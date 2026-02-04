@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "main.cpp"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        m5stack_tab5
+        lvgl
+        mooncake
+        mooncake_log
+        smooth_ui_toolkit
+)

@@ -1,0 +1,43 @@
+# Build directories
+build/
+
+# ESP-IDF
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Dependencies (fetched via fetch_repos.py)
+dependencies/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Compiled files
+*.o
+*.obj
+*.elf
+*.bin
+*.map
+*.hex
