@@ -173,7 +173,7 @@ bool startup_anim_init(void (*on_complete)(void))
     
     // ARCTIC slide animation - spring for bouncy effect
     ctx.anim_arctic_x.springOptions().visualDuration = 0.8f;
-    ctx.anim_arctic_x.springOptions().bounce = 0.15f;
+    ctx.anim_arctic_x.springOptions().bounce = 0.35f;  // More bounce!
     ctx.anim_arctic_x.pause();
     ctx.anim_arctic_x.teleport(-400);
     
@@ -195,10 +195,10 @@ bool startup_anim_init(void (*on_complete)(void))
     ctx.anim_heat_opa.pause();
     ctx.anim_heat_opa.teleport(0);
     
-    ctx.anim_heat_y.springOptions().visualDuration = 0.6f;
-    ctx.anim_heat_y.springOptions().bounce = 0.1f;
+    ctx.anim_heat_y.springOptions().visualDuration = 0.5f;
+    ctx.anim_heat_y.springOptions().bounce = 0.45f;  // Even more bounce!
     ctx.anim_heat_y.pause();
-    ctx.anim_heat_y.teleport((float)(ctx.heat_pumps_target_y + 40));  // Start 40px lower
+    ctx.anim_heat_y.teleport((float)(ctx.heat_pumps_target_y + 50));  // Start 50px lower for more travel
     
     // PUMPS fade + rise animation
     ctx.anim_pumps_opa.easingOptions().duration = 0.5f;
@@ -206,10 +206,10 @@ bool startup_anim_init(void (*on_complete)(void))
     ctx.anim_pumps_opa.pause();
     ctx.anim_pumps_opa.teleport(0);
     
-    ctx.anim_pumps_y.springOptions().visualDuration = 0.6f;
-    ctx.anim_pumps_y.springOptions().bounce = 0.1f;
+    ctx.anim_pumps_y.springOptions().visualDuration = 0.5f;
+    ctx.anim_pumps_y.springOptions().bounce = 0.45f;  // Even more bounce!
     ctx.anim_pumps_y.pause();
-    ctx.anim_pumps_y.teleport((float)(ctx.heat_pumps_target_y + 40));  // Start 40px lower
+    ctx.anim_pumps_y.teleport((float)(ctx.heat_pumps_target_y + 50));  // Start 50px lower for more travel
     
     // Fadeout animation
     ctx.anim_fadeout.easingOptions().duration = 0.4f;
@@ -252,23 +252,23 @@ bool startup_anim_update(void)
             ctx.label_arctic->setOpa((int)ctx.anim_fadeout.directValue());
         } else {
             ctx.label_arctic->setX((int)ctx.anim_arctic_x.directValue());
+        }
+        
+        // Pulsing glow effect
+        if (ctx.state >= AnimState::ArcticSlide && ctx.state < AnimState::FadeOut) {
+            int glow = (int)ctx.anim_arctic_glow.directValue();
+            ctx.label_arctic->setShadowSpread(glow);
             
-            // Pulsing glow effect
-            if (ctx.state >= AnimState::ArcticSlide && ctx.state < AnimState::FadeOut) {
-                int glow = (int)ctx.anim_arctic_glow.directValue();
-                ctx.label_arctic->setShadowSpread(glow);
-                
-                // Oscillate glow
-                if (ctx.anim_arctic_glow.done()) {
-                    if (ctx.glow_increasing) {
-                        ctx.anim_arctic_glow = 15;
-                        ctx.glow_increasing = false;
-                    } else {
-                        ctx.anim_arctic_glow = 5;
-                        ctx.glow_increasing = true;
-                    }
-                    ctx.anim_arctic_glow.play();
+            // Oscillate glow
+            if (ctx.anim_arctic_glow.done()) {
+                if (ctx.glow_increasing) {
+                    ctx.anim_arctic_glow = 15;
+                    ctx.glow_increasing = false;
+                } else {
+                    ctx.anim_arctic_glow = 5;
+                    ctx.glow_increasing = true;
                 }
+                ctx.anim_arctic_glow.play();
             }
         }
     }
@@ -405,12 +405,6 @@ static void update_particles()
         // Apply position
         if (p.obj) {
             p.obj->setPos((int)(p.x + drift), (int)p.y);
-            
-            // Fade out particles during fadeout state
-            if (ctx.state == AnimState::FadeOut) {
-                int opa = (int)(ctx.anim_fadeout.directValue() * p.initial_opa / 255);
-                p.obj->setBgOpa(opa);
-            }
         }
     }
 }
