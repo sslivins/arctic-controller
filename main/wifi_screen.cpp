@@ -7,6 +7,39 @@
 #include <stdio.h>
 
 // ============================================================================
+// Helper: Sanitize SSID for display (replace Unicode quotes with ASCII)
+// ============================================================================
+
+static void sanitize_ssid_for_display(char* dest, const char* src, size_t dest_size)
+{
+    size_t di = 0;
+    size_t si = 0;
+    
+    while (src[si] && di < dest_size - 1) {
+        // Check for UTF-8 sequences for fancy quotes
+        // U+2019 (') = E2 80 99, U+2018 (') = E2 80 98
+        // U+201C (") = E2 80 9C, U+201D (") = E2 80 9D
+        if ((unsigned char)src[si] == 0xE2 && 
+            (unsigned char)src[si + 1] == 0x80) {
+            unsigned char third = (unsigned char)src[si + 2];
+            if (third == 0x99 || third == 0x98) {
+                // Single curly quote -> ASCII apostrophe
+                dest[di++] = '\'';
+                si += 3;
+                continue;
+            } else if (third == 0x9C || third == 0x9D) {
+                // Double curly quote -> ASCII double quote
+                dest[di++] = '"';
+                si += 3;
+                continue;
+            }
+        }
+        dest[di++] = src[si++];
+    }
+    dest[di] = '\0';
+}
+
+// ============================================================================
 // Internal State
 // ============================================================================
 
@@ -226,9 +259,11 @@ void wifi_screen_update_networks(const wifi_network_info_t* networks, uint8_t co
         lv_obj_set_style_text_color(signal, COLOR_ACCENT, LV_PART_MAIN);
         lv_obj_align(signal, LV_ALIGN_LEFT_MID, 0, 0);
         
-        // Network name
+        // Network name (sanitize to replace unsupported Unicode quotes)
+        char display_ssid[64];
+        sanitize_ssid_for_display(display_ssid, net->ssid, sizeof(display_ssid));
         lv_obj_t* name = lv_label_create(row);
-        lv_label_set_text(name, net->ssid);
+        lv_label_set_text(name, display_ssid);
         lv_obj_set_style_text_font(name, &lv_font_montserrat_24, LV_PART_MAIN);
         lv_obj_set_style_text_color(name, COLOR_TEXT, LV_PART_MAIN);
         lv_obj_align(name, LV_ALIGN_LEFT_MID, 45, 0);
@@ -507,9 +542,11 @@ static void show_password_dialog(const char* ssid, bool is_open)
     strncpy(wifi_state.selected_ssid, ssid, sizeof(wifi_state.selected_ssid) - 1);
     wifi_state.selected_is_open = is_open;
     
-    // Update SSID label
-    char ssid_text[64];
-    snprintf(ssid_text, sizeof(ssid_text), "Network: %s", ssid);
+    // Update SSID label (sanitize for display)
+    char display_ssid[64];
+    sanitize_ssid_for_display(display_ssid, ssid, sizeof(display_ssid));
+    char ssid_text[96];
+    snprintf(ssid_text, sizeof(ssid_text), "Network: %s", display_ssid);
     lv_label_set_text(wifi_state.password_ssid_label, ssid_text);
     
     // Clear password field

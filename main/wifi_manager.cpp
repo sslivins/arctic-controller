@@ -3,6 +3,7 @@
  * WiFi Manager Implementation - ESP-Hosted WiFi via ESP32-C6
  */
 #include "wifi_manager.h"
+#include "time_manager.h"
 #include <string.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -393,6 +394,9 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
         snprintf(wifi_state.current_ip, sizeof(wifi_state.current_ip),
                  IPSTR, IP2STR(&event->ip_info.ip));
         ESP_LOGI(TAG, "Got IP: %s", wifi_state.current_ip);
+        
+        // Start NTP time synchronization
+        time_mgr_start_sync();
         
         xEventGroupSetBits(wifi_state.event_group, WIFI_CONNECTED_BIT);
         notify_state_change(WIFI_MGR_STATE_CONNECTED);

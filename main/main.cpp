@@ -10,6 +10,7 @@
 #include "startup_anim.h"
 #include "wifi_screen.h"
 #include "wifi_manager.h"
+#include "time_manager.h"
 
 static const char* TAG = "main";
 
@@ -75,6 +76,9 @@ extern "C" void app_main(void)
     bsp_display_unlock();
 
     mclog::tagInfo(TAG, "Startup animation started");
+
+    // Initialize time manager (NTP will start when WiFi connects)
+    time_mgr_init();
 
     // Main loop
     while (1) {
