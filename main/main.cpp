@@ -7,12 +7,21 @@
 #include <lvgl.h>
 #include <mooncake_log.h>
 #include "startup_anim.h"
+#include "wifi_screen.h"
 
 static const char* TAG = "main";
+
+// Main screen reference (for returning from WiFi screen)
+static lv_obj_t* main_screen = NULL;
 
 // Forward declarations
 void create_ui(void);
 static void on_startup_complete(void);
+static void show_wifi_screen(void);
+static void on_wifi_btn_clicked(lv_event_t* e);
+static void on_wifi_connect(const char* ssid, const char* password);
+static void on_wifi_scan(void);
+static void on_wifi_close(void);
 
 // Flag to track when to show main UI
 static bool show_main_ui = false;
@@ -95,8 +104,9 @@ static void on_startup_complete(void)
 
 void create_ui(void)
 {
-    // Get the active screen
+    // Get the active screen and save reference
     lv_obj_t* scr = lv_scr_act();
+    main_screen = scr;
     
     // Set background color
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x1a1a2e), LV_PART_MAIN);
@@ -146,13 +156,14 @@ void create_ui(void)
     lv_obj_set_style_text_color(status, lv_color_hex(0xffcc00), LV_PART_MAIN);
     lv_obj_align(status, LV_ALIGN_CENTER, 0, 30);
 
-    // WiFi Config button (placeholder - doesn't do anything yet)
+    // WiFi Config button
     lv_obj_t* btn_wifi = lv_btn_create(container);
     lv_obj_set_size(btn_wifi, 200, 60);
     lv_obj_align(btn_wifi, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_set_style_bg_color(btn_wifi, lv_color_hex(0x0f3460), LV_PART_MAIN);
     lv_obj_set_style_bg_color(btn_wifi, lv_color_hex(0x1a5276), LV_STATE_PRESSED);
     lv_obj_set_style_radius(btn_wifi, 10, LV_PART_MAIN);
+    lv_obj_add_event_cb(btn_wifi, on_wifi_btn_clicked, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t* btn_label = lv_label_create(btn_wifi);
     lv_label_set_text(btn_label, LV_SYMBOL_WIFI "  WiFi Setup");
@@ -165,4 +176,77 @@ void create_ui(void)
     lv_obj_set_style_text_font(footer, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(footer, lv_color_hex(0x444444), LV_PART_MAIN);
     lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -30);
+}
+
+// ============================================================================
+// WiFi Screen Integration
+// ============================================================================
+
+static void on_wifi_btn_clicked(lv_event_t* e)
+{
+    (void)e;
+    mclog::tagInfo(TAG, "WiFi button clicked");
+    show_wifi_screen();
+}
+
+static void show_wifi_screen(void)
+{
+    wifi_screen_config_t config = {
+        .on_connect = on_wifi_connect,
+        .on_scan = on_wifi_scan,
+        .on_close = on_wifi_close,
+    };
+    wifi_screen_create(&config);
+}
+
+static void on_wifi_connect(const char* ssid, const char* password)
+{
+    mclog::tagInfo(TAG, "WiFi connect requested: SSID='%s'", ssid);
+    
+    // TODO: Implement actual WiFi connection via ESP-Hosted
+    // For now, just show a message
+    wifi_screen_show_error("WiFi not yet implemented.\nESP32-C6 module needs to be configured.");
+}
+
+static void on_wifi_scan(void)
+{
+    mclog::tagInfo(TAG, "WiFi scan requested");
+    
+    // TODO: Implement actual WiFi scanning via ESP-Hosted
+    // For now, show some fake networks for UI testing
+    
+    wifi_screen_set_scanning(true);
+    
+    // Simulate scan delay with a timer
+    static lv_timer_t* scan_timer = NULL;
+    if (scan_timer) {
+        lv_timer_delete(scan_timer);
+    }
+    
+    scan_timer = lv_timer_create([](lv_timer_t* timer) {
+        // Fake network list for UI testing
+        wifi_network_info_t fake_networks[] = {
+            {"MyHomeNetwork", -45, 3},      // WPA2, excellent signal
+            {"Neighbor_WiFi", -62, 3},      // WPA2, good signal
+            {"CoffeeShop_Free", -71, 0},    // Open, fair signal
+            {"5G_Network_Plus", -55, 4},    // WPA3, good signal
+            {"IoT_Gateway", -78, 2},        // WPA, weak signal
+        };
+        
+        wifi_screen_set_scanning(false);
+        wifi_screen_update_networks(fake_networks, 5);
+        
+        lv_timer_delete(timer);
+    }, 1500, NULL);  // 1.5 second fake scan time
+    lv_timer_set_repeat_count(scan_timer, 1);
+}
+
+static void on_wifi_close(void)
+{
+    mclog::tagInfo(TAG, "WiFi screen closed");
+    
+    // Return to main screen
+    if (main_screen) {
+        lv_scr_load(main_screen);
+    }
 }

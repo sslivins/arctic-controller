@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.cpp"
         "startup_anim.cpp"
+        "wifi_screen.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES
