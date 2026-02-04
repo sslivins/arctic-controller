@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "startup_anim.cpp"
         "wifi_screen.cpp"
+        "wifi_manager.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -11,4 +12,8 @@ idf_component_register(
         mooncake
         mooncake_log
         smooth_ui_toolkit
+        esp_wifi
+        esp_event
+        nvs_flash
+        esp_netif
 )

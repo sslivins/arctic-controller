@@ -1,12 +1,22 @@
 {
-    "idf.showOnboardingOnInit": false,
-    "idf.notificationSilentMode": true,
-    "cmake.configureOnOpen": false,
-    "cmake.automaticReconfigure": false,
-    "C_Cpp.configurationWarnings": "disabled",
-    "idf.flashType": "UART",
-    "idf.portWin": "COM11",
-    "idf.espIdfPathWin": "C:\\Users\\Stefan\\esp\\v5.4.3\\esp-idf",
-    "idf.toolsPathWin": "j:\\.espressif",
-    "idf.pythonInstallPath": "j:\\.espressif\\tools\\idf-python\\3.11.2\\python.exe"
+  "idf.showOnboardingOnInit": false,
+  "idf.notificationSilentMode": true,
+  "cmake.configureOnOpen": false,
+  "cmake.automaticReconfigure": false,
+  "C_Cpp.configurationWarnings": "disabled",
+  "idf.flashType": "UART",
+  "idf.portWin": "COM11",
+  "idf.espIdfPathWin": "C:\\Users\\Stefan\\esp\\v5.4.3\\esp-idf",
+  "idf.toolsPathWin": "j:\\.espressif",
+  "idf.pythonInstallPath": "j:\\.espressif\\tools\\idf-python\\3.11.2\\python.exe",
+  "idf.customExtraVars": {
+    "OPENOCD_SCRIPTS": "C:\\Users\\Stefan\\.espressif\\tools\\openocd-esp32\\v0.10.0-esp32-20190708/openocd-esp32/share/openocd/scripts",
+    "IDF_TARGET": "esp32p4"
+  },
+  "clangd.path": "j:\\.espressif\\tools\\esp-clang\\esp-18.1.2_20240912\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=j:\\code\\tab5\\arctic-controller\\build"
+  ]
 }

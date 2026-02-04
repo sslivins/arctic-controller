@@ -5,9 +5,11 @@
 #include <stdio.h>
 #include <bsp/m5stack_tab5.h>
 #include <lvgl.h>
+#include <esp_log.h>
 #include <mooncake_log.h>
 #include "startup_anim.h"
 #include "wifi_screen.h"
+#include "wifi_manager.h"
 
 static const char* TAG = "main";
 
@@ -114,7 +116,7 @@ void create_ui(void)
     // Create title label
     lv_obj_t* title = lv_label_create(scr);
     lv_label_set_text(title, "Arctic Heat Pump");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_40, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, lv_color_hex(0x00d4ff), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 80);
 
@@ -139,20 +141,20 @@ void create_ui(void)
     // Temperature display (placeholder)
     lv_obj_t* temp_label = lv_label_create(container);
     lv_label_set_text(temp_label, "-- °C");
-    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_48, LV_PART_MAIN);
+    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(temp_label, lv_color_hex(0xffffff), LV_PART_MAIN);
     lv_obj_align(temp_label, LV_ALIGN_TOP_MID, 0, 20);
 
     lv_obj_t* temp_desc = lv_label_create(container);
     lv_label_set_text(temp_desc, "Current Temperature");
-    lv_obj_set_style_text_font(temp_desc, &lv_font_montserrat_18, LV_PART_MAIN);
+    lv_obj_set_style_text_font(temp_desc, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(temp_desc, lv_color_hex(0x888888), LV_PART_MAIN);
     lv_obj_align(temp_desc, LV_ALIGN_TOP_MID, 0, 90);
 
     // Status label
     lv_obj_t* status = lv_label_create(container);
     lv_label_set_text(status, "Status: Initializing...");
-    lv_obj_set_style_text_font(status, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(status, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_set_style_text_color(status, lv_color_hex(0xffcc00), LV_PART_MAIN);
     lv_obj_align(status, LV_ALIGN_CENTER, 0, 30);
 
@@ -167,7 +169,7 @@ void create_ui(void)
 
     lv_obj_t* btn_label = lv_label_create(btn_wifi);
     lv_label_set_text(btn_label, LV_SYMBOL_WIFI "  WiFi Setup");
-    lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_20, LV_PART_MAIN);
+    lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_center(btn_label);
 
     // Footer
@@ -182,10 +184,74 @@ void create_ui(void)
 // WiFi Screen Integration
 // ============================================================================
 
+// Callback when scan completes (runs in sys_evt task - use ESP_LOGI to avoid stack overflow)
+static void on_scan_done(const wifi_mgr_ap_info_t* ap_list, uint16_t count)
+{
+    ESP_LOGI(TAG, "Scan complete, found %d networks", count);
+    
+    // Convert to wifi_screen format
+    wifi_network_info_t* networks = new wifi_network_info_t[count];
+    for (uint16_t i = 0; i < count; i++) {
+        strncpy(networks[i].ssid, ap_list[i].ssid, sizeof(networks[i].ssid) - 1);
+        networks[i].rssi = ap_list[i].rssi;
+        networks[i].authmode = ap_list[i].authmode;
+    }
+    
+    // Update UI (must be done with LVGL lock)
+    bsp_display_lock(0);
+    wifi_screen_set_scanning(false);
+    wifi_screen_update_networks(networks, count);
+    bsp_display_unlock();
+    
+    delete[] networks;
+}
+
+// Callback when connection state changes (runs in sys_evt task - use ESP_LOGI)
+static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
+{
+    bsp_display_lock(0);
+    
+    switch (state) {
+        case WIFI_MGR_STATE_CONNECTING:
+            ESP_LOGI(TAG, "WiFi connecting...");
+            break;
+            
+        case WIFI_MGR_STATE_CONNECTED:
+            ESP_LOGI(TAG, "WiFi connected to '%s'", ssid ? ssid : "?");
+            wifi_screen_set_connection_status(true, ssid);
+            break;
+            
+        case WIFI_MGR_STATE_DISCONNECTED:
+            ESP_LOGI(TAG, "WiFi disconnected");
+            wifi_screen_set_connection_status(false, NULL);
+            break;
+            
+        case WIFI_MGR_STATE_ERROR:
+            ESP_LOGE(TAG, "WiFi error");
+            wifi_screen_show_error("Connection failed.\nPlease check password and try again.");
+            break;
+            
+        default:
+            break;
+    }
+    
+    bsp_display_unlock();
+}
+
 static void on_wifi_btn_clicked(lv_event_t* e)
 {
     (void)e;
     mclog::tagInfo(TAG, "WiFi button clicked");
+    
+    // Initialize WiFi manager if not already done
+    if (!wifi_mgr_is_initialized()) {
+        mclog::tagInfo(TAG, "Initializing WiFi manager...");
+        if (!wifi_mgr_init()) {
+            mclog::tagError(TAG, "Failed to initialize WiFi!");
+            // Still show the screen, but user will see errors
+        }
+    }
+    
     show_wifi_screen();
 }
 
@@ -197,48 +263,46 @@ static void show_wifi_screen(void)
         .on_close = on_wifi_close,
     };
     wifi_screen_create(&config);
+    
+    // Update connection status if already connected
+    if (wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
+        wifi_screen_set_connection_status(true, wifi_mgr_get_connected_ssid());
+    }
 }
 
 static void on_wifi_connect(const char* ssid, const char* password)
 {
     mclog::tagInfo(TAG, "WiFi connect requested: SSID='%s'", ssid);
     
-    // TODO: Implement actual WiFi connection via ESP-Hosted
-    // For now, just show a message
-    wifi_screen_show_error("WiFi not yet implemented.\nESP32-C6 module needs to be configured.");
+    if (!wifi_mgr_is_initialized()) {
+        wifi_screen_show_error("WiFi not initialized.\nPlease try again.");
+        return;
+    }
+    
+    if (!wifi_mgr_connect(ssid, password, on_wifi_state_changed)) {
+        wifi_screen_show_error("Failed to start connection.\nPlease try again.");
+    }
 }
 
 static void on_wifi_scan(void)
 {
     mclog::tagInfo(TAG, "WiFi scan requested");
     
-    // TODO: Implement actual WiFi scanning via ESP-Hosted
-    // For now, show some fake networks for UI testing
+    if (!wifi_mgr_is_initialized()) {
+        mclog::tagInfo(TAG, "Initializing WiFi manager for scan...");
+        if (!wifi_mgr_init()) {
+            wifi_screen_set_scanning(false);
+            wifi_screen_show_error("Failed to initialize WiFi.\nCheck ESP32-C6 module.");
+            return;
+        }
+    }
     
     wifi_screen_set_scanning(true);
     
-    // Simulate scan delay with a timer
-    static lv_timer_t* scan_timer = NULL;
-    if (scan_timer) {
-        lv_timer_delete(scan_timer);
-    }
-    
-    scan_timer = lv_timer_create([](lv_timer_t* timer) {
-        // Fake network list for UI testing
-        wifi_network_info_t fake_networks[] = {
-            {"MyHomeNetwork", -45, 3},      // WPA2, excellent signal
-            {"Neighbor_WiFi", -62, 3},      // WPA2, good signal
-            {"CoffeeShop_Free", -71, 0},    // Open, fair signal
-            {"5G_Network_Plus", -55, 4},    // WPA3, good signal
-            {"IoT_Gateway", -78, 2},        // WPA, weak signal
-        };
-        
+    if (!wifi_mgr_start_scan(on_scan_done)) {
         wifi_screen_set_scanning(false);
-        wifi_screen_update_networks(fake_networks, 5);
-        
-        lv_timer_delete(timer);
-    }, 1500, NULL);  // 1.5 second fake scan time
-    lv_timer_set_repeat_count(scan_timer, 1);
+        wifi_screen_show_error("Failed to start scan.\nPlease try again.");
+    }
 }
 
 static void on_wifi_close(void)

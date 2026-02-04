@@ -119,7 +119,7 @@ bool startup_anim_init(void (*on_complete)(void))
     // Create "ARCTIC" label - use absolute positioning for animation
     ctx.label_arctic = std::make_unique<Label>(scr);
     ctx.label_arctic->setText("ARCTIC");
-    ctx.label_arctic->setTextFont(&lv_font_montserrat_48);
+    ctx.label_arctic->setTextFont(&lv_font_montserrat_32);
     ctx.label_arctic->setTextColor(lv_color_hex(COLOR_ARCTIC_TEXT));
     lv_obj_set_style_text_letter_space(ctx.label_arctic->get(), 8, LV_PART_MAIN);
     // Glow effect using shadow
@@ -145,7 +145,7 @@ bool startup_anim_init(void (*on_complete)(void))
     // Create "HEAT" label - positioned left of center
     ctx.label_heat = std::make_unique<Label>(scr);
     ctx.label_heat->setText("HEAT");
-    ctx.label_heat->setTextFont(&lv_font_montserrat_40);
+    ctx.label_heat->setTextFont(&lv_font_montserrat_32);
     ctx.label_heat->setTextColor(lv_color_hex(COLOR_HEAT_TEXT));
     lv_obj_set_style_text_letter_space(ctx.label_heat->get(), 4, LV_PART_MAIN);
     // Warm glow
@@ -161,7 +161,7 @@ bool startup_anim_init(void (*on_complete)(void))
     // Create "PUMPS" label - positioned right of center
     ctx.label_pumps = std::make_unique<Label>(scr);
     ctx.label_pumps->setText("PUMPS");
-    ctx.label_pumps->setTextFont(&lv_font_montserrat_40);
+    ctx.label_pumps->setTextFont(&lv_font_montserrat_32);
     ctx.label_pumps->setTextColor(lv_color_hex(COLOR_PUMPS_TEXT));
     lv_obj_set_style_text_letter_space(ctx.label_pumps->get(), 4, LV_PART_MAIN);
     lv_obj_update_layout(ctx.label_pumps->get());
