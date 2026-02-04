@@ -6,11 +6,16 @@
 #include <bsp/m5stack_tab5.h>
 #include <lvgl.h>
 #include <mooncake_log.h>
+#include "startup_anim.h"
 
 static const char* TAG = "main";
 
-// Forward declaration
+// Forward declarations
 void create_ui(void);
+static void on_startup_complete(void);
+
+// Flag to track when to show main UI
+static bool show_main_ui = false;
 
 extern "C" void app_main(void)
 {
@@ -53,17 +58,39 @@ extern "C" void app_main(void)
 
     mclog::tagInfo(TAG, "Display initialized: %dx%d", BSP_LCD_H_RES, BSP_LCD_V_RES);
 
-    // Create UI
+    // Start the startup animation
     bsp_display_lock(0);
-    create_ui();
+    startup_anim_init(on_startup_complete);
     bsp_display_unlock();
 
-    mclog::tagInfo(TAG, "UI Created - Hello World!");
+    mclog::tagInfo(TAG, "Startup animation started");
 
     // Main loop
     while (1) {
+        // Update startup animation if running
+        if (startup_anim_is_running()) {
+            bsp_display_lock(0);
+            startup_anim_update();
+            bsp_display_unlock();
+        }
+        
+        // Check if we should show the main UI after animation completes
+        if (show_main_ui) {
+            bsp_display_lock(0);
+            create_ui();
+            bsp_display_unlock();
+            mclog::tagInfo(TAG, "UI Created");
+            show_main_ui = false;  // Only create once
+        }
+        
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+}
+
+static void on_startup_complete(void)
+{
+    mclog::tagInfo(TAG, "Startup animation complete");
+    show_main_ui = true;
 }
 
 void create_ui(void)

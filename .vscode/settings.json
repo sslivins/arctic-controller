@@ -1,0 +1,12 @@
+{
+    "idf.showOnboardingOnInit": false,
+    "idf.notificationSilentMode": true,
+    "cmake.configureOnOpen": false,
+    "cmake.automaticReconfigure": false,
+    "C_Cpp.configurationWarnings": "disabled",
+    "idf.flashType": "UART",
+    "idf.portWin": "COM11",
+    "idf.espIdfPathWin": "C:\\Users\\Stefan\\esp\\v5.4.3\\esp-idf",
+    "idf.toolsPathWin": "j:\\.espressif",
+    "idf.pythonInstallPath": "j:\\.espressif\\tools\\idf-python\\3.11.2\\python.exe"
+}
