@@ -24,7 +24,7 @@ using namespace smooth_ui_toolkit::lvgl_cpp;
 #define COLOR_PARTICLE      0xaaddff
 
 // Number of snowflake particles
-#define NUM_PARTICLES       15
+#define NUM_PARTICLES       30
 
 // Animation state
 enum class AnimState {
@@ -370,7 +370,7 @@ static void create_particles()
         p.drift_offset = (float)(rand() % 1000);
         p.initial_opa = 80 + (rand() % 120);
         
-        int size = 3 + (rand() % 5);  // 3-7 pixels
+        int size = 6 + (rand() % 9);  // 6-14 pixels
         
         p.obj = std::make_unique<Container>(scr);
         p.obj->setSize(size, size);

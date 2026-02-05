@@ -21,12 +21,18 @@ typedef void (*status_bar_wifi_click_cb_t)(void);
 typedef void (*status_bar_time_click_cb_t)(void);
 
 /**
+ * @brief Callback when settings is clicked
+ */
+typedef void (*status_bar_settings_click_cb_t)(void);
+
+/**
  * @brief Status bar configuration
  */
 typedef struct {
     lv_obj_t* parent;                           // Parent screen
     status_bar_wifi_click_cb_t on_wifi_click;   // WiFi button click callback
     status_bar_time_click_cb_t on_time_click;   // Time click callback
+    status_bar_settings_click_cb_t on_settings_click;  // Settings button click callback
 } status_bar_config_t;
 
 /**

@@ -24,17 +24,21 @@ static struct {
     lv_obj_t* container;
     lv_obj_t* time_btn;
     lv_obj_t* time_label;
+    lv_obj_t* settings_btn;
+    lv_obj_t* settings_icon;
     lv_obj_t* wifi_btn;
     lv_obj_t* wifi_icon;
     lv_timer_t* update_timer;
     status_bar_wifi_click_cb_t wifi_click_cb;
     status_bar_time_click_cb_t time_click_cb;
+    status_bar_settings_click_cb_t settings_click_cb;
     bool wifi_connected;
 } bar_state = {};
 
 // Forward declarations
 static void wifi_btn_event_cb(lv_event_t* e);
 static void time_btn_event_cb(lv_event_t* e);
+static void settings_btn_event_cb(lv_event_t* e);
 static void timer_update_cb(lv_timer_t* timer);
 
 lv_obj_t* status_bar_create(const status_bar_config_t* config)
@@ -47,6 +51,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     // Store callbacks
     bar_state.wifi_click_cb = config->on_wifi_click;
     bar_state.time_click_cb = config->on_time_click;
+    bar_state.settings_click_cb = config->on_settings_click;
     
     // Create container
     bar_state.container = lv_obj_create(config->parent);
@@ -95,6 +100,24 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     lv_obj_set_style_text_font(bar_state.wifi_icon, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.wifi_icon, lv_color_hex(COLOR_WIFI_OFF), LV_PART_MAIN);
     lv_obj_center(bar_state.wifi_icon);
+    
+    // Settings button (between time and wifi)
+    bar_state.settings_btn = lv_btn_create(bar_state.container);
+    lv_obj_set_size(bar_state.settings_btn, 80, 70);
+    lv_obj_align_to(bar_state.settings_btn, bar_state.wifi_btn, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+    lv_obj_set_style_bg_opa(bar_state.settings_btn, LV_OPA_0, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar_state.settings_btn, LV_OPA_30, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(bar_state.settings_btn, lv_color_hex(0xffffff), LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(bar_state.settings_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar_state.settings_btn, 8, LV_PART_MAIN);
+    lv_obj_add_event_cb(bar_state.settings_btn, settings_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    
+    // Settings icon
+    bar_state.settings_icon = lv_label_create(bar_state.settings_btn);
+    lv_label_set_text(bar_state.settings_icon, LV_SYMBOL_SETTINGS);
+    lv_obj_set_style_text_font(bar_state.settings_icon, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(bar_state.settings_icon, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+    lv_obj_center(bar_state.settings_icon);
     
     // Update time immediately
     status_bar_update_time();
@@ -170,6 +193,8 @@ void status_bar_delete(void)
     
     bar_state.time_btn = NULL;
     bar_state.time_label = NULL;
+    bar_state.settings_btn = NULL;
+    bar_state.settings_icon = NULL;
     bar_state.wifi_btn = NULL;
     bar_state.wifi_icon = NULL;
 }
@@ -191,6 +216,16 @@ static void time_btn_event_cb(lv_event_t* e)
     
     if (bar_state.time_click_cb) {
         bar_state.time_click_cb();
+    }
+}
+
+static void settings_btn_event_cb(lv_event_t* e)
+{
+    (void)e;
+    ESP_LOGI(TAG, "Settings button clicked");
+    
+    if (bar_state.settings_click_cb) {
+        bar_state.settings_click_cb();
     }
 }
 

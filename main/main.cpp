@@ -15,6 +15,7 @@
 #include "time_screen.h"
 #include "status_bar.h"
 #include "ota_manager.h"
+#include "settings_screen.h"
 
 static const char* TAG = "main";
 
@@ -28,11 +29,13 @@ static void show_wifi_screen(void);
 static void show_time_screen(void);
 static void on_status_bar_wifi_click(void);
 static void on_status_bar_time_click(void);
+static void on_status_bar_settings_click(void);
 static void on_wifi_connect(const char* ssid, const char* password);
 static void on_wifi_scan(void);
 static void on_wifi_disconnect(void);
 static void on_wifi_close(void);
 static void on_time_close(void);
+static void on_settings_close(void);
 static void try_auto_connect(void);
 static void wifi_init_task(void* param);
 
@@ -156,6 +159,7 @@ void create_ui(void)
         .parent = scr,
         .on_wifi_click = on_status_bar_wifi_click,
         .on_time_click = on_status_bar_time_click,
+        .on_settings_click = on_status_bar_settings_click,
     };
     status_bar_create(&bar_config);
     
@@ -420,6 +424,33 @@ static void on_time_close(void)
     
     // Force status bar to update with new format
     status_bar_update_time();
+    bsp_display_unlock();
+}
+
+// Settings screen callbacks
+static void on_status_bar_settings_click(void)
+{
+    mclog::tagInfo(TAG, "Status bar settings clicked");
+    
+    bsp_display_lock(0);
+    settings_screen_config_t config = {
+        .on_close = on_settings_close,
+    };
+    settings_screen_create(&config);
+    bsp_display_unlock();
+}
+
+static void on_settings_close(void)
+{
+    mclog::tagInfo(TAG, "Settings screen closed");
+    
+    bsp_display_lock(0);
+    settings_screen_close();
+    
+    // Return to main screen
+    if (main_screen) {
+        lv_scr_load(main_screen);
+    }
     bsp_display_unlock();
 }
 

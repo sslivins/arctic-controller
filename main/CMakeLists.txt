@@ -9,6 +9,7 @@ idf_component_register(
         "time_screen.cpp"
         "api_server.cpp"
         "ota_manager.cpp"
+        "settings_screen.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -26,4 +27,5 @@ idf_component_register(
         json
         esp_https_ota
         app_update
+        esp_http_client
 )

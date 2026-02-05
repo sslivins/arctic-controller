@@ -34,6 +34,9 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "📦 Building version: $VERSION"
 
+      - name: Fetch dependencies
+        run: python3 fetch_repos.py
+
       - name: ESP-IDF Build
         uses: espressif/esp-idf-ci-action@v1
         with:
