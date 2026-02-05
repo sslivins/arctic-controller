@@ -8,6 +8,7 @@ idf_component_register(
         "status_bar.cpp"
         "time_screen.cpp"
         "api_server.cpp"
+        "ota_manager.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -23,4 +24,6 @@ idf_component_register(
         mdns
         esp_http_server
         json
+        esp_https_ota
+        app_update
 )

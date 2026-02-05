@@ -14,6 +14,7 @@
 #include "time_manager.h"
 #include "time_screen.h"
 #include "status_bar.h"
+#include "ota_manager.h"
 
 static const char* TAG = "main";
 
@@ -103,6 +104,12 @@ extern "C" void app_main(void)
 
     // Initialize time manager (NTP will start when WiFi connects)
     time_mgr_init();
+
+    // Initialize OTA manager
+    ota_mgr_init();
+    
+    // Mark firmware as valid (prevents rollback after successful boot)
+    ota_mgr_mark_valid();
 
     // Start WiFi initialization in background task (runs parallel to animation)
     xTaskCreate(wifi_init_task, "wifi_init", 4096, NULL, 5, NULL);

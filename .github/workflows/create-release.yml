@@ -1,0 +1,140 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (check version and build without releasing)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Extract version from CMakeLists.txt
+        id: version
+        run: |
+          VERSION=$(grep -oP 'set\(PROJECT_VER\s*"\K[^"]+' CMakeLists.txt)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not extract PROJECT_VER from CMakeLists.txt"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Found version: $VERSION (tag: v$VERSION)"
+
+      - name: Check if tag already exists
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists! Bump PROJECT_VER in CMakeLists.txt first."
+            exit 1
+          fi
+          echo "✅ Tag $TAG does not exist yet"
+
+      - name: ESP-IDF Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.3
+          target: esp32p4
+          path: '.'
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "🔍 Dry run complete"
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo "Tag: ${{ steps.version.outputs.tag }}"
+          echo "Build: ✅ Success"
+          echo "No tag or release was created."
+
+      - name: Create tag
+        if: ${{ !inputs.dry_run }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git tag -a "$TAG" -m "Release $VERSION"
+          git push origin "$TAG"
+          
+          echo "🏷️ Created tag: $TAG"
+
+      - name: Upload firmware artifact
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.version.outputs.tag }}
+          path: |
+            build/arctic_controller.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+          retention-days: 90
+
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Arctic Controller ${{ steps.version.outputs.tag }}
+          body: |
+            ## Arctic Heat Pump Controller ${{ steps.version.outputs.tag }}
+            
+            ### Installation
+            
+            **For fresh install (via USB):**
+            Download all files and flash with esptool:
+            ```bash
+            esptool.py --chip esp32p4 write_flash \
+              0x2000 bootloader.bin \
+              0x8000 partition-table.bin \
+              0xf000 ota_data_initial.bin \
+              0x20000 arctic_controller.bin
+            ```
+            
+            **For OTA update:**
+            Use `arctic_controller.bin` with the device's OTA API:
+            ```bash
+            curl -X POST http://arctic.local/api/ota/update \
+              -H "Content-Type: application/json" \
+              -d '{"url":"http://your-server/arctic_controller.bin"}'
+            ```
+          files: |
+            build/arctic_controller.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Release summary
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "## Release Created ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | ${{ steps.version.outputs.tag }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | esp32p4 |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Files" >> $GITHUB_STEP_SUMMARY
+          echo "- \`arctic_controller.bin\` - Main firmware (for OTA updates)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`bootloader.bin\` - Bootloader" >> $GITHUB_STEP_SUMMARY
+          echo "- \`partition-table.bin\` - Partition table" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ota_data_initial.bin\` - OTA data partition" >> $GITHUB_STEP_SUMMARY

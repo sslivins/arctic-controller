@@ -5,6 +5,7 @@
 #include "api_server.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
+#include "ota_manager.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <mdns.h>
@@ -26,6 +27,9 @@ static esp_err_t status_get_handler(httpd_req_t* req);
 static esp_err_t time_get_handler(httpd_req_t* req);
 static esp_err_t wifi_get_handler(httpd_req_t* req);
 static esp_err_t info_get_handler(httpd_req_t* req);
+static esp_err_t ota_status_get_handler(httpd_req_t* req);
+static esp_err_t ota_update_post_handler(httpd_req_t* req);
+static esp_err_t ota_reboot_post_handler(httpd_req_t* req);
 
 // Check if hostname is already in use via mDNS query
 static bool hostname_in_use(const char* name)
@@ -172,6 +176,33 @@ bool api_server_start(void)
     };
     httpd_register_uri_handler(server, &info_uri);
     
+    // GET /api/ota/status - OTA update status
+    httpd_uri_t ota_status_uri = {
+        .uri = "/api/ota/status",
+        .method = HTTP_GET,
+        .handler = ota_status_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &ota_status_uri);
+    
+    // POST /api/ota/update - Start OTA update
+    httpd_uri_t ota_update_uri = {
+        .uri = "/api/ota/update",
+        .method = HTTP_POST,
+        .handler = ota_update_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &ota_update_uri);
+    
+    // POST /api/ota/reboot - Reboot after OTA
+    httpd_uri_t ota_reboot_uri = {
+        .uri = "/api/ota/reboot",
+        .method = HTTP_POST,
+        .handler = ota_reboot_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &ota_reboot_uri);
+    
     ESP_LOGI(TAG, "HTTP server started successfully");
     ESP_LOGI(TAG, "API endpoints:");
     ESP_LOGI(TAG, "  GET /api/health - Health check");
@@ -179,6 +210,9 @@ bool api_server_start(void)
     ESP_LOGI(TAG, "  GET /api/time   - Current time info");
     ESP_LOGI(TAG, "  GET /api/wifi   - WiFi status");
     ESP_LOGI(TAG, "  GET /api/info   - Device info");
+    ESP_LOGI(TAG, "  GET /api/ota/status  - OTA status");
+    ESP_LOGI(TAG, "  POST /api/ota/update - Start OTA update");
+    ESP_LOGI(TAG, "  POST /api/ota/reboot - Reboot after OTA");
     
     return true;
 }
@@ -394,6 +428,9 @@ static esp_err_t info_get_handler(httpd_req_t* req)
     cJSON_AddItemToArray(endpoints, cJSON_CreateString("/api/time"));
     cJSON_AddItemToArray(endpoints, cJSON_CreateString("/api/wifi"));
     cJSON_AddItemToArray(endpoints, cJSON_CreateString("/api/info"));
+    cJSON_AddItemToArray(endpoints, cJSON_CreateString("/api/ota/status"));
+    cJSON_AddItemToArray(endpoints, cJSON_CreateString("/api/ota/update"));
+    cJSON_AddItemToArray(endpoints, cJSON_CreateString("/api/ota/reboot"));
     
     char* json_str = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json_str);
@@ -402,4 +439,143 @@ static esp_err_t info_get_handler(httpd_req_t* req)
     cJSON_Delete(root);
     
     return ESP_OK;
+}
+
+// ============================================================================
+// OTA Handlers
+// ============================================================================
+
+static const char* ota_state_to_string(ota_state_t state)
+{
+    switch (state) {
+        case OTA_STATE_IDLE: return "idle";
+        case OTA_STATE_DOWNLOADING: return "downloading";
+        case OTA_STATE_VERIFYING: return "verifying";
+        case OTA_STATE_READY_TO_REBOOT: return "ready_to_reboot";
+        case OTA_STATE_FAILED: return "failed";
+        default: return "unknown";
+    }
+}
+
+static esp_err_t ota_status_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    
+    ota_status_t status = ota_mgr_get_status();
+    
+    cJSON* root = cJSON_CreateObject();
+    
+    cJSON_AddStringToObject(root, "state", ota_state_to_string(status.state));
+    cJSON_AddNumberToObject(root, "progress", status.progress_percent);
+    cJSON_AddNumberToObject(root, "bytes_downloaded", (double)status.bytes_downloaded);
+    cJSON_AddNumberToObject(root, "total_bytes", (double)status.total_bytes);
+    cJSON_AddStringToObject(root, "current_version", status.current_version);
+    
+    if (status.new_version[0] != '\0') {
+        cJSON_AddStringToObject(root, "new_version", status.new_version);
+    }
+    
+    if (status.error_msg[0] != '\0') {
+        cJSON_AddStringToObject(root, "error", status.error_msg);
+    }
+    
+    // Add partition info
+    char partition_label[16] = "";
+    uint32_t partition_addr = 0;
+    uint32_t partition_size = 0;
+    ota_mgr_get_partition_info(partition_label, &partition_addr, &partition_size);
+    
+    cJSON* partition = cJSON_AddObjectToObject(root, "partition");
+    cJSON_AddStringToObject(partition, "label", partition_label);
+    cJSON_AddNumberToObject(partition, "address", partition_addr);
+    cJSON_AddNumberToObject(partition, "size", partition_size);
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+static esp_err_t ota_update_post_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    
+    // Read request body
+    char content[512];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":\"No body provided\"}");
+        return ESP_OK;
+    }
+    content[ret] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(content);
+    if (root == NULL) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":\"Invalid JSON\"}");
+        return ESP_OK;
+    }
+    
+    // Get URL from request
+    cJSON* url_json = cJSON_GetObjectItem(root, "url");
+    if (url_json == NULL || !cJSON_IsString(url_json)) {
+        cJSON_Delete(root);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":\"Missing 'url' field\"}");
+        return ESP_OK;
+    }
+    
+    const char* url = url_json->valuestring;
+    
+    // Start OTA update
+    if (!ota_mgr_start_update(url)) {
+        cJSON_Delete(root);
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"error\":\"OTA already in progress or failed to start\"}");
+        return ESP_OK;
+    }
+    
+    cJSON_Delete(root);
+    
+    // Return success
+    cJSON* response = cJSON_CreateObject();
+    cJSON_AddStringToObject(response, "status", "started");
+    cJSON_AddStringToObject(response, "message", "OTA update started. Poll /api/ota/status for progress.");
+    
+    char* json_str = cJSON_PrintUnformatted(response);
+    httpd_resp_sendstr(req, json_str);
+    
+    free(json_str);
+    cJSON_Delete(response);
+    
+    return ESP_OK;
+}
+
+static esp_err_t ota_reboot_post_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    
+    ota_status_t status = ota_mgr_get_status();
+    
+    if (status.state != OTA_STATE_READY_TO_REBOOT) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"error\":\"No pending OTA update to apply\"}");
+        return ESP_OK;
+    }
+    
+    // Send response before rebooting
+    httpd_resp_sendstr(req, "{\"status\":\"rebooting\",\"message\":\"Device will reboot now\"}");
+    
+    // Give time for response to be sent
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    // Reboot
+    ota_mgr_reboot();
+    
+    return ESP_OK;  // Never reached
 }

@@ -22,16 +22,43 @@ Once connected to WiFi, the controller is accessible via mDNS:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/health` | GET | Simple health check |
+| `/api/health` | GET | Simple health check |
 | `/api/status` | GET | System status (WiFi, time, uptime) |
 | `/api/time` | GET | Current time in multiple formats |
 | `/api/wifi` | GET | WiFi connection status |
 | `/api/info` | GET | Device information |
+| `/api/ota/status` | GET | OTA update status |
+| `/api/ota/update` | POST | Start OTA update (body: `{"url":"http://..."}`) |
+| `/api/ota/reboot` | POST | Reboot after successful OTA |
 
 **Example:**
 ```bash
 curl http://arctic.local/api/status
 ```
+
+## OTA Updates
+
+The device supports Over-The-Air (OTA) firmware updates. The partition table uses dual OTA partitions (ota_0 and ota_1) for safe updates with automatic rollback.
+
+**To perform an OTA update:**
+
+1. Host your firmware binary on an HTTP/HTTPS server
+2. Start the update:
+   ```bash
+   curl -X POST http://arctic.local/api/ota/update \
+        -H "Content-Type: application/json" \
+        -d '{"url":"http://your-server/arctic_controller.bin"}'
+   ```
+3. Monitor progress:
+   ```bash
+   curl http://arctic.local/api/ota/status
+   ```
+4. Reboot to apply:
+   ```bash
+   curl -X POST http://arctic.local/api/ota/reboot
+   ```
+
+**Rollback Protection:** If the new firmware fails to boot properly, the device will automatically rollback to the previous working version after a few failed attempts.
 
 ## Project Structure
 
@@ -43,7 +70,8 @@ curl http://arctic.local/api/status
 │   ├── time_manager.*  # Time and NTP management
 │   ├── wifi_screen.*   # WiFi configuration screen
 │   ├── wifi_manager.*  # WiFi connection management
-│   └── api_server.*    # REST API and mDNS server
+│   ├── api_server.*    # REST API and mDNS server
+│   └── ota_manager.*   # OTA firmware update management
 ├── components/         # ESP-IDF components (BSP, etc.)
 ├── dependencies/       # External libraries (fetched via fetch_repos.py)
 │   ├── lvgl/          # LVGL graphics library

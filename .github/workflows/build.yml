@@ -1,0 +1,69 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'ESP32 target chip'
+        required: false
+        default: 'esp32p4'
+        type: choice
+        options:
+          - esp32p4
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Extract version from CMakeLists.txt
+        id: version
+        run: |
+          VERSION=$(grep -oP 'set\(PROJECT_VER\s*"\K[^"]+' CMakeLists.txt)
+          if [ -z "$VERSION" ]; then
+            echo "::warning::Could not extract PROJECT_VER from CMakeLists.txt, using 'unknown'"
+            VERSION="unknown"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Building version: $VERSION"
+
+      - name: ESP-IDF Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.3
+          target: ${{ inputs.target }}
+          path: '.'
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-v${{ steps.version.outputs.version }}-${{ inputs.target }}
+          path: |
+            build/arctic_controller.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+          retention-days: 30
+
+      - name: Build summary
+        run: |
+          echo "## Build Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | ${{ inputs.target }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ESP-IDF | v5.4.3 |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- \`arctic_controller.bin\` - Main firmware (for OTA)" >> $GITHUB_STEP_SUMMARY
+          echo "- \`bootloader.bin\` - Bootloader" >> $GITHUB_STEP_SUMMARY
+          echo "- \`partition-table.bin\` - Partition table" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ota_data_initial.bin\` - OTA data partition" >> $GITHUB_STEP_SUMMARY
