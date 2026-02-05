@@ -31,24 +31,6 @@ static esp_err_t ota_status_get_handler(httpd_req_t* req);
 static esp_err_t ota_update_post_handler(httpd_req_t* req);
 static esp_err_t ota_reboot_post_handler(httpd_req_t* req);
 
-// Check if hostname is already in use via mDNS query
-static bool hostname_in_use(const char* name)
-{
-    esp_ip4_addr_t addr;
-    addr.addr = 0;
-    
-    // Query for the hostname - if we get a response, it's in use
-    esp_err_t err = mdns_query_a(name, 1000, &addr);  // 1 second timeout
-    
-    if (err == ESP_OK && addr.addr != 0) {
-        ESP_LOGW(TAG, "Hostname '%s.local' already in use (IP: " IPSTR ")", 
-                 name, IP2STR(&addr));
-        return true;
-    }
-    
-    return false;
-}
-
 // ============================================================================
 // mDNS
 // ============================================================================
@@ -63,14 +45,9 @@ bool api_server_init_mdns(void)
         return false;
     }
     
-    // Find an available hostname (arctic, arctic-2, arctic-3, etc.)
+    // Use base hostname directly (skip collision check - it adds latency and
+    // hostname_in_use() querying before we're registered doesn't work reliably)
     snprintf(hostname, sizeof(hostname), "%s", HOSTNAME_BASE);
-    
-    int suffix = 2;
-    while (hostname_in_use(hostname) && suffix <= 99) {
-        snprintf(hostname, sizeof(hostname), "%s-%d", HOSTNAME_BASE, suffix);
-        suffix++;
-    }
     
     // Set hostname
     err = mdns_hostname_set(hostname);
@@ -79,25 +56,30 @@ bool api_server_init_mdns(void)
         return false;
     }
     
-    // Set instance name (include suffix if we have one)
-    char instance_name[64];
-    if (suffix == 2) {
-        snprintf(instance_name, sizeof(instance_name), "Arctic Heat Pump Controller");
-    } else {
-        snprintf(instance_name, sizeof(instance_name), "Arctic Heat Pump Controller #%d", suffix - 1);
-    }
-    err = mdns_instance_name_set(instance_name);
+    // Set instance name
+    err = mdns_instance_name_set("Arctic Heat Pump Controller");
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS instance name set failed: %s", esp_err_to_name(err));
     }
     
-    // Add HTTP service (_http._tcp)
-    err = mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+    // Add HTTP service (_http._tcp) - this is important for service discovery
+    err = mdns_service_add(hostname, "_http", "_tcp", 80, NULL, 0);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "mDNS service add failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "mDNS HTTP service add failed: %s", esp_err_to_name(err));
+    }
+    
+    // Add a simple text record for the service
+    mdns_txt_item_t serviceTxtData[] = {
+        {"version", "1.0"},
+        {"device", "arctic-controller"}
+    };
+    err = mdns_service_txt_set("_http", "_tcp", serviceTxtData, 2);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS service TXT set failed: %s", esp_err_to_name(err));
     }
     
     ESP_LOGI(TAG, "mDNS initialized: %s.local", hostname);
+    ESP_LOGI(TAG, "Try: ping %s.local (requires Bonjour on Windows)", hostname);
     return true;
 }
 

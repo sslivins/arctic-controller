@@ -9,6 +9,7 @@
 #include <esp_https_ota.h>
 #include <esp_app_format.h>
 #include <esp_system.h>
+#include <esp_crt_bundle.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string.h>
@@ -182,12 +183,10 @@ static esp_err_t http_event_handler(esp_http_client_event_t* evt)
         case HTTP_EVENT_HEADER_SENT:
             break;
         case HTTP_EVENT_ON_HEADER:
-            if (strcasecmp(evt->header_key, "Content-Length") == 0) {
-                xSemaphoreTake(status_mutex, portMAX_DELAY);
-                ota_status.total_bytes = atoi(evt->header_value);
-                xSemaphoreGive(status_mutex);
-                ESP_LOGI(TAG, "Firmware size: %d bytes", (int)ota_status.total_bytes);
-            }
+            // Note: Don't parse Content-Length here - with partial_http_download enabled,
+            // headers show chunk sizes (e.g., 8192) not actual firmware size.
+            // We get the correct total from esp_https_ota_get_image_size() instead.
+            ESP_LOGD(TAG, "Header: %s = %s", evt->header_key, evt->header_value);
             break;
         case HTTP_EVENT_ON_DATA:
             break;
@@ -207,28 +206,37 @@ static void ota_task(void* pvParameter)
 {
     ESP_LOGI(TAG, "OTA task started");
     
+    // Reduce verbosity of certificate bundle logging
+    esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
+    
     esp_err_t err;
     
     // Configure HTTP client
     esp_http_client_config_t config = {};
     config.url = update_url;
     config.event_handler = http_event_handler;
-    config.timeout_ms = 30000;
+    config.timeout_ms = 60000;  // 60 second timeout for large files
     config.keep_alive_enable = true;
-    config.buffer_size = 1024;
-    config.buffer_size_tx = 1024;
+    config.buffer_size = 8192;  // Larger buffer for HTTPS TLS handshake
+    config.buffer_size_tx = 4096;  // Larger TX buffer for GitHub
     
     // Check if HTTPS
     if (strncmp(update_url, "https://", 8) == 0) {
-        // For HTTPS, you'd need to set cert_pem or skip verification
-        // For development, we can skip verification
-        config.skip_cert_common_name_check = true;
-        ESP_LOGW(TAG, "HTTPS: Skipping certificate verification (development mode)");
+        // Use ESP's built-in certificate bundle for HTTPS verification
+        config.crt_bundle_attach = esp_crt_bundle_attach;
+        config.skip_cert_common_name_check = false;
+        ESP_LOGI(TAG, "HTTPS: Using certificate bundle for verification");
     }
     
-    // Perform OTA
+    // GitHub uses redirects for release downloads (to objects.githubusercontent.com)
+    config.disable_auto_redirect = false;
+    config.max_redirection_count = 10;
+    
+    // Perform OTA with partial download (handles redirects/chunked better)
     esp_https_ota_config_t ota_config = {};
     ota_config.http_config = &config;
+    ota_config.partial_http_download = true;
+    ota_config.max_http_request_size = 64 * 1024;  // 64KB chunks for faster download
     
     esp_https_ota_handle_t https_ota_handle = NULL;
     err = esp_https_ota_begin(&ota_config, &https_ota_handle);
@@ -254,6 +262,23 @@ static void ota_task(void* pvParameter)
         ESP_LOGI(TAG, "New firmware version: %s", new_app_info.version);
     }
     
+    // Get total image size from OTA handle
+    // Note: GitHub uses chunked transfer encoding, so this may return 0
+    int image_size = esp_https_ota_get_image_size(https_ota_handle);
+    ESP_LOGI(TAG, "Image size from server: %d bytes (0 means unknown/chunked)", image_size);
+    
+    // If image size unknown, use a reasonable estimate based on current firmware size
+    // Current firmware is ~1.5MB, so estimate 1.6MB for updates
+    int estimated_size = (image_size > 0) ? image_size : (1600 * 1024);
+    
+    xSemaphoreTake(status_mutex, portMAX_DELAY);
+    ota_status.total_bytes = estimated_size;
+    xSemaphoreGive(status_mutex);
+    
+    if (image_size <= 0) {
+        ESP_LOGW(TAG, "Using estimated size: %d bytes (server didn't provide Content-Length)", estimated_size);
+    }
+    
     // Download and write firmware
     while (1) {
         err = esp_https_ota_perform(https_ota_handle);
@@ -266,7 +291,9 @@ static void ota_task(void* pvParameter)
         xSemaphoreTake(status_mutex, portMAX_DELAY);
         ota_status.bytes_downloaded = image_len;
         if (ota_status.total_bytes > 0) {
-            ota_status.progress_percent = (image_len * 100) / ota_status.total_bytes;
+            int progress = (image_len * 100) / ota_status.total_bytes;
+            // Cap at 99% until download is complete (in case estimate was too small)
+            ota_status.progress_percent = (progress > 99) ? 99 : progress;
         }
         xSemaphoreGive(status_mutex);
         
