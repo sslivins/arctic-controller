@@ -389,28 +389,31 @@ static void create_header(lv_obj_t* parent)
     lv_obj_align(wifi_state.header, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(wifi_state.header, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(wifi_state.header, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_left(wifi_state.header, 25, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(wifi_state.header, 25, LV_PART_MAIN);
     lv_obj_clear_flag(wifi_state.header, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Back button
-    wifi_state.back_btn = lv_btn_create(wifi_state.header);
-    lv_obj_set_size(wifi_state.back_btn, 100, 50);
-    lv_obj_align(wifi_state.back_btn, LV_ALIGN_LEFT_MID, 20, 0);
-    lv_obj_set_style_bg_color(wifi_state.back_btn, COLOR_BTN, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(wifi_state.back_btn, COLOR_BTN_PRESSED, LV_STATE_PRESSED);
-    lv_obj_set_style_radius(wifi_state.back_btn, 8, LV_PART_MAIN);
-    lv_obj_add_event_cb(wifi_state.back_btn, on_back_clicked, LV_EVENT_CLICKED, NULL);
-    
-    lv_obj_t* back_label = lv_label_create(wifi_state.back_btn);
-    lv_label_set_text(back_label, LV_SYMBOL_LEFT " Back");
-    lv_obj_set_style_text_font(back_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_center(back_label);
-    
-    // Title
+    // Title (left aligned)
     lv_obj_t* title = lv_label_create(wifi_state.header);
     lv_label_set_text(title, LV_SYMBOL_WIFI " WiFi");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(title);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    
+    // Close button (X button on right, matching time screen)
+    wifi_state.back_btn = lv_btn_create(wifi_state.header);
+    lv_obj_set_size(wifi_state.back_btn, 50, 50);
+    lv_obj_align(wifi_state.back_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(wifi_state.back_btn, COLOR_PANEL, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(wifi_state.back_btn, COLOR_BTN_PRESSED, LV_STATE_PRESSED);
+    lv_obj_set_style_radius(wifi_state.back_btn, 25, LV_PART_MAIN);
+    lv_obj_add_event_cb(wifi_state.back_btn, on_back_clicked, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t* close_icon = lv_label_create(wifi_state.back_btn);
+    lv_label_set_text(close_icon, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_font(close_icon, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(close_icon, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(close_icon);
 }
 
 static void create_connected_section(lv_obj_t* parent)

@@ -6,11 +6,13 @@
 #include <bsp/m5stack_tab5.h>
 #include <lvgl.h>
 #include <esp_log.h>
+#include <nvs_flash.h>
 #include <mooncake_log.h>
 #include "startup_anim.h"
 #include "wifi_screen.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
+#include "time_screen.h"
 #include "status_bar.h"
 
 static const char* TAG = "main";
@@ -22,19 +24,38 @@ static lv_obj_t* main_screen = NULL;
 void create_ui(void);
 static void on_startup_complete(void);
 static void show_wifi_screen(void);
+static void show_time_screen(void);
 static void on_status_bar_wifi_click(void);
+static void on_status_bar_time_click(void);
 static void on_wifi_connect(const char* ssid, const char* password);
 static void on_wifi_scan(void);
 static void on_wifi_disconnect(void);
 static void on_wifi_close(void);
+static void on_time_close(void);
 static void try_auto_connect(void);
+static void wifi_init_task(void* param);
 
 // Flag to track when to show main UI
 static bool show_main_ui = false;
 
+// Flag to track WiFi init completion (set by background task)
+static volatile bool wifi_init_complete = false;
+
 extern "C" void app_main(void)
 {
     mclog::tagInfo(TAG, "Arctic Heat Pump Controller Starting...");
+
+    // Initialize NVS (required for storing settings like timezone, WiFi credentials, etc.)
+    mclog::tagInfo(TAG, "Initializing NVS...");
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        mclog::tagWarn(TAG, "NVS partition needs to be erased, erasing...");
+        nvs_flash_erase();
+        ret = nvs_flash_init();
+    }
+    if (ret != ESP_OK) {
+        mclog::tagError(TAG, "Failed to initialize NVS: %d", ret);
+    }
 
     // Initialize I2C (required for IO expander and other peripherals)
     mclog::tagInfo(TAG, "Initializing I2C...");
@@ -83,6 +104,9 @@ extern "C" void app_main(void)
     // Initialize time manager (NTP will start when WiFi connects)
     time_mgr_init();
 
+    // Start WiFi initialization in background task (runs parallel to animation)
+    xTaskCreate(wifi_init_task, "wifi_init", 4096, NULL, 5, NULL);
+
     // Main loop
     while (1) {
         // Update startup animation if running
@@ -124,6 +148,7 @@ void create_ui(void)
     status_bar_config_t bar_config = {
         .parent = scr,
         .on_wifi_click = on_status_bar_wifi_click,
+        .on_time_click = on_status_bar_time_click,
     };
     status_bar_create(&bar_config);
     
@@ -179,8 +204,10 @@ void create_ui(void)
     lv_obj_set_style_text_color(footer, lv_color_hex(0x444444), LV_PART_MAIN);
     lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -20);
     
-    // Try to auto-connect with saved credentials
-    try_auto_connect();
+    // WiFi init happens in background task, just update status bar when ready
+    if (wifi_init_complete && wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
+        status_bar_set_wifi_state(true, wifi_mgr_get_connected_ssid());
+    }
 }
 
 // ============================================================================
@@ -354,39 +381,89 @@ static void on_wifi_close(void)
     }
 }
 
-static void try_auto_connect(void)
+// Time screen callbacks
+static void on_status_bar_time_click(void)
 {
-    // Always initialize WiFi manager at startup so it's ready when user opens settings
-    mclog::tagInfo(TAG, "Initializing WiFi manager...");
-    if (!wifi_mgr_is_initialized()) {
-        if (!wifi_mgr_init()) {
-            mclog::tagError(TAG, "Failed to initialize WiFi manager");
-            return;
-        }
+    mclog::tagInfo(TAG, "Status bar time clicked");
+    
+    bsp_display_lock(0);
+    show_time_screen();
+    bsp_display_unlock();
+}
+
+static void show_time_screen(void)
+{
+    time_screen_config_t config = {
+        .on_close = on_time_close,
+    };
+    time_screen_create(&config);
+}
+
+static void on_time_close(void)
+{
+    mclog::tagInfo(TAG, "Time screen closed");
+    
+    bsp_display_lock(0);
+    time_screen_delete();
+    
+    // Return to main screen
+    if (main_screen) {
+        lv_scr_load(main_screen);
     }
+    
+    // Force status bar to update with new format
+    status_bar_update_time();
+    bsp_display_unlock();
+}
+
+// Background task to initialize WiFi during startup animation
+static void wifi_init_task(void* param)
+{
+    (void)param;
+    
+    mclog::tagInfo(TAG, "[BG] Starting WiFi initialization...");
+    
+    // Initialize WiFi manager (this takes ~4 seconds)
+    if (!wifi_mgr_init()) {
+        mclog::tagError(TAG, "[BG] Failed to initialize WiFi manager");
+        wifi_init_complete = true;
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    mclog::tagInfo(TAG, "[BG] WiFi manager initialized");
     
     // Check if we have saved credentials to auto-connect
-    if (!wifi_mgr_has_saved_credentials()) {
-        mclog::tagInfo(TAG, "No saved WiFi credentials - WiFi ready for manual config");
-        return;
+    if (wifi_mgr_has_saved_credentials()) {
+        char ssid[33];
+        char password[65];
+        
+        if (wifi_mgr_load_credentials(ssid, sizeof(ssid), password, sizeof(password))) {
+            mclog::tagInfo(TAG, "[BG] Auto-connecting to: %s", ssid);
+            
+            // Store as pending for state callback
+            strncpy(pending_ssid, ssid, sizeof(pending_ssid) - 1);
+            strncpy(pending_password, password, sizeof(pending_password) - 1);
+            
+            // Connect (callback will update UI when connected)
+            wifi_mgr_connect(ssid, password, on_wifi_state_changed);
+        }
+    } else {
+        mclog::tagInfo(TAG, "[BG] No saved credentials - WiFi ready for manual config");
     }
     
-    char ssid[33];
-    char password[65];
+    wifi_init_complete = true;
+    mclog::tagInfo(TAG, "[BG] WiFi init task complete");
     
-    if (!wifi_mgr_load_credentials(ssid, sizeof(ssid), password, sizeof(password))) {
-        mclog::tagError(TAG, "Failed to load saved credentials");
-        return;
-    }
-    
-    mclog::tagInfo(TAG, "Auto-connecting to saved network: %s", ssid);
-    
-    // Store as pending for state callback
-    strncpy(pending_ssid, ssid, sizeof(pending_ssid) - 1);
-    strncpy(pending_password, password, sizeof(pending_password) - 1);
-    
-    // Connect
-    if (!wifi_mgr_connect(ssid, password, on_wifi_state_changed)) {
-        mclog::tagError(TAG, "Failed to start auto-connect");
+    vTaskDelete(NULL);
+}
+
+// Legacy function - now just checks if we need to init (shouldn't be called)
+static void try_auto_connect(void)
+{
+    // WiFi init now happens in background task during startup animation
+    // This function is kept for backwards compatibility
+    if (!wifi_mgr_is_initialized()) {
+        mclog::tagWarn(TAG, "WiFi not initialized - init task may have failed");
     }
 }

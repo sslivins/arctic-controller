@@ -71,17 +71,7 @@ bool wifi_mgr_init(void)
     // ESP-Hosted requires adequate time for C6 to boot and initialize SDIO
     vTaskDelay(pdMS_TO_TICKS(1500));  // Give C6 time to boot
     
-    // Initialize NVS (required for WiFi)
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "NVS partition issue, erasing...");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(ret));
-        return false;
-    }
+    // NVS is already initialized in app_main
     
     // Create event group
     wifi_state.event_group = xEventGroupCreate();
@@ -91,7 +81,7 @@ bool wifi_mgr_init(void)
     }
     
     // Initialize TCP/IP stack
-    ret = esp_netif_init();
+    esp_err_t ret = esp_netif_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(ret));
         return false;

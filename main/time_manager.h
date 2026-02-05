@@ -52,10 +52,24 @@ bool time_mgr_get_time_str(char* buf, size_t buf_len, const char* format);
 bool time_mgr_get_local_time(struct tm* tm_info);
 
 /**
- * @brief Set timezone
+ * @brief Set timezone (saves to NVS for persistence)
  * @param tz_str POSIX timezone string (e.g., "EST5EDT,M3.2.0,M11.1.0" for US Eastern)
+ * 
+ * Common timezone strings:
+ *   US Eastern:    "EST5EDT,M3.2.0,M11.1.0"
+ *   US Central:    "CST6CDT,M3.2.0,M11.1.0"
+ *   US Mountain:   "MST7MDT,M3.2.0,M11.1.0"
+ *   US Pacific:    "PST8PDT,M3.2.0,M11.1.0"
+ *   UK/London:     "GMT0BST,M3.5.0/1,M10.5.0"
+ *   Central Europe: "CET-1CEST,M3.5.0,M10.5.0/3"
  */
 void time_mgr_set_timezone(const char* tz_str);
+
+/**
+ * @brief Get current timezone string
+ * @return Current POSIX timezone string
+ */
+const char* time_mgr_get_timezone(void);
 
 #ifdef __cplusplus
 }

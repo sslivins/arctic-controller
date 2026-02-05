@@ -7,16 +7,26 @@
 #include <sys/time.h>
 #include <esp_log.h>
 #include <esp_sntp.h>
+#include <nvs_flash.h>
+#include <nvs.h>
 
 static const char* TAG = "time_mgr";
+
+// NVS namespace and keys
+#define NVS_NAMESPACE "time_cfg"
+#define NVS_KEY_TZ    "timezone"
 
 // Default NTP servers
 #define NTP_SERVER_PRIMARY   "pool.ntp.org"
 #define NTP_SERVER_SECONDARY "time.google.com"
 #define NTP_SERVER_TERTIARY  "time.cloudflare.com"
 
-// Default timezone (UTC)
-#define DEFAULT_TIMEZONE "UTC0"
+// Default timezone - US Eastern (EST5EDT with DST rules)
+// Format: STDoffsetDST,start,end
+// EST5EDT = Eastern Standard Time, 5 hours behind UTC, Eastern Daylight Time
+// M3.2.0 = DST starts March, 2nd week, Sunday
+// M11.1.0 = DST ends November, 1st week, Sunday
+#define DEFAULT_TIMEZONE "EST5EDT,M3.2.0,M11.1.0"
 
 // Internal state
 static struct {
@@ -68,6 +78,47 @@ static void configure_sntp(void)
     time_state.sntp_configured = true;
 }
 
+// Load timezone from NVS
+static void load_timezone_from_nvs(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    ESP_LOGI(TAG, "Opening NVS namespace '%s' for timezone: err=%d", NVS_NAMESPACE, err);
+    if (err == ESP_OK) {
+        size_t len = sizeof(time_state.timezone);
+        err = nvs_get_str(nvs, NVS_KEY_TZ, time_state.timezone, &len);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Loaded timezone from NVS: '%s' (len=%d)", time_state.timezone, len);
+        } else {
+            ESP_LOGW(TAG, "nvs_get_str failed (err=%d), using default: %s", err, DEFAULT_TIMEZONE);
+            strncpy(time_state.timezone, DEFAULT_TIMEZONE, sizeof(time_state.timezone) - 1);
+        }
+        nvs_close(nvs);
+    } else {
+        ESP_LOGW(TAG, "NVS open failed (err=%d), using default timezone: %s", err, DEFAULT_TIMEZONE);
+        strncpy(time_state.timezone, DEFAULT_TIMEZONE, sizeof(time_state.timezone) - 1);
+    }
+}
+
+// Save timezone to NVS
+static void save_timezone_to_nvs(const char* tz_str)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    ESP_LOGI(TAG, "Saving timezone to NVS: '%s', open err=%d", tz_str, err);
+    if (err == ESP_OK) {
+        err = nvs_set_str(nvs, NVS_KEY_TZ, tz_str);
+        ESP_LOGI(TAG, "nvs_set_str result: %d", err);
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+            ESP_LOGI(TAG, "nvs_commit result: %d", err);
+        }
+        nvs_close(nvs);
+    } else {
+        ESP_LOGE(TAG, "Failed to open NVS for writing!");
+    }
+}
+
 void time_mgr_init(void)
 {
     if (time_state.initialized) {
@@ -77,9 +128,14 @@ void time_mgr_init(void)
     
     ESP_LOGI(TAG, "Initializing time manager...");
     
+    // Load saved timezone from NVS (or use default)
+    load_timezone_from_nvs();
+    
     // Set timezone
     setenv("TZ", time_state.timezone, 1);
     tzset();
+    
+    ESP_LOGI(TAG, "Timezone: %s", time_state.timezone);
     
     // Note: SNTP configuration is deferred until start_sync() is called
     // because it requires the TCP/IP stack to be initialized first
@@ -173,5 +229,13 @@ void time_mgr_set_timezone(const char* tz_str)
     setenv("TZ", time_state.timezone, 1);
     tzset();
     
+    // Save to NVS for persistence
+    save_timezone_to_nvs(tz_str);
+    
     ESP_LOGI(TAG, "Timezone set to: %s", time_state.timezone);
+}
+
+const char* time_mgr_get_timezone(void)
+{
+    return time_state.timezone;
 }

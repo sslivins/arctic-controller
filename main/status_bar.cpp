@@ -4,6 +4,7 @@
  */
 #include "status_bar.h"
 #include "time_manager.h"
+#include "time_screen.h"
 #include "wifi_manager.h"
 #include <esp_log.h>
 
@@ -21,16 +22,19 @@ static const char* TAG = "status_bar";
 // Internal state
 static struct {
     lv_obj_t* container;
+    lv_obj_t* time_btn;
     lv_obj_t* time_label;
     lv_obj_t* wifi_btn;
     lv_obj_t* wifi_icon;
     lv_timer_t* update_timer;
     status_bar_wifi_click_cb_t wifi_click_cb;
+    status_bar_time_click_cb_t time_click_cb;
     bool wifi_connected;
 } bar_state = {};
 
 // Forward declarations
 static void wifi_btn_event_cb(lv_event_t* e);
+static void time_btn_event_cb(lv_event_t* e);
 static void timer_update_cb(lv_timer_t* timer);
 
 lv_obj_t* status_bar_create(const status_bar_config_t* config)
@@ -40,8 +44,9 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
         return NULL;
     }
     
-    // Store callback
+    // Store callbacks
     bar_state.wifi_click_cb = config->on_wifi_click;
+    bar_state.time_click_cb = config->on_time_click;
     
     // Create container
     bar_state.container = lv_obj_create(config->parent);
@@ -55,12 +60,23 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     lv_obj_set_style_pad_right(bar_state.container, 25, LV_PART_MAIN);
     lv_obj_clear_flag(bar_state.container, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Time label (left side) - large font for visibility
-    bar_state.time_label = lv_label_create(bar_state.container);
+    // Time button (left side) - clickable with touch feedback
+    bar_state.time_btn = lv_btn_create(bar_state.container);
+    lv_obj_set_size(bar_state.time_btn, 180, 70);
+    lv_obj_align(bar_state.time_btn, LV_ALIGN_LEFT_MID, -15, 0);
+    lv_obj_set_style_bg_opa(bar_state.time_btn, LV_OPA_0, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar_state.time_btn, LV_OPA_30, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(bar_state.time_btn, lv_color_hex(0xffffff), LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(bar_state.time_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar_state.time_btn, 8, LV_PART_MAIN);
+    lv_obj_add_event_cb(bar_state.time_btn, time_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    
+    // Time label inside button - large font for visibility
+    bar_state.time_label = lv_label_create(bar_state.time_btn);
     lv_label_set_text(bar_state.time_label, "--:--");
     lv_obj_set_style_text_font(bar_state.time_label, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.time_label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
-    lv_obj_align(bar_state.time_label, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_center(bar_state.time_label);
     
     // WiFi button (right side) - larger touch target
     bar_state.wifi_btn = lv_btn_create(bar_state.container);
@@ -120,7 +136,10 @@ void status_bar_update_time(void)
     }
     
     char time_str[16];
-    if (time_mgr_is_synced() && time_mgr_get_time_str(time_str, sizeof(time_str), "%H:%M")) {
+    // Use 12h or 24h format based on user setting
+    const char* format = time_screen_get_24h_format() ? "%H:%M" : "%I:%M %p";
+    
+    if (time_mgr_is_synced() && time_mgr_get_time_str(time_str, sizeof(time_str), format)) {
         lv_label_set_text(bar_state.time_label, time_str);
     } else {
         lv_label_set_text(bar_state.time_label, "--:--");
@@ -139,6 +158,7 @@ void status_bar_delete(void)
         bar_state.container = NULL;
     }
     
+    bar_state.time_btn = NULL;
     bar_state.time_label = NULL;
     bar_state.wifi_btn = NULL;
     bar_state.wifi_icon = NULL;
@@ -151,6 +171,16 @@ static void wifi_btn_event_cb(lv_event_t* e)
     
     if (bar_state.wifi_click_cb) {
         bar_state.wifi_click_cb();
+    }
+}
+
+static void time_btn_event_cb(lv_event_t* e)
+{
+    (void)e;
+    ESP_LOGI(TAG, "Time button clicked");
+    
+    if (bar_state.time_click_cb) {
+        bar_state.time_click_cb();
     }
 }
 
