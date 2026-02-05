@@ -106,7 +106,8 @@ bool ota_mgr_start_update(const char* url)
     ESP_LOGI(TAG, "Starting OTA update from: %s", url);
     
     // Create OTA task
-    BaseType_t ret = xTaskCreate(ota_task, "ota_task", OTA_TASK_STACK_SIZE, NULL, 5, NULL);
+    // Lower priority than LVGL (5) to avoid display glitches during flash writes
+    BaseType_t ret = xTaskCreate(ota_task, "ota_task", OTA_TASK_STACK_SIZE, NULL, 3, NULL);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create OTA task");
         xSemaphoreTake(status_mutex, portMAX_DELAY);
@@ -305,7 +306,8 @@ static void ota_task(void* pvParameter)
                      ota_status.progress_percent, image_len);
         }
         
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // Yield to let display task run (prevents screen flashing)
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
     
     if (err != ESP_OK) {
