@@ -32,6 +32,11 @@ typedef void (*wifi_connect_cb_t)(const char* ssid, const char* password);
 typedef void (*wifi_scan_cb_t)(void);
 
 /**
+ * @brief Callback when user wants to disconnect
+ */
+typedef void (*wifi_disconnect_cb_t)(void);
+
+/**
  * @brief Callback when user closes the WiFi screen
  */
 typedef void (*wifi_close_cb_t)(void);
@@ -42,6 +47,7 @@ typedef void (*wifi_close_cb_t)(void);
 typedef struct {
     wifi_connect_cb_t on_connect;
     wifi_scan_cb_t on_scan;
+    wifi_disconnect_cb_t on_disconnect;
     wifi_close_cb_t on_close;
 } wifi_screen_config_t;
 
@@ -79,8 +85,9 @@ void wifi_screen_set_scanning(bool scanning);
  * @brief Update connection status display
  * @param connected true if connected
  * @param ssid Current network SSID (or NULL if not connected)
+ * @param ip_addr IP address string (or NULL if not connected)
  */
-void wifi_screen_set_connection_status(bool connected, const char* ssid);
+void wifi_screen_set_connection_status(bool connected, const char* ssid, const char* ip_addr);
 
 /**
  * @brief Show an error message

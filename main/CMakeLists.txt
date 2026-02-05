@@ -5,6 +5,7 @@ idf_component_register(
         "wifi_screen.cpp"
         "wifi_manager.cpp"
         "time_manager.cpp"
+        "status_bar.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES

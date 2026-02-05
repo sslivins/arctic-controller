@@ -413,3 +413,118 @@ static void notify_state_change(wifi_mgr_state_t new_state)
         wifi_state.state_callback(new_state, ssid);
     }
 }
+
+// ============================================================================
+// NVS Credential Storage
+// ============================================================================
+
+#define NVS_NAMESPACE "wifi_creds"
+#define NVS_KEY_SSID "ssid"
+#define NVS_KEY_PASSWORD "password"
+
+bool wifi_mgr_save_credentials(const char* ssid, const char* password)
+{
+    if (!ssid || strlen(ssid) == 0) {
+        ESP_LOGE(TAG, "Invalid SSID for saving");
+        return false;
+    }
+    
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
+        return false;
+    }
+    
+    err = nvs_set_str(nvs, NVS_KEY_SSID, ssid);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save SSID: %s", esp_err_to_name(err));
+        nvs_close(nvs);
+        return false;
+    }
+    
+    // Save password (empty string if NULL)
+    err = nvs_set_str(nvs, NVS_KEY_PASSWORD, password ? password : "");
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save password: %s", esp_err_to_name(err));
+        nvs_close(nvs);
+        return false;
+    }
+    
+    err = nvs_commit(nvs);
+    nvs_close(nvs);
+    
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit NVS: %s", esp_err_to_name(err));
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "WiFi credentials saved for '%s'", ssid);
+    return true;
+}
+
+bool wifi_mgr_load_credentials(char* ssid, size_t ssid_len, char* password, size_t password_len)
+{
+    if (!ssid || ssid_len < 33 || !password || password_len < 65) {
+        ESP_LOGE(TAG, "Invalid buffers for loading credentials");
+        return false;
+    }
+    
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) {
+        ESP_LOGD(TAG, "No saved credentials (NVS open failed)");
+        return false;
+    }
+    
+    size_t len = ssid_len;
+    err = nvs_get_str(nvs, NVS_KEY_SSID, ssid, &len);
+    if (err != ESP_OK) {
+        ESP_LOGD(TAG, "No saved SSID");
+        nvs_close(nvs);
+        return false;
+    }
+    
+    len = password_len;
+    err = nvs_get_str(nvs, NVS_KEY_PASSWORD, password, &len);
+    if (err != ESP_OK) {
+        // Password might not exist, that's OK for open networks
+        password[0] = '\0';
+    }
+    
+    nvs_close(nvs);
+    
+    ESP_LOGI(TAG, "Loaded saved credentials for '%s'", ssid);
+    return true;
+}
+
+bool wifi_mgr_has_saved_credentials(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err != ESP_OK) {
+        return false;
+    }
+    
+    size_t len = 0;
+    err = nvs_get_str(nvs, NVS_KEY_SSID, NULL, &len);
+    nvs_close(nvs);
+    
+    return (err == ESP_OK && len > 1);  // len includes null terminator
+}
+
+void wifi_mgr_clear_credentials(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return;
+    }
+    
+    nvs_erase_key(nvs, NVS_KEY_SSID);
+    nvs_erase_key(nvs, NVS_KEY_PASSWORD);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+    
+    ESP_LOGI(TAG, "WiFi credentials cleared");
+}

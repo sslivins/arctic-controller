@@ -1,10 +1,13 @@
 /*
  * Arctic Heat Pump Controller
- * WiFi Settings Screen Implementation
+ * WiFi Settings Screen Implementation - iPhone-style layout
  */
 #include "wifi_screen.h"
 #include <string.h>
 #include <stdio.h>
+#include <esp_log.h>
+
+static const char* TAG = "wifi_screen";
 
 // ============================================================================
 // Helper: Sanitize SSID for display (replace Unicode quotes with ASCII)
@@ -16,19 +19,14 @@ static void sanitize_ssid_for_display(char* dest, const char* src, size_t dest_s
     size_t si = 0;
     
     while (src[si] && di < dest_size - 1) {
-        // Check for UTF-8 sequences for fancy quotes
-        // U+2019 (') = E2 80 99, U+2018 (') = E2 80 98
-        // U+201C (") = E2 80 9C, U+201D (") = E2 80 9D
         if ((unsigned char)src[si] == 0xE2 && 
             (unsigned char)src[si + 1] == 0x80) {
             unsigned char third = (unsigned char)src[si + 2];
             if (third == 0x99 || third == 0x98) {
-                // Single curly quote -> ASCII apostrophe
                 dest[di++] = '\'';
                 si += 3;
                 continue;
             } else if (third == 0x9C || third == 0x9D) {
-                // Double curly quote -> ASCII double quote
                 dest[di++] = '"';
                 si += 3;
                 continue;
@@ -51,11 +49,25 @@ static struct {
     lv_obj_t* screen;
     lv_obj_t* header;
     lv_obj_t* back_btn;
-    lv_obj_t* status_label;
-    lv_obj_t* scan_btn;
+    
+    // Connected section
+    lv_obj_t* connected_section;
+    lv_obj_t* connected_ssid_label;
+    lv_obj_t* connected_ip_label;
+    lv_obj_t* disconnect_btn;
+    bool is_connected;
+    char connected_ssid[33];
+    char connected_ip[16];
+    
+    // Available networks section
+    lv_obj_t* networks_section;
+    lv_obj_t* networks_title;
     lv_obj_t* network_list;
     lv_obj_t* scanning_spinner;
     lv_obj_t* scanning_label;
+    
+    // Auto-scan timer
+    lv_timer_t* scan_timer;
     
     // Password dialog
     lv_obj_t* password_dialog;
@@ -93,24 +105,32 @@ static struct {
 #define COLOR_SUCCESS       lv_color_hex(0x27ae60)
 #define COLOR_WARNING       lv_color_hex(0xf39c12)
 #define COLOR_ERROR         lv_color_hex(0xe74c3c)
+#define COLOR_DISCONNECT    lv_color_hex(0xe74c3c)
+
+// Auto-scan interval (10 seconds)
+#define SCAN_INTERVAL_MS    10000
 
 // ============================================================================
 // Forward Declarations
 // ============================================================================
 
 static void create_header(lv_obj_t* parent);
-static void create_network_list(lv_obj_t* parent);
+static void create_connected_section(lv_obj_t* parent);
+static void create_networks_section(lv_obj_t* parent);
 static void create_password_dialog(void);
 static void show_password_dialog(const char* ssid, bool is_open);
 static void hide_password_dialog(void);
+static void update_connected_section(void);
+static void trigger_scan(void);
 
 static void on_back_clicked(lv_event_t* e);
-static void on_scan_clicked(lv_event_t* e);
+static void on_disconnect_clicked(lv_event_t* e);
 static void on_network_clicked(lv_event_t* e);
 static void on_connect_clicked(lv_event_t* e);
 static void on_cancel_clicked(lv_event_t* e);
 static void on_keyboard_ready(lv_event_t* e);
 static void on_show_password_clicked(lv_event_t* e);
+static void scan_timer_cb(lv_timer_t* timer);
 
 static const char* get_signal_icon(int8_t rssi);
 
@@ -121,7 +141,7 @@ static const char* get_signal_icon(int8_t rssi);
 void wifi_screen_create(const wifi_screen_config_t* config)
 {
     if (wifi_state.visible) {
-        return;  // Already visible
+        return;
     }
     
     // Store config
@@ -131,46 +151,33 @@ void wifi_screen_create(const wifi_screen_config_t* config)
         memset(&wifi_state.config, 0, sizeof(wifi_state.config));
     }
     
+    // Reset connection state
+    wifi_state.is_connected = false;
+    wifi_state.connected_ssid[0] = '\0';
+    wifi_state.connected_ip[0] = '\0';
+    
     // Create screen
     wifi_state.screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(wifi_state.screen, COLOR_BG, LV_PART_MAIN);
     
-    // Create header with back button and title
+    // Create header
     create_header(wifi_state.screen);
     
-    // Create main content area
+    // Main content container
     lv_obj_t* content = lv_obj_create(wifi_state.screen);
-    lv_obj_set_size(content, 760, 520);
-    lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 80);
-    lv_obj_set_style_bg_color(content, COLOR_PANEL, LV_PART_MAIN);
-    lv_obj_set_style_border_color(content, COLOR_BORDER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(content, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(content, 15, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(content, 20, LV_PART_MAIN);
+    lv_obj_set_size(content, 760, 540);
+    lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(content, 15, LV_PART_MAIN);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Connection status
-    wifi_state.status_label = lv_label_create(content);
-    lv_label_set_text(wifi_state.status_label, LV_SYMBOL_WIFI " Not Connected");
-    lv_obj_set_style_text_font(wifi_state.status_label, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(wifi_state.status_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_align(wifi_state.status_label, LV_ALIGN_TOP_LEFT, 10, 10);
+    // Create connected section (hidden initially)
+    create_connected_section(content);
     
-    // Scan button
-    wifi_state.scan_btn = lv_btn_create(content);
-    lv_obj_set_size(wifi_state.scan_btn, 150, 45);
-    lv_obj_align(wifi_state.scan_btn, LV_ALIGN_TOP_RIGHT, -10, 5);
-    lv_obj_set_style_bg_color(wifi_state.scan_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_radius(wifi_state.scan_btn, 8, LV_PART_MAIN);
-    lv_obj_add_event_cb(wifi_state.scan_btn, on_scan_clicked, LV_EVENT_CLICKED, NULL);
-    
-    lv_obj_t* scan_label = lv_label_create(wifi_state.scan_btn);
-    lv_label_set_text(scan_label, LV_SYMBOL_REFRESH " Scan");
-    lv_obj_set_style_text_font(scan_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_center(scan_label);
-    
-    // Create network list area
-    create_network_list(content);
+    // Create available networks section
+    create_networks_section(content);
     
     // Create password dialog (hidden initially)
     create_password_dialog();
@@ -179,10 +186,13 @@ void wifi_screen_create(const wifi_screen_config_t* config)
     lv_scr_load(wifi_state.screen);
     wifi_state.visible = true;
     
-    // Trigger initial scan if callback provided
-    if (wifi_state.config.on_scan) {
-        wifi_state.config.on_scan();
-    }
+    // Start auto-scan timer
+    wifi_state.scan_timer = lv_timer_create(scan_timer_cb, SCAN_INTERVAL_MS, NULL);
+    
+    // Trigger initial scan
+    trigger_scan();
+    
+    ESP_LOGI(TAG, "WiFi screen created with auto-scan");
 }
 
 void wifi_screen_close(void)
@@ -191,7 +201,13 @@ void wifi_screen_close(void)
         return;
     }
     
-    // Hide password dialog if shown
+    // Stop auto-scan timer
+    if (wifi_state.scan_timer) {
+        lv_timer_del(wifi_state.scan_timer);
+        wifi_state.scan_timer = NULL;
+    }
+    
+    // Hide password dialog
     hide_password_dialog();
     
     // Notify close callback
@@ -200,9 +216,7 @@ void wifi_screen_close(void)
     }
     
     wifi_state.visible = false;
-    
-    // Note: The main app should load a different screen
-    // We just clean up our state here
+    ESP_LOGI(TAG, "WiFi screen closed");
 }
 
 bool wifi_screen_is_visible(void)
@@ -216,19 +230,54 @@ void wifi_screen_update_networks(const wifi_network_info_t* networks, uint8_t co
         return;
     }
     
-    // Store network data
-    wifi_state.network_count = (count > 20) ? 20 : count;
-    if (networks && wifi_state.network_count > 0) {
-        memcpy(wifi_state.networks, networks, wifi_state.network_count * sizeof(wifi_network_info_t));
+    // Deduplicate networks by SSID (keep strongest signal)
+    wifi_network_info_t deduped[20];
+    uint8_t deduped_count = 0;
+    
+    for (uint8_t i = 0; i < count && i < 20; i++) {
+        const wifi_network_info_t* net = &networks[i];
+        
+        // Skip empty SSIDs (hidden networks)
+        if (net->ssid[0] == '\0') {
+            continue;
+        }
+        
+        // Skip the currently connected network (shown in connected section)
+        if (wifi_state.is_connected && strcmp(net->ssid, wifi_state.connected_ssid) == 0) {
+            continue;
+        }
+        
+        // Check if SSID already exists in deduped list
+        bool found = false;
+        for (uint8_t j = 0; j < deduped_count; j++) {
+            if (strcmp(deduped[j].ssid, net->ssid) == 0) {
+                if (net->rssi > deduped[j].rssi) {
+                    deduped[j].rssi = net->rssi;
+                    deduped[j].authmode = net->authmode;
+                }
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found && deduped_count < 20) {
+            memcpy(&deduped[deduped_count], net, sizeof(wifi_network_info_t));
+            deduped_count++;
+        }
+    }
+    
+    // Store deduplicated network data
+    wifi_state.network_count = deduped_count;
+    if (deduped_count > 0) {
+        memcpy(wifi_state.networks, deduped, deduped_count * sizeof(wifi_network_info_t));
     }
     
     // Clear existing list items
     lv_obj_clean(wifi_state.network_list);
     
     if (wifi_state.network_count == 0) {
-        // Show "No networks found" message
         lv_obj_t* empty_label = lv_label_create(wifi_state.network_list);
-        lv_label_set_text(empty_label, "No networks found.\nTap 'Scan' to search for WiFi networks.");
+        lv_label_set_text(empty_label, "Scanning for networks...");
         lv_obj_set_style_text_font(empty_label, &lv_font_montserrat_16, LV_PART_MAIN);
         lv_obj_set_style_text_color(empty_label, COLOR_TEXT_DIM, LV_PART_MAIN);
         lv_obj_set_style_text_align(empty_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -242,7 +291,7 @@ void wifi_screen_update_networks(const wifi_network_info_t* networks, uint8_t co
         
         // Create row container
         lv_obj_t* row = lv_obj_create(wifi_state.network_list);
-        lv_obj_set_size(row, lv_pct(100), 60);
+        lv_obj_set_size(row, lv_pct(100), 55);
         lv_obj_set_style_bg_color(row, COLOR_PANEL, LV_PART_MAIN);
         lv_obj_set_style_bg_color(row, COLOR_BTN, LV_STATE_PRESSED);
         lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
@@ -259,32 +308,23 @@ void wifi_screen_update_networks(const wifi_network_info_t* networks, uint8_t co
         lv_obj_set_style_text_color(signal, COLOR_ACCENT, LV_PART_MAIN);
         lv_obj_align(signal, LV_ALIGN_LEFT_MID, 0, 0);
         
-        // Network name (sanitize to replace unsupported Unicode quotes)
+        // Network name
         char display_ssid[64];
         sanitize_ssid_for_display(display_ssid, net->ssid, sizeof(display_ssid));
         lv_obj_t* name = lv_label_create(row);
         lv_label_set_text(name, display_ssid);
         lv_obj_set_style_text_font(name, &lv_font_montserrat_24, LV_PART_MAIN);
         lv_obj_set_style_text_color(name, COLOR_TEXT, LV_PART_MAIN);
-        lv_obj_align(name, LV_ALIGN_LEFT_MID, 45, 0);
+        lv_obj_align(name, LV_ALIGN_LEFT_MID, 40, 0);
         
-        // Secured indicator for protected networks
+        // Lock icon for secured networks
         if (net->authmode > 0) {
             lv_obj_t* lock = lv_label_create(row);
-            lv_label_set_text(lock, LV_SYMBOL_EYE_CLOSE);  // Use eye-close as "secured" indicator
+            lv_label_set_text(lock, LV_SYMBOL_EYE_CLOSE);
             lv_obj_set_style_text_font(lock, &lv_font_montserrat_16, LV_PART_MAIN);
             lv_obj_set_style_text_color(lock, COLOR_TEXT_DIM, LV_PART_MAIN);
             lv_obj_align(lock, LV_ALIGN_RIGHT_MID, -10, 0);
         }
-        
-        // RSSI value
-        char rssi_str[16];
-        snprintf(rssi_str, sizeof(rssi_str), "%d dBm", net->rssi);
-        lv_obj_t* rssi_label = lv_label_create(row);
-        lv_label_set_text(rssi_label, rssi_str);
-        lv_obj_set_style_text_font(rssi_label, &lv_font_montserrat_12, LV_PART_MAIN);
-        lv_obj_set_style_text_color(rssi_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-        lv_obj_align(rssi_label, LV_ALIGN_RIGHT_MID, (net->authmode > 0) ? -45 : -10, 0);
     }
 }
 
@@ -294,58 +334,35 @@ void wifi_screen_set_scanning(bool scanning)
         return;
     }
     
-    if (scanning) {
-        // Disable scan button
-        lv_obj_add_state(wifi_state.scan_btn, LV_STATE_DISABLED);
-        
-        // Show spinner if not already created
-        if (!wifi_state.scanning_spinner) {
-            wifi_state.scanning_spinner = lv_spinner_create(wifi_state.network_list);
-            lv_obj_set_size(wifi_state.scanning_spinner, 50, 50);
-            lv_obj_center(wifi_state.scanning_spinner);
-            
-            wifi_state.scanning_label = lv_label_create(wifi_state.network_list);
-            lv_label_set_text(wifi_state.scanning_label, "Scanning...");
-            lv_obj_set_style_text_font(wifi_state.scanning_label, &lv_font_montserrat_16, LV_PART_MAIN);
-            lv_obj_set_style_text_color(wifi_state.scanning_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-            lv_obj_align_to(wifi_state.scanning_label, wifi_state.scanning_spinner, LV_ALIGN_OUT_BOTTOM_MID, 0, 15);
+    // Update the networks title to show scanning status
+    if (wifi_state.networks_title) {
+        if (scanning) {
+            lv_label_set_text(wifi_state.networks_title, "Available Networks  " LV_SYMBOL_REFRESH);
+        } else {
+            lv_label_set_text(wifi_state.networks_title, "Available Networks");
         }
-        
-        // Clear network list and show spinner
-        lv_obj_clean(wifi_state.network_list);
-        
-        wifi_state.scanning_spinner = lv_spinner_create(wifi_state.network_list);
-        lv_obj_set_size(wifi_state.scanning_spinner, 50, 50);
-        lv_obj_center(wifi_state.scanning_spinner);
-        
-        wifi_state.scanning_label = lv_label_create(wifi_state.network_list);
-        lv_label_set_text(wifi_state.scanning_label, "Scanning for networks...");
-        lv_obj_set_style_text_font(wifi_state.scanning_label, &lv_font_montserrat_16, LV_PART_MAIN);
-        lv_obj_set_style_text_color(wifi_state.scanning_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-        lv_obj_align_to(wifi_state.scanning_label, wifi_state.scanning_spinner, LV_ALIGN_OUT_BOTTOM_MID, 0, 15);
-    } else {
-        // Re-enable scan button
-        lv_obj_clear_state(wifi_state.scan_btn, LV_STATE_DISABLED);
-        
-        // Spinner will be removed when network list updates
     }
 }
 
-void wifi_screen_set_connection_status(bool connected, const char* ssid)
+void wifi_screen_set_connection_status(bool connected, const char* ssid, const char* ip_addr)
 {
-    if (!wifi_state.visible || !wifi_state.status_label) {
-        return;
+    wifi_state.is_connected = connected;
+    
+    if (connected && ssid) {
+        strncpy(wifi_state.connected_ssid, ssid, sizeof(wifi_state.connected_ssid) - 1);
+        if (ip_addr) {
+            strncpy(wifi_state.connected_ip, ip_addr, sizeof(wifi_state.connected_ip) - 1);
+        } else {
+            wifi_state.connected_ip[0] = '\0';
+        }
+    } else {
+        wifi_state.connected_ssid[0] = '\0';
+        wifi_state.connected_ip[0] = '\0';
     }
     
-    char status_text[64];
-    if (connected && ssid) {
-        snprintf(status_text, sizeof(status_text), LV_SYMBOL_WIFI " Connected: %s", ssid);
-        lv_obj_set_style_text_color(wifi_state.status_label, COLOR_SUCCESS, LV_PART_MAIN);
-    } else {
-        snprintf(status_text, sizeof(status_text), LV_SYMBOL_WIFI " Not Connected");
-        lv_obj_set_style_text_color(wifi_state.status_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    if (wifi_state.visible) {
+        update_connected_section();
     }
-    lv_label_set_text(wifi_state.status_label, status_text);
 }
 
 void wifi_screen_show_error(const char* message)
@@ -354,7 +371,6 @@ void wifi_screen_show_error(const char* message)
         return;
     }
     
-    // Create a message box
     lv_obj_t* msgbox = lv_msgbox_create(wifi_state.screen);
     lv_msgbox_add_title(msgbox, "Error");
     lv_msgbox_add_text(msgbox, message);
@@ -368,7 +384,6 @@ void wifi_screen_show_error(const char* message)
 
 static void create_header(lv_obj_t* parent)
 {
-    // Header container
     wifi_state.header = lv_obj_create(parent);
     lv_obj_set_size(wifi_state.header, lv_pct(100), 70);
     lv_obj_align(wifi_state.header, LV_ALIGN_TOP_MID, 0, 0);
@@ -392,30 +407,138 @@ static void create_header(lv_obj_t* parent)
     
     // Title
     lv_obj_t* title = lv_label_create(wifi_state.header);
-    lv_label_set_text(title, LV_SYMBOL_WIFI " WiFi Settings");
+    lv_label_set_text(title, LV_SYMBOL_WIFI " WiFi");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_center(title);
 }
 
-static void create_network_list(lv_obj_t* parent)
+static void create_connected_section(lv_obj_t* parent)
 {
-    // Network list container (scrollable)
-    wifi_state.network_list = lv_obj_create(parent);
-    lv_obj_set_size(wifi_state.network_list, lv_pct(100), 400);
+    // Connected network section (iPhone-style)
+    wifi_state.connected_section = lv_obj_create(parent);
+    lv_obj_set_size(wifi_state.connected_section, lv_pct(100), 120);
+    lv_obj_set_style_bg_color(wifi_state.connected_section, COLOR_PANEL, LV_PART_MAIN);
+    lv_obj_set_style_border_color(wifi_state.connected_section, COLOR_SUCCESS, LV_PART_MAIN);
+    lv_obj_set_style_border_width(wifi_state.connected_section, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(wifi_state.connected_section, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(wifi_state.connected_section, 15, LV_PART_MAIN);
+    lv_obj_clear_flag(wifi_state.connected_section, LV_OBJ_FLAG_SCROLLABLE);
+    
+    // Section title
+    lv_obj_t* section_title = lv_label_create(wifi_state.connected_section);
+    lv_label_set_text(section_title, "Connected");
+    lv_obj_set_style_text_font(section_title, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(section_title, COLOR_SUCCESS, LV_PART_MAIN);
+    lv_obj_align(section_title, LV_ALIGN_TOP_LEFT, 0, 0);
+    
+    // Connected SSID with WiFi icon
+    wifi_state.connected_ssid_label = lv_label_create(wifi_state.connected_section);
+    lv_label_set_text(wifi_state.connected_ssid_label, LV_SYMBOL_WIFI " NetworkName");
+    lv_obj_set_style_text_font(wifi_state.connected_ssid_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(wifi_state.connected_ssid_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(wifi_state.connected_ssid_label, LV_ALIGN_TOP_LEFT, 0, 25);
+    
+    // IP Address
+    wifi_state.connected_ip_label = lv_label_create(wifi_state.connected_section);
+    lv_label_set_text(wifi_state.connected_ip_label, "IP: 192.168.1.100");
+    lv_obj_set_style_text_font(wifi_state.connected_ip_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(wifi_state.connected_ip_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_align(wifi_state.connected_ip_label, LV_ALIGN_TOP_LEFT, 0, 55);
+    
+    // Disconnect button
+    wifi_state.disconnect_btn = lv_btn_create(wifi_state.connected_section);
+    lv_obj_set_size(wifi_state.disconnect_btn, 130, 40);
+    lv_obj_align(wifi_state.disconnect_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(wifi_state.disconnect_btn, COLOR_DISCONNECT, LV_PART_MAIN);
+    lv_obj_set_style_radius(wifi_state.disconnect_btn, 8, LV_PART_MAIN);
+    lv_obj_add_event_cb(wifi_state.disconnect_btn, on_disconnect_clicked, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t* disconnect_label = lv_label_create(wifi_state.disconnect_btn);
+    lv_label_set_text(disconnect_label, "Disconnect");
+    lv_obj_set_style_text_font(disconnect_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_center(disconnect_label);
+    
+    // Initially hidden
+    lv_obj_add_flag(wifi_state.connected_section, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_networks_section(lv_obj_t* parent)
+{
+    // Networks section container
+    wifi_state.networks_section = lv_obj_create(parent);
+    lv_obj_set_size(wifi_state.networks_section, lv_pct(100), 400);
+    lv_obj_set_style_bg_color(wifi_state.networks_section, COLOR_PANEL, LV_PART_MAIN);
+    lv_obj_set_style_border_color(wifi_state.networks_section, COLOR_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(wifi_state.networks_section, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(wifi_state.networks_section, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(wifi_state.networks_section, 15, LV_PART_MAIN);
+    lv_obj_clear_flag(wifi_state.networks_section, LV_OBJ_FLAG_SCROLLABLE);
+    
+    // Section title
+    wifi_state.networks_title = lv_label_create(wifi_state.networks_section);
+    lv_label_set_text(wifi_state.networks_title, "Available Networks");
+    lv_obj_set_style_text_font(wifi_state.networks_title, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(wifi_state.networks_title, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_align(wifi_state.networks_title, LV_ALIGN_TOP_LEFT, 0, 0);
+    
+    // Network list (scrollable)
+    wifi_state.network_list = lv_obj_create(wifi_state.networks_section);
+    lv_obj_set_size(wifi_state.network_list, lv_pct(100), 340);
     lv_obj_align(wifi_state.network_list, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_opa(wifi_state.network_list, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(wifi_state.network_list, 0, LV_PART_MAIN);
     lv_obj_set_flex_flow(wifi_state.network_list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_flex_main_place(wifi_state.network_list, LV_FLEX_ALIGN_START, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(wifi_state.network_list, 10, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(wifi_state.network_list, 8, LV_PART_MAIN);
     
-    // Initial empty state
-    lv_obj_t* empty_label = lv_label_create(wifi_state.network_list);
-    lv_label_set_text(empty_label, "Tap 'Scan' to search for WiFi networks");
-    lv_obj_set_style_text_font(empty_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(empty_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_center(empty_label);
+    // Initial scanning message
+    lv_obj_t* scanning_label = lv_label_create(wifi_state.network_list);
+    lv_label_set_text(scanning_label, "Scanning for networks...");
+    lv_obj_set_style_text_font(scanning_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(scanning_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_center(scanning_label);
+}
+
+static void update_connected_section(void)
+{
+    if (wifi_state.is_connected) {
+        // Update labels
+        char ssid_text[64];
+        char display_ssid[48];
+        sanitize_ssid_for_display(display_ssid, wifi_state.connected_ssid, sizeof(display_ssid));
+        snprintf(ssid_text, sizeof(ssid_text), LV_SYMBOL_WIFI " %s", display_ssid);
+        lv_label_set_text(wifi_state.connected_ssid_label, ssid_text);
+        
+        if (wifi_state.connected_ip[0]) {
+            char ip_text[32];
+            snprintf(ip_text, sizeof(ip_text), "IP: %s", wifi_state.connected_ip);
+            lv_label_set_text(wifi_state.connected_ip_label, ip_text);
+        } else {
+            lv_label_set_text(wifi_state.connected_ip_label, "IP: Obtaining...");
+        }
+        
+        // Show connected section
+        lv_obj_clear_flag(wifi_state.connected_section, LV_OBJ_FLAG_HIDDEN);
+        
+        // Adjust networks section size
+        lv_obj_set_size(wifi_state.networks_section, lv_pct(100), 280);
+        lv_obj_set_size(wifi_state.network_list, lv_pct(100), 220);
+    } else {
+        // Hide connected section
+        lv_obj_add_flag(wifi_state.connected_section, LV_OBJ_FLAG_HIDDEN);
+        
+        // Restore networks section size
+        lv_obj_set_size(wifi_state.networks_section, lv_pct(100), 400);
+        lv_obj_set_size(wifi_state.network_list, lv_pct(100), 340);
+    }
+}
+
+static void trigger_scan(void)
+{
+    if (wifi_state.config.on_scan) {
+        wifi_screen_set_scanning(true);
+        wifi_state.config.on_scan();
+    }
 }
 
 static void create_password_dialog(void)
@@ -443,7 +566,7 @@ static void create_password_dialog(void)
     
     // Dialog title
     lv_obj_t* dialog_title = lv_label_create(dialog_box);
-    lv_label_set_text(dialog_title, "Connect to Network");
+    lv_label_set_text(dialog_title, "Enter Password");
     lv_obj_set_style_text_font(dialog_title, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_set_style_text_color(dialog_title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(dialog_title, LV_ALIGN_TOP_MID, 0, 0);
@@ -455,7 +578,7 @@ static void create_password_dialog(void)
     lv_obj_set_style_text_color(wifi_state.password_ssid_label, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_align(wifi_state.password_ssid_label, LV_ALIGN_TOP_MID, 0, 40);
     
-    // Password input container (textarea + eye button)
+    // Password input container
     lv_obj_t* password_container = lv_obj_create(dialog_box);
     lv_obj_set_size(password_container, 560, 50);
     lv_obj_align(password_container, LV_ALIGN_TOP_MID, 0, 80);
@@ -468,30 +591,28 @@ static void create_password_dialog(void)
     wifi_state.password_textarea = lv_textarea_create(password_container);
     lv_obj_set_size(wifi_state.password_textarea, 500, 50);
     lv_obj_align(wifi_state.password_textarea, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_textarea_set_placeholder_text(wifi_state.password_textarea, "Enter password...");
+    lv_textarea_set_placeholder_text(wifi_state.password_textarea, "Password...");
     lv_textarea_set_password_mode(wifi_state.password_textarea, true);
-    lv_textarea_set_password_bullet(wifi_state.password_textarea, "•");  // Explicit bullet character
     lv_textarea_set_one_line(wifi_state.password_textarea, true);
     lv_obj_set_style_text_font(wifi_state.password_textarea, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(wifi_state.password_textarea, COLOR_TEXT, LV_PART_MAIN);  // White text
+    lv_obj_set_style_text_color(wifi_state.password_textarea, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_style_bg_color(wifi_state.password_textarea, COLOR_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_color(wifi_state.password_textarea, COLOR_ACCENT, LV_PART_MAIN);  // Cyan border for visibility
+    lv_obj_set_style_border_color(wifi_state.password_textarea, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_border_width(wifi_state.password_textarea, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(wifi_state.password_textarea, 8, LV_PART_MAIN);
-    lv_obj_set_style_pad_left(wifi_state.password_textarea, 15, LV_PART_MAIN);  // Padding so text isn't against edge
+    lv_obj_set_style_pad_left(wifi_state.password_textarea, 15, LV_PART_MAIN);
     
-    // Show/hide password button (eye icon)
+    // Show/hide password button
     wifi_state.password_visible = false;
     wifi_state.show_password_btn = lv_btn_create(password_container);
     lv_obj_set_size(wifi_state.show_password_btn, 50, 50);
     lv_obj_align(wifi_state.show_password_btn, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_color(wifi_state.show_password_btn, COLOR_BTN, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(wifi_state.show_password_btn, COLOR_BTN_PRESSED, LV_STATE_PRESSED);
     lv_obj_set_style_radius(wifi_state.show_password_btn, 8, LV_PART_MAIN);
     lv_obj_add_event_cb(wifi_state.show_password_btn, on_show_password_clicked, LV_EVENT_CLICKED, NULL);
     
     wifi_state.show_password_icon = lv_label_create(wifi_state.show_password_btn);
-    lv_label_set_text(wifi_state.show_password_icon, LV_SYMBOL_EYE_CLOSE);  // Eye closed = password hidden
+    lv_label_set_text(wifi_state.show_password_icon, LV_SYMBOL_EYE_CLOSE);
     lv_obj_set_style_text_font(wifi_state.show_password_icon, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_center(wifi_state.show_password_icon);
     
@@ -542,22 +663,18 @@ static void show_password_dialog(const char* ssid, bool is_open)
     strncpy(wifi_state.selected_ssid, ssid, sizeof(wifi_state.selected_ssid) - 1);
     wifi_state.selected_is_open = is_open;
     
-    // Update SSID label (sanitize for display)
     char display_ssid[64];
     sanitize_ssid_for_display(display_ssid, ssid, sizeof(display_ssid));
     char ssid_text[96];
     snprintf(ssid_text, sizeof(ssid_text), "Network: %s", display_ssid);
     lv_label_set_text(wifi_state.password_ssid_label, ssid_text);
     
-    // Clear password field
     lv_textarea_set_text(wifi_state.password_textarea, "");
     
-    // Reset password visibility to hidden
     wifi_state.password_visible = false;
     lv_textarea_set_password_mode(wifi_state.password_textarea, true);
     lv_label_set_text(wifi_state.show_password_icon, LV_SYMBOL_EYE_CLOSE);
     
-    // Hide/show password field based on whether network is open
     if (is_open) {
         lv_obj_add_flag(wifi_state.password_textarea, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(wifi_state.show_password_btn, LV_OBJ_FLAG_HIDDEN);
@@ -568,7 +685,6 @@ static void show_password_dialog(const char* ssid, bool is_open)
         lv_obj_clear_flag(wifi_state.keyboard, LV_OBJ_FLAG_HIDDEN);
     }
     
-    // Show dialog
     lv_obj_clear_flag(wifi_state.password_dialog, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -589,12 +705,13 @@ static void on_back_clicked(lv_event_t* e)
     wifi_screen_close();
 }
 
-static void on_scan_clicked(lv_event_t* e)
+static void on_disconnect_clicked(lv_event_t* e)
 {
     (void)e;
-    if (wifi_state.config.on_scan) {
-        wifi_screen_set_scanning(true);
-        wifi_state.config.on_scan();
+    ESP_LOGI(TAG, "Disconnect clicked");
+    
+    if (wifi_state.config.on_disconnect) {
+        wifi_state.config.on_disconnect();
     }
 }
 
@@ -632,7 +749,6 @@ static void on_cancel_clicked(lv_event_t* e)
 static void on_keyboard_ready(lv_event_t* e)
 {
     (void)e;
-    // User pressed Enter on keyboard - trigger connect
     on_connect_clicked(NULL);
 }
 
@@ -640,17 +756,23 @@ static void on_show_password_clicked(lv_event_t* e)
 {
     (void)e;
     
-    // Toggle password visibility
     wifi_state.password_visible = !wifi_state.password_visible;
-    
-    // Update textarea password mode
     lv_textarea_set_password_mode(wifi_state.password_textarea, !wifi_state.password_visible);
     
-    // Update eye icon
     if (wifi_state.password_visible) {
-        lv_label_set_text(wifi_state.show_password_icon, LV_SYMBOL_EYE_OPEN);  // Eye open = password visible
+        lv_label_set_text(wifi_state.show_password_icon, LV_SYMBOL_EYE_OPEN);
     } else {
-        lv_label_set_text(wifi_state.show_password_icon, LV_SYMBOL_EYE_CLOSE);  // Eye closed = password hidden
+        lv_label_set_text(wifi_state.show_password_icon, LV_SYMBOL_EYE_CLOSE);
+    }
+}
+
+static void scan_timer_cb(lv_timer_t* timer)
+{
+    (void)timer;
+    
+    if (wifi_state.visible) {
+        ESP_LOGI(TAG, "Auto-scan triggered");
+        trigger_scan();
     }
 }
 
@@ -660,19 +782,6 @@ static void on_show_password_clicked(lv_event_t* e)
 
 static const char* get_signal_icon(int8_t rssi)
 {
-    // Map RSSI to signal bars
-    // Excellent: > -50 dBm
-    // Good: -50 to -60 dBm
-    // Fair: -60 to -70 dBm
-    // Weak: < -70 dBm
-    
-    if (rssi > -50) {
-        return LV_SYMBOL_WIFI;  // Full signal
-    } else if (rssi > -60) {
-        return LV_SYMBOL_WIFI;  // Good signal
-    } else if (rssi > -70) {
-        return LV_SYMBOL_WIFI;  // Fair signal
-    } else {
-        return LV_SYMBOL_WIFI;  // Weak signal (LVGL only has one wifi icon)
-    }
+    (void)rssi;
+    return LV_SYMBOL_WIFI;
 }

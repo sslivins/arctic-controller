@@ -105,6 +105,35 @@ const char* wifi_mgr_get_connected_ssid(void);
  */
 bool wifi_mgr_get_ip_addr(char* buf, size_t buf_len);
 
+/**
+ * @brief Save WiFi credentials to NVS
+ * @param ssid Network SSID
+ * @param password Network password
+ * @return true on success
+ */
+bool wifi_mgr_save_credentials(const char* ssid, const char* password);
+
+/**
+ * @brief Load saved WiFi credentials from NVS
+ * @param ssid Buffer to store SSID (min 33 bytes)
+ * @param ssid_len SSID buffer length
+ * @param password Buffer to store password (min 65 bytes)
+ * @param password_len Password buffer length
+ * @return true if credentials were found
+ */
+bool wifi_mgr_load_credentials(char* ssid, size_t ssid_len, char* password, size_t password_len);
+
+/**
+ * @brief Check if saved credentials exist
+ * @return true if credentials are saved
+ */
+bool wifi_mgr_has_saved_credentials(void);
+
+/**
+ * @brief Clear saved WiFi credentials from NVS
+ */
+void wifi_mgr_clear_credentials(void);
+
 #ifdef __cplusplus
 }
 #endif
