@@ -4,6 +4,7 @@
  */
 #include "wifi_manager.h"
 #include "time_manager.h"
+#include "api_server.h"
 #include <string.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -319,6 +320,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
             ESP_LOGW(TAG, "Disconnected from AP, reason: %d", event->reason);
             wifi_state.current_ip[0] = '\0';
+            
+            // Stop REST API server on disconnect
+            api_server_stop();
+            
             xEventGroupSetBits(wifi_state.event_group, WIFI_FAIL_BIT);
             notify_state_change(WIFI_MGR_STATE_DISCONNECTED);
             break;
@@ -387,6 +392,10 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
         
         // Start NTP time synchronization
         time_mgr_start_sync();
+        
+        // Initialize mDNS and start REST API server
+        api_server_init_mdns();
+        api_server_start();
         
         xEventGroupSetBits(wifi_state.event_group, WIFI_CONNECTED_BIT);
         notify_state_change(WIFI_MGR_STATE_CONNECTED);

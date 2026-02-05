@@ -6,3 +6,5 @@ dependencies:
   ## Pin to M5Stack Tab5's compatible versions (matches pre-flashed C6 firmware)
   espressif/esp_hosted: "1.4.0"
   espressif/esp_wifi_remote: "0.8.5"
+  ## mDNS for local network discovery (arctic.local)
+  espressif/mdns: "^1.4"

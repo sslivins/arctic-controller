@@ -7,6 +7,7 @@ idf_component_register(
         "time_manager.cpp"
         "status_bar.cpp"
         "time_screen.cpp"
+        "api_server.cpp"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -19,4 +20,7 @@ idf_component_register(
         esp_event
         nvs_flash
         esp_netif
+        mdns
+        esp_http_server
+        json
 )
