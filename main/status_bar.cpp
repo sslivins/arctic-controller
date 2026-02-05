@@ -139,9 +139,19 @@ void status_bar_update_time(void)
     // Use 12h or 24h format based on user setting
     const char* format = time_screen_get_24h_format() ? "%H:%M" : "%I:%M %p";
     
-    if (time_mgr_is_synced() && time_mgr_get_time_str(time_str, sizeof(time_str), format)) {
-        lv_label_set_text(bar_state.time_label, time_str);
+    // Get current time
+    time_t now;
+    time(&now);
+    
+    // Check if time appears valid (after Jan 1, 2020)
+    // RTC maintains time while battery has charge, so this should usually be valid
+    if (now >= 1577836800) {
+        // Time is valid, show it
+        if (time_mgr_get_time_str(time_str, sizeof(time_str), format)) {
+            lv_label_set_text(bar_state.time_label, time_str);
+        }
     } else {
+        // Time is invalid (epoch/1970) - battery was drained, wait for NTP
         lv_label_set_text(bar_state.time_label, "--:--");
     }
 }

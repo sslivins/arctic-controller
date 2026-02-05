@@ -188,9 +188,9 @@ bool time_mgr_get_time_str(char* buf, size_t buf_len, const char* format)
     }
     
     struct tm tm_info;
-    if (!time_mgr_get_local_time(&tm_info)) {
-        return false;
-    }
+    time_t now;
+    time(&now);
+    localtime_r(&now, &tm_info);
     
     if (strftime(buf, buf_len, format, &tm_info) == 0) {
         return false;
@@ -208,13 +208,13 @@ bool time_mgr_get_local_time(struct tm* tm_info)
     time_t now;
     time(&now);
     
-    // Check if time is valid (after year 2020)
-    if (now < 1577836800) {  // Jan 1, 2020
-        return false;
-    }
-    
+    // Always return the time, even if not synced
+    // The caller can check time_mgr_is_synced() if they need to know if it's accurate
     localtime_r(&now, tm_info);
-    return true;
+    
+    // Return true if time appears valid (after year 2020), false otherwise
+    // But we still populate tm_info either way
+    return (now >= 1577836800);  // Jan 1, 2020
 }
 
 void time_mgr_set_timezone(const char* tz_str)
