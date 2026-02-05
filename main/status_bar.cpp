@@ -62,8 +62,8 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     
     // Time button (left side) - clickable with touch feedback
     bar_state.time_btn = lv_btn_create(bar_state.container);
-    lv_obj_set_size(bar_state.time_btn, 180, 70);
-    lv_obj_align(bar_state.time_btn, LV_ALIGN_LEFT_MID, -15, 0);
+    lv_obj_set_size(bar_state.time_btn, 220, 70);  // Wider for 12h format like "12:30 PM"
+    lv_obj_align(bar_state.time_btn, LV_ALIGN_LEFT_MID, -10, 0);
     lv_obj_set_style_bg_opa(bar_state.time_btn, LV_OPA_0, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(bar_state.time_btn, LV_OPA_30, LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(bar_state.time_btn, lv_color_hex(0xffffff), LV_STATE_PRESSED);
@@ -76,7 +76,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     lv_label_set_text(bar_state.time_label, "--:--");
     lv_obj_set_style_text_font(bar_state.time_label, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.time_label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
-    lv_obj_center(bar_state.time_label);
+    lv_obj_align(bar_state.time_label, LV_ALIGN_LEFT_MID, 10, 0);
     
     // WiFi button (right side) - larger touch target
     bar_state.wifi_btn = lv_btn_create(bar_state.container);
