@@ -115,7 +115,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     // Settings icon
     bar_state.settings_icon = lv_label_create(bar_state.settings_btn);
     lv_label_set_text(bar_state.settings_icon, LV_SYMBOL_SETTINGS);
-    lv_obj_set_style_text_font(bar_state.settings_icon, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(bar_state.settings_icon, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.settings_icon, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_center(bar_state.settings_icon);
     

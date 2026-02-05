@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <esp_log.h>
 #include <esp_http_client.h>
+#include <esp_crt_bundle.h>
 #include <cJSON.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -67,6 +68,7 @@ static struct {
     
     // State
     update_ui_state_t update_state;
+    volatile update_ui_state_t pending_state;  // For async UI updates from tasks
     char current_version[32];
     char latest_version[32];
     char download_url[256];
@@ -74,12 +76,13 @@ static struct {
     // Update timer for progress
     lv_timer_t* progress_timer;
     
-} settings_state = {0};
+} settings_state = {};
 
 // Forward declarations
 static void create_header(void);
 static void create_firmware_section(void);
 static void update_ui_state(update_ui_state_t new_state);
+static void async_update_ui_cb(void* arg);
 static void check_for_updates_task(void* arg);
 static void progress_timer_cb(lv_timer_t* timer);
 
@@ -148,16 +151,18 @@ static esp_err_t http_event_handler(esp_http_client_event_t* evt)
 {
     switch (evt->event_id) {
         case HTTP_EVENT_ON_DATA:
-            if (!esp_http_client_is_chunked_response(evt->client)) {
-                if (http_response_buffer == NULL) {
-                    http_response_buffer = (char*)malloc(4096);
-                    http_response_len = 0;
+            // Handle both chunked and non-chunked responses
+            if (http_response_buffer == NULL) {
+                http_response_buffer = (char*)malloc(8192);  // Larger buffer for JSON
+                http_response_len = 0;
+                if (http_response_buffer) {
+                    http_response_buffer[0] = '\0';
                 }
-                if (http_response_buffer && http_response_len + evt->data_len < 4095) {
-                    memcpy(http_response_buffer + http_response_len, evt->data, evt->data_len);
-                    http_response_len += evt->data_len;
-                    http_response_buffer[http_response_len] = '\0';
-                }
+            }
+            if (http_response_buffer && http_response_len + evt->data_len < 8191) {
+                memcpy(http_response_buffer + http_response_len, evt->data, evt->data_len);
+                http_response_len += evt->data_len;
+                http_response_buffer[http_response_len] = '\0';
             }
             break;
         default:
@@ -185,7 +190,9 @@ static void check_for_updates_task(void* arg)
     config.url = GITHUB_API_URL;
     config.event_handler = http_event_handler;
     config.timeout_ms = GITHUB_API_TIMEOUT_MS;
-    config.skip_cert_common_name_check = true;  // For GitHub API
+    config.crt_bundle_attach = esp_crt_bundle_attach;
+    config.buffer_size = 4096;
+    config.buffer_size_tx = 2048;
     
     esp_http_client_handle_t client = esp_http_client_init(&config);
     
@@ -261,18 +268,28 @@ static void check_for_updates_task(void* arg)
         }
     }
     
-    // Update UI on main thread
+    // Update UI on main thread via async call
     if (settings_state.visible) {
         if (update_available) {
-            update_ui_state(UPDATE_STATE_UPDATE_AVAILABLE);
+            settings_state.pending_state = UPDATE_STATE_UPDATE_AVAILABLE;
         } else if (strlen(latest_ver) > 0) {
-            update_ui_state(UPDATE_STATE_NO_UPDATE);
+            settings_state.pending_state = UPDATE_STATE_NO_UPDATE;
         } else {
-            update_ui_state(UPDATE_STATE_FAILED);
+            settings_state.pending_state = UPDATE_STATE_FAILED;
         }
+        lv_async_call(async_update_ui_cb, NULL);
     }
     
     vTaskDelete(NULL);
+}
+
+// Async callback for thread-safe UI updates from background tasks
+static void async_update_ui_cb(void* arg)
+{
+    (void)arg;
+    if (settings_state.visible) {
+        update_ui_state(settings_state.pending_state);
+    }
 }
 
 // ============================================================================
@@ -448,56 +465,60 @@ static void create_firmware_section(void)
     ota_status_t status = ota_mgr_get_status();
     strncpy(settings_state.current_version, status.current_version, sizeof(settings_state.current_version) - 1);
     
-    // Section container
+    // Section container - use full width
     settings_state.fw_section = lv_obj_create(settings_state.content);
     lv_obj_set_size(settings_state.fw_section, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(settings_state.fw_section, COLOR_CARD, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(settings_state.fw_section, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(settings_state.fw_section, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(settings_state.fw_section, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(settings_state.fw_section, 20, LV_PART_MAIN);
+    lv_obj_set_style_radius(settings_state.fw_section, 16, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(settings_state.fw_section, 30, LV_PART_MAIN);
     lv_obj_set_flex_flow(settings_state.fw_section, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(settings_state.fw_section, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(settings_state.fw_section, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(settings_state.fw_section, 20, LV_PART_MAIN);
     
-    // Section title
+    // Section title - larger font
     lv_obj_t* section_title = lv_label_create(settings_state.fw_section);
     lv_label_set_text(section_title, LV_SYMBOL_DOWNLOAD " Firmware Update");
-    lv_obj_set_style_text_font(section_title, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(section_title, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_set_style_text_color(section_title, COLOR_ACCENT, LV_PART_MAIN);
     
-    // Current version
+    // Current version - larger font
     settings_state.current_version_label = lv_label_create(settings_state.fw_section);
     char buf[64];
     snprintf(buf, sizeof(buf), "Current: %s", 
              strlen(settings_state.current_version) > 0 ? settings_state.current_version : "Unknown");
     lv_label_set_text(settings_state.current_version_label, buf);
+    lv_obj_set_style_text_font(settings_state.current_version_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_set_style_text_color(settings_state.current_version_label, COLOR_TEXT, LV_PART_MAIN);
     
-    // Latest version
+    // Latest version - larger font
     settings_state.latest_version_label = lv_label_create(settings_state.fw_section);
     lv_label_set_text(settings_state.latest_version_label, "Latest: --");
+    lv_obj_set_style_text_font(settings_state.latest_version_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_set_style_text_color(settings_state.latest_version_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     
-    // Status label
+    // Status label - larger font
     settings_state.status_label = lv_label_create(settings_state.fw_section);
     lv_label_set_text(settings_state.status_label, "");
+    lv_obj_set_style_text_font(settings_state.status_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_set_style_text_color(settings_state.status_label, COLOR_TEXT, LV_PART_MAIN);
     
-    // Progress bar (hidden initially)
+    // Progress bar (hidden initially) - larger
     settings_state.progress_bar = lv_bar_create(settings_state.fw_section);
-    lv_obj_set_size(settings_state.progress_bar, LV_PCT(100), 20);
+    lv_obj_set_size(settings_state.progress_bar, LV_PCT(100), 30);
     lv_bar_set_range(settings_state.progress_bar, 0, 100);
     lv_bar_set_value(settings_state.progress_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(settings_state.progress_bar, lv_color_hex(0x333333), LV_PART_MAIN);
     lv_obj_set_style_bg_color(settings_state.progress_bar, COLOR_ACCENT, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(settings_state.progress_bar, 10, LV_PART_MAIN);
-    lv_obj_set_style_radius(settings_state.progress_bar, 10, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(settings_state.progress_bar, 15, LV_PART_MAIN);
+    lv_obj_set_style_radius(settings_state.progress_bar, 15, LV_PART_INDICATOR);
     lv_obj_add_flag(settings_state.progress_bar, LV_OBJ_FLAG_HIDDEN);
     
-    // Progress label (hidden initially)
+    // Progress label (hidden initially) - larger font
     settings_state.progress_label = lv_label_create(settings_state.fw_section);
     lv_label_set_text(settings_state.progress_label, "");
+    lv_obj_set_style_text_font(settings_state.progress_label, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(settings_state.progress_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_add_flag(settings_state.progress_label, LV_OBJ_FLAG_HIDDEN);
     
@@ -507,44 +528,49 @@ static void create_firmware_section(void)
     lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(btn_row, 0, LV_PART_MAIN);
-    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_top(btn_row, 10, LV_PART_MAIN);
+    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(btn_row, 15, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(btn_row, 20, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(btn_row, 15, LV_PART_MAIN);
     lv_obj_remove_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Check for updates button
+    // Check for updates button - larger
     settings_state.check_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(settings_state.check_btn, 180, 45);
+    lv_obj_set_size(settings_state.check_btn, 280, 60);
     lv_obj_set_style_bg_color(settings_state.check_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_radius(settings_state.check_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_radius(settings_state.check_btn, 12, LV_PART_MAIN);
     lv_obj_add_event_cb(settings_state.check_btn, check_btn_event_cb, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t* check_lbl = lv_label_create(settings_state.check_btn);
     lv_label_set_text(check_lbl, LV_SYMBOL_REFRESH " Check for Updates");
+    lv_obj_set_style_text_font(check_lbl, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_center(check_lbl);
     
-    // Update button (hidden initially)
+    // Update button (hidden initially) - larger
     settings_state.update_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(settings_state.update_btn, 150, 45);
+    lv_obj_set_size(settings_state.update_btn, 220, 60);
     lv_obj_set_style_bg_color(settings_state.update_btn, COLOR_SUCCESS, LV_PART_MAIN);
-    lv_obj_set_style_radius(settings_state.update_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_radius(settings_state.update_btn, 12, LV_PART_MAIN);
     lv_obj_add_event_cb(settings_state.update_btn, update_btn_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(settings_state.update_btn, LV_OBJ_FLAG_HIDDEN);
     
     lv_obj_t* update_lbl = lv_label_create(settings_state.update_btn);
     lv_label_set_text(update_lbl, LV_SYMBOL_DOWNLOAD " Install Update");
+    lv_obj_set_style_text_font(update_lbl, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_center(update_lbl);
     
-    // Reboot button (hidden initially)
+    // Reboot button (hidden initially) - larger
     settings_state.reboot_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(settings_state.reboot_btn, 150, 45);
+    lv_obj_set_size(settings_state.reboot_btn, 200, 60);
     lv_obj_set_style_bg_color(settings_state.reboot_btn, COLOR_WARNING, LV_PART_MAIN);
-    lv_obj_set_style_radius(settings_state.reboot_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_radius(settings_state.reboot_btn, 12, LV_PART_MAIN);
     lv_obj_add_event_cb(settings_state.reboot_btn, reboot_btn_event_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(settings_state.reboot_btn, LV_OBJ_FLAG_HIDDEN);
     
     lv_obj_t* reboot_lbl = lv_label_create(settings_state.reboot_btn);
     lv_label_set_text(reboot_lbl, LV_SYMBOL_POWER " Reboot Now");
+    lv_obj_set_style_text_font(reboot_lbl, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_center(reboot_lbl);
 }
 
