@@ -10,7 +10,6 @@
 #include <nvs_flash.h>
 #include <mooncake_log.h>
 #include "startup_anim.h"
-#include "wifi_screen.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
 #include "time_screen.h"
@@ -26,7 +25,6 @@ static lv_obj_t* main_screen = NULL;
 // Forward declarations
 void create_ui(void);
 static void on_startup_complete(void);
-static void show_wifi_screen(void);
 static void show_time_screen(void);
 static void on_status_bar_wifi_click(void);
 static void on_status_bar_time_click(void);
@@ -35,7 +33,6 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type);
 static void on_wifi_connect(const char* ssid, const char* password);
 static void on_wifi_scan(void);
 static void on_wifi_disconnect(void);
-static void on_wifi_close(void);
 static void on_time_close(void);
 static void on_settings_close(void);
 static void try_auto_connect(void);
@@ -248,8 +245,8 @@ static void on_scan_done(const wifi_mgr_ap_info_t* ap_list, uint16_t count)
 {
     ESP_LOGI(TAG, "Scan complete, found %d networks", count);
     
-    // Convert to wifi_screen format
-    wifi_network_info_t* networks = new wifi_network_info_t[count];
+    // Convert to settings_screen format
+    settings_wifi_network_t* networks = new settings_wifi_network_t[count];
     for (uint16_t i = 0; i < count; i++) {
         strncpy(networks[i].ssid, ap_list[i].ssid, sizeof(networks[i].ssid) - 1);
         networks[i].rssi = ap_list[i].rssi;
@@ -258,8 +255,8 @@ static void on_scan_done(const wifi_mgr_ap_info_t* ap_list, uint16_t count)
     
     // Update UI (must be done with LVGL lock)
     bsp_display_lock(0);
-    wifi_screen_set_scanning(false);
-    wifi_screen_update_networks(networks, count);
+    settings_screen_set_scanning(false);
+    settings_screen_update_networks(networks, count);
     bsp_display_unlock();
     
     delete[] networks;
@@ -280,7 +277,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             ESP_LOGI(TAG, "WiFi connected to '%s'", ssid ? ssid : "?");
             char ip[16] = {};
             wifi_mgr_get_ip_addr(ip, sizeof(ip));
-            wifi_screen_set_connection_status(true, ssid, ip);
+            settings_screen_set_wifi_status(true, ssid, ip);
             status_bar_set_wifi_state(true, ssid);
             // Save credentials on successful connection
             if (pending_ssid[0] != '\0') {
@@ -308,7 +305,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             
         case WIFI_MGR_STATE_DISCONNECTED: {
             ESP_LOGI(TAG, "WiFi disconnected");
-            wifi_screen_set_connection_status(false, NULL, NULL);
+            settings_screen_set_wifi_status(false, NULL, NULL);
             status_bar_set_wifi_state(false, NULL);
             
             // Track disconnect for instability detection
@@ -339,7 +336,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             
         case WIFI_MGR_STATE_ERROR:
             ESP_LOGE(TAG, "WiFi error");
-            wifi_screen_show_error("Connection failed.\nPlease check password and try again.");
+            settings_screen_show_error("Connection failed.\nPlease check password and try again.");
             status_bar_set_wifi_state(false, NULL);
             // Clear pending credentials on error
             pending_ssid[0] = '\0';
@@ -355,7 +352,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
 
 static void on_status_bar_wifi_click(void)
 {
-    mclog::tagInfo(TAG, "Status bar WiFi clicked");
+    mclog::tagInfo(TAG, "Status bar WiFi clicked - opening settings");
     
     // WiFi manager is initialized at startup, but check just in case
     if (!wifi_mgr_is_initialized()) {
@@ -365,27 +362,8 @@ static void on_status_bar_wifi_click(void)
         }
     }
     
-    bsp_display_lock(0);
-    show_wifi_screen();
-    bsp_display_unlock();
-}
-
-static void show_wifi_screen(void)
-{
-    wifi_screen_config_t config = {
-        .on_connect = on_wifi_connect,
-        .on_scan = on_wifi_scan,
-        .on_disconnect = on_wifi_disconnect,
-        .on_close = on_wifi_close,
-    };
-    wifi_screen_create(&config);
-    
-    // Update connection status if already connected
-    if (wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
-        char ip[16] = {};
-        wifi_mgr_get_ip_addr(ip, sizeof(ip));
-        wifi_screen_set_connection_status(true, wifi_mgr_get_connected_ssid(), ip);
-    }
+    // Open settings screen (WiFi is now integrated there)
+    on_status_bar_settings_click();
 }
 
 static void on_wifi_connect(const char* ssid, const char* password)
@@ -393,7 +371,7 @@ static void on_wifi_connect(const char* ssid, const char* password)
     mclog::tagInfo(TAG, "WiFi connect requested: SSID='%s'", ssid);
     
     if (!wifi_mgr_is_initialized()) {
-        wifi_screen_show_error("WiFi not initialized.\nPlease try again.");
+        settings_screen_show_error("WiFi not initialized.\nPlease try again.");
         return;
     }
     
@@ -402,7 +380,7 @@ static void on_wifi_connect(const char* ssid, const char* password)
     strncpy(pending_password, password ? password : "", sizeof(pending_password) - 1);
     
     if (!wifi_mgr_connect(ssid, password, on_wifi_state_changed)) {
-        wifi_screen_show_error("Failed to start connection.\nPlease try again.");
+        settings_screen_show_error("Failed to start connection.\nPlease try again.");
     }
 }
 
@@ -413,17 +391,17 @@ static void on_wifi_scan(void)
     if (!wifi_mgr_is_initialized()) {
         mclog::tagInfo(TAG, "Initializing WiFi manager for scan...");
         if (!wifi_mgr_init()) {
-            wifi_screen_set_scanning(false);
-            wifi_screen_show_error("Failed to initialize WiFi.\nCheck ESP32-C6 module.");
+            settings_screen_set_scanning(false);
+            settings_screen_show_error("Failed to initialize WiFi.\nCheck ESP32-C6 module.");
             return;
         }
     }
     
-    wifi_screen_set_scanning(true);
+    settings_screen_set_scanning(true);
     
     if (!wifi_mgr_start_scan(on_scan_done)) {
-        wifi_screen_set_scanning(false);
-        wifi_screen_show_error("Failed to start scan.\nPlease try again.");
+        settings_screen_set_scanning(false);
+        settings_screen_show_error("Failed to start scan.\nPlease try again.");
     }
 }
 
@@ -433,16 +411,6 @@ static void on_wifi_disconnect(void)
     
     if (wifi_mgr_is_initialized()) {
         wifi_mgr_disconnect();
-    }
-}
-
-static void on_wifi_close(void)
-{
-    mclog::tagInfo(TAG, "WiFi screen closed");
-    
-    // Return to main screen
-    if (main_screen) {
-        lv_scr_load(main_screen);
     }
 }
 
@@ -486,9 +454,18 @@ static void on_status_bar_settings_click(void)
 {
     mclog::tagInfo(TAG, "Status bar settings clicked");
     
+    // Ensure WiFi is initialized
+    if (!wifi_mgr_is_initialized()) {
+        mclog::tagWarn(TAG, "WiFi not initialized, initializing now...");
+        wifi_mgr_init();
+    }
+    
     bsp_display_lock(0);
     settings_screen_config_t config = {
         .on_close = on_settings_close,
+        .on_wifi_connect = on_wifi_connect,
+        .on_wifi_scan = on_wifi_scan,
+        .on_wifi_disconnect = on_wifi_disconnect,
     };
     settings_screen_create(&config);
     bsp_display_unlock();

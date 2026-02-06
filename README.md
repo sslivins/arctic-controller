@@ -130,6 +130,13 @@ idf.py -p [PORT] flash monitor
 
 Run `idf.py menuconfig` to configure ESP-IDF options.
 
+## TODO
+
+- [ ] Add automatic update option checkbox - allow users to enable auto-updates so firmware installs automatically when available
+- [ ] Web interface HTML for settings
+- [ ] API authentication (API key, session cookies)
+- [ ] Localization (i18n) support
+
 ## License
 
 [Add your license here]

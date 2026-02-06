@@ -2,16 +2,18 @@ idf_component_register(
     SRCS
         "main.cpp"
         "startup_anim.cpp"
-        "wifi_screen.cpp"
         "wifi_manager.cpp"
         "time_manager.cpp"
         "status_bar.cpp"
         "time_screen.cpp"
         "api_server.cpp"
         "ota_manager.cpp"
-        "settings_screen.cpp"
+        "settings/settings_screen.cpp"
+        "settings/settings_wifi_panel.cpp"
+        "settings/settings_firmware_panel.cpp"
     INCLUDE_DIRS
         "."
+        "settings"
     REQUIRES
         m5stack_tab5
         lvgl
