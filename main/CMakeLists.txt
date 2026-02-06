@@ -8,6 +8,7 @@ idf_component_register(
         "time_screen.cpp"
         "api_server.cpp"
         "ota_manager.cpp"
+        "auth_manager.cpp"
         "settings/settings_screen.cpp"
         "settings/settings_wifi_panel.cpp"
         "settings/settings_firmware_panel.cpp"
@@ -21,6 +22,8 @@ idf_component_register(
         "settings"
         "i18n"
         "fonts"
+    EMBED_FILES
+        "web/index.html"
     REQUIRES
         m5stack_tab5
         lvgl
@@ -38,4 +41,5 @@ idf_component_register(
         app_update
         esp_http_client
         esp-tls
+        mbedtls
 )
