@@ -12,10 +12,11 @@
 #include "startup_anim.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
-#include "time_screen.h"
 #include "status_bar.h"
 #include "ota_manager.h"
 #include "settings_screen.h"
+#include "settings/settings_time_panel.h"
+#include "i18n/i18n.h"
 
 static const char* TAG = "main";
 
@@ -25,15 +26,12 @@ static lv_obj_t* main_screen = NULL;
 // Forward declarations
 void create_ui(void);
 static void on_startup_complete(void);
-static void show_time_screen(void);
 static void on_status_bar_wifi_click(void);
-static void on_status_bar_time_click(void);
 static void on_status_bar_settings_click(void);
 static void on_status_bar_notify_item_click(status_bar_notify_type_t type);
 static void on_wifi_connect(const char* ssid, const char* password);
 static void on_wifi_scan(void);
 static void on_wifi_disconnect(void);
-static void on_time_close(void);
 static void on_settings_close(void);
 static void try_auto_connect(void);
 static void wifi_init_task(void* param);
@@ -70,6 +68,9 @@ extern "C" void app_main(void)
     if (ret != ESP_OK) {
         mclog::tagError(TAG, "Failed to initialize NVS: %d", ret);
     }
+
+    // Initialize i18n (localization) system
+    i18n_init();
 
     // Initialize I2C (required for IO expander and other peripherals)
     mclog::tagInfo(TAG, "Initializing I2C...");
@@ -168,7 +169,7 @@ void create_ui(void)
     status_bar_config_t bar_config = {
         .parent = scr,
         .on_wifi_click = on_status_bar_wifi_click,
-        .on_time_click = on_status_bar_time_click,
+        .on_time_click = NULL,  // Time click disabled - use Settings > Time instead
         .on_settings_click = on_status_bar_settings_click,
         .on_notify_item_click = on_status_bar_notify_item_click,
     };
@@ -412,41 +413,6 @@ static void on_wifi_disconnect(void)
     if (wifi_mgr_is_initialized()) {
         wifi_mgr_disconnect();
     }
-}
-
-// Time screen callbacks
-static void on_status_bar_time_click(void)
-{
-    mclog::tagInfo(TAG, "Status bar time clicked");
-    
-    bsp_display_lock(0);
-    show_time_screen();
-    bsp_display_unlock();
-}
-
-static void show_time_screen(void)
-{
-    time_screen_config_t config = {
-        .on_close = on_time_close,
-    };
-    time_screen_create(&config);
-}
-
-static void on_time_close(void)
-{
-    mclog::tagInfo(TAG, "Time screen closed");
-    
-    bsp_display_lock(0);
-    time_screen_delete();
-    
-    // Return to main screen
-    if (main_screen) {
-        lv_scr_load(main_screen);
-    }
-    
-    // Force status bar to update with new format
-    status_bar_update_time();
-    bsp_display_unlock();
 }
 
 // Settings screen callbacks

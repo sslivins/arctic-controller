@@ -9,6 +9,14 @@
 #include "settings_screen.h"
 #include <lvgl.h>
 #include <esp_log.h>
+#include "fonts/fonts.h"
+
+// ============================================================================
+// Custom Fonts with Latin Extended Support
+// ============================================================================
+
+#define FONT_NORMAL   &montserrat_16_latin
+#define FONT_LARGE    &montserrat_24_latin
 
 // ============================================================================
 // Colors and Styles
@@ -42,6 +50,8 @@
 typedef enum {
     PANEL_WIFI,
     PANEL_FIRMWARE,
+    PANEL_TIME,
+    PANEL_LANGUAGE,
     PANEL_COUNT
 } panel_type_t;
 
@@ -120,6 +130,14 @@ typedef struct {
     char latest_version[32];
     char download_url[256];
     lv_timer_t* progress_timer;
+    
+    // Language panel objects
+    lv_obj_t* lang_panel;
+    lv_obj_t* lang_btn;  // Sidebar button
+    
+    // Time panel objects
+    lv_obj_t* time_panel;
+    lv_obj_t* time_btn;  // Sidebar button
     
 } settings_state_t;
 

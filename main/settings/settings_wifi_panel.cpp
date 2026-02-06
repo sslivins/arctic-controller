@@ -5,6 +5,7 @@
 #include "settings_wifi_panel.h"
 #include "settings_common.h"
 #include "wifi_manager.h"
+#include "i18n/i18n.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -118,10 +119,12 @@ void wifi_update_connected_section(void)
         
         if (state->wifi_connected_ip[0]) {
             char ip_text[32];
-            snprintf(ip_text, sizeof(ip_text), "IP: %s", state->wifi_connected_ip);
+            snprintf(ip_text, sizeof(ip_text), "%s: %s", i18n_get(STR_WIFI_IP_ADDRESS), state->wifi_connected_ip);
             lv_label_set_text(state->wifi_ip_label, ip_text);
         } else {
-            lv_label_set_text(state->wifi_ip_label, "IP: Obtaining...");
+            char ip_text[48];
+            snprintf(ip_text, sizeof(ip_text), "%s: ...", i18n_get(STR_WIFI_IP_ADDRESS));
+            lv_label_set_text(state->wifi_ip_label, ip_text);
         }
         
         // Update signal strength
@@ -130,16 +133,16 @@ void wifi_update_connected_section(void)
         lv_color_t strength_color;
         
         if (rssi >= -50) {
-            strength_text = "Signal: Excellent";
+            strength_text = i18n_get(STR_WIFI_SIGNAL_EXCELLENT);
             strength_color = COLOR_SUCCESS;
         } else if (rssi >= -60) {
-            strength_text = "Signal: Good";
+            strength_text = i18n_get(STR_WIFI_SIGNAL_GOOD);
             strength_color = COLOR_SUCCESS;
         } else if (rssi >= -70) {
-            strength_text = "Signal: Fair";
+            strength_text = i18n_get(STR_WIFI_SIGNAL_FAIR);
             strength_color = COLOR_WARNING;
         } else {
-            strength_text = "Signal: Weak";
+            strength_text = i18n_get(STR_WIFI_SIGNAL_WEAK);
             strength_color = COLOR_ERROR;
         }
         lv_label_set_text(state->wifi_signal_label, strength_text);
@@ -161,7 +164,7 @@ void wifi_show_password_dialog(const char* ssid, bool is_open)
     char display_ssid[48];
     sanitize_ssid_for_display(display_ssid, ssid, sizeof(display_ssid));
     char ssid_text[64];
-    snprintf(ssid_text, sizeof(ssid_text), "Network: %s", display_ssid);
+    snprintf(ssid_text, sizeof(ssid_text), "%s: %s", i18n_get(STR_WIFI_NETWORK), display_ssid);
     lv_label_set_text(state->wifi_password_ssid_label, ssid_text);
     
     lv_textarea_set_text(state->wifi_password_textarea, "");
@@ -251,26 +254,32 @@ void wifi_panel_create(lv_obj_t* parent)
     disable_scrolling(info_container);
     
     lv_obj_t* conn_title = lv_label_create(info_container);
-    lv_label_set_text(conn_title, LV_SYMBOL_OK " Connected");
-    lv_obj_set_style_text_font(conn_title, &lv_font_montserrat_16, LV_PART_MAIN);
+    char conn_title_text[48];
+    snprintf(conn_title_text, sizeof(conn_title_text), LV_SYMBOL_OK " %s", i18n_get(STR_WIFI_CONNECTED));
+    lv_label_set_text(conn_title, conn_title_text);
+    lv_obj_set_style_text_font(conn_title, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(conn_title, COLOR_SUCCESS, LV_PART_MAIN);
     lv_obj_align(conn_title, LV_ALIGN_TOP_LEFT, 0, 0);
     
     state->wifi_ssid_label = lv_label_create(info_container);
     lv_label_set_text(state->wifi_ssid_label, LV_SYMBOL_WIFI " NetworkName");
-    lv_obj_set_style_text_font(state->wifi_ssid_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state->wifi_ssid_label, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->wifi_ssid_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(state->wifi_ssid_label, LV_ALIGN_TOP_LEFT, 0, 25);
     
     state->wifi_ip_label = lv_label_create(info_container);
-    lv_label_set_text(state->wifi_ip_label, "IP: 192.168.1.100");
-    lv_obj_set_style_text_font(state->wifi_ip_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%s: 192.168.1.100", i18n_get(STR_WIFI_IP_ADDRESS));
+        lv_label_set_text(state->wifi_ip_label, buf);
+    }
+    lv_obj_set_style_text_font(state->wifi_ip_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->wifi_ip_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_align(state->wifi_ip_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     
     state->wifi_signal_label = lv_label_create(info_container);
-    lv_label_set_text(state->wifi_signal_label, "Signal: Excellent");
-    lv_obj_set_style_text_font(state->wifi_signal_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(state->wifi_signal_label, i18n_get(STR_WIFI_SIGNAL_EXCELLENT));
+    lv_obj_set_style_text_font(state->wifi_signal_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->wifi_signal_label, COLOR_SUCCESS, LV_PART_MAIN);
     lv_obj_align(state->wifi_signal_label, LV_ALIGN_BOTTOM_LEFT, 220, 0);
     
@@ -283,8 +292,8 @@ void wifi_panel_create(lv_obj_t* parent)
     lv_obj_add_event_cb(state->wifi_disconnect_btn, wifi_disconnect_event_cb, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t* disc_lbl = lv_label_create(state->wifi_disconnect_btn);
-    lv_label_set_text(disc_lbl, "Disconnect");
-    lv_obj_set_style_text_font(disc_lbl, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(disc_lbl, i18n_get(STR_WIFI_DISCONNECT));
+    lv_obj_set_style_text_font(disc_lbl, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_center(disc_lbl);
     
     // Networks section
@@ -298,8 +307,8 @@ void wifi_panel_create(lv_obj_t* parent)
     disable_scrolling(state->wifi_networks_section);
     
     state->wifi_networks_title = lv_label_create(state->wifi_networks_section);
-    lv_label_set_text(state->wifi_networks_title, "Available Networks");
-    lv_obj_set_style_text_font(state->wifi_networks_title, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(state->wifi_networks_title, i18n_get(STR_WIFI_AVAILABLE_NETWORKS));
+    lv_obj_set_style_text_font(state->wifi_networks_title, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->wifi_networks_title, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_align(state->wifi_networks_title, LV_ALIGN_TOP_LEFT, 0, 0);
     
@@ -314,8 +323,8 @@ void wifi_panel_create(lv_obj_t* parent)
     lv_obj_set_scrollbar_mode(state->wifi_network_list, LV_SCROLLBAR_MODE_AUTO);
     
     lv_obj_t* scan_label = lv_label_create(state->wifi_network_list);
-    lv_label_set_text(scan_label, "Scanning for networks...");
-    lv_obj_set_style_text_font(scan_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(scan_label, i18n_get(STR_WIFI_SCANNING));
+    lv_obj_set_style_text_font(scan_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(scan_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     
     // Password dialog (attached to screen, not panel)
@@ -339,14 +348,18 @@ void wifi_panel_create(lv_obj_t* parent)
     disable_scrolling(dialog_box);
     
     lv_obj_t* dialog_title = lv_label_create(dialog_box);
-    lv_label_set_text(dialog_title, "Enter Password");
-    lv_obj_set_style_text_font(dialog_title, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_label_set_text(dialog_title, i18n_get(STR_WIFI_ENTER_PASSWORD));
+    lv_obj_set_style_text_font(dialog_title, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(dialog_title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(dialog_title, LV_ALIGN_TOP_MID, 0, 0);
     
     state->wifi_password_ssid_label = lv_label_create(dialog_box);
-    lv_label_set_text(state->wifi_password_ssid_label, "Network: ");
-    lv_obj_set_style_text_font(state->wifi_password_ssid_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%s: ", i18n_get(STR_WIFI_NETWORK));
+        lv_label_set_text(state->wifi_password_ssid_label, buf);
+    }
+    lv_obj_set_style_text_font(state->wifi_password_ssid_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->wifi_password_ssid_label, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_align(state->wifi_password_ssid_label, LV_ALIGN_TOP_MID, 0, 35);
     
@@ -355,8 +368,8 @@ void wifi_panel_create(lv_obj_t* parent)
     lv_obj_align(state->wifi_password_textarea, LV_ALIGN_TOP_MID, 0, 65);
     lv_textarea_set_one_line(state->wifi_password_textarea, true);
     lv_textarea_set_password_mode(state->wifi_password_textarea, true);
-    lv_textarea_set_placeholder_text(state->wifi_password_textarea, "Password");
-    lv_obj_set_style_text_font(state->wifi_password_textarea, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_textarea_set_placeholder_text(state->wifi_password_textarea, i18n_get(STR_WIFI_PASSWORD));
+    lv_obj_set_style_text_font(state->wifi_password_textarea, FONT_NORMAL, LV_PART_MAIN);
     
     state->wifi_show_password_btn = lv_btn_create(dialog_box);
     lv_obj_set_size(state->wifi_show_password_btn, 45, 45);
@@ -388,8 +401,8 @@ void wifi_panel_create(lv_obj_t* parent)
     lv_obj_add_event_cb(state->wifi_cancel_btn, wifi_cancel_event_cb, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t* cancel_lbl = lv_label_create(state->wifi_cancel_btn);
-    lv_label_set_text(cancel_lbl, "Cancel");
-    lv_obj_set_style_text_font(cancel_lbl, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(cancel_lbl, i18n_get(STR_CANCEL));
+    lv_obj_set_style_text_font(cancel_lbl, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_center(cancel_lbl);
     
     state->wifi_connect_btn = lv_btn_create(btn_row);
@@ -399,7 +412,7 @@ void wifi_panel_create(lv_obj_t* parent)
     lv_obj_add_event_cb(state->wifi_connect_btn, wifi_connect_event_cb, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t* connect_lbl = lv_label_create(state->wifi_connect_btn);
-    lv_label_set_text(connect_lbl, "Connect");
-    lv_obj_set_style_text_font(connect_lbl, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(connect_lbl, i18n_get(STR_WIFI_CONNECT));
+    lv_obj_set_style_text_font(connect_lbl, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_center(connect_lbl);
 }

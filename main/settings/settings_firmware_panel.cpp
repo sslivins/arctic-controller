@@ -5,6 +5,7 @@
 #include "settings_firmware_panel.h"
 #include "settings_common.h"
 #include "ota_manager.h"
+#include "i18n/i18n.h"
 #include <string.h>
 #include <stdio.h>
 #include <esp_http_client.h>
@@ -80,7 +81,7 @@ static void update_btn_event_cb(lv_event_t* e)
                     state->progress_timer = lv_timer_create(progress_timer_cb, 200, NULL);
                 }
             } else {
-                lv_label_set_text(state->fw_status_label, "Failed to start update");
+                lv_label_set_text(state->fw_status_label, i18n_get(STR_FW_UPDATE_FAILED));
                 firmware_update_ui_state(UPDATE_STATE_FAILED);
             }
         }
@@ -213,10 +214,12 @@ static void progress_timer_cb(lv_timer_t* timer)
             {
                 char buf[64];
                 if (status.total_bytes > 0) {
-                    snprintf(buf, sizeof(buf), "Downloading: %d%% (%zu KB / %zu KB)", 
-                             status.progress_percent, status.bytes_downloaded / 1024, status.total_bytes / 1024);
+                    snprintf(buf, sizeof(buf), "%s: %d%% (%zu KB / %zu KB)", 
+                             i18n_get(STR_FW_DOWNLOADING), status.progress_percent, 
+                             status.bytes_downloaded / 1024, status.total_bytes / 1024);
                 } else {
-                    snprintf(buf, sizeof(buf), "Downloading: %zu KB", status.bytes_downloaded / 1024);
+                    snprintf(buf, sizeof(buf), "%s: %zu KB", 
+                             i18n_get(STR_FW_DOWNLOADING), status.bytes_downloaded / 1024);
                 }
                 lv_label_set_text(state->fw_progress_label, buf);
             }
@@ -224,7 +227,7 @@ static void progress_timer_cb(lv_timer_t* timer)
             
         case OTA_STATE_VERIFYING:
             lv_bar_set_value(state->fw_progress_bar, 100, LV_ANIM_ON);
-            lv_label_set_text(state->fw_progress_label, "Verifying firmware...");
+            lv_label_set_text(state->fw_progress_label, i18n_get(STR_FW_VERIFYING));
             break;
             
         case OTA_STATE_READY_TO_REBOOT:
@@ -260,22 +263,30 @@ void firmware_update_ui_state(update_ui_state_t new_state)
     
     switch (new_state) {
         case UPDATE_STATE_IDLE:
-            lv_label_set_text(state->fw_latest_version_label, "Latest: --");
+            {
+                char buf[48];
+                snprintf(buf, sizeof(buf), "%s: --", i18n_get(STR_FW_LATEST));
+                lv_label_set_text(state->fw_latest_version_label, buf);
+            }
             lv_label_set_text(state->fw_status_label, "");
             break;
             
         case UPDATE_STATE_CHECKING:
-            lv_label_set_text(state->fw_latest_version_label, "Latest: Checking...");
-            lv_label_set_text(state->fw_status_label, "Checking for updates...");
+            lv_label_set_text(state->fw_latest_version_label, i18n_get(STR_FW_CHECKING));
+            lv_label_set_text(state->fw_status_label, i18n_get(STR_FW_CHECKING));
             break;
             
         case UPDATE_STATE_UPDATE_AVAILABLE:
             {
                 char buf[64];
-                snprintf(buf, sizeof(buf), "Latest: %s", state->latest_version);
+                snprintf(buf, sizeof(buf), "%s: %s", i18n_get(STR_FW_LATEST), state->latest_version);
                 lv_label_set_text(state->fw_latest_version_label, buf);
             }
-            lv_label_set_text(state->fw_status_label, LV_SYMBOL_DOWNLOAD " Update available!");
+            {
+                char buf[64];
+                snprintf(buf, sizeof(buf), LV_SYMBOL_DOWNLOAD " %s", i18n_get(STR_FW_UPDATE_AVAILABLE));
+                lv_label_set_text(state->fw_status_label, buf);
+            }
             lv_obj_set_style_text_color(state->fw_status_label, COLOR_SUCCESS, LV_PART_MAIN);
             lv_obj_remove_flag(state->fw_update_btn, LV_OBJ_FLAG_HIDDEN);
             break;
@@ -283,15 +294,19 @@ void firmware_update_ui_state(update_ui_state_t new_state)
         case UPDATE_STATE_NO_UPDATE:
             {
                 char buf[64];
-                snprintf(buf, sizeof(buf), "Latest: %s", state->latest_version);
+                snprintf(buf, sizeof(buf), "%s: %s", i18n_get(STR_FW_LATEST), state->latest_version);
                 lv_label_set_text(state->fw_latest_version_label, buf);
             }
-            lv_label_set_text(state->fw_status_label, LV_SYMBOL_OK " You're up to date!");
+            {
+                char buf[64];
+                snprintf(buf, sizeof(buf), LV_SYMBOL_OK " %s", i18n_get(STR_FW_UP_TO_DATE));
+                lv_label_set_text(state->fw_status_label, buf);
+            }
             lv_obj_set_style_text_color(state->fw_status_label, COLOR_SUCCESS, LV_PART_MAIN);
             break;
             
         case UPDATE_STATE_DOWNLOADING:
-            lv_label_set_text(state->fw_status_label, "Downloading update...");
+            lv_label_set_text(state->fw_status_label, i18n_get(STR_FW_DOWNLOADING));
             lv_obj_set_style_text_color(state->fw_status_label, COLOR_ACCENT, LV_PART_MAIN);
             lv_obj_remove_flag(state->fw_progress_bar, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(state->fw_progress_label, LV_OBJ_FLAG_HIDDEN);
@@ -299,16 +314,24 @@ void firmware_update_ui_state(update_ui_state_t new_state)
             break;
             
         case UPDATE_STATE_READY_TO_REBOOT:
-            lv_label_set_text(state->fw_status_label, LV_SYMBOL_OK " Update complete! Rebooting...");
+            {
+                char buf[96];
+                snprintf(buf, sizeof(buf), LV_SYMBOL_OK " %s", i18n_get(STR_FW_UPDATE_COMPLETE));
+                lv_label_set_text(state->fw_status_label, buf);
+            }
             lv_obj_set_style_text_color(state->fw_status_label, COLOR_SUCCESS, LV_PART_MAIN);
             lv_bar_set_value(state->fw_progress_bar, 100, LV_ANIM_OFF);
             lv_obj_remove_flag(state->fw_progress_bar, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text(state->fw_progress_label, "Rebooting in 3 seconds...");
+            lv_label_set_text(state->fw_progress_label, i18n_get(STR_FW_REBOOTING));
             lv_obj_remove_flag(state->fw_progress_label, LV_OBJ_FLAG_HIDDEN);
             break;
             
         case UPDATE_STATE_FAILED:
-            lv_label_set_text(state->fw_status_label, LV_SYMBOL_WARNING " Update check failed");
+            {
+                char buf[64];
+                snprintf(buf, sizeof(buf), LV_SYMBOL_WARNING " %s", i18n_get(STR_FW_CHECK_FAILED));
+                lv_label_set_text(state->fw_status_label, buf);
+            }
             lv_obj_set_style_text_color(state->fw_status_label, COLOR_ERROR, LV_PART_MAIN);
             break;
     }
@@ -357,25 +380,33 @@ void firmware_panel_create(lv_obj_t* parent)
     strncpy(state->current_version, ota_status.current_version, sizeof(state->current_version) - 1);
     
     lv_obj_t* title = lv_label_create(state->fw_panel);
-    lv_label_set_text(title, LV_SYMBOL_DOWNLOAD " Firmware Update");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, LV_PART_MAIN);
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), LV_SYMBOL_DOWNLOAD " %s", i18n_get(STR_FW_TITLE));
+        lv_label_set_text(title, buf);
+    }
+    lv_obj_set_style_text_font(title, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, COLOR_ACCENT, LV_PART_MAIN);
     
     state->fw_current_version_label = lv_label_create(state->fw_panel);
     char buf[64];
-    snprintf(buf, sizeof(buf), "Current: %s", strlen(state->current_version) > 0 ? state->current_version : "Unknown");
+    snprintf(buf, sizeof(buf), "%s: %s", i18n_get(STR_FW_CURRENT), strlen(state->current_version) > 0 ? state->current_version : "?");
     lv_label_set_text(state->fw_current_version_label, buf);
-    lv_obj_set_style_text_font(state->fw_current_version_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state->fw_current_version_label, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->fw_current_version_label, COLOR_TEXT, LV_PART_MAIN);
     
     state->fw_latest_version_label = lv_label_create(state->fw_panel);
-    lv_label_set_text(state->fw_latest_version_label, "Latest: --");
-    lv_obj_set_style_text_font(state->fw_latest_version_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    {
+        char buf2[64];
+        snprintf(buf2, sizeof(buf2), "%s: --", i18n_get(STR_FW_LATEST));
+        lv_label_set_text(state->fw_latest_version_label, buf2);
+    }
+    lv_obj_set_style_text_font(state->fw_latest_version_label, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->fw_latest_version_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     
     state->fw_status_label = lv_label_create(state->fw_panel);
     lv_label_set_text(state->fw_status_label, "");
-    lv_obj_set_style_text_font(state->fw_status_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state->fw_status_label, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->fw_status_label, COLOR_TEXT, LV_PART_MAIN);
     
     state->fw_progress_bar = lv_bar_create(state->fw_panel);
@@ -390,7 +421,7 @@ void firmware_panel_create(lv_obj_t* parent)
     
     state->fw_progress_label = lv_label_create(state->fw_panel);
     lv_label_set_text(state->fw_progress_label, "");
-    lv_obj_set_style_text_font(state->fw_progress_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state->fw_progress_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(state->fw_progress_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_add_flag(state->fw_progress_label, LV_OBJ_FLAG_HIDDEN);
     
@@ -402,7 +433,11 @@ void firmware_panel_create(lv_obj_t* parent)
     lv_obj_add_flag(state->fw_update_btn, LV_OBJ_FLAG_HIDDEN);
     
     lv_obj_t* update_lbl = lv_label_create(state->fw_update_btn);
-    lv_label_set_text(update_lbl, LV_SYMBOL_DOWNLOAD " Install Update");
-    lv_obj_set_style_text_font(update_lbl, &lv_font_montserrat_16, LV_PART_MAIN);
+    {
+        char buf3[64];
+        snprintf(buf3, sizeof(buf3), LV_SYMBOL_DOWNLOAD " %s", i18n_get(STR_FW_INSTALL_UPDATE));
+        lv_label_set_text(update_lbl, buf3);
+    }
+    lv_obj_set_style_text_font(update_lbl, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_center(update_lbl);
 }

@@ -103,6 +103,19 @@ void settings_screen_show_error(const char* message);
 void settings_screen_show_firmware_panel(void);
 
 /**
+ * @brief Switch to the language settings panel
+ *        If settings screen is not visible, this has no effect.
+ *        Call after settings_screen_create() to open directly to language panel.
+ */
+void settings_screen_show_language_panel(void);
+
+/**
+ * @brief Refresh the settings screen after language change
+ *        Safely recreates the screen with new language strings
+ */
+void settings_screen_refresh_for_language(void);
+
+/**
  * @brief Callback for update check result
  * @param update_available true if a new version is available
  * @param new_version Version string (only valid if update_available)
