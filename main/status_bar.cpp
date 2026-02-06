@@ -23,6 +23,12 @@ static const char* TAG = "status_bar";
 #define COLOR_DROPDOWN_BG  0x161b22
 #define COLOR_ITEM_HOVER   0x21262d
 
+// Fonts
+#define FONT_STATUS_BAR_ICON  (&lv_font_montserrat_32)  // Icons in status bar (WiFi, settings, bell)
+#define FONT_STATUS_BAR_TIME  (&lv_font_montserrat_32)  // Time display
+#define FONT_DROPDOWN_ICON    (&lv_font_montserrat_32)  // Icons in dropdown
+#define FONT_DROPDOWN_TEXT    (&lv_font_montserrat_24)  // Text in dropdown
+
 // Maximum notification message length
 #define NOTIFY_MSG_MAX_LEN 64
 
@@ -113,7 +119,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     // Time label inside button - large font for visibility
     bar_state.time_label = lv_label_create(bar_state.time_btn);
     lv_label_set_text(bar_state.time_label, "--:--");
-    lv_obj_set_style_text_font(bar_state.time_label, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(bar_state.time_label, FONT_STATUS_BAR_TIME, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.time_label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_align(bar_state.time_label, LV_ALIGN_LEFT_MID, 10, 0);
     
@@ -131,7 +137,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     // WiFi icon inside button - large font for visibility
     bar_state.wifi_icon = lv_label_create(bar_state.wifi_btn);
     lv_label_set_text(bar_state.wifi_icon, LV_SYMBOL_WIFI);
-    lv_obj_set_style_text_font(bar_state.wifi_icon, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(bar_state.wifi_icon, FONT_STATUS_BAR_ICON, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.wifi_icon, lv_color_hex(COLOR_WIFI_OFF), LV_PART_MAIN);
     lv_obj_center(bar_state.wifi_icon);
     
@@ -149,7 +155,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     // Settings icon
     bar_state.settings_icon = lv_label_create(bar_state.settings_btn);
     lv_label_set_text(bar_state.settings_icon, LV_SYMBOL_SETTINGS);
-    lv_obj_set_style_text_font(bar_state.settings_icon, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(bar_state.settings_icon, FONT_STATUS_BAR_ICON, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.settings_icon, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_center(bar_state.settings_icon);
     
@@ -167,7 +173,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     // Notification bell icon
     bar_state.notify_icon = lv_label_create(bar_state.notify_btn);
     lv_label_set_text(bar_state.notify_icon, LV_SYMBOL_BELL);
-    lv_obj_set_style_text_font(bar_state.notify_icon, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(bar_state.notify_icon, FONT_STATUS_BAR_ICON, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.notify_icon, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_center(bar_state.notify_icon);
     
@@ -536,7 +542,7 @@ static void show_dropdown(void)
     
     // Create the dropdown panel inside the overlay
     lv_obj_t* panel = lv_obj_create(bar_state.notify_dropdown);
-    lv_obj_set_size(panel, 400, count * 70 + 30);  // 70px per item + padding
+    lv_obj_set_size(panel, 500, count * 90 + 30);  // 90px per item + padding
     lv_obj_align(panel, LV_ALIGN_TOP_RIGHT, -25, STATUS_BAR_HEIGHT + 10);
     lv_obj_set_style_bg_color(panel, lv_color_hex(COLOR_DROPDOWN_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
@@ -561,7 +567,7 @@ static void show_dropdown(void)
         
         // Create item button
         lv_obj_t* item = lv_btn_create(panel);
-        lv_obj_set_size(item, LV_PCT(100), 60);
+        lv_obj_set_size(item, LV_PCT(100), 80);
         lv_obj_set_style_bg_color(item, lv_color_hex(COLOR_DROPDOWN_BG), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(item, LV_OPA_0, LV_PART_MAIN);
         lv_obj_set_style_bg_color(item, lv_color_hex(COLOR_ITEM_HOVER), LV_STATE_PRESSED);
@@ -573,11 +579,21 @@ static void show_dropdown(void)
         // Icon for the notification type
         lv_obj_t* icon = lv_label_create(item);
         const char* icon_text = LV_SYMBOL_BELL;
-        if (i == STATUS_BAR_NOTIFY_FIRMWARE_UPDATE) {
-            icon_text = LV_SYMBOL_DOWNLOAD;
+        switch (i) {
+            case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
+                icon_text = LV_SYMBOL_DOWNLOAD;
+                break;
+            case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:
+                icon_text = LV_SYMBOL_WARNING;
+                break;
+            case STATUS_BAR_NOTIFY_LOW_BATTERY:
+                icon_text = LV_SYMBOL_BATTERY_EMPTY;
+                break;
+            default:
+                break;
         }
         lv_label_set_text(icon, icon_text);
-        lv_obj_set_style_text_font(icon, &lv_font_montserrat_24, LV_PART_MAIN);
+        lv_obj_set_style_text_font(icon, FONT_DROPDOWN_ICON, LV_PART_MAIN);
         lv_obj_set_style_text_color(icon, lv_color_hex(COLOR_NOTIFY), LV_PART_MAIN);
         lv_obj_align(icon, LV_ALIGN_LEFT_MID, 10, 0);
         
@@ -586,14 +602,25 @@ static void show_dropdown(void)
         const char* msg = bar_state.notifications[i].message;
         if (msg[0] == '\0') {
             // Default messages if none provided
-            if (i == STATUS_BAR_NOTIFY_FIRMWARE_UPDATE) {
-                msg = "Firmware update available";
+            switch (i) {
+                case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
+                    msg = "Firmware update available";
+                    break;
+                case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:
+                    msg = "WiFi connection unstable";
+                    break;
+                case STATUS_BAR_NOTIFY_LOW_BATTERY:
+                    msg = "Low battery warning";
+                    break;
+                default:
+                    msg = "Notification";
+                    break;
             }
         }
         lv_label_set_text(label, msg);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_16, LV_PART_MAIN);
+        lv_obj_set_style_text_font(label, FONT_DROPDOWN_TEXT, LV_PART_MAIN);
         lv_obj_set_style_text_color(label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
-        lv_obj_align(label, LV_ALIGN_LEFT_MID, 50, 0);
+        lv_obj_align(label, LV_ALIGN_LEFT_MID, 60, 0);
     }
     
     ESP_LOGI(TAG, "Notification dropdown shown with %d items", count);

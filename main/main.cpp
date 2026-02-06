@@ -6,6 +6,7 @@
 #include <bsp/m5stack_tab5.h>
 #include <lvgl.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <nvs_flash.h>
 #include <mooncake_log.h>
 #include "startup_anim.h"
@@ -50,6 +51,12 @@ static volatile bool wifi_init_complete = false;
 // Periodic update check timer
 static lv_timer_t* update_check_timer = NULL;
 #define UPDATE_CHECK_INTERVAL_MS (60 * 1000)  // 1 minute for testing (change to 60*60*1000 for hourly)
+
+// WiFi stability tracking
+#define WIFI_UNSTABLE_THRESHOLD 3       // Number of disconnects to trigger "unstable" notification
+#define WIFI_UNSTABLE_WINDOW_MS 300000  // 5 minute window to count disconnects
+static uint32_t wifi_disconnect_times[WIFI_UNSTABLE_THRESHOLD] = {0};
+static int wifi_disconnect_index = 0;
 
 extern "C" void app_main(void)
 {
@@ -294,14 +301,41 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
                     }
                 }, UPDATE_CHECK_INTERVAL_MS, NULL);
             }
+            // Clear WiFi unstable notification since we're connected now
+            // (but keep tracking - it will reappear if we keep disconnecting)
             break;
         }
             
-        case WIFI_MGR_STATE_DISCONNECTED:
+        case WIFI_MGR_STATE_DISCONNECTED: {
             ESP_LOGI(TAG, "WiFi disconnected");
             wifi_screen_set_connection_status(false, NULL, NULL);
             status_bar_set_wifi_state(false, NULL);
+            
+            // Track disconnect for instability detection
+            uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);  // Current time in ms
+            wifi_disconnect_times[wifi_disconnect_index] = now;
+            wifi_disconnect_index = (wifi_disconnect_index + 1) % WIFI_UNSTABLE_THRESHOLD;
+            
+            // Count disconnects within the time window
+            int recent_disconnects = 0;
+            for (int i = 0; i < WIFI_UNSTABLE_THRESHOLD; i++) {
+                if (wifi_disconnect_times[i] > 0 && 
+                    (now - wifi_disconnect_times[i]) < WIFI_UNSTABLE_WINDOW_MS) {
+                    recent_disconnects++;
+                }
+            }
+            
+            // Show notification if WiFi is unstable
+            if (recent_disconnects >= WIFI_UNSTABLE_THRESHOLD) {
+                ESP_LOGW(TAG, "WiFi unstable: %d disconnects in last %d seconds", 
+                         recent_disconnects, WIFI_UNSTABLE_WINDOW_MS / 1000);
+                bsp_display_lock(0);
+                status_bar_add_notification(STATUS_BAR_NOTIFY_WIFI_UNSTABLE, 
+                    "WiFi unstable - frequent disconnects");
+                bsp_display_unlock();
+            }
             break;
+        }
             
         case WIFI_MGR_STATE_ERROR:
             ESP_LOGE(TAG, "WiFi error");
@@ -479,14 +513,29 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
 {
     mclog::tagInfo(TAG, "Notification item clicked: type={}", (int)type);
     
+    // Clear the notification that was clicked
+    bsp_display_lock(0);
+    status_bar_clear_notification(type);
+    bsp_display_unlock();
+    
+    // Handle specific actions based on type
     switch (type) {
         case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
-            // Clear this notification and open settings
-            bsp_display_lock(0);
-            status_bar_clear_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE);
-            bsp_display_unlock();
             // Open settings screen (which shows firmware updates)
             on_status_bar_settings_click();
+            break;
+        
+        case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:
+            // Open WiFi screen - user might want to switch networks
+            on_status_bar_wifi_click();
+            // Reset the disconnect tracking since user acknowledged
+            for (int i = 0; i < WIFI_UNSTABLE_THRESHOLD; i++) {
+                wifi_disconnect_times[i] = 0;
+            }
+            break;
+        
+        case STATUS_BAR_NOTIFY_LOW_BATTERY:
+            // Just clear (already done above) - no additional action
             break;
         
         default:
