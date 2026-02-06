@@ -418,6 +418,7 @@ void settings_screen_close(void)
     
     wifi_panel_cleanup();
     firmware_panel_cleanup();
+    time_panel_delete();
     language_panel_cleanup();
     
     state.visible = false;
@@ -439,6 +440,7 @@ void settings_screen_refresh_for_language(void)
     // Cleanup panel timers etc but don't delete screen yet
     wifi_panel_cleanup();
     firmware_panel_cleanup();
+    time_panel_delete();
     language_panel_cleanup();
     
     // Store old screen to delete after new one loads

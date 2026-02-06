@@ -381,9 +381,9 @@ void time_panel_create(lv_obj_t* parent)
     lv_obj_set_style_radius(panel_state.tz_roller, 8, LV_PART_MAIN);
     lv_obj_set_style_line_width(panel_state.tz_roller, 0, LV_PART_MAIN);
     
-    // Style the selected item
+    // Style the selected item - dark text on accent for better readability
     lv_obj_set_style_bg_color(panel_state.tz_roller, COLOR_ACCENT, LV_PART_SELECTED);
-    lv_obj_set_style_text_color(panel_state.tz_roller, lv_color_hex(0xffffff), LV_PART_SELECTED);
+    lv_obj_set_style_text_color(panel_state.tz_roller, lv_color_hex(0x0d1117), LV_PART_SELECTED);
     
     lv_obj_add_event_cb(panel_state.tz_roller, tz_roller_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     
