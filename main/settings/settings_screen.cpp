@@ -6,10 +6,15 @@
  * Panel-specific functionality is delegated to:
  * - settings_wifi_panel.cpp
  * - settings_firmware_panel.cpp
+ * - settings_time_panel.cpp
+ * - settings_language_panel.cpp
  */
 #include "settings_common.h"
 #include "settings_wifi_panel.h"
 #include "settings_firmware_panel.h"
+#include "settings_time_panel.h"
+#include "settings_language_panel.h"
+#include "i18n/i18n.h"
 #include "ui_common.h"
 #include "wifi_manager.h"
 #include <string.h>
@@ -118,6 +123,8 @@ static void close_btn_event_cb(lv_event_t* e)
 
 static void wifi_btn_event_cb(lv_event_t* e);
 static void firmware_btn_event_cb(lv_event_t* e);
+static void time_btn_event_cb(lv_event_t* e);
+static void language_btn_event_cb(lv_event_t* e);
 static void switch_panel(panel_type_t panel);
 static void update_sidebar_selection(void);
 
@@ -132,6 +139,20 @@ static void firmware_btn_event_cb(lv_event_t* e)
 {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
         switch_panel(PANEL_FIRMWARE);
+    }
+}
+
+static void time_btn_event_cb(lv_event_t* e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        switch_panel(PANEL_TIME);
+    }
+}
+
+static void language_btn_event_cb(lv_event_t* e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        switch_panel(PANEL_LANGUAGE);
     }
 }
 
@@ -151,6 +172,8 @@ static void switch_panel(panel_type_t panel)
     // Hide all panels
     lv_obj_add_flag(state.wifi_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(state.fw_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(state.time_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(state.lang_panel, LV_OBJ_FLAG_HIDDEN);
     
     // Show active panel
     switch (panel) {
@@ -166,6 +189,16 @@ static void switch_panel(panel_type_t panel)
             firmware_check_for_updates();
             break;
             
+        case PANEL_TIME:
+            time_panel_show();
+            wifi_stop_scan_timer();
+            break;
+            
+        case PANEL_LANGUAGE:
+            lv_obj_remove_flag(state.lang_panel, LV_OBJ_FLAG_HIDDEN);
+            wifi_stop_scan_timer();
+            break;
+            
         default:
             break;
     }
@@ -178,12 +211,18 @@ static void update_sidebar_selection(void)
     lv_obj_set_style_border_width(state.wifi_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.firmware_btn, COLOR_SIDEBAR_BTN, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.firmware_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.time_btn, COLOR_SIDEBAR_BTN, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.time_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.lang_btn, COLOR_SIDEBAR_BTN, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.lang_btn, 0, LV_PART_MAIN);
     
     // Highlight selected
     lv_obj_t* selected = NULL;
     switch (state.active_panel) {
         case PANEL_WIFI: selected = state.wifi_btn; break;
         case PANEL_FIRMWARE: selected = state.firmware_btn; break;
+        case PANEL_TIME: selected = state.time_btn; break;
+        case PANEL_LANGUAGE: selected = state.lang_btn; break;
         default: break;
     }
     
@@ -211,8 +250,8 @@ static void create_header(void)
     disable_scrolling(state.header);
     
     lv_obj_t* title = lv_label_create(state.header);
-    lv_label_set_text(title, "Settings");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_label_set_text(title, i18n_get(STR_SETTINGS));
+    lv_obj_set_style_text_font(title, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 10, 0);
     
@@ -242,12 +281,12 @@ static void create_sidebar(void)
     
     lv_obj_t* wifi_icon = lv_label_create(state.wifi_btn);
     lv_label_set_text(wifi_icon, LV_SYMBOL_WIFI);
-    lv_obj_set_style_text_font(wifi_icon, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(wifi_icon, FONT_LARGE, LV_PART_MAIN);
     lv_obj_align(wifi_icon, LV_ALIGN_LEFT_MID, 5, 0);
     
     lv_obj_t* wifi_lbl = lv_label_create(state.wifi_btn);
-    lv_label_set_text(wifi_lbl, "WiFi");
-    lv_obj_set_style_text_font(wifi_lbl, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(wifi_lbl, i18n_get(STR_SETTINGS_WIFI));
+    lv_obj_set_style_text_font(wifi_lbl, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_align(wifi_lbl, LV_ALIGN_LEFT_MID, 40, 0);
     
     // Firmware button
@@ -259,13 +298,47 @@ static void create_sidebar(void)
     
     lv_obj_t* fw_icon = lv_label_create(state.firmware_btn);
     lv_label_set_text(fw_icon, LV_SYMBOL_DOWNLOAD);
-    lv_obj_set_style_text_font(fw_icon, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(fw_icon, FONT_LARGE, LV_PART_MAIN);
     lv_obj_align(fw_icon, LV_ALIGN_LEFT_MID, 5, 0);
     
     lv_obj_t* fw_lbl = lv_label_create(state.firmware_btn);
-    lv_label_set_text(fw_lbl, "Update");
-    lv_obj_set_style_text_font(fw_lbl, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(fw_lbl, i18n_get(STR_SETTINGS_UPDATE));
+    lv_obj_set_style_text_font(fw_lbl, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_align(fw_lbl, LV_ALIGN_LEFT_MID, 40, 0);
+    
+    // Time button
+    state.time_btn = lv_btn_create(state.sidebar);
+    lv_obj_set_size(state.time_btn, LV_PCT(100), 60);
+    lv_obj_set_style_bg_color(state.time_btn, COLOR_SIDEBAR_BTN, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.time_btn, 8, LV_PART_MAIN);
+    lv_obj_add_event_cb(state.time_btn, time_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t* time_icon = lv_label_create(state.time_btn);
+    lv_label_set_text(time_icon, LV_SYMBOL_BELL);  // Clock-like symbol
+    lv_obj_set_style_text_font(time_icon, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_align(time_icon, LV_ALIGN_LEFT_MID, 5, 0);
+    
+    lv_obj_t* time_lbl = lv_label_create(state.time_btn);
+    lv_label_set_text(time_lbl, i18n_get(STR_SETTINGS_TIME));
+    lv_obj_set_style_text_font(time_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_align(time_lbl, LV_ALIGN_LEFT_MID, 40, 0);
+    
+    // Language button
+    state.lang_btn = lv_btn_create(state.sidebar);
+    lv_obj_set_size(state.lang_btn, LV_PCT(100), 60);
+    lv_obj_set_style_bg_color(state.lang_btn, COLOR_SIDEBAR_BTN, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.lang_btn, 8, LV_PART_MAIN);
+    lv_obj_add_event_cb(state.lang_btn, language_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t* lang_icon = lv_label_create(state.lang_btn);
+    lv_label_set_text(lang_icon, LV_SYMBOL_SETTINGS);
+    lv_obj_set_style_text_font(lang_icon, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_align(lang_icon, LV_ALIGN_LEFT_MID, 5, 0);
+    
+    lv_obj_t* lang_lbl = lv_label_create(state.lang_btn);
+    lv_label_set_text(lang_lbl, i18n_get(STR_SETTINGS_LANGUAGE));
+    lv_obj_set_style_text_font(lang_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_align(lang_lbl, LV_ALIGN_LEFT_MID, 40, 0);
 }
 
 static void create_content_area(void)
@@ -281,6 +354,8 @@ static void create_content_area(void)
     // Create panels - delegated to panel modules
     wifi_panel_create(state.content_area);
     firmware_panel_create(state.content_area);
+    time_panel_create(state.content_area);
+    language_panel_create(state.content_area);
 }
 
 // ============================================================================
@@ -343,6 +418,8 @@ void settings_screen_close(void)
     
     wifi_panel_cleanup();
     firmware_panel_cleanup();
+    time_panel_delete();
+    language_panel_cleanup();
     
     state.visible = false;
     
@@ -350,6 +427,56 @@ void settings_screen_close(void)
         lv_obj_delete(state.screen);
         state.screen = NULL;
     }
+}
+
+void settings_screen_refresh_for_language(void)
+{
+    if (!state.visible) {
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Refreshing settings screen for language change");
+    
+    // Cleanup panel timers etc but don't delete screen yet
+    wifi_panel_cleanup();
+    firmware_panel_cleanup();
+    time_panel_delete();
+    language_panel_cleanup();
+    
+    // Store old screen to delete after new one loads
+    lv_obj_t* old_screen = state.screen;
+    
+    // Reset state for recreation
+    state.active_panel = PANEL_COUNT;
+    state.update_state = UPDATE_STATE_IDLE;
+    
+    // Initialize screen dimensions
+    init_screen_dimensions();
+    
+    // Create new screen
+    state.screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(state.screen, COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(state.screen, LV_OPA_COVER, LV_PART_MAIN);
+    
+    create_header();
+    create_sidebar();
+    create_content_area();
+    
+    update_sidebar_selection();
+    switch_panel(PANEL_LANGUAGE);  // Go back to language panel
+    
+    // Update WiFi status if already connected
+    if (wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
+        char ip[16] = {};
+        wifi_mgr_get_ip_addr(ip, sizeof(ip));
+        settings_screen_set_wifi_status(true, wifi_mgr_get_connected_ssid(), ip);
+    }
+    
+    // Load new screen and auto-delete the old one
+    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, true);
+    
+    // The old screen will be deleted by LVGL after the animation
+    (void)old_screen;
 }
 
 bool settings_screen_is_visible(void)
@@ -400,8 +527,8 @@ void settings_screen_update_networks(const settings_wifi_network_t* networks, ui
     
     if (state.wifi_network_count == 0) {
         lv_obj_t* empty = lv_label_create(state.wifi_network_list);
-        lv_label_set_text(empty, "Scanning for networks...");
-        lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, LV_PART_MAIN);
+        lv_label_set_text(empty, i18n_get(STR_WIFI_SCANNING));
+        lv_obj_set_style_text_font(empty, FONT_NORMAL, LV_PART_MAIN);
         lv_obj_set_style_text_color(empty, COLOR_TEXT_DIM, LV_PART_MAIN);
         return;
     }
@@ -429,7 +556,7 @@ void settings_screen_update_networks(const settings_wifi_network_t* networks, ui
         
         lv_obj_t* signal = lv_label_create(row);
         lv_label_set_text(signal, get_signal_icon(net->rssi));
-        lv_obj_set_style_text_font(signal, &lv_font_montserrat_24, LV_PART_MAIN);
+        lv_obj_set_style_text_font(signal, FONT_LARGE, LV_PART_MAIN);
         lv_obj_set_style_text_color(signal, COLOR_ACCENT, LV_PART_MAIN);
         lv_obj_align(signal, LV_ALIGN_LEFT_MID, 0, 0);
         
@@ -437,14 +564,14 @@ void settings_screen_update_networks(const settings_wifi_network_t* networks, ui
         sanitize_ssid_for_display(display_ssid, net->ssid, sizeof(display_ssid));
         lv_obj_t* name = lv_label_create(row);
         lv_label_set_text(name, display_ssid);
-        lv_obj_set_style_text_font(name, &lv_font_montserrat_16, LV_PART_MAIN);
+        lv_obj_set_style_text_font(name, FONT_NORMAL, LV_PART_MAIN);
         lv_obj_set_style_text_color(name, COLOR_TEXT, LV_PART_MAIN);
         lv_obj_align(name, LV_ALIGN_LEFT_MID, 35, 0);
         
         if (net->authmode > 0) {
             lv_obj_t* lock = lv_label_create(row);
             lv_label_set_text(lock, LV_SYMBOL_EYE_CLOSE);
-            lv_obj_set_style_text_font(lock, &lv_font_montserrat_14, LV_PART_MAIN);
+            lv_obj_set_style_text_font(lock, FONT_NORMAL, LV_PART_MAIN);
             lv_obj_set_style_text_color(lock, COLOR_TEXT_DIM, LV_PART_MAIN);
             lv_obj_align(lock, LV_ALIGN_RIGHT_MID, -5, 0);
         }
@@ -458,9 +585,11 @@ void settings_screen_set_scanning(bool scanning)
     }
     
     if (scanning) {
-        lv_label_set_text(state.wifi_networks_title, "Available Networks  " LV_SYMBOL_REFRESH);
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s  " LV_SYMBOL_REFRESH, i18n_get(STR_WIFI_AVAILABLE_NETWORKS));
+        lv_label_set_text(state.wifi_networks_title, buf);
     } else {
-        lv_label_set_text(state.wifi_networks_title, "Available Networks");
+        lv_label_set_text(state.wifi_networks_title, i18n_get(STR_WIFI_AVAILABLE_NETWORKS));
     }
 }
 
@@ -492,7 +621,7 @@ void settings_screen_show_error(const char* message)
     }
     
     lv_obj_t* msgbox = lv_msgbox_create(state.screen);
-    lv_msgbox_add_title(msgbox, "Error");
+    lv_msgbox_add_title(msgbox, i18n_get(STR_ERROR));
     lv_msgbox_add_text(msgbox, message);
     lv_msgbox_add_close_button(msgbox);
     lv_obj_center(msgbox);
@@ -505,6 +634,15 @@ void settings_screen_show_firmware_panel(void)
     }
     
     switch_panel(PANEL_FIRMWARE);
+}
+
+void settings_screen_show_language_panel(void)
+{
+    if (!state.visible) {
+        return;
+    }
+    
+    switch_panel(PANEL_LANGUAGE);
 }
 
 // ============================================================================
