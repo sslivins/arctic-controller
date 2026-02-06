@@ -39,6 +39,13 @@ typedef struct {
 bool ota_mgr_init(void);
 
 /**
+ * @brief Check if a URL is allowed for OTA updates
+ * @param url URL to check
+ * @return true if URL is allowed
+ */
+bool ota_mgr_is_url_allowed(const char* url);
+
+/**
  * @brief Start OTA update from URL
  * @param url URL to firmware binary (http or https)
  * @return true if update started, false if already in progress or error

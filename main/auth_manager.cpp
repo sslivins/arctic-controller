@@ -77,11 +77,15 @@ static bool load_from_nvs(void)
     uint8_t enabled = 0;
     if (nvs_get_u8(nvs, NVS_KEY_WEB_ENABLED, &enabled) == ESP_OK) {
         state.web_auth_enabled = enabled != 0;
+        ESP_LOGI(TAG, "Loaded web_auth_enabled=%d from NVS", enabled);
+    } else {
+        ESP_LOGI(TAG, "web_auth_enabled not in NVS, defaulting to false");
     }
     
     // API auth enabled
     if (nvs_get_u8(nvs, NVS_KEY_API_ENABLED, &enabled) == ESP_OK) {
         state.api_auth_enabled = enabled != 0;
+        ESP_LOGI(TAG, "Loaded api_auth_enabled=%d from NVS", enabled);
     }
     
     // Username
@@ -114,6 +118,9 @@ static bool save_to_nvs(void)
         ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
         return false;
     }
+    
+    ESP_LOGI(TAG, "Saving to NVS: web_auth=%d, api_auth=%d", 
+             state.web_auth_enabled ? 1 : 0, state.api_auth_enabled ? 1 : 0);
     
     nvs_set_u8(nvs, NVS_KEY_WEB_ENABLED, state.web_auth_enabled ? 1 : 0);
     nvs_set_u8(nvs, NVS_KEY_API_ENABLED, state.api_auth_enabled ? 1 : 0);
@@ -194,6 +201,16 @@ void auth_mgr_init(void)
     
     memset(&state, 0, sizeof(state));
     load_from_nvs();
+    
+    // Set default credentials if none exist
+    if (!state.password_set || state.username[0] == '\0') {
+        strncpy(state.username, "arctic", sizeof(state.username) - 1);
+        state.username[sizeof(state.username) - 1] = '\0';
+        hash_password("arctic", state.password_hash);
+        state.password_set = true;
+        save_to_nvs();
+        ESP_LOGI(TAG, "Default credentials set (arctic/arctic)");
+    }
     
     // Generate API key if not set
     if (state.api_key[0] == '\0') {

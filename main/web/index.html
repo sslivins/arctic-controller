@@ -717,20 +717,7 @@
                                         <div class="alert alert-error" x-text="ota.error"></div>
                                     </template>
                                     
-                                    <!-- URL Update -->
-                                    <div class="form-group" style="margin-top: 1rem;">
-                                        <label>Update from URL</label>
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <input type="url" x-model="otaUrl" placeholder="https://example.com/firmware.bin">
-                                            </div>
-                                            <button class="btn btn-primary" @click="startOtaUrl()" :disabled="loading || ota.state === 'downloading'">
-                                                Update
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- File Upload -->
+                                    <!-- File Upload (URL updates restricted to GitHub releases for security) -->
                                     <div class="form-group">
                                         <label>Or upload firmware file</label>
                                         <div class="file-upload" 
@@ -802,20 +789,25 @@
                                         </label>
                                     </div>
                                     
-                                    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
-                                        <div class="form-group">
-                                            <label>API Key</label>
-                                            <div class="api-key-display">
-                                                <input :type="showApiKey ? 'text' : 'password'" :value="security.apiKey" readonly>
-                                                <button class="btn btn-secondary" @click="showApiKey = !showApiKey">
-                                                    <span x-text="showApiKey ? 'Hide' : 'Show'"></span>
-                                                </button>
-                                                <button class="btn btn-secondary" @click="regenerateApiKey()">
-                                                    Regenerate
-                                                </button>
+                                    <template x-if="security.apiAuthEnabled">
+                                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                                            <div class="form-group">
+                                                <label>API Key</label>
+                                                <div class="api-key-display">
+                                                    <input :type="showApiKey ? 'text' : 'password'" :value="security.apiKey" readonly x-ref="apiKeyInput">
+                                                    <button class="btn btn-secondary" @click="showApiKey = !showApiKey">
+                                                        <span x-text="showApiKey ? 'Hide' : 'Show'"></span>
+                                                    </button>
+                                                    <button class="btn btn-secondary" @click="copyApiKey()" title="Copy to clipboard">
+                                                        Copy
+                                                    </button>
+                                                    <button class="btn btn-secondary" @click="regenerateApiKey()">
+                                                        Regenerate
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
+                                    </template>
                                 </div>
                             </div>
                         </div>
@@ -846,7 +838,6 @@
                 timeConfig: { timezone: 'EST5EDT,M3.2.0,M11.1.0', format24h: true, synced: false },
                 security: { webAuthEnabled: false, apiAuthEnabled: false, username: '', newPassword: '', apiKey: '' },
                 
-                otaUrl: '',
                 selectedFile: null,
                 showApiKey: false,
                 
@@ -978,7 +969,17 @@
                     try {
                         const res = await fetch('/api/auth/config');
                         const data = await res.json();
-                        this.security = { ...this.security, ...data };
+                        // Map snake_case response to camelCase UI model
+                        this.security.webAuthEnabled = data.web_auth_enabled || false;
+                        this.security.apiAuthEnabled = data.api_auth_enabled || false;
+                        this.security.username = data.username || '';
+                        
+                        // Also fetch the API key (requires authentication)
+                        const keyRes = await fetch('/api/auth/apikey');
+                        if (keyRes.ok) {
+                            const keyData = await keyRes.json();
+                            this.security.apiKey = keyData.api_key || '';
+                        }
                     } catch (e) { console.error(e); }
                 },
                 
@@ -1016,7 +1017,7 @@
                 
                 async saveSecurityConfig() {
                     try {
-                        await fetch('/api/auth/config', {
+                        const res = await fetch('/api/auth/config', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1024,7 +1025,42 @@
                                 api_auth_enabled: this.security.apiAuthEnabled
                             })
                         });
+                        const data = await res.json();
+                        // If a new API key was auto-generated, update our display
+                        if (data.api_key_generated && data.api_key) {
+                            this.security.apiKey = data.api_key;
+                            this.showApiKey = true; // Show the new key
+                        }
                     } catch (e) { console.error(e); }
+                },
+                
+                copyApiKey() {
+                    const key = this.security.apiKey;
+                    if (!key) return;
+                    
+                    // Fallback for non-secure contexts (HTTP)
+                    const textarea = document.createElement('textarea');
+                    textarea.value = key;
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    textarea.style.top = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    textarea.select();
+                    
+                    try {
+                        document.execCommand('copy');
+                        // Brief visual feedback
+                        const btn = event.target;
+                        const originalText = btn.textContent;
+                        btn.textContent = 'Copied!';
+                        setTimeout(() => btn.textContent = originalText, 1500);
+                    } catch (err) {
+                        console.error('Copy failed:', err);
+                        alert('Copy failed. Please select and copy manually.');
+                    }
+                    
+                    document.body.removeChild(textarea);
                 },
                 
                 async saveCredentials() {
@@ -1054,19 +1090,6 @@
                         const data = await res.json();
                         this.security.apiKey = data.api_key;
                     } catch (e) { console.error(e); }
-                },
-                
-                async startOtaUrl() {
-                    if (!this.otaUrl) return;
-                    this.loading = true;
-                    try {
-                        await fetch('/api/ota/update', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ url: this.otaUrl })
-                        });
-                    } catch (e) { console.error(e); }
-                    this.loading = false;
                 },
                 
                 handleFileSelect(e) {

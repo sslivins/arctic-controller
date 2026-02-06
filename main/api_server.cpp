@@ -124,12 +124,27 @@ static bool check_web_auth(httpd_req_t* req)
 static bool check_api_auth(httpd_req_t* req)
 {
     if (!auth_mgr_api_auth_enabled()) {
-        return true;  // Auth disabled
+        return true;  // API auth disabled
     }
     
+    // First check for API key in header (programmatic access)
     char key[AUTH_API_KEY_LEN + 1] = {0};
     if (get_api_key_from_header(req, key)) {
         return auth_mgr_validate_api_key(key);
+    }
+    
+    // Also accept valid session cookies (web UI access when logged in)
+    char token[AUTH_SESSION_TOKEN_LEN + 1] = {0};
+    if (get_session_from_cookie(req, token)) {
+        if (auth_mgr_validate_session(token)) {
+            return true;
+        }
+    }
+    
+    // If web auth is disabled, allow access from the web interface
+    // (API auth is for external programmatic access, not for blocking the local web UI)
+    if (!auth_mgr_web_auth_enabled()) {
+        return true;
     }
     
     return false;
@@ -226,6 +241,9 @@ bool api_server_start(void)
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 24;  // Increased for all endpoints
     config.stack_size = 8192;      // Larger stack for file upload
+    config.max_resp_headers = 16;  // More response headers
+    config.recv_wait_timeout = 10; // 10 second receive timeout
+    config.max_open_sockets = 4;   // Reduced to leave sockets for OTA/API calls
     
     esp_err_t ret = httpd_start(&server, &config);
     if (ret != ESP_OK) {
@@ -986,9 +1004,16 @@ static esp_err_t ota_update_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
     
+    // Check URL is from allowed source
+    if (!ota_mgr_is_url_allowed(url_json->valuestring)) {
+        cJSON_Delete(root);
+        send_json_error(req, "403 Forbidden", "URL not allowed - must be from official GitHub repository");
+        return ESP_OK;
+    }
+    
     if (!ota_mgr_start_update(url_json->valuestring)) {
         cJSON_Delete(root);
-        send_json_error(req, "409 Conflict", "OTA already in progress or failed to start");
+        send_json_error(req, "409 Conflict", "OTA update already in progress");
         return ESP_OK;
     }
     
@@ -1184,14 +1209,35 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
     }
     
     cJSON* api_auth = cJSON_GetObjectItem(root, "api_auth_enabled");
+    bool api_key_generated = false;
+    char new_api_key[AUTH_API_KEY_LEN + 1] = {0};
+    
     if (api_auth && cJSON_IsBool(api_auth)) {
-        auth_mgr_set_api_auth_enabled(cJSON_IsTrue(api_auth));
+        bool enable_api = cJSON_IsTrue(api_auth);
+        
+        // If enabling API auth and no key exists, generate one
+        if (enable_api) {
+            char existing_key[AUTH_API_KEY_LEN + 1];
+            if (!auth_mgr_get_api_key(existing_key)) {
+                // No key exists, generate one
+                auth_mgr_regenerate_api_key(new_api_key);
+                api_key_generated = true;
+            }
+        }
+        
+        auth_mgr_set_api_auth_enabled(enable_api);
     }
     
     cJSON_Delete(root);
     
     cJSON* response = cJSON_CreateObject();
     cJSON_AddBoolToObject(response, "success", true);
+    
+    // If we generated a new key, include it in the response
+    if (api_key_generated) {
+        cJSON_AddStringToObject(response, "api_key", new_api_key);
+        cJSON_AddBoolToObject(response, "api_key_generated", true);
+    }
     char* json_str = cJSON_PrintUnformatted(response);
     httpd_resp_sendstr(req, json_str);
     free(json_str);

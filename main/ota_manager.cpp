@@ -19,6 +19,17 @@ static const char* TAG = "ota_manager";
 // OTA task stack size
 #define OTA_TASK_STACK_SIZE 8192
 
+// Allowed URL prefix for firmware updates (security)
+#define ALLOWED_OTA_URL_PREFIX "https://github.com/sslivins/arctic-controller/"
+
+bool ota_mgr_is_url_allowed(const char* url)
+{
+    if (url == NULL || strlen(url) == 0) {
+        return false;
+    }
+    return strncmp(url, ALLOWED_OTA_URL_PREFIX, strlen(ALLOWED_OTA_URL_PREFIX)) == 0;
+}
+
 // Current OTA status
 static ota_status_t ota_status = {
     .state = OTA_STATE_IDLE,
@@ -78,6 +89,12 @@ bool ota_mgr_start_update(const char* url)
 {
     if (url == NULL || strlen(url) == 0) {
         ESP_LOGE(TAG, "Invalid URL");
+        return false;
+    }
+    
+    // Security: Only allow updates from official GitHub repository
+    if (strncmp(url, ALLOWED_OTA_URL_PREFIX, strlen(ALLOWED_OTA_URL_PREFIX)) != 0) {
+        ESP_LOGE(TAG, "URL not allowed: must start with %s", ALLOWED_OTA_URL_PREFIX);
         return false;
     }
     
