@@ -306,8 +306,8 @@ static void ota_task(void* pvParameter)
                      ota_status.progress_percent, image_len);
         }
         
-        // Yield to let display task run (prevents screen flashing)
-        vTaskDelay(pdMS_TO_TICKS(20));
+        // Brief yield to let other tasks run
+        vTaskDelay(1);
     }
     
     if (err != ESP_OK) {

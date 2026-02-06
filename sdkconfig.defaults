@@ -7,9 +7,9 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
-# Disable XIP from PSRAM - run code from flash cache instead
-# This resolves the PSRAM memory mapping overflow issue caused by large code size
-CONFIG_SPIRAM_XIP_FROM_PSRAM=n
+# Enable XIP from PSRAM - allows PSRAM reads (display framebuffer) to continue
+# during SPI flash writes (OTA updates), preventing display flicker
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 
 # ESP-Hosted WiFi Configuration (ESP32-C6 co-processor via SDIO)
 # Using esp_hosted 1.4.0 to match M5Stack Tab5's pre-flashed C6 firmware

@@ -146,6 +146,7 @@ static void reboot_btn_event_cb(lv_event_t* e)
 
 static char* http_response_buffer = NULL;
 static int http_response_len = 0;
+#define HTTP_RESPONSE_BUFFER_SIZE 16384  // 16KB to be safe
 
 static esp_err_t http_event_handler(esp_http_client_event_t* evt)
 {
@@ -153,16 +154,19 @@ static esp_err_t http_event_handler(esp_http_client_event_t* evt)
         case HTTP_EVENT_ON_DATA:
             // Handle both chunked and non-chunked responses
             if (http_response_buffer == NULL) {
-                http_response_buffer = (char*)malloc(8192);  // Larger buffer for JSON
+                http_response_buffer = (char*)heap_caps_calloc(1, HTTP_RESPONSE_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 http_response_len = 0;
-                if (http_response_buffer) {
-                    http_response_buffer[0] = '\0';
+                if (http_response_buffer == NULL) {
+                    ESP_LOGE(TAG, "Failed to allocate HTTP response buffer!");
+                    return ESP_ERR_NO_MEM;
                 }
             }
-            if (http_response_buffer && http_response_len + evt->data_len < 8191) {
+            if (http_response_buffer && (http_response_len + evt->data_len) < (HTTP_RESPONSE_BUFFER_SIZE - 1)) {
                 memcpy(http_response_buffer + http_response_len, evt->data, evt->data_len);
                 http_response_len += evt->data_len;
                 http_response_buffer[http_response_len] = '\0';
+            } else if (http_response_buffer) {
+                ESP_LOGW(TAG, "HTTP response buffer overflow! len=%d, new=%d", http_response_len, evt->data_len);
             }
             break;
         default:
@@ -206,10 +210,19 @@ static void check_for_updates_task(void* arg)
         int status = esp_http_client_get_status_code(client);
         ESP_LOGI(TAG, "GitHub API response: %d", status);
         
-        if (status == 200 && http_response_buffer) {
+        if (status == 200 && http_response_buffer && http_response_len > 0) {
+            ESP_LOGI(TAG, "Response length: %d bytes", http_response_len);
+            
+            // Ensure buffer is properly terminated
+            http_response_buffer[http_response_len] = '\0';
+            
+            // Small yield to ensure all data is stable
+            vTaskDelay(pdMS_TO_TICKS(10));
+            
             // Parse JSON response
             cJSON* root = cJSON_Parse(http_response_buffer);
             if (root) {
+                ESP_LOGI(TAG, "JSON parsed successfully");
                 // Get tag_name (version)
                 cJSON* tag = cJSON_GetObjectItem(root, "tag_name");
                 if (tag && tag->valuestring) {
@@ -244,7 +257,21 @@ static void check_for_updates_task(void* arg)
                 }
                 
                 cJSON_Delete(root);
+            } else {
+                const char* error_ptr = cJSON_GetErrorPtr();
+                ESP_LOGE(TAG, "JSON parse failed! Error at: %.50s", error_ptr ? error_ptr : "(unknown)");
+                ESP_LOGE(TAG, "Buffer length: %d, Buffer start: %.100s", http_response_len, http_response_buffer ? http_response_buffer : "(null)");
+                // Check for non-printable characters that might corrupt JSON
+                if (http_response_buffer) {
+                    for (int i = 0; i < http_response_len && i < 20; i++) {
+                        if (http_response_buffer[i] < 32 && http_response_buffer[i] != '\n' && http_response_buffer[i] != '\r' && http_response_buffer[i] != '\t') {
+                            ESP_LOGE(TAG, "Non-printable char at pos %d: 0x%02X", i, (unsigned char)http_response_buffer[i]);
+                        }
+                    }
+                }
             }
+        } else {
+            ESP_LOGE(TAG, "No response buffer or bad status. Buffer: %p, Status: %d", http_response_buffer, status);
         }
     } else {
         ESP_LOGE(TAG, "GitHub API request failed: %s", esp_err_to_name(err));
