@@ -26,6 +26,20 @@ typedef void (*status_bar_time_click_cb_t)(void);
 typedef void (*status_bar_settings_click_cb_t)(void);
 
 /**
+ * @brief Notification types
+ */
+typedef enum {
+    STATUS_BAR_NOTIFY_FIRMWARE_UPDATE = 0,  // Firmware update available
+    STATUS_BAR_NOTIFY_MAX
+} status_bar_notify_type_t;
+
+/**
+ * @brief Callback when a notification item is clicked
+ * @param type The notification type that was clicked
+ */
+typedef void (*status_bar_notify_item_cb_t)(status_bar_notify_type_t type);
+
+/**
  * @brief Status bar configuration
  */
 typedef struct {
@@ -33,6 +47,7 @@ typedef struct {
     status_bar_wifi_click_cb_t on_wifi_click;   // WiFi button click callback
     status_bar_time_click_cb_t on_time_click;   // Time click callback
     status_bar_settings_click_cb_t on_settings_click;  // Settings button click callback
+    status_bar_notify_item_cb_t on_notify_item_click;  // Notification item click callback
 } status_bar_config_t;
 
 /**
@@ -54,6 +69,37 @@ void status_bar_set_wifi_state(bool connected, const char* ssid);
  * @param connecting true to start animation, false to stop
  */
 void status_bar_set_wifi_connecting(bool connecting);
+
+/**
+ * @brief Add a notification
+ * @param type The notification type to add
+ * @param message The notification message to display
+ */
+void status_bar_add_notification(status_bar_notify_type_t type, const char* message);
+
+/**
+ * @brief Clear a specific notification
+ * @param type The notification type to clear
+ */
+void status_bar_clear_notification(status_bar_notify_type_t type);
+
+/**
+ * @brief Clear all notifications
+ */
+void status_bar_clear_all_notifications(void);
+
+/**
+ * @brief Check if a notification exists
+ * @param type The notification type to check
+ * @return true if the notification exists
+ */
+bool status_bar_has_notification(status_bar_notify_type_t type);
+
+/**
+ * @brief Get current notification count
+ * @return Number of active notifications
+ */
+uint8_t status_bar_get_notify_count(void);
 
 /**
  * @brief Update time display

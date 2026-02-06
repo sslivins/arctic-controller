@@ -30,6 +30,7 @@ static void show_time_screen(void);
 static void on_status_bar_wifi_click(void);
 static void on_status_bar_time_click(void);
 static void on_status_bar_settings_click(void);
+static void on_status_bar_notify_item_click(status_bar_notify_type_t type);
 static void on_wifi_connect(const char* ssid, const char* password);
 static void on_wifi_scan(void);
 static void on_wifi_disconnect(void);
@@ -38,12 +39,17 @@ static void on_time_close(void);
 static void on_settings_close(void);
 static void try_auto_connect(void);
 static void wifi_init_task(void* param);
+static void on_update_check_complete(bool update_available, const char* new_version);
 
 // Flag to track when to show main UI
 static bool show_main_ui = false;
 
 // Flag to track WiFi init completion (set by background task)
 static volatile bool wifi_init_complete = false;
+
+// Periodic update check timer
+static lv_timer_t* update_check_timer = NULL;
+#define UPDATE_CHECK_INTERVAL_MS (60 * 1000)  // 1 minute for testing (change to 60*60*1000 for hourly)
 
 extern "C" void app_main(void)
 {
@@ -160,6 +166,7 @@ void create_ui(void)
         .on_wifi_click = on_status_bar_wifi_click,
         .on_time_click = on_status_bar_time_click,
         .on_settings_click = on_status_bar_settings_click,
+        .on_notify_item_click = on_status_bar_notify_item_click,
     };
     status_bar_create(&bar_config);
     
@@ -273,6 +280,19 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
                 wifi_mgr_save_credentials(pending_ssid, pending_password);
                 pending_ssid[0] = '\0';
                 pending_password[0] = '\0';
+            }
+            // Start periodic firmware update checks (if not already running)
+            if (!update_check_timer) {
+                // Check immediately on first connect
+                settings_screen_check_for_updates_async(on_update_check_complete);
+                // Then check periodically
+                update_check_timer = lv_timer_create([](lv_timer_t* t) {
+                    (void)t;
+                    if (wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
+                        ESP_LOGI("main", "Periodic firmware update check...");
+                        settings_screen_check_for_updates_async(on_update_check_complete);
+                    }
+                }, UPDATE_CHECK_INTERVAL_MS, NULL);
             }
             break;
         }
@@ -452,6 +472,46 @@ static void on_settings_close(void)
         lv_scr_load(main_screen);
     }
     bsp_display_unlock();
+}
+
+// Notification item clicked - handle based on type
+static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
+{
+    mclog::tagInfo(TAG, "Notification item clicked: type={}", (int)type);
+    
+    switch (type) {
+        case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
+            // Clear this notification and open settings
+            bsp_display_lock(0);
+            status_bar_clear_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE);
+            bsp_display_unlock();
+            // Open settings screen (which shows firmware updates)
+            on_status_bar_settings_click();
+            break;
+        
+        default:
+            mclog::tagWarn(TAG, "Unknown notification type: {}", (int)type);
+            break;
+    }
+}
+
+// Callback when background update check completes
+static void on_update_check_complete(bool update_available, const char* new_version)
+{
+    if (update_available) {
+        mclog::tagInfo(TAG, "Firmware update available: %s", new_version);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Firmware v%s available", new_version ? new_version : "?");
+        bsp_display_lock(0);
+        status_bar_add_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE, msg);
+        bsp_display_unlock();
+    } else {
+        mclog::tagInfo(TAG, "Firmware is up to date");
+        // Clear any existing firmware notification
+        bsp_display_lock(0);
+        status_bar_clear_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE);
+        bsp_display_unlock();
+    }
 }
 
 // Background task to initialize WiFi during startup animation

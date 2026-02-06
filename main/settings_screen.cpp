@@ -9,6 +9,8 @@
 #include <esp_log.h>
 #include <esp_http_client.h>
 #include <esp_crt_bundle.h>
+#include <esp_app_desc.h>
+#include <esp_heap_caps.h>
 #include <cJSON.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -387,7 +389,7 @@ static void update_ui_state(update_ui_state_t new_state)
             
         case UPDATE_STATE_CHECKING:
             lv_label_set_text(settings_state.latest_version_label, "Latest: Checking...");
-            lv_label_set_text(settings_state.status_label, "Checking GitHub for updates...");
+            lv_label_set_text(settings_state.status_label, "Checking for updates...");
             lv_obj_add_state(settings_state.check_btn, LV_STATE_DISABLED);
             break;
             
@@ -656,4 +658,107 @@ void settings_screen_close(void)
 bool settings_screen_is_visible(void)
 {
     return settings_state.visible;
+}
+
+// ============================================================================
+// Background Update Check (can be called without UI)
+// ============================================================================
+
+static update_check_cb_t s_update_check_callback = NULL;
+
+static void background_update_check_task(void* arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "Background check for updates...");
+    
+    bool update_available = false;
+    char latest_ver[32] = {0};
+    char* response_buffer = NULL;
+    int response_len = 0;
+    
+    // Allocate buffer from PSRAM
+    response_buffer = (char*)heap_caps_calloc(1, HTTP_RESPONSE_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+    if (!response_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate response buffer");
+        goto done;
+    }
+    
+    {
+        esp_http_client_config_t config = {};
+        config.url = GITHUB_API_URL;
+        config.timeout_ms = GITHUB_API_TIMEOUT_MS;
+        config.crt_bundle_attach = esp_crt_bundle_attach;
+        config.buffer_size = 4096;
+        config.buffer_size_tx = 2048;
+        
+        esp_http_client_handle_t client = esp_http_client_init(&config);
+        if (!client) {
+            ESP_LOGE(TAG, "Failed to init HTTP client");
+            goto done;
+        }
+        
+        esp_http_client_set_header(client, "Accept", "application/vnd.github.v3+json");
+        esp_http_client_set_header(client, "User-Agent", "ESP32-Arctic-Controller");
+        
+        esp_err_t err = esp_http_client_open(client, 0);
+        if (err == ESP_OK) {
+            int content_len = esp_http_client_fetch_headers(client);
+            int status = esp_http_client_get_status_code(client);
+            
+            if (status == 200 && content_len > 0 && content_len < HTTP_RESPONSE_BUFFER_SIZE) {
+                response_len = esp_http_client_read_response(client, response_buffer, HTTP_RESPONSE_BUFFER_SIZE - 1);
+                response_buffer[response_len] = '\0';
+            }
+        }
+        
+        esp_http_client_cleanup(client);
+    }
+    
+    // Parse response
+    if (response_len > 0) {
+        cJSON* root = cJSON_Parse(response_buffer);
+        if (root) {
+            cJSON* tag_name = cJSON_GetObjectItem(root, "tag_name");
+            if (tag_name && cJSON_IsString(tag_name)) {
+                const char* version = tag_name->valuestring;
+                // Skip 'v' prefix if present
+                if (version[0] == 'v' || version[0] == 'V') {
+                    version++;
+                }
+                strncpy(latest_ver, version, sizeof(latest_ver) - 1);
+                
+                // Compare with current version
+                const esp_app_desc_t* app_desc = esp_app_get_description();
+                if (app_desc && strcmp(latest_ver, app_desc->version) > 0) {
+                    update_available = true;
+                }
+            }
+            cJSON_Delete(root);
+        }
+    }
+
+done:
+    if (response_buffer) {
+        free(response_buffer);
+    }
+    
+    // Call callback if set
+    if (s_update_check_callback) {
+        s_update_check_callback(update_available, latest_ver);
+        s_update_check_callback = NULL;
+    }
+    
+    if (update_available) {
+        ESP_LOGI(TAG, "Update available: %s", latest_ver);
+    } else {
+        ESP_LOGI(TAG, "No updates available");
+    }
+    
+    vTaskDelete(NULL);
+}
+
+void settings_screen_check_for_updates_async(update_check_cb_t callback)
+{
+    s_update_check_callback = callback;
+    xTaskCreate(background_update_check_task, "bg_update_chk", 8192, NULL, 5, NULL);
 }

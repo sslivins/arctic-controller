@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 # Project version - update this for releases
-set(PROJECT_VER "1.0.5")
+set(PROJECT_VER "1.0.6")
 
 # Add dependencies to component search path
 set(EXTRA_COMPONENT_DIRS

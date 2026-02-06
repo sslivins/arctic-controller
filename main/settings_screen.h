@@ -39,6 +39,20 @@ void settings_screen_close(void);
  */
 bool settings_screen_is_visible(void);
 
+/**
+ * @brief Callback for update check result
+ * @param update_available true if a new version is available
+ * @param new_version Version string (only valid if update_available)
+ */
+typedef void (*update_check_cb_t)(bool update_available, const char* new_version);
+
+/**
+ * @brief Start background check for firmware updates
+ *        Can be called without settings screen visible
+ * @param callback Function to call with result (can be NULL)
+ */
+void settings_screen_check_for_updates_async(update_check_cb_t callback);
+
 #ifdef __cplusplus
 }
 #endif
