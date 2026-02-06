@@ -364,6 +364,7 @@ static esp_err_t wifi_get_handler(httpd_req_t* req)
         if (wifi_mgr_get_ip_addr(ip, sizeof(ip))) {
             cJSON_AddStringToObject(root, "ip", ip);
         }
+        cJSON_AddNumberToObject(root, "rssi", wifi_mgr_get_rssi());
         cJSON_AddStringToObject(root, "hostname", hostname);
         
         // Construct full local URL
@@ -527,7 +528,7 @@ static esp_err_t ota_update_post_handler(httpd_req_t* req)
     // Return success
     cJSON* response = cJSON_CreateObject();
     cJSON_AddStringToObject(response, "status", "started");
-    cJSON_AddStringToObject(response, "message", "OTA update started. Poll /api/ota/status for progress.");
+    cJSON_AddStringToObject(response, "message", "OTA update started. Device will auto-reboot when complete.");
     
     char* json_str = cJSON_PrintUnformatted(response);
     httpd_resp_sendstr(req, json_str);

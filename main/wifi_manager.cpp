@@ -303,6 +303,19 @@ bool wifi_mgr_get_ip_addr(char* buf, size_t buf_len)
     return true;
 }
 
+int8_t wifi_mgr_get_rssi(void)
+{
+    if (wifi_state.state != WIFI_MGR_STATE_CONNECTED) {
+        return 0;
+    }
+    
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        return ap_info.rssi;
+    }
+    return 0;
+}
+
 // ============================================================================
 // Event Handlers
 // ============================================================================

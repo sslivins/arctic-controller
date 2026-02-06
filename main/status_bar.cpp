@@ -29,10 +29,13 @@ static struct {
     lv_obj_t* wifi_btn;
     lv_obj_t* wifi_icon;
     lv_timer_t* update_timer;
+    lv_timer_t* wifi_anim_timer;  // Timer for connecting animation
     status_bar_wifi_click_cb_t wifi_click_cb;
     status_bar_time_click_cb_t time_click_cb;
     status_bar_settings_click_cb_t settings_click_cb;
     bool wifi_connected;
+    bool wifi_connecting;  // Connecting animation active
+    uint8_t wifi_anim_step;  // Animation step counter
 } bar_state = {};
 
 // Forward declarations
@@ -40,6 +43,7 @@ static void wifi_btn_event_cb(lv_event_t* e);
 static void time_btn_event_cb(lv_event_t* e);
 static void settings_btn_event_cb(lv_event_t* e);
 static void timer_update_cb(lv_timer_t* timer);
+static void wifi_anim_timer_cb(lv_timer_t* timer);
 
 lv_obj_t* status_bar_create(const status_bar_config_t* config)
 {
@@ -138,8 +142,18 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
 void status_bar_set_wifi_state(bool connected, const char* ssid)
 {
     bar_state.wifi_connected = connected;
+    bar_state.wifi_connecting = false;  // Stop connecting animation
+    
+    // Stop animation timer if running
+    if (bar_state.wifi_anim_timer) {
+        lv_timer_del(bar_state.wifi_anim_timer);
+        bar_state.wifi_anim_timer = NULL;
+    }
     
     if (bar_state.wifi_icon) {
+        // Reset opacity to full
+        lv_obj_set_style_opa(bar_state.wifi_icon, LV_OPA_COVER, LV_PART_MAIN);
+        
         if (connected) {
             lv_obj_set_style_text_color(bar_state.wifi_icon, 
                                         lv_color_hex(COLOR_WIFI_ON), LV_PART_MAIN);
@@ -181,6 +195,11 @@ void status_bar_update_time(void)
 
 void status_bar_delete(void)
 {
+    if (bar_state.wifi_anim_timer) {
+        lv_timer_del(bar_state.wifi_anim_timer);
+        bar_state.wifi_anim_timer = NULL;
+    }
+    
     if (bar_state.update_timer) {
         lv_timer_del(bar_state.update_timer);
         bar_state.update_timer = NULL;
@@ -197,6 +216,63 @@ void status_bar_delete(void)
     bar_state.settings_icon = NULL;
     bar_state.wifi_btn = NULL;
     bar_state.wifi_icon = NULL;
+    bar_state.wifi_connecting = false;
+    bar_state.wifi_anim_step = 0;
+}
+
+void status_bar_set_wifi_connecting(bool connecting)
+{
+    if (connecting == bar_state.wifi_connecting) {
+        return;  // No change
+    }
+    
+    bar_state.wifi_connecting = connecting;
+    bar_state.wifi_connected = false;
+    
+    if (connecting) {
+        // Start pulsing animation - use cyan color
+        bar_state.wifi_anim_step = 0;
+        if (bar_state.wifi_icon) {
+            lv_obj_set_style_text_color(bar_state.wifi_icon, 
+                                        lv_color_hex(COLOR_WIFI_ON), LV_PART_MAIN);
+        }
+        
+        // Create animation timer (updates every 100ms for smooth pulse)
+        if (!bar_state.wifi_anim_timer) {
+            bar_state.wifi_anim_timer = lv_timer_create(wifi_anim_timer_cb, 100, NULL);
+        }
+        ESP_LOGI(TAG, "WiFi connecting animation started");
+    } else {
+        // Stop animation
+        if (bar_state.wifi_anim_timer) {
+            lv_timer_del(bar_state.wifi_anim_timer);
+            bar_state.wifi_anim_timer = NULL;
+        }
+        // Reset opacity
+        if (bar_state.wifi_icon) {
+            lv_obj_set_style_opa(bar_state.wifi_icon, LV_OPA_COVER, LV_PART_MAIN);
+        }
+    }
+}
+
+static void wifi_anim_timer_cb(lv_timer_t* timer)
+{
+    (void)timer;
+    
+    if (!bar_state.wifi_connecting || !bar_state.wifi_icon) {
+        return;
+    }
+    
+    // Smooth sine-wave pulse between 30% and 100% opacity
+    // Using a lookup table for 20 steps (2 second cycle at 100ms interval)
+    static const uint8_t opacity_table[20] = {
+        255, 242, 207, 158, 107, 66, 38, 24, 24, 38,
+        66, 107, 158, 207, 242, 255, 255, 255, 255, 255
+    };
+    
+    bar_state.wifi_anim_step = (bar_state.wifi_anim_step + 1) % 20;
+    lv_opa_t opa = opacity_table[bar_state.wifi_anim_step];
+    lv_obj_set_style_opa(bar_state.wifi_icon, opa, LV_PART_MAIN);
 }
 
 static void wifi_btn_event_cb(lv_event_t* e)

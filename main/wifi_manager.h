@@ -106,6 +106,12 @@ const char* wifi_mgr_get_connected_ssid(void);
 bool wifi_mgr_get_ip_addr(char* buf, size_t buf_len);
 
 /**
+ * @brief Get current connection signal strength (RSSI)
+ * @return RSSI in dBm (typically -30 to -90), 0 if not connected
+ */
+int8_t wifi_mgr_get_rssi(void);
+
+/**
  * @brief Save WiFi credentials to NVS
  * @param ssid Network SSID
  * @param password Network password

@@ -1,0 +1,431 @@
+openapi: 3.0.3
+info:
+  title: Arctic Heat Pump Controller API
+  description: |
+    REST API for the Arctic Heat Pump Controller running on ESP32-P4 with ESP32-C6 WiFi.
+    
+    The device is discoverable via mDNS at `http://arctic.local` when connected to your local network.
+    
+    ## Features
+    - Device status and health monitoring
+    - WiFi connection status with signal strength
+    - Time/NTP synchronization status
+    - Over-the-Air (OTA) firmware updates
+    
+    ## Authentication
+    No authentication required. The API is accessible on the local network only.
+  version: 1.0.0
+  contact:
+    name: Arctic Controller
+  license:
+    name: MIT
+
+servers:
+  - url: http://arctic.local
+    description: Local mDNS hostname
+  - url: http://{ip_address}
+    description: Direct IP address
+    variables:
+      ip_address:
+        default: 192.168.1.100
+        description: Device IP address
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Status
+    description: Device status information
+  - name: WiFi
+    description: WiFi connection information
+  - name: Time
+    description: Time and NTP status
+  - name: Info
+    description: Device information
+  - name: OTA
+    description: Over-the-Air firmware updates
+
+paths:
+  /api/health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Simple health check endpoint to verify the device is responding.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Device is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  uptime_ms:
+                    type: number
+                    description: Device uptime in milliseconds
+                    example: 123456789
+
+  /api/status:
+    get:
+      tags:
+        - Status
+      summary: Full device status
+      description: Returns comprehensive device status including WiFi and time information.
+      operationId: getStatus
+      responses:
+        '200':
+          description: Device status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device:
+                    type: string
+                    example: Arctic Heat Pump Controller
+                  hostname:
+                    type: string
+                    example: arctic
+                  uptime_ms:
+                    type: number
+                    example: 123456789
+                  wifi:
+                    type: object
+                    properties:
+                      state:
+                        type: string
+                        enum: [not_initialized, disconnected, connecting, connected, error]
+                        example: connected
+                      ssid:
+                        type: string
+                        example: MyNetwork
+                      ip:
+                        type: string
+                        example: 192.168.1.100
+                  time:
+                    type: object
+                    properties:
+                      local:
+                        type: string
+                        example: "14:30:45"
+                      timezone:
+                        type: string
+                        example: EST5EDT,M3.2.0,M11.1.0
+                      synced:
+                        type: boolean
+                        example: true
+                      epoch:
+                        type: number
+                        description: Unix timestamp
+                        example: 1738766400
+
+  /api/time:
+    get:
+      tags:
+        - Time
+      summary: Current time information
+      description: Returns current time in various formats with NTP sync status.
+      operationId: getTime
+      responses:
+        '200':
+          description: Time information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  time_24h:
+                    type: string
+                    example: "14:30:45"
+                  time_12h:
+                    type: string
+                    example: "02:30:45 PM"
+                  date:
+                    type: string
+                    format: date
+                    example: "2026-02-05"
+                  iso:
+                    type: string
+                    format: date-time
+                    example: "2026-02-05T14:30:45"
+                  timezone:
+                    type: string
+                    example: EST5EDT,M3.2.0,M11.1.0
+                  epoch:
+                    type: number
+                    description: Unix timestamp
+                    example: 1738766400
+                  ntp_synced:
+                    type: boolean
+                    description: Whether time has been synchronized via NTP
+                    example: true
+
+  /api/wifi:
+    get:
+      tags:
+        - WiFi
+      summary: WiFi connection status
+      description: Returns current WiFi connection state and signal strength.
+      operationId: getWifi
+      responses:
+        '200':
+          description: WiFi status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    enum: [not_initialized, disconnected, connecting, connected, error]
+                    example: connected
+                  connected:
+                    type: boolean
+                    example: true
+                  ssid:
+                    type: string
+                    description: Connected network name (only when connected)
+                    example: MyNetwork
+                  ip:
+                    type: string
+                    description: Device IP address (only when connected)
+                    example: 192.168.1.100
+                  rssi:
+                    type: integer
+                    description: Signal strength in dBm (only when connected). Typical range -30 (excellent) to -90 (weak).
+                    example: -45
+                  hostname:
+                    type: string
+                    description: mDNS hostname (only when connected)
+                    example: arctic
+                  local_url:
+                    type: string
+                    description: Full mDNS URL (only when connected)
+                    example: http://arctic.local
+
+  /api/info:
+    get:
+      tags:
+        - Info
+      summary: Device information
+      description: Returns device hardware/software information and available API endpoints.
+      operationId: getInfo
+      responses:
+        '200':
+          description: Device information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: Arctic Heat Pump Controller
+                  hostname:
+                    type: string
+                    example: arctic
+                  platform:
+                    type: string
+                    example: ESP32-P4
+                  wifi_module:
+                    type: string
+                    example: ESP32-C6
+                  version:
+                    type: string
+                    example: "1.0.3"
+                  free_heap:
+                    type: integer
+                    description: Free heap memory in bytes
+                    example: 4194304
+                  min_free_heap:
+                    type: integer
+                    description: Minimum free heap since boot
+                    example: 4000000
+                  uptime_ms:
+                    type: number
+                    example: 123456789
+                  api_version:
+                    type: string
+                    example: "1.0"
+                  endpoints:
+                    type: array
+                    items:
+                      type: string
+                    example:
+                      - /api/health
+                      - /api/status
+                      - /api/time
+                      - /api/wifi
+                      - /api/info
+                      - /api/ota/status
+                      - /api/ota/update
+                      - /api/ota/reboot
+
+  /api/ota/status:
+    get:
+      tags:
+        - OTA
+      summary: OTA update status
+      description: Returns current OTA update status, progress, and partition information.
+      operationId: getOtaStatus
+      responses:
+        '200':
+          description: OTA status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    enum: [idle, downloading, verifying, ready_to_reboot, failed]
+                    example: idle
+                  progress:
+                    type: integer
+                    description: Download progress percentage (0-100)
+                    minimum: 0
+                    maximum: 100
+                    example: 0
+                  bytes_downloaded:
+                    type: integer
+                    example: 0
+                  total_bytes:
+                    type: integer
+                    example: 0
+                  current_version:
+                    type: string
+                    example: "1.0.2"
+                  new_version:
+                    type: string
+                    description: Version being installed (only during update)
+                    example: "1.0.3"
+                  error:
+                    type: string
+                    description: Error message (only when state is failed)
+                  partition:
+                    type: object
+                    properties:
+                      label:
+                        type: string
+                        example: ota_0
+                      address:
+                        type: integer
+                        example: 1048576
+                      size:
+                        type: integer
+                        example: 4194304
+
+  /api/ota/update:
+    post:
+      tags:
+        - OTA
+      summary: Start OTA update
+      description: |
+        Initiates an OTA firmware update from the specified URL.
+        
+        The URL should point to a valid ESP32-P4 firmware binary file (.bin).
+        For GitHub releases, use the direct download URL for the asset.
+        
+        **Auto-reboot**: The device will automatically reboot 3 seconds after 
+        a successful update. Poll `/api/ota/status` to monitor progress.
+      operationId: startOtaUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: URL to download firmware from
+                  example: https://github.com/user/repo/releases/download/v1.0.3/arctic_controller.bin
+      responses:
+        '200':
+          description: OTA update started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: started
+                  message:
+                    type: string
+                    example: OTA update started. Poll /api/ota/status for progress.
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                noBody:
+                  value:
+                    error: No body provided
+                invalidJson:
+                  value:
+                    error: Invalid JSON
+                missingUrl:
+                  value:
+                    error: "Missing 'url' field"
+        '409':
+          description: OTA already in progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: OTA already in progress or failed to start
+
+  /api/ota/reboot:
+    post:
+      tags:
+        - OTA
+      summary: Reboot after OTA update (deprecated)
+      deprecated: true
+      description: |
+        **DEPRECATED**: The device now automatically reboots after a successful OTA update.
+        This endpoint is kept for backwards compatibility but is no longer needed.
+        
+        Manually reboots the device to apply a pending OTA update.
+        Only works when OTA state is `ready_to_reboot`.
+      operationId: rebootAfterOta
+      responses:
+        '200':
+          description: Device is rebooting
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: rebooting
+                  message:
+                    type: string
+                    example: Device will reboot now
+        '409':
+          description: No pending OTA update
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: No pending OTA update to apply
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message

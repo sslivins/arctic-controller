@@ -64,7 +64,6 @@ static struct {
     lv_obj_t* progress_label;
     lv_obj_t* check_btn;
     lv_obj_t* update_btn;
-    lv_obj_t* reboot_btn;
     
     // State
     update_ui_state_t update_state;
@@ -129,14 +128,6 @@ static void update_btn_event_cb(lv_event_t* e)
                 update_ui_state(UPDATE_STATE_FAILED);
             }
         }
-    }
-}
-
-static void reboot_btn_event_cb(lv_event_t* e)
-{
-    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-        ESP_LOGI(TAG, "Reboot clicked");
-        ota_mgr_reboot();
     }
 }
 
@@ -386,7 +377,6 @@ static void update_ui_state(update_ui_state_t new_state)
     lv_obj_add_flag(settings_state.progress_bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(settings_state.progress_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(settings_state.update_btn, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(settings_state.reboot_btn, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_state(settings_state.check_btn, LV_STATE_DISABLED);
     
     switch (new_state) {
@@ -432,13 +422,13 @@ static void update_ui_state(update_ui_state_t new_state)
             break;
             
         case UPDATE_STATE_READY_TO_REBOOT:
-            lv_label_set_text(settings_state.status_label, LV_SYMBOL_OK " Update complete! Reboot to apply.");
+            lv_label_set_text(settings_state.status_label, LV_SYMBOL_OK " Update complete! Rebooting...");
             lv_obj_set_style_text_color(settings_state.status_label, COLOR_SUCCESS, LV_PART_MAIN);
             lv_bar_set_value(settings_state.progress_bar, 100, LV_ANIM_OFF);
             lv_obj_remove_flag(settings_state.progress_bar, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_remove_flag(settings_state.reboot_btn, LV_OBJ_FLAG_HIDDEN);
-            lv_label_set_text(settings_state.progress_label, "Download complete!");
+            lv_label_set_text(settings_state.progress_label, "Rebooting in 3 seconds...");
             lv_obj_remove_flag(settings_state.progress_label, LV_OBJ_FLAG_HIDDEN);
+            // Auto-reboot handled by OTA manager
             break;
             
         case UPDATE_STATE_FAILED:
@@ -587,18 +577,7 @@ static void create_firmware_section(void)
     lv_obj_set_style_text_font(update_lbl, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_center(update_lbl);
     
-    // Reboot button (hidden initially) - larger
-    settings_state.reboot_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(settings_state.reboot_btn, 200, 60);
-    lv_obj_set_style_bg_color(settings_state.reboot_btn, COLOR_WARNING, LV_PART_MAIN);
-    lv_obj_set_style_radius(settings_state.reboot_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(settings_state.reboot_btn, reboot_btn_event_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_flag(settings_state.reboot_btn, LV_OBJ_FLAG_HIDDEN);
-    
-    lv_obj_t* reboot_lbl = lv_label_create(settings_state.reboot_btn);
-    lv_label_set_text(reboot_lbl, LV_SYMBOL_POWER " Reboot Now");
-    lv_obj_set_style_text_font(reboot_lbl, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_center(reboot_lbl);
+    // Note: Reboot is now automatic after OTA completes (3 second delay)
 }
 
 // ============================================================================

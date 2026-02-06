@@ -259,7 +259,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
     switch (state) {
         case WIFI_MGR_STATE_CONNECTING:
             ESP_LOGI(TAG, "WiFi connecting...");
-            status_bar_set_wifi_state(false, NULL);
+            status_bar_set_wifi_connecting(true);
             break;
             
         case WIFI_MGR_STATE_CONNECTED: {

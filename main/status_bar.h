@@ -50,6 +50,12 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config);
 void status_bar_set_wifi_state(bool connected, const char* ssid);
 
 /**
+ * @brief Set WiFi connecting animation (pulsing icon)
+ * @param connecting true to start animation, false to stop
+ */
+void status_bar_set_wifi_connecting(bool connecting);
+
+/**
  * @brief Update time display
  *        Call this periodically or it will auto-update via timer
  */

@@ -361,11 +361,18 @@ static void ota_task(void* pvParameter)
     }
     
     // Success!
-    ESP_LOGI(TAG, "OTA update successful! Ready to reboot.");
+    ESP_LOGI(TAG, "OTA update successful! Rebooting in 3 seconds...");
     
     xSemaphoreTake(status_mutex, portMAX_DELAY);
     ota_status.state = OTA_STATE_READY_TO_REBOOT;
     xSemaphoreGive(status_mutex);
     
+    // Give UI time to show "Update complete" message, then auto-reboot
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    
+    ESP_LOGI(TAG, "Rebooting to apply OTA update...");
+    esp_restart();
+    
+    // Never reached
     vTaskDelete(NULL);
 }

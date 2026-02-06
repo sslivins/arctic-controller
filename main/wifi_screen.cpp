@@ -3,6 +3,7 @@
  * WiFi Settings Screen Implementation - iPhone-style layout
  */
 #include "wifi_screen.h"
+#include "wifi_manager.h"
 #include <string.h>
 #include <stdio.h>
 #include <esp_log.h>
@@ -54,6 +55,7 @@ static struct {
     lv_obj_t* connected_section;
     lv_obj_t* connected_ssid_label;
     lv_obj_t* connected_ip_label;
+    lv_obj_t* connected_signal_label;  // Signal strength display
     lv_obj_t* disconnect_btn;
     bool is_connected;
     char connected_ssid[33];
@@ -442,12 +444,19 @@ static void create_connected_section(lv_obj_t* parent)
     lv_obj_set_style_text_color(wifi_state.connected_ssid_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(wifi_state.connected_ssid_label, LV_ALIGN_TOP_LEFT, 0, 25);
     
-    // IP Address
+    // IP Address and Signal Strength on same line
     wifi_state.connected_ip_label = lv_label_create(wifi_state.connected_section);
     lv_label_set_text(wifi_state.connected_ip_label, "IP: 192.168.1.100");
     lv_obj_set_style_text_font(wifi_state.connected_ip_label, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(wifi_state.connected_ip_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_align(wifi_state.connected_ip_label, LV_ALIGN_TOP_LEFT, 0, 55);
+    
+    // Signal strength
+    wifi_state.connected_signal_label = lv_label_create(wifi_state.connected_section);
+    lv_label_set_text(wifi_state.connected_signal_label, "Signal: Excellent");
+    lv_obj_set_style_text_font(wifi_state.connected_signal_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_color(wifi_state.connected_signal_label, COLOR_SUCCESS, LV_PART_MAIN);
+    lv_obj_align(wifi_state.connected_signal_label, LV_ALIGN_TOP_LEFT, 200, 55);
     
     // Disconnect button
     wifi_state.disconnect_btn = lv_btn_create(wifi_state.connected_section);
@@ -519,6 +528,27 @@ static void update_connected_section(void)
         } else {
             lv_label_set_text(wifi_state.connected_ip_label, "IP: Obtaining...");
         }
+        
+        // Update signal strength
+        int8_t rssi = wifi_mgr_get_rssi();
+        const char* strength_text;
+        lv_color_t strength_color;
+        
+        if (rssi >= -50) {
+            strength_text = "Signal: Excellent";
+            strength_color = COLOR_SUCCESS;
+        } else if (rssi >= -60) {
+            strength_text = "Signal: Good";
+            strength_color = COLOR_SUCCESS;
+        } else if (rssi >= -70) {
+            strength_text = "Signal: Fair";
+            strength_color = COLOR_WARNING;
+        } else {
+            strength_text = "Signal: Weak";
+            strength_color = COLOR_ERROR;
+        }
+        lv_label_set_text(wifi_state.connected_signal_label, strength_text);
+        lv_obj_set_style_text_color(wifi_state.connected_signal_label, strength_color, LV_PART_MAIN);
         
         // Show connected section
         lv_obj_clear_flag(wifi_state.connected_section, LV_OBJ_FLAG_HIDDEN);
