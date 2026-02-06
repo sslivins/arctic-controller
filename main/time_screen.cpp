@@ -4,6 +4,7 @@
  */
 #include "time_screen.h"
 #include "time_manager.h"
+#include "ui_common.h"
 #include <esp_log.h>
 #include <nvs_flash.h>
 #include <nvs.h>
@@ -207,18 +208,7 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     lv_obj_set_style_text_color(title, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
     
-    lv_obj_t* close_btn = lv_btn_create(header);
-    lv_obj_set_size(close_btn, 50, 50);
-    lv_obj_align(close_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(close_btn, lv_color_hex(COLOR_PANEL), LV_PART_MAIN);
-    lv_obj_set_style_radius(close_btn, 25, LV_PART_MAIN);
-    lv_obj_add_event_cb(close_btn, close_btn_event_cb, LV_EVENT_CLICKED, NULL);
-    
-    lv_obj_t* close_lbl = lv_label_create(close_btn);
-    lv_label_set_text(close_lbl, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(close_lbl, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(close_lbl, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
-    lv_obj_center(close_lbl);
+    ui_create_close_button(header, close_btn_event_cb);
     
     // ===== TIME ROW: Current Time + Sync Status =====
     lv_obj_t* time_row = lv_obj_create(screen_state.container);

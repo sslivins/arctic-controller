@@ -4,6 +4,7 @@
  */
 #include "wifi_screen.h"
 #include "wifi_manager.h"
+#include "ui_common.h"
 #include <string.h>
 #include <stdio.h>
 #include <esp_log.h>
@@ -402,20 +403,8 @@ static void create_header(lv_obj_t* parent)
     lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
     
-    // Close button (X button on right, matching time screen)
-    wifi_state.back_btn = lv_btn_create(wifi_state.header);
-    lv_obj_set_size(wifi_state.back_btn, 50, 50);
-    lv_obj_align(wifi_state.back_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(wifi_state.back_btn, COLOR_PANEL, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(wifi_state.back_btn, COLOR_BTN_PRESSED, LV_STATE_PRESSED);
-    lv_obj_set_style_radius(wifi_state.back_btn, 25, LV_PART_MAIN);
-    lv_obj_add_event_cb(wifi_state.back_btn, on_back_clicked, LV_EVENT_CLICKED, NULL);
-    
-    lv_obj_t* close_icon = lv_label_create(wifi_state.back_btn);
-    lv_label_set_text(close_icon, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(close_icon, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(close_icon, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(close_icon);
+    // Close button (X button on right)
+    wifi_state.back_btn = ui_create_close_button(wifi_state.header, on_back_clicked);
 }
 
 static void create_connected_section(lv_obj_t* parent)

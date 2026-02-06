@@ -4,6 +4,7 @@
  */
 #include "settings_screen.h"
 #include "ota_manager.h"
+#include "ui_common.h"
 #include <string.h>
 #include <stdio.h>
 #include <esp_log.h>
@@ -464,18 +465,7 @@ static void create_header(void)
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 10, 0);
     
     // Close button
-    lv_obj_t* close_btn = lv_btn_create(settings_state.header);
-    lv_obj_set_size(close_btn, 40, 40);
-    lv_obj_align(close_btn, LV_ALIGN_RIGHT_MID, -10, 0);
-    lv_obj_set_style_bg_opa(close_btn, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(close_btn, 0, LV_PART_MAIN);
-    lv_obj_add_event_cb(close_btn, close_btn_event_cb, LV_EVENT_CLICKED, NULL);
-    
-    lv_obj_t* close_icon = lv_label_create(close_btn);
-    lv_label_set_text(close_icon, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(close_icon, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(close_icon, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(close_icon);
+    ui_create_close_button(settings_state.header, close_btn_event_cb);
 }
 
 static void create_firmware_section(void)
