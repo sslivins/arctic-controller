@@ -65,7 +65,6 @@ static struct {
     lv_obj_t* status_label;
     lv_obj_t* progress_bar;
     lv_obj_t* progress_label;
-    lv_obj_t* check_btn;
     lv_obj_t* update_btn;
     
     // State
@@ -102,16 +101,7 @@ static void close_btn_event_cb(lv_event_t* e)
     }
 }
 
-static void check_btn_event_cb(lv_event_t* e)
-{
-    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-        ESP_LOGI(TAG, "Check for updates clicked");
-        update_ui_state(UPDATE_STATE_CHECKING);
-        
-        // Start check task
-        xTaskCreate(check_for_updates_task, "fw_check", 8192, NULL, 5, NULL);
-    }
-}
+
 
 static void update_btn_event_cb(lv_event_t* e)
 {
@@ -380,7 +370,6 @@ static void update_ui_state(update_ui_state_t new_state)
     lv_obj_add_flag(settings_state.progress_bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(settings_state.progress_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(settings_state.update_btn, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_state(settings_state.check_btn, LV_STATE_DISABLED);
     
     switch (new_state) {
         case UPDATE_STATE_IDLE:
@@ -391,7 +380,6 @@ static void update_ui_state(update_ui_state_t new_state)
         case UPDATE_STATE_CHECKING:
             lv_label_set_text(settings_state.latest_version_label, "Latest: Checking...");
             lv_label_set_text(settings_state.status_label, "Checking for updates...");
-            lv_obj_add_state(settings_state.check_btn, LV_STATE_DISABLED);
             break;
             
         case UPDATE_STATE_UPDATE_AVAILABLE:
@@ -421,7 +409,6 @@ static void update_ui_state(update_ui_state_t new_state)
             lv_obj_remove_flag(settings_state.progress_bar, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(settings_state.progress_label, LV_OBJ_FLAG_HIDDEN);
             lv_bar_set_value(settings_state.progress_bar, 0, LV_ANIM_OFF);
-            lv_obj_add_state(settings_state.check_btn, LV_STATE_DISABLED);
             break;
             
         case UPDATE_STATE_READY_TO_REBOOT:
@@ -544,19 +531,7 @@ static void create_firmware_section(void)
     lv_obj_set_style_pad_row(btn_row, 15, LV_PART_MAIN);
     lv_obj_remove_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Check for updates button - larger
-    settings_state.check_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(settings_state.check_btn, 280, 60);
-    lv_obj_set_style_bg_color(settings_state.check_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_radius(settings_state.check_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(settings_state.check_btn, check_btn_event_cb, LV_EVENT_CLICKED, NULL);
-    
-    lv_obj_t* check_lbl = lv_label_create(settings_state.check_btn);
-    lv_label_set_text(check_lbl, LV_SYMBOL_REFRESH " Check for Updates");
-    lv_obj_set_style_text_font(check_lbl, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_center(check_lbl);
-    
-    // Update button (hidden initially) - larger
+    // Update button (hidden until update is available)
     settings_state.update_btn = lv_btn_create(btn_row);
     lv_obj_set_size(settings_state.update_btn, 220, 60);
     lv_obj_set_style_bg_color(settings_state.update_btn, COLOR_SUCCESS, LV_PART_MAIN);
@@ -621,6 +596,11 @@ void settings_screen_create(const settings_screen_config_t* config)
     
     // Load screen
     lv_screen_load_anim(settings_state.screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+    
+    // Automatically check for updates when screen opens
+    ESP_LOGI(TAG, "Auto-checking for updates...");
+    update_ui_state(UPDATE_STATE_CHECKING);
+    xTaskCreate(check_for_updates_task, "fw_check", 8192, NULL, 5, NULL);
 }
 
 void settings_screen_close(void)

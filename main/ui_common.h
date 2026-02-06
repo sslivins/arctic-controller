@@ -26,9 +26,9 @@ extern "C" {
 // ============================================================================
 // Common Sizes
 // ============================================================================
-#define UI_CLOSE_BTN_SIZE     50
-#define UI_CLOSE_BTN_RADIUS   25
-#define UI_HEADER_HEIGHT      60
+#define UI_CLOSE_BTN_SIZE     60
+#define UI_CLOSE_BTN_RADIUS   30
+#define UI_HEADER_HEIGHT      70
 
 // ============================================================================
 // Common Fonts
@@ -37,7 +37,7 @@ extern "C" {
 #define UI_FONT_SUBTITLE      (&lv_font_montserrat_24)
 #define UI_FONT_BODY          (&lv_font_montserrat_20)
 #define UI_FONT_SMALL         (&lv_font_montserrat_16)
-#define UI_FONT_ICON          (&lv_font_montserrat_24)
+#define UI_FONT_ICON          (&lv_font_montserrat_32)  // Match status bar icons
 #define UI_FONT_ICON_LARGE    (&lv_font_montserrat_32)
 
 // ============================================================================
