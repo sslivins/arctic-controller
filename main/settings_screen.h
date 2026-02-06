@@ -96,6 +96,13 @@ void settings_screen_set_wifi_status(bool connected, const char* ssid, const cha
 void settings_screen_show_error(const char* message);
 
 /**
+ * @brief Switch to the firmware update panel
+ *        If settings screen is not visible, this has no effect.
+ *        Call after settings_screen_create() to open directly to firmware panel.
+ */
+void settings_screen_show_firmware_panel(void);
+
+/**
  * @brief Callback for update check result
  * @param update_available true if a new version is available
  * @param new_version Version string (only valid if update_available)

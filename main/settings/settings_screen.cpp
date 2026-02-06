@@ -498,6 +498,15 @@ void settings_screen_show_error(const char* message)
     lv_obj_center(msgbox);
 }
 
+void settings_screen_show_firmware_panel(void)
+{
+    if (!state.visible) {
+        return;
+    }
+    
+    switch_panel(PANEL_FIRMWARE);
+}
+
 // ============================================================================
 // Background Update Check
 // ============================================================================

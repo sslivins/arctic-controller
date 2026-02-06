@@ -498,8 +498,11 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
     // Handle specific actions based on type
     switch (type) {
         case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
-            // Open settings screen (which shows firmware updates)
+            // Open settings screen and go directly to firmware panel
             on_status_bar_settings_click();
+            bsp_display_lock(0);
+            settings_screen_show_firmware_panel();
+            bsp_display_unlock();
             break;
         
         case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:
