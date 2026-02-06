@@ -214,12 +214,14 @@ static void progress_timer_cb(lv_timer_t* timer)
             {
                 char buf[64];
                 if (status.total_bytes > 0) {
-                    snprintf(buf, sizeof(buf), "%s: %d%% (%zu KB / %zu KB)", 
+                    snprintf(buf, sizeof(buf), "%s: %d%% (%lu KB / %lu KB)", 
                              i18n_get(STR_FW_DOWNLOADING), status.progress_percent, 
-                             status.bytes_downloaded / 1024, status.total_bytes / 1024);
+                             (unsigned long)(status.bytes_downloaded / 1024), 
+                             (unsigned long)(status.total_bytes / 1024));
                 } else {
-                    snprintf(buf, sizeof(buf), "%s: %zu KB", 
-                             i18n_get(STR_FW_DOWNLOADING), status.bytes_downloaded / 1024);
+                    snprintf(buf, sizeof(buf), "%s: %lu KB", 
+                             i18n_get(STR_FW_DOWNLOADING), 
+                             (unsigned long)(status.bytes_downloaded / 1024));
                 }
                 lv_label_set_text(state->fw_progress_label, buf);
             }
