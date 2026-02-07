@@ -100,9 +100,11 @@ bool ota_mgr_start_update(const char* url)
     
     xSemaphoreTake(status_mutex, portMAX_DELAY);
     
-    if (ota_status.state == OTA_STATE_DOWNLOADING || 
+    // Check for any ongoing OTA operation (including file upload)
+    if (ota_status.state == OTA_STATE_UPLOADING ||
+        ota_status.state == OTA_STATE_DOWNLOADING || 
         ota_status.state == OTA_STATE_VERIFYING) {
-        ESP_LOGW(TAG, "OTA already in progress");
+        ESP_LOGW(TAG, "OTA already in progress (state=%d)", ota_status.state);
         xSemaphoreGive(status_mutex);
         return false;
     }
@@ -149,10 +151,47 @@ ota_status_t ota_mgr_get_status(void)
 bool ota_mgr_is_busy(void)
 {
     xSemaphoreTake(status_mutex, portMAX_DELAY);
-    bool busy = (ota_status.state == OTA_STATE_DOWNLOADING || 
+    bool busy = (ota_status.state == OTA_STATE_UPLOADING ||
+                 ota_status.state == OTA_STATE_DOWNLOADING || 
                  ota_status.state == OTA_STATE_VERIFYING);
     xSemaphoreGive(status_mutex);
     return busy;
+}
+
+bool ota_mgr_try_lock_upload(void)
+{
+    xSemaphoreTake(status_mutex, portMAX_DELAY);
+    
+    // Check if any OTA operation is in progress
+    if (ota_status.state == OTA_STATE_UPLOADING ||
+        ota_status.state == OTA_STATE_DOWNLOADING ||
+        ota_status.state == OTA_STATE_VERIFYING) {
+        ESP_LOGW(TAG, "Cannot start upload: OTA already in progress (state=%d)", ota_status.state);
+        xSemaphoreGive(status_mutex);
+        return false;
+    }
+    
+    // Acquire lock by setting state
+    ota_status.state = OTA_STATE_UPLOADING;
+    ota_status.progress_percent = 0;
+    ota_status.error_msg[0] = '\0';
+    
+    xSemaphoreGive(status_mutex);
+    ESP_LOGI(TAG, "Upload lock acquired");
+    return true;
+}
+
+void ota_mgr_unlock_upload(void)
+{
+    xSemaphoreTake(status_mutex, portMAX_DELAY);
+    
+    // Only unlock if we're in uploading state (don't disturb other states)
+    if (ota_status.state == OTA_STATE_UPLOADING) {
+        ota_status.state = OTA_STATE_IDLE;
+        ESP_LOGI(TAG, "Upload lock released");
+    }
+    
+    xSemaphoreGive(status_mutex);
 }
 
 void ota_mgr_reboot(void)

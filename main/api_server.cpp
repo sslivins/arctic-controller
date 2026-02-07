@@ -1039,11 +1039,18 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
     
+    // Try to acquire OTA lock - prevents concurrent updates
+    if (!ota_mgr_try_lock_upload()) {
+        send_json_error(req, "409 Conflict", "Another OTA update is already in progress");
+        return ESP_OK;
+    }
+    
     ESP_LOGI(TAG, "Receiving firmware upload, content length: %d", req->content_len);
     
     // Get the next OTA partition
     const esp_partition_t* update_partition = esp_ota_get_next_update_partition(NULL);
     if (update_partition == NULL) {
+        ota_mgr_unlock_upload();
         send_json_error(req, "500 Internal Server Error", "No OTA partition available");
         return ESP_OK;
     }
@@ -1052,6 +1059,7 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+        ota_mgr_unlock_upload();
         send_json_error(req, "500 Internal Server Error", "Failed to begin OTA");
         return ESP_OK;
     }
@@ -1060,6 +1068,7 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     char* buf = (char*)malloc(4096);
     if (buf == NULL) {
         esp_ota_abort(ota_handle);
+        ota_mgr_unlock_upload();
         send_json_error(req, "500 Internal Server Error", "Memory allocation failed");
         return ESP_OK;
     }
@@ -1067,8 +1076,23 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     size_t total_received = 0;
     int received;
     bool success = true;
+    bool header_validated = false;
     
     while ((received = httpd_req_recv(req, buf, 4096)) > 0) {
+        // Validate ESP32 firmware magic byte in first chunk
+        if (!header_validated && received > 0) {
+            if ((uint8_t)buf[0] != 0xE9) {
+                ESP_LOGE(TAG, "Invalid firmware header: expected 0xE9, got 0x%02X", (uint8_t)buf[0]);
+                esp_ota_abort(ota_handle);
+                free(buf);
+                ota_mgr_unlock_upload();
+                send_json_error(req, "400 Bad Request", "Invalid firmware file (not an ESP32 binary)");
+                return ESP_OK;
+            }
+            header_validated = true;
+            ESP_LOGI(TAG, "Firmware header validated");
+        }
+        
         err = esp_ota_write(ota_handle, buf, received);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
@@ -1087,6 +1111,7 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     
     if (!success || received < 0) {
         esp_ota_abort(ota_handle);
+        ota_mgr_unlock_upload();
         send_json_error(req, "500 Internal Server Error", "Upload failed");
         return ESP_OK;
     }
@@ -1094,6 +1119,7 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     err = esp_ota_end(ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+        ota_mgr_unlock_upload();
         send_json_error(req, "500 Internal Server Error", "OTA validation failed");
         return ESP_OK;
     }
@@ -1101,6 +1127,7 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     err = esp_ota_set_boot_partition(update_partition);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        ota_mgr_unlock_upload();
         send_json_error(req, "500 Internal Server Error", "Failed to set boot partition");
         return ESP_OK;
     }
@@ -1111,12 +1138,17 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     cJSON* response = cJSON_CreateObject();
     cJSON_AddBoolToObject(response, "success", true);
     cJSON_AddNumberToObject(response, "bytes_received", (double)total_received);
-    cJSON_AddStringToObject(response, "message", "Firmware uploaded. Ready to reboot.");
+    cJSON_AddStringToObject(response, "message", "Firmware uploaded. Rebooting...");
     
     char* json_str = cJSON_PrintUnformatted(response);
     httpd_resp_sendstr(req, json_str);
     free(json_str);
     cJSON_Delete(response);
+    
+    // Schedule reboot after response is sent
+    ESP_LOGI(TAG, "Scheduling reboot...");
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
     
     return ESP_OK;
 }
@@ -1275,6 +1307,9 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
     
     const char* u = (username && cJSON_IsString(username)) ? username->valuestring : NULL;
     const char* p = (password && cJSON_IsString(password)) ? password->valuestring : NULL;
+    
+    ESP_LOGI(TAG, "Credential update request: username='%s', password=%s", 
+             u ? u : "(null)", p ? (p[0] ? "(provided)" : "(empty)") : "(null)");
     
     auth_mgr_set_credentials(u, p);
     

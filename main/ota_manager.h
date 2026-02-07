@@ -15,7 +15,8 @@ extern "C" {
 // OTA update states
 typedef enum {
     OTA_STATE_IDLE,
-    OTA_STATE_DOWNLOADING,
+    OTA_STATE_UPLOADING,    // File upload in progress
+    OTA_STATE_DOWNLOADING,  // URL download in progress
     OTA_STATE_VERIFYING,
     OTA_STATE_READY_TO_REBOOT,
     OTA_STATE_FAILED
@@ -63,6 +64,19 @@ ota_status_t ota_mgr_get_status(void);
  * @return true if update in progress
  */
 bool ota_mgr_is_busy(void);
+
+/**
+ * @brief Try to acquire upload lock
+ * Prevents concurrent OTA updates
+ * @return true if lock acquired, false if OTA already in progress
+ */
+bool ota_mgr_try_lock_upload(void);
+
+/**
+ * @brief Release upload lock
+ * Call after upload completes (success or failure)
+ */
+void ota_mgr_unlock_upload(void);
 
 /**
  * @brief Reboot to apply pending update

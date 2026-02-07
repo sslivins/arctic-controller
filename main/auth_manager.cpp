@@ -69,7 +69,7 @@ static bool load_from_nvs(void)
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
     if (err != ESP_OK) {
-        ESP_LOGI(TAG, "No auth settings in NVS, using defaults");
+        ESP_LOGI(TAG, "No auth settings in NVS (err=%s), will use defaults", esp_err_to_name(err));
         return false;
     }
     
@@ -90,14 +90,22 @@ static bool load_from_nvs(void)
     
     // Username
     size_t len = sizeof(state.username);
-    if (nvs_get_str(nvs, NVS_KEY_USERNAME, state.username, &len) != ESP_OK) {
+    err = nvs_get_str(nvs, NVS_KEY_USERNAME, state.username, &len);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Loaded username='%s' from NVS (len=%d)", state.username, (int)len);
+    } else {
         state.username[0] = '\0';
+        ESP_LOGI(TAG, "Username not in NVS (err=%s)", esp_err_to_name(err));
     }
     
     // Password hash
     len = sizeof(state.password_hash);
-    if (nvs_get_blob(nvs, NVS_KEY_PASS_HASH, state.password_hash, &len) == ESP_OK) {
+    err = nvs_get_blob(nvs, NVS_KEY_PASS_HASH, state.password_hash, &len);
+    if (err == ESP_OK) {
         state.password_set = true;
+        ESP_LOGI(TAG, "Loaded password hash from NVS (len=%d)", (int)len);
+    } else {
+        ESP_LOGI(TAG, "Password hash not in NVS (err=%s)", esp_err_to_name(err));
     }
     
     // API key
@@ -200,16 +208,20 @@ void auth_mgr_init(void)
     ESP_LOGI(TAG, "Initializing authentication manager...");
     
     memset(&state, 0, sizeof(state));
-    load_from_nvs();
+    bool loaded = load_from_nvs();
     
-    // Set default credentials if none exist
-    if (!state.password_set || state.username[0] == '\0') {
+    // Set default credentials only if BOTH username and password are missing
+    // This ensures we don't overwrite user-set credentials
+    if (!loaded || (!state.password_set && state.username[0] == '\0')) {
+        ESP_LOGI(TAG, "No credentials found in NVS, setting defaults (arctic/arctic)");
         strncpy(state.username, "arctic", sizeof(state.username) - 1);
         state.username[sizeof(state.username) - 1] = '\0';
         hash_password("arctic", state.password_hash);
         state.password_set = true;
         save_to_nvs();
-        ESP_LOGI(TAG, "Default credentials set (arctic/arctic)");
+    } else {
+        ESP_LOGI(TAG, "Credentials loaded from NVS: username='%s', password_set=%d", 
+                 state.username, state.password_set ? 1 : 0);
     }
     
     // Generate API key if not set
@@ -253,21 +265,33 @@ bool auth_mgr_set_credentials(const char* username, const char* password)
 {
     bool changed = false;
     
-    if (username != NULL) {
+    ESP_LOGI(TAG, "set_credentials called: username='%s', password=%s",
+             username ? username : "(null)", 
+             password ? (password[0] ? "(provided)" : "(empty)") : "(null)");
+    
+    if (username != NULL && username[0] != '\0') {
         strncpy(state.username, username, AUTH_MAX_USERNAME_LEN);
         state.username[AUTH_MAX_USERNAME_LEN] = '\0';
         changed = true;
+        ESP_LOGI(TAG, "Username updated to '%s'", state.username);
     }
     
     if (password != NULL && password[0] != '\0') {
         hash_password(password, state.password_hash);
         state.password_set = true;
         changed = true;
+        ESP_LOGI(TAG, "Password hash updated");
     }
     
     if (changed) {
-        save_to_nvs();
-        ESP_LOGI(TAG, "Credentials updated");
+        bool saved = save_to_nvs();
+        ESP_LOGI(TAG, "Credentials updated, NVS save %s", saved ? "successful" : "FAILED");
+        
+        // Invalidate all sessions when credentials change for security
+        auth_mgr_logout_all();
+        ESP_LOGI(TAG, "All sessions invalidated due to credential change");
+    } else {
+        ESP_LOGW(TAG, "No credential changes to save");
     }
     
     return true;
