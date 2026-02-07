@@ -456,6 +456,7 @@ void settings_screen_close(void)
     firmware_panel_cleanup();
     time_panel_delete();
     language_panel_cleanup();
+    display_panel_delete();
     
     state.visible = false;
     
@@ -478,9 +479,7 @@ void settings_screen_refresh_for_language(void)
     firmware_panel_cleanup();
     time_panel_delete();
     language_panel_cleanup();
-    
-    // Store old screen to delete after new one loads
-    lv_obj_t* old_screen = state.screen;
+    display_panel_delete();
     
     // Reset state for recreation
     state.active_panel = PANEL_COUNT;
@@ -508,11 +507,8 @@ void settings_screen_refresh_for_language(void)
         settings_screen_set_wifi_status(true, wifi_mgr_get_connected_ssid(), ip);
     }
     
-    // Load new screen and auto-delete the old one
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 200, 0, true);
-    
-    // The old screen will be deleted by LVGL after the animation
-    (void)old_screen;
+    // Load new screen with fade animation, old screen will be deleted automatically
+    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 500, 0, true);
 }
 
 bool settings_screen_is_visible(void)
