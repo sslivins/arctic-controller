@@ -1,6 +1,12 @@
 name: Build
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       target:
@@ -17,6 +23,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      TARGET: ${{ inputs.target || 'esp32p4' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,13 +49,13 @@ jobs:
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4.3
-          target: ${{ inputs.target }}
+          target: ${{ env.TARGET }}
           path: '.'
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-v${{ steps.version.outputs.version }}-${{ inputs.target }}
+          name: firmware-v${{ steps.version.outputs.version }}-${{ env.TARGET }}
           path: |
             build/arctic_controller.bin
             build/bootloader/bootloader.bin
@@ -62,7 +70,7 @@ jobs:
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Target | ${{ inputs.target }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | ${{ env.TARGET }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ESP-IDF | v5.4.3 |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Artifacts" >> $GITHUB_STEP_SUMMARY

@@ -53,6 +53,8 @@ static esp_err_t ota_status_get_handler(httpd_req_t* req);
 static esp_err_t ota_update_post_handler(httpd_req_t* req);
 static esp_err_t ota_upload_post_handler(httpd_req_t* req);
 static esp_err_t ota_reboot_post_handler(httpd_req_t* req);
+static esp_err_t ota_releases_get_handler(httpd_req_t* req);
+static esp_err_t ota_github_update_post_handler(httpd_req_t* req);
 static esp_err_t auth_config_get_handler(httpd_req_t* req);
 static esp_err_t auth_config_post_handler(httpd_req_t* req);
 static esp_err_t auth_status_get_handler(httpd_req_t* req);
@@ -239,7 +241,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 24;  // Increased for all endpoints
+    config.max_uri_handlers = 32;  // Increased for all endpoints
     config.stack_size = 8192;      // Larger stack for file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -250,6 +252,16 @@ bool api_server_start(void)
         ESP_LOGE(TAG, "Failed to start server: %s", esp_err_to_name(ret));
         return false;
     }
+    
+    // Helper macro - abort if URI registration fails (catches max_uri_handlers issues)
+    #define REGISTER_URI(uri_struct) do { \
+        esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
+        if (err != ESP_OK) { \
+            ESP_LOGE(TAG, "FATAL: Failed to register URI '%s': %s", (uri_struct).uri, esp_err_to_name(err)); \
+            ESP_LOGE(TAG, "Increase max_uri_handlers in httpd config!"); \
+            abort(); \
+        } \
+    } while(0)
     
     // ========================================================================
     // Web Interface
@@ -262,7 +274,7 @@ bool api_server_start(void)
         .handler = web_root_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &web_root_uri);
+    REGISTER_URI(web_root_uri);
     
     httpd_uri_t web_index_uri = {
         .uri = "/index.html",
@@ -270,7 +282,7 @@ bool api_server_start(void)
         .handler = web_root_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &web_index_uri);
+    REGISTER_URI(web_index_uri);
     
     // GET /favicon.ico - Return 204 No Content (no favicon)
     httpd_uri_t favicon_uri = {
@@ -279,7 +291,7 @@ bool api_server_start(void)
         .handler = favicon_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &favicon_uri);
+    REGISTER_URI(favicon_uri);
     
     // POST /login - Web login
     httpd_uri_t login_uri = {
@@ -288,7 +300,7 @@ bool api_server_start(void)
         .handler = web_login_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &login_uri);
+    REGISTER_URI(login_uri);
     
     // POST /logout - Web logout
     httpd_uri_t logout_uri = {
@@ -297,7 +309,7 @@ bool api_server_start(void)
         .handler = web_logout_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &logout_uri);
+    REGISTER_URI(logout_uri);
     
     // ========================================================================
     // API Endpoints
@@ -310,7 +322,7 @@ bool api_server_start(void)
         .handler = health_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &health_uri);
+    REGISTER_URI(health_uri);
     
     // GET /api/status
     httpd_uri_t status_uri = {
@@ -319,7 +331,7 @@ bool api_server_start(void)
         .handler = status_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &status_uri);
+    REGISTER_URI(status_uri);
     
     // GET /api/time
     httpd_uri_t time_uri = {
@@ -328,7 +340,7 @@ bool api_server_start(void)
         .handler = time_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &time_uri);
+    REGISTER_URI(time_uri);
     
     // GET/POST /api/time/config
     httpd_uri_t time_config_get_uri = {
@@ -337,7 +349,7 @@ bool api_server_start(void)
         .handler = time_config_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &time_config_get_uri);
+    REGISTER_URI(time_config_get_uri);
     
     httpd_uri_t time_config_post_uri = {
         .uri = "/api/time/config",
@@ -345,7 +357,7 @@ bool api_server_start(void)
         .handler = time_config_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &time_config_post_uri);
+    REGISTER_URI(time_config_post_uri);
     
     // POST /api/time/sync
     httpd_uri_t time_sync_uri = {
@@ -354,7 +366,7 @@ bool api_server_start(void)
         .handler = time_sync_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &time_sync_uri);
+    REGISTER_URI(time_sync_uri);
     
     // GET /api/wifi
     httpd_uri_t wifi_uri = {
@@ -363,7 +375,7 @@ bool api_server_start(void)
         .handler = wifi_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &wifi_uri);
+    REGISTER_URI(wifi_uri);
     
     // GET /api/info
     httpd_uri_t info_uri = {
@@ -372,7 +384,7 @@ bool api_server_start(void)
         .handler = info_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &info_uri);
+    REGISTER_URI(info_uri);
     
     // GET /api/ota/status
     httpd_uri_t ota_status_uri = {
@@ -381,7 +393,7 @@ bool api_server_start(void)
         .handler = ota_status_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &ota_status_uri);
+    REGISTER_URI(ota_status_uri);
     
     // POST /api/ota/update
     httpd_uri_t ota_update_uri = {
@@ -390,7 +402,7 @@ bool api_server_start(void)
         .handler = ota_update_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &ota_update_uri);
+    REGISTER_URI(ota_update_uri);
     
     // POST /api/ota/upload
     httpd_uri_t ota_upload_uri = {
@@ -399,7 +411,7 @@ bool api_server_start(void)
         .handler = ota_upload_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &ota_upload_uri);
+    REGISTER_URI(ota_upload_uri);
     
     // POST /api/ota/reboot
     httpd_uri_t ota_reboot_uri = {
@@ -408,7 +420,25 @@ bool api_server_start(void)
         .handler = ota_reboot_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &ota_reboot_uri);
+    REGISTER_URI(ota_reboot_uri);
+    
+    // GET /api/ota/releases - Check GitHub for updates
+    httpd_uri_t ota_releases_uri = {
+        .uri = "/api/ota/releases",
+        .method = HTTP_GET,
+        .handler = ota_releases_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(ota_releases_uri);
+    
+    // POST /api/ota/github - Start update from GitHub
+    httpd_uri_t ota_github_uri = {
+        .uri = "/api/ota/github",
+        .method = HTTP_POST,
+        .handler = ota_github_update_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(ota_github_uri);
     
     // GET /api/auth/config
     httpd_uri_t auth_config_get_uri = {
@@ -417,7 +447,7 @@ bool api_server_start(void)
         .handler = auth_config_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &auth_config_get_uri);
+    REGISTER_URI(auth_config_get_uri);
     
     // POST /api/auth/config
     httpd_uri_t auth_config_post_uri = {
@@ -426,7 +456,7 @@ bool api_server_start(void)
         .handler = auth_config_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &auth_config_post_uri);
+    REGISTER_URI(auth_config_post_uri);
     
     // GET /api/auth/status - Quick auth status check for web UI
     httpd_uri_t auth_status_uri = {
@@ -435,7 +465,7 @@ bool api_server_start(void)
         .handler = auth_status_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &auth_status_uri);
+    REGISTER_URI(auth_status_uri);
     
     // POST /api/auth/credentials
     httpd_uri_t auth_credentials_uri = {
@@ -444,7 +474,7 @@ bool api_server_start(void)
         .handler = auth_credentials_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &auth_credentials_uri);
+    REGISTER_URI(auth_credentials_uri);
     
     // GET /api/auth/apikey
     httpd_uri_t auth_apikey_uri = {
@@ -453,7 +483,7 @@ bool api_server_start(void)
         .handler = auth_apikey_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &auth_apikey_uri);
+    REGISTER_URI(auth_apikey_uri);
     
     // POST /api/auth/apikey/regenerate
     httpd_uri_t auth_apikey_regen_uri = {
@@ -462,7 +492,7 @@ bool api_server_start(void)
         .handler = auth_apikey_regenerate_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &auth_apikey_regen_uri);
+    REGISTER_URI(auth_apikey_regen_uri);
     
     // GET /api/heatpump/status
     httpd_uri_t heatpump_uri = {
@@ -471,9 +501,11 @@ bool api_server_start(void)
         .handler = heatpump_status_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &heatpump_uri);
+    REGISTER_URI(heatpump_uri);
     
-    ESP_LOGI(TAG, "HTTP server started successfully");
+    #undef REGISTER_URI
+    
+    ESP_LOGI(TAG, "HTTP server started successfully (26 URI handlers registered)");
     ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
     
     return true;
@@ -1166,6 +1198,81 @@ static esp_err_t ota_reboot_post_handler(httpd_req_t* req)
     
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
+    
+    return ESP_OK;
+}
+
+static esp_err_t ota_releases_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    ota_release_info_t info;
+    if (!ota_mgr_check_github_releases(&info)) {
+        send_json_error(req, "502 Bad Gateway", "Failed to check GitHub for updates");
+        return ESP_OK;
+    }
+    
+    ota_status_t status = ota_mgr_get_status();
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "update_available", info.update_available);
+    cJSON_AddStringToObject(root, "current_version", status.current_version);
+    cJSON_AddStringToObject(root, "latest_version", info.latest_version);
+    cJSON_AddStringToObject(root, "published_at", info.published_at);
+    
+    if (info.download_url[0] != '\0') {
+        cJSON_AddBoolToObject(root, "download_ready", true);
+    } else {
+        cJSON_AddBoolToObject(root, "download_ready", false);
+    }
+    
+    // Truncate release notes for JSON response
+    if (info.release_notes[0] != '\0') {
+        cJSON_AddStringToObject(root, "release_notes", info.release_notes);
+    }
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+static esp_err_t ota_github_update_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    const ota_release_info_t* info = ota_mgr_get_release_info();
+    if (!info->update_available) {
+        send_json_error(req, "400 Bad Request", "No update available - check for updates first");
+        return ESP_OK;
+    }
+    
+    if (!ota_mgr_start_github_update()) {
+        send_json_error(req, "409 Conflict", "OTA update already in progress or no download URL");
+        return ESP_OK;
+    }
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "status", "started");
+    cJSON_AddStringToObject(root, "message", "GitHub update started");
+    cJSON_AddStringToObject(root, "version", info->latest_version);
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
     
     return ESP_OK;
 }

@@ -67,7 +67,7 @@ extern "C" void app_main(void)
         ret = nvs_flash_init();
     }
     if (ret != ESP_OK) {
-        mclog::tagError(TAG, "Failed to initialize NVS: %d", ret);
+        mclog::tagError(TAG, "Failed to initialize NVS: {}", ret);
     }
 
     // Initialize i18n (localization) system
@@ -108,7 +108,7 @@ extern "C" void app_main(void)
     lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);
     bsp_display_backlight_on();
 
-    mclog::tagInfo(TAG, "Display initialized: %dx%d", BSP_LCD_H_RES, BSP_LCD_V_RES);
+    mclog::tagInfo(TAG, "Display initialized: {}x{}", BSP_LCD_H_RES, BSP_LCD_V_RES);
 
     // Start the startup animation
     bsp_display_lock(0);
@@ -373,7 +373,7 @@ static void on_status_bar_wifi_click(void)
 
 static void on_wifi_connect(const char* ssid, const char* password)
 {
-    mclog::tagInfo(TAG, "WiFi connect requested: SSID='%s'", ssid);
+    mclog::tagInfo(TAG, "WiFi connect requested: SSID='{}'", ssid);
     
     if (!wifi_mgr_is_initialized()) {
         settings_screen_show_error("WiFi not initialized.\nPlease try again.");
@@ -498,7 +498,7 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
 static void on_update_check_complete(bool update_available, const char* new_version)
 {
     if (update_available) {
-        mclog::tagInfo(TAG, "Firmware update available: %s", new_version);
+        mclog::tagInfo(TAG, "Firmware update available: {}", new_version ? new_version : "?");
         char msg[64];
         snprintf(msg, sizeof(msg), "Firmware v%s available", new_version ? new_version : "?");
         bsp_display_lock(0);
@@ -536,7 +536,7 @@ static void wifi_init_task(void* param)
         char password[65];
         
         if (wifi_mgr_load_credentials(ssid, sizeof(ssid), password, sizeof(password))) {
-            mclog::tagInfo(TAG, "[BG] Auto-connecting to: %s", ssid);
+            mclog::tagInfo(TAG, "[BG] Auto-connecting to: {}", ssid);
             
             // Store as pending for state callback
             strncpy(pending_ssid, ssid, sizeof(pending_ssid) - 1);

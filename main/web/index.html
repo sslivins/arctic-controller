@@ -71,6 +71,12 @@
                 // Settings - Firmware
                 firmwareUpdates: 'Firmware Updates',
                 currentVersion: 'Current Version',
+                latestVersion: 'Latest Version',
+                checkForUpdates: 'Check for Updates',
+                checking: 'Checking...',
+                updateAvailable: 'Update Available!',
+                upToDate: 'You are up to date',
+                installUpdate: 'Install Update',
                 downloading: 'Downloading',
                 updateSuccess: 'Update downloaded successfully! Ready to reboot.',
                 uploadFirmware: 'Or upload firmware file',
@@ -84,6 +90,8 @@
                 deviceRebooting: 'Device is rebooting... Please wait.',
                 deviceRebootTimeout: 'Device did not respond after reboot. Please refresh the page manually.',
                 invalidFileType: 'Invalid file type. Please select a .bin file.',
+                checkFailed: 'Failed to check for updates',
+                noDownloadUrl: 'No firmware binary found in release',
                 
                 // Settings - Security
                 security: 'Security',
@@ -178,6 +186,12 @@
                 // Settings - Firmware
                 firmwareUpdates: 'Mises à jour du firmware',
                 currentVersion: 'Version actuelle',
+                latestVersion: 'Dernière version',
+                checkForUpdates: 'Vérifier les mises à jour',
+                checking: 'Vérification...',
+                updateAvailable: 'Mise à jour disponible!',
+                upToDate: 'Vous êtes à jour',
+                installUpdate: 'Installer la mise à jour',
                 downloading: 'Téléchargement',
                 updateSuccess: 'Mise à jour téléchargée! Prêt à redémarrer.',
                 uploadFirmware: 'Ou téléverser un fichier firmware',
@@ -191,6 +205,8 @@
                 deviceRebooting: "L'appareil redémarre... Veuillez patienter.",
                 deviceRebootTimeout: "L'appareil n'a pas répondu. Actualisez la page manuellement.",
                 invalidFileType: 'Type de fichier invalide. Veuillez sélectionner un fichier .bin.',
+                checkFailed: 'Échec de la vérification des mises à jour',
+                noDownloadUrl: 'Aucun fichier binaire trouvé dans la version',
                 
                 // Settings - Security
                 security: 'Sécurité',
@@ -285,6 +301,12 @@
                 // Settings - Firmware
                 firmwareUpdates: 'Actualizaciones de firmware',
                 currentVersion: 'Versión actual',
+                latestVersion: 'Última versión',
+                checkForUpdates: 'Buscar actualizaciones',
+                checking: 'Verificando...',
+                updateAvailable: '¡Actualización disponible!',
+                upToDate: 'Está actualizado',
+                installUpdate: 'Instalar actualización',
                 downloading: 'Descargando',
                 updateSuccess: '¡Actualización descargada! Listo para reiniciar.',
                 uploadFirmware: 'O subir archivo de firmware',
@@ -298,6 +320,8 @@
                 deviceRebooting: 'El dispositivo está reiniciando... Por favor espere.',
                 deviceRebootTimeout: 'El dispositivo no respondió. Por favor actualice la página manualmente.',
                 invalidFileType: 'Tipo de archivo inválido. Por favor seleccione un archivo .bin.',
+                checkFailed: 'Error al buscar actualizaciones',
+                noDownloadUrl: 'No se encontró archivo binario en la versión',
                 
                 // Settings - Security
                 security: 'Seguridad',
@@ -970,8 +994,7 @@
                 
                 <main>
                     <!-- Dashboard Page -->
-                    <template x-if="page === 'dashboard'">
-                        <div>
+                    <div x-show="page === 'dashboard'">
                             <div class="card">
                                 <div class="card-header">
                                     <h2 x-text="t('heatPumpStatus')"></h2>
@@ -1023,11 +1046,9 @@
                                 </div>
                             </div>
                         </div>
-                    </template>
                     
                     <!-- Settings Page -->
-                    <template x-if="page === 'settings'">
-                        <div>
+                    <div x-show="page === 'settings'">
                             <!-- Device Info -->
                             <div class="card">
                                 <div class="card-header">
@@ -1123,6 +1144,68 @@
                                         <span class="value" x-text="'v' + ota.current_version"></span>
                                     </div>
                                     
+                                    <!-- GitHub Update Check -->
+                                    <div style="margin: 1rem 0; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px;">
+                                        <template x-if="!github.checked && !github.checking">
+                                            <button class="btn btn-primary" style="width: 100%;" 
+                                                    @click="checkForUpdates()" 
+                                                    :disabled="loading || ota.state === 'downloading'"
+                                                    x-text="t('checkForUpdates')"></button>
+                                        </template>
+                                        
+                                        <template x-if="github.checking">
+                                            <div style="text-align: center; color: var(--text-secondary);">
+                                                <span>🔍</span> <span x-text="t('checking')"></span>
+                                            </div>
+                                        </template>
+                                        
+                                        <template x-if="github.checked && !github.checking">
+                                            <div>
+                                                <template x-if="github.error">
+                                                    <div class="alert alert-error" x-text="github.error"></div>
+                                                </template>
+                                                
+                                                <template x-if="!github.error && github.updateAvailable">
+                                                    <div>
+                                                        <div class="alert alert-success" style="margin-bottom: 0.75rem;">
+                                                            🎉 <span x-text="t('updateAvailable')"></span>
+                                                        </div>
+                                                        <div class="info-row">
+                                                            <span class="label" x-text="t('latestVersion')"></span>
+                                                            <span class="value" style="color: var(--success);" x-text="github.latestVersion"></span>
+                                                        </div>
+                                                        <button class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;" 
+                                                                @click="startGithubUpdate()" 
+                                                                :disabled="loading || ota.state === 'downloading' || !github.downloadReady"
+                                                                x-text="t('installUpdate')"></button>
+                                                        <template x-if="!github.downloadReady">
+                                                            <div style="margin-top: 0.5rem; color: var(--warning); font-size: 0.85rem;" x-text="t('noDownloadUrl')"></div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                                
+                                                <template x-if="!github.error && !github.updateAvailable">
+                                                    <div>
+                                                        <div style="text-align: center; color: var(--success); margin-bottom: 0.75rem;">
+                                                            ✅ <span x-text="t('upToDate')"></span>
+                                                        </div>
+                                                        <button class="btn btn-secondary" style="width: 100%;" 
+                                                                @click="checkForUpdates()" 
+                                                                :disabled="loading || ota.state === 'downloading'"
+                                                                x-text="t('checkForUpdates')"></button>
+                                                    </div>
+                                                </template>
+                                                
+                                                <template x-if="github.error">
+                                                    <button class="btn btn-secondary" style="width: 100%; margin-top: 0.75rem;" 
+                                                            @click="checkForUpdates()" 
+                                                            :disabled="loading || ota.state === 'downloading'"
+                                                            x-text="t('checkForUpdates')"></button>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    
                                     <template x-if="ota.state === 'downloading'">
                                         <div>
                                             <div class="progress-bar">
@@ -1136,7 +1219,9 @@
                                     </template>
                                     
                                     <template x-if="ota.state === 'ready_to_reboot'">
-                                        <div class="alert alert-success" x-text="t('updateSuccess')"></div>
+                                        <div class="alert alert-success">
+                                            🔄 <span x-text="t('rebooting')"></span>
+                                        </div>
                                     </template>
                                     
                                     <template x-if="ota.error">
@@ -1144,7 +1229,7 @@
                                     </template>
                                     
                                     <!-- File Upload (URL updates restricted to GitHub releases for security) -->
-                                    <div class="form-group">
+                                    <div class="form-group" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
                                         <label x-text="t('uploadFirmware')"></label>
                                         
                                         <!-- Upload Progress UI -->
@@ -1197,9 +1282,7 @@
                                         </template>
                                     </div>
                                     
-                                    <template x-if="ota.state === 'ready_to_reboot'">
-                                        <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" @click="reboot()" x-text="t('rebootNow')"></button>
-                                    </template>
+                                    
                                 </div>
                             </div>
                             
@@ -1274,7 +1357,6 @@
                                 </div>
                             </div>
                         </div>
-                    </template>
                 </main>
             </div>
         </template>
@@ -1299,9 +1381,21 @@
                 heatpump: { compressor: false, fans: false, pump: false, error: null },
                 ota: { state: 'idle', progress: 0, current_version: '--' },
                 
+                // GitHub update state
+                github: {
+                    checking: false,
+                    checked: false,
+                    updateAvailable: false,
+                    latestVersion: '',
+                    releaseNotes: '',
+                    downloadReady: false,
+                    error: ''
+                },
+                
                 timeConfig: { timezone: 'EST5EDT,M3.2.0,M11.1.0', format24h: true, synced: false },
                 security: { webAuthEnabled: false, apiAuthEnabled: false, username: '', newPassword: '', apiKey: '' },
                 
+                dataLoaded: false, // Prevents saving during initial load
                 selectedFile: null,
                 uploadState: 'idle', // idle, uploading, verifying, rebooting, complete, error
                 uploadProgress: 0,
@@ -1403,16 +1497,41 @@
                         this.loadSecurity(),
                         this.loadHeatpump()
                     ]);
+                    this.dataLoaded = true;
                     this.lastUpdate = Date.now();
                 },
                 
                 startPolling() {
-                    setInterval(async () => {
-                        await this.loadStatus();
+                    // Adaptive polling - fast during OTA, normal otherwise
+                    let prevOtaState = this.ota.state;
+                    const poll = async () => {
                         await this.loadOta();
-                        await this.loadHeatpump();
-                        this.lastUpdate = Date.now();
-                    }, 5000);
+                        
+                        // Reset github update state when OTA completes (ready_to_reboot)
+                        // This ensures after reboot, the UI shows "Check for Updates" instead of stale state
+                        if (this.ota.state === 'ready_to_reboot' && prevOtaState !== 'ready_to_reboot') {
+                            this.github.checked = false;
+                            this.github.updateAvailable = false;
+                            this.github.latestVersion = '';
+                            this.github.downloadReady = false;
+                            this.github.error = '';
+                        }
+                        prevOtaState = this.ota.state;
+                        
+                        // Poll faster (500ms) when OTA is active for smooth progress
+                        const otaActive = this.ota.state === 'downloading' || this.ota.state === 'verifying' || this.ota.state === 'uploading';
+                        const interval = otaActive ? 500 : 5000;
+                        
+                        // Only load other status on slow poll interval
+                        if (!otaActive) {
+                            await this.loadStatus();
+                            await this.loadHeatpump();
+                            this.lastUpdate = Date.now();
+                        }
+                        
+                        setTimeout(poll, interval);
+                    };
+                    poll();
                 },
                 
                 async loadInfo() {
@@ -1447,9 +1566,15 @@
                     try {
                         const res = await fetch('/api/time/config');
                         const data = await res.json();
-                        // Map snake_case API response to camelCase UI model
-                        this.timeConfig.timezone = data.timezone || this.timeConfig.timezone;
-                        this.timeConfig.format24h = data.format_24h !== undefined ? data.format_24h : this.timeConfig.format24h;
+                        // Store what we're loading BEFORE setting reactive properties
+                        // This prevents race conditions with @change handlers
+                        const newTz = data.timezone || this.timeConfig.timezone;
+                        const newFormat = data.format_24h !== undefined ? data.format_24h : this.timeConfig.format24h;
+                        this._loadedTimezone = newTz;
+                        this._loadedFormat24h = newFormat;
+                        // Now set the reactive properties
+                        this.timeConfig.timezone = newTz;
+                        this.timeConfig.format24h = newFormat;
                         this.timeConfig.synced = data.synced || false;
                     } catch (e) { console.error(e); }
                 },
@@ -1482,7 +1607,59 @@
                     }
                 },
                 
+                async checkForUpdates() {
+                    this.github.checking = true;
+                    this.github.error = '';
+                    
+                    try {
+                        const res = await fetch('/api/ota/releases');
+                        if (!res.ok) {
+                            const err = await res.json();
+                            this.github.error = err.error || this.t('checkFailed');
+                        } else {
+                            const data = await res.json();
+                            this.github.updateAvailable = data.update_available;
+                            this.github.latestVersion = data.latest_version;
+                            this.github.releaseNotes = data.release_notes || '';
+                            this.github.downloadReady = data.download_ready;
+                        }
+                        this.github.checked = true;
+                    } catch (e) {
+                        console.error(e);
+                        this.github.error = this.t('checkFailed');
+                        this.github.checked = true;
+                    }
+                    
+                    this.github.checking = false;
+                },
+                
+                async startGithubUpdate() {
+                    if (!this.github.updateAvailable || !this.github.downloadReady) return;
+                    
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/api/ota/github', { method: 'POST' });
+                        if (!res.ok) {
+                            const err = await res.json();
+                            this.showToast(err.error || 'Update failed', 'error');
+                        } else {
+                            this.showToast('Update started - downloading...', 'info');
+                            // Polling will pick up the progress
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast('Failed to start update', 'error');
+                    }
+                    this.loading = false;
+                },
+                
                 async saveTimeConfig() {
+                    if (!this.dataLoaded) return; // Don't save during initial load
+                    // Only save if values actually changed from what was loaded
+                    if (this.timeConfig.timezone === this._loadedTimezone &&
+                        this.timeConfig.format24h === this._loadedFormat24h) {
+                        return;
+                    }
                     try {
                         await fetch('/api/time/config', {
                             method: 'POST',
@@ -1492,6 +1669,9 @@
                                 format_24h: this.timeConfig.format24h
                             })
                         });
+                        // Update loaded values after successful save
+                        this._loadedTimezone = this.timeConfig.timezone;
+                        this._loadedFormat24h = this.timeConfig.format24h;
                     } catch (e) { console.error(e); }
                 },
                 
