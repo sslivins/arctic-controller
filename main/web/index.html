@@ -72,6 +72,8 @@
                 firmwareUpdates: 'Firmware Updates',
                 currentVersion: 'Current Version',
                 latestVersion: 'Latest Version',
+                autoUpdate: 'Automatic Updates',
+                autoUpdateDesc: 'Install updates automatically when available',
                 checkForUpdates: 'Check for Updates',
                 checking: 'Checking...',
                 updateAvailable: 'Update Available!',
@@ -187,6 +189,8 @@
                 firmwareUpdates: 'Mises à jour du firmware',
                 currentVersion: 'Version actuelle',
                 latestVersion: 'Dernière version',
+                autoUpdate: 'Mises à jour automatiques',
+                autoUpdateDesc: 'Installer les mises à jour automatiquement',
                 checkForUpdates: 'Vérifier les mises à jour',
                 checking: 'Vérification...',
                 updateAvailable: 'Mise à jour disponible!',
@@ -302,6 +306,8 @@
                 firmwareUpdates: 'Actualizaciones de firmware',
                 currentVersion: 'Versión actual',
                 latestVersion: 'Última versión',
+                autoUpdate: 'Actualizaciones automáticas',
+                autoUpdateDesc: 'Instalar actualizaciones automáticamente',
                 checkForUpdates: 'Buscar actualizaciones',
                 checking: 'Verificando...',
                 updateAvailable: '¡Actualización disponible!',
@@ -756,11 +762,35 @@
             display: flex;
             gap: 0.5rem;
             align-items: center;
+            flex-wrap: wrap;
         }
         
         .api-key-display input {
             flex: 1;
+            min-width: 120px;
             font-family: monospace;
+        }
+        
+        .api-key-display .btn-group {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        @media (max-width: 480px) {
+            .api-key-display {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .api-key-display input {
+                width: 100%;
+            }
+            .api-key-display .btn-group {
+                justify-content: stretch;
+            }
+            .api-key-display .btn-group .btn {
+                flex: 1;
+            }
         }
         
         /* File Upload */
@@ -952,7 +982,7 @@
                     <form @submit.prevent="login()">
                         <div class="form-group">
                             <label x-text="t('username')"></label>
-                            <input type="text" x-model="loginForm.username" required>
+                            <input type="text" x-model="loginForm.username" autocapitalize="off" autocorrect="off" required>
                         </div>
                         <div class="form-group">
                             <label x-text="t('password')"></label>
@@ -1144,6 +1174,18 @@
                                         <span class="value" x-text="'v' + ota.current_version"></span>
                                     </div>
                                     
+                                    <!-- Auto-update option (not implemented yet) -->
+                                    <div class="toggle-row" style="opacity: 0.5; cursor: not-allowed;" title="Coming soon - not implemented yet">
+                                        <div class="toggle-label">
+                                            <span class="title" x-text="t('autoUpdate')"></span>
+                                            <span class="desc" x-text="t('autoUpdateDesc')"></span>
+                                        </div>
+                                        <label class="toggle">
+                                            <input type="checkbox" disabled>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    
                                     <!-- GitHub Update Check -->
                                     <div style="margin: 1rem 0; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px;">
                                         <template x-if="!github.checked && !github.checking">
@@ -1307,7 +1349,7 @@
                                         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
                                             <div class="form-group">
                                                 <label x-text="t('username')"></label>
-                                                <input type="text" x-model="security.username">
+                                                <input type="text" x-model="security.username" autocapitalize="off" autocorrect="off">
                                             </div>
                                             <div class="form-group">
                                                 <label x-text="t('newPassword')"></label>
@@ -1334,9 +1376,11 @@
                                                 <label x-text="t('apiKey')"></label>
                                                 <div class="api-key-display">
                                                     <input :type="showApiKey ? 'text' : 'password'" :value="security.apiKey" readonly x-ref="apiKeyInput">
-                                                    <button class="btn btn-secondary" @click="showApiKey = !showApiKey" x-text="showApiKey ? t('hide') : t('show')"></button>
-                                                    <button class="btn btn-secondary" @click="copyApiKey()" :title="t('copy')" x-text="t('copy')"></button>
-                                                    <button class="btn btn-secondary" @click="regenerateApiKey()" x-text="t('regenerate')"></button>
+                                                    <div class="btn-group">
+                                                        <button class="btn btn-secondary" @click="showApiKey = !showApiKey" x-text="showApiKey ? t('hide') : t('show')"></button>
+                                                        <button class="btn btn-secondary" @click="copyApiKey()" :title="t('copy')" x-text="t('copy')"></button>
+                                                        <button class="btn btn-secondary" @click="regenerateApiKey()" x-text="t('regenerate')"></button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
