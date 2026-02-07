@@ -92,6 +92,8 @@ CONFIG_LV_LOG_PRINTF=y
 CONFIG_LV_USE_PERF_MONITOR=y
 # Enable IRAM for LVGL fast memory - device is always-on, optimize for smooth UI
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+# Increase LVGL memory pool for complex screens (language change needs 2 screens in memory)
+CONFIG_LV_MEM_SIZE_KILOBYTES=128
 
 # Fonts - Reduced set to save code space
 CONFIG_LV_FONT_MONTSERRAT_12=y

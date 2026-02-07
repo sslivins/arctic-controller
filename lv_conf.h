@@ -53,7 +53,8 @@
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
     /*Size of the memory available for `lv_malloc()` in bytes (>= 2kB)*/
-    #define LV_MEM_SIZE (1024 * 1024U)          /*[bytes]*/
+    /* NOTE: In ESP-IDF, this is overridden by CONFIG_LV_MEM_SIZE_KILOBYTES in sdkconfig */
+    #define LV_MEM_SIZE (1 * 1024 * 1024U)          /*[bytes]*/
 
     /*Size of the memory expand for `lv_malloc()` in bytes*/
     #define LV_MEM_POOL_EXPAND_SIZE 0
