@@ -650,10 +650,14 @@ void settings_screen_show_language_panel(void)
 // ============================================================================
 
 static update_check_cb_t s_update_check_callback = NULL;
+static volatile bool s_update_check_running = false;
 
 static void background_update_check_task(void* arg)
 {
     (void)arg;
+    
+    // Mark as running
+    s_update_check_running = true;
     ESP_LOGI(TAG, "Background check for updates...");
     
     bool update_available = false;
@@ -709,11 +713,19 @@ static void background_update_check_task(void* arg)
         s_update_check_callback = NULL;
     }
     
+    // Mark as not running
+    s_update_check_running = false;
     vTaskDelete(NULL);
 }
 
 void settings_screen_check_for_updates_async(update_check_cb_t callback)
 {
+    // Prevent concurrent update checks
+    if (s_update_check_running) {
+        ESP_LOGW(TAG, "Update check already in progress, skipping");
+        return;
+    }
+    
     s_update_check_callback = callback;
     xTaskCreate(background_update_check_task, "bg_update_chk", 8192, NULL, 5, NULL);
 }

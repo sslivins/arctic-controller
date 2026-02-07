@@ -140,6 +140,13 @@ bool wifi_mgr_has_saved_credentials(void);
  */
 void wifi_mgr_clear_credentials(void);
 
+/**
+ * @brief Get MAC address
+ * @param mac Buffer to store MAC (6 bytes)
+ * @return true if MAC available
+ */
+bool wifi_mgr_get_mac_addr(uint8_t* mac);
+
 #ifdef __cplusplus
 }
 #endif

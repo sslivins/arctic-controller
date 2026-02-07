@@ -1,0 +1,1774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arctic Controller</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        // Web Interface Translations (independent of controller localization)
+        const translations = {
+            en: {
+                // Header & Navigation
+                appTitle: 'Arctic Controller',
+                dashboard: 'Dashboard',
+                settings: 'Settings',
+                
+                // Login
+                username: 'Username',
+                password: 'Password',
+                login: 'Login',
+                loggingIn: 'Logging in...',
+                loginFailed: 'Login failed',
+                connectionError: 'Connection error',
+                
+                // Dashboard - Heat Pump
+                heatPumpStatus: 'Heat Pump Status',
+                lastUpdated: 'Last updated',
+                compressor: 'Compressor',
+                airFlowFans: 'Air Flow Fans',
+                waterPump: 'Water Pump',
+                systemStatus: 'System Status',
+                on: 'ON',
+                off: 'OFF',
+                ok: 'OK',
+                
+                // Dashboard - System Overview
+                systemOverview: 'System Overview',
+                device: 'Device',
+                uptime: 'Uptime',
+                currentTime: 'Current Time',
+                timezone: 'Timezone',
+                
+                // Settings - Device Info
+                deviceInfo: 'Device Information',
+                firmwareVersion: 'Firmware Version',
+                platform: 'Platform',
+                freeHeap: 'Free Heap',
+                
+                // Settings - WiFi
+                wifiStatus: 'WiFi Status',
+                network: 'Network',
+                signalStrength: 'Signal Strength',
+                ipAddress: 'IP Address',
+                hostname: 'Hostname',
+                notConnected: 'Not connected',
+                signalExcellent: 'Excellent',
+                signalGood: 'Good',
+                signalFair: 'Fair',
+                signalWeak: 'Weak',
+                signalPoor: 'Poor',
+                
+                // Settings - Time
+                timeSettings: 'Time Settings',
+                ntpSync: 'NTP Sync',
+                synced: 'Synced',
+                notSynced: 'Not synced',
+                format24h: '24-Hour Format',
+                format24hDesc: 'Display time in 24-hour format',
+                syncNow: 'Sync Now',
+                
+                // Settings - Firmware
+                firmwareUpdates: 'Firmware Updates',
+                currentVersion: 'Current Version',
+                downloading: 'Downloading',
+                updateSuccess: 'Update downloaded successfully! Ready to reboot.',
+                uploadFirmware: 'Or upload firmware file',
+                dragDropFile: 'Click or drag .bin file here',
+                uploadInstall: 'Upload & Install',
+                rebootNow: 'Reboot Now',
+                uploading: 'Uploading firmware...',
+                verifying: 'Upload complete! Verifying...',
+                rebooting: 'Rebooting device...',
+                updateSuccessful: 'Update successful! Refreshing page...',
+                deviceRebooting: 'Device is rebooting... Please wait.',
+                deviceRebootTimeout: 'Device did not respond after reboot. Please refresh the page manually.',
+                invalidFileType: 'Invalid file type. Please select a .bin file.',
+                
+                // Settings - Security
+                security: 'Security',
+                webAuth: 'Web Interface Authentication',
+                webAuthDesc: 'Require login to access this interface',
+                newPassword: 'New Password',
+                passwordPlaceholder: 'Leave blank to keep current',
+                saveCredentials: 'Save Credentials',
+                credentialsSaved: 'Credentials saved',
+                credentialsFailed: 'Failed to save credentials',
+                apiAuth: 'API Key Authentication',
+                apiAuthDesc: 'Require X-API-Key header for API requests',
+                apiKey: 'API Key',
+                show: 'Show',
+                hide: 'Hide',
+                copy: 'Copy',
+                copied: 'Copied!',
+                copyFailed: 'Copy failed. Please select and copy manually.',
+                regenerate: 'Regenerate',
+                regenerateConfirm: 'Are you sure? Existing API integrations will stop working.',
+                
+                // Settings - System
+                system: 'System',
+                systemDesc: 'Restart the controller. All active connections will be lost.',
+                rebootController: 'Reboot Controller',
+                rebootConfirm: 'Reboot the device now?',
+                rebootingMsg: 'Device is rebooting. Please wait...',
+                
+                // Language
+                language: 'Language'
+            },
+            fr: {
+                // Header & Navigation
+                appTitle: 'Contrôleur Arctic',
+                dashboard: 'Tableau de bord',
+                settings: 'Paramètres',
+                
+                // Login
+                username: "Nom d'utilisateur",
+                password: 'Mot de passe',
+                login: 'Connexion',
+                loggingIn: 'Connexion...',
+                loginFailed: 'Échec de la connexion',
+                connectionError: 'Erreur de connexion',
+                
+                // Dashboard - Heat Pump
+                heatPumpStatus: 'État de la pompe à chaleur',
+                lastUpdated: 'Dernière mise à jour',
+                compressor: 'Compresseur',
+                airFlowFans: 'Ventilateurs',
+                waterPump: "Pompe à eau",
+                systemStatus: 'État du système',
+                on: 'MARCHE',
+                off: 'ARRÊT',
+                ok: 'OK',
+                
+                // Dashboard - System Overview
+                systemOverview: 'Aperçu du système',
+                device: 'Appareil',
+                uptime: 'Temps de fonctionnement',
+                currentTime: 'Heure actuelle',
+                timezone: 'Fuseau horaire',
+                
+                // Settings - Device Info
+                deviceInfo: "Informations sur l'appareil",
+                firmwareVersion: 'Version du firmware',
+                platform: 'Plateforme',
+                freeHeap: 'Mémoire libre',
+                
+                // Settings - WiFi
+                wifiStatus: 'État WiFi',
+                network: 'Réseau',
+                signalStrength: 'Force du signal',
+                ipAddress: 'Adresse IP',
+                hostname: "Nom d'hôte",
+                notConnected: 'Non connecté',
+                signalExcellent: 'Excellent',
+                signalGood: 'Bon',
+                signalFair: 'Moyen',
+                signalWeak: 'Faible',
+                signalPoor: 'Très faible',
+                
+                // Settings - Time
+                timeSettings: "Paramètres de l'heure",
+                ntpSync: 'Synchronisation NTP',
+                synced: 'Synchronisé',
+                notSynced: 'Non synchronisé',
+                format24h: 'Format 24 heures',
+                format24hDesc: "Afficher l'heure au format 24 heures",
+                syncNow: 'Synchroniser',
+                
+                // Settings - Firmware
+                firmwareUpdates: 'Mises à jour du firmware',
+                currentVersion: 'Version actuelle',
+                downloading: 'Téléchargement',
+                updateSuccess: 'Mise à jour téléchargée! Prêt à redémarrer.',
+                uploadFirmware: 'Ou téléverser un fichier firmware',
+                dragDropFile: 'Cliquez ou glissez un fichier .bin ici',
+                uploadInstall: 'Téléverser et installer',
+                rebootNow: 'Redémarrer',
+                uploading: 'Téléversement du firmware...',
+                verifying: 'Téléversement terminé! Vérification...',
+                rebooting: "Redémarrage de l'appareil...",
+                updateSuccessful: 'Mise à jour réussie! Actualisation...',
+                deviceRebooting: "L'appareil redémarre... Veuillez patienter.",
+                deviceRebootTimeout: "L'appareil n'a pas répondu. Actualisez la page manuellement.",
+                invalidFileType: 'Type de fichier invalide. Veuillez sélectionner un fichier .bin.',
+                
+                // Settings - Security
+                security: 'Sécurité',
+                webAuth: "Authentification de l'interface web",
+                webAuthDesc: 'Exiger une connexion pour accéder à cette interface',
+                newPassword: 'Nouveau mot de passe',
+                passwordPlaceholder: 'Laisser vide pour conserver le mot de passe actuel',
+                saveCredentials: 'Enregistrer',
+                credentialsSaved: 'Identifiants enregistrés',
+                credentialsFailed: "Échec de l'enregistrement des identifiants",
+                apiAuth: 'Authentification par clé API',
+                apiAuthDesc: "Exiger l'en-tête X-API-Key pour les requêtes API",
+                apiKey: 'Clé API',
+                show: 'Afficher',
+                hide: 'Masquer',
+                copy: 'Copier',
+                copied: 'Copié!',
+                copyFailed: 'Échec de la copie. Veuillez sélectionner et copier manuellement.',
+                regenerate: 'Régénérer',
+                regenerateConfirm: 'Êtes-vous sûr? Les intégrations API existantes cesseront de fonctionner.',
+                
+                // Settings - System
+                system: 'Système',
+                systemDesc: 'Redémarrer le contrôleur. Toutes les connexions actives seront perdues.',
+                rebootController: 'Redémarrer le contrôleur',
+                rebootConfirm: "Redémarrer l'appareil maintenant?",
+                rebootingMsg: "L'appareil redémarre. Veuillez patienter...",
+                
+                // Language
+                language: 'Langue'
+            },
+            es: {
+                // Header & Navigation
+                appTitle: 'Controlador Arctic',
+                dashboard: 'Panel',
+                settings: 'Configuración',
+                
+                // Login
+                username: 'Usuario',
+                password: 'Contraseña',
+                login: 'Iniciar sesión',
+                loggingIn: 'Iniciando sesión...',
+                loginFailed: 'Error de inicio de sesión',
+                connectionError: 'Error de conexión',
+                
+                // Dashboard - Heat Pump
+                heatPumpStatus: 'Estado de la bomba de calor',
+                lastUpdated: 'Última actualización',
+                compressor: 'Compresor',
+                airFlowFans: 'Ventiladores',
+                waterPump: 'Bomba de agua',
+                systemStatus: 'Estado del sistema',
+                on: 'ENCENDIDO',
+                off: 'APAGADO',
+                ok: 'OK',
+                
+                // Dashboard - System Overview
+                systemOverview: 'Resumen del sistema',
+                device: 'Dispositivo',
+                uptime: 'Tiempo activo',
+                currentTime: 'Hora actual',
+                timezone: 'Zona horaria',
+                
+                // Settings - Device Info
+                deviceInfo: 'Información del dispositivo',
+                firmwareVersion: 'Versión del firmware',
+                platform: 'Plataforma',
+                freeHeap: 'Memoria libre',
+                
+                // Settings - WiFi
+                wifiStatus: 'Estado WiFi',
+                network: 'Red',
+                signalStrength: 'Intensidad de señal',
+                ipAddress: 'Dirección IP',
+                hostname: 'Nombre de host',
+                notConnected: 'No conectado',
+                signalExcellent: 'Excelente',
+                signalGood: 'Buena',
+                signalFair: 'Regular',
+                signalWeak: 'Débil',
+                signalPoor: 'Muy débil',
+                
+                // Settings - Time
+                timeSettings: 'Configuración de hora',
+                ntpSync: 'Sincronización NTP',
+                synced: 'Sincronizado',
+                notSynced: 'No sincronizado',
+                format24h: 'Formato 24 horas',
+                format24hDesc: 'Mostrar la hora en formato de 24 horas',
+                syncNow: 'Sincronizar ahora',
+                
+                // Settings - Firmware
+                firmwareUpdates: 'Actualizaciones de firmware',
+                currentVersion: 'Versión actual',
+                downloading: 'Descargando',
+                updateSuccess: '¡Actualización descargada! Listo para reiniciar.',
+                uploadFirmware: 'O subir archivo de firmware',
+                dragDropFile: 'Haga clic o arrastre un archivo .bin aquí',
+                uploadInstall: 'Subir e instalar',
+                rebootNow: 'Reiniciar ahora',
+                uploading: 'Subiendo firmware...',
+                verifying: '¡Subida completada! Verificando...',
+                rebooting: 'Reiniciando dispositivo...',
+                updateSuccessful: '¡Actualización exitosa! Actualizando página...',
+                deviceRebooting: 'El dispositivo está reiniciando... Por favor espere.',
+                deviceRebootTimeout: 'El dispositivo no respondió. Por favor actualice la página manualmente.',
+                invalidFileType: 'Tipo de archivo inválido. Por favor seleccione un archivo .bin.',
+                
+                // Settings - Security
+                security: 'Seguridad',
+                webAuth: 'Autenticación de interfaz web',
+                webAuthDesc: 'Requerir inicio de sesión para acceder a esta interfaz',
+                newPassword: 'Nueva contraseña',
+                passwordPlaceholder: 'Dejar en blanco para mantener la actual',
+                saveCredentials: 'Guardar credenciales',
+                credentialsSaved: 'Credenciales guardadas',
+                credentialsFailed: 'Error al guardar las credenciales',
+                apiAuth: 'Autenticación por clave API',
+                apiAuthDesc: 'Requerir encabezado X-API-Key para solicitudes API',
+                apiKey: 'Clave API',
+                show: 'Mostrar',
+                hide: 'Ocultar',
+                copy: 'Copiar',
+                copied: '¡Copiado!',
+                copyFailed: 'Error al copiar. Por favor seleccione y copie manualmente.',
+                regenerate: 'Regenerar',
+                regenerateConfirm: '¿Está seguro? Las integraciones API existentes dejarán de funcionar.',
+                
+                // Settings - System
+                system: 'Sistema',
+                systemDesc: 'Reiniciar el controlador. Todas las conexiones activas se perderán.',
+                rebootController: 'Reiniciar controlador',
+                rebootConfirm: '¿Reiniciar el dispositivo ahora?',
+                rebootingMsg: 'El dispositivo está reiniciando. Por favor espere...',
+                
+                // Language
+                language: 'Idioma'
+            }
+        };
+    </script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent: #00d4aa;
+            --accent-dim: #00a883;
+            --error: #f85149;
+            --warning: #d29922;
+            --success: #3fb950;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+        
+        /* Layout */
+        .app {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .logo svg {
+            width: 32px;
+            height: 32px;
+            fill: var(--accent);
+        }
+        
+        .logo h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        
+        .version {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        
+        nav {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 0 1.5rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        nav button {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            padding: 1rem 1.25rem;
+            cursor: pointer;
+            font-size: 0.9rem;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        nav button:hover {
+            color: var(--text-primary);
+        }
+        
+        nav button.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        
+        main {
+            flex: 1;
+            padding: 1.5rem;
+            max-width: 900px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        
+        /* Cards */
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+        
+        .card-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .card-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        
+        .card-body {
+            padding: 1.25rem;
+        }
+        
+        /* Status Grid */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+        
+        .status-item {
+            text-align: center;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+        
+        .status-item .label {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .status-item .value {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        
+        .status-item .value.on {
+            color: var(--success);
+        }
+        
+        .status-item .value.off {
+            color: var(--text-secondary);
+        }
+        
+        .status-item .value.error {
+            color: var(--error);
+        }
+        
+        /* Forms */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-group label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.625rem 0.875rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        .form-row {
+            display: flex;
+            gap: 1rem;
+            align-items: flex-end;
+        }
+        
+        .form-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.625rem 1.25rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: var(--accent);
+            color: var(--bg-primary);
+        }
+        
+        .btn-primary:hover {
+            background: var(--accent-dim);
+        }
+        
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            border-color: var(--border);
+            color: var(--text-primary);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+        
+        .btn-danger {
+            background: var(--error);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            opacity: 0.9;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* Toggle Switch */
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .toggle-row:last-child {
+            border-bottom: none;
+        }
+        
+        .toggle-label {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .toggle-label .title {
+            font-weight: 500;
+        }
+        
+        .toggle-label .desc {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+        
+        .toggle {
+            position: relative;
+            width: 44px;
+            height: 24px;
+        }
+        
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: var(--bg-tertiary);
+            border-radius: 24px;
+            transition: 0.2s;
+        }
+        
+        .toggle-slider:before {
+            content: '';
+            position: absolute;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.2s;
+        }
+        
+        .toggle input:checked + .toggle-slider {
+            background: var(--accent);
+        }
+        
+        .toggle input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+        
+        /* Progress Bar */
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        
+        .progress-bar .fill {
+            height: 100%;
+            background: var(--accent);
+            transition: width 0.3s;
+        }
+        
+        .progress-bar .fill.success {
+            background: var(--success);
+        }
+        
+        .progress-bar .fill.error {
+            background: var(--error);
+        }
+        
+        /* Info Row */
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.625rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .info-row:last-child {
+            border-bottom: none;
+        }
+        
+        .info-row .label {
+            color: var(--text-secondary);
+        }
+        
+        .info-row .value {
+            font-weight: 500;
+        }
+        
+        .info-row .value.success {
+            color: var(--success);
+        }
+        
+        /* Alerts */
+        .alert {
+            padding: 0.875rem 1rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .alert-success {
+            background: rgba(63, 185, 80, 0.15);
+            border: 1px solid var(--success);
+            color: var(--success);
+        }
+        
+        .alert-error {
+            background: rgba(248, 81, 73, 0.15);
+            border: 1px solid var(--error);
+            color: var(--error);
+        }
+        
+        .alert-warning {
+            background: rgba(210, 153, 34, 0.15);
+            border: 1px solid var(--warning);
+            color: var(--warning);
+        }
+        
+        /* API Key Display */
+        .api-key-display {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .api-key-display input {
+            flex: 1;
+            font-family: monospace;
+        }
+        
+        /* File Upload */
+        .file-upload {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .file-upload:hover {
+            border-color: var(--accent);
+            background: rgba(0, 212, 170, 0.05);
+        }
+        
+        .file-upload.dragover {
+            border-color: var(--accent);
+            background: rgba(0, 212, 170, 0.1);
+        }
+        
+        .file-upload input {
+            display: none;
+        }
+        
+        .file-upload .icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .file-upload .text {
+            color: var(--text-secondary);
+        }
+        
+        .file-upload .selected {
+            color: var(--accent);
+            margin-top: 0.5rem;
+        }
+        
+        /* Responsive */
+        @media (max-width: 600px) {
+            header {
+                flex-direction: column;
+                gap: 0.5rem;
+                text-align: center;
+            }
+            
+            nav {
+                overflow-x: auto;
+                justify-content: flex-start;
+            }
+            
+            .form-row {
+                flex-direction: column;
+            }
+            
+            .status-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        /* Login Page */
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        
+        .login-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 2rem;
+            width: 100%;
+            max-width: 400px;
+        }
+        
+        .login-box h1 {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+        
+        .login-box .btn {
+            width: 100%;
+            justify-content: center;
+        }
+        
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .toast {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            min-width: 200px;
+            max-width: 350px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            animation: slideIn 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .toast.success { border-left: 3px solid var(--success); }
+        .toast.error { border-left: 3px solid var(--error); }
+        .toast.info { border-left: 3px solid var(--accent); }
+        
+        .toast.hiding {
+            animation: slideOut 0.3s ease forwards;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+        
+        /* Language Selector */
+        .lang-selector {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .lang-selector select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            padding: 0.375rem 0.625rem;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        
+        .lang-selector select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div x-data="app()" x-init="init()">
+        <!-- Toast Container -->
+        <div class="toast-container">
+            <template x-for="toast in toasts" :key="toast.id">
+                <div class="toast" :class="[toast.type, toast.hiding ? 'hiding' : '']">
+                    <span x-text="toast.message"></span>
+                </div>
+            </template>
+        </div>
+        
+        <!-- Login Page -->
+        <template x-if="requiresLogin && !isLoggedIn">
+            <div class="login-container">
+                <div class="login-box">
+                    <h1>🌡️ <span x-text="t('appTitle')"></span></h1>
+                    <div class="lang-selector" style="justify-content: center; margin-bottom: 1rem;">
+                        <select x-model="lang" @change="setLanguage(lang)">
+                            <option value="en">English</option>
+                            <option value="fr">Français</option>
+                            <option value="es">Español</option>
+                        </select>
+                    </div>
+                    <template x-if="loginError">
+                        <div class="alert alert-error" x-text="loginError"></div>
+                    </template>
+                    <form @submit.prevent="login()">
+                        <div class="form-group">
+                            <label x-text="t('username')"></label>
+                            <input type="text" x-model="loginForm.username" required>
+                        </div>
+                        <div class="form-group">
+                            <label x-text="t('password')"></label>
+                            <input type="password" x-model="loginForm.password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary" :disabled="loading">
+                            <span x-show="loading" x-text="t('loggingIn')"></span>
+                            <span x-show="!loading" x-text="t('login')"></span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </template>
+        
+        <!-- Main App -->
+        <template x-if="!requiresLogin || isLoggedIn">
+            <div class="app">
+                <header>
+                    <div class="logo">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                        <h1 x-text="t('appTitle')"></h1>
+                    </div>
+                    <div class="header-right">
+                        <div class="lang-selector">
+                            <select x-model="lang" @change="setLanguage(lang)">
+                                <option value="en">English</option>
+                                <option value="fr">Français</option>
+                                <option value="es">Español</option>
+                            </select>
+                        </div>
+                        <span class="version" x-text="'v' + info.version"></span>
+                    </div>
+                </header>
+                
+                <nav>
+                    <button :class="{ active: page === 'dashboard' }" @click="page = 'dashboard'" x-text="t('dashboard')"></button>
+                    <button :class="{ active: page === 'settings' }" @click="page = 'settings'" x-text="t('settings')"></button>
+                </nav>
+                
+                <main>
+                    <!-- Dashboard Page -->
+                    <template x-if="page === 'dashboard'">
+                        <div>
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('heatPumpStatus')"></h2>
+                                    <span class="version" x-text="t('lastUpdated') + ': ' + formatTime(lastUpdate)"></span>
+                                </div>
+                                <div class="card-body">
+                                    <div class="status-grid">
+                                        <div class="status-item">
+                                            <div class="label" x-text="t('compressor')"></div>
+                                            <div class="value" :class="heatpump.compressor ? 'on' : 'off'" x-text="heatpump.compressor ? t('on') : t('off')"></div>
+                                        </div>
+                                        <div class="status-item">
+                                            <div class="label" x-text="t('airFlowFans')"></div>
+                                            <div class="value" :class="heatpump.fans ? 'on' : 'off'" x-text="heatpump.fans ? t('on') : t('off')"></div>
+                                        </div>
+                                        <div class="status-item">
+                                            <div class="label" x-text="t('waterPump')"></div>
+                                            <div class="value" :class="heatpump.pump ? 'on' : 'off'" x-text="heatpump.pump ? t('on') : t('off')"></div>
+                                        </div>
+                                        <div class="status-item">
+                                            <div class="label" x-text="t('systemStatus')"></div>
+                                            <div class="value" :class="heatpump.error ? 'error' : 'on'" x-text="heatpump.error || t('ok')"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('systemOverview')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('device')"></span>
+                                        <span class="value" x-text="info.hostname + '.local'"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('uptime')"></span>
+                                        <span class="value" x-text="formatUptime(status.uptime_ms)"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('currentTime')"></span>
+                                        <span class="value" x-text="status.time?.local || '--'"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('timezone')"></span>
+                                        <span class="value" x-text="status.time?.timezone || '--'"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    
+                    <!-- Settings Page -->
+                    <template x-if="page === 'settings'">
+                        <div>
+                            <!-- Device Info -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('deviceInfo')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('firmwareVersion')"></span>
+                                        <span class="value" x-text="'v' + info.version"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('platform')"></span>
+                                        <span class="value" x-text="info.platform"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('freeHeap')"></span>
+                                        <span class="value" x-text="formatBytes(info.free_heap)"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('uptime')"></span>
+                                        <span class="value" x-text="formatUptime(status.uptime_ms)"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- WiFi Status -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('wifiStatus')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('network')"></span>
+                                        <span class="value" x-text="wifi.ssid || t('notConnected')"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('signalStrength')"></span>
+                                        <span class="value" x-text="wifi.rssi ? wifi.rssi + ' dBm (' + getSignalStrength(wifi.rssi) + ')' : '--'"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('ipAddress')"></span>
+                                        <span class="value" x-text="wifi.ip || '--'"></span>
+                                    </div>
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('hostname')"></span>
+                                        <span class="value" x-text="wifi.hostname ? wifi.hostname + '.local' : '--'"></span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Time Settings -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('timeSettings')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('ntpSync')"></span>
+                                        <span class="value" :class="timeConfig.synced ? 'success' : ''" x-text="timeConfig.synced ? t('synced') : t('notSynced')"></span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label x-text="t('timezone')"></label>
+                                        <select x-model="timeConfig.timezone" @change="saveTimeConfig()">
+                                            <template x-for="tz in timezones" :key="tz.value">
+                                                <option :value="tz.value" x-text="tz.name"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <div class="toggle-row">
+                                        <div class="toggle-label">
+                                            <span class="title" x-text="t('format24h')"></span>
+                                            <span class="desc" x-text="t('format24hDesc')"></span>
+                                        </div>
+                                        <label class="toggle">
+                                            <input type="checkbox" x-model="timeConfig.format24h" @change="saveTimeConfig()">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div style="margin-top: 1rem;">
+                                        <button class="btn btn-secondary" @click="syncTime()" :disabled="loading" x-text="t('syncNow')"></button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Firmware Updates -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('firmwareUpdates')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="info-row">
+                                        <span class="label" x-text="t('currentVersion')"></span>
+                                        <span class="value" x-text="'v' + ota.current_version"></span>
+                                    </div>
+                                    
+                                    <template x-if="ota.state === 'downloading'">
+                                        <div>
+                                            <div class="progress-bar">
+                                                <div class="fill" :style="'width: ' + ota.progress + '%'"></div>
+                                            </div>
+                                            <div style="text-align: center; color: var(--text-secondary);">
+                                                <span x-text="t('downloading')"></span>: <span x-text="ota.progress + '%'"></span>
+                                                (<span x-text="formatBytes(ota.bytes_downloaded)"></span> / <span x-text="formatBytes(ota.total_bytes)"></span>)
+                                            </div>
+                                        </div>
+                                    </template>
+                                    
+                                    <template x-if="ota.state === 'ready_to_reboot'">
+                                        <div class="alert alert-success" x-text="t('updateSuccess')"></div>
+                                    </template>
+                                    
+                                    <template x-if="ota.error">
+                                        <div class="alert alert-error" x-text="ota.error"></div>
+                                    </template>
+                                    
+                                    <!-- File Upload (URL updates restricted to GitHub releases for security) -->
+                                    <div class="form-group">
+                                        <label x-text="t('uploadFirmware')"></label>
+                                        
+                                        <!-- Upload Progress UI -->
+                                        <template x-if="uploadState !== 'idle'">
+                                            <div style="margin-bottom: 1rem;">
+                                                <div class="progress-bar">
+                                                    <div class="fill" :class="{ 
+                                                        'success': uploadState === 'complete',
+                                                        'error': uploadState === 'error'
+                                                    }" :style="'width: ' + uploadProgress + '%'"></div>
+                                                </div>
+                                                <div style="text-align: center; margin-top: 0.5rem; color: var(--text-secondary);">
+                                                    <template x-if="uploadState === 'uploading'">
+                                                        <span>📤 <span x-text="uploadStatus"></span></span>
+                                                    </template>
+                                                    <template x-if="uploadState === 'verifying'">
+                                                        <span>🔍 <span x-text="uploadStatus"></span></span>
+                                                    </template>
+                                                    <template x-if="uploadState === 'rebooting'">
+                                                        <span>🔄 <span x-text="uploadStatus"></span></span>
+                                                    </template>
+                                                    <template x-if="uploadState === 'complete'">
+                                                        <span style="color: var(--success);">✅ <span x-text="uploadStatus"></span></span>
+                                                    </template>
+                                                    <template x-if="uploadState === 'error'">
+                                                        <span style="color: var(--error);">❌ <span x-text="uploadError"></span></span>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        
+                                        <!-- File Selector (only show when not actively uploading) -->
+                                        <template x-if="uploadState === 'idle' || uploadState === 'error'">
+                                            <div>
+                                                <div class="file-upload" 
+                                                     @click="$refs.fileInput.click()"
+                                                     @dragover.prevent="$el.classList.add('dragover')"
+                                                     @dragleave="$el.classList.remove('dragover')"
+                                                     @drop.prevent="handleFileDrop($event)">
+                                                    <input type="file" x-ref="fileInput" accept=".bin" @change="handleFileSelect($event)">
+                                                    <div class="icon">📁</div>
+                                                    <div class="text" x-text="t('dragDropFile')"></div>
+                                                    <div class="selected" x-show="selectedFile" x-text="selectedFile?.name"></div>
+                                                </div>
+                                                <button class="btn btn-primary" style="margin-top: 0.5rem; width: 100%;" 
+                                                        @click="startOtaUpload()" 
+                                                        :disabled="!selectedFile || loading || ota.state === 'downloading'"
+                                                        x-text="t('uploadInstall')"></button>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    
+                                    <template x-if="ota.state === 'ready_to_reboot'">
+                                        <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" @click="reboot()" x-text="t('rebootNow')"></button>
+                                    </template>
+                                </div>
+                            </div>
+                            
+                            <!-- Security -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('security')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="toggle-row">
+                                        <div class="toggle-label">
+                                            <span class="title" x-text="t('webAuth')"></span>
+                                            <span class="desc" x-text="t('webAuthDesc')"></span>
+                                        </div>
+                                        <label class="toggle">
+                                            <input type="checkbox" x-model="security.webAuthEnabled" @change="saveSecurityConfig()">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    
+                                    <template x-if="security.webAuthEnabled">
+                                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                                            <div class="form-group">
+                                                <label x-text="t('username')"></label>
+                                                <input type="text" x-model="security.username">
+                                            </div>
+                                            <div class="form-group">
+                                                <label x-text="t('newPassword')"></label>
+                                                <input type="password" x-model="security.newPassword" :placeholder="t('passwordPlaceholder')">
+                                            </div>
+                                            <button class="btn btn-secondary" @click="saveCredentials()" :disabled="loading" x-text="t('saveCredentials')"></button>
+                                        </div>
+                                    </template>
+                                    
+                                    <div class="toggle-row" style="margin-top: 1rem;">
+                                        <div class="toggle-label">
+                                            <span class="title" x-text="t('apiAuth')"></span>
+                                            <span class="desc" x-text="t('apiAuthDesc')"></span>
+                                        </div>
+                                        <label class="toggle">
+                                            <input type="checkbox" x-model="security.apiAuthEnabled" @change="saveSecurityConfig()">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    
+                                    <template x-if="security.apiAuthEnabled">
+                                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                                            <div class="form-group">
+                                                <label x-text="t('apiKey')"></label>
+                                                <div class="api-key-display">
+                                                    <input :type="showApiKey ? 'text' : 'password'" :value="security.apiKey" readonly x-ref="apiKeyInput">
+                                                    <button class="btn btn-secondary" @click="showApiKey = !showApiKey" x-text="showApiKey ? t('hide') : t('show')"></button>
+                                                    <button class="btn btn-secondary" @click="copyApiKey()" :title="t('copy')" x-text="t('copy')"></button>
+                                                    <button class="btn btn-secondary" @click="regenerateApiKey()" x-text="t('regenerate')"></button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            
+                            <!-- Reboot Controller -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('system')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <p style="color: var(--text-secondary); margin-bottom: 1rem;" x-text="t('systemDesc')"></p>
+                                    <button class="btn btn-secondary" @click="reboot()" :disabled="loading" style="width: 100%;">
+                                        🔄 <span x-text="t('rebootController')"></span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                </main>
+            </div>
+        </template>
+    </div>
+    
+    <script>
+        function app() {
+            return {
+                page: 'dashboard',
+                loading: false,
+                requiresLogin: false,
+                isLoggedIn: false,
+                lastUpdate: null,
+                lang: localStorage.getItem('arctic_lang') || navigator.language.slice(0, 2) || 'en',
+                
+                loginForm: { username: '', password: '' },
+                loginError: '',
+                
+                info: { version: '--', platform: '--', hostname: 'arctic', free_heap: 0 },
+                status: { uptime_ms: 0, time: {} },
+                wifi: {},
+                heatpump: { compressor: false, fans: false, pump: false, error: null },
+                ota: { state: 'idle', progress: 0, current_version: '--' },
+                
+                timeConfig: { timezone: 'EST5EDT,M3.2.0,M11.1.0', format24h: true, synced: false },
+                security: { webAuthEnabled: false, apiAuthEnabled: false, username: '', newPassword: '', apiKey: '' },
+                
+                selectedFile: null,
+                uploadState: 'idle', // idle, uploading, verifying, rebooting, complete, error
+                uploadProgress: 0,
+                uploadStatus: '',
+                uploadError: '',
+                showApiKey: false,
+                
+                toasts: [],
+                toastId: 0,
+                
+                timezones: [
+                    { name: 'US Eastern (EST/EDT)', value: 'EST5EDT,M3.2.0,M11.1.0' },
+                    { name: 'US Central (CST/CDT)', value: 'CST6CDT,M3.2.0,M11.1.0' },
+                    { name: 'US Mountain (MST/MDT)', value: 'MST7MDT,M3.2.0,M11.1.0' },
+                    { name: 'US Pacific (PST/PDT)', value: 'PST8PDT,M3.2.0,M11.1.0' },
+                    { name: 'US Alaska', value: 'AKST9AKDT,M3.2.0,M11.1.0' },
+                    { name: 'US Hawaii', value: 'HST10' },
+                    { name: 'US Arizona (no DST)', value: 'MST7' },
+                    { name: 'Canada Atlantic', value: 'AST4ADT,M3.2.0,M11.1.0' },
+                    { name: 'Canada Newfoundland', value: 'NST3:30NDT,M3.2.0,M11.1.0' },
+                    { name: 'UK / London (GMT/BST)', value: 'GMT0BST,M3.5.0/1,M10.5.0' },
+                    { name: 'Central Europe (CET/CEST)', value: 'CET-1CEST,M3.5.0,M10.5.0/3' },
+                    { name: 'Eastern Europe (EET/EEST)', value: 'EET-2EEST,M3.5.0/3,M10.5.0/4' },
+                    { name: 'Japan (JST)', value: 'JST-9' },
+                    { name: 'China (CST)', value: 'CST-8' },
+                    { name: 'India (IST)', value: 'IST-5:30' },
+                    { name: 'Korea (KST)', value: 'KST-9' },
+                    { name: 'Singapore/HK', value: 'SGT-8' },
+                    { name: 'Australia Eastern (AEST)', value: 'AEST-10AEDT,M10.1.0,M4.1.0/3' },
+                    { name: 'Australia Central', value: 'ACST-9:30ACDT,M10.1.0,M4.1.0/3' },
+                    { name: 'Australia Western', value: 'AWST-8' },
+                    { name: 'UTC (No offset)', value: 'UTC0' }
+                ],
+                
+                async init() {
+                    // Normalize language code
+                    if (!translations[this.lang]) {
+                        this.lang = 'en';
+                    }
+                    await this.checkAuth();
+                    if (!this.requiresLogin || this.isLoggedIn) {
+                        await this.loadAll();
+                        this.startPolling();
+                    }
+                },
+                
+                // Translation helper
+                t(key) {
+                    const langData = translations[this.lang] || translations['en'];
+                    return langData[key] || translations['en'][key] || key;
+                },
+                
+                setLanguage(lang) {
+                    this.lang = lang;
+                    localStorage.setItem('arctic_lang', lang);
+                },
+                
+                async checkAuth() {
+                    try {
+                        const res = await fetch('/api/auth/status');
+                        const data = await res.json();
+                        this.requiresLogin = data.web_auth_enabled;
+                        this.isLoggedIn = data.session_valid;
+                    } catch (e) {
+                        console.error('Auth check failed:', e);
+                    }
+                },
+                
+                async login() {
+                    this.loading = true;
+                    this.loginError = '';
+                    try {
+                        const res = await fetch('/login', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.loginForm)
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                            this.isLoggedIn = true;
+                            await this.loadAll();
+                            this.startPolling();
+                        } else {
+                            this.loginError = data.error || this.t('loginFailed');
+                        }
+                    } catch (e) {
+                        this.loginError = this.t('connectionError');
+                    }
+                    this.loading = false;
+                },
+                
+                async loadAll() {
+                    await Promise.all([
+                        this.loadInfo(),
+                        this.loadStatus(),
+                        this.loadWifi(),
+                        this.loadOta(),
+                        this.loadTimeConfig(),
+                        this.loadSecurity(),
+                        this.loadHeatpump()
+                    ]);
+                    this.lastUpdate = Date.now();
+                },
+                
+                startPolling() {
+                    setInterval(async () => {
+                        await this.loadStatus();
+                        await this.loadOta();
+                        await this.loadHeatpump();
+                        this.lastUpdate = Date.now();
+                    }, 5000);
+                },
+                
+                async loadInfo() {
+                    try {
+                        const res = await fetch('/api/info');
+                        this.info = await res.json();
+                    } catch (e) { console.error(e); }
+                },
+                
+                async loadStatus() {
+                    try {
+                        const res = await fetch('/api/status');
+                        this.status = await res.json();
+                    } catch (e) { console.error(e); }
+                },
+                
+                async loadWifi() {
+                    try {
+                        const res = await fetch('/api/wifi');
+                        this.wifi = await res.json();
+                    } catch (e) { console.error(e); }
+                },
+                
+                async loadOta() {
+                    try {
+                        const res = await fetch('/api/ota/status');
+                        this.ota = await res.json();
+                    } catch (e) { console.error(e); }
+                },
+                
+                async loadTimeConfig() {
+                    try {
+                        const res = await fetch('/api/time/config');
+                        const data = await res.json();
+                        // Map snake_case API response to camelCase UI model
+                        this.timeConfig.timezone = data.timezone || this.timeConfig.timezone;
+                        this.timeConfig.format24h = data.format_24h !== undefined ? data.format_24h : this.timeConfig.format24h;
+                        this.timeConfig.synced = data.synced || false;
+                    } catch (e) { console.error(e); }
+                },
+                
+                async loadSecurity() {
+                    try {
+                        const res = await fetch('/api/auth/config');
+                        const data = await res.json();
+                        // Map snake_case response to camelCase UI model
+                        this.security.webAuthEnabled = data.web_auth_enabled || false;
+                        this.security.apiAuthEnabled = data.api_auth_enabled || false;
+                        this.security.username = data.username || '';
+                        
+                        // Also fetch the API key (requires authentication)
+                        const keyRes = await fetch('/api/auth/apikey');
+                        if (keyRes.ok) {
+                            const keyData = await keyRes.json();
+                            this.security.apiKey = keyData.api_key || '';
+                        }
+                    } catch (e) { console.error(e); }
+                },
+                
+                async loadHeatpump() {
+                    try {
+                        const res = await fetch('/api/heatpump/status');
+                        this.heatpump = await res.json();
+                    } catch (e) { 
+                        // Placeholder - endpoint might not exist yet
+                        this.heatpump = { compressor: false, fans: false, pump: false, error: null };
+                    }
+                },
+                
+                async saveTimeConfig() {
+                    try {
+                        await fetch('/api/time/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                timezone: this.timeConfig.timezone,
+                                format_24h: this.timeConfig.format24h
+                            })
+                        });
+                    } catch (e) { console.error(e); }
+                },
+                
+                async syncTime() {
+                    this.loading = true;
+                    try {
+                        await fetch('/api/time/sync', { method: 'POST' });
+                        await this.loadTimeConfig();
+                    } catch (e) { console.error(e); }
+                    this.loading = false;
+                },
+                
+                async saveSecurityConfig() {
+                    try {
+                        const res = await fetch('/api/auth/config', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                web_auth_enabled: this.security.webAuthEnabled,
+                                api_auth_enabled: this.security.apiAuthEnabled
+                            })
+                        });
+                        const data = await res.json();
+                        // If a new API key was auto-generated, update our display
+                        if (data.api_key_generated && data.api_key) {
+                            this.security.apiKey = data.api_key;
+                            this.showApiKey = true; // Show the new key
+                        }
+                    } catch (e) { console.error(e); }
+                },
+                
+                copyApiKey() {
+                    const key = this.security.apiKey;
+                    if (!key) return;
+                    
+                    // Fallback for non-secure contexts (HTTP)
+                    const textarea = document.createElement('textarea');
+                    textarea.value = key;
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    textarea.style.top = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    textarea.select();
+                    
+                    try {
+                        document.execCommand('copy');
+                        // Brief visual feedback
+                        const btn = event.target;
+                        const originalText = btn.textContent;
+                        btn.textContent = this.t('copied');
+                        setTimeout(() => btn.textContent = originalText, 1500);
+                    } catch (err) {
+                        console.error('Copy failed:', err);
+                        this.showToast(this.t('copyFailed'), 'error');
+                    }
+                    
+                    document.body.removeChild(textarea);
+                },
+                
+                async saveCredentials() {
+                    this.loading = true;
+                    try {
+                        await fetch('/api/auth/credentials', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                username: this.security.username,
+                                password: this.security.newPassword
+                            })
+                        });
+                        this.security.newPassword = '';
+                        this.showToast(this.t('credentialsSaved'), 'success');
+                    } catch (e) { 
+                        console.error(e);
+                        this.showToast(this.t('credentialsFailed'), 'error');
+                    }
+                    this.loading = false;
+                },
+                
+                showToast(message, type = 'info', duration = 3000) {
+                    const id = ++this.toastId;
+                    this.toasts.push({ id, message, type, hiding: false });
+                    
+                    setTimeout(() => {
+                        const toast = this.toasts.find(t => t.id === id);
+                        if (toast) toast.hiding = true;
+                        setTimeout(() => {
+                            this.toasts = this.toasts.filter(t => t.id !== id);
+                        }, 300);
+                    }, duration);
+                },
+                
+                async regenerateApiKey() {
+                    if (!confirm(this.t('regenerateConfirm'))) return;
+                    try {
+                        const res = await fetch('/api/auth/apikey/regenerate', { method: 'POST' });
+                        const data = await res.json();
+                        this.security.apiKey = data.api_key;
+                    } catch (e) { console.error(e); }
+                },
+                
+                handleFileSelect(e) {
+                    this.selectedFile = e.target.files[0];
+                },
+                
+                handleFileDrop(e) {
+                    e.target.classList.remove('dragover');
+                    const file = e.dataTransfer.files[0];
+                    if (file && file.name.endsWith('.bin')) {
+                        this.selectedFile = file;
+                    }
+                },
+                
+                async startOtaUpload() {
+                    if (!this.selectedFile) return;
+                    
+                    // Validate file extension
+                    if (!this.selectedFile.name.toLowerCase().endsWith('.bin')) {
+                        this.uploadError = this.t('invalidFileType');
+                        this.uploadState = 'error';
+                        return;
+                    }
+                    
+                    this.uploadState = 'uploading';
+                    this.uploadProgress = 0;
+                    this.uploadStatus = this.t('uploading');
+                    this.uploadError = '';
+                    this.loading = true;
+                    
+                    const xhr = new XMLHttpRequest();
+                    const self = this;
+                    
+                    xhr.upload.onprogress = function(e) {
+                        if (e.lengthComputable) {
+                            // Use 0-90% for upload, 90-95% for verification
+                            self.uploadProgress = Math.round((e.loaded / e.total) * 90);
+                            self.uploadStatus = `${self.formatBytes(e.loaded)} / ${self.formatBytes(e.total)}`;
+                        }
+                    };
+                    
+                    xhr.onload = function() {
+                        if (xhr.status === 200) {
+                            try {
+                                const result = JSON.parse(xhr.responseText);
+                                if (result.success) {
+                                    self.uploadProgress = 95;
+                                    self.uploadStatus = self.t('verifying');
+                                    self.uploadState = 'verifying';
+                                    
+                                    // Start reboot sequence
+                                    setTimeout(() => {
+                                        self.uploadProgress = 100;
+                                        self.uploadStatus = self.t('rebooting');
+                                        self.uploadState = 'rebooting';
+                                        self.waitForReboot();
+                                    }, 1000);
+                                } else {
+                                    self.uploadError = result.error || 'Upload failed';
+                                    self.uploadState = 'error';
+                                    self.loading = false;
+                                }
+                            } catch (e) {
+                                self.uploadError = 'Invalid server response';
+                                self.uploadState = 'error';
+                                self.loading = false;
+                            }
+                        } else {
+                            self.uploadError = `Upload failed (HTTP ${xhr.status})`;
+                            self.uploadState = 'error';
+                            self.loading = false;
+                        }
+                    };
+                    
+                    xhr.onerror = function() {
+                        self.uploadError = 'Network error during upload';
+                        self.uploadState = 'error';
+                        self.loading = false;
+                    };
+                    
+                    xhr.open('POST', '/api/ota/upload', true);
+                    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+                    xhr.send(this.selectedFile);
+                },
+                
+                async waitForReboot() {
+                    this.uploadStatus = this.t('deviceRebooting');
+                    let attempts = 0;
+                    const maxAttempts = 60; // 60 seconds max wait
+                    const self = this;
+                    
+                    const checkDevice = async () => {
+                        attempts++;
+                        try {
+                            // Use a simple HEAD request to check if server is responding
+                            // We check for any response (even 401) to know device is back
+                            const res = await fetch('/api/info', { 
+                                method: 'GET',
+                                cache: 'no-cache'
+                            });
+                            
+                            // Any response (including 401 Unauthorized) means device is back
+                            // After firmware update, sessions are cleared so we just refresh the page
+                            self.uploadState = 'complete';
+                            self.uploadStatus = self.t('updateSuccessful');
+                            self.loading = false;
+                            
+                            // Refresh the page - this will show login screen if auth is enabled
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1500);
+                            return;
+                        } catch (e) {
+                            // Device not responding yet (network error)
+                        }
+                        
+                        if (attempts < maxAttempts) {
+                            self.uploadStatus = `${self.t('deviceRebooting').replace('...', '')} (${attempts}s)...`;
+                            setTimeout(checkDevice, 1000);
+                        } else {
+                            self.uploadError = self.t('deviceRebootTimeout');
+                            self.uploadState = 'error';
+                            self.loading = false;
+                        }
+                    };
+                    
+                    // Wait a few seconds before starting to poll
+                    setTimeout(checkDevice, 3000);
+                },
+                
+                async reboot() {
+                    if (!confirm(this.t('rebootConfirm'))) return;
+                    await fetch('/api/ota/reboot', { method: 'POST' });
+                    this.showToast(this.t('rebootingMsg'), 'info', 5000);
+                },
+                
+                formatUptime(ms) {
+                    if (!ms) return '--';
+                    const s = Math.floor(ms / 1000);
+                    const d = Math.floor(s / 86400);
+                    const h = Math.floor((s % 86400) / 3600);
+                    const m = Math.floor((s % 3600) / 60);
+                    if (d > 0) return `${d}d ${h}h ${m}m`;
+                    if (h > 0) return `${h}h ${m}m`;
+                    return `${m}m`;
+                },
+                
+                formatBytes(bytes) {
+                    if (!bytes) return '0 B';
+                    const k = 1024;
+                    const sizes = ['B', 'KB', 'MB', 'GB'];
+                    const i = Math.floor(Math.log(bytes) / Math.log(k));
+                    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+                },
+                
+                formatTime(ts) {
+                    if (!ts) return '--';
+                    return new Date(ts).toLocaleTimeString();
+                },
+                
+                getSignalBars(rssi) {
+                    if (rssi > -50) return '▂▄▆█';
+                    if (rssi > -60) return '▂▄▆▁';
+                    if (rssi > -70) return '▂▄▁▁';
+                    if (rssi > -80) return '▂▁▁▁';
+                    return '▁▁▁▁';
+                },
+                
+                getSignalStrength(rssi) {
+                    if (rssi > -50) return this.t('signalExcellent');
+                    if (rssi > -60) return this.t('signalGood');
+                    if (rssi > -70) return this.t('signalFair');
+                    if (rssi > -80) return this.t('signalWeak');
+                    return this.t('signalPoor');
+                }
+            };
+        }
+    </script>
+</body>
+</html>

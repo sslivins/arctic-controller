@@ -71,6 +71,23 @@ void time_mgr_set_timezone(const char* tz_str);
  */
 const char* time_mgr_get_timezone(void);
 
+/**
+ * @brief Force immediate NTP sync
+ */
+void time_mgr_force_sync(void);
+
+/**
+ * @brief Set 24-hour time format preference (saves to NVS)
+ * @param use_24h true for 24-hour format, false for 12-hour format
+ */
+void time_mgr_set_24h_format(bool use_24h);
+
+/**
+ * @brief Get 24-hour time format preference
+ * @return true if using 24-hour format
+ */
+bool time_mgr_get_24h_format(void);
+
 #ifdef __cplusplus
 }
 #endif

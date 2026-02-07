@@ -6,6 +6,9 @@ sdkconfig.old
 managed_components/
 dependencies.lock
 
+# Generated files
+main/web/*.gz
+
 # Dependencies (fetched via fetch_repos.py)
 dependencies/
 
@@ -22,6 +25,7 @@ venv/
 
 # IDE
 .idea/
+.vscode/
 *.swp
 *.swo
 *~

@@ -540,3 +540,15 @@ void wifi_mgr_clear_credentials(void)
     
     ESP_LOGI(TAG, "WiFi credentials cleared");
 }
+
+bool wifi_mgr_get_mac_addr(uint8_t* mac)
+{
+    if (mac == NULL || !wifi_state.initialized) {
+        return false;
+    }
+    
+    // Get MAC from current connection or use default
+    // For now, return the station MAC
+    esp_err_t err = esp_wifi_get_mac(WIFI_IF_STA, mac);
+    return (err == ESP_OK);
+}

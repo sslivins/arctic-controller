@@ -17,6 +17,7 @@
 #include "settings_screen.h"
 #include "settings/settings_time_panel.h"
 #include "i18n/i18n.h"
+#include "auth_manager.h"
 
 static const char* TAG = "main";
 
@@ -118,6 +119,9 @@ extern "C" void app_main(void)
 
     // Initialize time manager (NTP will start when WiFi connects)
     time_mgr_init();
+
+    // Initialize authentication manager
+    auth_mgr_init();
 
     // Initialize OTA manager
     ota_mgr_init();

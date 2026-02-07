@@ -1,6 +1,6 @@
 # Arctic Controller
 
-Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5.
+Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based management interface.
 
 ## Hardware
 
@@ -11,79 +11,149 @@ Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5.
 ## Features
 
 - **LVGL-based Touch UI** - Status bar, time settings, WiFi configuration screens
+- **Web Interface** - Responsive web UI at `http://arctic.local` for remote management
 - **WiFi Management** - Connect to networks, credentials saved to NVS
 - **Time Synchronization** - NTP sync with configurable timezone (saved to NVS)
 - **REST API** - HTTP API for external control and monitoring
-- **mDNS Discovery** - Access via `arctic.local` (auto-increments to `arctic-2.local`, etc. for multiple controllers)
+- **OTA Updates** - Over-the-air firmware updates via web UI or API
+- **Security** - Optional web authentication and API key protection
+- **Multi-Language** - Web interface in English, French, and Spanish
+- **mDNS Discovery** - Access via `arctic.local` (auto-increments for multiple controllers)
+
+## Web Interface
+
+Access the web interface at `http://arctic.local` after connecting to WiFi.
+
+### Dashboard
+- Real-time heat pump status (compressor, fans, pump, errors)
+- System overview (uptime, time, timezone)
+- Auto-refresh every 5 seconds
+
+### Settings
+- **Device Info** - Firmware version, platform, memory usage
+- **WiFi Status** - Network, signal strength, IP address
+- **Time Settings** - Timezone selection, 24h format, NTP sync
+- **Firmware Updates** - Drag-and-drop .bin file upload with progress
+- **Security** - Enable/disable authentication, manage API keys
+- **System** - Reboot controller
+
+### Security Options
+- **Web Authentication** - Require login to access web interface (default credentials: `arctic`/`arctic`)
+- **API Key Authentication** - Require `X-API-Key` header for programmatic API access
+
+### Multi-Language Support
+- English, Français, Español
+- Language selector in header
+- Preference saved in browser localStorage
 
 ## REST API
 
-Once connected to WiFi, the controller is accessible via mDNS:
+Full API documentation available in [docs/openapi.yaml](docs/openapi.yaml).
 
+### Public Endpoints (no auth required)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | Simple health check |
 | `/api/status` | GET | System status (WiFi, time, uptime) |
 | `/api/time` | GET | Current time in multiple formats |
 | `/api/wifi` | GET | WiFi connection status |
-| `/api/info` | GET | Device information |
-| `/api/ota/status` | GET | OTA update status |
-| `/api/ota/update` | POST | Start OTA update (body: `{"url":"http://..."}`) |
-| `/api/ota/reboot` | POST | Reboot after successful OTA |
+| `/api/auth/status` | GET | Check if auth is required |
 
-**Example:**
+### Protected Endpoints (auth optional, configurable)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/info` | GET | Device information |
+| `/api/time/config` | GET/POST | Timezone and format settings |
+| `/api/time/sync` | POST | Force NTP synchronization |
+| `/api/ota/status` | GET | OTA update status |
+| `/api/ota/update` | POST | Start OTA from URL (GitHub only) |
+| `/api/ota/upload` | POST | Upload firmware binary |
+| `/api/ota/reboot` | POST | Reboot device |
+| `/api/heatpump/status` | GET | Heat pump component status |
+| `/api/auth/config` | GET/POST | Authentication settings |
+| `/api/auth/credentials` | POST | Update username/password |
+| `/api/auth/apikey` | GET | Retrieve API key |
+| `/api/auth/apikey/regenerate` | POST | Generate new API key |
+
+### Authentication
+When API authentication is enabled, include the API key in requests:
 ```bash
+curl -H "X-API-Key: your-api-key" http://arctic.local/api/info
+```
+
+### Examples
+```bash
+# Health check
+curl http://arctic.local/api/health
+
+# Get device status
 curl http://arctic.local/api/status
+
+# Upload firmware (with API key)
+curl -X POST http://arctic.local/api/ota/upload \
+     -H "X-API-Key: your-api-key" \
+     -H "Content-Type: application/octet-stream" \
+     --data-binary @arctic_controller.bin
 ```
 
 ## OTA Updates
 
-The device supports Over-The-Air (OTA) firmware updates. The partition table uses dual OTA partitions (ota_0 and ota_1) for safe updates with automatic rollback.
+The device supports Over-The-Air (OTA) firmware updates via the web interface or API.
 
-**To perform an OTA update:**
+### Via Web Interface (Recommended)
+1. Open `http://arctic.local` in your browser
+2. Go to Settings → Firmware Updates
+3. Drag and drop your `.bin` file or click to browse
+4. Monitor upload progress and wait for automatic reboot
 
-1. Host your firmware binary on an HTTP/HTTPS server
-2. Start the update:
-   ```bash
-   curl -X POST http://arctic.local/api/ota/update \
-        -H "Content-Type: application/json" \
-        -d '{"url":"http://your-server/arctic_controller.bin"}'
-   ```
-3. Monitor progress:
-   ```bash
-   curl http://arctic.local/api/ota/status
-   ```
-4. Reboot to apply:
-   ```bash
-   curl -X POST http://arctic.local/api/ota/reboot
-   ```
+### Via API
+```bash
+# Upload firmware binary
+curl -X POST http://arctic.local/api/ota/upload \
+     -H "Content-Type: application/octet-stream" \
+     --data-binary @arctic_controller.bin
 
-**Rollback Protection:** If the new firmware fails to boot properly, the device will automatically rollback to the previous working version after a few failed attempts.
+# Or from GitHub releases (URL must be from official repo)
+curl -X POST http://arctic.local/api/ota/update \
+     -H "Content-Type: application/json" \
+     -d '{"url":"https://github.com/sslivins/arctic-controller/releases/download/v1.3.0/arctic_controller.bin"}'
+```
+
+**Safety Features:**
+- Dual OTA partitions for safe updates with automatic rollback
+- Firmware validation (ESP32 magic byte check)
+- Concurrent update protection
+- URL restriction to official GitHub repository
 
 ## Project Structure
 
 ```
-├── main/               # Application source code
-│   ├── main.cpp        # Entry point
-│   ├── status_bar.*    # Top status bar (time, WiFi indicator)
-│   ├── time_screen.*   # Time/timezone settings screen
-│   ├── time_manager.*  # Time and NTP management
-│   ├── wifi_screen.*   # WiFi configuration screen
-│   ├── wifi_manager.*  # WiFi connection management
-│   ├── api_server.*    # REST API and mDNS server
-│   └── ota_manager.*   # OTA firmware update management
-├── components/         # ESP-IDF components (BSP, etc.)
-├── dependencies/       # External libraries (fetched via fetch_repos.py)
-│   ├── lvgl/          # LVGL graphics library
-│   ├── mooncake/      # Mooncake framework
-│   ├── mooncake_log/  # Logging utilities
+├── main/                  # Application source code
+│   ├── main.cpp           # Entry point
+│   ├── api_server.*       # REST API and mDNS server
+│   ├── auth_manager.*     # Session and API key authentication
+│   ├── ota_manager.*      # OTA firmware update management
+│   ├── time_manager.*     # Time and NTP management
+│   ├── wifi_manager.*     # WiFi connection management
+│   ├── status_bar.*       # Top status bar (time, WiFi indicator)
+│   ├── time_screen.*      # Time/timezone settings screen
+│   ├── wifi_screen.*      # WiFi configuration screen
+│   └── web/
+│       └── index.html     # Web interface (embedded in firmware)
+├── docs/
+│   └── openapi.yaml       # OpenAPI 3.0 specification
+├── components/            # ESP-IDF components (BSP, etc.)
+├── dependencies/          # External libraries (fetched via fetch_repos.py)
+│   ├── lvgl/             # LVGL graphics library
+│   ├── mooncake/         # Mooncake framework
+│   ├── mooncake_log/     # Logging utilities
 │   └── smooth_ui_toolkit/
-├── CMakeLists.txt     # ESP-IDF project configuration
-├── sdkconfig          # ESP-IDF settings
-├── partitions.csv     # Partition table
-├── lv_conf.h          # LVGL configuration
-├── fetch_repos.py     # Dependency fetcher script
-└── repos.json         # Dependency definitions
+├── CMakeLists.txt        # ESP-IDF project configuration
+├── sdkconfig             # ESP-IDF settings
+├── partitions.csv        # Partition table
+├── lv_conf.h             # LVGL configuration
+├── fetch_repos.py        # Dependency fetcher script
+└── repos.json            # Dependency definitions
 ```
 
 ## Prerequisites
@@ -130,12 +200,18 @@ idf.py -p [PORT] flash monitor
 
 Run `idf.py menuconfig` to configure ESP-IDF options.
 
+## Default Credentials
+
+| Type | Username | Password/Key |
+|------|----------|--------------|
+| Web Login | `arctic` | `arctic` |
+| API Key | N/A | Auto-generated (view in Settings) |
+
 ## TODO
 
 - [ ] Add automatic update option checkbox - allow users to enable auto-updates so firmware installs automatically when available
-- [ ] Web interface HTML for settings
-- [ ] API authentication (API key, session cookies)
-- [ ] Localization (i18n) support
+- [ ] Temperature and sensor readings on dashboard
+- [ ] Heat pump control commands
 
 ## License
 

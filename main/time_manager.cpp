@@ -15,6 +15,7 @@ static const char* TAG = "time_mgr";
 // NVS namespace and keys
 #define NVS_NAMESPACE "time_cfg"
 #define NVS_KEY_TZ    "timezone"
+#define NVS_KEY_24H   "format_24h"
 
 // Default NTP servers
 #define NTP_SERVER_PRIMARY   "pool.ntp.org"
@@ -33,11 +34,13 @@ static struct {
     bool initialized;
     bool sntp_configured;
     bool synced;
+    bool format_24h;
     char timezone[64];
 } time_state = {
     .initialized = false,
     .sntp_configured = false,
     .synced = false,
+    .format_24h = true,  // Default to 24-hour format
     .timezone = DEFAULT_TIMEZONE,
 };
 
@@ -131,11 +134,22 @@ void time_mgr_init(void)
     // Load saved timezone from NVS (or use default)
     load_timezone_from_nvs();
     
+    // Load 24h format preference from NVS
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        uint8_t format_val = 1;  // Default to 24h
+        if (nvs_get_u8(nvs, NVS_KEY_24H, &format_val) == ESP_OK) {
+            time_state.format_24h = (format_val != 0);
+        }
+        nvs_close(nvs);
+    }
+    
     // Set timezone
     setenv("TZ", time_state.timezone, 1);
     tzset();
     
-    ESP_LOGI(TAG, "Timezone: %s", time_state.timezone);
+    ESP_LOGI(TAG, "Timezone: %s, Format: %s", time_state.timezone, 
+             time_state.format_24h ? "24-hour" : "12-hour");
     
     // Note: SNTP configuration is deferred until start_sync() is called
     // because it requires the TCP/IP stack to be initialized first
@@ -238,4 +252,32 @@ void time_mgr_set_timezone(const char* tz_str)
 const char* time_mgr_get_timezone(void)
 {
     return time_state.timezone;
+}
+
+void time_mgr_force_sync(void)
+{
+    ESP_LOGI(TAG, "Forcing NTP sync...");
+    time_mgr_stop_sync();
+    time_mgr_start_sync();
+}
+
+void time_mgr_set_24h_format(bool use_24h)
+{
+    time_state.format_24h = use_24h;
+    
+    // Save to NVS
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        nvs_set_u8(nvs, NVS_KEY_24H, use_24h ? 1 : 0);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    
+    ESP_LOGI(TAG, "Time format set to %s", use_24h ? "24-hour" : "12-hour");
+}
+
+bool time_mgr_get_24h_format(void)
+{
+    return time_state.format_24h;
 }
