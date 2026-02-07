@@ -8,13 +8,15 @@ set(GZIP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/web/gzip_html.py")
 if(EXISTS "${WEB_SRC}")
     if(NOT EXISTS "${WEB_GZ}" OR "${WEB_SRC}" IS_NEWER_THAN "${WEB_GZ}")
         message(STATUS "Compressing web/index.html -> index.html.gz")
-        # Use Python from IDF environment or find it
-        if(DEFINED ENV{IDF_PYTHON_ENV_PATH})
-            set(PYTHON_CMD "$ENV{IDF_PYTHON_ENV_PATH}/Scripts/python.exe")
-        elseif(DEFINED PYTHON)
-            set(PYTHON_CMD "${PYTHON}")
+        # Find Python - prefer IDF's Python, then system Python
+        # Use Python3::Interpreter if available (set by ESP-IDF), otherwise find it
+        if(Python3_EXECUTABLE)
+            set(PYTHON_CMD "${Python3_EXECUTABLE}")
         else()
             find_program(PYTHON_CMD NAMES python3 python)
+        endif()
+        if(NOT PYTHON_CMD)
+            message(FATAL_ERROR "Python not found - required for gzip compression")
         endif()
         execute_process(
             COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${WEB_SRC}" "${WEB_GZ}"
