@@ -994,8 +994,7 @@
                 
                 <main>
                     <!-- Dashboard Page -->
-                    <template x-if="page === 'dashboard'">
-                        <div>
+                    <div x-show="page === 'dashboard'">
                             <div class="card">
                                 <div class="card-header">
                                     <h2 x-text="t('heatPumpStatus')"></h2>
@@ -1047,11 +1046,9 @@
                                 </div>
                             </div>
                         </div>
-                    </template>
                     
                     <!-- Settings Page -->
-                    <template x-if="page === 'settings'">
-                        <div>
+                    <div x-show="page === 'settings'">
                             <!-- Device Info -->
                             <div class="card">
                                 <div class="card-header">
@@ -1177,12 +1174,7 @@
                                                             <span class="label" x-text="t('latestVersion')"></span>
                                                             <span class="value" style="color: var(--success);" x-text="github.latestVersion"></span>
                                                         </div>
-                                                        <template x-if="github.releaseNotes">
-                                                            <div style="margin: 0.75rem 0; padding: 0.75rem; background: var(--bg-secondary); border-radius: 6px; font-size: 0.9rem; color: var(--text-secondary); max-height: 100px; overflow-y: auto;">
-                                                                <span x-text="github.releaseNotes.substring(0, 300) + (github.releaseNotes.length > 300 ? '...' : '')"></span>
-                                                            </div>
-                                                        </template>
-                                                        <button class="btn btn-primary" style="width: 100%;" 
+                                                        <button class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;" 
                                                                 @click="startGithubUpdate()" 
                                                                 :disabled="loading || ota.state === 'downloading' || !github.downloadReady"
                                                                 x-text="t('installUpdate')"></button>
@@ -1193,15 +1185,23 @@
                                                 </template>
                                                 
                                                 <template x-if="!github.error && !github.updateAvailable">
-                                                    <div style="text-align: center; color: var(--success);">
-                                                        ✅ <span x-text="t('upToDate')"></span>
+                                                    <div>
+                                                        <div style="text-align: center; color: var(--success); margin-bottom: 0.75rem;">
+                                                            ✅ <span x-text="t('upToDate')"></span>
+                                                        </div>
+                                                        <button class="btn btn-secondary" style="width: 100%;" 
+                                                                @click="checkForUpdates()" 
+                                                                :disabled="loading || ota.state === 'downloading'"
+                                                                x-text="t('checkForUpdates')"></button>
                                                     </div>
                                                 </template>
                                                 
-                                                <button class="btn btn-secondary" style="width: 100%; margin-top: 0.75rem;" 
-                                                        @click="checkForUpdates()" 
-                                                        :disabled="loading || ota.state === 'downloading'"
-                                                        x-text="t('checkForUpdates')"></button>
+                                                <template x-if="github.error">
+                                                    <button class="btn btn-secondary" style="width: 100%; margin-top: 0.75rem;" 
+                                                            @click="checkForUpdates()" 
+                                                            :disabled="loading || ota.state === 'downloading'"
+                                                            x-text="t('checkForUpdates')"></button>
+                                                </template>
                                             </div>
                                         </template>
                                     </div>
@@ -1219,7 +1219,9 @@
                                     </template>
                                     
                                     <template x-if="ota.state === 'ready_to_reboot'">
-                                        <div class="alert alert-success" x-text="t('updateSuccess')"></div>
+                                        <div class="alert alert-success">
+                                            🔄 <span x-text="t('rebooting')"></span>
+                                        </div>
                                     </template>
                                     
                                     <template x-if="ota.error">
@@ -1280,9 +1282,7 @@
                                         </template>
                                     </div>
                                     
-                                    <template x-if="ota.state === 'ready_to_reboot'">
-                                        <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" @click="reboot()" x-text="t('rebootNow')"></button>
-                                    </template>
+                                    
                                 </div>
                             </div>
                             
@@ -1357,7 +1357,6 @@
                                 </div>
                             </div>
                         </div>
-                    </template>
                 </main>
             </div>
         </template>
@@ -1396,6 +1395,7 @@
                 timeConfig: { timezone: 'EST5EDT,M3.2.0,M11.1.0', format24h: true, synced: false },
                 security: { webAuthEnabled: false, apiAuthEnabled: false, username: '', newPassword: '', apiKey: '' },
                 
+                dataLoaded: false, // Prevents saving during initial load
                 selectedFile: null,
                 uploadState: 'idle', // idle, uploading, verifying, rebooting, complete, error
                 uploadProgress: 0,
@@ -1497,16 +1497,41 @@
                         this.loadSecurity(),
                         this.loadHeatpump()
                     ]);
+                    this.dataLoaded = true;
                     this.lastUpdate = Date.now();
                 },
                 
                 startPolling() {
-                    setInterval(async () => {
-                        await this.loadStatus();
+                    // Adaptive polling - fast during OTA, normal otherwise
+                    let prevOtaState = this.ota.state;
+                    const poll = async () => {
                         await this.loadOta();
-                        await this.loadHeatpump();
-                        this.lastUpdate = Date.now();
-                    }, 5000);
+                        
+                        // Reset github update state when OTA completes (ready_to_reboot)
+                        // This ensures after reboot, the UI shows "Check for Updates" instead of stale state
+                        if (this.ota.state === 'ready_to_reboot' && prevOtaState !== 'ready_to_reboot') {
+                            this.github.checked = false;
+                            this.github.updateAvailable = false;
+                            this.github.latestVersion = '';
+                            this.github.downloadReady = false;
+                            this.github.error = '';
+                        }
+                        prevOtaState = this.ota.state;
+                        
+                        // Poll faster (500ms) when OTA is active for smooth progress
+                        const otaActive = this.ota.state === 'downloading' || this.ota.state === 'verifying' || this.ota.state === 'uploading';
+                        const interval = otaActive ? 500 : 5000;
+                        
+                        // Only load other status on slow poll interval
+                        if (!otaActive) {
+                            await this.loadStatus();
+                            await this.loadHeatpump();
+                            this.lastUpdate = Date.now();
+                        }
+                        
+                        setTimeout(poll, interval);
+                    };
+                    poll();
                 },
                 
                 async loadInfo() {
@@ -1541,9 +1566,15 @@
                     try {
                         const res = await fetch('/api/time/config');
                         const data = await res.json();
-                        // Map snake_case API response to camelCase UI model
-                        this.timeConfig.timezone = data.timezone || this.timeConfig.timezone;
-                        this.timeConfig.format24h = data.format_24h !== undefined ? data.format_24h : this.timeConfig.format24h;
+                        // Store what we're loading BEFORE setting reactive properties
+                        // This prevents race conditions with @change handlers
+                        const newTz = data.timezone || this.timeConfig.timezone;
+                        const newFormat = data.format_24h !== undefined ? data.format_24h : this.timeConfig.format24h;
+                        this._loadedTimezone = newTz;
+                        this._loadedFormat24h = newFormat;
+                        // Now set the reactive properties
+                        this.timeConfig.timezone = newTz;
+                        this.timeConfig.format24h = newFormat;
                         this.timeConfig.synced = data.synced || false;
                     } catch (e) { console.error(e); }
                 },
@@ -1623,6 +1654,12 @@
                 },
                 
                 async saveTimeConfig() {
+                    if (!this.dataLoaded) return; // Don't save during initial load
+                    // Only save if values actually changed from what was loaded
+                    if (this.timeConfig.timezone === this._loadedTimezone &&
+                        this.timeConfig.format24h === this._loadedFormat24h) {
+                        return;
+                    }
                     try {
                         await fetch('/api/time/config', {
                             method: 'POST',
@@ -1632,6 +1669,9 @@
                                 format_24h: this.timeConfig.format24h
                             })
                         });
+                        // Update loaded values after successful save
+                        this._loadedTimezone = this.timeConfig.timezone;
+                        this._loadedFormat24h = this.timeConfig.format24h;
                     } catch (e) { console.error(e); }
                 },
                 
