@@ -9,12 +9,26 @@ info:
     ## Features
     - Device status and health monitoring
     - WiFi connection status with signal strength
-    - Time/NTP synchronization status
-    - Over-the-Air (OTA) firmware updates
+    - Time/NTP synchronization and configuration
+    - Over-the-Air (OTA) firmware updates (URL download or file upload)
+    - Web interface authentication with session management
+    - API key authentication for programmatic access
+    - Heat pump status monitoring
     
     ## Authentication
-    No authentication required. The API is accessible on the local network only.
-  version: 1.0.0
+    
+    The API supports two optional authentication mechanisms:
+    
+    ### Web Authentication (Session-based)
+    When enabled, users must log in via `/login` with username/password. 
+    A session cookie (`arctic_session`) is returned and must be included in subsequent requests.
+    
+    ### API Key Authentication
+    When enabled, programmatic API access requires the `X-API-Key` header.
+    The API key can be retrieved from the web interface settings.
+    
+    Both authentication types can be independently enabled/disabled via `/api/auth/config`.
+  version: 2.0.0
   contact:
     name: Arctic Controller
   license:
@@ -38,13 +52,93 @@ tags:
   - name: WiFi
     description: WiFi connection information
   - name: Time
-    description: Time and NTP status
+    description: Time and NTP configuration
   - name: Info
     description: Device information
   - name: OTA
     description: Over-the-Air firmware updates
+  - name: Authentication
+    description: Session and API key authentication
+  - name: HeatPump
+    description: Heat pump status and control
 
 paths:
+  /login:
+    post:
+      tags:
+        - Authentication
+      summary: Login with credentials
+      description: |
+        Authenticates a user and returns a session cookie.
+        The session cookie is automatically set via `Set-Cookie` header.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: arctic
+                password:
+                  type: string
+                  format: password
+                  example: arctic
+      responses:
+        '200':
+          description: Login successful
+          headers:
+            Set-Cookie:
+              description: Session cookie
+              schema:
+                type: string
+                example: arctic_session=abc123...; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Invalid credentials
+
+  /logout:
+    post:
+      tags:
+        - Authentication
+      summary: Logout and invalidate session
+      description: Invalidates the current session and clears the session cookie.
+      operationId: logout
+      responses:
+        '200':
+          description: Logout successful
+          headers:
+            Set-Cookie:
+              description: Cleared session cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
   /api/health:
     get:
       tags:
@@ -163,6 +257,87 @@ paths:
                     description: Whether time has been synchronized via NTP
                     example: true
 
+  /api/time/config:
+    get:
+      tags:
+        - Time
+      summary: Get time configuration
+      description: Returns current timezone and time format settings.
+      operationId: getTimeConfig
+      responses:
+        '200':
+          description: Time configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  timezone:
+                    type: string
+                    description: POSIX timezone string
+                    example: EST5EDT,M3.2.0,M11.1.0
+                  format_24h:
+                    type: boolean
+                    description: Use 24-hour time format
+                    example: true
+                  synced:
+                    type: boolean
+                    description: Whether NTP sync has occurred
+                    example: true
+    post:
+      tags:
+        - Time
+      summary: Set time configuration
+      description: Updates timezone and time format settings.
+      operationId: setTimeConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timezone:
+                  type: string
+                  description: POSIX timezone string
+                  example: PST8PDT,M3.2.0,M11.1.0
+                format_24h:
+                  type: boolean
+                  example: true
+      responses:
+        '200':
+          description: Configuration updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
+  /api/time/sync:
+    post:
+      tags:
+        - Time
+      summary: Force NTP sync
+      description: Triggers an immediate NTP time synchronization.
+      operationId: syncTime
+      responses:
+        '200':
+          description: Sync initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: NTP sync initiated
+
   /api/wifi:
     get:
       tags:
@@ -211,8 +386,11 @@ paths:
       tags:
         - Info
       summary: Device information
-      description: Returns device hardware/software information and available API endpoints.
+      description: Returns device hardware/software information.
       operationId: getInfo
+      security:
+        - apiKey: []
+        - sessionCookie: []
       responses:
         '200':
           description: Device information
@@ -235,7 +413,7 @@ paths:
                     example: ESP32-C6
                   version:
                     type: string
-                    example: "1.0.3"
+                    example: "1.2.3"
                   free_heap:
                     type: integer
                     description: Free heap memory in bytes
@@ -249,20 +427,13 @@ paths:
                     example: 123456789
                   api_version:
                     type: string
-                    example: "1.0"
-                  endpoints:
-                    type: array
-                    items:
-                      type: string
-                    example:
-                      - /api/health
-                      - /api/status
-                      - /api/time
-                      - /api/wifi
-                      - /api/info
-                      - /api/ota/status
-                      - /api/ota/update
-                      - /api/ota/reboot
+                    example: "2.0"
+        '401':
+          description: API key required (when API auth is enabled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/ota/status:
     get:
@@ -281,11 +452,18 @@ paths:
                 properties:
                   state:
                     type: string
-                    enum: [idle, downloading, verifying, ready_to_reboot, failed]
+                    enum: [idle, uploading, downloading, verifying, ready_to_reboot, failed]
+                    description: |
+                      - `idle`: No update in progress
+                      - `uploading`: Receiving firmware via file upload
+                      - `downloading`: Downloading firmware from URL
+                      - `verifying`: Validating downloaded/uploaded firmware
+                      - `ready_to_reboot`: Update complete, awaiting reboot
+                      - `failed`: Update failed
                     example: idle
                   progress:
                     type: integer
-                    description: Download progress percentage (0-100)
+                    description: Download/upload progress percentage (0-100)
                     minimum: 0
                     maximum: 100
                     example: 0
@@ -297,11 +475,11 @@ paths:
                     example: 0
                   current_version:
                     type: string
-                    example: "1.0.2"
+                    example: "1.2.3"
                   new_version:
                     type: string
-                    description: Version being installed (only during update)
-                    example: "1.0.3"
+                    description: Version being installed (only during URL update)
+                    example: "1.2.4"
                   error:
                     type: string
                     description: Error message (only when state is failed)
@@ -313,7 +491,7 @@ paths:
                         example: ota_0
                       address:
                         type: integer
-                        example: 1048576
+                        example: 131072
                       size:
                         type: integer
                         example: 4194304
@@ -322,16 +500,17 @@ paths:
     post:
       tags:
         - OTA
-      summary: Start OTA update
+      summary: Start OTA update from URL
       description: |
         Initiates an OTA firmware update from the specified URL.
         
-        The URL should point to a valid ESP32-P4 firmware binary file (.bin).
-        For GitHub releases, use the direct download URL for the asset.
+        **Security**: Only URLs starting with `https://github.com/sslivins/arctic-controller/` are allowed.
         
-        **Auto-reboot**: The device will automatically reboot 3 seconds after 
-        a successful update. Poll `/api/ota/status` to monitor progress.
+        The device will automatically reboot after a successful update.
       operationId: startOtaUpdate
+      security:
+        - apiKey: []
+        - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -344,8 +523,8 @@ paths:
                 url:
                   type: string
                   format: uri
-                  description: URL to download firmware from
-                  example: https://github.com/user/repo/releases/download/v1.0.3/arctic_controller.bin
+                  description: URL to download firmware from (must be from official GitHub repo)
+                  example: https://github.com/sslivins/arctic-controller/releases/download/v1.2.4/arctic_controller.bin
       responses:
         '200':
           description: OTA update started
@@ -361,21 +540,21 @@ paths:
                     type: string
                     example: OTA update started. Poll /api/ota/status for progress.
         '400':
-          description: Invalid request
+          description: Invalid request or URL not allowed
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
               examples:
-                noBody:
+                urlNotAllowed:
                   value:
-                    error: No body provided
-                invalidJson:
-                  value:
-                    error: Invalid JSON
-                missingUrl:
-                  value:
-                    error: "Missing 'url' field"
+                    error: URL not allowed. Must be from official GitHub repository.
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: OTA already in progress
           content:
@@ -383,21 +562,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
               example:
-                error: OTA already in progress or failed to start
+                error: OTA already in progress
+
+  /api/ota/upload:
+    post:
+      tags:
+        - OTA
+      summary: Upload firmware file
+      description: |
+        Uploads a firmware binary file directly to the device.
+        
+        The file must be a valid ESP32-P4 firmware binary (.bin file starting with magic byte 0xE9).
+        
+        **Note**: The device will automatically reboot after successful upload.
+        
+        Only one OTA operation (upload or URL download) can be in progress at a time.
+      operationId: uploadFirmware
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+              description: Raw firmware binary data
+      responses:
+        '200':
+          description: Firmware uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  bytes_received:
+                    type: integer
+                    example: 1725696
+                  message:
+                    type: string
+                    example: Firmware uploaded. Rebooting...
+        '400':
+          description: Invalid firmware file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Invalid firmware file (not an ESP32 binary)
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another OTA update is in progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Another OTA update is already in progress
+        '500':
+          description: Upload or flash failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/ota/reboot:
     post:
       tags:
         - OTA
-      summary: Reboot after OTA update (deprecated)
-      deprecated: true
-      description: |
-        **DEPRECATED**: The device now automatically reboots after a successful OTA update.
-        This endpoint is kept for backwards compatibility but is no longer needed.
-        
-        Manually reboots the device to apply a pending OTA update.
-        Only works when OTA state is `ready_to_reboot`.
-      operationId: rebootAfterOta
+      summary: Reboot device
+      description: Immediately reboots the device. Can be used to apply updates or restart the system.
+      operationId: reboot
+      security:
+        - apiKey: []
+        - sessionCookie: []
       responses:
         '200':
           description: Device is rebooting
@@ -412,16 +659,266 @@ paths:
                   message:
                     type: string
                     example: Device will reboot now
-        '409':
-          description: No pending OTA update
+        '401':
+          description: API key required
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-              example:
-                error: No pending OTA update to apply
+
+  /api/auth/config:
+    get:
+      tags:
+        - Authentication
+      summary: Get authentication configuration
+      description: Returns current authentication settings. This endpoint is always accessible.
+      operationId: getAuthConfig
+      responses:
+        '200':
+          description: Authentication configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  web_auth_enabled:
+                    type: boolean
+                    description: Whether web interface requires login
+                    example: true
+                  api_auth_enabled:
+                    type: boolean
+                    description: Whether API requires X-API-Key header
+                    example: false
+                  username:
+                    type: string
+                    description: Current username (for display)
+                    example: arctic
+                  authenticated:
+                    type: boolean
+                    description: Whether current request is authenticated
+                    example: true
+    post:
+      tags:
+        - Authentication
+      summary: Set authentication configuration
+      description: Updates authentication settings. Requires authentication if web auth is enabled.
+      operationId: setAuthConfig
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                web_auth_enabled:
+                  type: boolean
+                  description: Enable/disable web interface authentication
+                api_auth_enabled:
+                  type: boolean
+                  description: Enable/disable API key authentication
+      responses:
+        '200':
+          description: Configuration updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/status:
+    get:
+      tags:
+        - Authentication
+      summary: Quick auth status check
+      description: Returns whether authentication is required and if current session is valid.
+      operationId: getAuthStatus
+      responses:
+        '200':
+          description: Authentication status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  web_auth_enabled:
+                    type: boolean
+                    example: true
+                  session_valid:
+                    type: boolean
+                    description: Whether the current session cookie is valid
+                    example: true
+
+  /api/auth/credentials:
+    post:
+      tags:
+        - Authentication
+      summary: Update login credentials
+      description: |
+        Updates username and/or password. 
+        
+        **Note**: Changing credentials invalidates all active sessions.
+      operationId: setCredentials
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  description: New username (omit to keep current)
+                  example: admin
+                password:
+                  type: string
+                  format: password
+                  description: New password (omit or empty to keep current)
+                  example: newpassword123
+      responses:
+        '200':
+          description: Credentials updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/apikey:
+    get:
+      tags:
+        - Authentication
+      summary: Get API key
+      description: Returns the current API key. Requires authentication.
+      operationId: getApiKey
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: API key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    type: string
+                    description: 32-character hex API key
+                    example: a1b2c3d4e5f6789012345678abcdef01
+        '401':
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/auth/apikey/regenerate:
+    post:
+      tags:
+        - Authentication
+      summary: Regenerate API key
+      description: |
+        Generates a new random API key. 
+        
+        **Warning**: Existing API integrations using the old key will stop working.
+      operationId: regenerateApiKey
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: New API key generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  api_key:
+                    type: string
+                    description: New 32-character hex API key
+                    example: fedcba9876543210fedcba9876543210
+        '401':
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/status:
+    get:
+      tags:
+        - HeatPump
+      summary: Heat pump status
+      description: Returns current heat pump component status and any error codes.
+      operationId: getHeatpumpStatus
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Heat pump status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  compressor:
+                    type: boolean
+                    description: Compressor running state
+                    example: false
+                  fans:
+                    type: boolean
+                    description: Fan running state
+                    example: false
+                  pump:
+                    type: boolean
+                    description: Circulation pump running state
+                    example: false
+                  error:
+                    type: string
+                    nullable: true
+                    description: Current error code or null if no error
+                    example: null
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
 components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for programmatic access (32-character hex string)
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: arctic_session
+      description: Session cookie obtained from /login endpoint
+
   schemas:
     Error:
       type: object
