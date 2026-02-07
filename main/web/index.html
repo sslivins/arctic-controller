@@ -5,6 +5,332 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arctic Controller</title>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        // Web Interface Translations (independent of controller localization)
+        const translations = {
+            en: {
+                // Header & Navigation
+                appTitle: 'Arctic Controller',
+                dashboard: 'Dashboard',
+                settings: 'Settings',
+                
+                // Login
+                username: 'Username',
+                password: 'Password',
+                login: 'Login',
+                loggingIn: 'Logging in...',
+                loginFailed: 'Login failed',
+                connectionError: 'Connection error',
+                
+                // Dashboard - Heat Pump
+                heatPumpStatus: 'Heat Pump Status',
+                lastUpdated: 'Last updated',
+                compressor: 'Compressor',
+                airFlowFans: 'Air Flow Fans',
+                waterPump: 'Water Pump',
+                systemStatus: 'System Status',
+                on: 'ON',
+                off: 'OFF',
+                ok: 'OK',
+                
+                // Dashboard - System Overview
+                systemOverview: 'System Overview',
+                device: 'Device',
+                uptime: 'Uptime',
+                currentTime: 'Current Time',
+                timezone: 'Timezone',
+                
+                // Settings - Device Info
+                deviceInfo: 'Device Information',
+                firmwareVersion: 'Firmware Version',
+                platform: 'Platform',
+                freeHeap: 'Free Heap',
+                
+                // Settings - WiFi
+                wifiStatus: 'WiFi Status',
+                network: 'Network',
+                signalStrength: 'Signal Strength',
+                ipAddress: 'IP Address',
+                hostname: 'Hostname',
+                notConnected: 'Not connected',
+                signalExcellent: 'Excellent',
+                signalGood: 'Good',
+                signalFair: 'Fair',
+                signalWeak: 'Weak',
+                signalPoor: 'Poor',
+                
+                // Settings - Time
+                timeSettings: 'Time Settings',
+                ntpSync: 'NTP Sync',
+                synced: 'Synced',
+                notSynced: 'Not synced',
+                format24h: '24-Hour Format',
+                format24hDesc: 'Display time in 24-hour format',
+                syncNow: 'Sync Now',
+                
+                // Settings - Firmware
+                firmwareUpdates: 'Firmware Updates',
+                currentVersion: 'Current Version',
+                downloading: 'Downloading',
+                updateSuccess: 'Update downloaded successfully! Ready to reboot.',
+                uploadFirmware: 'Or upload firmware file',
+                dragDropFile: 'Click or drag .bin file here',
+                uploadInstall: 'Upload & Install',
+                rebootNow: 'Reboot Now',
+                uploading: 'Uploading firmware...',
+                verifying: 'Upload complete! Verifying...',
+                rebooting: 'Rebooting device...',
+                updateSuccessful: 'Update successful! Refreshing page...',
+                deviceRebooting: 'Device is rebooting... Please wait.',
+                deviceRebootTimeout: 'Device did not respond after reboot. Please refresh the page manually.',
+                invalidFileType: 'Invalid file type. Please select a .bin file.',
+                
+                // Settings - Security
+                security: 'Security',
+                webAuth: 'Web Interface Authentication',
+                webAuthDesc: 'Require login to access this interface',
+                newPassword: 'New Password',
+                passwordPlaceholder: 'Leave blank to keep current',
+                saveCredentials: 'Save Credentials',
+                credentialsSaved: 'Credentials saved',
+                credentialsFailed: 'Failed to save credentials',
+                apiAuth: 'API Key Authentication',
+                apiAuthDesc: 'Require X-API-Key header for API requests',
+                apiKey: 'API Key',
+                show: 'Show',
+                hide: 'Hide',
+                copy: 'Copy',
+                copied: 'Copied!',
+                copyFailed: 'Copy failed. Please select and copy manually.',
+                regenerate: 'Regenerate',
+                regenerateConfirm: 'Are you sure? Existing API integrations will stop working.',
+                
+                // Settings - System
+                system: 'System',
+                systemDesc: 'Restart the controller. All active connections will be lost.',
+                rebootController: 'Reboot Controller',
+                rebootConfirm: 'Reboot the device now?',
+                rebootingMsg: 'Device is rebooting. Please wait...',
+                
+                // Language
+                language: 'Language'
+            },
+            fr: {
+                // Header & Navigation
+                appTitle: 'Contrôleur Arctic',
+                dashboard: 'Tableau de bord',
+                settings: 'Paramètres',
+                
+                // Login
+                username: "Nom d'utilisateur",
+                password: 'Mot de passe',
+                login: 'Connexion',
+                loggingIn: 'Connexion...',
+                loginFailed: 'Échec de la connexion',
+                connectionError: 'Erreur de connexion',
+                
+                // Dashboard - Heat Pump
+                heatPumpStatus: 'État de la pompe à chaleur',
+                lastUpdated: 'Dernière mise à jour',
+                compressor: 'Compresseur',
+                airFlowFans: 'Ventilateurs',
+                waterPump: "Pompe à eau",
+                systemStatus: 'État du système',
+                on: 'MARCHE',
+                off: 'ARRÊT',
+                ok: 'OK',
+                
+                // Dashboard - System Overview
+                systemOverview: 'Aperçu du système',
+                device: 'Appareil',
+                uptime: 'Temps de fonctionnement',
+                currentTime: 'Heure actuelle',
+                timezone: 'Fuseau horaire',
+                
+                // Settings - Device Info
+                deviceInfo: "Informations sur l'appareil",
+                firmwareVersion: 'Version du firmware',
+                platform: 'Plateforme',
+                freeHeap: 'Mémoire libre',
+                
+                // Settings - WiFi
+                wifiStatus: 'État WiFi',
+                network: 'Réseau',
+                signalStrength: 'Force du signal',
+                ipAddress: 'Adresse IP',
+                hostname: "Nom d'hôte",
+                notConnected: 'Non connecté',
+                signalExcellent: 'Excellent',
+                signalGood: 'Bon',
+                signalFair: 'Moyen',
+                signalWeak: 'Faible',
+                signalPoor: 'Très faible',
+                
+                // Settings - Time
+                timeSettings: "Paramètres de l'heure",
+                ntpSync: 'Synchronisation NTP',
+                synced: 'Synchronisé',
+                notSynced: 'Non synchronisé',
+                format24h: 'Format 24 heures',
+                format24hDesc: "Afficher l'heure au format 24 heures",
+                syncNow: 'Synchroniser',
+                
+                // Settings - Firmware
+                firmwareUpdates: 'Mises à jour du firmware',
+                currentVersion: 'Version actuelle',
+                downloading: 'Téléchargement',
+                updateSuccess: 'Mise à jour téléchargée! Prêt à redémarrer.',
+                uploadFirmware: 'Ou téléverser un fichier firmware',
+                dragDropFile: 'Cliquez ou glissez un fichier .bin ici',
+                uploadInstall: 'Téléverser et installer',
+                rebootNow: 'Redémarrer',
+                uploading: 'Téléversement du firmware...',
+                verifying: 'Téléversement terminé! Vérification...',
+                rebooting: "Redémarrage de l'appareil...",
+                updateSuccessful: 'Mise à jour réussie! Actualisation...',
+                deviceRebooting: "L'appareil redémarre... Veuillez patienter.",
+                deviceRebootTimeout: "L'appareil n'a pas répondu. Actualisez la page manuellement.",
+                invalidFileType: 'Type de fichier invalide. Veuillez sélectionner un fichier .bin.',
+                
+                // Settings - Security
+                security: 'Sécurité',
+                webAuth: "Authentification de l'interface web",
+                webAuthDesc: 'Exiger une connexion pour accéder à cette interface',
+                newPassword: 'Nouveau mot de passe',
+                passwordPlaceholder: 'Laisser vide pour conserver le mot de passe actuel',
+                saveCredentials: 'Enregistrer',
+                credentialsSaved: 'Identifiants enregistrés',
+                credentialsFailed: "Échec de l'enregistrement des identifiants",
+                apiAuth: 'Authentification par clé API',
+                apiAuthDesc: "Exiger l'en-tête X-API-Key pour les requêtes API",
+                apiKey: 'Clé API',
+                show: 'Afficher',
+                hide: 'Masquer',
+                copy: 'Copier',
+                copied: 'Copié!',
+                copyFailed: 'Échec de la copie. Veuillez sélectionner et copier manuellement.',
+                regenerate: 'Régénérer',
+                regenerateConfirm: 'Êtes-vous sûr? Les intégrations API existantes cesseront de fonctionner.',
+                
+                // Settings - System
+                system: 'Système',
+                systemDesc: 'Redémarrer le contrôleur. Toutes les connexions actives seront perdues.',
+                rebootController: 'Redémarrer le contrôleur',
+                rebootConfirm: "Redémarrer l'appareil maintenant?",
+                rebootingMsg: "L'appareil redémarre. Veuillez patienter...",
+                
+                // Language
+                language: 'Langue'
+            },
+            es: {
+                // Header & Navigation
+                appTitle: 'Controlador Arctic',
+                dashboard: 'Panel',
+                settings: 'Configuración',
+                
+                // Login
+                username: 'Usuario',
+                password: 'Contraseña',
+                login: 'Iniciar sesión',
+                loggingIn: 'Iniciando sesión...',
+                loginFailed: 'Error de inicio de sesión',
+                connectionError: 'Error de conexión',
+                
+                // Dashboard - Heat Pump
+                heatPumpStatus: 'Estado de la bomba de calor',
+                lastUpdated: 'Última actualización',
+                compressor: 'Compresor',
+                airFlowFans: 'Ventiladores',
+                waterPump: 'Bomba de agua',
+                systemStatus: 'Estado del sistema',
+                on: 'ENCENDIDO',
+                off: 'APAGADO',
+                ok: 'OK',
+                
+                // Dashboard - System Overview
+                systemOverview: 'Resumen del sistema',
+                device: 'Dispositivo',
+                uptime: 'Tiempo activo',
+                currentTime: 'Hora actual',
+                timezone: 'Zona horaria',
+                
+                // Settings - Device Info
+                deviceInfo: 'Información del dispositivo',
+                firmwareVersion: 'Versión del firmware',
+                platform: 'Plataforma',
+                freeHeap: 'Memoria libre',
+                
+                // Settings - WiFi
+                wifiStatus: 'Estado WiFi',
+                network: 'Red',
+                signalStrength: 'Intensidad de señal',
+                ipAddress: 'Dirección IP',
+                hostname: 'Nombre de host',
+                notConnected: 'No conectado',
+                signalExcellent: 'Excelente',
+                signalGood: 'Buena',
+                signalFair: 'Regular',
+                signalWeak: 'Débil',
+                signalPoor: 'Muy débil',
+                
+                // Settings - Time
+                timeSettings: 'Configuración de hora',
+                ntpSync: 'Sincronización NTP',
+                synced: 'Sincronizado',
+                notSynced: 'No sincronizado',
+                format24h: 'Formato 24 horas',
+                format24hDesc: 'Mostrar la hora en formato de 24 horas',
+                syncNow: 'Sincronizar ahora',
+                
+                // Settings - Firmware
+                firmwareUpdates: 'Actualizaciones de firmware',
+                currentVersion: 'Versión actual',
+                downloading: 'Descargando',
+                updateSuccess: '¡Actualización descargada! Listo para reiniciar.',
+                uploadFirmware: 'O subir archivo de firmware',
+                dragDropFile: 'Haga clic o arrastre un archivo .bin aquí',
+                uploadInstall: 'Subir e instalar',
+                rebootNow: 'Reiniciar ahora',
+                uploading: 'Subiendo firmware...',
+                verifying: '¡Subida completada! Verificando...',
+                rebooting: 'Reiniciando dispositivo...',
+                updateSuccessful: '¡Actualización exitosa! Actualizando página...',
+                deviceRebooting: 'El dispositivo está reiniciando... Por favor espere.',
+                deviceRebootTimeout: 'El dispositivo no respondió. Por favor actualice la página manualmente.',
+                invalidFileType: 'Tipo de archivo inválido. Por favor seleccione un archivo .bin.',
+                
+                // Settings - Security
+                security: 'Seguridad',
+                webAuth: 'Autenticación de interfaz web',
+                webAuthDesc: 'Requerir inicio de sesión para acceder a esta interfaz',
+                newPassword: 'Nueva contraseña',
+                passwordPlaceholder: 'Dejar en blanco para mantener la actual',
+                saveCredentials: 'Guardar credenciales',
+                credentialsSaved: 'Credenciales guardadas',
+                credentialsFailed: 'Error al guardar las credenciales',
+                apiAuth: 'Autenticación por clave API',
+                apiAuthDesc: 'Requerir encabezado X-API-Key para solicitudes API',
+                apiKey: 'Clave API',
+                show: 'Mostrar',
+                hide: 'Ocultar',
+                copy: 'Copiar',
+                copied: '¡Copiado!',
+                copyFailed: 'Error al copiar. Por favor seleccione y copie manualmente.',
+                regenerate: 'Regenerar',
+                regenerateConfirm: '¿Está seguro? Las integraciones API existentes dejarán de funcionar.',
+                
+                // Settings - System
+                system: 'Sistema',
+                systemDesc: 'Reiniciar el controlador. Todas las conexiones activas se perderán.',
+                rebootController: 'Reiniciar controlador',
+                rebootConfirm: '¿Reiniciar el dispositivo ahora?',
+                rebootingMsg: 'El dispositivo está reiniciando. Por favor espere...',
+                
+                // Language
+                language: 'Idioma'
+            }
+        };
+    </script>
     <style>
         :root {
             --bg-primary: #0d1117;
@@ -543,6 +869,34 @@
             from { transform: translateX(0); opacity: 1; }
             to { transform: translateX(100%); opacity: 0; }
         }
+        
+        /* Language Selector */
+        .lang-selector {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .lang-selector select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-primary);
+            padding: 0.375rem 0.625rem;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        
+        .lang-selector select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
     </style>
 </head>
 <body>
@@ -560,22 +914,29 @@
         <template x-if="requiresLogin && !isLoggedIn">
             <div class="login-container">
                 <div class="login-box">
-                    <h1>🌡️ Arctic Controller</h1>
+                    <h1>🌡️ <span x-text="t('appTitle')"></span></h1>
+                    <div class="lang-selector" style="justify-content: center; margin-bottom: 1rem;">
+                        <select x-model="lang" @change="setLanguage(lang)">
+                            <option value="en">English</option>
+                            <option value="fr">Français</option>
+                            <option value="es">Español</option>
+                        </select>
+                    </div>
                     <template x-if="loginError">
                         <div class="alert alert-error" x-text="loginError"></div>
                     </template>
                     <form @submit.prevent="login()">
                         <div class="form-group">
-                            <label>Username</label>
+                            <label x-text="t('username')"></label>
                             <input type="text" x-model="loginForm.username" required>
                         </div>
                         <div class="form-group">
-                            <label>Password</label>
+                            <label x-text="t('password')"></label>
                             <input type="password" x-model="loginForm.password" required>
                         </div>
                         <button type="submit" class="btn btn-primary" :disabled="loading">
-                            <span x-show="loading">Logging in...</span>
-                            <span x-show="!loading">Login</span>
+                            <span x-show="loading" x-text="t('loggingIn')"></span>
+                            <span x-show="!loading" x-text="t('login')"></span>
                         </button>
                     </form>
                 </div>
@@ -588,14 +949,23 @@
                 <header>
                     <div class="logo">
                         <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                        <h1>Arctic Controller</h1>
+                        <h1 x-text="t('appTitle')"></h1>
                     </div>
-                    <span class="version" x-text="'v' + info.version"></span>
+                    <div class="header-right">
+                        <div class="lang-selector">
+                            <select x-model="lang" @change="setLanguage(lang)">
+                                <option value="en">English</option>
+                                <option value="fr">Français</option>
+                                <option value="es">Español</option>
+                            </select>
+                        </div>
+                        <span class="version" x-text="'v' + info.version"></span>
+                    </div>
                 </header>
                 
                 <nav>
-                    <button :class="{ active: page === 'dashboard' }" @click="page = 'dashboard'">Dashboard</button>
-                    <button :class="{ active: page === 'settings' }" @click="page = 'settings'">Settings</button>
+                    <button :class="{ active: page === 'dashboard' }" @click="page = 'dashboard'" x-text="t('dashboard')"></button>
+                    <button :class="{ active: page === 'settings' }" @click="page = 'settings'" x-text="t('settings')"></button>
                 </nav>
                 
                 <main>
@@ -604,26 +974,26 @@
                         <div>
                             <div class="card">
                                 <div class="card-header">
-                                    <h2>Heat Pump Status</h2>
-                                    <span class="version" x-text="'Last updated: ' + formatTime(lastUpdate)"></span>
+                                    <h2 x-text="t('heatPumpStatus')"></h2>
+                                    <span class="version" x-text="t('lastUpdated') + ': ' + formatTime(lastUpdate)"></span>
                                 </div>
                                 <div class="card-body">
                                     <div class="status-grid">
                                         <div class="status-item">
-                                            <div class="label">Compressor</div>
-                                            <div class="value" :class="heatpump.compressor ? 'on' : 'off'" x-text="heatpump.compressor ? 'ON' : 'OFF'"></div>
+                                            <div class="label" x-text="t('compressor')"></div>
+                                            <div class="value" :class="heatpump.compressor ? 'on' : 'off'" x-text="heatpump.compressor ? t('on') : t('off')"></div>
                                         </div>
                                         <div class="status-item">
-                                            <div class="label">Air Flow Fans</div>
-                                            <div class="value" :class="heatpump.fans ? 'on' : 'off'" x-text="heatpump.fans ? 'ON' : 'OFF'"></div>
+                                            <div class="label" x-text="t('airFlowFans')"></div>
+                                            <div class="value" :class="heatpump.fans ? 'on' : 'off'" x-text="heatpump.fans ? t('on') : t('off')"></div>
                                         </div>
                                         <div class="status-item">
-                                            <div class="label">Water Pump</div>
-                                            <div class="value" :class="heatpump.pump ? 'on' : 'off'" x-text="heatpump.pump ? 'ON' : 'OFF'"></div>
+                                            <div class="label" x-text="t('waterPump')"></div>
+                                            <div class="value" :class="heatpump.pump ? 'on' : 'off'" x-text="heatpump.pump ? t('on') : t('off')"></div>
                                         </div>
                                         <div class="status-item">
-                                            <div class="label">System Status</div>
-                                            <div class="value" :class="heatpump.error ? 'error' : 'on'" x-text="heatpump.error || 'OK'"></div>
+                                            <div class="label" x-text="t('systemStatus')"></div>
+                                            <div class="value" :class="heatpump.error ? 'error' : 'on'" x-text="heatpump.error || t('ok')"></div>
                                         </div>
                                     </div>
                                 </div>
@@ -631,23 +1001,23 @@
                             
                             <div class="card">
                                 <div class="card-header">
-                                    <h2>System Overview</h2>
+                                    <h2 x-text="t('systemOverview')"></h2>
                                 </div>
                                 <div class="card-body">
                                     <div class="info-row">
-                                        <span class="label">Device</span>
+                                        <span class="label" x-text="t('device')"></span>
                                         <span class="value" x-text="info.hostname + '.local'"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">Uptime</span>
+                                        <span class="label" x-text="t('uptime')"></span>
                                         <span class="value" x-text="formatUptime(status.uptime_ms)"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">Current Time</span>
+                                        <span class="label" x-text="t('currentTime')"></span>
                                         <span class="value" x-text="status.time?.local || '--'"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">Timezone</span>
+                                        <span class="label" x-text="t('timezone')"></span>
                                         <span class="value" x-text="status.time?.timezone || '--'"></span>
                                     </div>
                                 </div>
@@ -661,23 +1031,23 @@
                             <!-- Device Info -->
                             <div class="card">
                                 <div class="card-header">
-                                    <h2>Device Information</h2>
+                                    <h2 x-text="t('deviceInfo')"></h2>
                                 </div>
                                 <div class="card-body">
                                     <div class="info-row">
-                                        <span class="label">Firmware Version</span>
+                                        <span class="label" x-text="t('firmwareVersion')"></span>
                                         <span class="value" x-text="'v' + info.version"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">Platform</span>
+                                        <span class="label" x-text="t('platform')"></span>
                                         <span class="value" x-text="info.platform"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">Free Heap</span>
+                                        <span class="label" x-text="t('freeHeap')"></span>
                                         <span class="value" x-text="formatBytes(info.free_heap)"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">Uptime</span>
+                                        <span class="label" x-text="t('uptime')"></span>
                                         <span class="value" x-text="formatUptime(status.uptime_ms)"></span>
                                     </div>
                                 </div>
@@ -686,23 +1056,23 @@
                             <!-- WiFi Status -->
                             <div class="card">
                                 <div class="card-header">
-                                    <h2>WiFi Status</h2>
+                                    <h2 x-text="t('wifiStatus')"></h2>
                                 </div>
                                 <div class="card-body">
                                     <div class="info-row">
-                                        <span class="label">Network</span>
-                                        <span class="value" x-text="wifi.ssid || 'Not connected'"></span>
+                                        <span class="label" x-text="t('network')"></span>
+                                        <span class="value" x-text="wifi.ssid || t('notConnected')"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">Signal Strength</span>
+                                        <span class="label" x-text="t('signalStrength')"></span>
                                         <span class="value" x-text="wifi.rssi ? wifi.rssi + ' dBm (' + getSignalStrength(wifi.rssi) + ')' : '--'"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">IP Address</span>
+                                        <span class="label" x-text="t('ipAddress')"></span>
                                         <span class="value" x-text="wifi.ip || '--'"></span>
                                     </div>
                                     <div class="info-row">
-                                        <span class="label">Hostname</span>
+                                        <span class="label" x-text="t('hostname')"></span>
                                         <span class="value" x-text="wifi.hostname ? wifi.hostname + '.local' : '--'"></span>
                                     </div>
                                 </div>
@@ -711,15 +1081,15 @@
                             <!-- Time Settings -->
                             <div class="card">
                                 <div class="card-header">
-                                    <h2>Time Settings</h2>
+                                    <h2 x-text="t('timeSettings')"></h2>
                                 </div>
                                 <div class="card-body">
                                     <div class="info-row">
-                                        <span class="label">NTP Sync</span>
-                                        <span class="value" :class="timeConfig.synced ? 'success' : ''" x-text="timeConfig.synced ? 'Synced' : 'Not synced'"></span>
+                                        <span class="label" x-text="t('ntpSync')"></span>
+                                        <span class="value" :class="timeConfig.synced ? 'success' : ''" x-text="timeConfig.synced ? t('synced') : t('notSynced')"></span>
                                     </div>
                                     <div class="form-group">
-                                        <label>Timezone</label>
+                                        <label x-text="t('timezone')"></label>
                                         <select x-model="timeConfig.timezone" @change="saveTimeConfig()">
                                             <template x-for="tz in timezones" :key="tz.value">
                                                 <option :value="tz.value" x-text="tz.name"></option>
@@ -728,8 +1098,8 @@
                                     </div>
                                     <div class="toggle-row">
                                         <div class="toggle-label">
-                                            <span class="title">24-Hour Format</span>
-                                            <span class="desc">Display time in 24-hour format</span>
+                                            <span class="title" x-text="t('format24h')"></span>
+                                            <span class="desc" x-text="t('format24hDesc')"></span>
                                         </div>
                                         <label class="toggle">
                                             <input type="checkbox" x-model="timeConfig.format24h" @change="saveTimeConfig()">
@@ -737,9 +1107,7 @@
                                         </label>
                                     </div>
                                     <div style="margin-top: 1rem;">
-                                        <button class="btn btn-secondary" @click="syncTime()" :disabled="loading">
-                                            Sync Now
-                                        </button>
+                                        <button class="btn btn-secondary" @click="syncTime()" :disabled="loading" x-text="t('syncNow')"></button>
                                     </div>
                                 </div>
                             </div>
@@ -747,11 +1115,11 @@
                             <!-- Firmware Updates -->
                             <div class="card">
                                 <div class="card-header">
-                                    <h2>Firmware Updates</h2>
+                                    <h2 x-text="t('firmwareUpdates')"></h2>
                                 </div>
                                 <div class="card-body">
                                     <div class="info-row">
-                                        <span class="label">Current Version</span>
+                                        <span class="label" x-text="t('currentVersion')"></span>
                                         <span class="value" x-text="'v' + ota.current_version"></span>
                                     </div>
                                     
@@ -761,16 +1129,14 @@
                                                 <div class="fill" :style="'width: ' + ota.progress + '%'"></div>
                                             </div>
                                             <div style="text-align: center; color: var(--text-secondary);">
-                                                Downloading: <span x-text="ota.progress + '%'"></span>
+                                                <span x-text="t('downloading')"></span>: <span x-text="ota.progress + '%'"></span>
                                                 (<span x-text="formatBytes(ota.bytes_downloaded)"></span> / <span x-text="formatBytes(ota.total_bytes)"></span>)
                                             </div>
                                         </div>
                                     </template>
                                     
                                     <template x-if="ota.state === 'ready_to_reboot'">
-                                        <div class="alert alert-success">
-                                            Update downloaded successfully! Ready to reboot.
-                                        </div>
+                                        <div class="alert alert-success" x-text="t('updateSuccess')"></div>
                                     </template>
                                     
                                     <template x-if="ota.error">
@@ -779,7 +1145,7 @@
                                     
                                     <!-- File Upload (URL updates restricted to GitHub releases for security) -->
                                     <div class="form-group">
-                                        <label>Or upload firmware file</label>
+                                        <label x-text="t('uploadFirmware')"></label>
                                         
                                         <!-- Upload Progress UI -->
                                         <template x-if="uploadState !== 'idle'">
@@ -820,22 +1186,19 @@
                                                      @drop.prevent="handleFileDrop($event)">
                                                     <input type="file" x-ref="fileInput" accept=".bin" @change="handleFileSelect($event)">
                                                     <div class="icon">📁</div>
-                                                    <div class="text">Click or drag .bin file here</div>
+                                                    <div class="text" x-text="t('dragDropFile')"></div>
                                                     <div class="selected" x-show="selectedFile" x-text="selectedFile?.name"></div>
                                                 </div>
                                                 <button class="btn btn-primary" style="margin-top: 0.5rem; width: 100%;" 
                                                         @click="startOtaUpload()" 
-                                                        :disabled="!selectedFile || loading || ota.state === 'downloading'">
-                                                    Upload & Install
-                                                </button>
+                                                        :disabled="!selectedFile || loading || ota.state === 'downloading'"
+                                                        x-text="t('uploadInstall')"></button>
                                             </div>
                                         </template>
                                     </div>
                                     
                                     <template x-if="ota.state === 'ready_to_reboot'">
-                                        <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" @click="reboot()">
-                                            Reboot Now
-                                        </button>
+                                        <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" @click="reboot()" x-text="t('rebootNow')"></button>
                                     </template>
                                 </div>
                             </div>
@@ -843,13 +1206,13 @@
                             <!-- Security -->
                             <div class="card">
                                 <div class="card-header">
-                                    <h2>Security</h2>
+                                    <h2 x-text="t('security')"></h2>
                                 </div>
                                 <div class="card-body">
                                     <div class="toggle-row">
                                         <div class="toggle-label">
-                                            <span class="title">Web Interface Authentication</span>
-                                            <span class="desc">Require login to access this interface</span>
+                                            <span class="title" x-text="t('webAuth')"></span>
+                                            <span class="desc" x-text="t('webAuthDesc')"></span>
                                         </div>
                                         <label class="toggle">
                                             <input type="checkbox" x-model="security.webAuthEnabled" @change="saveSecurityConfig()">
@@ -860,23 +1223,21 @@
                                     <template x-if="security.webAuthEnabled">
                                         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
                                             <div class="form-group">
-                                                <label>Username</label>
+                                                <label x-text="t('username')"></label>
                                                 <input type="text" x-model="security.username">
                                             </div>
                                             <div class="form-group">
-                                                <label>New Password</label>
-                                                <input type="password" x-model="security.newPassword" placeholder="Leave blank to keep current">
+                                                <label x-text="t('newPassword')"></label>
+                                                <input type="password" x-model="security.newPassword" :placeholder="t('passwordPlaceholder')">
                                             </div>
-                                            <button class="btn btn-secondary" @click="saveCredentials()" :disabled="loading">
-                                                Save Credentials
-                                            </button>
+                                            <button class="btn btn-secondary" @click="saveCredentials()" :disabled="loading" x-text="t('saveCredentials')"></button>
                                         </div>
                                     </template>
                                     
                                     <div class="toggle-row" style="margin-top: 1rem;">
                                         <div class="toggle-label">
-                                            <span class="title">API Key Authentication</span>
-                                            <span class="desc">Require X-API-Key header for API requests</span>
+                                            <span class="title" x-text="t('apiAuth')"></span>
+                                            <span class="desc" x-text="t('apiAuthDesc')"></span>
                                         </div>
                                         <label class="toggle">
                                             <input type="checkbox" x-model="security.apiAuthEnabled" @change="saveSecurityConfig()">
@@ -887,18 +1248,12 @@
                                     <template x-if="security.apiAuthEnabled">
                                         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
                                             <div class="form-group">
-                                                <label>API Key</label>
+                                                <label x-text="t('apiKey')"></label>
                                                 <div class="api-key-display">
                                                     <input :type="showApiKey ? 'text' : 'password'" :value="security.apiKey" readonly x-ref="apiKeyInput">
-                                                    <button class="btn btn-secondary" @click="showApiKey = !showApiKey">
-                                                        <span x-text="showApiKey ? 'Hide' : 'Show'"></span>
-                                                    </button>
-                                                    <button class="btn btn-secondary" @click="copyApiKey()" title="Copy to clipboard">
-                                                        Copy
-                                                    </button>
-                                                    <button class="btn btn-secondary" @click="regenerateApiKey()">
-                                                        Regenerate
-                                                    </button>
+                                                    <button class="btn btn-secondary" @click="showApiKey = !showApiKey" x-text="showApiKey ? t('hide') : t('show')"></button>
+                                                    <button class="btn btn-secondary" @click="copyApiKey()" :title="t('copy')" x-text="t('copy')"></button>
+                                                    <button class="btn btn-secondary" @click="regenerateApiKey()" x-text="t('regenerate')"></button>
                                                 </div>
                                             </div>
                                         </div>
@@ -909,12 +1264,12 @@
                             <!-- Reboot Controller -->
                             <div class="card">
                                 <div class="card-header">
-                                    <h2>System</h2>
+                                    <h2 x-text="t('system')"></h2>
                                 </div>
                                 <div class="card-body">
-                                    <p style="color: var(--text-secondary); margin-bottom: 1rem;">Restart the controller. All active connections will be lost.</p>
+                                    <p style="color: var(--text-secondary); margin-bottom: 1rem;" x-text="t('systemDesc')"></p>
                                     <button class="btn btn-secondary" @click="reboot()" :disabled="loading" style="width: 100%;">
-                                        🔄 Reboot Controller
+                                        🔄 <span x-text="t('rebootController')"></span>
                                     </button>
                                 </div>
                             </div>
@@ -933,6 +1288,7 @@
                 requiresLogin: false,
                 isLoggedIn: false,
                 lastUpdate: null,
+                lang: localStorage.getItem('arctic_lang') || navigator.language.slice(0, 2) || 'en',
                 
                 loginForm: { username: '', password: '' },
                 loginError: '',
@@ -981,11 +1337,26 @@
                 ],
                 
                 async init() {
+                    // Normalize language code
+                    if (!translations[this.lang]) {
+                        this.lang = 'en';
+                    }
                     await this.checkAuth();
                     if (!this.requiresLogin || this.isLoggedIn) {
                         await this.loadAll();
                         this.startPolling();
                     }
+                },
+                
+                // Translation helper
+                t(key) {
+                    const langData = translations[this.lang] || translations['en'];
+                    return langData[key] || translations['en'][key] || key;
+                },
+                
+                setLanguage(lang) {
+                    this.lang = lang;
+                    localStorage.setItem('arctic_lang', lang);
                 },
                 
                 async checkAuth() {
@@ -1014,10 +1385,10 @@
                             await this.loadAll();
                             this.startPolling();
                         } else {
-                            this.loginError = data.error || 'Login failed';
+                            this.loginError = data.error || this.t('loginFailed');
                         }
                     } catch (e) {
-                        this.loginError = 'Connection error';
+                        this.loginError = this.t('connectionError');
                     }
                     this.loading = false;
                 },
@@ -1168,11 +1539,11 @@
                         // Brief visual feedback
                         const btn = event.target;
                         const originalText = btn.textContent;
-                        btn.textContent = 'Copied!';
+                        btn.textContent = this.t('copied');
                         setTimeout(() => btn.textContent = originalText, 1500);
                     } catch (err) {
                         console.error('Copy failed:', err);
-                        this.showToast('Copy failed. Please select and copy manually.', 'error');
+                        this.showToast(this.t('copyFailed'), 'error');
                     }
                     
                     document.body.removeChild(textarea);
@@ -1190,10 +1561,10 @@
                             })
                         });
                         this.security.newPassword = '';
-                        this.showToast('Credentials saved', 'success');
+                        this.showToast(this.t('credentialsSaved'), 'success');
                     } catch (e) { 
                         console.error(e);
-                        this.showToast('Failed to save credentials', 'error');
+                        this.showToast(this.t('credentialsFailed'), 'error');
                     }
                     this.loading = false;
                 },
@@ -1212,7 +1583,7 @@
                 },
                 
                 async regenerateApiKey() {
-                    if (!confirm('Are you sure? Existing API integrations will stop working.')) return;
+                    if (!confirm(this.t('regenerateConfirm'))) return;
                     try {
                         const res = await fetch('/api/auth/apikey/regenerate', { method: 'POST' });
                         const data = await res.json();
@@ -1237,14 +1608,14 @@
                     
                     // Validate file extension
                     if (!this.selectedFile.name.toLowerCase().endsWith('.bin')) {
-                        this.uploadError = 'Invalid file type. Please select a .bin file.';
+                        this.uploadError = this.t('invalidFileType');
                         this.uploadState = 'error';
                         return;
                     }
                     
                     this.uploadState = 'uploading';
                     this.uploadProgress = 0;
-                    this.uploadStatus = 'Uploading firmware...';
+                    this.uploadStatus = this.t('uploading');
                     this.uploadError = '';
                     this.loading = true;
                     
@@ -1255,7 +1626,7 @@
                         if (e.lengthComputable) {
                             // Use 0-90% for upload, 90-95% for verification
                             self.uploadProgress = Math.round((e.loaded / e.total) * 90);
-                            self.uploadStatus = `Uploading: ${self.formatBytes(e.loaded)} / ${self.formatBytes(e.total)}`;
+                            self.uploadStatus = `${self.formatBytes(e.loaded)} / ${self.formatBytes(e.total)}`;
                         }
                     };
                     
@@ -1265,13 +1636,13 @@
                                 const result = JSON.parse(xhr.responseText);
                                 if (result.success) {
                                     self.uploadProgress = 95;
-                                    self.uploadStatus = 'Upload complete! Verifying...';
+                                    self.uploadStatus = self.t('verifying');
                                     self.uploadState = 'verifying';
                                     
                                     // Start reboot sequence
                                     setTimeout(() => {
                                         self.uploadProgress = 100;
-                                        self.uploadStatus = 'Rebooting device...';
+                                        self.uploadStatus = self.t('rebooting');
                                         self.uploadState = 'rebooting';
                                         self.waitForReboot();
                                     }, 1000);
@@ -1304,9 +1675,10 @@
                 },
                 
                 async waitForReboot() {
-                    this.uploadStatus = 'Device is rebooting... Please wait.';
+                    this.uploadStatus = this.t('deviceRebooting');
                     let attempts = 0;
                     const maxAttempts = 60; // 60 seconds max wait
+                    const self = this;
                     
                     const checkDevice = async () => {
                         attempts++;
@@ -1320,9 +1692,9 @@
                             
                             // Any response (including 401 Unauthorized) means device is back
                             // After firmware update, sessions are cleared so we just refresh the page
-                            this.uploadState = 'complete';
-                            this.uploadStatus = 'Update successful! Refreshing page...';
-                            this.loading = false;
+                            self.uploadState = 'complete';
+                            self.uploadStatus = self.t('updateSuccessful');
+                            self.loading = false;
                             
                             // Refresh the page - this will show login screen if auth is enabled
                             setTimeout(() => {
@@ -1334,12 +1706,12 @@
                         }
                         
                         if (attempts < maxAttempts) {
-                            this.uploadStatus = `Device is rebooting... (${attempts}s)`;
+                            self.uploadStatus = `${self.t('deviceRebooting').replace('...', '')} (${attempts}s)...`;
                             setTimeout(checkDevice, 1000);
                         } else {
-                            this.uploadError = 'Device did not respond after reboot. Please refresh the page manually.';
-                            this.uploadState = 'error';
-                            this.loading = false;
+                            self.uploadError = self.t('deviceRebootTimeout');
+                            self.uploadState = 'error';
+                            self.loading = false;
                         }
                     };
                     
@@ -1348,9 +1720,9 @@
                 },
                 
                 async reboot() {
-                    if (!confirm('Reboot the device now?')) return;
+                    if (!confirm(this.t('rebootConfirm'))) return;
                     await fetch('/api/ota/reboot', { method: 'POST' });
-                    this.showToast('Device is rebooting. Please wait...', 'info', 5000);
+                    this.showToast(this.t('rebootingMsg'), 'info', 5000);
                 },
                 
                 formatUptime(ms) {
@@ -1386,11 +1758,11 @@
                 },
                 
                 getSignalStrength(rssi) {
-                    if (rssi > -50) return 'Excellent';
-                    if (rssi > -60) return 'Good';
-                    if (rssi > -70) return 'Fair';
-                    if (rssi > -80) return 'Weak';
-                    return 'Poor';
+                    if (rssi > -50) return this.t('signalExcellent');
+                    if (rssi > -60) return this.t('signalGood');
+                    if (rssi > -70) return this.t('signalFair');
+                    if (rssi > -80) return this.t('signalWeak');
+                    return this.t('signalPoor');
                 }
             };
         }
