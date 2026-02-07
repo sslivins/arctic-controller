@@ -13,21 +13,28 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string.h>
+#include <cJSON.h>
 
 static const char* TAG = "ota_manager";
 
 // OTA task stack size
 #define OTA_TASK_STACK_SIZE 8192
 
-// Allowed URL prefix for firmware updates (security)
+// GitHub API URL for releases
+#define GITHUB_API_URL "https://api.github.com/repos/sslivins/arctic-controller/releases/latest"
+
+// Allowed URL prefixes for firmware updates (security)
 #define ALLOWED_OTA_URL_PREFIX "https://github.com/sslivins/arctic-controller/"
+#define ALLOWED_OTA_URL_PREFIX2 "https://objects.githubusercontent.com/"
 
 bool ota_mgr_is_url_allowed(const char* url)
 {
     if (url == NULL || strlen(url) == 0) {
         return false;
     }
-    return strncmp(url, ALLOWED_OTA_URL_PREFIX, strlen(ALLOWED_OTA_URL_PREFIX)) == 0;
+    // Allow both GitHub repo URLs and GitHub's CDN (objects.githubusercontent.com)
+    return strncmp(url, ALLOWED_OTA_URL_PREFIX, strlen(ALLOWED_OTA_URL_PREFIX)) == 0 ||
+           strncmp(url, ALLOWED_OTA_URL_PREFIX2, strlen(ALLOWED_OTA_URL_PREFIX2)) == 0;
 }
 
 // Current OTA status
@@ -39,6 +46,15 @@ static ota_status_t ota_status = {
     .error_msg = "",
     .current_version = "",
     .new_version = ""
+};
+
+// Cached release info
+static ota_release_info_t release_info = {
+    .update_available = false,
+    .latest_version = "",
+    .download_url = "",
+    .release_notes = "",
+    .published_at = ""
 };
 
 // URL for current update
@@ -431,4 +447,190 @@ static void ota_task(void* pvParameter)
     
     // Never reached
     vTaskDelete(NULL);
+}
+
+// Compare semantic versions (returns: -1 if v1<v2, 0 if equal, 1 if v1>v2)
+static int compare_versions(const char* v1, const char* v2)
+{
+    int major1 = 0, minor1 = 0, patch1 = 0;
+    int major2 = 0, minor2 = 0, patch2 = 0;
+    
+    // Skip 'v' prefix if present
+    if (v1[0] == 'v' || v1[0] == 'V') v1++;
+    if (v2[0] == 'v' || v2[0] == 'V') v2++;
+    
+    sscanf(v1, "%d.%d.%d", &major1, &minor1, &patch1);
+    sscanf(v2, "%d.%d.%d", &major2, &minor2, &patch2);
+    
+    if (major1 != major2) return (major1 > major2) ? 1 : -1;
+    if (minor1 != minor2) return (minor1 > minor2) ? 1 : -1;
+    if (patch1 != patch2) return (patch1 > patch2) ? 1 : -1;
+    return 0;
+}
+
+// HTTP response buffer for GitHub API
+static char* http_response_buffer = NULL;
+static size_t http_response_len = 0;
+static size_t http_response_capacity = 0;
+
+static esp_err_t github_http_event_handler(esp_http_client_event_t* evt)
+{
+    switch (evt->event_id) {
+        case HTTP_EVENT_ON_DATA:
+            if (http_response_buffer == NULL) {
+                // Initial allocation
+                http_response_capacity = 4096;
+                http_response_buffer = (char*)malloc(http_response_capacity);
+                http_response_len = 0;
+            }
+            // Grow buffer if needed
+            if (http_response_len + evt->data_len >= http_response_capacity) {
+                http_response_capacity = http_response_len + evt->data_len + 1024;
+                http_response_buffer = (char*)realloc(http_response_buffer, http_response_capacity);
+            }
+            if (http_response_buffer) {
+                memcpy(http_response_buffer + http_response_len, evt->data, evt->data_len);
+                http_response_len += evt->data_len;
+                http_response_buffer[http_response_len] = '\0';
+            }
+            break;
+        default:
+            break;
+    }
+    return ESP_OK;
+}
+
+bool ota_mgr_check_github_releases(ota_release_info_t* info)
+{
+    ESP_LOGI(TAG, "Checking GitHub for updates...");
+    
+    // Reset release info
+    memset(&release_info, 0, sizeof(release_info));
+    
+    // Free any previous response buffer
+    if (http_response_buffer) {
+        free(http_response_buffer);
+        http_response_buffer = NULL;
+    }
+    http_response_len = 0;
+    http_response_capacity = 0;
+    
+    // Configure HTTP client for GitHub API
+    esp_http_client_config_t config = {};
+    config.url = GITHUB_API_URL;
+    config.event_handler = github_http_event_handler;
+    config.timeout_ms = 15000;
+    config.crt_bundle_attach = esp_crt_bundle_attach;
+    config.buffer_size = 2048;
+    
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to init HTTP client");
+        return false;
+    }
+    
+    // GitHub API requires User-Agent header
+    esp_http_client_set_header(client, "User-Agent", "arctic-controller");
+    esp_http_client_set_header(client, "Accept", "application/vnd.github.v3+json");
+    
+    esp_err_t err = esp_http_client_perform(client);
+    int status_code = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    
+    if (err != ESP_OK || status_code != 200) {
+        ESP_LOGE(TAG, "GitHub API request failed: %s (HTTP %d)", esp_err_to_name(err), status_code);
+        if (http_response_buffer) {
+            free(http_response_buffer);
+            http_response_buffer = NULL;
+        }
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Got GitHub response (%d bytes)", http_response_len);
+    
+    // Parse JSON response
+    cJSON* root = cJSON_Parse(http_response_buffer);
+    free(http_response_buffer);
+    http_response_buffer = NULL;
+    
+    if (root == NULL) {
+        ESP_LOGE(TAG, "Failed to parse GitHub JSON response");
+        return false;
+    }
+    
+    // Extract version tag
+    cJSON* tag_name = cJSON_GetObjectItem(root, "tag_name");
+    if (tag_name && cJSON_IsString(tag_name)) {
+        strncpy(release_info.latest_version, tag_name->valuestring, sizeof(release_info.latest_version) - 1);
+    }
+    
+    // Extract published date
+    cJSON* published_at = cJSON_GetObjectItem(root, "published_at");
+    if (published_at && cJSON_IsString(published_at)) {
+        strncpy(release_info.published_at, published_at->valuestring, sizeof(release_info.published_at) - 1);
+    }
+    
+    // Extract release notes (body), truncate if needed
+    cJSON* body = cJSON_GetObjectItem(root, "body");
+    if (body && cJSON_IsString(body)) {
+        strncpy(release_info.release_notes, body->valuestring, sizeof(release_info.release_notes) - 1);
+    }
+    
+    // Find the .bin asset in assets array
+    cJSON* assets = cJSON_GetObjectItem(root, "assets");
+    if (assets && cJSON_IsArray(assets)) {
+        cJSON* asset;
+        cJSON_ArrayForEach(asset, assets) {
+            cJSON* name = cJSON_GetObjectItem(asset, "name");
+            if (name && cJSON_IsString(name)) {
+                // Look for .bin file
+                if (strstr(name->valuestring, ".bin") != NULL) {
+                    cJSON* download_url = cJSON_GetObjectItem(asset, "browser_download_url");
+                    if (download_url && cJSON_IsString(download_url)) {
+                        strncpy(release_info.download_url, download_url->valuestring, sizeof(release_info.download_url) - 1);
+                        ESP_LOGI(TAG, "Found firmware: %s", name->valuestring);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    // Compare versions
+    if (strlen(release_info.latest_version) > 0 && strlen(ota_status.current_version) > 0) {
+        int cmp = compare_versions(release_info.latest_version, ota_status.current_version);
+        release_info.update_available = (cmp > 0);
+        ESP_LOGI(TAG, "Current: %s, Latest: %s, Update available: %s",
+                 ota_status.current_version, release_info.latest_version,
+                 release_info.update_available ? "YES" : "NO");
+    }
+    
+    if (info) {
+        memcpy(info, &release_info, sizeof(ota_release_info_t));
+    }
+    
+    return true;
+}
+
+const ota_release_info_t* ota_mgr_get_release_info(void)
+{
+    return &release_info;
+}
+
+bool ota_mgr_start_github_update(void)
+{
+    if (strlen(release_info.download_url) == 0) {
+        ESP_LOGE(TAG, "No download URL available - run check first");
+        return false;
+    }
+    
+    if (!release_info.update_available) {
+        ESP_LOGW(TAG, "No update available");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Starting GitHub OTA update to %s", release_info.latest_version);
+    return ota_mgr_start_update(release_info.download_url);
 }

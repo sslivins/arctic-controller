@@ -71,6 +71,12 @@
                 // Settings - Firmware
                 firmwareUpdates: 'Firmware Updates',
                 currentVersion: 'Current Version',
+                latestVersion: 'Latest Version',
+                checkForUpdates: 'Check for Updates',
+                checking: 'Checking...',
+                updateAvailable: 'Update Available!',
+                upToDate: 'You are up to date',
+                installUpdate: 'Install Update',
                 downloading: 'Downloading',
                 updateSuccess: 'Update downloaded successfully! Ready to reboot.',
                 uploadFirmware: 'Or upload firmware file',
@@ -84,6 +90,8 @@
                 deviceRebooting: 'Device is rebooting... Please wait.',
                 deviceRebootTimeout: 'Device did not respond after reboot. Please refresh the page manually.',
                 invalidFileType: 'Invalid file type. Please select a .bin file.',
+                checkFailed: 'Failed to check for updates',
+                noDownloadUrl: 'No firmware binary found in release',
                 
                 // Settings - Security
                 security: 'Security',
@@ -178,6 +186,12 @@
                 // Settings - Firmware
                 firmwareUpdates: 'Mises à jour du firmware',
                 currentVersion: 'Version actuelle',
+                latestVersion: 'Dernière version',
+                checkForUpdates: 'Vérifier les mises à jour',
+                checking: 'Vérification...',
+                updateAvailable: 'Mise à jour disponible!',
+                upToDate: 'Vous êtes à jour',
+                installUpdate: 'Installer la mise à jour',
                 downloading: 'Téléchargement',
                 updateSuccess: 'Mise à jour téléchargée! Prêt à redémarrer.',
                 uploadFirmware: 'Ou téléverser un fichier firmware',
@@ -191,6 +205,8 @@
                 deviceRebooting: "L'appareil redémarre... Veuillez patienter.",
                 deviceRebootTimeout: "L'appareil n'a pas répondu. Actualisez la page manuellement.",
                 invalidFileType: 'Type de fichier invalide. Veuillez sélectionner un fichier .bin.',
+                checkFailed: 'Échec de la vérification des mises à jour',
+                noDownloadUrl: 'Aucun fichier binaire trouvé dans la version',
                 
                 // Settings - Security
                 security: 'Sécurité',
@@ -285,6 +301,12 @@
                 // Settings - Firmware
                 firmwareUpdates: 'Actualizaciones de firmware',
                 currentVersion: 'Versión actual',
+                latestVersion: 'Última versión',
+                checkForUpdates: 'Buscar actualizaciones',
+                checking: 'Verificando...',
+                updateAvailable: '¡Actualización disponible!',
+                upToDate: 'Está actualizado',
+                installUpdate: 'Instalar actualización',
                 downloading: 'Descargando',
                 updateSuccess: '¡Actualización descargada! Listo para reiniciar.',
                 uploadFirmware: 'O subir archivo de firmware',
@@ -298,6 +320,8 @@
                 deviceRebooting: 'El dispositivo está reiniciando... Por favor espere.',
                 deviceRebootTimeout: 'El dispositivo no respondió. Por favor actualice la página manualmente.',
                 invalidFileType: 'Tipo de archivo inválido. Por favor seleccione un archivo .bin.',
+                checkFailed: 'Error al buscar actualizaciones',
+                noDownloadUrl: 'No se encontró archivo binario en la versión',
                 
                 // Settings - Security
                 security: 'Seguridad',
@@ -1123,6 +1147,65 @@
                                         <span class="value" x-text="'v' + ota.current_version"></span>
                                     </div>
                                     
+                                    <!-- GitHub Update Check -->
+                                    <div style="margin: 1rem 0; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px;">
+                                        <template x-if="!github.checked && !github.checking">
+                                            <button class="btn btn-primary" style="width: 100%;" 
+                                                    @click="checkForUpdates()" 
+                                                    :disabled="loading || ota.state === 'downloading'"
+                                                    x-text="t('checkForUpdates')"></button>
+                                        </template>
+                                        
+                                        <template x-if="github.checking">
+                                            <div style="text-align: center; color: var(--text-secondary);">
+                                                <span>🔍</span> <span x-text="t('checking')"></span>
+                                            </div>
+                                        </template>
+                                        
+                                        <template x-if="github.checked && !github.checking">
+                                            <div>
+                                                <template x-if="github.error">
+                                                    <div class="alert alert-error" x-text="github.error"></div>
+                                                </template>
+                                                
+                                                <template x-if="!github.error && github.updateAvailable">
+                                                    <div>
+                                                        <div class="alert alert-success" style="margin-bottom: 0.75rem;">
+                                                            🎉 <span x-text="t('updateAvailable')"></span>
+                                                        </div>
+                                                        <div class="info-row">
+                                                            <span class="label" x-text="t('latestVersion')"></span>
+                                                            <span class="value" style="color: var(--success);" x-text="github.latestVersion"></span>
+                                                        </div>
+                                                        <template x-if="github.releaseNotes">
+                                                            <div style="margin: 0.75rem 0; padding: 0.75rem; background: var(--bg-secondary); border-radius: 6px; font-size: 0.9rem; color: var(--text-secondary); max-height: 100px; overflow-y: auto;">
+                                                                <span x-text="github.releaseNotes.substring(0, 300) + (github.releaseNotes.length > 300 ? '...' : '')"></span>
+                                                            </div>
+                                                        </template>
+                                                        <button class="btn btn-primary" style="width: 100%;" 
+                                                                @click="startGithubUpdate()" 
+                                                                :disabled="loading || ota.state === 'downloading' || !github.downloadReady"
+                                                                x-text="t('installUpdate')"></button>
+                                                        <template x-if="!github.downloadReady">
+                                                            <div style="margin-top: 0.5rem; color: var(--warning); font-size: 0.85rem;" x-text="t('noDownloadUrl')"></div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                                
+                                                <template x-if="!github.error && !github.updateAvailable">
+                                                    <div style="text-align: center; color: var(--success);">
+                                                        ✅ <span x-text="t('upToDate')"></span>
+                                                    </div>
+                                                </template>
+                                                
+                                                <button class="btn btn-secondary" style="width: 100%; margin-top: 0.75rem;" 
+                                                        @click="checkForUpdates()" 
+                                                        :disabled="loading || ota.state === 'downloading'"
+                                                        x-text="t('checkForUpdates')"></button>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    
                                     <template x-if="ota.state === 'downloading'">
                                         <div>
                                             <div class="progress-bar">
@@ -1144,7 +1227,7 @@
                                     </template>
                                     
                                     <!-- File Upload (URL updates restricted to GitHub releases for security) -->
-                                    <div class="form-group">
+                                    <div class="form-group" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
                                         <label x-text="t('uploadFirmware')"></label>
                                         
                                         <!-- Upload Progress UI -->
@@ -1298,6 +1381,17 @@
                 wifi: {},
                 heatpump: { compressor: false, fans: false, pump: false, error: null },
                 ota: { state: 'idle', progress: 0, current_version: '--' },
+                
+                // GitHub update state
+                github: {
+                    checking: false,
+                    checked: false,
+                    updateAvailable: false,
+                    latestVersion: '',
+                    releaseNotes: '',
+                    downloadReady: false,
+                    error: ''
+                },
                 
                 timeConfig: { timezone: 'EST5EDT,M3.2.0,M11.1.0', format24h: true, synced: false },
                 security: { webAuthEnabled: false, apiAuthEnabled: false, username: '', newPassword: '', apiKey: '' },
@@ -1480,6 +1574,52 @@
                         // Placeholder - endpoint might not exist yet
                         this.heatpump = { compressor: false, fans: false, pump: false, error: null };
                     }
+                },
+                
+                async checkForUpdates() {
+                    this.github.checking = true;
+                    this.github.error = '';
+                    
+                    try {
+                        const res = await fetch('/api/ota/releases');
+                        if (!res.ok) {
+                            const err = await res.json();
+                            this.github.error = err.error || this.t('checkFailed');
+                        } else {
+                            const data = await res.json();
+                            this.github.updateAvailable = data.update_available;
+                            this.github.latestVersion = data.latest_version;
+                            this.github.releaseNotes = data.release_notes || '';
+                            this.github.downloadReady = data.download_ready;
+                        }
+                        this.github.checked = true;
+                    } catch (e) {
+                        console.error(e);
+                        this.github.error = this.t('checkFailed');
+                        this.github.checked = true;
+                    }
+                    
+                    this.github.checking = false;
+                },
+                
+                async startGithubUpdate() {
+                    if (!this.github.updateAvailable || !this.github.downloadReady) return;
+                    
+                    this.loading = true;
+                    try {
+                        const res = await fetch('/api/ota/github', { method: 'POST' });
+                        if (!res.ok) {
+                            const err = await res.json();
+                            this.showToast(err.error || 'Update failed', 'error');
+                        } else {
+                            this.showToast('Update started - downloading...', 'info');
+                            // Polling will pick up the progress
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast('Failed to start update', 'error');
+                    }
+                    this.loading = false;
                 },
                 
                 async saveTimeConfig() {

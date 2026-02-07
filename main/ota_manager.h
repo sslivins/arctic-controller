@@ -15,6 +15,7 @@ extern "C" {
 // OTA update states
 typedef enum {
     OTA_STATE_IDLE,
+    OTA_STATE_CHECKING,     // Checking GitHub for updates
     OTA_STATE_UPLOADING,    // File upload in progress
     OTA_STATE_DOWNLOADING,  // URL download in progress
     OTA_STATE_VERIFYING,
@@ -32,6 +33,15 @@ typedef struct {
     char current_version[32];
     char new_version[32];
 } ota_status_t;
+
+// GitHub release info
+typedef struct {
+    bool update_available;
+    char latest_version[32];
+    char download_url[256];
+    char release_notes[512];
+    char published_at[32];
+} ota_release_info_t;
 
 /**
  * @brief Initialize OTA manager
@@ -97,6 +107,26 @@ void ota_mgr_mark_valid(void);
  * @param size Pointer to store partition size (can be NULL)
  */
 void ota_mgr_get_partition_info(char* label, uint32_t* address, uint32_t* size);
+
+/**
+ * @brief Check GitHub for available updates
+ * @param info Pointer to store release info
+ * @return true if check succeeded (doesn't mean update available)
+ */
+bool ota_mgr_check_github_releases(ota_release_info_t* info);
+
+/**
+ * @brief Get cached release info from last check
+ * @return Pointer to cached release info (valid until next check)
+ */
+const ota_release_info_t* ota_mgr_get_release_info(void);
+
+/**
+ * @brief Start OTA update from GitHub release
+ * Uses the URL from the last successful release check
+ * @return true if update started
+ */
+bool ota_mgr_start_github_update(void);
 
 #ifdef __cplusplus
 }

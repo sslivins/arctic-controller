@@ -53,6 +53,8 @@ static esp_err_t ota_status_get_handler(httpd_req_t* req);
 static esp_err_t ota_update_post_handler(httpd_req_t* req);
 static esp_err_t ota_upload_post_handler(httpd_req_t* req);
 static esp_err_t ota_reboot_post_handler(httpd_req_t* req);
+static esp_err_t ota_releases_get_handler(httpd_req_t* req);
+static esp_err_t ota_github_update_post_handler(httpd_req_t* req);
 static esp_err_t auth_config_get_handler(httpd_req_t* req);
 static esp_err_t auth_config_post_handler(httpd_req_t* req);
 static esp_err_t auth_status_get_handler(httpd_req_t* req);
@@ -409,6 +411,24 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &ota_reboot_uri);
+    
+    // GET /api/ota/releases - Check GitHub for updates
+    httpd_uri_t ota_releases_uri = {
+        .uri = "/api/ota/releases",
+        .method = HTTP_GET,
+        .handler = ota_releases_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &ota_releases_uri);
+    
+    // POST /api/ota/github - Start update from GitHub
+    httpd_uri_t ota_github_uri = {
+        .uri = "/api/ota/github",
+        .method = HTTP_POST,
+        .handler = ota_github_update_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &ota_github_uri);
     
     // GET /api/auth/config
     httpd_uri_t auth_config_get_uri = {
@@ -1166,6 +1186,81 @@ static esp_err_t ota_reboot_post_handler(httpd_req_t* req)
     
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
+    
+    return ESP_OK;
+}
+
+static esp_err_t ota_releases_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    ota_release_info_t info;
+    if (!ota_mgr_check_github_releases(&info)) {
+        send_json_error(req, "502 Bad Gateway", "Failed to check GitHub for updates");
+        return ESP_OK;
+    }
+    
+    ota_status_t status = ota_mgr_get_status();
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "update_available", info.update_available);
+    cJSON_AddStringToObject(root, "current_version", status.current_version);
+    cJSON_AddStringToObject(root, "latest_version", info.latest_version);
+    cJSON_AddStringToObject(root, "published_at", info.published_at);
+    
+    if (info.download_url[0] != '\0') {
+        cJSON_AddBoolToObject(root, "download_ready", true);
+    } else {
+        cJSON_AddBoolToObject(root, "download_ready", false);
+    }
+    
+    // Truncate release notes for JSON response
+    if (info.release_notes[0] != '\0') {
+        cJSON_AddStringToObject(root, "release_notes", info.release_notes);
+    }
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+static esp_err_t ota_github_update_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    const ota_release_info_t* info = ota_mgr_get_release_info();
+    if (!info->update_available) {
+        send_json_error(req, "400 Bad Request", "No update available - check for updates first");
+        return ESP_OK;
+    }
+    
+    if (!ota_mgr_start_github_update()) {
+        send_json_error(req, "409 Conflict", "OTA update already in progress or no download URL");
+        return ESP_OK;
+    }
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "status", "started");
+    cJSON_AddStringToObject(root, "message", "GitHub update started");
+    cJSON_AddStringToObject(root, "version", info->latest_version);
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
     
     return ESP_OK;
 }
