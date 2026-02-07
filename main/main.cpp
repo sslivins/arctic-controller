@@ -16,6 +16,7 @@
 #include "ota_manager.h"
 #include "settings_screen.h"
 #include "settings/settings_time_panel.h"
+#include "settings/settings_display_panel.h"
 #include "i18n/i18n.h"
 #include "auth_manager.h"
 
@@ -107,6 +108,9 @@ extern "C" void app_main(void)
     // Set rotation and turn on backlight
     lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);
     bsp_display_backlight_on();
+    
+    // Initialize display brightness from saved settings
+    display_panel_init_brightness();
 
     mclog::tagInfo(TAG, "Display initialized: {}x{}", BSP_LCD_H_RES, BSP_LCD_V_RES);
 

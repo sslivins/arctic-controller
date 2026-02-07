@@ -110,6 +110,15 @@ typedef enum {
     STR_SETTINGS_TIME,
     
     // ========================================================================
+    // Display Panel
+    // ========================================================================
+    STR_SETTINGS_DISPLAY,
+    STR_DISPLAY_TITLE,
+    STR_DISPLAY_BRIGHTNESS,
+    STR_DISPLAY_BRIGHTNESS_LOW,
+    STR_DISPLAY_BRIGHTNESS_HIGH,
+    
+    // ========================================================================
     // Must be last - used for array sizing
     // ========================================================================
     STR_COUNT
