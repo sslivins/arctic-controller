@@ -23,7 +23,7 @@ idf_component_register(
         "i18n"
         "fonts"
     EMBED_FILES
-        "web/index.html"
+        "web/index.html.gz"
     REQUIRES
         m5stack_tab5
         lvgl

@@ -24,9 +24,9 @@ static char hostname[32] = "arctic";  // Actual hostname (may have suffix)
 // HTTP server handle
 static httpd_handle_t server = NULL;
 
-// Embedded web files (from EMBED_FILES)
-extern const uint8_t index_html_start[] asm("_binary_index_html_start");
-extern const uint8_t index_html_end[] asm("_binary_index_html_end");
+// Embedded web files (from EMBED_FILES) - gzip compressed
+extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
+extern const uint8_t index_html_gz_end[] asm("_binary_index_html_gz_end");
 
 // Session cookie name
 static const char* SESSION_COOKIE_NAME = "arctic_session";
@@ -529,10 +529,11 @@ static esp_err_t web_root_handler(httpd_req_t* req)
     }
     
     httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     
-    size_t html_len = index_html_end - index_html_start;
-    httpd_resp_send(req, (const char*)index_html_start, html_len);
+    size_t html_len = index_html_gz_end - index_html_gz_start;
+    httpd_resp_send(req, (const char*)index_html_gz_start, html_len);
     
     return ESP_OK;
 }
