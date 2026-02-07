@@ -2,21 +2,27 @@
 # Generate gzipped web file at configure time if source is newer
 set(WEB_SRC "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html")
 set(WEB_GZ "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html.gz")
-
-# Convert to native paths for Python
-file(TO_NATIVE_PATH "${WEB_SRC}" WEB_SRC_NATIVE)
-file(TO_NATIVE_PATH "${WEB_GZ}" WEB_GZ_NATIVE)
+set(GZIP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/web/gzip_html.py")
 
 # Check if we need to regenerate the gzip file
 if(EXISTS "${WEB_SRC}")
     if(NOT EXISTS "${WEB_GZ}" OR "${WEB_SRC}" IS_NEWER_THAN "${WEB_GZ}")
         message(STATUS "Compressing web/index.html -> index.html.gz")
+        # Use Python from IDF environment or find it
+        if(DEFINED ENV{IDF_PYTHON_ENV_PATH})
+            set(PYTHON_CMD "$ENV{IDF_PYTHON_ENV_PATH}/Scripts/python.exe")
+        elseif(DEFINED PYTHON)
+            set(PYTHON_CMD "${PYTHON}")
+        else()
+            find_program(PYTHON_CMD NAMES python3 python)
+        endif()
         execute_process(
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/web/gzip_html.py" "${WEB_SRC}" "${WEB_GZ}"
+            COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${WEB_SRC}" "${WEB_GZ}"
             RESULT_VARIABLE GZIP_RESULT
+            ERROR_VARIABLE GZIP_ERROR
         )
         if(NOT GZIP_RESULT EQUAL 0)
-            message(FATAL_ERROR "Failed to gzip web/index.html (exit code: ${GZIP_RESULT})")
+            message(FATAL_ERROR "Failed to gzip web/index.html (exit code: ${GZIP_RESULT}, error: ${GZIP_ERROR})")
         endif()
     endif()
 endif()
