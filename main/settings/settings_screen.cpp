@@ -14,6 +14,7 @@
 #include "settings_firmware_panel.h"
 #include "settings_time_panel.h"
 #include "settings_language_panel.h"
+#include "settings_display_panel.h"
 #include "i18n/i18n.h"
 #include "ui_common.h"
 #include "wifi_manager.h"
@@ -125,6 +126,7 @@ static void wifi_btn_event_cb(lv_event_t* e);
 static void firmware_btn_event_cb(lv_event_t* e);
 static void time_btn_event_cb(lv_event_t* e);
 static void language_btn_event_cb(lv_event_t* e);
+static void display_btn_event_cb(lv_event_t* e);
 static void switch_panel(panel_type_t panel);
 static void update_sidebar_selection(void);
 
@@ -156,6 +158,13 @@ static void language_btn_event_cb(lv_event_t* e)
     }
 }
 
+static void display_btn_event_cb(lv_event_t* e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        switch_panel(PANEL_DISPLAY);
+    }
+}
+
 // ============================================================================
 // Panel Switching
 // ============================================================================
@@ -174,6 +183,7 @@ static void switch_panel(panel_type_t panel)
     lv_obj_add_flag(state.fw_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(state.time_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(state.lang_panel, LV_OBJ_FLAG_HIDDEN);
+    display_panel_hide();
     
     // Show active panel
     switch (panel) {
@@ -199,6 +209,11 @@ static void switch_panel(panel_type_t panel)
             wifi_stop_scan_timer();
             break;
             
+        case PANEL_DISPLAY:
+            display_panel_show();
+            wifi_stop_scan_timer();
+            break;
+            
         default:
             break;
     }
@@ -215,6 +230,8 @@ static void update_sidebar_selection(void)
     lv_obj_set_style_border_width(state.time_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.lang_btn, COLOR_SIDEBAR_BTN, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.lang_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.display_btn, COLOR_SIDEBAR_BTN, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.display_btn, 0, LV_PART_MAIN);
     
     // Highlight selected
     lv_obj_t* selected = NULL;
@@ -223,6 +240,7 @@ static void update_sidebar_selection(void)
         case PANEL_FIRMWARE: selected = state.firmware_btn; break;
         case PANEL_TIME: selected = state.time_btn; break;
         case PANEL_LANGUAGE: selected = state.lang_btn; break;
+        case PANEL_DISPLAY: selected = state.display_btn; break;
         default: break;
     }
     
@@ -339,6 +357,23 @@ static void create_sidebar(void)
     lv_label_set_text(lang_lbl, i18n_get(STR_SETTINGS_LANGUAGE));
     lv_obj_set_style_text_font(lang_lbl, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_align(lang_lbl, LV_ALIGN_LEFT_MID, 40, 0);
+    
+    // Display button
+    state.display_btn = lv_btn_create(state.sidebar);
+    lv_obj_set_size(state.display_btn, LV_PCT(100), 60);
+    lv_obj_set_style_bg_color(state.display_btn, COLOR_SIDEBAR_BTN, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.display_btn, 8, LV_PART_MAIN);
+    lv_obj_add_event_cb(state.display_btn, display_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t* display_icon = lv_label_create(state.display_btn);
+    lv_label_set_text(display_icon, LV_SYMBOL_IMAGE);  // Screen-like symbol
+    lv_obj_set_style_text_font(display_icon, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_align(display_icon, LV_ALIGN_LEFT_MID, 5, 0);
+    
+    lv_obj_t* display_lbl = lv_label_create(state.display_btn);
+    lv_label_set_text(display_lbl, i18n_get(STR_SETTINGS_DISPLAY));
+    lv_obj_set_style_text_font(display_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_align(display_lbl, LV_ALIGN_LEFT_MID, 40, 0);
 }
 
 static void create_content_area(void)
@@ -356,6 +391,7 @@ static void create_content_area(void)
     firmware_panel_create(state.content_area);
     time_panel_create(state.content_area);
     language_panel_create(state.content_area);
+    display_panel_create(state.content_area);
 }
 
 // ============================================================================

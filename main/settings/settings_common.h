@@ -52,6 +52,7 @@ typedef enum {
     PANEL_FIRMWARE,
     PANEL_TIME,
     PANEL_LANGUAGE,
+    PANEL_DISPLAY,
     PANEL_COUNT
 } panel_type_t;
 
@@ -138,6 +139,12 @@ typedef struct {
     // Time panel objects
     lv_obj_t* time_panel;
     lv_obj_t* time_btn;  // Sidebar button
+    
+    // Display panel objects
+    lv_obj_t* display_panel;
+    lv_obj_t* display_btn;  // Sidebar button
+    lv_obj_t* brightness_slider;
+    lv_obj_t* brightness_label;
     
 } settings_state_t;
 

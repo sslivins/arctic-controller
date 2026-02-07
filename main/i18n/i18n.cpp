@@ -99,6 +99,13 @@ static const char* strings_en[STR_COUNT] = {
     [STR_TIME_SYNCED] = "Synced",
     [STR_TIME_NOT_SYNCED] = "Not synced",
     [STR_SETTINGS_TIME] = "Time",
+    
+    // Display Panel
+    [STR_SETTINGS_DISPLAY] = "Display",
+    [STR_DISPLAY_TITLE] = "Display Settings",
+    [STR_DISPLAY_BRIGHTNESS] = "Brightness",
+    [STR_DISPLAY_BRIGHTNESS_LOW] = "Low",
+    [STR_DISPLAY_BRIGHTNESS_HIGH] = "High",
 };
 
 // French strings
@@ -179,6 +186,13 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_TIME_SYNCED] = "Synchronisé",
     [STR_TIME_NOT_SYNCED] = "Non synchronisé",
     [STR_SETTINGS_TIME] = "Heure",
+    
+    // Display Panel
+    [STR_SETTINGS_DISPLAY] = "Affichage",
+    [STR_DISPLAY_TITLE] = "Paramètres d'affichage",
+    [STR_DISPLAY_BRIGHTNESS] = "Luminosité",
+    [STR_DISPLAY_BRIGHTNESS_LOW] = "Faible",
+    [STR_DISPLAY_BRIGHTNESS_HIGH] = "Élevée",
 };
 
 // Spanish strings
@@ -259,6 +273,13 @@ static const char* strings_es[STR_COUNT] = {
     [STR_TIME_SYNCED] = "Sincronizado",
     [STR_TIME_NOT_SYNCED] = "No sincronizado",
     [STR_SETTINGS_TIME] = "Hora",
+    
+    // Display Panel
+    [STR_SETTINGS_DISPLAY] = "Pantalla",
+    [STR_DISPLAY_TITLE] = "Ajustes de pantalla",
+    [STR_DISPLAY_BRIGHTNESS] = "Brillo",
+    [STR_DISPLAY_BRIGHTNESS_LOW] = "Bajo",
+    [STR_DISPLAY_BRIGHTNESS_HIGH] = "Alto",
 };
 
 // Language names in their own language (native names)

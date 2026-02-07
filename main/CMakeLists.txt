@@ -45,6 +45,7 @@ idf_component_register(
         "settings/settings_firmware_panel.cpp"
         "settings/settings_time_panel.cpp"
         "settings/settings_language_panel.cpp"
+        "settings/settings_display_panel.cpp"
         "i18n/i18n.cpp"
         "fonts/montserrat_16_latin.c"
         "fonts/montserrat_24_latin.c"
