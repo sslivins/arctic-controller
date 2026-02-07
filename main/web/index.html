@@ -1447,7 +1447,10 @@
                     try {
                         const res = await fetch('/api/time/config');
                         const data = await res.json();
-                        this.timeConfig = { ...this.timeConfig, ...data };
+                        // Map snake_case API response to camelCase UI model
+                        this.timeConfig.timezone = data.timezone || this.timeConfig.timezone;
+                        this.timeConfig.format24h = data.format_24h !== undefined ? data.format_24h : this.timeConfig.format24h;
+                        this.timeConfig.synced = data.synced || false;
                     } catch (e) { console.error(e); }
                 },
                 
