@@ -19,6 +19,8 @@
 #include "settings/settings_display_panel.h"
 #include "i18n/i18n.h"
 #include "auth_manager.h"
+#include "modbus/modbus_manager.h"
+#include "modbus/arctic_heatpump.h"
 
 static const char* TAG = "main";
 
@@ -123,6 +125,16 @@ extern "C" void app_main(void)
 
     // Initialize time manager (NTP will start when WiFi connects)
     time_mgr_init();
+
+    // Initialize Modbus and Arctic heat pump communication
+    esp_err_t modbus_ret = modbus::init();
+    if (modbus_ret == ESP_OK) {
+        arctic::init();
+        arctic::startPolling();
+        mclog::tagInfo(TAG, "Modbus initialized, heat pump polling started");
+    } else {
+        mclog::tagError(TAG, "Failed to initialize Modbus: {}", (int)modbus_ret);
+    }
 
     // Initialize authentication manager
     auth_mgr_init();
