@@ -429,9 +429,9 @@ static void on_settings_close(void)
     
     bsp_display_lock(0);
     
-    // Load main screen with slide-right animation (auto_del=true will delete settings menu)
+    // Load main screen with slide-up animation (auto_del=true will delete settings menu)
     if (main_screen) {
-        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, true);
+        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
     }
     
     // Mark settings as closed (screen will be auto-deleted by LVGL)

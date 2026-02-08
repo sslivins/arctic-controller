@@ -8,6 +8,7 @@
 #include "settings_wifi_screen.h"
 #include "settings_menu.h"
 #include "settings_common.h"  // For shared layout constants
+#include "keyboard_maps.h"    // Custom keyboard maps (C file for LVGL compatibility)
 #include "wifi_manager.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
@@ -568,6 +569,11 @@ static void create_password_dialog(void)
     lv_obj_set_style_text_font(s_state.keyboard, FONT_NORMAL, LV_PART_ITEMS);
     lv_keyboard_set_textarea(s_state.keyboard, s_state.password_textarea);
     lv_obj_add_event_cb(s_state.keyboard, keyboard_ready_cb, LV_EVENT_READY, NULL);
+    
+    // Apply custom keyboard maps (without OK and keyboard-toggle buttons)
+    lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lc, kb_ctrl_lc);
+    lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_uc, kb_ctrl_uc);
+    lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec);
 }
 
 // ============================================================================
@@ -630,6 +636,19 @@ static void update_connected_display(void)
     }
 }
 
+// Animation callback for dialog Y position
+static void dialog_anim_cb(void* var, int32_t val)
+{
+    lv_obj_set_y((lv_obj_t*)var, val);
+}
+
+// Animation complete callback for hiding
+static void dialog_hide_anim_ready_cb(lv_anim_t* a)
+{
+    lv_obj_t* dialog = (lv_obj_t*)lv_anim_get_user_data(a);
+    lv_obj_add_flag(dialog, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void show_password_dialog(const char* ssid, bool is_open)
 {
     strncpy(s_state.selected_ssid, ssid, sizeof(s_state.selected_ssid) - 1);
@@ -644,25 +663,44 @@ static void show_password_dialog(const char* ssid, bool is_open)
     lv_textarea_set_password_mode(s_state.password_textarea, true);
     lv_label_set_text(s_state.show_password_icon, LV_SYMBOL_EYE_CLOSE);
     
-    // Hide password input for open networks
-    if (is_open) {
-        lv_obj_add_flag(s_state.password_textarea, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_state.show_password_btn, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_state.keyboard, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_remove_flag(s_state.password_textarea, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(s_state.show_password_btn, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(s_state.keyboard, LV_OBJ_FLAG_HIDDEN);
-    }
+    // Get screen height for animation
+    lv_display_t* disp = lv_display_get_default();
+    int32_t screen_height = lv_display_get_vertical_resolution(disp);
     
+    // Position dialog off-screen at bottom, then animate up
+    lv_obj_set_y(s_state.password_dialog, screen_height);
     lv_obj_remove_flag(s_state.password_dialog, LV_OBJ_FLAG_HIDDEN);
+    
+    // Animate slide up
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_state.password_dialog);
+    lv_anim_set_values(&a, screen_height, 0);
+    lv_anim_set_duration(&a, 300);
+    lv_anim_set_exec_cb(&a, dialog_anim_cb);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
 }
 
 static void hide_password_dialog(void)
 {
-    if (s_state.password_dialog) {
-        lv_obj_add_flag(s_state.password_dialog, LV_OBJ_FLAG_HIDDEN);
-    }
+    if (!s_state.password_dialog) return;
+    
+    // Get screen height for animation
+    lv_display_t* disp = lv_display_get_default();
+    int32_t screen_height = lv_display_get_vertical_resolution(disp);
+    
+    // Animate slide down
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_state.password_dialog);
+    lv_anim_set_values(&a, 0, screen_height);
+    lv_anim_set_duration(&a, 250);
+    lv_anim_set_exec_cb(&a, dialog_anim_cb);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
+    lv_anim_set_user_data(&a, s_state.password_dialog);
+    lv_anim_set_completed_cb(&a, dialog_hide_anim_ready_cb);
+    lv_anim_start(&a);
 }
 
 // ============================================================================
@@ -706,7 +744,16 @@ static void network_item_cb(lv_event_t* e)
     if (net) {
         bool is_open = (net->authmode == 0);
         ESP_LOGI(TAG, "Network selected: %s (open=%d)", net->ssid, is_open);
-        show_password_dialog(net->ssid, is_open);
+        
+        if (is_open) {
+            // Open network - connect directly without password dialog
+            if (s_state.config.on_wifi_connect) {
+                s_state.config.on_wifi_connect(net->ssid, "");
+            }
+        } else {
+            // Secured network - show password dialog
+            show_password_dialog(net->ssid, is_open);
+        }
     }
 }
 

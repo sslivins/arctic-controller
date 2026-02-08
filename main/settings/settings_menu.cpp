@@ -225,10 +225,11 @@ static void create_header(void)
 static void create_menu_list(void)
 {
     lv_display_t* disp = lv_display_get_default();
-    int32_t header_height = lv_display_get_vertical_resolution(disp) * 8 / 100;
+    int32_t screen_height = lv_display_get_vertical_resolution(disp);
+    int32_t header_height = screen_height * 8 / 100;
     
     state.list_container = lv_obj_create(state.screen);
-    lv_obj_set_size(state.list_container, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_size(state.list_container, LV_PCT(100), screen_height - header_height);
     lv_obj_set_pos(state.list_container, 0, header_height);
     lv_obj_set_style_bg_opa(state.list_container, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.list_container, 0, LV_PART_MAIN);
@@ -300,7 +301,8 @@ void settings_menu_create(const settings_menu_config_t* config)
         settings_menu_update_wifi_status(true, wifi_mgr_get_connected_ssid());
     }
     
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+    // Slide down from top when opening settings
+    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
 }
 
 void settings_menu_close(void)
