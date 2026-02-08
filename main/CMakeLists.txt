@@ -49,11 +49,14 @@ idf_component_register(
         "i18n/i18n.cpp"
         "fonts/montserrat_16_latin.c"
         "fonts/montserrat_24_latin.c"
+        "modbus/modbus_manager.cpp"
+        "modbus/arctic_heatpump.cpp"
     INCLUDE_DIRS
         "."
         "settings"
         "i18n"
         "fonts"
+        "modbus"
     EMBED_FILES
         "web/index.html.gz"
     REQUIRES
