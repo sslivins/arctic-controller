@@ -41,6 +41,7 @@ esp_err_t init() {
     }
     
     // Configure Modbus communication parameters
+    // esp_modbus will install UART driver with these settings
     mb_communication_info_t comm_info = {};
     comm_info.port = UART_NUM_1;
     comm_info.mode = MB_MODE_RTU;
@@ -55,7 +56,16 @@ esp_err_t init() {
         return err;
     }
     
-    // Set UART pins for RS-485
+    // Start Modbus controller (this installs the UART driver)
+    err = mbc_master_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start Modbus master: %s", esp_err_to_name(err));
+        snprintf(s_last_error, sizeof(s_last_error), "Start failed: %s", esp_err_to_name(err));
+        mbc_master_destroy();
+        return err;
+    }
+    
+    // NOW we can reconfigure UART - driver is installed after mbc_master_start()
     err = uart_set_pin(UART_NUM_1, 
                        arctic::RS485_TX_PIN, 
                        arctic::RS485_RX_PIN,
@@ -68,7 +78,7 @@ esp_err_t init() {
         return err;
     }
     
-    // Set RS-485 half-duplex mode with RTS for direction control
+    // Set RS-485 half-duplex mode
     err = uart_set_mode(UART_NUM_1, UART_MODE_RS485_HALF_DUPLEX);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set RS-485 mode: %s", esp_err_to_name(err));
@@ -77,22 +87,10 @@ esp_err_t init() {
         return err;
     }
     
-    // Start Modbus controller
-    err = mbc_master_start();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start Modbus master: %s", esp_err_to_name(err));
-        snprintf(s_last_error, sizeof(s_last_error), "Start failed: %s", esp_err_to_name(err));
-        mbc_master_destroy();
-        return err;
-    }
-    
-    // Set response timeout
-    err = mbc_master_set_descriptor(nullptr, 0);  // Clear any existing descriptors
-    
     s_initialized = true;
     resetStats();
     
-    ESP_LOGI(TAG, "Modbus RTU master initialized on UART1 (TX:%d, RX:%d, RTS:%d)",
+    ESP_LOGI(TAG, "Modbus RTU master initialized (TX:%d, RX:%d, RTS:%d)",
              arctic::RS485_TX_PIN, arctic::RS485_RX_PIN, arctic::RS485_DIR_PIN);
     
     return ESP_OK;
