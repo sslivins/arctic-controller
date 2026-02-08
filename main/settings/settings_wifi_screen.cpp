@@ -101,27 +101,6 @@ static void keyboard_ready_cb(lv_event_t* e);
 static void scan_timer_cb(lv_timer_t* timer);
 
 // ============================================================================
-// Helpers (using disable_scrolling and get_signal_icon from settings_common.h)
-// ============================================================================
-
-static void sanitize_ssid(char* dest, const char* src, size_t dest_size)
-{
-    if (!dest || !src || dest_size == 0) return;
-    
-    size_t j = 0;
-    for (size_t i = 0; src[i] && j < dest_size - 1; i++) {
-        unsigned char c = (unsigned char)src[i];
-        if (c >= 32 && c < 127) {
-            dest[j++] = c;
-        } else if (c >= 0xC0 && j < dest_size - 2) {
-            // UTF-8 multi-byte - copy as-is for LVGL
-            dest[j++] = c;
-        }
-    }
-    dest[j] = '\0';
-}
-
-// ============================================================================
 // Public API
 // ============================================================================
 
@@ -291,19 +270,16 @@ void wifi_screen_update_networks(const settings_wifi_network_t* networks, uint8_
         lv_obj_align(icon, LV_ALIGN_LEFT_MID, 0, 0);
         
         // SSID
-        char display_ssid[48];
-        sanitize_ssid(display_ssid, deduped[i].ssid, sizeof(display_ssid));
-        
         lv_obj_t* ssid_label = lv_label_create(row);
-        lv_label_set_text(ssid_label, display_ssid);
+        lv_label_set_text(ssid_label, deduped[i].ssid);
         lv_obj_set_style_text_font(ssid_label, FONT_NORMAL, LV_PART_MAIN);
         lv_obj_set_style_text_color(ssid_label, COLOR_TEXT, LV_PART_MAIN);
         lv_obj_align(ssid_label, LV_ALIGN_LEFT_MID, 45, 0);
         
-        // Lock icon if secured
+        // Lock icon for secured networks (most networks)
         if (deduped[i].authmode != 0) {
             lv_obj_t* lock = lv_label_create(row);
-            lv_label_set_text(lock, LV_SYMBOL_EYE_CLOSE);  // No lock symbol in LVGL 9
+            lv_label_set_text(lock, FA_SYMBOL_LOCK);
             lv_obj_set_style_text_font(lock, FONT_NORMAL, LV_PART_MAIN);
             lv_obj_set_style_text_color(lock, COLOR_TEXT_DIM, LV_PART_MAIN);
             lv_obj_align(lock, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -497,7 +473,7 @@ static void create_password_dialog(void)
     disable_scrolling(s_state.password_dialog);
     lv_obj_add_flag(s_state.password_dialog, LV_OBJ_FLAG_HIDDEN);
     
-    // iOS-style header with X (left) and checkmark (right)
+    // iOS-style header with X (left) and checkmark (right) - 8% height
     lv_obj_t* header = lv_obj_create(s_state.password_dialog);
     lv_obj_set_size(header, LV_PCT(100), LV_PCT(HEADER_HEIGHT_PCT));
     lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
@@ -509,7 +485,7 @@ static void create_password_dialog(void)
     
     // Cancel button (X) on left
     s_state.cancel_btn = lv_btn_create(header);
-    lv_obj_set_size(s_state.cancel_btn, 60, 50);
+    lv_obj_set_size(s_state.cancel_btn, 70, 60);
     lv_obj_align(s_state.cancel_btn, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_style_bg_opa(s_state.cancel_btn, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(s_state.cancel_btn, 0, LV_PART_MAIN);
@@ -523,7 +499,7 @@ static void create_password_dialog(void)
     
     // Connect button (checkmark) on right
     s_state.connect_btn = lv_btn_create(header);
-    lv_obj_set_size(s_state.connect_btn, 60, 50);
+    lv_obj_set_size(s_state.connect_btn, 70, 60);
     lv_obj_align(s_state.connect_btn, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_opa(s_state.connect_btn, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(s_state.connect_btn, 0, LV_PART_MAIN);
@@ -535,43 +511,36 @@ static void create_password_dialog(void)
     lv_obj_set_style_text_color(connect_icon, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_center(connect_icon);
     
-    // Content panel with rounded corners - centered between header and keyboard
-    // Header is 8%, keyboard is 25% at bottom with 20px gap, so position in the middle area
+    // Content panel with rounded corners - positioned in middle area
+    // Header=8%, Keyboard=25%, gap=2% => middle area is ~65%, center content in that
     lv_obj_t* content = lv_obj_create(s_state.password_dialog);
-    lv_obj_set_size(content, LV_PCT(95), 280);  // Fixed height to fit content snugly
-    lv_obj_align(content, LV_ALIGN_CENTER, 0, -100);  // Center and shift up to account for keyboard
+    lv_obj_set_size(content, LV_PCT(90), LV_PCT(18));
+    lv_obj_align(content, LV_ALIGN_CENTER, 0, -130);  // Shift up from center
     lv_obj_set_style_bg_color(content, COLOR_CARD, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(content, 20, LV_PART_MAIN);
     lv_obj_set_style_pad_all(content, 25, LV_PART_MAIN);
     disable_scrolling(content);
     
-    // SSID label - big and centered at top
+    // SSID label - prominent at top, centered
     s_state.password_ssid_label = lv_label_create(content);
     lv_label_set_text(s_state.password_ssid_label, "");
-    lv_obj_set_style_text_font(s_state.password_ssid_label, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(s_state.password_ssid_label, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_state.password_ssid_label, &montserrat_32_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_state.password_ssid_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(s_state.password_ssid_label, LV_ALIGN_TOP_MID, 0, 10);
     
-    // "Enter Password" label above input
-    lv_obj_t* enter_password_label = lv_label_create(content);
-    lv_label_set_text(enter_password_label, i18n_get(STR_WIFI_ENTER_PASSWORD));
-    lv_obj_set_style_text_font(enter_password_label, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(enter_password_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_align(enter_password_label, LV_ALIGN_TOP_MID, 0, 70);
-    
-    // Password input row - below the label
+    // Password input row - below SSID
     lv_obj_t* input_row = lv_obj_create(content);
     lv_obj_set_size(input_row, LV_PCT(95), 80);
-    lv_obj_align(input_row, LV_ALIGN_TOP_MID, 0, 130);
+    lv_obj_align(input_row, LV_ALIGN_BOTTOM_MID, 0, -10);
     lv_obj_set_style_bg_opa(input_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(input_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(input_row, 0, LV_PART_MAIN);
     disable_scrolling(input_row);
     
-    // Password textarea - takes most of the width
+    // Password textarea
     s_state.password_textarea = lv_textarea_create(input_row);
-    lv_obj_set_size(s_state.password_textarea, LV_PCT(85), 70);
+    lv_obj_set_size(s_state.password_textarea, LV_PCT(82), LV_PCT(100));
     lv_obj_align(s_state.password_textarea, LV_ALIGN_LEFT_MID, 0, 0);
     lv_textarea_set_one_line(s_state.password_textarea, true);
     lv_textarea_set_password_mode(s_state.password_textarea, true);
@@ -580,7 +549,7 @@ static void create_password_dialog(void)
     
     // Show password button
     s_state.show_password_btn = lv_btn_create(input_row);
-    lv_obj_set_size(s_state.show_password_btn, 70, 70);
+    lv_obj_set_size(s_state.show_password_btn, LV_PCT(15), LV_PCT(100));
     lv_obj_align(s_state.show_password_btn, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_color(s_state.show_password_btn, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_radius(s_state.show_password_btn, 10, LV_PART_MAIN);
@@ -591,10 +560,10 @@ static void create_password_dialog(void)
     lv_obj_set_style_text_font(s_state.show_password_icon, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_center(s_state.show_password_icon);
     
-    // Full-width keyboard at bottom - 25% height for normal key proportions
+    // Keyboard at bottom - 25% height
     s_state.keyboard = lv_keyboard_create(s_state.password_dialog);
     lv_obj_set_size(s_state.keyboard, LV_PCT(100), LV_PCT(25));
-    lv_obj_align(s_state.keyboard, LV_ALIGN_BOTTOM_MID, 0, -20);  // 20px gap from bottom
+    lv_obj_align(s_state.keyboard, LV_ALIGN_BOTTOM_MID, 0, -25);
     lv_obj_set_style_bg_color(s_state.keyboard, COLOR_CARD, LV_PART_MAIN);
     lv_obj_set_style_text_font(s_state.keyboard, FONT_NORMAL, LV_PART_ITEMS);
     lv_keyboard_set_textarea(s_state.keyboard, s_state.password_textarea);
@@ -615,9 +584,7 @@ static void update_connected_display(void)
         
         // Update SSID
         char ssid_buf[64];
-        char display_ssid[48];
-        sanitize_ssid(display_ssid, s_state.connected_ssid, sizeof(display_ssid));
-        snprintf(ssid_buf, sizeof(ssid_buf), LV_SYMBOL_WIFI " %s", display_ssid);
+        snprintf(ssid_buf, sizeof(ssid_buf), LV_SYMBOL_WIFI " %s", s_state.connected_ssid);
         lv_label_set_text(s_state.connected_ssid_label, ssid_buf);
         
         // Update IP
@@ -668,12 +635,8 @@ static void show_password_dialog(const char* ssid, bool is_open)
     strncpy(s_state.selected_ssid, ssid, sizeof(s_state.selected_ssid) - 1);
     s_state.selected_is_open = is_open;
     
-    // Update SSID label
-    char display_ssid[48];
-    sanitize_ssid(display_ssid, ssid, sizeof(display_ssid));
-    char ssid_text[64];
-    snprintf(ssid_text, sizeof(ssid_text), "%s: %s", i18n_get(STR_WIFI_NETWORK), display_ssid);
-    lv_label_set_text(s_state.password_ssid_label, ssid_text);
+    // Update SSID label - just show the network name prominently
+    lv_label_set_text(s_state.password_ssid_label, ssid);
     
     // Reset password field
     lv_textarea_set_text(s_state.password_textarea, "");
