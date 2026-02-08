@@ -15,7 +15,7 @@
 // Custom Fonts with Latin Extended Support
 // ============================================================================
 
-#define FONT_NORMAL   &montserrat_16_latin
+#define FONT_NORMAL   &montserrat_24_latin
 #define FONT_LARGE    &montserrat_24_latin
 
 // ============================================================================
@@ -23,7 +23,8 @@
 // ============================================================================
 
 #define COLOR_BG            lv_color_hex(0x1a1a2e)
-#define COLOR_CARD          lv_color_hex(0x16213e)
+#define COLOR_CARD          lv_color_hex(0x1e2a4a)
+#define COLOR_HEADER        lv_color_hex(0x16213e)
 #define COLOR_SIDEBAR       lv_color_hex(0x0f1a2e)
 #define COLOR_SIDEBAR_BTN   lv_color_hex(0x1a2a4e)
 #define COLOR_SIDEBAR_SEL   lv_color_hex(0x00d4ff)

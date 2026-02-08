@@ -41,6 +41,8 @@ idf_component_register(
         "ota_manager.cpp"
         "auth_manager.cpp"
         "settings/settings_screen.cpp"
+        "settings/settings_menu.cpp"
+        "settings/settings_wifi_screen.cpp"
         "settings/settings_wifi_panel.cpp"
         "settings/settings_firmware_panel.cpp"
         "settings/settings_time_panel.cpp"

@@ -15,6 +15,7 @@
 #include "status_bar.h"
 #include "ota_manager.h"
 #include "settings_screen.h"
+#include "settings/settings_menu.h"
 #include "settings/settings_time_panel.h"
 #include "settings/settings_display_panel.h"
 #include "i18n/i18n.h"
@@ -241,8 +242,8 @@ static void on_scan_done(const wifi_mgr_ap_info_t* ap_list, uint16_t count)
     
     // Update UI (must be done with LVGL lock)
     bsp_display_lock(0);
-    settings_screen_set_scanning(false);
-    settings_screen_update_networks(networks, count);
+    settings_menu_set_scanning(false);
+    settings_menu_update_networks(networks, count);
     bsp_display_unlock();
     
     delete[] networks;
@@ -263,7 +264,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             ESP_LOGI(TAG, "WiFi connected to '%s'", ssid ? ssid : "?");
             char ip[16] = {};
             wifi_mgr_get_ip_addr(ip, sizeof(ip));
-            settings_screen_set_wifi_status(true, ssid, ip);
+            settings_menu_update_wifi_status(true, ssid);
             status_bar_set_wifi_state(true, ssid);
             // Save credentials on successful connection
             if (pending_ssid[0] != '\0') {
@@ -291,7 +292,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             
         case WIFI_MGR_STATE_DISCONNECTED: {
             ESP_LOGI(TAG, "WiFi disconnected");
-            settings_screen_set_wifi_status(false, NULL, NULL);
+            settings_menu_update_wifi_status(false, NULL);
             status_bar_set_wifi_state(false, NULL);
             
             // Track disconnect for instability detection
@@ -377,17 +378,17 @@ static void on_wifi_scan(void)
     if (!wifi_mgr_is_initialized()) {
         mclog::tagInfo(TAG, "Initializing WiFi manager for scan...");
         if (!wifi_mgr_init()) {
-            settings_screen_set_scanning(false);
-            settings_screen_show_error("Failed to initialize WiFi.\nCheck ESP32-C6 module.");
+            settings_menu_set_scanning(false);
+            // TODO: Add error display to wifi_screen
             return;
         }
     }
     
-    settings_screen_set_scanning(true);
+    settings_menu_set_scanning(true);
     
     if (!wifi_mgr_start_scan(on_scan_done)) {
-        settings_screen_set_scanning(false);
-        settings_screen_show_error("Failed to start scan.\nPlease try again.");
+        settings_menu_set_scanning(false);
+        // TODO: Add error display to wifi_screen
     }
 }
 
@@ -412,13 +413,13 @@ static void on_status_bar_settings_click(void)
     }
     
     bsp_display_lock(0);
-    settings_screen_config_t config = {
+    settings_menu_config_t config = {
         .on_close = on_settings_close,
-        .on_wifi_connect = on_wifi_connect,
         .on_wifi_scan = on_wifi_scan,
+        .on_wifi_connect = on_wifi_connect,
         .on_wifi_disconnect = on_wifi_disconnect,
     };
-    settings_screen_create(&config);
+    settings_menu_create(&config);
     bsp_display_unlock();
 }
 
@@ -427,12 +428,15 @@ static void on_settings_close(void)
     mclog::tagInfo(TAG, "Settings screen closed");
     
     bsp_display_lock(0);
-    settings_screen_close();
     
-    // Return to main screen
+    // Load main screen with slide-right animation (auto_del=true will delete settings menu)
     if (main_screen) {
-        lv_scr_load(main_screen);
+        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, true);
     }
+    
+    // Mark settings as closed (screen will be auto-deleted by LVGL)
+    settings_menu_close();
+    
     bsp_display_unlock();
 }
 

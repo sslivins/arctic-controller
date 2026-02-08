@@ -310,7 +310,7 @@ void time_panel_create(lv_obj_t* parent)
     lv_obj_set_size(panel_state.format_switch, 80, 45);
     lv_obj_align(panel_state.format_switch, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(panel_state.format_switch, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(panel_state.format_switch, COLOR_ACCENT, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(panel_state.format_switch, COLOR_ACCENT, LV_PART_INDICATOR | (lv_style_selector_t)LV_STATE_CHECKED);
     if (panel_state.use_24h) {
         lv_obj_add_state(panel_state.format_switch, LV_STATE_CHECKED);
     }
