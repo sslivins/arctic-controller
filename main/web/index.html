@@ -26,12 +26,28 @@
                 heatPumpStatus: 'Heat Pump Status',
                 lastUpdated: 'Last updated',
                 compressor: 'Compressor',
-                airFlowFans: 'Air Flow Fans',
+                airFlowFans: 'Fan',
                 waterPump: 'Water Pump',
+                auxHeater: 'Aux Heater',
                 systemStatus: 'System Status',
                 on: 'ON',
                 off: 'OFF',
                 ok: 'OK',
+                disconnected: 'Disconnected',
+                standby: 'Standby',
+                tankTemp: 'Tank',
+                setpoint: 'Setpoint',
+                outdoorTemp: 'Outdoor',
+                mode: 'Mode',
+                cooling: 'Cooling',
+                floorHeating: 'Floor Heating',
+                fanCoilHeating: 'Fan Heating',
+                hotWater: 'Hot Water',
+                auto: 'Auto',
+                defrost: 'Defrost',
+                fanLow: 'Low',
+                fanMed: 'Med',
+                fanHigh: 'High',
                 
                 // Dashboard - System Overview
                 systemOverview: 'System Overview',
@@ -143,12 +159,28 @@
                 heatPumpStatus: 'État de la pompe à chaleur',
                 lastUpdated: 'Dernière mise à jour',
                 compressor: 'Compresseur',
-                airFlowFans: 'Ventilateurs',
+                airFlowFans: 'Ventilateur',
                 waterPump: "Pompe à eau",
+                auxHeater: 'Chauff. Aux',
                 systemStatus: 'État du système',
                 on: 'MARCHE',
                 off: 'ARRÊT',
                 ok: 'OK',
+                disconnected: 'Déconnecté',
+                standby: 'Veille',
+                tankTemp: 'Réservoir',
+                setpoint: 'Consigne',
+                outdoorTemp: 'Extérieur',
+                mode: 'Mode',
+                cooling: 'Refroidissement',
+                floorHeating: 'Chauffage sol',
+                fanCoilHeating: 'Chauffage ventilo',
+                hotWater: 'Eau chaude',
+                auto: 'Auto',
+                defrost: 'Dégivrage',
+                fanLow: 'Bas',
+                fanMed: 'Moyen',
+                fanHigh: 'Haut',
                 
                 // Dashboard - System Overview
                 systemOverview: 'Aperçu du système',
@@ -260,12 +292,28 @@
                 heatPumpStatus: 'Estado de la bomba de calor',
                 lastUpdated: 'Última actualización',
                 compressor: 'Compresor',
-                airFlowFans: 'Ventiladores',
+                airFlowFans: 'Ventilador',
                 waterPump: 'Bomba de agua',
+                auxHeater: 'Calent. Aux',
                 systemStatus: 'Estado del sistema',
                 on: 'ENCENDIDO',
                 off: 'APAGADO',
                 ok: 'OK',
+                disconnected: 'Desconectado',
+                standby: 'En espera',
+                tankTemp: 'Tanque',
+                setpoint: 'Consigna',
+                outdoorTemp: 'Exterior',
+                mode: 'Modo',
+                cooling: 'Enfriamiento',
+                floorHeating: 'Calef. suelo',
+                fanCoilHeating: 'Calef. ventilador',
+                hotWater: 'Agua caliente',
+                auto: 'Auto',
+                defrost: 'Descongelación',
+                fanLow: 'Bajo',
+                fanMed: 'Medio',
+                fanHigh: 'Alto',
                 
                 // Dashboard - System Overview
                 systemOverview: 'Resumen del sistema',
@@ -492,7 +540,7 @@
         /* Status Grid */
         .status-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(4, 1fr);
             gap: 1rem;
         }
         
@@ -501,14 +549,49 @@
             padding: 1rem;
             background: var(--bg-tertiary);
             border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
         }
         
         .status-item .label {
             color: var(--text-secondary);
             font-size: 0.8rem;
-            margin-bottom: 0.5rem;
         }
         
+        /* Status indicator circles */
+        .status-indicator {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            border: 2px solid #444;
+        }
+        
+        .status-indicator.on {
+            background: var(--success);
+            border-color: var(--success);
+            box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+        }
+        
+        .status-indicator.off {
+            background: #333;
+            border-color: #555;
+        }
+        
+        .status-indicator.warning {
+            background: var(--warning);
+            border-color: var(--warning);
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+        }
+        
+        .status-indicator.unknown {
+            background: transparent;
+            border: 2px dashed #555;
+        }
+        
+        /* Legacy .value styles (keep for compatibility) */
         .status-item .value {
             font-size: 1.1rem;
             font-weight: 600;
@@ -522,8 +605,70 @@
             color: var(--text-secondary);
         }
         
+        .status-item .value.warning {
+            color: var(--warning);
+        }
+        
         .status-item .value.error {
             color: var(--error);
+        }
+        
+        /* Heat Pump Display */
+        .hp-mode-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            text-transform: uppercase;
+        }
+        
+        .hp-mode-badge.mode-disconnected {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+        
+        .hp-mode-badge.mode-standby {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+        
+        .hp-mode-badge.mode-cooling {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+        }
+        
+        .hp-mode-badge.mode-heating {
+            background: rgba(249, 115, 22, 0.2);
+            color: #f97316;
+        }
+        
+        .hp-mode-badge.mode-hotwater {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        
+        .hp-mode-badge.mode-defrost {
+            background: rgba(139, 92, 246, 0.2);
+            color: #8b5cf6;
+        }
+        
+        .hp-temp {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        
+        .hp-setpoint {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .hp-outdoor {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--text-secondary);
         }
         
         /* Forms */
@@ -1031,23 +1176,73 @@
                                     <span class="version" x-text="t('lastUpdated') + ': ' + formatTime(lastUpdate)"></span>
                                 </div>
                                 <div class="card-body">
+                                    <!-- Connection / Mode / Temperature Row -->
+                                    <div class="hp-main" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+                                        <!-- Mode Badge -->
+                                        <div style="text-align: center;">
+                                            <div class="label" x-text="t('mode')"></div>
+                                            <div class="hp-mode-badge" 
+                                                 :class="{ 
+                                                     'mode-disconnected': !heatpump.connected,
+                                                     'mode-standby': heatpump.connected && !heatpump.unit_on,
+                                                     'mode-cooling': heatpump.connected && heatpump.unit_on && heatpump.mode === 'cooling',
+                                                     'mode-heating': heatpump.connected && heatpump.unit_on && (heatpump.mode === 'floor_heating' || heatpump.mode === 'fan_coil_heating'),
+                                                     'mode-hotwater': heatpump.connected && heatpump.unit_on && heatpump.mode === 'hot_water',
+                                                     'mode-defrost': heatpump.connected && heatpump.defrosting
+                                                 }"
+                                                 x-text="!heatpump.connected ? t('disconnected') : 
+                                                         (!heatpump.unit_on ? t('standby') :
+                                                         (heatpump.defrosting ? t('defrost') :
+                                                         (heatpump.mode === 'cooling' ? t('cooling') :
+                                                         (heatpump.mode === 'floor_heating' ? t('floorHeating') :
+                                                         (heatpump.mode === 'fan_coil_heating' ? t('fanCoilHeating') :
+                                                         (heatpump.mode === 'hot_water' ? t('hotWater') :
+                                                         (heatpump.mode === 'auto' ? t('auto') : heatpump.mode)))))))">
+                                            </div>
+                                        </div>
+                                        <!-- Tank Temperature -->
+                                        <div style="text-align: center;">
+                                            <div class="label" x-text="t('tankTemp')"></div>
+                                            <div class="hp-temp" x-text="heatpump.connected ? heatpump.temperatures.tank + ' °C' : '-- °C'"></div>
+                                        </div>
+                                        <!-- Setpoint -->
+                                        <div style="text-align: center;">
+                                            <div class="label" x-text="t('setpoint')"></div>
+                                            <div class="hp-setpoint" x-text="heatpump.connected ? 
+                                                ((heatpump.mode === 'cooling' ? heatpump.setpoints.cooling :
+                                                 (heatpump.mode === 'hot_water' ? heatpump.setpoints.hot_water : 
+                                                  heatpump.setpoints.heating)) + ' °C') : '-- °C'"></div>
+                                        </div>
+                                        <!-- Outdoor Temperature -->
+                                        <div style="text-align: center;">
+                                            <div class="label" x-text="t('outdoorTemp')"></div>
+                                            <div class="hp-outdoor" x-text="heatpump.connected ? heatpump.temperatures.outdoor + ' °C' : '-- °C'"></div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Component Status Grid -->
                                     <div class="status-grid">
                                         <div class="status-item">
+                                            <div class="status-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.compressor ? 'on' : 'off')"></div>
                                             <div class="label" x-text="t('compressor')"></div>
-                                            <div class="value" :class="heatpump.compressor ? 'on' : 'off'" x-text="heatpump.compressor ? t('on') : t('off')"></div>
                                         </div>
                                         <div class="status-item">
+                                            <div class="status-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.fans ? 'on' : 'off')"></div>
                                             <div class="label" x-text="t('airFlowFans')"></div>
-                                            <div class="value" :class="heatpump.fans ? 'on' : 'off'" x-text="heatpump.fans ? t('on') : t('off')"></div>
                                         </div>
                                         <div class="status-item">
+                                            <div class="status-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.pump ? 'on' : 'off')"></div>
                                             <div class="label" x-text="t('waterPump')"></div>
-                                            <div class="value" :class="heatpump.pump ? 'on' : 'off'" x-text="heatpump.pump ? t('on') : t('off')"></div>
                                         </div>
                                         <div class="status-item">
-                                            <div class="label" x-text="t('systemStatus')"></div>
-                                            <div class="value" :class="heatpump.error ? 'error' : 'on'" x-text="heatpump.error || t('ok')"></div>
+                                            <div class="status-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.aux_heater ? 'warning' : 'off')"></div>
+                                            <div class="label" x-text="t('auxHeater')"></div>
                                         </div>
+                                    </div>
+                                    
+                                    <!-- Error Display -->
+                                    <div x-show="heatpump.has_error" class="hp-error-banner" style="margin-top: 1rem; padding: 0.75rem 1rem; background: rgba(239, 68, 68, 0.15); border: 1px solid var(--error); border-radius: 8px;">
+                                        <span style="color: var(--error); font-weight: 500;" x-text="'⚠ ' + heatpump.error"></span>
                                     </div>
                                 </div>
                             </div>
@@ -1422,7 +1617,21 @@
                 info: { version: '--', platform: '--', hostname: 'arctic', free_heap: 0 },
                 status: { uptime_ms: 0, time: {} },
                 wifi: {},
-                heatpump: { compressor: false, fans: false, pump: false, error: null },
+                heatpump: { 
+                    connected: false, 
+                    unit_on: false,
+                    mode: 'unknown',
+                    defrosting: false,
+                    compressor: false, 
+                    fans: false, 
+                    fan_speed: 0,
+                    pump: false, 
+                    aux_heater: false,
+                    temperatures: { tank: 0, outlet: 0, inlet: 0, outdoor: 0 },
+                    setpoints: { cooling: 0, heating: 0, hot_water: 0 },
+                    has_error: false,
+                    error: null 
+                },
                 ota: { state: 'idle', progress: 0, current_version: '--' },
                 
                 // GitHub update state
@@ -1644,10 +1853,25 @@
                 async loadHeatpump() {
                     try {
                         const res = await fetch('/api/heatpump/status');
-                        this.heatpump = await res.json();
+                        const data = await res.json();
+                        // Merge with defaults to ensure all properties exist
+                        this.heatpump = {
+                            connected: data.connected || false,
+                            unit_on: data.unit_on || false,
+                            mode: data.mode || 'unknown',
+                            defrosting: data.defrosting || false,
+                            compressor: data.compressor || false,
+                            fans: data.fans || false,
+                            fan_speed: data.fan_speed || 0,
+                            pump: data.pump || false,
+                            aux_heater: data.aux_heater || false,
+                            temperatures: data.temperatures || { tank: 0, outlet: 0, inlet: 0, outdoor: 0 },
+                            setpoints: data.setpoints || { cooling: 0, heating: 0, hot_water: 0 },
+                            has_error: data.has_error || false,
+                            error: data.error || null
+                        };
                     } catch (e) { 
-                        // Placeholder - endpoint might not exist yet
-                        this.heatpump = { compressor: false, fans: false, pump: false, error: null };
+                        console.error('Failed to load heatpump status:', e);
                     }
                 },
                 

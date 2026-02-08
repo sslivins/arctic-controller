@@ -7,10 +7,12 @@ Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based
 - **Platform:** M5Stack Tab5 (ESP32-P4 main processor, ESP32-C6 WiFi co-processor)
 - **Display:** 7" touch display with LVGL graphics library
 - **RTC:** Battery-backed real-time clock
+- **RS-485:** SIT3088 transceiver for Modbus RTU communication with heat pump
 
 ## Features
 
-- **LVGL-based Touch UI** - Status bar, time settings, WiFi configuration screens
+- **Heat Pump Communication** - Modbus RTU over RS-485 for real-time monitoring and control
+- **LVGL-based Touch UI** - Status bar, heat pump dashboard, settings screens
 - **Web Interface** - Responsive web UI at `http://arctic.local` for remote management
 - **WiFi Management** - Connect to networks, credentials saved to NVS
 - **Time Synchronization** - NTP sync with configurable timezone (saved to NVS)
@@ -20,12 +22,38 @@ Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based
 - **Multi-Language** - Web interface in English, French, and Spanish
 - **mDNS Discovery** - Access via `arctic.local` (auto-increments for multiple controllers)
 
+## Heat Pump Communication
+
+The controller communicates with the Arctic heat pump via Modbus RTU over RS-485:
+
+- **Protocol:** Modbus RTU, 2400 baud, 8E1 (8 data bits, even parity, 1 stop bit)
+- **Slave Address:** 1
+- **Polling Interval:** 1 second (connected), 5 seconds (disconnected)
+
+### Monitored Data
+- Operating mode (Cooling, Floor Heating, Fan Coil Heating, Hot Water, Auto)
+- Component status (Compressor, Fan with speed, Water Pump, Backup Heater)
+- Temperatures (Tank, Outlet, Inlet, Outdoor Ambient)
+- Setpoints (Cooling, Heating, Hot Water)
+- System readings (Compressor frequency, Voltages, Currents, Pressures)
+- Error codes with descriptions
+
+### RS-485 Pinout
+| Signal | GPIO |
+|--------|------|
+| TX     | 20   |
+| RX     | 21   |
+| DIR    | 34   |
+
 ## Web Interface
 
 Access the web interface at `http://arctic.local` after connecting to WiFi.
 
 ### Dashboard
-- Real-time heat pump status (compressor, fans, pump, errors)
+- Real-time heat pump status with mode indicator
+- Temperature display (Tank, Setpoint, Outdoor)
+- Component status (Compressor, Fan, Pump, Aux Heater)
+- Error display
 - System overview (uptime, time, timezone)
 - Auto-refresh every 5 seconds
 
@@ -69,7 +97,7 @@ Full API documentation available in [docs/openapi.yaml](docs/openapi.yaml).
 | `/api/ota/update` | POST | Start OTA from URL (GitHub only) |
 | `/api/ota/upload` | POST | Upload firmware binary |
 | `/api/ota/reboot` | POST | Reboot device |
-| `/api/heatpump/status` | GET | Heat pump component status |
+| `/api/heatpump/status` | GET | Heat pump status, temps, setpoints |
 | `/api/auth/config` | GET/POST | Authentication settings |
 | `/api/auth/credentials` | POST | Update username/password |
 | `/api/auth/apikey` | GET | Retrieve API key |

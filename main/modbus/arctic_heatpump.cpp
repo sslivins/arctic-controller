@@ -335,6 +335,36 @@ bool setHotWaterSetpoint(int16_t temp) {
     return false;
 }
 
+bool writeRegister(uint16_t address, uint16_t value) {
+    // Validate address is in writable range (2000-2057)
+    if (address < 2000 || address > 2057) {
+        ESP_LOGE(TAG, "Invalid register address %d (must be 2000-2057)", address);
+        return false;
+    }
+    
+    esp_err_t err = modbus::writeSingleRegister(SLAVE_ADDRESS, address, value);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Register %d set to %d", address, value);
+        return true;
+    }
+    ESP_LOGE(TAG, "Failed to write register %d: %s", address, modbus::getLastError());
+    return false;
+}
+
+bool readRegister(uint16_t address, uint16_t* value_out) {
+    if (value_out == nullptr) {
+        return false;
+    }
+    
+    esp_err_t err = modbus::readHoldingRegisters(SLAVE_ADDRESS, address, 1, value_out);
+    if (err == ESP_OK) {
+        ESP_LOGD(TAG, "Register %d = %d", address, *value_out);
+        return true;
+    }
+    ESP_LOGE(TAG, "Failed to read register %d: %s", address, modbus::getLastError());
+    return false;
+}
+
 // ============================================================================
 // Diagnostic Functions
 // ============================================================================

@@ -869,7 +869,9 @@ paths:
       tags:
         - HeatPump
       summary: Heat pump status
-      description: Returns current heat pump component status and any error codes.
+      description: |
+        Returns comprehensive heat pump status including connection state, operating mode,
+        component states, temperatures, setpoints, and any error conditions.
       operationId: getHeatpumpStatus
       security:
         - apiKey: []
@@ -882,22 +884,109 @@ paths:
               schema:
                 type: object
                 properties:
+                  connected:
+                    type: boolean
+                    description: Whether the heat pump is connected via Modbus
+                    example: true
+                  unit_on:
+                    type: boolean
+                    description: Whether the unit is powered on
+                    example: true
+                  mode:
+                    type: string
+                    enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto, unknown]
+                    description: Current operating mode
+                    example: floor_heating
+                  defrosting:
+                    type: boolean
+                    description: Whether the unit is in defrost cycle
+                    example: false
                   compressor:
                     type: boolean
                     description: Compressor running state
-                    example: false
+                    example: true
                   fans:
                     type: boolean
                     description: Fan running state
-                    example: false
+                    example: true
+                  fan_speed:
+                    type: integer
+                    minimum: 0
+                    maximum: 3
+                    description: Fan speed level (0=off, 1=low, 2=med, 3=high)
+                    example: 2
                   pump:
                     type: boolean
-                    description: Circulation pump running state
+                    description: Water circulation pump running state
+                    example: true
+                  aux_heater:
+                    type: boolean
+                    description: Auxiliary/backup electrical heater running state
+                    example: false
+                  temperatures:
+                    type: object
+                    description: Temperature readings in degrees Celsius
+                    properties:
+                      tank:
+                        type: integer
+                        description: Water tank temperature
+                        example: 45
+                      outlet:
+                        type: integer
+                        description: Water outlet temperature
+                        example: 48
+                      inlet:
+                        type: integer
+                        description: Water inlet temperature
+                        example: 42
+                      outdoor:
+                        type: integer
+                        description: Outdoor ambient temperature
+                        example: 5
+                  setpoints:
+                    type: object
+                    description: Temperature setpoints in degrees Celsius
+                    properties:
+                      cooling:
+                        type: integer
+                        description: Cooling mode setpoint
+                        example: 7
+                      heating:
+                        type: integer
+                        description: Heating mode setpoint
+                        example: 45
+                      hot_water:
+                        type: integer
+                        description: Hot water mode setpoint
+                        example: 55
+                  readings:
+                    type: object
+                    description: System readings
+                    properties:
+                      compressor_freq:
+                        type: integer
+                        description: Compressor frequency in Hz
+                        example: 60
+                      fan_rpm:
+                        type: integer
+                        description: Fan speed in RPM
+                        example: 800
+                      ac_voltage:
+                        type: integer
+                        description: AC input voltage
+                        example: 230
+                      ac_current:
+                        type: integer
+                        description: AC current draw
+                        example: 5
+                  has_error:
+                    type: boolean
+                    description: Whether the unit has any active errors
                     example: false
                   error:
                     type: string
                     nullable: true
-                    description: Current error code or null if no error
+                    description: Comma-separated list of active errors, or null if no errors
                     example: null
         '401':
           description: API key required

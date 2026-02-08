@@ -51,6 +51,9 @@ idf_component_register(
         "fonts/montserrat_24_latin.c"
         "modbus/modbus_manager.cpp"
         "modbus/arctic_heatpump.cpp"
+        "heatpump_screen.cpp"
+        "heatpump_detail_screen.cpp"
+        "heatpump_control_screen.cpp"
     INCLUDE_DIRS
         "."
         "settings"

@@ -21,6 +21,7 @@
 #include "auth_manager.h"
 #include "modbus/modbus_manager.h"
 #include "modbus/arctic_heatpump.h"
+#include "heatpump_screen.h"
 
 static const char* TAG = "main";
 
@@ -195,57 +196,16 @@ void create_ui(void)
     };
     status_bar_create(&bar_config);
     
-    // Create title label (adjusted for larger status bar - 80px)
-    lv_obj_t* title = lv_label_create(scr);
-    lv_label_set_text(title, "Arctic Heat Pump");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x00d4ff), LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 100);
-
-    // Create subtitle
-    lv_obj_t* subtitle = lv_label_create(scr);
-    lv_label_set_text(subtitle, "Controller v0.1");
-    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(subtitle, lv_color_hex(0x888888), LV_PART_MAIN);
-    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 150);
-
-    // Create a container for the main content
-    lv_obj_t* container = lv_obj_create(scr);
-    lv_obj_set_size(container, 600, 380);
-    lv_obj_align(container, LV_ALIGN_CENTER, 0, 50);
-    lv_obj_set_style_bg_color(container, lv_color_hex(0x16213e), LV_PART_MAIN);
-    lv_obj_set_style_border_color(container, lv_color_hex(0x0f3460), LV_PART_MAIN);
-    lv_obj_set_style_border_width(container, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(container, 20, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(container, 30, LV_PART_MAIN);
-    lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Temperature display (placeholder)
-    lv_obj_t* temp_label = lv_label_create(container);
-    lv_label_set_text(temp_label, "-- °C");
-    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(temp_label, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_align(temp_label, LV_ALIGN_TOP_MID, 0, 40);
-
-    lv_obj_t* temp_desc = lv_label_create(container);
-    lv_label_set_text(temp_desc, "Current Temperature");
-    lv_obj_set_style_text_font(temp_desc, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(temp_desc, lv_color_hex(0x888888), LV_PART_MAIN);
-    lv_obj_align(temp_desc, LV_ALIGN_TOP_MID, 0, 110);
-
-    // Status label
-    lv_obj_t* status = lv_label_create(container);
-    lv_label_set_text(status, "Status: Ready");
-    lv_obj_set_style_text_font(status, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(status, lv_color_hex(0x00d4ff), LV_PART_MAIN);
-    lv_obj_align(status, LV_ALIGN_CENTER, 0, 50);
-
+    // Create heat pump status display (main content area)
+    // Status bar is 80px, leave some margin
+    heatpump_screen_create(scr, 90);
+    
     // Footer
     lv_obj_t* footer = lv_label_create(scr);
-    lv_label_set_text(footer, "M5Stack Tab5 • ESP32-P4 • LVGL 9.2");
-    lv_obj_set_style_text_font(footer, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(footer, "M5Stack Tab5 • ESP32-P4");
+    lv_obj_set_style_text_font(footer, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(footer, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -10);
     
     // WiFi init happens in background task, just update status bar when ready
     if (wifi_init_complete && wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {

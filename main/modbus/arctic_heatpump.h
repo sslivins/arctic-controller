@@ -115,6 +115,14 @@ bool setCoolingSetpoint(int16_t temp);
 bool setHeatingSetpoint(int16_t temp);
 bool setHotWaterSetpoint(int16_t temp);
 
+// Generic register write (for technician parameters)
+// Returns true on success
+bool writeRegister(uint16_t address, uint16_t value);
+
+// Read a single register (for technician parameters)
+// Returns true on success, value is stored in *value_out
+bool readRegister(uint16_t address, uint16_t* value_out);
+
 // ============================================================================
 // Debug/Diagnostic Functions
 // ============================================================================
