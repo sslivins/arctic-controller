@@ -1170,7 +1170,7 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t* config, bsp_l
         .dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
         .dpi_clock_freq_mhz = 60,  // 720*1280 RGB24 60Hz RGB24 // 80,
         .pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565,
-        .num_fbs            = 1,
+        .num_fbs            = CONFIG_BSP_LCD_DPI_BUFFER_NUMS,  // 2 for VSync double buffering
         .video_timing =
             {
                 .h_size            = BSP_LCD_H_RES,
@@ -1392,7 +1392,7 @@ esp_err_t bsp_display_new_with_handles_to_st7123(const bsp_display_config_t* con
         .dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
         .dpi_clock_freq_mhz = 70,  // ST7123 DPI clock frequency
         .pixel_format       = LCD_COLOR_PIXEL_FORMAT_RGB565,
-        .num_fbs            = 1,
+        .num_fbs            = CONFIG_BSP_LCD_DPI_BUFFER_NUMS,  // 2 for VSync double buffering
         .video_timing =
             {
                 .h_size            = 720,

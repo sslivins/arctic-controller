@@ -95,6 +95,10 @@ CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 # Increase LVGL memory pool for complex screens (language change needs 2 screens in memory)
 CONFIG_LV_MEM_SIZE_KILOBYTES=128
 
+# Display Configuration
+# Use 2 DPI frame buffers for hardware double-buffering
+CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
+
 # Fonts - Reduced set to save code space
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_16=y

@@ -90,6 +90,11 @@ extern "C" void app_main(void)
     bsp_reset_tp();
 
     // Initialize Tab5 BSP (display, touch, etc.)
+    // NOTE: sw_rotate is disabled because it causes visible tearing during scrolling.
+    // The PPA-accelerated rotation process isn't synchronized with VSync, resulting in
+    // horizontal tear lines on animated content. Using native portrait mode (720x1280)
+    // eliminates tearing. MADCTL hardware rotation was tested but ST7123 DSI panel
+    // doesn't support it. If landscape is needed, re-enable sw_rotate and accept tearing.
     bsp_display_cfg_t display_cfg = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
         .buffer_size = BSP_LCD_H_RES * BSP_LCD_V_RES,
@@ -97,7 +102,7 @@ extern "C" void app_main(void)
         .flags = {
             .buff_dma = true,
             .buff_spiram = true,
-            .sw_rotate = true,
+            .sw_rotate = false,  // Disabled - causes tearing during scroll (see note above)
         }
     };
     display_cfg.lvgl_port_cfg.task_priority = 5;
@@ -108,8 +113,8 @@ extern "C" void app_main(void)
         return;
     }
 
-    // Set rotation and turn on backlight
-    lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);
+    // Portrait mode - rotation has no effect with sw_rotate disabled
+    lv_display_set_rotation(display, LV_DISPLAY_ROTATION_0);
     bsp_display_backlight_on();
     
     // Initialize display brightness from saved settings
