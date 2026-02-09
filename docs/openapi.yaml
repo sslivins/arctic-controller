@@ -886,8 +886,12 @@ paths:
                 properties:
                   connected:
                     type: boolean
-                    description: Whether the heat pump is connected via Modbus
+                    description: Whether the heat pump is connected via Modbus (or demo mode active)
                     example: true
+                  demo_mode:
+                    type: boolean
+                    description: Whether demo mode is active (simulated values)
+                    example: false
                   unit_on:
                     type: boolean
                     description: Whether the unit is powered on
@@ -930,19 +934,39 @@ paths:
                       tank:
                         type: integer
                         description: Water tank temperature
-                        example: 45
+                        example: 42
                       outlet:
                         type: integer
                         description: Water outlet temperature
-                        example: 48
+                        example: 45
                       inlet:
                         type: integer
                         description: Water inlet temperature
-                        example: 42
+                        example: 38
                       outdoor:
                         type: integer
                         description: Outdoor ambient temperature
-                        example: 5
+                        example: 22
+                      discharge:
+                        type: integer
+                        description: Compressor discharge temperature
+                        example: 85
+                      suction:
+                        type: integer
+                        description: Compressor suction temperature
+                        example: 12
+                      outdoor_coil:
+                        type: integer
+                        description: Outdoor coil temperature
+                        example: 35
+                      indoor_coil:
+                        type: integer
+                        description: Indoor coil temperature
+                        example: 40
+                      ipm:
+                        type: integer
+                        description: IPM (Intelligent Power Module) temperature
+                        example: 55
                   setpoints:
                     type: object
                     description: Temperature setpoints in degrees Celsius
@@ -970,15 +994,43 @@ paths:
                       fan_rpm:
                         type: integer
                         description: Fan speed in RPM
-                        example: 800
+                        example: 850
                       ac_voltage:
                         type: integer
                         description: AC input voltage
                         example: 230
                       ac_current:
                         type: integer
-                        description: AC current draw
+                        description: AC current draw in amps
                         example: 5
+                      dc_voltage:
+                        type: number
+                        description: DC bus voltage
+                        example: 380.0
+                      dc_current:
+                        type: integer
+                        description: DC current in amps
+                        example: 4
+                      high_pressure:
+                        type: number
+                        description: High side pressure in MPa
+                        example: 2.50
+                      low_pressure:
+                        type: number
+                        description: Low side pressure in MPa
+                        example: 0.85
+                      primary_eev:
+                        type: integer
+                        description: Primary EEV opening in steps
+                        example: 350
+                      secondary_eev:
+                        type: integer
+                        description: Secondary EEV opening in steps
+                        example: 200
+                      power_consumption:
+                        type: integer
+                        description: Calculated power consumption in watts (AC voltage × AC current)
+                        example: 1150
                   has_error:
                     type: boolean
                     description: Whether the unit has any active errors
@@ -988,6 +1040,186 @@ paths:
                     nullable: true
                     description: Comma-separated list of active errors, or null if no errors
                     example: null
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/power:
+    put:
+      tags:
+        - HeatPump
+      summary: Set power on/off
+      description: |
+        Turn the heat pump unit on or off. Works in demo mode (logs action but doesn't control real hardware).
+      operationId: setHeatpumpPower
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - 'on'
+              properties:
+                'on':
+                  type: boolean
+                  description: Power state
+                  example: true
+      responses:
+        '200':
+          description: Power state set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  'on':
+                    type: boolean
+                  demo_mode:
+                    type: boolean
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/mode:
+    put:
+      tags:
+        - HeatPump
+      summary: Set operating mode
+      description: |
+        Set the heat pump operating mode. Works in demo mode.
+      operationId: setHeatpumpMode
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mode
+              properties:
+                mode:
+                  type: string
+                  enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+                  description: Operating mode
+                  example: floor_heating
+      responses:
+        '200':
+          description: Mode set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  mode:
+                    type: string
+                  demo_mode:
+                    type: boolean
+        '400':
+          description: Invalid mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/setpoints:
+    put:
+      tags:
+        - HeatPump
+      summary: Set temperature setpoints
+      description: |
+        Set one or more temperature setpoints. All fields are optional - only provided fields are updated.
+        Temperatures are in degrees Celsius.
+      operationId: setHeatpumpSetpoints
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cooling:
+                  type: integer
+                  description: Cooling setpoint in °C
+                  example: 18
+                heating:
+                  type: integer
+                  description: Heating setpoint in °C
+                  example: 45
+                hot_water:
+                  type: integer
+                  description: Hot water setpoint in °C
+                  example: 50
+      responses:
+        '200':
+          description: Setpoints updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  setpoints:
+                    type: object
+                    properties:
+                      cooling:
+                        type: integer
+                      heating:
+                        type: integer
+                      hot_water:
+                        type: integer
+                  demo_mode:
+                    type: boolean
+        '400':
+          description: No valid setpoints provided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: API key required
           content:

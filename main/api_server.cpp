@@ -10,6 +10,7 @@
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
 #include "heatpump_params.h"
+#include "heatpump_demo_state.h"
 #include "app_preferences.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
@@ -70,6 +71,9 @@ static esp_err_t heatpump_control_handler(httpd_req_t* req);
 static esp_err_t heatpump_params_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_param_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_param_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_power_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -249,7 +253,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 32;  // Increased for all endpoints
+    config.max_uri_handlers = 40;  // Increased for all endpoints
     config.stack_size = 8192;      // Larger stack for file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -547,9 +551,36 @@ bool api_server_start(void)
     };
     REGISTER_URI(heatpump_param_put_uri);
     
+    // PUT /api/heatpump/power - Set power on/off
+    httpd_uri_t heatpump_power_uri = {
+        .uri = "/api/heatpump/power",
+        .method = HTTP_PUT,
+        .handler = heatpump_power_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_power_uri);
+    
+    // PUT /api/heatpump/mode - Set operating mode
+    httpd_uri_t heatpump_mode_uri = {
+        .uri = "/api/heatpump/mode",
+        .method = HTTP_PUT,
+        .handler = heatpump_mode_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_mode_uri);
+    
+    // PUT /api/heatpump/setpoints - Set temperature setpoints
+    httpd_uri_t heatpump_setpoints_uri = {
+        .uri = "/api/heatpump/setpoints",
+        .method = HTTP_PUT,
+        .handler = heatpump_setpoints_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_setpoints_uri);
+    
     #undef REGISTER_URI
     
-    ESP_LOGI(TAG, "HTTP server started successfully (29 URI handlers registered)");
+    ESP_LOGI(TAG, "HTTP server started successfully (32 URI handlers registered)");
     ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
     
     return true;
@@ -1539,52 +1570,117 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     set_json_content_type(req);
     
     arctic::HeatPumpState hp = arctic::getState();
+    bool demo_mode = app_prefs_is_demo_mode();
     
     cJSON* root = cJSON_CreateObject();
     
     // Connection status
-    cJSON_AddBoolToObject(root, "connected", hp.connected);
+    cJSON_AddBoolToObject(root, "connected", hp.connected || demo_mode);
+    cJSON_AddBoolToObject(root, "demo_mode", demo_mode);
     
-    // Mode and power
-    cJSON_AddBoolToObject(root, "unit_on", hp.unit_on);
-    cJSON_AddStringToObject(root, "mode", arctic::workingModeToString(hp.working_mode));
-    cJSON_AddBoolToObject(root, "defrosting", hp.isDefrosting());
-    
-    // Components
-    cJSON_AddBoolToObject(root, "compressor", hp.isCompressorRunning());
-    cJSON_AddBoolToObject(root, "fans", hp.isFanRunning());
-    cJSON_AddNumberToObject(root, "fan_speed", hp.getFanSpeedLevel());
-    cJSON_AddBoolToObject(root, "pump", hp.isWaterPumpRunning());
-    cJSON_AddBoolToObject(root, "aux_heater", hp.isBackupHeaterOn());
-    
-    // Temperatures
-    cJSON* temps = cJSON_AddObjectToObject(root, "temperatures");
-    cJSON_AddNumberToObject(temps, "tank", hp.water_tank_temp);
-    cJSON_AddNumberToObject(temps, "outlet", hp.outlet_water_temp);
-    cJSON_AddNumberToObject(temps, "inlet", hp.inlet_water_temp);
-    cJSON_AddNumberToObject(temps, "outdoor", hp.outdoor_ambient_temp);
-    
-    // Setpoints
-    cJSON* setpoints = cJSON_AddObjectToObject(root, "setpoints");
-    cJSON_AddNumberToObject(setpoints, "cooling", hp.cooling_setpoint);
-    cJSON_AddNumberToObject(setpoints, "heating", hp.heating_setpoint);
-    cJSON_AddNumberToObject(setpoints, "hot_water", hp.hot_water_setpoint);
-    
-    // System readings
-    cJSON* readings = cJSON_AddObjectToObject(root, "readings");
-    cJSON_AddNumberToObject(readings, "compressor_freq", hp.compressor_freq);
-    cJSON_AddNumberToObject(readings, "fan_rpm", hp.fan_speed);
-    cJSON_AddNumberToObject(readings, "ac_voltage", hp.ac_voltage);
-    cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
-    
-    // Errors
-    cJSON_AddBoolToObject(root, "has_error", hp.hasAnyError());
-    if (hp.hasAnyError()) {
-        char error_buf[256];
-        arctic::getErrorDescriptions(error_buf, sizeof(error_buf));
-        cJSON_AddStringToObject(root, "error", error_buf);
-    } else {
+    if (demo_mode) {
+        // Demo mode - return simulated values from shared state
+        cJSON_AddBoolToObject(root, "unit_on", heatpump_demo_get_power());
+        cJSON_AddStringToObject(root, "mode", arctic::workingModeToString(heatpump_demo_get_mode()));
+        cJSON_AddBoolToObject(root, "defrosting", false);
+        
+        // Components (simulate activity when power is on)
+        bool power_on = heatpump_demo_get_power();
+        cJSON_AddBoolToObject(root, "compressor", power_on);
+        cJSON_AddBoolToObject(root, "fans", power_on);
+        cJSON_AddNumberToObject(root, "fan_speed", power_on ? 2 : 0);
+        cJSON_AddBoolToObject(root, "pump", power_on);
+        cJSON_AddBoolToObject(root, "aux_heater", false);
+        
+        // All temperatures
+        cJSON* temps = cJSON_AddObjectToObject(root, "temperatures");
+        cJSON_AddNumberToObject(temps, "tank", 42);
+        cJSON_AddNumberToObject(temps, "outlet", 45);
+        cJSON_AddNumberToObject(temps, "inlet", 38);
+        cJSON_AddNumberToObject(temps, "outdoor", 22);
+        cJSON_AddNumberToObject(temps, "discharge", 85);
+        cJSON_AddNumberToObject(temps, "suction", 12);
+        cJSON_AddNumberToObject(temps, "outdoor_coil", 35);
+        cJSON_AddNumberToObject(temps, "indoor_coil", 40);
+        cJSON_AddNumberToObject(temps, "ipm", 55);
+        
+        // Setpoints from shared state
+        cJSON* setpoints = cJSON_AddObjectToObject(root, "setpoints");
+        cJSON_AddNumberToObject(setpoints, "cooling", heatpump_demo_get_cooling_setpoint());
+        cJSON_AddNumberToObject(setpoints, "heating", heatpump_demo_get_heating_setpoint());
+        cJSON_AddNumberToObject(setpoints, "hot_water", heatpump_demo_get_hotwater_setpoint());
+        
+        // System readings (simulated)
+        cJSON* readings = cJSON_AddObjectToObject(root, "readings");
+        cJSON_AddNumberToObject(readings, "compressor_freq", power_on ? 60 : 0);
+        cJSON_AddNumberToObject(readings, "fan_rpm", power_on ? 850 : 0);
+        cJSON_AddNumberToObject(readings, "ac_voltage", 230);
+        cJSON_AddNumberToObject(readings, "ac_current", power_on ? 5 : 0);
+        cJSON_AddNumberToObject(readings, "dc_voltage", power_on ? 380.0 : 0);
+        cJSON_AddNumberToObject(readings, "dc_current", power_on ? 4 : 0);
+        cJSON_AddNumberToObject(readings, "high_pressure", power_on ? 2.50 : 0);
+        cJSON_AddNumberToObject(readings, "low_pressure", power_on ? 0.85 : 0);
+        cJSON_AddNumberToObject(readings, "primary_eev", power_on ? 350 : 0);
+        cJSON_AddNumberToObject(readings, "secondary_eev", power_on ? 200 : 0);
+        cJSON_AddNumberToObject(readings, "power_consumption", power_on ? 230 * 5 : 0);  // W
+        
+        // No errors in demo
+        cJSON_AddBoolToObject(root, "has_error", false);
         cJSON_AddNullToObject(root, "error");
+    } else {
+        // Real mode - use actual values from heat pump
+        cJSON_AddBoolToObject(root, "unit_on", hp.unit_on);
+        cJSON_AddStringToObject(root, "mode", arctic::workingModeToString(hp.working_mode));
+        cJSON_AddBoolToObject(root, "defrosting", hp.isDefrosting());
+        
+        // Components
+        cJSON_AddBoolToObject(root, "compressor", hp.isCompressorRunning());
+        cJSON_AddBoolToObject(root, "fans", hp.isFanRunning());
+        cJSON_AddNumberToObject(root, "fan_speed", hp.getFanSpeedLevel());
+        cJSON_AddBoolToObject(root, "pump", hp.isWaterPumpRunning());
+        cJSON_AddBoolToObject(root, "aux_heater", hp.isBackupHeaterOn());
+        
+        // All temperatures
+        cJSON* temps = cJSON_AddObjectToObject(root, "temperatures");
+        cJSON_AddNumberToObject(temps, "tank", hp.water_tank_temp);
+        cJSON_AddNumberToObject(temps, "outlet", hp.outlet_water_temp);
+        cJSON_AddNumberToObject(temps, "inlet", hp.inlet_water_temp);
+        cJSON_AddNumberToObject(temps, "outdoor", hp.outdoor_ambient_temp);
+        cJSON_AddNumberToObject(temps, "discharge", hp.discharge_temp);
+        cJSON_AddNumberToObject(temps, "suction", hp.suction_temp);
+        cJSON_AddNumberToObject(temps, "outdoor_coil", hp.outdoor_coil_temp);
+        cJSON_AddNumberToObject(temps, "indoor_coil", hp.indoor_coil_temp);
+        cJSON_AddNumberToObject(temps, "ipm", hp.ipm_temp);
+        
+        // Setpoints
+        cJSON* setpoints = cJSON_AddObjectToObject(root, "setpoints");
+        cJSON_AddNumberToObject(setpoints, "cooling", hp.cooling_setpoint);
+        cJSON_AddNumberToObject(setpoints, "heating", hp.heating_setpoint);
+        cJSON_AddNumberToObject(setpoints, "hot_water", hp.hot_water_setpoint);
+        
+        // System readings
+        cJSON* readings = cJSON_AddObjectToObject(root, "readings");
+        cJSON_AddNumberToObject(readings, "compressor_freq", hp.compressor_freq);
+        cJSON_AddNumberToObject(readings, "fan_rpm", hp.fan_speed);
+        cJSON_AddNumberToObject(readings, "ac_voltage", hp.ac_voltage);
+        cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
+        cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
+        cJSON_AddNumberToObject(readings, "dc_current", hp.dc_current);
+        cJSON_AddNumberToObject(readings, "high_pressure", hp.getHighPressureMPa());
+        cJSON_AddNumberToObject(readings, "low_pressure", hp.getLowPressureMPa());
+        cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
+        cJSON_AddNumberToObject(readings, "secondary_eev", hp.secondary_eev_opening);
+        cJSON_AddNumberToObject(readings, "power_consumption", hp.ac_voltage * hp.ac_current);  // W
+        
+        // Errors
+        cJSON_AddBoolToObject(root, "has_error", hp.hasAnyError());
+        if (hp.hasAnyError()) {
+            char error_buf[256];
+            arctic::getErrorDescriptions(error_buf, sizeof(error_buf));
+            cJSON_AddStringToObject(root, "error", error_buf);
+        } else {
+            cJSON_AddNullToObject(root, "error");
+        }
     }
     
     char* json_str = cJSON_PrintUnformatted(root);
@@ -1922,6 +2018,260 @@ static esp_err_t heatpump_param_put_handler(httpd_req_t* req)
     if (!success) {
         cJSON_AddStringToObject(resp, "error", "Write failed");
     }
+    
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// PUT /api/heatpump/power - Set power on/off
+// Body: { "on": true/false }
+static esp_err_t heatpump_power_put_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    bool demo_mode = app_prefs_is_demo_mode();
+    
+    // Check connection (allow in demo mode)
+    if (!arctic::isConnected() && !demo_mode) {
+        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char body[64];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    cJSON* on_val = cJSON_GetObjectItem(root, "on");
+    if (!on_val || !cJSON_IsBool(on_val)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Missing or invalid 'on' field (boolean required)");
+        return ESP_OK;
+    }
+    
+    bool power_on = cJSON_IsTrue(on_val);
+    cJSON_Delete(root);
+    
+    bool success = false;
+    if (demo_mode) {
+        ESP_LOGI(TAG, "[DEMO] Set power = %s", power_on ? "ON" : "OFF");
+        heatpump_demo_set_power(power_on);  // Update shared demo state
+        success = true;
+    } else {
+        success = arctic::setUnitPower(power_on);
+    }
+    
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", success);
+    cJSON_AddBoolToObject(resp, "on", power_on);
+    cJSON_AddBoolToObject(resp, "demo_mode", demo_mode);
+    
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// PUT /api/heatpump/mode - Set operating mode
+// Body: { "mode": "cooling" | "floor_heating" | "fan_coil_heating" | "hot_water" | "auto" }
+static esp_err_t heatpump_mode_put_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    bool demo_mode = app_prefs_is_demo_mode();
+    
+    // Check connection (allow in demo mode)
+    if (!arctic::isConnected() && !demo_mode) {
+        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char body[64];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    cJSON* mode_val = cJSON_GetObjectItem(root, "mode");
+    if (!mode_val || !cJSON_IsString(mode_val)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Missing or invalid 'mode' field (string required)");
+        return ESP_OK;
+    }
+    
+    const char* mode_str = mode_val->valuestring;
+    arctic::WorkingMode mode;
+    
+    if (strcmp(mode_str, "cooling") == 0) {
+        mode = arctic::WorkingMode::COOLING;
+    } else if (strcmp(mode_str, "floor_heating") == 0) {
+        mode = arctic::WorkingMode::FLOOR_HEATING;
+    } else if (strcmp(mode_str, "fan_coil_heating") == 0) {
+        mode = arctic::WorkingMode::FAN_COIL_HEATING;
+    } else if (strcmp(mode_str, "hot_water") == 0) {
+        mode = arctic::WorkingMode::HOT_WATER;
+    } else if (strcmp(mode_str, "auto") == 0) {
+        mode = arctic::WorkingMode::AUTO;
+    } else {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", 
+            "Invalid mode. Valid: cooling, floor_heating, fan_coil_heating, hot_water, auto");
+        return ESP_OK;
+    }
+    
+    cJSON_Delete(root);
+    
+    bool success = false;
+    if (demo_mode) {
+        ESP_LOGI(TAG, "[DEMO] Set mode = %s", mode_str);
+        heatpump_demo_set_mode(mode);  // Update shared demo state
+        success = true;
+    } else {
+        success = arctic::setWorkingMode(mode);
+    }
+    
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", success);
+    cJSON_AddStringToObject(resp, "mode", arctic::workingModeToString(mode));
+    cJSON_AddBoolToObject(resp, "demo_mode", demo_mode);
+    
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// PUT /api/heatpump/setpoints - Set temperature setpoints
+// Body: { "cooling": 18, "heating": 45, "hot_water": 50 }
+// All fields optional - only provided fields are updated
+static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    bool demo_mode = app_prefs_is_demo_mode();
+    
+    // Check connection (allow in demo mode)
+    if (!arctic::isConnected() && !demo_mode) {
+        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char body[128];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    bool any_set = false;
+    bool all_success = true;
+    
+    cJSON* cooling = cJSON_GetObjectItem(root, "cooling");
+    cJSON* heating = cJSON_GetObjectItem(root, "heating");
+    cJSON* hot_water = cJSON_GetObjectItem(root, "hot_water");
+    
+    int cooling_val = -999, heating_val = -999, hot_water_val = -999;
+    
+    if (cooling && cJSON_IsNumber(cooling)) {
+        cooling_val = cooling->valueint;
+        any_set = true;
+        if (demo_mode) {
+            ESP_LOGI(TAG, "[DEMO] Set cooling setpoint = %d", cooling_val);
+            heatpump_demo_set_cooling_setpoint((int16_t)cooling_val);
+        } else if (!arctic::setCoolingSetpoint((int16_t)cooling_val)) {
+            all_success = false;
+        }
+    }
+    
+    if (heating && cJSON_IsNumber(heating)) {
+        heating_val = heating->valueint;
+        any_set = true;
+        if (demo_mode) {
+            ESP_LOGI(TAG, "[DEMO] Set heating setpoint = %d", heating_val);
+            heatpump_demo_set_heating_setpoint((int16_t)heating_val);
+        } else if (!arctic::setHeatingSetpoint((int16_t)heating_val)) {
+            all_success = false;
+        }
+    }
+    
+    if (hot_water && cJSON_IsNumber(hot_water)) {
+        hot_water_val = hot_water->valueint;
+        any_set = true;
+        if (demo_mode) {
+            ESP_LOGI(TAG, "[DEMO] Set hot water setpoint = %d", hot_water_val);
+            heatpump_demo_set_hotwater_setpoint((int16_t)hot_water_val);
+        } else if (!arctic::setHotWaterSetpoint((int16_t)hot_water_val)) {
+            all_success = false;
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    if (!any_set) {
+        send_json_error(req, "400 Bad Request", 
+            "At least one setpoint required: cooling, heating, or hot_water");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", all_success);
+    
+    cJSON* setpoints = cJSON_AddObjectToObject(resp, "setpoints");
+    if (cooling_val != -999) cJSON_AddNumberToObject(setpoints, "cooling", cooling_val);
+    if (heating_val != -999) cJSON_AddNumberToObject(setpoints, "heating", heating_val);
+    if (hot_water_val != -999) cJSON_AddNumberToObject(setpoints, "hot_water", hot_water_val);
+    
+    cJSON_AddBoolToObject(resp, "demo_mode", demo_mode);
     
     char* json_str = cJSON_PrintUnformatted(resp);
     httpd_resp_sendstr(req, json_str);

@@ -7,6 +7,7 @@
 #include "heatpump_temps_screen.h"
 #include "heatpump_system_screen.h"
 #include "heatpump_control_screen.h"
+#include "heatpump_demo_state.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
 #include "app_preferences.h"
@@ -60,13 +61,6 @@ static struct {
     lv_obj_t* active_setpoint_label = nullptr;
     lv_obj_t* active_setpoint_minus = nullptr;
     lv_obj_t* active_setpoint_plus = nullptr;
-    
-    // Demo mode state (used when heat pump disconnected or demo enabled)
-    bool demo_power = true;
-    int demo_mode = 1;  // 0=Cool, 1=Floor Heat, 2=Fan Heat, 3=Hot Water, 4=Auto
-    int16_t demo_cooling = 18;
-    int16_t demo_heating = 45;
-    int16_t demo_hotwater = 50;
     
     // Power meter display
     lv_obj_t* power_meter_label = nullptr;
@@ -230,9 +224,10 @@ static void power_btn_cb(lv_event_t* e) {
     bool demo_mode = app_prefs_is_demo_mode();
     
     if (demo_mode) {
-        // Demo mode - just update local state
-        state.demo_power = !state.demo_power;
-        ESP_LOGI(TAG, "[DEMO] Power %s", state.demo_power ? "ON" : "OFF");
+        // Demo mode - update shared demo state
+        bool new_power = !heatpump_demo_get_power();
+        heatpump_demo_set_power(new_power);
+        ESP_LOGI(TAG, "[DEMO] Power %s", new_power ? "ON" : "OFF");
         heatpump_screen_update();
         return;
     }
@@ -252,8 +247,17 @@ static void mode_dropdown_cb(lv_event_t* e) {
     bool demo_mode = app_prefs_is_demo_mode();
     
     if (demo_mode) {
-        // Demo mode - just update local state
-        state.demo_mode = sel;
+        // Demo mode - update shared demo state
+        arctic::WorkingMode mode;
+        switch (sel) {
+            case 0: mode = arctic::WorkingMode::COOLING; break;
+            case 1: mode = arctic::WorkingMode::FLOOR_HEATING; break;
+            case 2: mode = arctic::WorkingMode::FAN_COIL_HEATING; break;
+            case 3: mode = arctic::WorkingMode::HOT_WATER; break;
+            case 4: mode = arctic::WorkingMode::AUTO; break;
+            default: return;
+        }
+        heatpump_demo_set_mode(mode);
         const char* mode_names[] = {"Cooling", "Floor Heat", "Fan Heat", "Hot Water", "Auto"};
         ESP_LOGI(TAG, "[DEMO] Mode: %s", mode_names[sel]);
         return;
@@ -296,7 +300,17 @@ static int get_active_mode() {
         }
         return 1;  // Default when disconnected
     }
-    return state.demo_mode;
+    
+    // Demo mode - get from shared state
+    arctic::WorkingMode mode = heatpump_demo_get_mode();
+    switch (mode) {
+        case arctic::WorkingMode::COOLING: return 0;
+        case arctic::WorkingMode::FLOOR_HEATING: return 1;
+        case arctic::WorkingMode::FAN_COIL_HEATING: return 2;
+        case arctic::WorkingMode::HOT_WATER: return 3;
+        case arctic::WorkingMode::AUTO: return 4;
+        default: return 1;
+    }
 }
 
 static void setpoint_minus_cb(lv_event_t* e) {
@@ -305,10 +319,17 @@ static void setpoint_minus_cb(lv_event_t* e) {
     int mode = get_active_mode();
     
     if (demo_mode) {
-        // Demo mode
-        if (mode == 0) { if (state.demo_cooling > 5) state.demo_cooling--; }
-        else if (mode == 3) { if (state.demo_hotwater > 30) state.demo_hotwater--; }
-        else { if (state.demo_heating > 20) state.demo_heating--; }
+        // Demo mode - update shared state
+        if (mode == 0) {
+            int16_t val = heatpump_demo_get_cooling_setpoint();
+            if (val > 5) heatpump_demo_set_cooling_setpoint(val - 1);
+        } else if (mode == 3) {
+            int16_t val = heatpump_demo_get_hotwater_setpoint();
+            if (val > 30) heatpump_demo_set_hotwater_setpoint(val - 1);
+        } else {
+            int16_t val = heatpump_demo_get_heating_setpoint();
+            if (val > 20) heatpump_demo_set_heating_setpoint(val - 1);
+        }
         return;
     }
     
@@ -337,10 +358,17 @@ static void setpoint_plus_cb(lv_event_t* e) {
     int mode = get_active_mode();
     
     if (demo_mode) {
-        // Demo mode
-        if (mode == 0) { if (state.demo_cooling < 30) state.demo_cooling++; }
-        else if (mode == 3) { if (state.demo_hotwater < 60) state.demo_hotwater++; }
-        else { if (state.demo_heating < 60) state.demo_heating++; }
+        // Demo mode - update shared state
+        if (mode == 0) {
+            int16_t val = heatpump_demo_get_cooling_setpoint();
+            if (val < 30) heatpump_demo_set_cooling_setpoint(val + 1);
+        } else if (mode == 3) {
+            int16_t val = heatpump_demo_get_hotwater_setpoint();
+            if (val < 60) heatpump_demo_set_hotwater_setpoint(val + 1);
+        } else {
+            int16_t val = heatpump_demo_get_heating_setpoint();
+            if (val < 60) heatpump_demo_set_heating_setpoint(val + 1);
+        }
         return;
     }
     
@@ -694,17 +722,17 @@ void heatpump_screen_update(void) {
     // Helper: Get setpoint name, value, and color for active mode
     auto get_active_setpoint_info = [&](bool connected, int mode, int16_t* value, const char** name, lv_color_t* color) {
         if (!connected) {
-            // Demo mode
+            // Demo mode - use shared state
             if (mode == 0) {
-                *value = state.demo_cooling;
+                *value = heatpump_demo_get_cooling_setpoint();
                 *name = "Cooling";
                 *color = COLOR_COOLING;
             } else if (mode == 3) {
-                *value = state.demo_hotwater;
+                *value = heatpump_demo_get_hotwater_setpoint();
                 *name = "Hot Water";
                 *color = COLOR_ERROR;
             } else {
-                *value = state.demo_heating;
+                *value = heatpump_demo_get_heating_setpoint();
                 *name = "Heating";
                 *color = COLOR_HEATING;
             }
@@ -767,14 +795,27 @@ void heatpump_screen_update(void) {
         const char* demo_mode_names[] = {"COOLING", "FLOOR HEAT", "FAN HEAT", "HOT WATER", "AUTO"};
         lv_color_t demo_mode_colors[] = {COLOR_COOLING, COLOR_HEATING, COLOR_HEATING, COLOR_ERROR, COLOR_SUCCESS};
         
-        if (!state.demo_power) {
+        // Get demo state from shared state module
+        bool demo_power = heatpump_demo_get_power();
+        arctic::WorkingMode demo_mode_val = heatpump_demo_get_mode();
+        int demo_mode_idx = 1;  // Default to floor heat
+        switch (demo_mode_val) {
+            case arctic::WorkingMode::COOLING: demo_mode_idx = 0; break;
+            case arctic::WorkingMode::FLOOR_HEATING: demo_mode_idx = 1; break;
+            case arctic::WorkingMode::FAN_COIL_HEATING: demo_mode_idx = 2; break;
+            case arctic::WorkingMode::HOT_WATER: demo_mode_idx = 3; break;
+            case arctic::WorkingMode::AUTO: demo_mode_idx = 4; break;
+            default: demo_mode_idx = 1; break;
+        }
+        
+        if (!demo_power) {
             lv_label_set_text(state.mode_label, "DEMO - STANDBY");
             lv_obj_set_style_text_color(state.mode_label, COLOR_TEXT_DIM, LV_PART_MAIN);
         } else {
             char mode_buf[32];
-            snprintf(mode_buf, sizeof(mode_buf), "DEMO - %s", demo_mode_names[state.demo_mode]);
+            snprintf(mode_buf, sizeof(mode_buf), "DEMO - %s", demo_mode_names[demo_mode_idx]);
             lv_label_set_text(state.mode_label, mode_buf);
-            lv_obj_set_style_text_color(state.mode_label, demo_mode_colors[state.demo_mode], LV_PART_MAIN);
+            lv_obj_set_style_text_color(state.mode_label, demo_mode_colors[demo_mode_idx], LV_PART_MAIN);
         }
         
         // Demo tank temperature
@@ -787,7 +828,7 @@ void heatpump_screen_update(void) {
         int16_t sp_val;
         const char* sp_name;
         lv_color_t sp_color;
-        get_active_setpoint_info(false, state.demo_mode, &sp_val, &sp_name, &sp_color);
+        get_active_setpoint_info(false, demo_mode_idx, &sp_val, &sp_name, &sp_color);
         
         char sp_buf[24];
         snprintf(sp_buf, sizeof(sp_buf), "Set: %d %s", 
@@ -795,16 +836,16 @@ void heatpump_screen_update(void) {
         lv_label_set_text(state.setpoint_label, sp_buf);
         
         // Demo component indicators (simulate some activity)
-        set_indicator_active(state.compressor_indicator, state.demo_power, COLOR_SUCCESS);
-        set_indicator_active(state.fan_indicator, state.demo_power, COLOR_SUCCESS);
-        set_indicator_active(state.pump_indicator, state.demo_power, COLOR_ACCENT);
+        set_indicator_active(state.compressor_indicator, demo_power, COLOR_SUCCESS);
+        set_indicator_active(state.fan_indicator, demo_power, COLOR_SUCCESS);
+        set_indicator_active(state.pump_indicator, demo_power, COLOR_ACCENT);
         set_indicator_active(state.heater_indicator, false, COLOR_WARNING);
         
-        lv_label_set_text(state.fan_label, state.demo_power ? "Fan Med" : "Fan");
+        lv_label_set_text(state.fan_label, demo_power ? "Fan Med" : "Fan");
         
         // Demo power meter (simulated 1.2 kW when running)
         if (state.power_meter_label) {
-            lv_label_set_text(state.power_meter_label, state.demo_power ? "1200 W" : "0 W");
+            lv_label_set_text(state.power_meter_label, demo_power ? "1200 W" : "0 W");
         }
         
         // Show demo mode message in info card
@@ -814,12 +855,12 @@ void heatpump_screen_update(void) {
         lv_obj_remove_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);
         
         // Update power button
-        update_power_btn(state.demo_power);
+        update_power_btn(demo_power);
         
         // Update mode dropdown
         if (state.mode_dropdown) {
             lv_obj_remove_event_cb(state.mode_dropdown, mode_dropdown_cb);
-            lv_dropdown_set_selected(state.mode_dropdown, state.demo_mode);
+            lv_dropdown_set_selected(state.mode_dropdown, demo_mode_idx);
             lv_obj_add_event_cb(state.mode_dropdown, mode_dropdown_cb, LV_EVENT_VALUE_CHANGED, nullptr);
         }
         

@@ -42,6 +42,7 @@ idf_component_register(
         "auth_manager.cpp"
         "app_preferences.cpp"
         "heatpump_params.cpp"
+        "heatpump_demo_state.cpp"
         "settings/settings_menu.cpp"
         "settings/settings_wifi_screen.cpp"
         "settings/keyboard_maps.c"
