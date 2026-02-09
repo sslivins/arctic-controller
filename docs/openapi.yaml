@@ -995,6 +995,165 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/heatpump/params:
+    get:
+      tags:
+        - HeatPump
+      summary: Get all P-parameters
+      description: |
+        Returns all configurable P-parameters with their current values.
+        In demo mode, returns simulated values. When disconnected, values are null.
+      operationId: getHeatpumpParams
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: All P-parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected:
+                    type: boolean
+                    description: Whether heat pump is connected (or demo mode active)
+                  demo_mode:
+                    type: boolean
+                    description: Whether demo mode is active
+                  params:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/HeatPumpParam'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/params/{id}:
+    get:
+      tags:
+        - HeatPump
+      summary: Get single P-parameter
+      description: |
+        Returns a single P-parameter by its key (e.g., `defrost_cycle`) or P-code (e.g., `P29`).
+        P-code lookup is case-insensitive.
+      operationId: getHeatpumpParam
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Parameter key (e.g., `defrost_cycle`) or P-code (e.g., `P29`)
+          schema:
+            type: string
+          examples:
+            by_key:
+              value: defrost_cycle
+              summary: By descriptive key
+            by_pcode:
+              value: P29
+              summary: By P-code
+      responses:
+        '200':
+          description: Parameter details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/HeatPumpParam'
+                  - type: object
+                    properties:
+                      connected:
+                        type: boolean
+                      demo_mode:
+                        type: boolean
+        '404':
+          description: Unknown parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      tags:
+        - HeatPump
+      summary: Set P-parameter value
+      description: |
+        Sets a P-parameter value. The request body is a plain integer (not JSON).
+        Values are validated against min/max range. Works in demo mode (updates in-memory values).
+      operationId: setHeatpumpParam
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Parameter key or P-code
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: Plain integer value (not JSON)
+        content:
+          text/plain:
+            schema:
+              type: integer
+            example: 45
+      responses:
+        '200':
+          description: Value set successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  key:
+                    type: string
+                  p_code:
+                    type: string
+                  value:
+                    type: integer
+                  demo_mode:
+                    type: boolean
+        '400':
+          description: Invalid value or out of range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Unknown parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     apiKey:
@@ -1015,3 +1174,46 @@ components:
         error:
           type: string
           description: Error message
+
+    HeatPumpParam:
+      type: object
+      description: Heat pump P-parameter definition and value
+      properties:
+        key:
+          type: string
+          description: Descriptive API key
+          example: defrost_cycle
+        p_code:
+          type: string
+          description: Arctic P-code identifier
+          example: P29
+        name:
+          type: string
+          description: Human-readable name
+          example: Defrost Cycle
+        description:
+          type: string
+          description: Detailed description
+          example: Minimum time between defrost cycles during heating operation.
+        unit:
+          type: string
+          description: Unit of measurement
+          enum: ['', steps, min, sec, °C]
+          example: min
+        min:
+          type: integer
+          description: Minimum allowed value
+          example: 30
+        max:
+          type: integer
+          description: Maximum allowed value
+          example: 120
+        category:
+          type: string
+          description: Parameter category for grouping
+          example: Defrost
+        value:
+          type: integer
+          nullable: true
+          description: Current value (null if disconnected and not in demo mode)
+          example: 45

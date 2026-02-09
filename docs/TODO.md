@@ -14,12 +14,37 @@
 - [x] Offset parameters show "Δ°F" notation via `app_prefs_temp_diff_unit_str()`
 
 ## API for Heat Pump Values
-- [ ] REST endpoint: GET /api/heatpump/state (all current readings)
-- [ ] REST endpoint: GET /api/heatpump/params (P-parameters)
-- [ ] REST endpoint: PUT /api/heatpump/params/:id (write P-parameter)
-- [ ] REST endpoint: PUT /api/heatpump/setpoints (write setpoints)
-- [ ] REST endpoint: PUT /api/heatpump/power (on/off)
-- [ ] REST endpoint: PUT /api/heatpump/mode (working mode)
+All temperatures in Celsius (native units). snake_case naming.
+
+### Read Endpoints
+- [ ] `GET /api/heatpump/state` - All current readings (temps, pressures, status, setpoints)
+- [x] `GET /api/heatpump/params` - All P-parameters with descriptive keys
+- [x] `GET /api/heatpump/params/:id` - Single parameter (accepts key or P-code)
+
+### Write Endpoints
+- [ ] `PUT /api/heatpump/power` - `{ "on": true/false }`
+- [ ] `PUT /api/heatpump/mode` - `{ "mode": "heating" }` (cooling/heating/hot_water/cooling_heating/auto)
+- [ ] `PUT /api/heatpump/setpoints` - `{ "cooling": 18, "heating": 45, "hot_water": 50 }`
+- [x] `PUT /api/heatpump/params/:id` - Plain integer body (e.g., `25`), accepts key or P-code
+
+### Parameter Format
+```json
+{
+  "water_inlet_low_limit": {
+    "value": 5,
+    "p_code": "P01",
+    "unit": "°C",
+    "min": 3,
+    "max": 15
+  }
+}
+```
+
+### Future/Optional
+- [ ] `GET /api/heatpump/errors` - Decoded error codes
+- [ ] `GET /api/system/info` - Firmware version, WiFi, uptime
+- [ ] `GET /api/settings` - App preferences
+- [ ] `PUT /api/settings` - Update preferences
 
 ## Localization (i18n)
 - [x] i18n infrastructure in place (`i18n.h`)

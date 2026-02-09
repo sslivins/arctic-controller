@@ -41,6 +41,7 @@ idf_component_register(
         "ota_manager.cpp"
         "auth_manager.cpp"
         "app_preferences.cpp"
+        "heatpump_params.cpp"
         "settings/settings_menu.cpp"
         "settings/settings_wifi_screen.cpp"
         "settings/keyboard_maps.c"
@@ -57,7 +58,7 @@ idf_component_register(
         "heatpump_screen.cpp"
         "heatpump_temps_screen.cpp"
         "heatpump_system_screen.cpp"
-        "heatpump_settings_screen.cpp"
+        "heatpump_params_screen.cpp"
     INCLUDE_DIRS
         "."
         "settings"
