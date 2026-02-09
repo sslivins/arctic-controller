@@ -162,6 +162,7 @@ static void row_click_cb(lv_event_t* e)
                 .on_wifi_connect = state.config.on_wifi_connect,
                 .on_wifi_disconnect = state.config.on_wifi_disconnect,
                 .on_back = settings_menu_show,
+                .use_fade = false,
             };
             wifi_screen_create(&wifi_cfg);
             state.sub_screen_active = true;

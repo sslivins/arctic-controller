@@ -151,29 +151,6 @@ static void update_preview(void)
     }
 }
 
-// Create a styled section panel
-static lv_obj_t* create_section(lv_obj_t* parent, const char* title, int height)
-{
-    lv_obj_t* panel = lv_obj_create(parent);
-    lv_obj_set_width(panel, LV_PCT(100));
-    lv_obj_set_height(panel, height);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(COLOR_PANEL), LV_PART_MAIN);
-    lv_obj_set_style_border_color(panel, lv_color_hex(COLOR_BORDER), LV_PART_MAIN);
-    lv_obj_set_style_border_width(panel, 1, LV_PART_MAIN);
-    lv_obj_set_style_radius(panel, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(panel, 20, LV_PART_MAIN);
-    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Title
-    lv_obj_t* lbl = lv_label_create(panel);
-    lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
-    lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, 0);
-    
-    return panel;
-}
-
 lv_obj_t* time_screen_create(const time_screen_config_t* config)
 {
     if (!config) {
@@ -285,7 +262,7 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     lv_obj_set_size(screen_state.format_switch, 80, 45);
     lv_obj_align(screen_state.format_switch, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(screen_state.format_switch, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(screen_state.format_switch, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(screen_state.format_switch, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | (lv_style_selector_t)LV_STATE_CHECKED);
     if (screen_state.use_24h) {
         lv_obj_add_state(screen_state.format_switch, LV_STATE_CHECKED);
     }

@@ -41,7 +41,6 @@ static void on_wifi_scan(void);
 static void on_wifi_disconnect(void);
 static void on_settings_close(void);
 static void on_wifi_screen_close(void);  // For WiFi opened from status bar
-static void try_auto_connect(void);
 static void wifi_init_task(void* param);
 static void on_update_check_complete(bool update_available, const char* new_version);
 
@@ -429,6 +428,8 @@ static void on_status_bar_settings_click(void)
         .on_wifi_scan = on_wifi_scan,
         .on_wifi_connect = on_wifi_connect,
         .on_wifi_disconnect = on_wifi_disconnect,
+        .on_check_updates = nullptr,
+        .on_update_firmware = nullptr,
     };
     settings_menu_create(&config);
     bsp_display_unlock();
@@ -561,14 +562,4 @@ static void wifi_init_task(void* param)
     mclog::tagInfo(TAG, "[BG] WiFi init task complete");
     
     vTaskDelete(NULL);
-}
-
-// Legacy function - now just checks if we need to init (shouldn't be called)
-static void try_auto_connect(void)
-{
-    // WiFi init now happens in background task during startup animation
-    // This function is kept for backwards compatibility
-    if (!wifi_mgr_is_initialized()) {
-        mclog::tagWarn(TAG, "WiFi not initialized - init task may have failed");
-    }
 }
