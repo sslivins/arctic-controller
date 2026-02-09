@@ -336,3 +336,29 @@ static void slider_cb(lv_event_t* e)
         ESP_LOGI(TAG, "Brightness changed to: %d%%", value);
     }
 }
+
+// ============================================================================
+// Startup Initialization
+// ============================================================================
+
+void display_screen_init_brightness(void)
+{
+    // Load and apply saved brightness at startup (before screen is created)
+    nvs_handle_t nvs;
+    int brightness = DEFAULT_BRIGHTNESS;
+    
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        uint8_t val = DEFAULT_BRIGHTNESS;
+        nvs_get_u8(nvs, NVS_KEY_BRIGHTNESS, &val);
+        brightness = val;
+        nvs_close(nvs);
+    }
+    
+    // Apply brightness
+    if (brightness < 5) brightness = 5;
+    if (brightness > 100) brightness = 100;
+    bsp_display_brightness_set(brightness);
+    
+    ESP_LOGI(TAG, "Initialized display brightness to %d%%", brightness);
+}

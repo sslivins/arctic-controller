@@ -14,11 +14,11 @@
 #include "time_manager.h"
 #include "status_bar.h"
 #include "ota_manager.h"
-#include "settings_screen.h"
 #include "settings/settings_menu.h"
 #include "settings/settings_wifi_screen.h"
-#include "settings/settings_time_panel.h"
-#include "settings/settings_display_panel.h"
+#include "settings/settings_firmware_screen.h"
+#include "settings/settings_time_screen.h"
+#include "settings/settings_display_screen.h"
 #include "i18n/i18n.h"
 #include "auth_manager.h"
 #include "modbus/modbus_manager.h"
@@ -59,6 +59,19 @@ static lv_timer_t* update_check_timer = NULL;
 #define WIFI_UNSTABLE_WINDOW_MS 300000  // 5 minute window to count disconnects
 static uint32_t wifi_disconnect_times[WIFI_UNSTABLE_THRESHOLD] = {0};
 static int wifi_disconnect_index = 0;
+
+// Helper to show error message on current screen
+static void show_error_message(const char* message)
+{
+    lv_obj_t* scr = lv_scr_act();
+    if (scr) {
+        lv_obj_t* msgbox = lv_msgbox_create(scr);
+        lv_msgbox_add_title(msgbox, "Error");
+        lv_msgbox_add_text(msgbox, message);
+        lv_msgbox_add_close_button(msgbox);
+        lv_obj_center(msgbox);
+    }
+}
 
 extern "C" void app_main(void)
 {
@@ -120,7 +133,7 @@ extern "C" void app_main(void)
     bsp_display_backlight_on();
     
     // Initialize display brightness from saved settings
-    display_panel_init_brightness();
+    display_screen_init_brightness();
 
     mclog::tagInfo(TAG, "Display initialized: {}x{}", BSP_LCD_H_RES, BSP_LCD_V_RES);
 
@@ -278,13 +291,13 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             // Start periodic firmware update checks (if not already running)
             if (!update_check_timer) {
                 // Check immediately on first connect
-                settings_screen_check_for_updates_async(on_update_check_complete);
+                firmware_screen_check_for_updates_async(on_update_check_complete);
                 // Then check periodically
                 update_check_timer = lv_timer_create([](lv_timer_t* t) {
                     (void)t;
                     if (wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
                         ESP_LOGI("main", "Periodic firmware update check...");
-                        settings_screen_check_for_updates_async(on_update_check_complete);
+                        firmware_screen_check_for_updates_async(on_update_check_complete);
                     }
                 }, UPDATE_CHECK_INTERVAL_MS, NULL);
             }
@@ -326,7 +339,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             
         case WIFI_MGR_STATE_ERROR:
             ESP_LOGE(TAG, "WiFi error");
-            settings_screen_show_error("Connection failed.\nPlease check password and try again.");
+            show_error_message("Connection failed.\nPlease check password and try again.");
             status_bar_set_wifi_state(false, NULL);
             // Clear pending credentials on error
             pending_ssid[0] = '\0';
@@ -370,7 +383,7 @@ static void on_wifi_connect(const char* ssid, const char* password)
     mclog::tagInfo(TAG, "WiFi connect requested: SSID='{}'", ssid);
     
     if (!wifi_mgr_is_initialized()) {
-        settings_screen_show_error("WiFi not initialized.\nPlease try again.");
+        show_error_message("WiFi not initialized.\nPlease try again.");
         return;
     }
     
@@ -379,7 +392,7 @@ static void on_wifi_connect(const char* ssid, const char* password)
     strncpy(pending_password, password ? password : "", sizeof(pending_password) - 1);
     
     if (!wifi_mgr_connect(ssid, password, on_wifi_state_changed)) {
-        settings_screen_show_error("Failed to start connection.\nPlease try again.");
+        show_error_message("Failed to start connection.\nPlease try again.");
     }
 }
 
@@ -476,13 +489,23 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
     
     // Handle specific actions based on type
     switch (type) {
-        case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
-            // Open settings screen and go directly to firmware panel
-            on_status_bar_settings_click();
+        case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE: {
+            // Open firmware screen directly with fade animation
             bsp_display_lock(0);
-            settings_screen_show_firmware_panel();
+            firmware_screen_config_t fw_cfg = {
+                .on_back = []() {
+                    // Fade back to main screen
+                    extern lv_obj_t* main_screen;
+                    if (main_screen) {
+                        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
+                    }
+                    firmware_screen_close();
+                },
+            };
+            firmware_screen_create(&fw_cfg);
             bsp_display_unlock();
             break;
+        }
         
         case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:
             // Open WiFi screen - user might want to switch networks

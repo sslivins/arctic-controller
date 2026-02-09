@@ -35,6 +35,12 @@ void time_screen_close(void);
  */
 bool time_screen_is_visible(void);
 
+/**
+ * @brief Get the current 24-hour format setting
+ * @return true if 24-hour format, false for 12-hour
+ */
+bool time_screen_get_24h_format(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -35,6 +35,19 @@ void firmware_screen_close(void);
  */
 bool firmware_screen_is_visible(void);
 
+/**
+ * @brief Callback for async update check
+ * @param update_available True if a newer version is available
+ * @param new_version Version string of the new release (or empty)
+ */
+typedef void (*firmware_update_check_cb_t)(bool update_available, const char* new_version);
+
+/**
+ * @brief Check for firmware updates in the background
+ * @param callback Called when check completes (may be called from LVGL context)
+ */
+void firmware_screen_check_for_updates_async(firmware_update_check_cb_t callback);
+
 #ifdef __cplusplus
 }
 #endif

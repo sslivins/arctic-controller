@@ -11,7 +11,7 @@
 #include "settings_time_screen.h"
 #include "settings_language_screen.h"
 #include "settings_display_screen.h"
-#include "../settings_screen.h"  // For settings_wifi_network_t
+#include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"

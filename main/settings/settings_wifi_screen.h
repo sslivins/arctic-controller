@@ -7,7 +7,7 @@
 #pragma once
 
 #include <lvgl.h>
-#include "../settings_screen.h"  // For settings_wifi_network_t
+#include "settings_types.h"  // For settings_wifi_network_t
 
 #ifdef __cplusplus
 extern "C" {

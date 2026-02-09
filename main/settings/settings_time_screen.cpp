@@ -488,3 +488,24 @@ static void preview_timer_cb(lv_timer_t* timer)
     update_preview();
     update_sync_status();
 }
+
+// ============================================================================
+// Public Utility Functions
+// ============================================================================
+
+bool time_screen_get_24h_format(void)
+{
+    // Read from NVS directly (works even when screen isn't created)
+    nvs_handle_t nvs;
+    bool use_24h = true;  // Default
+    
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        uint8_t val = 1;
+        nvs_get_u8(nvs, NVS_KEY_24H, &val);
+        use_24h = (val != 0);
+        nvs_close(nvs);
+    }
+    
+    return use_24h;
+}

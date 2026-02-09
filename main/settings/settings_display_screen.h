@@ -35,6 +35,12 @@ void display_screen_close(void);
  */
 bool display_screen_is_visible(void);
 
+/**
+ * @brief Initialize display brightness from saved settings
+ * Called at startup to restore brightness.
+ */
+void display_screen_init_brightness(void);
+
 #ifdef __cplusplus
 }
 #endif

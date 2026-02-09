@@ -18,6 +18,40 @@
 
 static const char* TAG = "wifi_screen";
 
+// ============================================================================
+// Helper Function Implementations
+// ============================================================================
+
+void sanitize_ssid_for_display(char* dest, const char* src, size_t dest_size)
+{
+    size_t di = 0;
+    size_t si = 0;
+
+    while (src[si] && di < dest_size - 1) {
+        if ((unsigned char)src[si] == 0xE2 &&
+            (unsigned char)src[si + 1] == 0x80) {
+            unsigned char third = (unsigned char)src[si + 2];
+            if (third == 0x99 || third == 0x98) {
+                dest[di++] = '\'';
+                si += 3;
+                continue;
+            } else if (third == 0x9C || third == 0x9D) {
+                dest[di++] = '"';
+                si += 3;
+                continue;
+            }
+        }
+        dest[di++] = src[si++];
+    }
+    dest[di] = '\0';
+}
+
+const char* get_signal_icon(int8_t rssi)
+{
+    (void)rssi;
+    return LV_SYMBOL_WIFI;
+}
+
 // Colors, fonts, and helpers come from settings_common.h
 
 // ============================================================================
