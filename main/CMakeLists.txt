@@ -54,7 +54,8 @@ idf_component_register(
         "modbus/modbus_manager.cpp"
         "modbus/arctic_heatpump.cpp"
         "heatpump_screen.cpp"
-        "heatpump_detail_screen.cpp"
+        "heatpump_temps_screen.cpp"
+        "heatpump_system_screen.cpp"
         "heatpump_control_screen.cpp"
     INCLUDE_DIRS
         "."

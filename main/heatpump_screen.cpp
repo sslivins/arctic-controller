@@ -4,7 +4,8 @@
  */
 
 #include "heatpump_screen.h"
-#include "heatpump_detail_screen.h"
+#include "heatpump_temps_screen.h"
+#include "heatpump_system_screen.h"
 #include "heatpump_control_screen.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
@@ -41,10 +42,9 @@ static struct {
     // Error indicator
     lv_obj_t* error_label = nullptr;
     
-    // Details button
-    lv_obj_t* details_btn = nullptr;
-    
-    // Controls button
+    // Bottom button bar
+    lv_obj_t* temps_btn = nullptr;
+    lv_obj_t* system_btn = nullptr;
     lv_obj_t* controls_btn = nullptr;
     
     // Saved screen for returning from details/controls
@@ -149,7 +149,7 @@ static void set_indicator_active(lv_obj_t* indicator, bool active, lv_color_t ac
 // Detail Screen Callbacks
 // ============================================================================
 
-static void on_detail_close(void) {
+static void on_temps_close(void) {
     // Load saved screen back
     if (state.saved_screen) {
         lv_scr_load(state.saved_screen);
@@ -157,12 +157,28 @@ static void on_detail_close(void) {
     }
 }
 
-static void details_btn_cb(lv_event_t* e) {
+static void temps_btn_cb(lv_event_t* e) {
     // Save current screen
     state.saved_screen = lv_scr_act();
     
-    // Show detail screen
-    heatpump_detail_show(on_detail_close);
+    // Show temperatures screen
+    heatpump_temps_show(on_temps_close);
+}
+
+static void on_system_close(void) {
+    // Load saved screen back
+    if (state.saved_screen) {
+        lv_scr_load(state.saved_screen);
+        state.saved_screen = nullptr;
+    }
+}
+
+static void system_btn_cb(lv_event_t* e) {
+    // Save current screen
+    state.saved_screen = lv_scr_act();
+    
+    // Show system readings screen
+    heatpump_system_show(on_system_close);
 }
 
 static void on_control_close(void) {
@@ -201,9 +217,10 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     ESP_LOGI(TAG, "Creating heat pump status display");
     
-    // Main container - takes up most of the screen
+    // Main container - fills from y_offset to near bottom of screen
+    // Screen is 1280px tall, leave 40px for footer
     state.container = lv_obj_create(parent);
-    lv_obj_set_size(state.container, 680, 500);
+    lv_obj_set_size(state.container, 700, 1280 - y_offset - 40);
     lv_obj_align(state.container, LV_ALIGN_TOP_MID, 0, y_offset);
     lv_obj_set_style_bg_opa(state.container, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.container, 0, LV_PART_MAIN);
@@ -299,30 +316,13 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_text_align(state.error_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     
     // =========================================================================
-    // BOTTOM RIGHT: Details Button
+    // BOTTOM: Three button bar - Controls | Temps | System
     // =========================================================================
-    state.details_btn = lv_btn_create(state.container);
-    lv_obj_set_size(state.details_btn, 140, 50);
-    lv_obj_align(state.details_btn, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
-    lv_obj_set_style_bg_color(state.details_btn, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(state.details_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(state.details_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_border_width(state.details_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(state.details_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.details_btn, details_btn_cb, LV_EVENT_CLICKED, nullptr);
     
-    lv_obj_t* btn_label = lv_label_create(state.details_btn);
-    lv_label_set_text(btn_label, "Details " LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(btn_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(btn_label);
-    
-    // =========================================================================
-    // BOTTOM LEFT: Controls Button
-    // =========================================================================
+    // Controls button (left)
     state.controls_btn = lv_btn_create(state.container);
-    lv_obj_set_size(state.controls_btn, 140, 50);
-    lv_obj_align(state.controls_btn, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+    lv_obj_set_size(state.controls_btn, 200, 60);
+    lv_obj_align(state.controls_btn, LV_ALIGN_BOTTOM_LEFT, 10, 0);
     lv_obj_set_style_bg_color(state.controls_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.controls_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.controls_btn, COLOR_SUCCESS, LV_PART_MAIN);
@@ -332,9 +332,43 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     lv_obj_t* ctrl_label = lv_label_create(state.controls_btn);
     lv_label_set_text(ctrl_label, LV_SYMBOL_SETTINGS " Controls");
-    lv_obj_set_style_text_font(ctrl_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(ctrl_label, &lv_font_montserrat_24, LV_PART_MAIN);
     lv_obj_set_style_text_color(ctrl_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_center(ctrl_label);
+    
+    // Temperatures button (center)
+    state.temps_btn = lv_btn_create(state.container);
+    lv_obj_set_size(state.temps_btn, 200, 60);
+    lv_obj_align(state.temps_btn, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(state.temps_btn, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.temps_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(state.temps_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.temps_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.temps_btn, 12, LV_PART_MAIN);
+    lv_obj_add_event_cb(state.temps_btn, temps_btn_cb, LV_EVENT_CLICKED, nullptr);
+    
+    lv_obj_t* temps_label = lv_label_create(state.temps_btn);
+    lv_label_set_text(temps_label, "Temps " LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_font(temps_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(temps_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(temps_label);
+    
+    // System readings button (right)
+    state.system_btn = lv_btn_create(state.container);
+    lv_obj_set_size(state.system_btn, 200, 60);
+    lv_obj_align(state.system_btn, LV_ALIGN_BOTTOM_RIGHT, -10, 0);
+    lv_obj_set_style_bg_color(state.system_btn, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.system_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(state.system_btn, COLOR_WARNING, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.system_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.system_btn, 12, LV_PART_MAIN);
+    lv_obj_add_event_cb(state.system_btn, system_btn_cb, LV_EVENT_CLICKED, nullptr);
+    
+    lv_obj_t* system_label = lv_label_create(state.system_btn);
+    lv_label_set_text(system_label, "System " LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_font(system_label, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_color(system_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(system_label);
 
     state.created = true;
     
