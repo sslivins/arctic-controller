@@ -15,6 +15,7 @@
 #include <esp_log.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 static const char* TAG = "hp_settings";
 
@@ -34,122 +35,145 @@ static const char* TAG = "hp_settings";
 // ============================================================================
 // Parameter Definition
 // ============================================================================
+
+// Unit type for parameters
+enum class ParamUnit {
+    NONE,           // No unit
+    STEPS,          // EEV steps
+    MINUTES,        // Time in minutes
+    SECONDS,        // Time in seconds
+    TEMP_ABSOLUTE,  // Temperature (absolute, e.g., setpoint)
+    TEMP_OFFSET     // Temperature differential (no +32 in F conversion)
+};
+
 struct ParameterDef {
     const char* name;           // Short display name
     const char* description;    // Full description for edit dialog
     uint16_t reg_addr;          // Modbus register address
-    int16_t min_val;            // Minimum value
-    int16_t max_val;            // Maximum value
-    const char* unit;           // Unit string (°C, min, steps, etc.)
+    int16_t min_val;            // Minimum value (in Celsius for temps)
+    int16_t max_val;            // Maximum value (in Celsius for temps)
+    ParamUnit unit_type;        // Unit type for conversion
     const char* category;       // Category for grouping
 };
+
+// Helper to get unit string for display
+static const char* get_param_unit_str(ParamUnit unit_type) {
+    switch (unit_type) {
+        case ParamUnit::STEPS:         return "steps";
+        case ParamUnit::MINUTES:       return "min";
+        case ParamUnit::SECONDS:       return "sec";
+        case ParamUnit::TEMP_ABSOLUTE: return app_prefs_temp_unit_str();
+        case ParamUnit::TEMP_OFFSET:   return app_prefs_temp_diff_unit_str();
+        default:                       return "";
+    }
+}
 
 // Parameter definitions - organized by category
 static const ParameterDef s_params[] = {
     // EEV Settings
     {"EEV Opening (P1)", 
      "Initial EEV opening position when compressor starts. Higher values allow more refrigerant flow.",
-     arctic::reg::P1_EEV_INITIAL_OPENING, 0, 500, "steps", "EEV"},
+     arctic::reg::P1_EEV_INITIAL_OPENING, 0, 500, ParamUnit::STEPS, "EEV"},
     
     {"EEV Mode (P41)", 
      "EEV control mode. 0=Superheat control (automatic), 1=Fixed position.",
-     arctic::reg::P41_EEV_SUPERHEAT_MODE, 0, 1, "", "EEV"},
+     arctic::reg::P41_EEV_SUPERHEAT_MODE, 0, 1, ParamUnit::NONE, "EEV"},
     
     {"Target Superheat (P42)", 
      "Target superheat temperature for EEV superheat control mode.",
-     arctic::reg::P42_EEV_TARGET_SUPERHEAT, 0, 20, "°C", "EEV"},
+     arctic::reg::P42_EEV_TARGET_SUPERHEAT, 0, 20, ParamUnit::TEMP_OFFSET, "EEV"},
     
     // Defrost Settings
     {"Defrost Cycle (P29)", 
      "Minimum time between defrost cycles during heating operation.",
-     arctic::reg::P29_DEFROST_CYCLE, 30, 120, "min", "Defrost"},
+     arctic::reg::P29_DEFROST_CYCLE, 30, 120, ParamUnit::MINUTES, "Defrost"},
     
     {"Defrost Enter Temp (P30)", 
      "Outdoor coil temperature to initiate defrost cycle.",
-     arctic::reg::P30_DEFROST_ENTER_TEMP, -20, 5, "°C", "Defrost"},
+     arctic::reg::P30_DEFROST_ENTER_TEMP, -20, 5, ParamUnit::TEMP_ABSOLUTE, "Defrost"},
     
     {"Defrost Extend Temp (P31)", 
      "Ambient temperature below which defrost time is extended.",
-     arctic::reg::P31_DEFROST_EXTEND_TEMP, -20, 10, "°C", "Defrost"},
+     arctic::reg::P31_DEFROST_EXTEND_TEMP, -20, 10, ParamUnit::TEMP_ABSOLUTE, "Defrost"},
     
     {"Defrost Temp Diff (P32)", 
      "Temperature difference between ambient and coil to trigger defrost.",
-     arctic::reg::P32_DEFROST_TEMP_DIFF, 0, 30, "°C", "Defrost"},
+     arctic::reg::P32_DEFROST_TEMP_DIFF, 0, 30, ParamUnit::TEMP_OFFSET, "Defrost"},
     
     {"Defrost Extend Time (P33)", 
      "Additional defrost cycle time when ambient is below P31.",
-     arctic::reg::P33_DEFROST_EXTEND_TIME, 0, 60, "min", "Defrost"},
+     arctic::reg::P33_DEFROST_EXTEND_TIME, 0, 60, ParamUnit::MINUTES, "Defrost"},
     
     {"Max Defrost Time (P34)", 
      "Maximum duration of a single defrost cycle.",
-     arctic::reg::P34_MAX_DEFROST_TIME, 1, 30, "min", "Defrost"},
+     arctic::reg::P34_MAX_DEFROST_TIME, 1, 30, ParamUnit::MINUTES, "Defrost"},
     
     {"Defrost Exit Temp (P35)", 
      "Outdoor coil temperature to end defrost cycle early.",
-     arctic::reg::P35_DEFROST_EXIT_TEMP, 5, 30, "°C", "Defrost"},
+     arctic::reg::P35_DEFROST_EXIT_TEMP, 5, 30, ParamUnit::TEMP_ABSOLUTE, "Defrost"},
     
     // Protection Settings
     {"Low Ambient Protect (P38)", 
      "Minimum ambient temperature for heating operation. Unit stops below this.",
-     arctic::reg::P38_LOW_AMBIENT_PROTECT, -30, 10, "°C", "Protection"},
+     arctic::reg::P38_LOW_AMBIENT_PROTECT, -30, 10, ParamUnit::TEMP_ABSOLUTE, "Protection"},
     
     {"Freq Reduction (P39)", 
      "Temperature difference from setpoint to start reducing compressor frequency.",
-     arctic::reg::P39_FREQ_REDUCTION, 0, 10, "°C", "Protection"},
+     arctic::reg::P39_FREQ_REDUCTION, 0, 10, ParamUnit::TEMP_OFFSET, "Protection"},
     
     {"Cooling Low Ambient (P40)", 
      "Minimum ambient temperature for cooling operation.",
-     arctic::reg::P40_COOLING_LOW_AMBIENT, -10, 20, "°C", "Protection"},
+     arctic::reg::P40_COOLING_LOW_AMBIENT, -10, 20, ParamUnit::TEMP_ABSOLUTE, "Protection"},
     
     // Auto Mode Settings
     {"Max Setting Temp (P13)", 
      "Maximum allowed temperature setpoint for hot water.",
-     arctic::reg::P13_MAX_TEMP_SETTING, 40, 65, "°C", "Auto Mode"},
+     arctic::reg::P13_MAX_TEMP_SETTING, 40, 65, ParamUnit::TEMP_ABSOLUTE, "Auto Mode"},
     
     {"Cooling Auto Temp (P23)", 
      "Ambient temperature above which auto mode switches to cooling.",
-     arctic::reg::P23_COOLING_AUTO_TEMP, 15, 35, "°C", "Auto Mode"},
+     arctic::reg::P23_COOLING_AUTO_TEMP, 15, 35, ParamUnit::TEMP_ABSOLUTE, "Auto Mode"},
     
     {"Heating Auto Temp (P24)", 
      "Ambient temperature below which auto mode switches to heating.",
-     arctic::reg::P24_HEATING_AUTO_TEMP, 5, 25, "°C", "Auto Mode"},
+     arctic::reg::P24_HEATING_AUTO_TEMP, 5, 25, ParamUnit::TEMP_ABSOLUTE, "Auto Mode"},
     
     {"Mode Switch Delay (P28)", 
      "Minimum time before auto mode can switch between heating and cooling.",
-     arctic::reg::P28_MODE_SWITCH_DELAY, 0, 60, "min", "Auto Mode"},
+     arctic::reg::P28_MODE_SWITCH_DELAY, 0, 60, ParamUnit::MINUTES, "Auto Mode"},
     
     // Pump & Valve Settings
     {"Sterilize Time (P5)", 
      "Duration of high-temperature sterilization cycle for hot water tank.",
-     arctic::reg::P5_STERILIZING_TIME, 0, 120, "min", "Pump & Valve"},
+     arctic::reg::P5_STERILIZING_TIME, 0, 120, ParamUnit::MINUTES, "Pump & Valve"},
     
     {"Water Return Temp (P36)", 
      "Target water temperature for return water cycle.",
-     arctic::reg::P36_WATER_RETURN_TEMP, 20, 50, "°C", "Pump & Valve"},
+     arctic::reg::P36_WATER_RETURN_TEMP, 20, 50, ParamUnit::TEMP_ABSOLUTE, "Pump & Valve"},
     
     {"Water Return Time (P37)", 
      "Duration of water return circulation cycle.",
-     arctic::reg::P37_WATER_RETURN_TIME, 0, 60, "min", "Pump & Valve"},
+     arctic::reg::P37_WATER_RETURN_TIME, 0, 60, ParamUnit::MINUTES, "Pump & Valve"},
     
     {"3-Way Valve Time (P43)", 
      "Time for 3-way valve to fully switch positions.",
-     arctic::reg::P43_3WAY_VALVE_TIME, 0, 300, "sec", "Pump & Valve"},
+     arctic::reg::P43_3WAY_VALVE_TIME, 0, 300, ParamUnit::SECONDS, "Pump & Valve"},
     
     {"Pump Mode (P44)", 
      "Water pump behavior at setpoint. 0=Per P45 interval, 1=OFF, 2=Always ON.",
-     arctic::reg::P44_PUMP_TARGET_MODE, 0, 2, "", "Pump & Valve"},
+     arctic::reg::P44_PUMP_TARGET_MODE, 0, 2, ParamUnit::NONE, "Pump & Valve"},
     
     {"Pump Interval (P45)", 
      "Pump running interval when at setpoint (if P44=0).",
-     arctic::reg::P45_PUMP_INTERVAL, 0, 60, "min", "Pump & Valve"},
+     arctic::reg::P45_PUMP_INTERVAL, 0, 60, ParamUnit::MINUTES, "Pump & Valve"},
     
     {"Pump Low Ambient (P46)", 
      "Ambient temperature below which pump runs in standby to prevent freezing.",
-     arctic::reg::P46_PUMP_LOW_AMBIENT, -20, 10, "°C", "Pump & Valve"},
+     arctic::reg::P46_PUMP_LOW_AMBIENT, -20, 10, ParamUnit::TEMP_ABSOLUTE, "Pump & Valve"},
     
     {"Waterway Clean (P47)", 
      "Waterway cleaning mode. 0=OFF, 1=Pump only, 2=+3WV1, 3=+3WV1+3WV2.",
-     arctic::reg::P47_WATERWAY_CLEANING, 0, 3, "", "Pump & Valve"},
+     arctic::reg::P47_WATERWAY_CLEANING, 0, 3, ParamUnit::NONE, "Pump & Valve"},
 };
 
 static const int NUM_PARAMS = sizeof(s_params) / sizeof(s_params[0]);
@@ -184,26 +208,26 @@ static struct {
     lv_obj_t* edit_minus_btn = nullptr;
     lv_obj_t* edit_plus_btn = nullptr;
     int current_param_idx = -1;
-    int16_t edit_value = 0;
+    float edit_value = 0;       // Float for F mode precision
+    int16_t edit_value_celsius = 0;  // Original value in Celsius (for non-temp params too)
     
     // Setpoint editing (uses same dialog, different handling)
     // -1 = editing P-parameter, 0/1/2 = editing cooling/heating/hotwater
     int current_setpoint_type = -1;
 } state;
 
-// Setpoint definitions (separate from P-parameters)
+// Setpoint definitions (separate from P-parameters) - all are absolute temps
 struct SetpointDef {
     const char* name;
     const char* description;
-    int16_t min_val;
-    int16_t max_val;
-    const char* unit;
+    int16_t min_val;    // In Celsius
+    int16_t max_val;    // In Celsius
 };
 
 static const SetpointDef s_setpoints[] = {
-    {"Cooling Setpoint", "Target water temperature for cooling mode.", 5, 30, "°C"},
-    {"Heating Setpoint", "Target water temperature for floor/fan heating mode.", 20, 60, "°C"},
-    {"Hot Water Setpoint", "Target temperature for hot water tank.", 30, 60, "°C"},
+    {"Cooling Setpoint", "Target water temperature for cooling mode.", 5, 30},
+    {"Heating Setpoint", "Target water temperature for floor/fan heating mode.", 20, 60},
+    {"Hot Water Setpoint", "Target temperature for hot water tank.", 30, 60},
 };
 
 // ============================================================================
@@ -225,13 +249,48 @@ static void show_setpoint_edit(int setpoint_type);  // 0=cooling, 1=heating, 2=h
 // ============================================================================
 // Demo/Default Values (used when in demo mode)
 // ============================================================================
+static int16_t s_demo_param_values[NUM_PARAMS];      // In-memory storage for demo P-parameters
+static int16_t s_demo_setpoints[3] = {-1, -1, -1};   // Demo setpoints: cooling, heating, hot water (-1 = not set)
+static bool s_demo_values_initialized = false;
+
+static void init_demo_values(void) {
+    if (s_demo_values_initialized) return;
+    
+    // Initialize P-parameters to midpoint of range
+    for (int i = 0; i < NUM_PARAMS; i++) {
+        s_demo_param_values[i] = (s_params[i].min_val + s_params[i].max_val) / 2;
+    }
+    
+    // Initialize setpoints to midpoint of range
+    for (int i = 0; i < 3; i++) {
+        s_demo_setpoints[i] = (s_setpoints[i].min_val + s_setpoints[i].max_val) / 2;
+    }
+    
+    s_demo_values_initialized = true;
+}
+
 static int16_t get_demo_value(int param_idx) {
     if (param_idx < 0 || param_idx >= NUM_PARAMS) return 0;
-    
-    // Return reasonable default values for demo mode
-    const ParameterDef& param = s_params[param_idx];
-    // Use midpoint of range as demo value
-    return (param.min_val + param.max_val) / 2;
+    init_demo_values();
+    return s_demo_param_values[param_idx];
+}
+
+static void set_demo_value(int param_idx, int16_t value) {
+    if (param_idx < 0 || param_idx >= NUM_PARAMS) return;
+    init_demo_values();
+    s_demo_param_values[param_idx] = value;
+}
+
+static int16_t get_demo_setpoint(int setpoint_type) {
+    if (setpoint_type < 0 || setpoint_type > 2) return 0;
+    init_demo_values();
+    return s_demo_setpoints[setpoint_type];
+}
+
+static void set_demo_setpoint(int setpoint_type, int16_t value) {
+    if (setpoint_type < 0 || setpoint_type > 2) return;
+    init_demo_values();
+    s_demo_setpoints[setpoint_type] = value;
 }
 
 // Helper: show error popup for write failures
@@ -273,9 +332,10 @@ static int16_t read_param_value(int param_idx) {
 static bool write_param_value(int param_idx, int16_t value) {
     if (param_idx < 0 || param_idx >= NUM_PARAMS) return false;
     
-    // Demo mode - simulate success
+    // Demo mode - store in memory
     if (app_prefs_is_demo_mode()) {
-        ESP_LOGI(TAG, "[DEMO] Would write %s = %d", s_params[param_idx].name, value);
+        ESP_LOGI(TAG, "[DEMO] Storing %s = %d (in-memory)", s_params[param_idx].name, value);
+        set_demo_value(param_idx, value);
         return true;
     }
     
@@ -289,16 +349,28 @@ static bool write_param_value(int param_idx, int16_t value) {
     return arctic::writeRegister(s_params[param_idx].reg_addr, (uint16_t)value);
 }
 
-static void update_param_display(int param_idx, int16_t value) {
+static void update_param_display(int param_idx, int16_t value_celsius) {
     if (param_idx < 0 || param_idx >= NUM_PARAMS || param_idx >= 32) return;
     if (!state.value_labels[param_idx]) return;
     
     const ParameterDef& param = s_params[param_idx];
+    const char* unit_str = get_param_unit_str(param.unit_type);
     char buf[32];
-    if (param.unit[0]) {
-        snprintf(buf, sizeof(buf), "%d %s", value, param.unit);
+    
+    // Convert temperature values based on unit type
+    int display_value;
+    if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
+        display_value = app_prefs_convert_temp(value_celsius);
+    } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
+        display_value = app_prefs_convert_temp_diff(value_celsius);
     } else {
-        snprintf(buf, sizeof(buf), "%d", value);
+        display_value = value_celsius;  // Non-temp values, no conversion
+    }
+    
+    if (unit_str[0]) {
+        snprintf(buf, sizeof(buf), "%d %s", display_value, unit_str);
+    } else {
+        snprintf(buf, sizeof(buf), "%d", display_value);
     }
     lv_label_set_text(state.value_labels[param_idx], buf);
 }
@@ -631,13 +703,17 @@ static void edit_save_cb(lv_event_t* e) {
     (void)e;
     
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
-        // Saving a setpoint
+        // Saving a setpoint - convert F back to C (setpoints are always TEMP_ABSOLUTE)
+        int16_t celsius_val = app_prefs_temp_to_celsius_from_f(state.edit_value);
+        
         arctic::HeatPumpState hp = arctic::getState();
         bool success = false;
         
         if (app_prefs_is_demo_mode()) {
-            // Demo mode - simulate success
-            ESP_LOGI(TAG, "[DEMO] Would save setpoint %d = %d", state.current_setpoint_type, state.edit_value);
+            // Demo mode - store in memory
+            ESP_LOGI(TAG, "[DEMO] Storing setpoint %d = %d°C (from %.0f display units)", 
+                     state.current_setpoint_type, celsius_val, state.edit_value);
+            set_demo_setpoint(state.current_setpoint_type, celsius_val);
             success = true;
         } else if (!hp.connected) {
             // Disconnected - show error
@@ -646,16 +722,16 @@ static void edit_save_cb(lv_event_t* e) {
             return;
         } else {
             switch (state.current_setpoint_type) {
-                case 0: success = arctic::setCoolingSetpoint(state.edit_value); break;
-                case 1: success = arctic::setHeatingSetpoint(state.edit_value); break;
-                case 2: success = arctic::setHotWaterSetpoint(state.edit_value); break;
+                case 0: success = arctic::setCoolingSetpoint(celsius_val); break;
+                case 1: success = arctic::setHeatingSetpoint(celsius_val); break;
+                case 2: success = arctic::setHotWaterSetpoint(celsius_val); break;
             }
         }
         
         if (success) {
-            ESP_LOGI(TAG, "Saved setpoint %d = %d", state.current_setpoint_type, state.edit_value);
+            ESP_LOGI(TAG, "Saved setpoint %d = %d°C", state.current_setpoint_type, celsius_val);
             
-            // Update the displayed value in the list
+            // Update the displayed value in the list (show in display units)
             lv_obj_t** label_ptr = nullptr;
             switch (state.current_setpoint_type) {
                 case 0: label_ptr = &state.cooling_value_label; break;
@@ -664,8 +740,8 @@ static void edit_save_cb(lv_event_t* e) {
             }
             if (label_ptr && *label_ptr) {
                 char buf[32];
-                snprintf(buf, sizeof(buf), "%d %s", 
-                         app_prefs_convert_temp(state.edit_value), app_prefs_temp_unit_str());
+                int display_val = (int)roundf(state.edit_value);
+                snprintf(buf, sizeof(buf), "%d %s", display_val, app_prefs_temp_unit_str());
                 lv_label_set_text(*label_ptr, buf);
             }
         } else {
@@ -677,22 +753,36 @@ static void edit_save_cb(lv_event_t* e) {
     }
     
     if (state.current_param_idx >= 0 && state.current_param_idx < NUM_PARAMS) {
-        if (write_param_value(state.current_param_idx, state.edit_value)) {
-            ESP_LOGI(TAG, "Saved %s = %d", s_params[state.current_param_idx].name, state.edit_value);
+        const ParameterDef& param = s_params[state.current_param_idx];
+        
+        // Convert back to Celsius for temp parameters
+        int16_t save_val;
+        if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
+            save_val = app_prefs_temp_to_celsius_from_f(state.edit_value);
+        } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
+            save_val = app_prefs_temp_diff_to_celsius_from_f(state.edit_value);
+        } else {
+            save_val = (int16_t)roundf(state.edit_value);
+        }
+        
+        if (write_param_value(state.current_param_idx, save_val)) {
+            ESP_LOGI(TAG, "Saved %s = %d (from %.0f display units)", 
+                     param.name, save_val, state.edit_value);
             
             // Update the displayed value in the list
             if (state.current_param_idx < 32 && state.value_labels[state.current_param_idx]) {
-                const ParameterDef& param = s_params[state.current_param_idx];
                 char buf[32];
-                if (param.unit[0]) {
-                    snprintf(buf, sizeof(buf), "%d %s", state.edit_value, param.unit);
+                int display_val = (int)roundf(state.edit_value);
+                const char* unit_str = get_param_unit_str(param.unit_type);
+                if (unit_str[0]) {
+                    snprintf(buf, sizeof(buf), "%d %s", display_val, unit_str);
                 } else {
-                    snprintf(buf, sizeof(buf), "%d", state.edit_value);
+                    snprintf(buf, sizeof(buf), "%d", display_val);
                 }
                 lv_label_set_text(state.value_labels[state.current_param_idx], buf);
             }
         } else {
-            ESP_LOGE(TAG, "Failed to save %s", s_params[state.current_param_idx].name);
+            ESP_LOGE(TAG, "Failed to save %s", param.name);
         }
     }
     
@@ -702,18 +792,26 @@ static void edit_save_cb(lv_event_t* e) {
 static void edit_minus_cb(lv_event_t* e) {
     (void)e;
     
-    int16_t min_val = 0;
+    float min_val = 0;
     
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
-        min_val = s_setpoints[state.current_setpoint_type].min_val;
+        // Setpoints are always TEMP_ABSOLUTE - convert limit to display units
+        min_val = app_prefs_convert_temp_f(s_setpoints[state.current_setpoint_type].min_val);
     } else if (state.current_param_idx >= 0 && state.current_param_idx < NUM_PARAMS) {
-        min_val = s_params[state.current_param_idx].min_val;
+        const ParameterDef& param = s_params[state.current_param_idx];
+        if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
+            min_val = app_prefs_convert_temp_f(param.min_val);
+        } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
+            min_val = app_prefs_convert_temp_diff_f(param.min_val);
+        } else {
+            min_val = (float)param.min_val;
+        }
     } else {
         return;
     }
     
     if (state.edit_value > min_val) {
-        state.edit_value--;
+        state.edit_value -= 1.0f;
         update_edit_value_display();
     }
 }
@@ -721,18 +819,26 @@ static void edit_minus_cb(lv_event_t* e) {
 static void edit_plus_cb(lv_event_t* e) {
     (void)e;
     
-    int16_t max_val = 0;
+    float max_val = 0;
     
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
-        max_val = s_setpoints[state.current_setpoint_type].max_val;
+        // Setpoints are always TEMP_ABSOLUTE - convert limit to display units
+        max_val = app_prefs_convert_temp_f(s_setpoints[state.current_setpoint_type].max_val);
     } else if (state.current_param_idx >= 0 && state.current_param_idx < NUM_PARAMS) {
-        max_val = s_params[state.current_param_idx].max_val;
+        const ParameterDef& param = s_params[state.current_param_idx];
+        if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
+            max_val = app_prefs_convert_temp_f(param.max_val);
+        } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
+            max_val = app_prefs_convert_temp_diff_f(param.max_val);
+        } else {
+            max_val = (float)param.max_val;
+        }
     } else {
         return;
     }
     
     if (state.edit_value < max_val) {
-        state.edit_value++;
+        state.edit_value += 1.0f;
         update_edit_value_display();
     }
 }
@@ -744,21 +850,44 @@ static void show_edit_dialog(int param_idx) {
     state.current_setpoint_type = -1;  // Not editing a setpoint
     const ParameterDef& param = s_params[param_idx];
     
-    // Read current value
-    state.edit_value = read_param_value(param_idx);
+    // Read current value in Celsius
+    state.edit_value_celsius = read_param_value(param_idx);
+    
+    // Convert to display units (float for F mode precision)
+    if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
+        state.edit_value = app_prefs_convert_temp_f(state.edit_value_celsius);
+    } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
+        state.edit_value = app_prefs_convert_temp_diff_f(state.edit_value_celsius);
+    } else {
+        state.edit_value = (float)state.edit_value_celsius;
+    }
     
     // Update dialog content
     lv_label_set_text(state.edit_title, param.name);
     lv_label_set_text(state.edit_description, param.description);
     
-    // Range label
+    // Range label - convert limits for temp params
     char range_buf[64];
-    if (param.unit[0]) {
+    const char* unit_str = get_param_unit_str(param.unit_type);
+    int display_min, display_max;
+    
+    if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
+        display_min = app_prefs_convert_temp(param.min_val);
+        display_max = app_prefs_convert_temp(param.max_val);
+    } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
+        display_min = app_prefs_convert_temp_diff(param.min_val);
+        display_max = app_prefs_convert_temp_diff(param.max_val);
+    } else {
+        display_min = param.min_val;
+        display_max = param.max_val;
+    }
+    
+    if (unit_str[0]) {
         snprintf(range_buf, sizeof(range_buf), "Range: %d to %d %s", 
-                 param.min_val, param.max_val, param.unit);
+                 display_min, display_max, unit_str);
     } else {
         snprintf(range_buf, sizeof(range_buf), "Range: %d to %d", 
-                 param.min_val, param.max_val);
+                 display_min, display_max);
     }
     lv_label_set_text(state.edit_range_label, range_buf);
     
@@ -775,30 +904,38 @@ static void show_setpoint_edit(int setpoint_type) {
     state.current_setpoint_type = setpoint_type;
     const SetpointDef& sp = s_setpoints[setpoint_type];
     
-    // Read current value
+    // Read current value in Celsius
+    int16_t celsius_val;
     arctic::HeatPumpState hp = arctic::getState();
     if (app_prefs_is_demo_mode()) {
-        // Demo mode - use midpoint
-        state.edit_value = (sp.min_val + sp.max_val) / 2;
+        // Demo mode - use in-memory value
+        celsius_val = get_demo_setpoint(setpoint_type);
     } else if (!hp.connected) {
         // Disconnected - use midpoint as placeholder
-        state.edit_value = (sp.min_val + sp.max_val) / 2;
+        celsius_val = (sp.min_val + sp.max_val) / 2;
     } else {
         switch (setpoint_type) {
-            case 0: state.edit_value = hp.cooling_setpoint; break;
-            case 1: state.edit_value = hp.heating_setpoint; break;
-            case 2: state.edit_value = hp.hot_water_setpoint; break;
+            case 0: celsius_val = hp.cooling_setpoint; break;
+            case 1: celsius_val = hp.heating_setpoint; break;
+            case 2: celsius_val = hp.hot_water_setpoint; break;
+            default: celsius_val = sp.min_val; break;
         }
     }
+    
+    // Store Celsius value and convert to display units
+    state.edit_value_celsius = celsius_val;
+    state.edit_value = app_prefs_convert_temp_f(celsius_val);
     
     // Update dialog content
     lv_label_set_text(state.edit_title, sp.name);
     lv_label_set_text(state.edit_description, sp.description);
     
-    // Range label
+    // Range label - convert limits to display units
     char range_buf[64];
+    int display_min = app_prefs_convert_temp(sp.min_val);
+    int display_max = app_prefs_convert_temp(sp.max_val);
     snprintf(range_buf, sizeof(range_buf), "Range: %d to %d %s", 
-             sp.min_val, sp.max_val, sp.unit);
+             display_min, display_max, app_prefs_temp_unit_str());
     lv_label_set_text(state.edit_range_label, range_buf);
     
     update_edit_value_display();
@@ -815,20 +952,22 @@ static void hide_edit_dialog(void) {
 
 static void update_edit_value_display(void) {
     const char* unit = "";
+    int display_val = (int)roundf(state.edit_value);  // Round float to int for display
     
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
-        unit = s_setpoints[state.current_setpoint_type].unit;
+        // Setpoints are always TEMP_ABSOLUTE
+        unit = app_prefs_temp_unit_str();
     } else if (state.current_param_idx >= 0 && state.current_param_idx < NUM_PARAMS) {
-        unit = s_params[state.current_param_idx].unit;
+        unit = get_param_unit_str(s_params[state.current_param_idx].unit_type);
     } else {
         return;
     }
     
     char val_buf[32];
     if (unit[0]) {
-        snprintf(val_buf, sizeof(val_buf), "%d %s", state.edit_value, unit);
+        snprintf(val_buf, sizeof(val_buf), "%d %s", display_val, unit);
     } else {
-        snprintf(val_buf, sizeof(val_buf), "%d", state.edit_value);
+        snprintf(val_buf, sizeof(val_buf), "%d", display_val);
     }
     lv_label_set_text(state.edit_value_label, val_buf);
 }
@@ -888,7 +1027,7 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
         lv_label_set_text(title, "DEMO MODE - Settings");
         lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
     } else {
-        lv_label_set_text(title, "Heat Pump Settings");
+        lv_label_set_text(title, "Advanced");
         lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     }
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);

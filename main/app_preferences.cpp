@@ -7,6 +7,7 @@
 #include <nvs_flash.h>
 #include <nvs.h>
 #include <esp_log.h>
+#include <math.h>
 
 static const char* TAG = "app_prefs";
 
@@ -95,18 +96,65 @@ void app_prefs_set_temp_unit(temp_unit_t unit) {
 
 int16_t app_prefs_convert_temp(int16_t celsius) {
     if (s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT) {
-        return (celsius * 9 / 5) + 32;
+        return (int16_t)roundf((celsius * 9.0f / 5.0f) + 32.0f);
     }
     return celsius;
 }
 
+float app_prefs_convert_temp_f(int16_t celsius) {
+    if (s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT) {
+        return (celsius * 9.0f / 5.0f) + 32.0f;
+    }
+    return (float)celsius;
+}
+
+int16_t app_prefs_convert_temp_diff(int16_t celsius_diff) {
+    if (s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT) {
+        // No +32 for differentials
+        return (int16_t)roundf(celsius_diff * 9.0f / 5.0f);
+    }
+    return celsius_diff;
+}
+
+float app_prefs_convert_temp_diff_f(int16_t celsius_diff) {
+    if (s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT) {
+        return celsius_diff * 9.0f / 5.0f;
+    }
+    return (float)celsius_diff;
+}
+
 int16_t app_prefs_temp_to_celsius(int16_t temp) {
     if (s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT) {
-        return (temp - 32) * 5 / 9;
+        return (int16_t)roundf((temp - 32.0f) * 5.0f / 9.0f);
     }
     return temp;
 }
 
+int16_t app_prefs_temp_to_celsius_from_f(float temp) {
+    if (s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT) {
+        return (int16_t)roundf((temp - 32.0f) * 5.0f / 9.0f);
+    }
+    return (int16_t)roundf(temp);
+}
+
+int16_t app_prefs_temp_diff_to_celsius(int16_t diff) {
+    if (s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT) {
+        return (int16_t)roundf(diff * 5.0f / 9.0f);
+    }
+    return diff;
+}
+
+int16_t app_prefs_temp_diff_to_celsius_from_f(float diff) {
+    if (s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT) {
+        return (int16_t)roundf(diff * 5.0f / 9.0f);
+    }
+    return (int16_t)roundf(diff);
+}
+
 const char* app_prefs_temp_unit_str(void) {
     return s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT ? "°F" : "°C";
+}
+
+const char* app_prefs_temp_diff_unit_str(void) {
+    return s_prefs.temp_unit == TEMP_UNIT_FAHRENHEIT ? "Δ°F" : "°C";
 }
