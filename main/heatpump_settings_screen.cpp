@@ -1024,7 +1024,7 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     // Title
     lv_obj_t* title = lv_label_create(header);
     if (app_prefs_is_demo_mode()) {
-        lv_label_set_text(title, "DEMO MODE - Settings");
+        lv_label_set_text(title, "DEMO MODE - Advanced");
         lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
     } else {
         lv_label_set_text(title, "Advanced");
