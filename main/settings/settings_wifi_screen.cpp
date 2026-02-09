@@ -130,8 +130,10 @@ void wifi_screen_create(const wifi_screen_config_t* config)
     create_networks_section();
     create_password_dialog();
     
-    // Load screen with slide-left animation (don't auto-delete settings menu - we go back to it)
-    lv_screen_load_anim(s_state.screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+    // Load screen with appropriate animation
+    // Fade for status bar entry, slide-left for settings menu entry
+    lv_scr_load_anim_t anim = s_state.config.use_fade ? LV_SCR_LOAD_ANIM_FADE_IN : LV_SCR_LOAD_ANIM_MOVE_LEFT;
+    lv_screen_load_anim(s_state.screen, anim, 300, 0, false);
     s_state.visible = true;
     
     // Check current connection status

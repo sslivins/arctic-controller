@@ -60,16 +60,6 @@ void settings_menu_refresh(void);
  */
 void settings_menu_update_wifi_status(bool connected, const char* ssid);
 
-/**
- * @brief Update WiFi network list (forwarded to WiFi screen if active)
- */
-void settings_menu_update_networks(const void* networks, uint8_t count);
-
-/**
- * @brief Set scanning indicator
- */
-void settings_menu_set_scanning(bool scanning);
-
 #ifdef __cplusplus
 }
 #endif

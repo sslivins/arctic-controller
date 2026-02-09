@@ -16,6 +16,7 @@
 #include "ota_manager.h"
 #include "settings_screen.h"
 #include "settings/settings_menu.h"
+#include "settings/settings_wifi_screen.h"
 #include "settings/settings_time_panel.h"
 #include "settings/settings_display_panel.h"
 #include "i18n/i18n.h"
@@ -39,6 +40,7 @@ static void on_wifi_connect(const char* ssid, const char* password);
 static void on_wifi_scan(void);
 static void on_wifi_disconnect(void);
 static void on_settings_close(void);
+static void on_wifi_screen_close(void);  // For WiFi opened from status bar
 static void try_auto_connect(void);
 static void wifi_init_task(void* param);
 static void on_update_check_complete(bool update_available, const char* new_version);
@@ -240,10 +242,12 @@ static void on_scan_done(const wifi_mgr_ap_info_t* ap_list, uint16_t count)
         networks[i].authmode = ap_list[i].authmode;
     }
     
-    // Update UI (must be done with LVGL lock)
+    // Update WiFi screen if visible
     bsp_display_lock(0);
-    settings_menu_set_scanning(false);
-    settings_menu_update_networks(networks, count);
+    if (wifi_screen_is_visible()) {
+        wifi_screen_set_scanning(false);
+        wifi_screen_update_networks(networks, count);
+    }
     bsp_display_unlock();
     
     delete[] networks;
@@ -339,7 +343,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
 
 static void on_status_bar_wifi_click(void)
 {
-    mclog::tagInfo(TAG, "Status bar WiFi clicked - opening settings");
+    mclog::tagInfo(TAG, "Status bar WiFi clicked - opening WiFi settings directly");
     
     // WiFi manager is initialized at startup, but check just in case
     if (!wifi_mgr_is_initialized()) {
@@ -349,8 +353,17 @@ static void on_status_bar_wifi_click(void)
         }
     }
     
-    // Open settings screen (WiFi is now integrated there)
-    on_status_bar_settings_click();
+    // Open WiFi screen directly (back button will fade back to main screen)
+    bsp_display_lock(0);
+    wifi_screen_config_t wifi_cfg = {
+        .on_wifi_scan = on_wifi_scan,
+        .on_wifi_connect = on_wifi_connect,
+        .on_wifi_disconnect = on_wifi_disconnect,
+        .on_back = on_wifi_screen_close,  // Fade back to main screen
+        .use_fade = true,                  // Fade in from status bar
+    };
+    wifi_screen_create(&wifi_cfg);
+    bsp_display_unlock();
 }
 
 static void on_wifi_connect(const char* ssid, const char* password)
@@ -378,17 +391,15 @@ static void on_wifi_scan(void)
     if (!wifi_mgr_is_initialized()) {
         mclog::tagInfo(TAG, "Initializing WiFi manager for scan...");
         if (!wifi_mgr_init()) {
-            settings_menu_set_scanning(false);
-            // TODO: Add error display to wifi_screen
+            wifi_screen_set_scanning(false);
             return;
         }
     }
     
-    settings_menu_set_scanning(true);
+    wifi_screen_set_scanning(true);
     
     if (!wifi_mgr_start_scan(on_scan_done)) {
-        settings_menu_set_scanning(false);
-        // TODO: Add error display to wifi_screen
+        wifi_screen_set_scanning(false);
     }
 }
 
@@ -438,6 +449,18 @@ static void on_settings_close(void)
     settings_menu_close();
     
     bsp_display_unlock();
+}
+
+// Called when WiFi screen (opened from status bar) back button is pressed
+// Note: wifi_screen_close() is called by the WiFi screen's back_btn_cb after this returns
+static void on_wifi_screen_close(void)
+{
+    mclog::tagInfo(TAG, "WiFi screen closed (from status bar)");
+    
+    // Load main screen with fade animation (auto_del=true deletes WiFi screen)
+    if (main_screen) {
+        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
+    }
 }
 
 // Notification item clicked - handle based on type

@@ -7,6 +7,10 @@
  */
 #include "settings_menu.h"
 #include "settings_wifi_screen.h"
+#include "settings_firmware_screen.h"
+#include "settings_time_screen.h"
+#include "settings_language_screen.h"
+#include "settings_display_screen.h"
 #include "../settings_screen.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "i18n/i18n.h"
@@ -14,13 +18,6 @@
 #include "wifi_manager.h"
 #include <esp_log.h>
 #include <string.h>
-
-// Sub-screen headers (will be created)
-// #include "settings_wifi_screen.h"
-// #include "settings_firmware_screen.h"
-// #include "settings_time_screen.h"
-// #include "settings_language_screen.h"
-// #include "settings_display_screen.h"
 
 static const char* TAG = "settings_menu";
 
@@ -171,22 +168,46 @@ static void row_click_cb(lv_event_t* e)
             state.active_sub_screen = SETTINGS_WIFI;
             break;
         }
-        case SETTINGS_FIRMWARE:
-            // settings_firmware_screen_create();
+        case SETTINGS_FIRMWARE: {
             ESP_LOGI(TAG, "Opening Firmware settings...");
+            firmware_screen_config_t fw_cfg = {
+                .on_back = settings_menu_show,
+            };
+            firmware_screen_create(&fw_cfg);
+            state.sub_screen_active = true;
+            state.active_sub_screen = SETTINGS_FIRMWARE;
             break;
-        case SETTINGS_TIME:
-            // settings_time_screen_create();
+        }
+        case SETTINGS_TIME: {
             ESP_LOGI(TAG, "Opening Time settings...");
+            time_screen_config_t time_cfg = {
+                .on_back = settings_menu_show,
+            };
+            time_screen_create(&time_cfg);
+            state.sub_screen_active = true;
+            state.active_sub_screen = SETTINGS_TIME;
             break;
-        case SETTINGS_LANGUAGE:
-            // settings_language_screen_create();
+        }
+        case SETTINGS_LANGUAGE: {
             ESP_LOGI(TAG, "Opening Language settings...");
+            language_screen_config_t lang_cfg = {
+                .on_back = settings_menu_show,
+            };
+            language_screen_create(&lang_cfg);
+            state.sub_screen_active = true;
+            state.active_sub_screen = SETTINGS_LANGUAGE;
             break;
-        case SETTINGS_DISPLAY:
-            // settings_display_screen_create();
+        }
+        case SETTINGS_DISPLAY: {
             ESP_LOGI(TAG, "Opening Display settings...");
+            display_screen_config_t disp_cfg = {
+                .on_back = settings_menu_show,
+            };
+            display_screen_create(&disp_cfg);
+            state.sub_screen_active = true;
+            state.active_sub_screen = SETTINGS_DISPLAY;
             break;
+        }
         default:
             break;
     }
@@ -366,21 +387,5 @@ void settings_menu_update_wifi_status(bool connected, const char* ssid)
     } else {
         lv_label_set_text(state.wifi_status_label, i18n_get(STR_WIFI_DISCONNECTED));
         lv_obj_set_style_text_color(state.wifi_status_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-    }
-}
-
-void settings_menu_update_networks(const void* networks, uint8_t count)
-{
-    // Forward to WiFi screen if it's active
-    if (state.sub_screen_active && state.active_sub_screen == SETTINGS_WIFI) {
-        wifi_screen_update_networks((const settings_wifi_network_t*)networks, count);
-    }
-}
-
-void settings_menu_set_scanning(bool scanning)
-{
-    // Forward to WiFi screen if it's active
-    if (state.sub_screen_active && state.active_sub_screen == SETTINGS_WIFI) {
-        wifi_screen_set_scanning(scanning);
     }
 }
