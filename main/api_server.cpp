@@ -11,6 +11,7 @@
 #include "modbus/arctic_registers.h"
 #include "heatpump_params.h"
 #include "heatpump_demo_state.h"
+#include "heatpump_errors.h"
 #include "app_preferences.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
@@ -74,6 +75,7 @@ static esp_err_t heatpump_param_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_power_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_errors_get_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -577,6 +579,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_setpoints_uri);
+    
+    // GET /api/heatpump/errors - Get active errors and history
+    httpd_uri_t heatpump_errors_uri = {
+        .uri = "/api/heatpump/errors",
+        .method = HTTP_GET,
+        .handler = heatpump_errors_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_errors_uri);
     
     #undef REGISTER_URI
     
@@ -2277,6 +2288,74 @@ static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req)
     httpd_resp_sendstr(req, json_str);
     free(json_str);
     cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// GET /api/heatpump/errors - Get active errors and error history
+static esp_err_t heatpump_errors_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    bool demo_mode = app_prefs_is_demo_mode();
+    arctic::HeatPumpState hp = arctic::getState();
+    
+    cJSON* root = cJSON_CreateObject();
+    
+    // Summary
+    cJSON_AddBoolToObject(root, "demo_mode", demo_mode);
+    cJSON_AddBoolToObject(root, "connected", hp.connected || demo_mode);
+    
+    if (demo_mode) {
+        // Demo mode - return empty errors
+        cJSON_AddBoolToObject(root, "has_errors", false);
+        cJSON_AddNumberToObject(root, "error_count", 0);
+        cJSON_AddStringToObject(root, "highest_severity", "info");
+        cJSON_AddArrayToObject(root, "active");
+        cJSON_AddArrayToObject(root, "history");
+    } else {
+        // Real mode
+        int error_count = arctic::getActiveErrorCount();
+        cJSON_AddBoolToObject(root, "has_errors", error_count > 0);
+        cJSON_AddNumberToObject(root, "error_count", error_count);
+        cJSON_AddStringToObject(root, "highest_severity", 
+            arctic::severityToString(arctic::getHighestSeverity()));
+        
+        // Active errors array
+        char* active_json = arctic::getErrorsAsJson();
+        if (active_json) {
+            cJSON* active = cJSON_Parse(active_json);
+            if (active) {
+                cJSON_AddItemToObject(root, "active", active);
+            }
+            free(active_json);
+        }
+        
+        // Error history array
+        char* history_json = arctic::getErrorHistoryAsJson();
+        if (history_json) {
+            cJSON* history = cJSON_Parse(history_json);
+            if (history) {
+                cJSON_AddItemToObject(root, "history", history);
+            }
+            free(history_json);
+        }
+    }
+    
+    // Raw register values (for debugging)
+    cJSON* raw = cJSON_AddObjectToObject(root, "raw");
+    cJSON_AddNumberToObject(raw, "error1", hp.error1);
+    cJSON_AddNumberToObject(raw, "error2", hp.error2);
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
     
     return ESP_OK;
 }

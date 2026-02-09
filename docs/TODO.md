@@ -41,18 +41,18 @@ All temperatures in Celsius (native units). snake_case naming.
 ```
 
 ### Future/Optional
-- [ ] `GET /api/heatpump/errors` - Decoded error codes
+- [x] `GET /api/heatpump/errors` - Decoded error codes with severity and history
 - [ ] `GET /api/system/info` - Firmware version, WiFi, uptime
 - [ ] `GET /api/settings` - App preferences
 - [ ] `PUT /api/settings` - Update preferences
 
 ## Error Status Display
-- [ ] Parse error registers (2137, 2138) into human-readable messages
-- [ ] UI: Error indicator on main screen when errors present
-- [ ] UI: Error details screen showing active errors with descriptions
-- [ ] API: Include decoded error list in `/api/heatpump/status`
-- [ ] API: `GET /api/heatpump/errors` - Dedicated endpoint with error history
-- [ ] Store error history with timestamps (ring buffer)
+- [x] Parse error registers (2137, 2138) into human-readable messages
+- [x] UI: Error indicator on main screen when errors present
+- [x] UI: Error details screen showing active errors with descriptions
+- [x] API: Include decoded error list in `/api/heatpump/status`
+- [x] API: `GET /api/heatpump/errors` - Dedicated endpoint with error history
+- [x] Store error history with timestamps (ring buffer, 32 entries)
 
 ## Localization (i18n)
 - [x] i18n infrastructure in place (`i18n.h`)

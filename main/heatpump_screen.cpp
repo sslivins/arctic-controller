@@ -7,6 +7,7 @@
 #include "heatpump_temps_screen.h"
 #include "heatpump_system_screen.h"
 #include "heatpump_control_screen.h"
+#include "heatpump_errors_screen.h"
 #include "heatpump_demo_state.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
@@ -208,6 +209,24 @@ static void system_btn_cb(lv_event_t* e) {
     
     // Show system readings screen
     heatpump_system_show(on_system_close);
+}
+
+static void on_errors_close(void) {
+    // Load saved screen back with slide-down animation
+    // auto_del=true - LVGL will delete the sub-screen after animation
+    if (state.saved_screen) {
+        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 400, 0, true);
+        state.saved_screen = nullptr;
+    }
+}
+
+static void error_card_cb(lv_event_t* e) {
+    (void)e;
+    // Save current screen
+    state.saved_screen = lv_scr_act();
+    
+    // Show error details screen
+    heatpump_errors_show(on_errors_close);
 }
 
 static void on_control_close(void) {
@@ -533,6 +552,10 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_width(state.error_label, LV_PCT(100));
     lv_obj_set_style_text_align(state.error_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_center(state.error_label);
+    
+    // Make error card clickable to show error details
+    lv_obj_add_flag(state.error_card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(state.error_card, error_card_cb, LV_EVENT_CLICKED, nullptr);
     
     // Hide error card initially
     lv_obj_add_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);

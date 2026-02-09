@@ -43,6 +43,7 @@ idf_component_register(
         "app_preferences.cpp"
         "heatpump_params.cpp"
         "heatpump_demo_state.cpp"
+        "heatpump_errors.cpp"
         "settings/settings_menu.cpp"
         "settings/settings_wifi_screen.cpp"
         "settings/keyboard_maps.c"
@@ -60,6 +61,7 @@ idf_component_register(
         "heatpump_temps_screen.cpp"
         "heatpump_system_screen.cpp"
         "heatpump_params_screen.cpp"
+        "heatpump_errors_screen.cpp"
     INCLUDE_DIRS
         "."
         "settings"

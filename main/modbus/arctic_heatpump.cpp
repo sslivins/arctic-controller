@@ -4,6 +4,7 @@
 
 #include "arctic_heatpump.h"
 #include "modbus_manager.h"
+#include "heatpump_errors.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -156,6 +157,9 @@ static void pollTask(void* param) {
             s_state.last_successful_read_ms = now;
             s_state.consecutive_failures = 0;
             poll_interval = POLL_INTERVAL_NORMAL_MS;
+            
+            // Update error history tracking
+            updateErrorHistory(s_state.error1, s_state.error2);
             
             // Log connection state change
             if (!s_was_connected) {

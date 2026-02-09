@@ -1227,6 +1227,130 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/heatpump/errors:
+    get:
+      tags:
+        - HeatPump
+      summary: Get error information and history
+      description: |
+        Returns detailed information about active errors and error history.
+        Each error includes code, name, description, and severity (info, warning, error, critical).
+        History shows when errors occurred and cleared with timestamps.
+      operationId: getHeatpumpErrors
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Error information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  demo_mode:
+                    type: boolean
+                    description: Whether demo mode is enabled
+                  connected:
+                    type: boolean
+                    description: Whether heat pump is connected
+                  has_errors:
+                    type: boolean
+                    description: Whether any errors are currently active
+                  error_count:
+                    type: integer
+                    description: Number of active errors
+                  highest_severity:
+                    type: string
+                    enum: [info, warning, error, critical]
+                    description: Highest severity among active errors
+                  active:
+                    type: array
+                    description: List of currently active errors
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                          description: Error code (e.g., "E01")
+                          example: "E23"
+                        name:
+                          type: string
+                          description: Short error name
+                          example: "HIGH_PRESSURE"
+                        description:
+                          type: string
+                          description: Human-readable description
+                          example: "High pressure protection triggered"
+                        severity:
+                          type: string
+                          enum: [info, warning, error, critical]
+                          example: "critical"
+                        register:
+                          type: integer
+                          description: Error register number (1 or 2)
+                          example: 2
+                        active:
+                          type: boolean
+                          description: Whether error is currently active
+                  history:
+                    type: array
+                    description: Error history (most recent first, up to 32 entries)
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                          description: Error code
+                        occurred:
+                          type: integer
+                          nullable: true
+                          description: Unix timestamp when error occurred
+                        cleared:
+                          type: integer
+                          nullable: true
+                          description: Unix timestamp when error cleared
+                        active:
+                          type: boolean
+                          description: Whether error is still active
+                  raw:
+                    type: object
+                    description: Raw register values for debugging
+                    properties:
+                      error1:
+                        type: integer
+                        description: Register 2137 value
+                      error2:
+                        type: integer
+                        description: Register 2138 value
+              example:
+                demo_mode: false
+                connected: true
+                has_errors: true
+                error_count: 1
+                highest_severity: "critical"
+                active:
+                  - code: "E23"
+                    name: "HIGH_PRESSURE"
+                    description: "High pressure protection triggered"
+                    severity: "critical"
+                    register: 2
+                    active: true
+                history:
+                  - code: "E23"
+                    occurred: 1739145600
+                    cleared: null
+                    active: true
+                raw:
+                  error1: 0
+                  error2: 64
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/heatpump/params:
     get:
       tags:
