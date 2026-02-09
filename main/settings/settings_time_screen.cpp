@@ -266,12 +266,17 @@ static void create_header(void)
     lv_obj_set_style_pad_hor(s_state.header, 15, LV_PART_MAIN);
     disable_scrolling(s_state.header);
     
-    // Back button
+    // Back button with circular background
     s_state.back_btn = lv_btn_create(s_state.header);
-    lv_obj_set_size(s_state.back_btn, 50, 40);
+    lv_obj_set_size(s_state.back_btn, 50, 50);
     lv_obj_align(s_state.back_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_opa(s_state.back_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.back_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_state.back_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_state.back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(s_state.back_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_state.back_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_state.back_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_state.back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t* back_icon = lv_label_create(s_state.back_btn);
@@ -283,7 +288,7 @@ static void create_header(void)
     // Title
     lv_obj_t* title = lv_label_create(s_state.header);
     lv_label_set_text(title, i18n_get(STR_SETTINGS_TIME));
-    lv_obj_set_style_text_font(title, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
 }
@@ -440,15 +445,15 @@ static void back_btn_cb(lv_event_t* e)
     (void)e;
     ESP_LOGI(TAG, "Back button clicked");
     
-    void (*on_back)(void) = s_state.config.on_back;
+    // Stop the preview timer FIRST to prevent use-after-free
+    time_screen_close();
     
+    void (*on_back)(void) = s_state.config.on_back;
     if (on_back) {
         on_back();
     } else {
         settings_menu_show();
     }
-    
-    time_screen_close();
 }
 
 static void format_switch_cb(lv_event_t* e)

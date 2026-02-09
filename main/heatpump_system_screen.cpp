@@ -9,6 +9,7 @@
 #include "modbus/arctic_heatpump.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
+#include "app_preferences.h"
 #include <esp_log.h>
 #include <stdio.h>
 
@@ -113,9 +114,41 @@ static void update_readings() {
     if (!state.shown) return;
     
     arctic::HeatPumpState hp = arctic::getState();
+    bool demo_mode = app_prefs_is_demo_mode();
     char buf[32];
     
+    if (demo_mode) {
+        // Demo mode - show simulated values
+        lv_label_set_text(state.compressor_freq, "60 Hz");
+        lv_obj_set_style_text_color(state.compressor_freq, COLOR_SUCCESS, LV_PART_MAIN);
+        
+        lv_label_set_text(state.fan_speed, "850 RPM");
+        lv_obj_set_style_text_color(state.fan_speed, COLOR_SUCCESS, LV_PART_MAIN);
+        
+        lv_label_set_text(state.ac_voltage, "230 V");
+        lv_label_set_text(state.ac_current, "5 A");
+        lv_label_set_text(state.dc_voltage, "380.0 V");
+        lv_label_set_text(state.dc_current, "4 A");
+        
+        lv_label_set_text(state.high_pressure, "2.50 MPa");
+        lv_label_set_text(state.low_pressure, "0.85 MPa");
+        
+        lv_label_set_text(state.primary_eev, "350 steps");
+        lv_label_set_text(state.secondary_eev, "200 steps");
+        
+        snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(20), app_prefs_temp_unit_str());
+        lv_label_set_text(state.cooling_setpoint, buf);
+        
+        snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(45), app_prefs_temp_unit_str());
+        lv_label_set_text(state.heating_setpoint, buf);
+        
+        snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(50), app_prefs_temp_unit_str());
+        lv_label_set_text(state.hotwater_setpoint, buf);
+        return;
+    }
+    
     if (!hp.connected) {
+        // Disconnected - show placeholders
         const char* na = "--";
         lv_label_set_text(state.compressor_freq, na);
         lv_label_set_text(state.fan_speed, na);
@@ -133,7 +166,7 @@ static void update_readings() {
         return;
     }
     
-    // Compressor and fan
+    // Real mode - update from actual values
     snprintf(buf, sizeof(buf), "%d Hz", hp.compressor_freq);
     lv_label_set_text(state.compressor_freq, buf);
     lv_obj_set_style_text_color(state.compressor_freq, 
@@ -171,14 +204,14 @@ static void update_readings() {
     snprintf(buf, sizeof(buf), "%d steps", hp.secondary_eev_opening);
     lv_label_set_text(state.secondary_eev, buf);
     
-    // Setpoints
-    snprintf(buf, sizeof(buf), "%d °C", hp.cooling_setpoint);
+    // Setpoints with unit conversion
+    snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(hp.cooling_setpoint), app_prefs_temp_unit_str());
     lv_label_set_text(state.cooling_setpoint, buf);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.heating_setpoint);
+    snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(hp.heating_setpoint), app_prefs_temp_unit_str());
     lv_label_set_text(state.heating_setpoint, buf);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.hot_water_setpoint);
+    snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(hp.hot_water_setpoint), app_prefs_temp_unit_str());
     lv_label_set_text(state.hotwater_setpoint, buf);
 }
 
@@ -187,7 +220,25 @@ static void update_timer_cb(lv_timer_t* timer) {
 }
 
 static void back_btn_cb(lv_event_t* e) {
-    heatpump_system_hide();
+    (void)e;
+    ESP_LOGI(TAG, "Back button clicked");
+    
+    // Stop timer first to prevent use-after-free
+    if (state.update_timer) {
+        lv_timer_del(state.update_timer);
+        state.update_timer = nullptr;
+    }
+    
+    // Save and clear callback
+    heatpump_system_close_cb_t cb = state.on_close;
+    state.on_close = nullptr;
+    state.shown = false;
+    state.screen = nullptr;
+    
+    // Call callback - it will load the previous screen with auto_del=true
+    if (cb) {
+        cb();
+    }
 }
 
 // ============================================================================
@@ -218,25 +269,35 @@ void heatpump_system_show(heatpump_system_close_cb_t on_close) {
     lv_obj_set_style_pad_hor(header, 15, LV_PART_MAIN);
     lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Back button
+    // Close button (X on right) with circular background
     lv_obj_t* back_btn = lv_btn_create(header);
-    lv_obj_set_size(back_btn, 60, 50);
-    lv_obj_align(back_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_opa(back_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_size(back_btn, 50, 50);
+    lv_obj_align(back_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(back_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, nullptr);
     
     lv_obj_t* back_icon = lv_label_create(back_btn);
-    lv_label_set_text(back_icon, LV_SYMBOL_LEFT);
+    lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
     lv_obj_set_style_text_font(back_icon, &montserrat_32_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_center(back_icon);
     
     // Title
     lv_obj_t* title = lv_label_create(header);
-    lv_label_set_text(title, "System Readings");
-    lv_obj_set_style_text_font(title, &montserrat_32_latin, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
+    if (app_prefs_is_demo_mode()) {
+        lv_label_set_text(title, "DEMO MODE - System");
+        lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
+    } else {
+        lv_label_set_text(title, "System Readings");
+        lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
+    }
+    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
     
     // Scrollable content
@@ -286,8 +347,8 @@ void heatpump_system_show(heatpump_system_close_cb_t on_close) {
     // Initial update
     update_readings();
     
-    // Load with slide animation
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+    // Load with slide animation (main screen moves up)
+    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_TOP, 400, 0, false);
 }
 
 void heatpump_system_hide(void) {
@@ -303,7 +364,6 @@ void heatpump_system_hide(void) {
     }
     
     heatpump_system_close_cb_t cb = state.on_close;
-    lv_obj_t* screen_to_delete = state.screen;
     
     state.shown = false;
     state.on_close = nullptr;
@@ -322,14 +382,9 @@ void heatpump_system_hide(void) {
     state.heating_setpoint = nullptr;
     state.hotwater_setpoint = nullptr;
     
-    // Call callback to restore previous screen
+    // Call callback to restore previous screen (animation will delete this screen)
     if (cb) {
         cb();
-    }
-    
-    // Delete our screen
-    if (screen_to_delete) {
-        lv_obj_del(screen_to_delete);
     }
 }
 

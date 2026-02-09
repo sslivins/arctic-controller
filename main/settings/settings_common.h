@@ -10,13 +10,14 @@
 #include <esp_log.h>
 #include "fonts/fonts.h"
 #include "settings_types.h"
+#include "ui_common.h"
 
 // ============================================================================
-// Custom Fonts with Latin Extended Support
+// Fonts (use Latin-extended fonts for i18n support)
 // ============================================================================
 
-#define FONT_NORMAL   &montserrat_24_latin
-#define FONT_LARGE    &montserrat_24_latin
+#define FONT_NORMAL   (&montserrat_24_latin)  // Body text
+#define FONT_LARGE    (&montserrat_32_latin)  // Large text (not headers - use UI_FONT_HEADER for screen titles)
 
 // ============================================================================
 // Colors and Styles

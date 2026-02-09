@@ -368,12 +368,17 @@ static void create_header(void)
     lv_obj_set_style_pad_hor(s_state.header, 15, LV_PART_MAIN);
     disable_scrolling(s_state.header);
     
-    // Back button
+    // Back button with circular background
     s_state.back_btn = lv_btn_create(s_state.header);
-    lv_obj_set_size(s_state.back_btn, 50, 40);
+    lv_obj_set_size(s_state.back_btn, 50, 50);
     lv_obj_align(s_state.back_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_opa(s_state.back_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.back_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_state.back_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_state.back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(s_state.back_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_state.back_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_state.back_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_state.back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t* back_icon = lv_label_create(s_state.back_btn);
@@ -385,7 +390,7 @@ static void create_header(void)
     // Title
     s_state.title_label = lv_label_create(s_state.header);
     lv_label_set_text(s_state.title_label, i18n_get(STR_SETTINGS_WIFI));
-    lv_obj_set_style_text_font(s_state.title_label, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_state.title_label, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_state.title_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(s_state.title_label, LV_ALIGN_CENTER, 0, 0);
 }
@@ -520,32 +525,42 @@ static void create_password_dialog(void)
     lv_obj_set_style_pad_hor(header, 15, LV_PART_MAIN);
     disable_scrolling(header);
     
-    // Cancel button (X) on left
+    // Cancel button (X) on left with circular background
     s_state.cancel_btn = lv_btn_create(header);
-    lv_obj_set_size(s_state.cancel_btn, 70, 60);
+    lv_obj_set_size(s_state.cancel_btn, 60, 60);
     lv_obj_align(s_state.cancel_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_opa(s_state.cancel_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.cancel_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_state.cancel_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_state.cancel_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(s_state.cancel_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_state.cancel_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_state.cancel_btn, COLOR_ERROR, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_state.cancel_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.cancel_btn, cancel_btn_cb, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t* cancel_icon = lv_label_create(s_state.cancel_btn);
     lv_label_set_text(cancel_icon, LV_SYMBOL_CLOSE);
     lv_obj_set_style_text_font(cancel_icon, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(cancel_icon, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_style_text_color(cancel_icon, COLOR_ERROR, LV_PART_MAIN);
     lv_obj_center(cancel_icon);
     
-    // Connect button (checkmark) on right
+    // Connect button (checkmark) on right with circular background
     s_state.connect_btn = lv_btn_create(header);
-    lv_obj_set_size(s_state.connect_btn, 70, 60);
+    lv_obj_set_size(s_state.connect_btn, 60, 60);
     lv_obj_align(s_state.connect_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_opa(s_state.connect_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_state.connect_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_state.connect_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_state.connect_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(s_state.connect_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_state.connect_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_state.connect_btn, COLOR_SUCCESS, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(s_state.connect_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.connect_btn, connect_btn_cb, LV_EVENT_CLICKED, NULL);
     
     lv_obj_t* connect_icon = lv_label_create(s_state.connect_btn);
     lv_label_set_text(connect_icon, LV_SYMBOL_OK);
     lv_obj_set_style_text_font(connect_icon, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(connect_icon, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(connect_icon, COLOR_SUCCESS, LV_PART_MAIN);
     lv_obj_center(connect_icon);
     
     // Content panel with rounded corners - positioned in middle area

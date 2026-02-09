@@ -13,6 +13,7 @@
 #include "settings_display_screen.h"
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
+#include "../app_preferences.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include "wifi_manager.h"
@@ -59,6 +60,10 @@ typedef struct {
     lv_obj_t* rows[SETTINGS_COUNT];
     lv_obj_t* wifi_status_label;  // Shows connected SSID or "Not connected"
     
+    // Toggle switches
+    lv_obj_t* demo_mode_switch;
+    lv_obj_t* temp_unit_switch;
+    
     // Track which sub-screen is active
     settings_item_t active_sub_screen;
     bool sub_screen_active;
@@ -74,6 +79,8 @@ static void create_header(void);
 static void create_menu_list(void);
 static void close_btn_event_cb(lv_event_t* e);
 static void row_click_cb(lv_event_t* e);
+static void demo_mode_switch_cb(lv_event_t* e);
+static void temp_unit_switch_cb(lv_event_t* e);
 
 // ============================================================================
 // Helper Functions
@@ -129,9 +136,85 @@ static lv_obj_t* create_settings_row(lv_obj_t* parent, const char* icon,
     return row;
 }
 
+static lv_obj_t* create_toggle_row(lv_obj_t* parent, const char* icon, 
+                                    const char* label, bool initial_state,
+                                    lv_obj_t** switch_out, lv_event_cb_t switch_cb)
+{
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), 88);
+    lv_obj_set_style_bg_color(row, COLOR_ROW, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(row, 20, LV_PART_MAIN);
+    disable_scrolling(row);
+    
+    // Icon on left
+    lv_obj_t* icon_label = lv_label_create(row);
+    lv_label_set_text(icon_label, icon);
+    lv_obj_set_style_text_font(icon_label, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_set_style_text_color(icon_label, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_align(icon_label, LV_ALIGN_LEFT_MID, 0, 0);
+    
+    // Label
+    lv_obj_t* text_label = lv_label_create(row);
+    lv_label_set_text(text_label, label);
+    lv_obj_set_style_text_font(text_label, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(text_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(text_label, LV_ALIGN_LEFT_MID, 45, 0);
+    
+    // Switch on right
+    lv_obj_t* sw = lv_switch_create(row);
+    lv_obj_set_size(sw, 80, 40);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(0x555555), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, lv_color_hex(0x4caf50), 
+        static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | static_cast<lv_style_selector_t>(LV_STATE_CHECKED));
+    
+    if (initial_state) {
+        lv_obj_add_state(sw, LV_STATE_CHECKED);
+    }
+    
+    lv_obj_add_event_cb(sw, switch_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    
+    if (switch_out) {
+        *switch_out = sw;
+    }
+    
+    return row;
+}
+
 // ============================================================================
 // Event Handlers
 // ============================================================================
+
+static void demo_mode_switch_cb(lv_event_t* e)
+{
+    lv_obj_t* sw = (lv_obj_t*)lv_event_get_target(e);
+    bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    app_prefs_set_demo_mode(on);
+    ESP_LOGI(TAG, "Demo mode %s", on ? "enabled" : "disabled");
+}
+
+static void temp_unit_switch_cb(lv_event_t* e)
+{
+    lv_obj_t* sw = (lv_obj_t*)lv_event_get_target(e);
+    bool fahrenheit = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    app_prefs_set_temp_unit(fahrenheit ? TEMP_UNIT_FAHRENHEIT : TEMP_UNIT_CELSIUS);
+    
+    // Update the label colors to show which is active
+    lv_obj_t* row = lv_obj_get_parent(sw);
+    if (row) {
+        lv_obj_t* celsius_lbl = (lv_obj_t*)lv_obj_get_user_data(row);
+        lv_obj_t* fahrenheit_lbl = (lv_obj_t*)lv_event_get_user_data(e);
+        if (celsius_lbl && fahrenheit_lbl) {
+            lv_obj_set_style_text_color(celsius_lbl, fahrenheit ? COLOR_TEXT_DIM : COLOR_TEXT, LV_PART_MAIN);
+            lv_obj_set_style_text_color(fahrenheit_lbl, fahrenheit ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
+        }
+    }
+    
+    ESP_LOGI(TAG, "Temperature unit set to %s", fahrenheit ? "Fahrenheit" : "Celsius");
+}
 
 static void close_btn_event_cb(lv_event_t* e)
 {
@@ -236,7 +319,7 @@ static void create_header(void)
     // Title
     lv_obj_t* title = lv_label_create(state.header);
     lv_label_set_text(title, i18n_get(STR_SETTINGS));
-    lv_obj_set_style_text_font(title, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 10, 0);
     
@@ -288,6 +371,70 @@ static void create_menu_list(void)
     state.rows[SETTINGS_DISPLAY] = create_settings_row(
         state.list_container, LV_SYMBOL_IMAGE, 
         i18n_get(STR_SETTINGS_DISPLAY), SETTINGS_DISPLAY);
+    
+    // Demo Mode toggle
+    create_toggle_row(state.list_container, LV_SYMBOL_PLAY,
+                      "Demo Mode", app_prefs_is_demo_mode(),
+                      &state.demo_mode_switch, demo_mode_switch_cb);
+    
+    // Temperature Units toggle with °C / °F labels
+    {
+        bool is_fahrenheit = app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT;
+        
+        lv_obj_t* row = lv_obj_create(state.list_container);
+        lv_obj_set_size(row, LV_PCT(100), 88);
+        lv_obj_set_style_bg_color(row, COLOR_ROW, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
+        lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_hor(row, 15, LV_PART_MAIN);
+        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+        
+        // Icon on left
+        lv_obj_t* icon_label = lv_label_create(row);
+        lv_label_set_text(icon_label, LV_SYMBOL_SETTINGS);
+        lv_obj_set_style_text_font(icon_label, FONT_LARGE, LV_PART_MAIN);
+        lv_obj_set_style_text_color(icon_label, COLOR_ACCENT, LV_PART_MAIN);
+        lv_obj_align(icon_label, LV_ALIGN_LEFT_MID, 0, 0);
+        
+        // "Temperature" label
+        lv_obj_t* text_label = lv_label_create(row);
+        lv_label_set_text(text_label, "Temperature");
+        lv_obj_set_style_text_font(text_label, FONT_NORMAL, LV_PART_MAIN);
+        lv_obj_set_style_text_color(text_label, COLOR_TEXT, LV_PART_MAIN);
+        lv_obj_align(text_label, LV_ALIGN_LEFT_MID, 45, 0);
+        
+        // °C label (right side, before switch)
+        lv_obj_t* celsius_lbl = lv_label_create(row);
+        lv_label_set_text(celsius_lbl, "°C");
+        lv_obj_set_style_text_font(celsius_lbl, FONT_LARGE, LV_PART_MAIN);
+        lv_obj_set_style_text_color(celsius_lbl, is_fahrenheit ? COLOR_TEXT_DIM : COLOR_TEXT, LV_PART_MAIN);
+        lv_obj_align(celsius_lbl, LV_ALIGN_RIGHT_MID, -130, 0);
+        
+        // Switch in middle-right
+        lv_obj_t* sw = lv_switch_create(row);
+        lv_obj_set_size(sw, 60, 32);
+        lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -55, 0);
+        lv_obj_set_style_bg_color(sw, lv_color_hex(0x555555), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(sw, COLOR_ACCENT, 
+            static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | static_cast<lv_style_selector_t>(LV_STATE_CHECKED));
+        if (is_fahrenheit) {
+            lv_obj_add_state(sw, LV_STATE_CHECKED);
+        }
+        
+        // °F label (far right)
+        lv_obj_t* fahrenheit_lbl = lv_label_create(row);
+        lv_label_set_text(fahrenheit_lbl, "°F");
+        lv_obj_set_style_text_font(fahrenheit_lbl, FONT_LARGE, LV_PART_MAIN);
+        lv_obj_set_style_text_color(fahrenheit_lbl, is_fahrenheit ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
+        lv_obj_align(fahrenheit_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
+        
+        // Store celsius label in row's user data, fahrenheit label passed via event
+        lv_obj_set_user_data(row, celsius_lbl);
+        lv_obj_add_event_cb(sw, temp_unit_switch_cb, LV_EVENT_VALUE_CHANGED, fahrenheit_lbl);
+        
+        state.temp_unit_switch = sw;
+    }
 }
 
 // ============================================================================

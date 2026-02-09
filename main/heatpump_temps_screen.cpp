@@ -9,6 +9,7 @@
 #include "modbus/arctic_heatpump.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
+#include "app_preferences.h"
 #include <esp_log.h>
 #include <stdio.h>
 
@@ -23,6 +24,7 @@ static const char* TAG = "hp_temps";
 #define COLOR_TEXT          lv_color_hex(0xeaeaea)
 #define COLOR_TEXT_DIM      lv_color_hex(0x888888)
 #define COLOR_ACCENT        lv_color_hex(0x00d4ff)
+#define COLOR_WARNING       lv_color_hex(0xfbbf24)
 #define COLOR_WARM          lv_color_hex(0xf97316)
 #define COLOR_COLD          lv_color_hex(0x3b82f6)
 
@@ -89,10 +91,58 @@ static void update_readings() {
     if (!state.shown) return;
     
     arctic::HeatPumpState hp = arctic::getState();
+    bool demo_mode = app_prefs_is_demo_mode();
     char buf[16];
     
+    // Helper to format temperature with unit conversion
+    auto format_temp = [&buf](int16_t temp_c) {
+        snprintf(buf, sizeof(buf), "%d %s", 
+                 app_prefs_convert_temp(temp_c), app_prefs_temp_unit_str());
+    };
+    
+    if (demo_mode) {
+        // Demo mode - show simulated temperatures
+        format_temp(42);  // Tank
+        lv_label_set_text(state.tank_temp, buf);
+        lv_obj_set_style_text_color(state.tank_temp, get_temp_color(42), LV_PART_MAIN);
+        
+        format_temp(45);  // Outlet
+        lv_label_set_text(state.outlet_temp, buf);
+        lv_obj_set_style_text_color(state.outlet_temp, get_temp_color(45), LV_PART_MAIN);
+        
+        format_temp(38);  // Inlet
+        lv_label_set_text(state.inlet_temp, buf);
+        lv_obj_set_style_text_color(state.inlet_temp, get_temp_color(38), LV_PART_MAIN);
+        
+        format_temp(22);  // Outdoor ambient
+        lv_label_set_text(state.outdoor_temp, buf);
+        lv_obj_set_style_text_color(state.outdoor_temp, get_temp_color(22), LV_PART_MAIN);
+        
+        format_temp(85);  // Discharge
+        lv_label_set_text(state.discharge_temp, buf);
+        lv_obj_set_style_text_color(state.discharge_temp, get_temp_color(85), LV_PART_MAIN);
+        
+        format_temp(12);  // Suction
+        lv_label_set_text(state.suction_temp, buf);
+        lv_obj_set_style_text_color(state.suction_temp, get_temp_color(12), LV_PART_MAIN);
+        
+        format_temp(35);  // Outdoor coil
+        lv_label_set_text(state.outdoor_coil_temp, buf);
+        lv_obj_set_style_text_color(state.outdoor_coil_temp, get_temp_color(35), LV_PART_MAIN);
+        
+        format_temp(40);  // Indoor coil
+        lv_label_set_text(state.indoor_coil_temp, buf);
+        lv_obj_set_style_text_color(state.indoor_coil_temp, get_temp_color(40), LV_PART_MAIN);
+        
+        format_temp(55);  // IPM
+        lv_label_set_text(state.ipm_temp, buf);
+        lv_obj_set_style_text_color(state.ipm_temp, get_temp_color(55), LV_PART_MAIN);
+        return;
+    }
+    
     if (!hp.connected) {
-        const char* na = "-- °C";
+        // Disconnected - show placeholders
+        const char* na = "--";
         lv_label_set_text(state.tank_temp, na);
         lv_label_set_text(state.outlet_temp, na);
         lv_label_set_text(state.inlet_temp, na);
@@ -105,40 +155,40 @@ static void update_readings() {
         return;
     }
     
-    // Update all temperatures with color coding
-    snprintf(buf, sizeof(buf), "%d °C", hp.water_tank_temp);
+    // Real mode - update all temperatures with color coding
+    format_temp(hp.water_tank_temp);
     lv_label_set_text(state.tank_temp, buf);
     lv_obj_set_style_text_color(state.tank_temp, get_temp_color(hp.water_tank_temp), LV_PART_MAIN);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.outlet_water_temp);
+    format_temp(hp.outlet_water_temp);
     lv_label_set_text(state.outlet_temp, buf);
     lv_obj_set_style_text_color(state.outlet_temp, get_temp_color(hp.outlet_water_temp), LV_PART_MAIN);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.inlet_water_temp);
+    format_temp(hp.inlet_water_temp);
     lv_label_set_text(state.inlet_temp, buf);
     lv_obj_set_style_text_color(state.inlet_temp, get_temp_color(hp.inlet_water_temp), LV_PART_MAIN);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.outdoor_ambient_temp);
+    format_temp(hp.outdoor_ambient_temp);
     lv_label_set_text(state.outdoor_temp, buf);
     lv_obj_set_style_text_color(state.outdoor_temp, get_temp_color(hp.outdoor_ambient_temp), LV_PART_MAIN);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.discharge_temp);
+    format_temp(hp.discharge_temp);
     lv_label_set_text(state.discharge_temp, buf);
     lv_obj_set_style_text_color(state.discharge_temp, get_temp_color(hp.discharge_temp), LV_PART_MAIN);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.suction_temp);
+    format_temp(hp.suction_temp);
     lv_label_set_text(state.suction_temp, buf);
     lv_obj_set_style_text_color(state.suction_temp, get_temp_color(hp.suction_temp), LV_PART_MAIN);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.outdoor_coil_temp);
+    format_temp(hp.outdoor_coil_temp);
     lv_label_set_text(state.outdoor_coil_temp, buf);
     lv_obj_set_style_text_color(state.outdoor_coil_temp, get_temp_color(hp.outdoor_coil_temp), LV_PART_MAIN);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.indoor_coil_temp);
+    format_temp(hp.indoor_coil_temp);
     lv_label_set_text(state.indoor_coil_temp, buf);
     lv_obj_set_style_text_color(state.indoor_coil_temp, get_temp_color(hp.indoor_coil_temp), LV_PART_MAIN);
     
-    snprintf(buf, sizeof(buf), "%d °C", hp.ipm_temp);
+    format_temp(hp.ipm_temp);
     lv_label_set_text(state.ipm_temp, buf);
     lv_obj_set_style_text_color(state.ipm_temp, get_temp_color(hp.ipm_temp), LV_PART_MAIN);
 }
@@ -148,7 +198,25 @@ static void update_timer_cb(lv_timer_t* timer) {
 }
 
 static void back_btn_cb(lv_event_t* e) {
-    heatpump_temps_hide();
+    (void)e;
+    ESP_LOGI(TAG, "Back button clicked");
+    
+    // Stop timer first to prevent use-after-free
+    if (state.update_timer) {
+        lv_timer_del(state.update_timer);
+        state.update_timer = nullptr;
+    }
+    
+    // Save and clear callback
+    heatpump_temps_close_cb_t cb = state.on_close;
+    state.on_close = nullptr;
+    state.shown = false;
+    state.screen = nullptr;
+    
+    // Call callback - it will load the previous screen with auto_del=true
+    if (cb) {
+        cb();
+    }
 }
 
 // ============================================================================
@@ -179,25 +247,35 @@ void heatpump_temps_show(heatpump_temps_close_cb_t on_close) {
     lv_obj_set_style_pad_hor(header, 15, LV_PART_MAIN);
     lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Back button
+    // Close button (X on right) with circular background
     lv_obj_t* back_btn = lv_btn_create(header);
-    lv_obj_set_size(back_btn, 60, 50);
-    lv_obj_align(back_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_opa(back_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_size(back_btn, 50, 50);
+    lv_obj_align(back_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(back_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, nullptr);
     
     lv_obj_t* back_icon = lv_label_create(back_btn);
-    lv_label_set_text(back_icon, LV_SYMBOL_LEFT);
+    lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
     lv_obj_set_style_text_font(back_icon, &montserrat_32_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_center(back_icon);
     
     // Title
     lv_obj_t* title = lv_label_create(header);
-    lv_label_set_text(title, "Temperatures");
-    lv_obj_set_style_text_font(title, &montserrat_32_latin, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
+    if (app_prefs_is_demo_mode()) {
+        lv_label_set_text(title, "DEMO MODE - Temperatures");
+        lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
+    } else {
+        lv_label_set_text(title, "Temperatures");
+        lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
+    }
+    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
     
     // Scrollable content (remaining 92%)
@@ -236,8 +314,8 @@ void heatpump_temps_show(heatpump_temps_close_cb_t on_close) {
     // Initial update
     update_readings();
     
-    // Load with slide animation
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+    // Load with slide animation (main screen moves up)
+    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_TOP, 400, 0, false);
 }
 
 void heatpump_temps_hide(void) {
@@ -253,7 +331,6 @@ void heatpump_temps_hide(void) {
     }
     
     heatpump_temps_close_cb_t cb = state.on_close;
-    lv_obj_t* screen_to_delete = state.screen;
     
     state.shown = false;
     state.on_close = nullptr;
@@ -268,14 +345,9 @@ void heatpump_temps_hide(void) {
     state.indoor_coil_temp = nullptr;
     state.ipm_temp = nullptr;
     
-    // Call callback to restore previous screen
+    // Call callback to restore previous screen (animation will delete this screen)
     if (cb) {
         cb();
-    }
-    
-    // Delete our screen
-    if (screen_to_delete) {
-        lv_obj_del(screen_to_delete);
     }
 }
 

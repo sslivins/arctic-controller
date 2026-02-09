@@ -24,6 +24,7 @@
 #include "modbus/modbus_manager.h"
 #include "modbus/arctic_heatpump.h"
 #include "heatpump_screen.h"
+#include "app_preferences.h"
 
 static const char* TAG = "main";
 
@@ -147,14 +148,21 @@ extern "C" void app_main(void)
     // Initialize time manager (NTP will start when WiFi connects)
     time_mgr_init();
 
-    // Initialize Modbus and Arctic heat pump communication
-    esp_err_t modbus_ret = modbus::init();
-    if (modbus_ret == ESP_OK) {
-        arctic::init();
-        arctic::startPolling();
-        mclog::tagInfo(TAG, "Modbus initialized, heat pump polling started");
+    // Initialize app preferences (demo mode, temp units, etc.)
+    app_prefs_init();
+
+    // Initialize Modbus and Arctic heat pump communication (skip in demo mode)
+    if (app_prefs_is_demo_mode()) {
+        mclog::tagInfo(TAG, "Demo mode enabled - skipping Modbus initialization");
     } else {
-        mclog::tagError(TAG, "Failed to initialize Modbus: {}", (int)modbus_ret);
+        esp_err_t modbus_ret = modbus::init();
+        if (modbus_ret == ESP_OK) {
+            arctic::init();
+            arctic::startPolling();
+            mclog::tagInfo(TAG, "Modbus initialized, heat pump polling started");
+        } else {
+            mclog::tagError(TAG, "Failed to initialize Modbus: {}", (int)modbus_ret);
+        }
     }
 
     // Initialize authentication manager
