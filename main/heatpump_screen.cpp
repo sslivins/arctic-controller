@@ -41,6 +41,7 @@ static struct {
     lv_obj_t* connection_indicator = nullptr;
     lv_obj_t* mode_label = nullptr;
     lv_obj_t* tank_temp_label = nullptr;
+    lv_obj_t* tank_desc_label = nullptr;
     lv_obj_t* setpoint_label = nullptr;
     
     // Component status indicators
@@ -490,11 +491,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_align(state.tank_temp_label, LV_ALIGN_CENTER, 0, 0);
     
     // "Tank Temperature" label
-    lv_obj_t* tank_desc = lv_label_create(state.status_card);
-    lv_label_set_text(tank_desc, i18n_get(STR_HP_TANK_TEMPERATURE));
-    lv_obj_set_style_text_font(tank_desc, UI_FONT_SMALL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(tank_desc, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_align(tank_desc, LV_ALIGN_CENTER, 0, 40);
+    state.tank_desc_label = lv_label_create(state.status_card);
+    lv_label_set_text(state.tank_desc_label, i18n_get(STR_HP_TANK_TEMPERATURE));
+    lv_obj_set_style_text_font(state.tank_desc_label, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.tank_desc_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_align(state.tank_desc_label, LV_ALIGN_CENTER, 0, 40);
     
     // Setpoint (bottom right)
     state.setpoint_label = lv_label_create(state.status_card);
@@ -745,11 +746,15 @@ void heatpump_screen_update(void) {
     
     arctic::HeatPumpState hp = arctic::getState();
     
-    // Refresh i18n labels (bottom buttons, mode row label, dropdown options)
+    // Refresh i18n labels (all static text that needs to update on language change)
+    if (state.tank_desc_label) lv_label_set_text(state.tank_desc_label, i18n_get(STR_HP_TANK_TEMPERATURE));
     if (state.temps_btn_label) lv_label_set_text(state.temps_btn_label, i18n_get(STR_HP_BTN_TEMPS));
     if (state.system_btn_label) lv_label_set_text(state.system_btn_label, i18n_get(STR_HP_BTN_SYSTEM));
     if (state.controls_btn_label) lv_label_set_text(state.controls_btn_label, i18n_get(STR_HP_BTN_ADVANCED));
     if (state.mode_row_label) lv_label_set_text(state.mode_row_label, i18n_get(STR_HP_MODE));
+    if (state.compressor_label) lv_label_set_text(state.compressor_label, i18n_get(STR_HP_COMPRESSOR));
+    if (state.pump_label) lv_label_set_text(state.pump_label, i18n_get(STR_HP_PUMP));
+    if (state.heater_label) lv_label_set_text(state.heater_label, i18n_get(STR_HP_AUX_HEAT));
     if (state.mode_dropdown) {
         char dropdown_opts[256];
         snprintf(dropdown_opts, sizeof(dropdown_opts), "%s\n%s\n%s\n%s\n%s",

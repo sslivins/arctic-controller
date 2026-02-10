@@ -224,12 +224,12 @@ namespace error2 {
 // Convert working mode enum to string
 inline const char* workingModeToString(WorkingMode mode) {
     switch (mode) {
-        case WorkingMode::COOLING:         return "Cooling";
-        case WorkingMode::FLOOR_HEATING:   return "Floor Heating";
-        case WorkingMode::FAN_COIL_HEATING: return "Fan Coil Heating";
-        case WorkingMode::HOT_WATER:       return "Hot Water";
-        case WorkingMode::AUTO:            return "Auto";
-        default:                           return "Unknown";
+        case WorkingMode::COOLING:         return "cooling";
+        case WorkingMode::FLOOR_HEATING:   return "floor_heating";
+        case WorkingMode::FAN_COIL_HEATING: return "fan_coil_heating";
+        case WorkingMode::HOT_WATER:       return "hot_water";
+        case WorkingMode::AUTO:            return "auto";
+        default:                           return "unknown";
     }
 }
 
