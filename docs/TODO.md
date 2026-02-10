@@ -77,11 +77,17 @@ All temperatures in Celsius (native units). snake_case naming.
 - [ ] Localize settings menu "Demo Mode" and "Temperature" row labels
 
 ## Web Interface
-- [ ] Dashboard page showing heat pump status
-- [ ] Temperature/setpoint controls
-- [ ] P-parameter editor
-- [ ] Settings page (demo mode, temp units, etc.)
-- [ ] Mobile-responsive design
+- [x] Dashboard with power toggle, mode selector, component status indicators
+- [x] Temperature display for all 9 sensors (tank, outlet, inlet, outdoor, discharge, suction, coils, IPM)
+- [x] Setpoint controls with ± adjustment buttons (cooling, heating, hot water)
+- [x] System readings (compressor freq, fan RPM, voltages, pressures, EEV, power)
+- [x] Active errors with severity badges, resolution text, timestamps
+- [x] Error history with occurred/cleared timestamps
+- [x] P-parameter editor page with category grouping and inline editing
+- [x] 3-tab navigation (Dashboard, Parameters, Settings)
+- [x] Full i18n (EN/FR/ES) for all new UI elements (~55 new translation keys)
+- [x] Mobile-responsive design (grid breakpoints for all new components)
+- [ ] Settings page (demo mode toggle, temp units via web)
 
 ## Time Settings
 - [x] Fixed duplicate time_screen.cpp conflict (removed old file from CMakeLists)
