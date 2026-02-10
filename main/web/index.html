@@ -143,8 +143,8 @@
                 
                 // Heat Pump Controls
                 power: 'Power',
-                turnOn: 'Turn On',
-                turnOff: 'Turn Off',
+                turnOn: 'Power On',
+                turnOff: 'Power Off',
                 controls: 'Controls',
                 modeSelect: 'Operating Mode',
                 
@@ -347,8 +347,8 @@
                 
                 // Heat Pump Controls
                 power: 'Alimentation',
-                turnOn: 'Allumer',
-                turnOff: 'Éteindre',
+                turnOn: 'Marche',
+                turnOff: 'Arrêt',
                 controls: 'Commandes',
                 modeSelect: 'Mode de fonctionnement',
                 
@@ -551,8 +551,8 @@
                 
                 // Heat Pump Controls
                 power: 'Energía',
-                turnOn: 'Encender',
-                turnOff: 'Apagar',
+                turnOn: 'Encendido',
+                turnOff: 'Apagado',
                 controls: 'Controles',
                 modeSelect: 'Modo de operación',
                 
@@ -1918,7 +1918,7 @@
                                             :class="heatpump.unit_on ? 'on' : 'off'"
                                             :disabled="!heatpump.connected || controlLoading"
                                             @click="togglePower()">
-                                        <span x-text="heatpump.unit_on ? '⏻ ' + t('turnOff') : '⏻ ' + t('turnOn')"></span>
+                                        <span x-text="heatpump.unit_on ? '⏻ ' + t('turnOn') : '⏻ ' + t('turnOff')"></span>
                                     </button>
                                     <div class="hp-mode-badge" 
                                          :class="{ 
