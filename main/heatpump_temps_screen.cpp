@@ -10,6 +10,7 @@
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "app_preferences.h"
+#include "i18n/i18n.h"
 #include <esp_log.h>
 #include <stdio.h>
 
@@ -269,10 +270,10 @@ void heatpump_temps_show(heatpump_temps_close_cb_t on_close) {
     // Title
     lv_obj_t* title = lv_label_create(header);
     if (app_prefs_is_demo_mode()) {
-        lv_label_set_text(title, "DEMO MODE - Temperatures");
+        lv_label_set_text(title, i18n_get(STR_HP_DEMO_TEMPERATURES));
         lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
     } else {
-        lv_label_set_text(title, "Temperatures");
+        lv_label_set_text(title, i18n_get(STR_HP_TEMPERATURES));
         lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     }
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
@@ -290,21 +291,21 @@ void heatpump_temps_show(heatpump_temps_close_cb_t on_close) {
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
     
     // Temperature rows - Water temperatures first
-    create_temp_row(content, "Water Tank", &state.tank_temp);
-    create_temp_row(content, "Water Outlet", &state.outlet_temp);
-    create_temp_row(content, "Water Inlet", &state.inlet_temp);
+    create_temp_row(content, i18n_get(STR_HP_WATER_TANK), &state.tank_temp);
+    create_temp_row(content, i18n_get(STR_HP_WATER_OUTLET), &state.outlet_temp);
+    create_temp_row(content, i18n_get(STR_HP_WATER_INLET), &state.inlet_temp);
     
     // Ambient and refrigerant temps
-    create_temp_row(content, "Outdoor Ambient", &state.outdoor_temp);
-    create_temp_row(content, "Discharge", &state.discharge_temp);
-    create_temp_row(content, "Suction", &state.suction_temp);
+    create_temp_row(content, i18n_get(STR_HP_OUTDOOR_AMBIENT), &state.outdoor_temp);
+    create_temp_row(content, i18n_get(STR_HP_DISCHARGE), &state.discharge_temp);
+    create_temp_row(content, i18n_get(STR_HP_SUCTION), &state.suction_temp);
     
     // Coil temps
-    create_temp_row(content, "Outdoor Coil", &state.outdoor_coil_temp);
-    create_temp_row(content, "Indoor Coil", &state.indoor_coil_temp);
+    create_temp_row(content, i18n_get(STR_HP_OUTDOOR_COIL), &state.outdoor_coil_temp);
+    create_temp_row(content, i18n_get(STR_HP_INDOOR_COIL), &state.indoor_coil_temp);
     
     // Module temp
-    create_temp_row(content, "IPM Module", &state.ipm_temp);
+    create_temp_row(content, i18n_get(STR_HP_IPM_MODULE), &state.ipm_temp);
     
     state.shown = true;
     
@@ -315,7 +316,7 @@ void heatpump_temps_show(heatpump_temps_close_cb_t on_close) {
     update_readings();
     
     // Load with slide animation (main screen moves up)
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_TOP, 400, 0, false);
+    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
 }
 
 void heatpump_temps_hide(void) {

@@ -1234,8 +1234,10 @@ paths:
       summary: Get error information and history
       description: |
         Returns detailed information about active errors and error history.
-        Each error includes code, name, description, and severity (info, warning, error, critical).
-        History shows when errors occurred and cleared with timestamps.
+        Each error includes Arctic error code, name, description, resolution steps, and severity.
+        History shows when errors occurred and cleared with UTC timestamps.
+        In demo mode, returns sample errors for testing.
+        All timestamps are Unix epoch seconds in UTC.
       operationId: getHeatpumpErrors
       security:
         - apiKey: []
@@ -1272,8 +1274,8 @@ paths:
                       properties:
                         code:
                           type: string
-                          description: Error code (e.g., "E01")
-                          example: "E23"
+                          description: Arctic error code (e.g., "P02", "E01", "r01", "FA")
+                          example: "P02"
                         name:
                           type: string
                           description: Short error name
@@ -1281,69 +1283,66 @@ paths:
                         description:
                           type: string
                           description: Human-readable description
-                          example: "High pressure protection triggered"
+                          example: "High pressure protection activated"
+                        resolution:
+                          type: string
+                          description: Suggested resolution steps
+                          example: "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked."
                         severity:
                           type: string
                           enum: [info, warning, error, critical]
-                          example: "critical"
-                        register:
+                          example: "warning"
+                        occurred:
                           type: integer
-                          description: Error register number (1 or 2)
-                          example: 2
+                          nullable: true
+                          description: Unix timestamp (UTC) when error first appeared
+                          example: 1739145600
                         active:
                           type: boolean
                           description: Whether error is currently active
                   history:
                     type: array
-                    description: Error history (most recent first, up to 32 entries)
+                    description: Error history (most recent first, up to 10 entries)
                     items:
                       type: object
                       properties:
                         code:
                           type: string
-                          description: Error code
+                          description: Arctic error code
                         occurred:
                           type: integer
                           nullable: true
-                          description: Unix timestamp when error occurred
+                          description: Unix timestamp (UTC) when error occurred
                         cleared:
                           type: integer
                           nullable: true
-                          description: Unix timestamp when error cleared
+                          description: Unix timestamp (UTC) when error cleared
                         active:
                           type: boolean
                           description: Whether error is still active
-                  raw:
-                    type: object
-                    description: Raw register values for debugging
-                    properties:
-                      error1:
-                        type: integer
-                        description: Register 2137 value
-                      error2:
-                        type: integer
-                        description: Register 2138 value
               example:
-                demo_mode: false
+                demo_mode: true
                 connected: true
                 has_errors: true
-                error_count: 1
-                highest_severity: "critical"
+                error_count: 3
+                highest_severity: "warning"
                 active:
-                  - code: "E23"
+                  - code: "P02"
                     name: "HIGH_PRESSURE"
-                    description: "High pressure protection triggered"
-                    severity: "critical"
-                    register: 2
+                    description: "High pressure protection activated"
+                    resolution: "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked."
+                    severity: "warning"
+                    occurred: 1739145600
                     active: true
                 history:
-                  - code: "E23"
-                    occurred: 1739145600
-                    cleared: null
-                    active: true
-                raw:
-                  error1: 0
-                  error2: 64
+                  - code: "E26"
+                    occurred: 1739138400
+                    cleared: 1739142000
+                    active: false
+                  - code: "E19"
+                    occurred: 1739131200
+                    cleared: 1739134800
+                    active: false
         '401':
           description: API key required
           content:

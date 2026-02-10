@@ -7,6 +7,7 @@
 #include "modbus/arctic_registers.h"
 #include <cJSON.h>
 #include <esp_log.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -15,48 +16,174 @@ static const char* TAG = "hp_errors";
 namespace arctic {
 
 // ============================================================================
-// Error Definitions
+// Error Definitions - Based on Arctic Heat Pump documentation
 // ============================================================================
 
-// Error register 1 (2137) definitions
+// Error register 1 (2137) definitions - mapped to Arctic display codes
 static const ErrorDef s_error1_defs[] = {
-    { error1::INDOOR_EE,         "E01", "INDOOR_EE",        "Indoor unit EEPROM error",           ErrorSeverity::ERROR },
-    { error1::OUTDOOR_EE,        "E02", "OUTDOOR_EE",       "Outdoor unit EEPROM error",          ErrorSeverity::ERROR },
-    { error1::INLET_TEMP_SENS,   "E03", "INLET_SENS",       "Inlet water temperature sensor fault", ErrorSeverity::ERROR },
-    { error1::OUTLET_TEMP_SENS,  "E04", "OUTLET_SENS",      "Outlet water temperature sensor fault", ErrorSeverity::ERROR },
-    { error1::INDOOR_COIL_SENS,  "E05", "INDOOR_COIL_SENS", "Indoor coil temperature sensor fault", ErrorSeverity::ERROR },
-    { error1::OUTDOOR_COIL_SENS, "E06", "OUTDOOR_COIL_SENS","Outdoor coil temperature sensor fault", ErrorSeverity::ERROR },
-    { error1::DISCHARGE_SENS,    "E07", "DISCHARGE_SENS",   "Discharge temperature sensor fault", ErrorSeverity::ERROR },
-    { error1::SUCTION_SENS,      "E08", "SUCTION_SENS",     "Suction temperature sensor fault",   ErrorSeverity::ERROR },
-    { error1::OUTDOOR_TEMP_SENS, "E09", "OUTDOOR_SENS",     "Outdoor ambient temperature sensor fault", ErrorSeverity::ERROR },
-    { error1::INDOOR_OUTDOOR_COMM, "E10", "COMM_IO",        "Indoor/outdoor unit communication failure", ErrorSeverity::CRITICAL },
-    { error1::WIRED_CTRL_COMM,   "E11", "COMM_CTRL",        "Wired controller communication failure", ErrorSeverity::WARNING },
-    { error1::COMP_START,        "E12", "COMP_START",       "Compressor failed to start",         ErrorSeverity::CRITICAL },
-    { error1::COMP_DRIVE,        "E13", "COMP_DRIVE",       "Compressor drive fault",             ErrorSeverity::CRITICAL },
-    { error1::IPM_ERROR,         "E14", "IPM_ERROR",        "Inverter power module (IPM) fault",  ErrorSeverity::CRITICAL },
-    { error1::COMP_TOP_PROT,     "E15", "COMP_OVERHEAT",    "Compressor overheat protection",     ErrorSeverity::CRITICAL },
-    { error1::AC_VOLTAGE_PROT,   "E16", "AC_VOLTAGE",       "AC supply voltage out of range",     ErrorSeverity::ERROR },
+    // Bit 0 - Indoor EE (no Arctic code documented)
+    { error1::INDOOR_EE,         "E27", "INDOOR_EE",        "Indoor unit EEPROM error",
+      "Contact the dealer.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 1 - Outdoor EE = E28
+    { error1::OUTDOOR_EE,        "E28", "OUTDOOR_EE",       "Outdoor unit EEPROM fault",
+      "Contact the dealer.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 2 - Inlet water temp sensor = E19
+    { error1::INLET_TEMP_SENS,   "E19", "INLET_SENS",       "Inlet water temperature sensor fault",
+      "Check the inlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 3 - Outlet water temp sensor = E18
+    { error1::OUTLET_TEMP_SENS,  "E18", "OUTLET_SENS",      "Outlet water temperature sensor fault",
+      "Check the outlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 4 - Cooling coil antifreeze = P30/E13
+    { error1::INDOOR_COIL_SENS,  "E13", "COIL_SENS",        "Cooling coil temperature sensor fault",
+      "Check the coil temperature sensor for a short or open circuit and correct or replace.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 5 - External coil temp sensor = E05
+    { error1::OUTDOOR_COIL_SENS, "E05", "COIL_SENS",        "Heat pump coil temperature sensor fault",
+      "Check the heat pump coil temperature sensor and wires for a short or open circuit and correct or replace sensors.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 6 - Discharge temp sensor = E01
+    { error1::DISCHARGE_SENS,    "E01", "DISCHARGE_SENS",   "Compressor discharge temperature sensor fault",
+      "Check if the compressor discharge temperature sensor for short or open circuit and correct or replace.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 7 - Suction temp sensor = E09
+    { error1::SUCTION_SENS,      "E09", "SUCTION_SENS",     "Compressor suction temperature sensor fault",
+      "Check if the compressor suction temperature sensor for short or open circuit and correct or replace.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 8 - Ambient temp sensor = E22
+    { error1::OUTDOOR_TEMP_SENS, "E22", "AMBIENT_SENS",     "Outdoor ambient temperature sensor fault",
+      "Check if the ambient temperature sensor for the heat pump or its wiring has a short or open circuit and correct or replace.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 9 - Drive/main board comm (no Arctic code)
+    { error1::INDOOR_OUTDOOR_COMM, "E10", "COMM_IO",        "Communication error between drive board and main board",
+      "Contact the dealer.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 10 - Wired controller comm = E21
+    { error1::WIRED_CTRL_COMM,   "E21", "COMM_CTRL",        "Wired controller communication fault",
+      "Check the wired controller's cable and its connections.",
+      ErrorSeverity::WARNING },
+    
+    // Bit 11 - Compressor start = r02
+    { error1::COMP_START,        "r02", "COMP_START",       "Compressor start fault",
+      "Contact the dealer.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 12 - Indoor/outdoor comm (no Arctic code)
+    { error1::COMP_DRIVE,        "E12", "COMM_UNIT",        "Communication error between indoor and outdoor unit",
+      "Contact the dealer.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 13 - IPM error = r01
+    { error1::IPM_ERROR,         "r01", "IPM_FAULT",        "IPM module fault",
+      "Contact the dealer.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 14 - High outlet water temp = PA
+    { error1::COMP_TOP_PROT,     "PA",  "TANK_TEMP",        "Tank temperature protection activated",
+      "Contact the dealer.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 15 - AC voltage = r10
+    { error1::AC_VOLTAGE_PROT,   "r10", "AC_VOLTAGE",       "AC voltage too high or too low protection",
+      "Contact the dealer.",
+      ErrorSeverity::ERROR },
 };
 static const int s_error1_count = sizeof(s_error1_defs) / sizeof(s_error1_defs[0]);
 
-// Error register 2 (2138) definitions
+// Error register 2 (2138) definitions - mapped to Arctic display codes
 static const ErrorDef s_error2_defs[] = {
-    { error2::AC_CURRENT_PROT,   "E17", "AC_CURRENT",       "AC supply current protection",       ErrorSeverity::ERROR },
-    { error2::COMP_CURRENT_PROT, "E18", "COMP_CURRENT",     "Compressor overcurrent protection",  ErrorSeverity::CRITICAL },
-    { error2::FAN_MOTOR,         "E19", "FAN_MOTOR",        "Fan motor fault",                    ErrorSeverity::ERROR },
-    { error2::BUS_VOLTAGE_PROT,  "E20", "BUS_VOLTAGE",      "DC bus voltage protection",          ErrorSeverity::CRITICAL },
-    { error2::IPM_HIGH_TEMP,     "E21", "IPM_OVERHEAT",     "IPM high temperature protection",    ErrorSeverity::CRITICAL },
-    { error2::HIGH_DISCHARGE_TEMP, "E22", "HIGH_DISCHARGE", "Compressor discharge temperature too high", ErrorSeverity::CRITICAL },
-    { error2::HIGH_PRESSURE,     "E23", "HIGH_PRESSURE",    "High pressure protection triggered", ErrorSeverity::CRITICAL },
-    { error2::LOW_PRESSURE,      "E24", "LOW_PRESSURE",     "Low pressure protection triggered",  ErrorSeverity::ERROR },
-    { error2::WATER_FLOW,        "E25", "WATER_FLOW",       "Water flow sensor fault or no flow", ErrorSeverity::ERROR },
-    { error2::COOLING_HIGH_COIL, "E26", "COIL_OVERHEAT",    "Outdoor coil temperature too high",  ErrorSeverity::WARNING },
-    { error2::LOW_AMBIENT_TEMP,  "E27", "LOW_AMBIENT",      "Ambient temperature too low for operation", ErrorSeverity::WARNING },
-    { error2::EEV_LOW_PRESS,     "E28", "EEV_LOW_PRESS",    "EEV low pressure protection",        ErrorSeverity::ERROR },
-    { error2::EVI_LOW_PRESS,     "E29", "EVI_LOW_PRESS",    "EVI low pressure protection",        ErrorSeverity::ERROR },
-    { error2::WATER_TEMP_DIFF,   "E30", "TEMP_DIFF",        "Inlet/outlet water temperature difference too large", ErrorSeverity::WARNING },
-    { error2::LOW_OUTLET_TEMP,   "E31", "LOW_OUTLET",       "Outlet water temperature too low (freeze protection)", ErrorSeverity::WARNING },
-    { error2::COMP_PRESS_DIFF,   "E32", "COMP_PRESS",       "Compressor pressure differential fault", ErrorSeverity::ERROR },
+    // Bit 0 - AC current = P19
+    { error2::AC_CURRENT_PROT,   "P19", "AC_CURRENT",       "AC current protection",
+      "Contact the dealer.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 1 - Compressor current = r06
+    { error2::COMP_CURRENT_PROT, "r06", "COMP_PHASE",       "Compressor phase current protection",
+      "This applies to 3-phase units where the phasing of the wires is incorrect and needs to be corrected.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 2 - DC fan motor = FA
+    { error2::FAN_MOTOR,         "FA",  "FAN_MOTOR",        "DC fan motor protection",
+      "Contact the dealer.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 3 - Bus voltage = r11
+    { error2::BUS_VOLTAGE_PROT,  "r11", "BUS_VOLTAGE",      "DC bus voltage protection",
+      "Contact the dealer.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 4 - IPM high temp = r05
+    { error2::IPM_HIGH_TEMP,     "r05", "IPM_OVERHEAT",     "IPM module temperature too high protection",
+      "Contact the dealer.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 5 - High discharge temp = P11
+    { error2::HIGH_DISCHARGE_TEMP, "P11", "HIGH_DISCHARGE", "Compressor discharge temperature too high protection",
+      "1) Check water system is operating normal, look for reduction in normal water flow. 2) Check whether there was a refrigerant leak and repair. 3) Verify unit is in normal operation with proper exhaust temperature and system pressure.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 6 - High pressure switch = P02
+    { error2::HIGH_PRESSURE,     "P02", "HIGH_PRESSURE",    "High pressure protection activated",
+      "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked or if evaporator fins are blocked. 3) Check whether snow or ice has built up inside the unit. 4) Check that the water tank temperature setting is not too high.",
+      ErrorSeverity::CRITICAL },
+    
+    // Bit 7 - Low pressure switch = P06
+    { error2::LOW_PRESSURE,      "P06", "LOW_PRESSURE",     "Low pressure protection activated",
+      "1) Check whether the unit is leaking refrigerant. 2) Repair and vacuum system, then refill with exact amount of refrigerant as per nameplate.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 8 - Water flow switch = P01
+    { error2::WATER_FLOW,        "P01", "WATER_FLOW",       "Water flow switch protection",
+      "Flow is too low or wiring is open circuit. Check the water system, water pump, and operation of water flow switch and correct problem.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 9 - Cooling coil overheat = P27
+    { error2::COOLING_HIGH_COIL, "P27", "COIL_OVERHEAT",    "Cooling coil temperature overheating protection",
+      "Check that the fan is in good condition and that the evaporator fins are not in need of cleaning.",
+      ErrorSeverity::WARNING },
+    
+    // Bit 10 - Low ambient temp (no Arctic code)
+    { error2::LOW_AMBIENT_TEMP,  "E26", "LOW_AMBIENT",      "Low ambient temperature protection",
+      "Ambient temperature is too low for operation. Wait for conditions to improve.",
+      ErrorSeverity::WARNING },
+    
+    // Bit 11 - Primary low pressure = EC
+    { error2::EEV_LOW_PRESS,     "EC",  "EEV_LOW_PRESS",    "EEV circuit low pressure protection",
+      "1) Check whether the unit is leaking refrigerant. 2) After leak repair and vacuum, refill with correct refrigerant amount per nameplate.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 12 - Secondary low pressure = ED
+    { error2::EVI_LOW_PRESS,     "ED",  "LOW_PRESS_SENS",   "Low pressure protection (pressure sensor)",
+      "Check if the ambient temperature sensor is short circuit or disconnected.",
+      ErrorSeverity::ERROR },
+    
+    // Bit 13 - Temp difference = P15
+    { error2::WATER_TEMP_DIFF,   "P15", "TEMP_DIFF",        "Inlet/outlet temperature difference too large",
+      "1) Check if water system is operating abnormally, such as water flow is too low. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure.",
+      ErrorSeverity::WARNING },
+    
+    // Bit 14 - Low outlet temp = P16
+    { error2::LOW_OUTLET_TEMP,   "P16", "LOW_OUTLET",       "Outlet water temperature too low protection",
+      "1) Check water system is normal and water flow is adequate. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure.",
+      ErrorSeverity::WARNING },
+    
+    // Bit 15 - Compressor differential = r20/FF
+    { error2::COMP_PRESS_DIFF,   "r20", "COMP_PROTECT",     "Compressor protection",
+      "Contact the dealer.",
+      ErrorSeverity::ERROR },
 };
 static const int s_error2_count = sizeof(s_error2_defs) / sizeof(s_error2_defs[0]);
 
@@ -70,8 +197,13 @@ static int s_history_count = 0;
 static uint16_t s_last_error1 = 0;
 static uint16_t s_last_error2 = 0;
 
+// Track when each error first appeared (for duration calculation)
+// Index matches the error definition arrays
+static time_t s_error1_first_seen[16] = {0};
+static time_t s_error2_first_seen[16] = {0};
+
 // Add entry to history ring buffer
-static void addHistoryEntry(const char* code, bool is_clearing) {
+static void addHistoryEntry(const char* code, bool is_clearing, time_t occurred_time) {
     ErrorHistoryEntry& entry = s_history[s_history_head];
     strncpy(entry.code, code, sizeof(entry.code) - 1);
     entry.code[sizeof(entry.code) - 1] = '\0';
@@ -79,7 +211,7 @@ static void addHistoryEntry(const char* code, bool is_clearing) {
     time_t now = time(nullptr);
     
     if (is_clearing) {
-        entry.occurred = 0;
+        entry.occurred = occurred_time;  // When it originally occurred
         entry.cleared = now;
         entry.is_active = false;
     } else {
@@ -120,10 +252,12 @@ int getActiveErrors(ActiveError* errors, int max_errors) {
             err.code = s_error1_defs[i].code;
             err.name = s_error1_defs[i].name;
             err.description = s_error1_defs[i].description;
+            err.resolution = s_error1_defs[i].resolution;
             err.severity = s_error1_defs[i].severity;
             err.register_num = 1;
             err.mask = s_error1_defs[i].mask;
-            err.first_seen = now;  // Would need tracking for accurate value
+            // Use tracked first_seen time if available
+            err.first_seen = s_error1_first_seen[i] > 0 ? s_error1_first_seen[i] : now;
             err.last_seen = now;
             err.active = true;
         }
@@ -136,10 +270,12 @@ int getActiveErrors(ActiveError* errors, int max_errors) {
             err.code = s_error2_defs[i].code;
             err.name = s_error2_defs[i].name;
             err.description = s_error2_defs[i].description;
+            err.resolution = s_error2_defs[i].resolution;
             err.severity = s_error2_defs[i].severity;
             err.register_num = 2;
             err.mask = s_error2_defs[i].mask;
-            err.first_seen = now;
+            // Use tracked first_seen time if available
+            err.first_seen = s_error2_first_seen[i] > 0 ? s_error2_first_seen[i] : now;
             err.last_seen = now;
             err.active = true;
         }
@@ -183,6 +319,8 @@ ErrorSeverity getHighestSeverity() {
 }
 
 void updateErrorHistory(uint16_t error1, uint16_t error2) {
+    time_t now = time(nullptr);
+    
     // Check for newly set errors
     uint16_t new_error1 = error1 & ~s_last_error1;
     uint16_t new_error2 = error2 & ~s_last_error2;
@@ -191,31 +329,41 @@ void updateErrorHistory(uint16_t error1, uint16_t error2) {
     uint16_t cleared_error1 = s_last_error1 & ~error1;
     uint16_t cleared_error2 = s_last_error2 & ~error2;
     
-    // Log new errors
+    // Log new errors and track first_seen time
     for (int i = 0; i < s_error1_count; i++) {
         if (new_error1 & s_error1_defs[i].mask) {
+            s_error1_first_seen[i] = now;  // Track when error started
             ESP_LOGW(TAG, "Error SET: %s - %s", s_error1_defs[i].code, s_error1_defs[i].description);
-            addHistoryEntry(s_error1_defs[i].code, false);
+            addHistoryEntry(s_error1_defs[i].code, false, 0);
         }
     }
     for (int i = 0; i < s_error2_count; i++) {
         if (new_error2 & s_error2_defs[i].mask) {
+            s_error2_first_seen[i] = now;  // Track when error started
             ESP_LOGW(TAG, "Error SET: %s - %s", s_error2_defs[i].code, s_error2_defs[i].description);
-            addHistoryEntry(s_error2_defs[i].code, false);
+            addHistoryEntry(s_error2_defs[i].code, false, 0);
         }
     }
     
-    // Log cleared errors
+    // Log cleared errors with duration
     for (int i = 0; i < s_error1_count; i++) {
         if (cleared_error1 & s_error1_defs[i].mask) {
-            ESP_LOGI(TAG, "Error CLEARED: %s - %s", s_error1_defs[i].code, s_error1_defs[i].description);
-            addHistoryEntry(s_error1_defs[i].code, true);
+            time_t occurred = s_error1_first_seen[i];
+            time_t duration = (occurred > 0 && now > occurred) ? (now - occurred) : 0;
+            ESP_LOGI(TAG, "Error CLEARED: %s - %s (duration: %lld sec)", 
+                     s_error1_defs[i].code, s_error1_defs[i].description, (long long)duration);
+            addHistoryEntry(s_error1_defs[i].code, true, occurred);
+            s_error1_first_seen[i] = 0;  // Clear tracking
         }
     }
     for (int i = 0; i < s_error2_count; i++) {
         if (cleared_error2 & s_error2_defs[i].mask) {
-            ESP_LOGI(TAG, "Error CLEARED: %s - %s", s_error2_defs[i].code, s_error2_defs[i].description);
-            addHistoryEntry(s_error2_defs[i].code, true);
+            time_t occurred = s_error2_first_seen[i];
+            time_t duration = (occurred > 0 && now > occurred) ? (now - occurred) : 0;
+            ESP_LOGI(TAG, "Error CLEARED: %s - %s (duration: %lld sec)", 
+                     s_error2_defs[i].code, s_error2_defs[i].description, (long long)duration);
+            addHistoryEntry(s_error2_defs[i].code, true, occurred);
+            s_error2_first_seen[i] = 0;  // Clear tracking
         }
     }
     
@@ -251,6 +399,55 @@ const char* severityToString(ErrorSeverity severity) {
     }
 }
 
+const char* formatDuration(time_t start_time, time_t end_time) {
+    static char buf[32];
+    
+    // If no valid start time, return unknown
+    if (start_time <= 0) {
+        return "Unknown";
+    }
+    
+    // If end_time is 0, error is still active - use current time
+    time_t now = (end_time > 0) ? end_time : time(nullptr);
+    
+    // Handle edge case where now < start (clock sync issues)
+    if (now < start_time) {
+        return "Active";
+    }
+    
+    time_t duration = now - start_time;
+    
+    if (duration < 60) {
+        snprintf(buf, sizeof(buf), "%llds", (long long)duration);
+    } else if (duration < 3600) {
+        int mins = duration / 60;
+        int secs = duration % 60;
+        if (secs > 0) {
+            snprintf(buf, sizeof(buf), "%dm %ds", mins, secs);
+        } else {
+            snprintf(buf, sizeof(buf), "%dm", mins);
+        }
+    } else if (duration < 86400) {
+        int hours = duration / 3600;
+        int mins = (duration % 3600) / 60;
+        if (mins > 0) {
+            snprintf(buf, sizeof(buf), "%dh %dm", hours, mins);
+        } else {
+            snprintf(buf, sizeof(buf), "%dh", hours);
+        }
+    } else {
+        int days = duration / 86400;
+        int hours = (duration % 86400) / 3600;
+        if (hours > 0) {
+            snprintf(buf, sizeof(buf), "%dd %dh", days, hours);
+        } else {
+            snprintf(buf, sizeof(buf), "%dd", days);
+        }
+    }
+    
+    return buf;
+}
+
 bool isErrorActive(uint8_t register_num, uint16_t mask) {
     HeatPumpState state = getState();
     if (register_num == 1) {
@@ -272,8 +469,13 @@ char* getErrorsAsJson() {
         cJSON_AddStringToObject(err, "code", errors[i].code);
         cJSON_AddStringToObject(err, "name", errors[i].name);
         cJSON_AddStringToObject(err, "description", errors[i].description);
+        cJSON_AddStringToObject(err, "resolution", errors[i].resolution);
         cJSON_AddStringToObject(err, "severity", severityToString(errors[i].severity));
-        cJSON_AddNumberToObject(err, "register", errors[i].register_num);
+        if (errors[i].first_seen > 0) {
+            cJSON_AddNumberToObject(err, "occurred", (double)errors[i].first_seen);
+        } else {
+            cJSON_AddNullToObject(err, "occurred");
+        }
         cJSON_AddBoolToObject(err, "active", errors[i].active);
         cJSON_AddItemToArray(root, err);
     }

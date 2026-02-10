@@ -50,15 +50,31 @@ All temperatures in Celsius (native units). snake_case naming.
 - [x] Parse error registers (2137, 2138) into human-readable messages
 - [x] UI: Error indicator on main screen when errors present
 - [x] UI: Error details screen showing active errors with descriptions
+- [x] Map Arctic error codes (E01, P02, r01, FA, etc.) to register bits
+- [x] Resolution text for each error code (expandable on tap)
+- [x] Duration and timestamp tracking (12/24h format from settings)
+- [x] Visual distinction: active errors (dark red) vs cleared errors (dimmed)
+- [x] Error history limited to 10 entries
 - [x] API: Include decoded error list in `/api/heatpump/status`
 - [x] API: `GET /api/heatpump/errors` - Dedicated endpoint with error history
-- [x] Store error history with timestamps (ring buffer, 32 entries)
+- [x] API: Demo mode returns sample errors (1 active + 2 cleared)
+- [x] Store error history with timestamps (ring buffer, 10 entries)
+- [x] OpenAPI spec updated with resolution, occurred fields; removed register/raw
 
 ## Localization (i18n)
-- [x] i18n infrastructure in place (`i18n.h`)
-- [ ] Add strings for all heat pump UI elements
-- [ ] Translate to additional languages (French, Spanish, etc.)
-- [ ] Latin-extended fonts already in use for i18n support
+- [x] i18n infrastructure in place (`i18n.h`, `strings.h`, `i18n.cpp`)
+- [x] Add strings for all heat pump UI elements (106 string IDs)
+- [x] Translate to French and Spanish (all 106 strings)
+- [x] Latin-extended fonts already in use for i18n support
+- [x] All 5 heat pump screens converted to `i18n_get()` calls
+- [x] P-parameter names translated (25 params, EN/FR/ES)
+- [x] P-parameter category headers translated (EEV, Defrost, Protection, Auto Mode, Pump & Valve)
+- [x] Range format string in edit dialogs translated
+- [x] Settings menu refreshes on back-navigation to pick up language changes
+- [x] Language screen title updates immediately on language change
+- [ ] Localize error resolution text (currently English-only from Arctic docs)
+- [ ] Localize P-parameter descriptions (currently English technical text)
+- [ ] Localize settings menu "Demo Mode" and "Temperature" row labels
 
 ## Web Interface
 - [ ] Dashboard page showing heat pump status
@@ -67,7 +83,16 @@ All temperatures in Celsius (native units). snake_case naming.
 - [ ] Settings page (demo mode, temp units, etc.)
 - [ ] Mobile-responsive design
 
-## Minor UI Items
+## Time Settings
+- [x] Fixed duplicate time_screen.cpp conflict (removed old file from CMakeLists)
+- [x] 12/24h format now syncs via `time_mgr_set/get_24h_format()`
+- [x] Timezone panel overlap fixed (flex layout)
+- [x] Rounded corners on timezone roller
+
+## UI Polish
+- [x] Fade animations (300ms) on all heat pump sub-screens
+- [x] Larger fonts (32/24px) on error cards
+- [x] Removed snake_case names from error display
 - [ ] Status bar fonts - migrate to `ui_common.h` Latin-extended fonts
 - [ ] Startup animation fonts - use Latin-extended fonts
 - [ ] More prominent connection status indicator on main screen?

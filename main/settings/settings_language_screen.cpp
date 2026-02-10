@@ -33,6 +33,7 @@ typedef struct {
     // Language buttons
     lv_obj_t* lang_buttons[LANG_COUNT];
     lv_obj_t* current_label;
+    lv_obj_t* title_label;
     
 } language_screen_state_t;
 
@@ -132,11 +133,11 @@ static void create_header(void)
     lv_obj_center(back_icon);
     
     // Title
-    lv_obj_t* title = lv_label_create(s_state.header);
-    lv_label_set_text(title, i18n_get(STR_SETTINGS_LANGUAGE));
-    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
+    s_state.title_label = lv_label_create(s_state.header);
+    lv_label_set_text(s_state.title_label, i18n_get(STR_SETTINGS_LANGUAGE));
+    lv_obj_set_style_text_font(s_state.title_label, UI_FONT_HEADER, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_state.title_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(s_state.title_label, LV_ALIGN_CENTER, 0, 0);
 }
 
 static void create_content(void)
@@ -259,6 +260,11 @@ static void language_btn_cb(lv_event_t* e)
 static void update_selection_ui(void)
 {
     language_t current = i18n_get_language();
+    
+    // Update header title
+    if (s_state.title_label) {
+        lv_label_set_text(s_state.title_label, i18n_get(STR_SETTINGS_LANGUAGE));
+    }
     
     // Update current language label
     if (s_state.current_label) {

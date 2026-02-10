@@ -2312,12 +2312,46 @@ static esp_err_t heatpump_errors_get_handler(httpd_req_t* req)
     cJSON_AddBoolToObject(root, "connected", hp.connected || demo_mode);
     
     if (demo_mode) {
-        // Demo mode - return empty errors
-        cJSON_AddBoolToObject(root, "has_errors", false);
-        cJSON_AddNumberToObject(root, "error_count", 0);
-        cJSON_AddStringToObject(root, "highest_severity", "info");
-        cJSON_AddArrayToObject(root, "active");
-        cJSON_AddArrayToObject(root, "history");
+        // Demo mode - return sample errors for testing
+        cJSON_AddBoolToObject(root, "has_errors", true);
+        cJSON_AddNumberToObject(root, "error_count", 3);
+        cJSON_AddStringToObject(root, "highest_severity", "warning");
+        
+        // Demo active errors
+        cJSON* active = cJSON_AddArrayToObject(root, "active");
+        
+        // Active error: P02 High Pressure (occurred 30 min ago)
+        cJSON* err1 = cJSON_CreateObject();
+        cJSON_AddStringToObject(err1, "code", "P02");
+        cJSON_AddStringToObject(err1, "name", "HIGH_PRESSURE");
+        cJSON_AddStringToObject(err1, "description", "High pressure protection activated");
+        cJSON_AddStringToObject(err1, "resolution", "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked.");
+        cJSON_AddStringToObject(err1, "severity", "warning");
+        cJSON_AddNumberToObject(err1, "occurred", (double)(time(NULL) - 1800));  // 30 min ago
+        cJSON_AddBoolToObject(err1, "active", true);
+        cJSON_AddItemToArray(active, err1);
+        
+        // Demo history
+        cJSON* history = cJSON_AddArrayToObject(root, "history");
+        
+        // Cleared error: E26 Low Ambient (2h ago, cleared 1h ago)
+        time_t now = time(NULL);
+        cJSON* hist1 = cJSON_CreateObject();
+        cJSON_AddStringToObject(hist1, "code", "E26");
+        cJSON_AddStringToObject(hist1, "description", "Low ambient temperature protection");
+        cJSON_AddNumberToObject(hist1, "occurred", (double)(now - 7200));   // 2h ago
+        cJSON_AddNumberToObject(hist1, "cleared", (double)(now - 3600));    // 1h ago
+        cJSON_AddBoolToObject(hist1, "is_active", false);
+        cJSON_AddItemToArray(history, hist1);
+        
+        // Cleared error: E19 Inlet Sensor (4h ago, cleared 3h ago)
+        cJSON* hist2 = cJSON_CreateObject();
+        cJSON_AddStringToObject(hist2, "code", "E19");
+        cJSON_AddStringToObject(hist2, "description", "Inlet water temperature sensor fault");
+        cJSON_AddNumberToObject(hist2, "occurred", (double)(now - 14400));  // 4h ago
+        cJSON_AddNumberToObject(hist2, "cleared", (double)(now - 10800));   // 3h ago
+        cJSON_AddBoolToObject(hist2, "is_active", false);
+        cJSON_AddItemToArray(history, hist2);
     } else {
         // Real mode
         int error_count = arctic::getActiveErrorCount();
@@ -2346,11 +2380,6 @@ static esp_err_t heatpump_errors_get_handler(httpd_req_t* req)
             free(history_json);
         }
     }
-    
-    // Raw register values (for debugging)
-    cJSON* raw = cJSON_AddObjectToObject(root, "raw");
-    cJSON_AddNumberToObject(raw, "error1", hp.error1);
-    cJSON_AddNumberToObject(raw, "error2", hp.error2);
     
     char* json_str = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json_str);

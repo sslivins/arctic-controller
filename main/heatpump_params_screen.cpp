@@ -13,6 +13,7 @@
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "app_preferences.h"
+#include "i18n/i18n.h"
 #include <esp_log.h>
 #include <stdio.h>
 #include <string.h>
@@ -49,7 +50,17 @@ static const char* get_param_unit_str(ParamUnit unit_type) {
 
 // Helper to format display name with P-code (e.g., "EEV Opening (P1)")
 static void format_param_display_name(char* buf, size_t buf_size, const HeatPumpParam* param) {
-    snprintf(buf, buf_size, "%s (%s)", param->name, param->p_code);
+    snprintf(buf, buf_size, "%s (%s)", i18n_get(param->name_id), param->p_code);
+}
+
+// Map category string from heatpump_params.h to i18n string ID
+static const char* get_category_i18n(const char* category) {
+    if (strcmp(category, "EEV") == 0)          return i18n_get(STR_HP_CAT_EEV);
+    if (strcmp(category, "Defrost") == 0)      return i18n_get(STR_HP_CAT_DEFROST);
+    if (strcmp(category, "Protection") == 0)   return i18n_get(STR_HP_CAT_PROTECTION);
+    if (strcmp(category, "Auto Mode") == 0)    return i18n_get(STR_HP_CAT_AUTO_MODE);
+    if (strcmp(category, "Pump & Valve") == 0) return i18n_get(STR_HP_CAT_PUMP_VALVE);
+    return category;  // Fallback to original
 }
 
 // ============================================================================
@@ -90,18 +101,18 @@ static struct {
     int current_setpoint_type = -1;
 } state;
 
-// Setpoint definitions (separate from P-parameters) - all are absolute temps
+// Setpoint definitions are initialized lazily to pick up i18n language
 struct SetpointDef {
-    const char* name;
-    const char* description;
+    string_id_t name_id;
+    const char* description;  // Technical - not translated
     int16_t min_val;    // In Celsius
     int16_t max_val;    // In Celsius
 };
 
 static const SetpointDef s_setpoints[] = {
-    {"Cooling Setpoint", "Target water temperature for cooling mode.", 5, 30},
-    {"Heating Setpoint", "Target water temperature for floor/fan heating mode.", 20, 60},
-    {"Hot Water Setpoint", "Target temperature for hot water tank.", 30, 60},
+    {STR_HP_COOLING_SETPOINT, "Target water temperature for cooling mode.", 5, 30},
+    {STR_HP_HEATING_SETPOINT, "Target water temperature for floor/fan heating mode.", 20, 60},
+    {STR_HP_HOT_WATER_SETPOINT, "Target temperature for hot water tank.", 30, 60},
 };
 
 // ============================================================================
@@ -152,7 +163,7 @@ static void set_demo_setpoint(int setpoint_type, int16_t value) {
 // Helper: show error popup for write failures
 static void show_settings_write_error(const char* message) {
     lv_obj_t* msgbox = lv_msgbox_create(lv_layer_top());
-    lv_msgbox_add_title(msgbox, "Communication Error");
+    lv_msgbox_add_title(msgbox, i18n_get(STR_HP_COMMUNICATION_ERROR));
     lv_msgbox_add_text(msgbox, message);
     lv_msgbox_add_close_button(msgbox);
     lv_obj_center(msgbox);
@@ -166,7 +177,7 @@ static void show_settings_write_error(const char* message) {
 // Wrapper for UI that shows error dialog on write failure
 static bool write_param_value_with_ui(int param_idx, int16_t value) {
     if (!heatpump_param_write_by_index(param_idx, value)) {
-        show_settings_write_error("Cannot save setting: Heat pump not connected");
+        show_settings_write_error(i18n_get(STR_HP_CANNOT_SAVE));
         return false;
     }
     return true;
@@ -316,7 +327,7 @@ static lv_obj_t* create_setpoint_row(lv_obj_t* parent, int setpoint_type, lv_obj
     
     // Setpoint name (left)
     lv_obj_t* name_lbl = lv_label_create(row);
-    lv_label_set_text(name_lbl, sp.name);
+    lv_label_set_text(name_lbl, i18n_get(sp.name_id));
     lv_obj_set_style_text_font(name_lbl, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(name_lbl, row_color, LV_PART_MAIN);
     lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 0, 0);
@@ -382,7 +393,7 @@ static void create_edit_dialog(void) {
     
     // Title in center
     state.edit_title = lv_label_create(header);
-    lv_label_set_text(state.edit_title, "Edit Parameter");
+    lv_label_set_text(state.edit_title, i18n_get(STR_HP_EDIT_PARAMETER));
     lv_obj_set_style_text_font(state.edit_title, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.edit_title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(state.edit_title, LV_ALIGN_CENTER, 0, 0);
@@ -542,7 +553,7 @@ static void edit_save_cb(lv_event_t* e) {
             success = true;
         } else if (!hp.connected) {
             // Disconnected - show error
-            show_settings_write_error("Cannot save setpoint: Heat pump not connected");
+            show_settings_write_error(i18n_get(STR_HP_CANNOT_SAVE_SETPOINT));
             hide_edit_dialog();
             return;
         } else {
@@ -710,11 +721,11 @@ static void show_edit_dialog(int param_idx) {
     }
     
     if (unit_str[0]) {
-        snprintf(range_buf, sizeof(range_buf), "Range: %d to %d %s", 
-                 display_min, display_max, unit_str);
+        snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s", 
+                 i18n_get(STR_HP_RANGE_FMT), display_min, display_max, unit_str);
     } else {
-        snprintf(range_buf, sizeof(range_buf), "Range: %d to %d", 
-                 display_min, display_max);
+        snprintf(range_buf, sizeof(range_buf), "%s %d - %d", 
+                 i18n_get(STR_HP_RANGE_FMT), display_min, display_max);
     }
     lv_label_set_text(state.edit_range_label, range_buf);
     
@@ -754,15 +765,15 @@ static void show_setpoint_edit(int setpoint_type) {
     state.edit_value = app_prefs_convert_temp_f(celsius_val);
     
     // Update dialog content
-    lv_label_set_text(state.edit_title, sp.name);
+    lv_label_set_text(state.edit_title, i18n_get(sp.name_id));
     lv_label_set_text(state.edit_description, sp.description);
     
     // Range label - convert limits to display units
     char range_buf[64];
     int display_min = app_prefs_convert_temp(sp.min_val);
     int display_max = app_prefs_convert_temp(sp.max_val);
-    snprintf(range_buf, sizeof(range_buf), "Range: %d to %d %s", 
-             display_min, display_max, app_prefs_temp_unit_str());
+    snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s", 
+             i18n_get(STR_HP_RANGE_FMT), display_min, display_max, app_prefs_temp_unit_str());
     lv_label_set_text(state.edit_range_label, range_buf);
     
     update_edit_value_display();
@@ -851,10 +862,10 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     // Title
     lv_obj_t* title = lv_label_create(header);
     if (app_prefs_is_demo_mode()) {
-        lv_label_set_text(title, "DEMO MODE - Advanced");
+        lv_label_set_text(title, i18n_get(STR_HP_DEMO_ADVANCED));
         lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
     } else {
-        lv_label_set_text(title, "Advanced");
+        lv_label_set_text(title, i18n_get(STR_HP_ADVANCED));
         lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     }
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
@@ -874,7 +885,7 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     // =========================================================================
     // BASIC SETTINGS SECTION - Setpoints
     // =========================================================================
-    create_section_header(state.scroll_container, "Setpoints");
+    create_section_header(state.scroll_container, i18n_get(STR_HP_SETPOINTS));
     
     // Cooling setpoint row
     create_setpoint_row(state.scroll_container, 0, &state.cooling_value_label);
@@ -895,7 +906,7 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
         // Add section header if category changed
         if (current_category == nullptr || strcmp(current_category, HEATPUMP_PARAMS[i].category) != 0) {
             current_category = HEATPUMP_PARAMS[i].category;
-            create_section_header(state.scroll_container, current_category);
+            create_section_header(state.scroll_container, get_category_i18n(current_category));
         }
         
         create_param_row(state.scroll_container, i);
@@ -983,7 +994,7 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     }
     
     // Load the screen with slide animation (main screen moves up)
-    lv_scr_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_TOP, 400, 0, false);
+    lv_scr_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
 }
 
 void heatpump_control_hide(void) {

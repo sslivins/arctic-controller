@@ -499,6 +499,17 @@ void settings_menu_show(void)
     }
     
     state.sub_screen_active = false;
+    
+    // Rebuild screen contents to pick up language/setting changes
+    lv_obj_clean(state.screen);
+    create_header();
+    create_menu_list();
+    
+    // Update WiFi status if connected
+    if (wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
+        settings_menu_update_wifi_status(true, wifi_mgr_get_connected_ssid());
+    }
+    
     // Slide right animation with auto_del=true - LVGL will delete the old screen after animation
     lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, true);
 }

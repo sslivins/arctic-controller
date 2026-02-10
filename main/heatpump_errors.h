@@ -11,8 +11,8 @@
 
 namespace arctic {
 
-// Maximum number of error history entries
-constexpr int ERROR_HISTORY_SIZE = 32;
+// Maximum number of error history entries (keep short, use event log for full history)
+constexpr int ERROR_HISTORY_SIZE = 10;
 
 // Error severity levels
 enum class ErrorSeverity {
@@ -25,9 +25,10 @@ enum class ErrorSeverity {
 // Single error definition
 struct ErrorDef {
     uint16_t mask;          // Bit mask in error register
-    const char* code;       // Short code (e.g., "E01", "E17")
-    const char* name;       // Short name (e.g., "INDOOR_EE")
+    const char* code;       // Arctic display code (e.g., "E01", "P02", "r01")
+    const char* name;       // Short name (e.g., "DISCHARGE_SENS")
     const char* description;// Human-readable description
+    const char* resolution; // Suggested resolution steps
     ErrorSeverity severity;
 };
 
@@ -36,6 +37,7 @@ struct ActiveError {
     const char* code;       // Error code (e.g., "E01")
     const char* name;       // Error name
     const char* description;// Description
+    const char* resolution; // Suggested resolution steps
     ErrorSeverity severity;
     uint8_t register_num;   // 1 or 2 (for register 2137 or 2138)
     uint16_t mask;          // Bit mask
@@ -104,6 +106,10 @@ char* getErrorHistoryAsJson();
 
 // Convert severity to string
 const char* severityToString(ErrorSeverity severity);
+
+// Format duration as human readable string (e.g., "2h 15m", "45s", "Active")
+// Returns static buffer, not thread-safe
+const char* formatDuration(time_t start_time, time_t end_time = 0);
 
 // Check if a specific error is active
 bool isErrorActive(uint8_t register_num, uint16_t mask);

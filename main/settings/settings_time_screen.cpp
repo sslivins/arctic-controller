@@ -12,16 +12,10 @@
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include <esp_log.h>
-#include <nvs_flash.h>
-#include <nvs.h>
 #include <string.h>
 #include <stdio.h>
 
 static const char* TAG = "time_screen";
-
-// NVS namespace and keys
-#define NVS_NAMESPACE    "time_cfg"
-#define NVS_KEY_24H      "use_24h"
 
 // Common timezone definitions
 typedef struct {
@@ -119,16 +113,8 @@ static int find_current_tz_index(void);
 
 static void load_settings(void)
 {
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
-    if (err == ESP_OK) {
-        uint8_t val = 1;  // Default to 24h
-        nvs_get_u8(nvs, NVS_KEY_24H, &val);
-        s_state.use_24h = (val != 0);
-        nvs_close(nvs);
-    } else {
-        s_state.use_24h = true;
-    }
+    // Get format from time_manager (which has the authoritative in-memory state)
+    s_state.use_24h = time_mgr_get_24h_format();
     
     s_state.current_tz_index = find_current_tz_index();
     ESP_LOGI(TAG, "Loaded settings: 24h=%d, tz_idx=%d", s_state.use_24h, s_state.current_tz_index);
@@ -136,14 +122,9 @@ static void load_settings(void)
 
 static void save_settings(void)
 {
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err == ESP_OK) {
-        nvs_set_u8(nvs, NVS_KEY_24H, s_state.use_24h ? 1 : 0);
-        nvs_commit(nvs);
-        nvs_close(nvs);
-        ESP_LOGI(TAG, "Saved 24h format: %d", s_state.use_24h);
-    }
+    // Use time_manager API to save format - it updates both NVS and in-memory state
+    time_mgr_set_24h_format(s_state.use_24h);
+    ESP_LOGI(TAG, "Saved 24h format: %d", s_state.use_24h);
 }
 
 static int find_current_tz_index(void)
@@ -390,11 +371,13 @@ static void create_content(void)
     
     // ===== TIMEZONE CARD =====
     lv_obj_t* tz_card = lv_obj_create(s_state.content);
-    lv_obj_set_size(tz_card, LV_PCT(100), 350);
+    lv_obj_set_size(tz_card, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(tz_card, COLOR_CARD, LV_PART_MAIN);
     lv_obj_set_style_border_width(tz_card, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(tz_card, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_all(tz_card, 20, LV_PART_MAIN);
+    lv_obj_set_flex_flow(tz_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(tz_card, 10, LV_PART_MAIN);
     disable_scrolling(tz_card);
     
     // Timezone section title
@@ -402,7 +385,6 @@ static void create_content(void)
     lv_label_set_text(tz_title, i18n_get(STR_TIME_TIMEZONE));
     lv_obj_set_style_text_font(tz_title, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(tz_title, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_align(tz_title, LV_ALIGN_TOP_LEFT, 0, 0);
     
     // Build roller options
     static char tz_options[2048] = {0};
@@ -417,8 +399,7 @@ static void create_content(void)
     lv_roller_set_options(s_state.tz_roller, tz_options, LV_ROLLER_MODE_NORMAL);
     lv_roller_set_selected(s_state.tz_roller, s_state.current_tz_index, LV_ANIM_OFF);
     lv_roller_set_visible_row_count(s_state.tz_roller, 7);
-    lv_obj_set_size(s_state.tz_roller, LV_PCT(100), 280);
-    lv_obj_align(s_state.tz_roller, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_width(s_state.tz_roller, LV_PCT(100));
     
     // Style the roller
     lv_obj_set_style_bg_color(s_state.tz_roller, lv_color_hex(0x1a1f26), LV_PART_MAIN);
@@ -426,7 +407,7 @@ static void create_content(void)
     lv_obj_set_style_border_color(s_state.tz_roller, lv_color_hex(0x30363d), LV_PART_MAIN);
     lv_obj_set_style_border_width(s_state.tz_roller, 1, LV_PART_MAIN);
     lv_obj_set_style_text_font(s_state.tz_roller, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_state.tz_roller, 8, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_state.tz_roller, 12, LV_PART_MAIN);
     lv_obj_set_style_line_width(s_state.tz_roller, 0, LV_PART_MAIN);
     
     // Style the selected item
@@ -500,17 +481,6 @@ static void preview_timer_cb(lv_timer_t* timer)
 
 bool time_screen_get_24h_format(void)
 {
-    // Read from NVS directly (works even when screen isn't created)
-    nvs_handle_t nvs;
-    bool use_24h = true;  // Default
-    
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
-    if (err == ESP_OK) {
-        uint8_t val = 1;
-        nvs_get_u8(nvs, NVS_KEY_24H, &val);
-        use_24h = (val != 0);
-        nvs_close(nvs);
-    }
-    
-    return use_24h;
+    // Delegate to time_manager which has the authoritative state
+    return time_mgr_get_24h_format();
 }

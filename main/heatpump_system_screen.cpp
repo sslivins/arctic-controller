@@ -10,6 +10,7 @@
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "app_preferences.h"
+#include "i18n/i18n.h"
 #include <esp_log.h>
 #include <stdio.h>
 
@@ -291,10 +292,10 @@ void heatpump_system_show(heatpump_system_close_cb_t on_close) {
     // Title
     lv_obj_t* title = lv_label_create(header);
     if (app_prefs_is_demo_mode()) {
-        lv_label_set_text(title, "DEMO MODE - System");
+        lv_label_set_text(title, i18n_get(STR_HP_DEMO_SYSTEM));
         lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
     } else {
-        lv_label_set_text(title, "System Readings");
+        lv_label_set_text(title, i18n_get(STR_HP_SYSTEM_READINGS));
         lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     }
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
@@ -312,32 +313,32 @@ void heatpump_system_show(heatpump_system_close_cb_t on_close) {
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
     
     // Compressor section
-    create_section_header(content, "Compressor");
-    create_reading_row(content, "Frequency", &state.compressor_freq);
-    create_reading_row(content, "Fan Speed", &state.fan_speed);
+    create_section_header(content, i18n_get(STR_HP_COMPRESSOR));
+    create_reading_row(content, i18n_get(STR_HP_FREQUENCY), &state.compressor_freq);
+    create_reading_row(content, i18n_get(STR_HP_FAN_SPEED), &state.fan_speed);
     
     // Electrical section
-    create_section_header(content, "Electrical");
-    create_reading_row(content, "AC Voltage", &state.ac_voltage);
-    create_reading_row(content, "AC Current", &state.ac_current);
-    create_reading_row(content, "DC Voltage", &state.dc_voltage);
-    create_reading_row(content, "DC Current", &state.dc_current);
+    create_section_header(content, i18n_get(STR_HP_ELECTRICAL));
+    create_reading_row(content, i18n_get(STR_HP_AC_VOLTAGE), &state.ac_voltage);
+    create_reading_row(content, i18n_get(STR_HP_AC_CURRENT), &state.ac_current);
+    create_reading_row(content, i18n_get(STR_HP_DC_VOLTAGE), &state.dc_voltage);
+    create_reading_row(content, i18n_get(STR_HP_DC_CURRENT), &state.dc_current);
     
     // Pressure section
-    create_section_header(content, "Pressures");
-    create_reading_row(content, "High Pressure", &state.high_pressure);
-    create_reading_row(content, "Low Pressure", &state.low_pressure);
+    create_section_header(content, i18n_get(STR_HP_PRESSURES));
+    create_reading_row(content, i18n_get(STR_HP_HIGH_PRESSURE), &state.high_pressure);
+    create_reading_row(content, i18n_get(STR_HP_LOW_PRESSURE), &state.low_pressure);
     
     // EEV section
-    create_section_header(content, "Expansion Valves");
-    create_reading_row(content, "Primary EEV", &state.primary_eev);
-    create_reading_row(content, "Secondary EEV", &state.secondary_eev);
+    create_section_header(content, i18n_get(STR_HP_EXPANSION_VALVES));
+    create_reading_row(content, i18n_get(STR_HP_PRIMARY_EEV), &state.primary_eev);
+    create_reading_row(content, i18n_get(STR_HP_SECONDARY_EEV), &state.secondary_eev);
     
     // Setpoints section
-    create_section_header(content, "Setpoints");
-    create_reading_row(content, "Cooling", &state.cooling_setpoint);
-    create_reading_row(content, "Heating", &state.heating_setpoint);
-    create_reading_row(content, "Hot Water", &state.hotwater_setpoint);
+    create_section_header(content, i18n_get(STR_HP_SETPOINTS));
+    create_reading_row(content, i18n_get(STR_HP_COOLING), &state.cooling_setpoint);
+    create_reading_row(content, i18n_get(STR_HP_HEATING), &state.heating_setpoint);
+    create_reading_row(content, i18n_get(STR_HP_HOT_WATER), &state.hotwater_setpoint);
     
     state.shown = true;
     
@@ -348,7 +349,7 @@ void heatpump_system_show(heatpump_system_close_cb_t on_close) {
     update_readings();
     
     // Load with slide animation (main screen moves up)
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_MOVE_TOP, 400, 0, false);
+    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
 }
 
 void heatpump_system_hide(void) {

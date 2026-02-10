@@ -12,6 +12,7 @@
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
 #include "app_preferences.h"
+#include "i18n/i18n.h"
 #include "ui_common.h"
 #include <esp_log.h>
 #include <stdio.h>
@@ -21,7 +22,7 @@ static const char* TAG = "hp_screen";
 // Helper: show error popup for write failures when disconnected
 static void show_write_error_popup(const char* message) {
     lv_obj_t* msgbox = lv_msgbox_create(lv_layer_top());
-    lv_msgbox_add_title(msgbox, "Communication Error");
+    lv_msgbox_add_title(msgbox, i18n_get(STR_HP_COMMUNICATION_ERROR));
     lv_msgbox_add_text(msgbox, message);
     lv_msgbox_add_close_button(msgbox);
     lv_obj_center(msgbox);
@@ -107,15 +108,15 @@ static struct {
 
 static const char* getModeText(arctic::WorkingMode mode, bool defrosting) {
     if (defrosting) {
-        return "DEFROST";
+        return i18n_get(STR_HP_MODE_DEFROST);
     }
     switch (mode) {
-        case arctic::WorkingMode::COOLING:           return "COOLING";
-        case arctic::WorkingMode::FLOOR_HEATING:     return "FLOOR HEAT";
-        case arctic::WorkingMode::FAN_COIL_HEATING:  return "FAN HEAT";
-        case arctic::WorkingMode::HOT_WATER:         return "HOT WATER";
-        case arctic::WorkingMode::AUTO:              return "AUTO";
-        default:                                      return "UNKNOWN";
+        case arctic::WorkingMode::COOLING:           return i18n_get(STR_HP_MODE_COOLING);
+        case arctic::WorkingMode::FLOOR_HEATING:     return i18n_get(STR_HP_MODE_FLOOR_HEAT);
+        case arctic::WorkingMode::FAN_COIL_HEATING:  return i18n_get(STR_HP_MODE_FAN_HEAT);
+        case arctic::WorkingMode::HOT_WATER:         return i18n_get(STR_HP_MODE_HOT_WATER);
+        case arctic::WorkingMode::AUTO:              return i18n_get(STR_HP_MODE_AUTO);
+        default:                                      return i18n_get(STR_HP_MODE_UNKNOWN);
     }
 }
 
@@ -178,10 +179,10 @@ static void set_indicator_active(lv_obj_t* indicator, bool active, lv_color_t ac
 // ============================================================================
 
 static void on_temps_close(void) {
-    // Load saved screen back with slide-down animation
+    // Load saved screen back with fade animation
     // auto_del=true - LVGL will delete the sub-screen after animation
     if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 400, 0, true);
+        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
         state.saved_screen = nullptr;
     }
 }
@@ -195,10 +196,10 @@ static void temps_btn_cb(lv_event_t* e) {
 }
 
 static void on_system_close(void) {
-    // Load saved screen back with slide-down animation
+    // Load saved screen back with fade animation
     // auto_del=true - LVGL will delete the sub-screen after animation
     if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 400, 0, true);
+        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
         state.saved_screen = nullptr;
     }
 }
@@ -212,10 +213,10 @@ static void system_btn_cb(lv_event_t* e) {
 }
 
 static void on_errors_close(void) {
-    // Load saved screen back with slide-down animation
+    // Load saved screen back with fade animation
     // auto_del=true - LVGL will delete the sub-screen after animation
     if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 400, 0, true);
+        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
         state.saved_screen = nullptr;
     }
 }
@@ -230,10 +231,10 @@ static void error_card_cb(lv_event_t* e) {
 }
 
 static void on_control_close(void) {
-    // Load saved screen back with slide-down animation
+    // Load saved screen back with fade animation
     // auto_del=true - LVGL will delete the sub-screen after animation
     if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_MOVE_BOTTOM, 400, 0, true);
+        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
         state.saved_screen = nullptr;
     }
 }
@@ -472,7 +473,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     // Mode label (large, centered at top)
     state.mode_label = lv_label_create(state.status_card);
-    lv_label_set_text(state.mode_label, "DISCONNECTED");
+    lv_label_set_text(state.mode_label, i18n_get(STR_HP_DISCONNECTED));
     lv_obj_set_style_text_font(state.mode_label, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.mode_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_align(state.mode_label, LV_ALIGN_TOP_MID, 0, 5);
@@ -486,7 +487,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     // "Tank Temperature" label
     lv_obj_t* tank_desc = lv_label_create(state.status_card);
-    lv_label_set_text(tank_desc, "Tank Temperature");
+    lv_label_set_text(tank_desc, i18n_get(STR_HP_TANK_TEMPERATURE));
     lv_obj_set_style_text_font(tank_desc, UI_FONT_SMALL, LV_PART_MAIN);
     lv_obj_set_style_text_color(tank_desc, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_align(tank_desc, LV_ALIGN_CENTER, 0, 40);
@@ -521,16 +522,16 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_align(status_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
     // Compressor indicator
-    create_status_indicator(status_row, "Compressor", &state.compressor_indicator, &state.compressor_label);
+    create_status_indicator(status_row, i18n_get(STR_HP_COMPRESSOR), &state.compressor_indicator, &state.compressor_label);
     
     // Fan indicator
-    create_status_indicator(status_row, "Fan", &state.fan_indicator, &state.fan_label);
+    create_status_indicator(status_row, i18n_get(STR_HP_FAN), &state.fan_indicator, &state.fan_label);
     
     // Water pump indicator
-    create_status_indicator(status_row, "Pump", &state.pump_indicator, &state.pump_label);
+    create_status_indicator(status_row, i18n_get(STR_HP_PUMP), &state.pump_indicator, &state.pump_label);
     
     // Backup heater indicator
-    create_status_indicator(status_row, "Aux Heat", &state.heater_indicator, &state.heater_label);
+    create_status_indicator(status_row, i18n_get(STR_HP_AUX_HEAT), &state.heater_indicator, &state.heater_label);
     
     // =========================================================================
     // ERROR CARD: Prominent error/status display
@@ -583,7 +584,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_add_event_cb(state.power_btn, power_btn_cb, LV_EVENT_CLICKED, nullptr);
     
     state.power_btn_label = lv_label_create(state.power_btn);
-    lv_label_set_text(state.power_btn_label, LV_SYMBOL_POWER " POWER OFF");
+    lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_OFF));
     lv_obj_set_style_text_font(state.power_btn_label, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_center(state.power_btn_label);
@@ -598,18 +599,19 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_clear_flag(mode_row, LV_OBJ_FLAG_SCROLLABLE);
     
     lv_obj_t* mode_lbl = lv_label_create(mode_row);
-    lv_label_set_text(mode_lbl, "Mode");
+    lv_label_set_text(mode_lbl, i18n_get(STR_HP_MODE));
     lv_obj_set_style_text_font(mode_lbl, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(mode_lbl, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(mode_lbl, LV_ALIGN_LEFT_MID, 0, 0);
     
     state.mode_dropdown = lv_dropdown_create(mode_row);
-    lv_dropdown_set_options(state.mode_dropdown, 
-        "Cooling\n"
-        "Floor Heating\n"
-        "Fan Coil Heating\n"
-        "Hot Water\n"
-        "Auto");
+    // Build dropdown options from i18n strings
+    char dropdown_opts[256];
+    snprintf(dropdown_opts, sizeof(dropdown_opts), "%s\n%s\n%s\n%s\n%s",
+             i18n_get(STR_HP_OPT_COOLING), i18n_get(STR_HP_OPT_FLOOR_HEATING),
+             i18n_get(STR_HP_OPT_FAN_COIL_HEATING), i18n_get(STR_HP_OPT_HOT_WATER),
+             i18n_get(STR_HP_OPT_AUTO));
+    lv_dropdown_set_options(state.mode_dropdown, dropdown_opts);
     lv_obj_set_size(state.mode_dropdown, 280, 50);
     lv_obj_align(state.mode_dropdown, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_color(state.mode_dropdown, lv_color_hex(0x1a2a4e), LV_PART_MAIN);
@@ -630,7 +632,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     // Setpoint name label (Cooling/Heating/Hot Water)
     state.active_setpoint_name = lv_label_create(setpoint_row);
-    lv_label_set_text(state.active_setpoint_name, "Setpoint");
+    lv_label_set_text(state.active_setpoint_name, i18n_get(STR_HP_SETPOINT));
     lv_obj_set_style_text_font(state.active_setpoint_name, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.active_setpoint_name, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_align(state.active_setpoint_name, LV_ALIGN_LEFT_MID, 0, 0);
@@ -684,7 +686,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_add_event_cb(state.temps_btn, temps_btn_cb, LV_EVENT_CLICKED, nullptr);
     
     lv_obj_t* temps_label = lv_label_create(state.temps_btn);
-    lv_label_set_text(temps_label, LV_SYMBOL_MINUS " Temps");
+    lv_label_set_text(temps_label, i18n_get(STR_HP_BTN_TEMPS));
     lv_obj_set_style_text_font(temps_label, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(temps_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_center(temps_label);
@@ -701,7 +703,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_add_event_cb(state.system_btn, system_btn_cb, LV_EVENT_CLICKED, nullptr);
     
     lv_obj_t* system_label = lv_label_create(state.system_btn);
-    lv_label_set_text(system_label, LV_SYMBOL_LIST " System");
+    lv_label_set_text(system_label, i18n_get(STR_HP_BTN_SYSTEM));
     lv_obj_set_style_text_font(system_label, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(system_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_center(system_label);
@@ -718,7 +720,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_add_event_cb(state.controls_btn, controls_btn_cb, LV_EVENT_CLICKED, nullptr);
     
     lv_obj_t* ctrl_label = lv_label_create(state.controls_btn);
-    lv_label_set_text(ctrl_label, LV_SYMBOL_SETTINGS " Advanced");
+    lv_label_set_text(ctrl_label, i18n_get(STR_HP_BTN_ADVANCED));
     lv_obj_set_style_text_font(ctrl_label, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(ctrl_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_center(ctrl_label);
@@ -748,15 +750,15 @@ void heatpump_screen_update(void) {
             // Demo mode - use shared state
             if (mode == 0) {
                 *value = heatpump_demo_get_cooling_setpoint();
-                *name = "Cooling";
+                *name = i18n_get(STR_HP_COOLING);
                 *color = COLOR_COOLING;
             } else if (mode == 3) {
                 *value = heatpump_demo_get_hotwater_setpoint();
-                *name = "Hot Water";
+                *name = i18n_get(STR_HP_HOT_WATER);
                 *color = COLOR_ERROR;
             } else {
                 *value = heatpump_demo_get_heating_setpoint();
-                *name = "Heating";
+                *name = i18n_get(STR_HP_HEATING);
                 *color = COLOR_HEATING;
             }
         } else {
@@ -764,24 +766,24 @@ void heatpump_screen_update(void) {
             switch (hp.working_mode) {
                 case arctic::WorkingMode::COOLING:
                     *value = hp.cooling_setpoint;
-                    *name = "Cooling";
+                    *name = i18n_get(STR_HP_COOLING);
                     *color = COLOR_COOLING;
                     break;
                 case arctic::WorkingMode::FLOOR_HEATING:
                 case arctic::WorkingMode::FAN_COIL_HEATING:
                     *value = hp.heating_setpoint;
-                    *name = "Heating";
+                    *name = i18n_get(STR_HP_HEATING);
                     *color = COLOR_HEATING;
                     break;
                 case arctic::WorkingMode::HOT_WATER:
                     *value = hp.hot_water_setpoint;
-                    *name = "Hot Water";
+                    *name = i18n_get(STR_HP_HOT_WATER);
                     *color = COLOR_ERROR;
                     break;
                 case arctic::WorkingMode::AUTO:
                 default:
                     *value = hp.heating_setpoint;
-                    *name = "Heating";
+                    *name = i18n_get(STR_HP_HEATING);
                     *color = COLOR_HEATING;
                     break;
             }
@@ -795,13 +797,13 @@ void heatpump_screen_update(void) {
         if (power_on) {
             lv_obj_set_style_bg_color(state.power_btn, COLOR_SUCCESS, LV_PART_MAIN);
             lv_obj_set_style_bg_color(state.power_btn, lv_color_hex(0x2d8b3d), LV_STATE_PRESSED);
-            lv_label_set_text(state.power_btn_label, LV_SYMBOL_POWER " POWER ON");
+            lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_ON));
             // Dark text on green for better contrast
             lv_obj_set_style_text_color(state.power_btn_label, lv_color_hex(0x0a2010), LV_PART_MAIN);
         } else {
             lv_obj_set_style_bg_color(state.power_btn, COLOR_ERROR, LV_PART_MAIN);
             lv_obj_set_style_bg_color(state.power_btn, lv_color_hex(0x8b0000), LV_STATE_PRESSED);
-            lv_label_set_text(state.power_btn_label, LV_SYMBOL_POWER " POWER OFF");
+            lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_OFF));
             // White text on red
             lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT, LV_PART_MAIN);
         }
@@ -815,7 +817,11 @@ void heatpump_screen_update(void) {
         // =====================================================================
         // DEMO MODE - show simulated values and allow interaction
         // =====================================================================
-        const char* demo_mode_names[] = {"COOLING", "FLOOR HEAT", "FAN HEAT", "HOT WATER", "AUTO"};
+        const char* demo_mode_names[] = {
+            i18n_get(STR_HP_MODE_COOLING), i18n_get(STR_HP_MODE_FLOOR_HEAT),
+            i18n_get(STR_HP_MODE_FAN_HEAT), i18n_get(STR_HP_MODE_HOT_WATER),
+            i18n_get(STR_HP_MODE_AUTO)
+        };
         lv_color_t demo_mode_colors[] = {COLOR_COOLING, COLOR_HEATING, COLOR_HEATING, COLOR_ERROR, COLOR_SUCCESS};
         
         // Get demo state from shared state module
@@ -832,7 +838,9 @@ void heatpump_screen_update(void) {
         }
         
         if (!demo_power) {
-            lv_label_set_text(state.mode_label, "DEMO - STANDBY");
+            char standby_buf[48];
+            snprintf(standby_buf, sizeof(standby_buf), "DEMO - %s", i18n_get(STR_HP_STANDBY));
+            lv_label_set_text(state.mode_label, standby_buf);
             lv_obj_set_style_text_color(state.mode_label, COLOR_TEXT_DIM, LV_PART_MAIN);
         } else {
             char mode_buf[32];
@@ -864,7 +872,14 @@ void heatpump_screen_update(void) {
         set_indicator_active(state.pump_indicator, demo_power, COLOR_ACCENT);
         set_indicator_active(state.heater_indicator, false, COLOR_WARNING);
         
-        lv_label_set_text(state.fan_label, demo_power ? "Fan Med" : "Fan");
+        // Demo fan label
+        if (demo_power) {
+            char fan_buf[24];
+            snprintf(fan_buf, sizeof(fan_buf), "%s %s", i18n_get(STR_HP_FAN), i18n_get(STR_HP_FAN_MED));
+            lv_label_set_text(state.fan_label, fan_buf);
+        } else {
+            lv_label_set_text(state.fan_label, i18n_get(STR_HP_FAN));
+        }
         
         // Demo power meter (simulated 1.2 kW when running)
         if (state.power_meter_label) {
@@ -872,7 +887,7 @@ void heatpump_screen_update(void) {
         }
         
         // Show demo mode message in info card
-        lv_label_set_text(state.error_label, "Demo Mode Enabled");
+        lv_label_set_text(state.error_label, i18n_get(STR_HP_DEMO_MODE_ENABLED));
         lv_obj_set_style_text_color(state.error_label, COLOR_WARNING, LV_PART_MAIN);
         lv_obj_set_style_border_color(state.error_card, COLOR_WARNING, LV_PART_MAIN);
         lv_obj_remove_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);
@@ -905,7 +920,7 @@ void heatpump_screen_update(void) {
         // =====================================================================
         // DISCONNECTED MODE - show placeholders, controls will show error popups
         // =====================================================================
-        lv_label_set_text(state.mode_label, "DISCONNECTED");
+        lv_label_set_text(state.mode_label, i18n_get(STR_HP_DISCONNECTED));
         lv_obj_set_style_text_color(state.mode_label, COLOR_ERROR, LV_PART_MAIN);
         
         // Placeholder values
@@ -917,7 +932,7 @@ void heatpump_screen_update(void) {
         set_indicator_active(state.fan_indicator, false, COLOR_SUCCESS);
         set_indicator_active(state.pump_indicator, false, COLOR_ACCENT);
         set_indicator_active(state.heater_indicator, false, COLOR_WARNING);
-        lv_label_set_text(state.fan_label, "Fan");
+        lv_label_set_text(state.fan_label, i18n_get(STR_HP_FAN));
         
         // Power meter placeholder
         if (state.power_meter_label) {
@@ -925,7 +940,7 @@ void heatpump_screen_update(void) {
         }
         
         // Show disconnected warning in error card
-        lv_label_set_text(state.error_label, "Heat pump not connected");
+        lv_label_set_text(state.error_label, i18n_get(STR_HP_NOT_CONNECTED));
         lv_obj_set_style_text_color(state.error_label, COLOR_ERROR, LV_PART_MAIN);
         lv_obj_set_style_border_color(state.error_card, COLOR_ERROR, LV_PART_MAIN);
         lv_obj_remove_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);
@@ -942,7 +957,7 @@ void heatpump_screen_update(void) {
         
         // Active setpoint row - placeholders
         if (state.active_setpoint_name) {
-            lv_label_set_text(state.active_setpoint_name, "Setpoint");
+            lv_label_set_text(state.active_setpoint_name, i18n_get(STR_HP_SETPOINT));
             lv_obj_set_style_text_color(state.active_setpoint_name, COLOR_TEXT_DIM, LV_PART_MAIN);
         }
         if (state.active_setpoint_label) {
@@ -962,7 +977,7 @@ void heatpump_screen_update(void) {
     lv_color_t mode_color = getModeColor(hp.working_mode, defrosting);
     
     if (!hp.unit_on) {
-        lv_label_set_text(state.mode_label, "STANDBY");
+        lv_label_set_text(state.mode_label, i18n_get(STR_HP_STANDBY));
         lv_obj_set_style_text_color(state.mode_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     } else {
         lv_label_set_text(state.mode_label, mode_text);
@@ -994,12 +1009,12 @@ void heatpump_screen_update(void) {
     // Update fan label with speed
     int fan_speed = hp.getFanSpeedLevel();
     if (fan_speed > 0) {
-        const char* speed_names[] = {"", "Low", "Med", "High"};
+        const char* speed_names[] = {"", i18n_get(STR_HP_FAN_LOW), i18n_get(STR_HP_FAN_MED), i18n_get(STR_HP_FAN_HIGH)};
         char fan_buf[16];
-        snprintf(fan_buf, sizeof(fan_buf), "Fan %s", speed_names[fan_speed]);
+        snprintf(fan_buf, sizeof(fan_buf), "%s %s", i18n_get(STR_HP_FAN), speed_names[fan_speed]);
         lv_label_set_text(state.fan_label, fan_buf);
     } else {
-        lv_label_set_text(state.fan_label, "Fan");
+        lv_label_set_text(state.fan_label, i18n_get(STR_HP_FAN));
     }
     
     // Power meter: AC voltage × AC current

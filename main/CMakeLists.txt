@@ -36,7 +36,6 @@ idf_component_register(
         "wifi_manager.cpp"
         "time_manager.cpp"
         "status_bar.cpp"
-        "time_screen.cpp"
         "api_server.cpp"
         "ota_manager.cpp"
         "auth_manager.cpp"

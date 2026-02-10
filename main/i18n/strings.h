@@ -119,6 +119,149 @@ typedef enum {
     STR_DISPLAY_BRIGHTNESS_HIGH,
     
     // ========================================================================
+    // Heat Pump - Main Screen
+    // ========================================================================
+    STR_HP_COMMUNICATION_ERROR,
+    STR_HP_DISCONNECTED,
+    STR_HP_STANDBY,
+    STR_HP_TANK_TEMPERATURE,
+    STR_HP_SETPOINT,
+    STR_HP_MODE,
+    STR_HP_POWER_ON,
+    STR_HP_POWER_OFF,
+    STR_HP_DEMO_MODE_ENABLED,
+    STR_HP_NOT_CONNECTED,
+    STR_HP_BTN_TEMPS,
+    STR_HP_BTN_SYSTEM,
+    STR_HP_BTN_ADVANCED,
+    
+    // Heat Pump - Mode Names
+    STR_HP_MODE_COOLING,
+    STR_HP_MODE_FLOOR_HEAT,
+    STR_HP_MODE_FAN_HEAT,
+    STR_HP_MODE_HOT_WATER,
+    STR_HP_MODE_AUTO,
+    STR_HP_MODE_DEFROST,
+    STR_HP_MODE_UNKNOWN,
+    
+    // Heat Pump - Mode Dropdown Options
+    STR_HP_OPT_COOLING,
+    STR_HP_OPT_FLOOR_HEATING,
+    STR_HP_OPT_FAN_COIL_HEATING,
+    STR_HP_OPT_HOT_WATER,
+    STR_HP_OPT_AUTO,
+    
+    // Heat Pump - Component Labels
+    STR_HP_COMPRESSOR,
+    STR_HP_FAN,
+    STR_HP_PUMP,
+    STR_HP_AUX_HEAT,
+    
+    // Heat Pump - Fan Speeds
+    STR_HP_FAN_LOW,
+    STR_HP_FAN_MED,
+    STR_HP_FAN_HIGH,
+    
+    // Heat Pump - Setpoint Names
+    STR_HP_COOLING,
+    STR_HP_HEATING,
+    STR_HP_HOT_WATER,
+    
+    // ========================================================================
+    // Heat Pump - Temperatures Screen
+    // ========================================================================
+    STR_HP_TEMPERATURES,
+    STR_HP_DEMO_TEMPERATURES,
+    STR_HP_WATER_TANK,
+    STR_HP_WATER_OUTLET,
+    STR_HP_WATER_INLET,
+    STR_HP_OUTDOOR_AMBIENT,
+    STR_HP_DISCHARGE,
+    STR_HP_SUCTION,
+    STR_HP_OUTDOOR_COIL,
+    STR_HP_INDOOR_COIL,
+    STR_HP_IPM_MODULE,
+    
+    // ========================================================================
+    // Heat Pump - System Screen
+    // ========================================================================
+    STR_HP_SYSTEM_READINGS,
+    STR_HP_DEMO_SYSTEM,
+    STR_HP_FREQUENCY,
+    STR_HP_FAN_SPEED,
+    STR_HP_ELECTRICAL,
+    STR_HP_AC_VOLTAGE,
+    STR_HP_AC_CURRENT,
+    STR_HP_DC_VOLTAGE,
+    STR_HP_DC_CURRENT,
+    STR_HP_PRESSURES,
+    STR_HP_HIGH_PRESSURE,
+    STR_HP_LOW_PRESSURE,
+    STR_HP_EXPANSION_VALVES,
+    STR_HP_PRIMARY_EEV,
+    STR_HP_SECONDARY_EEV,
+    STR_HP_SETPOINTS,
+    
+    // ========================================================================
+    // Heat Pump - Errors Screen
+    // ========================================================================
+    STR_HP_ERROR_STATUS,
+    STR_HP_DEMO_ERRORS,
+    STR_HP_RESOLUTION,
+    STR_HP_CONTACT_DEALER,
+    STR_HP_STARTED,
+    STR_HP_ACTIVE_FOR,
+    STR_HP_DURATION,
+    STR_HP_JUST_DETECTED,
+    STR_HP_DISCONNECTED_MSG,
+    STR_HP_NO_ERRORS,
+    
+    // ========================================================================
+    // Heat Pump - Advanced/Params Screen
+    // ========================================================================
+    STR_HP_ADVANCED,
+    STR_HP_DEMO_ADVANCED,
+    STR_HP_EDIT_PARAMETER,
+    STR_HP_RANGE_FMT,
+    STR_HP_COOLING_SETPOINT,
+    STR_HP_HEATING_SETPOINT,
+    STR_HP_HOT_WATER_SETPOINT,
+    STR_HP_CANNOT_SAVE,
+    STR_HP_CANNOT_SAVE_SETPOINT,
+    STR_HP_CAT_EEV,
+    STR_HP_CAT_DEFROST,
+    STR_HP_CAT_PROTECTION,
+    STR_HP_CAT_AUTO_MODE,
+    STR_HP_CAT_PUMP_VALVE,
+
+    // Heat Pump - P-parameter names
+    STR_HP_PARAM_EEV_OPENING,
+    STR_HP_PARAM_EEV_MODE,
+    STR_HP_PARAM_TARGET_SUPERHEAT,
+    STR_HP_PARAM_DEFROST_CYCLE,
+    STR_HP_PARAM_DEFROST_ENTER_TEMP,
+    STR_HP_PARAM_DEFROST_EXTEND_TEMP,
+    STR_HP_PARAM_DEFROST_TEMP_DIFF,
+    STR_HP_PARAM_DEFROST_EXTEND_TIME,
+    STR_HP_PARAM_MAX_DEFROST_TIME,
+    STR_HP_PARAM_DEFROST_EXIT_TEMP,
+    STR_HP_PARAM_LOW_AMBIENT_PROTECT,
+    STR_HP_PARAM_FREQ_REDUCTION,
+    STR_HP_PARAM_COOLING_LOW_AMBIENT,
+    STR_HP_PARAM_MAX_SETTING_TEMP,
+    STR_HP_PARAM_COOLING_AUTO_TEMP,
+    STR_HP_PARAM_HEATING_AUTO_TEMP,
+    STR_HP_PARAM_MODE_SWITCH_DELAY,
+    STR_HP_PARAM_STERILIZE_TIME,
+    STR_HP_PARAM_WATER_RETURN_TEMP,
+    STR_HP_PARAM_WATER_RETURN_TIME,
+    STR_HP_PARAM_3WAY_VALVE_TIME,
+    STR_HP_PARAM_PUMP_MODE,
+    STR_HP_PARAM_PUMP_INTERVAL,
+    STR_HP_PARAM_PUMP_LOW_AMBIENT,
+    STR_HP_PARAM_WATERWAY_CLEAN,
+    
+    // ========================================================================
     // Must be last - used for array sizing
     // ========================================================================
     STR_COUNT

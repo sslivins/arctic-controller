@@ -448,3 +448,123 @@ If the master does not receive a response within 200ms, it resends the request. 
 | 6 | Auto |
 
 ---
+
+## Error Codes Reference
+
+The heat pump displays error codes on the wired controller. These codes map to specific bits in the error registers (2134, 2137, 2138).
+
+### Sensor Errors (E-Series)
+
+| Code | Description | Register | Bit | Resolution |
+|------|-------------|----------|-----|------------|
+| E01 | Compressor discharge temperature sensor fault | 2137 | 6 | Check if the compressor discharge temperature sensor for short or open circuit and correct or replace. |
+| E05 | Heat pump coil temperature sensor fault | 2137 | 5 | Check the heat pump coil temperature sensor and wires for a short or open circuit and correct or replace sensors. |
+| E09 | Compressor suction temperature sensor fault | 2137 | 7 | Check if the compressor suction temperature sensor for short or open circuit and correct or replace. |
+| E13 | Cooling coil temperature sensor fault | 2137 | 4 | Check the coil temperature sensor for a short or open circuit and correct or replace. |
+| E18 | Outlet water temperature sensor fault | 2137 | 3 | Check the outlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace. |
+| E19 | Inlet water temperature sensor fault | 2137 | 2 | Check the inlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace. |
+| E20 | Water tank temperature sensor fault | 2134 | 3 | Check if the hot water tank temperature sensor or wires have a short or open circuit. Correct or replace. |
+| E21 | Wired controller communication fault | 2137 | 10 | Check the wired controller's cable and its connections. |
+| E22 | Outdoor ambient temperature sensor fault | 2137 | 8 | Check if the ambient temperature sensor for the heat pump or its wiring has a short or open circuit and correct or replace. |
+| E28 | Outdoor EEPROM fault | 2137 | 1 | Contact the dealer. |
+| E33 | High pressure sensor fault | 2138 | 6 | Compressor high pressure switch or wiring faulty. Correct or replace. |
+| E34 | EEV return sensor fault | 2137 | 7 | Check if the suction temperature sensor short circuit or disconnect. |
+
+### Protection Errors (P-Series)
+
+| Code | Description | Register | Bit | Resolution |
+|------|-------------|----------|-----|------------|
+| P01 | Water flow switch protection | 2138 | 8 | Flow is too low or wiring is open circuit. Check the water system, water pump, and operation of water flow switch and correct problem. |
+| P02 | High pressure protection activated | 2138 | 6 | 1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked or if evaporator fins are blocked impacting heat transfer efficiency. 3) Check whether snow or ice has built up too much inside the unit. 4) Check that the water tank temperature setting is not too high. |
+| P06 | Low pressure protection activated | 2138 | 7 | 1) Check whether the unit is leaking refrigerant. 2) Repair and vacuum system, then refill with exact amount of refrigerant as per nameplate. |
+| P11 | Compressor discharge temperature too high | 2138 | 5 | 1) Check water system is operating normal, look for reduction in normal water flow. 2) Check whether there was a refrigerant leak and repair. 3) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
+| P15 | Inlet/outlet temperature difference too large | 2138 | 13 | 1) Check if water system is operating abnormally, such as water flow is too low. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
+| P16 | Outlet water temperature too low protection | 2138 | 14 | 1) Check water system is normal and water flow is adequate. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure. |
+| P19 | AC current protection | 2138 | 0 | Contact the dealer. |
+| P27 | Cooling coil temperature overheating protection | 2138 | 9 | Check that the fan is in good condition and that the evaporator fins are not in need of cleaning. |
+| P30 | Antifreeze cooling coil protection | 2137 | 4 | Unit antifreeze protection activated. Wait for conditions to improve or check for issues. |
+| PA | Tank temperature protection activated | 2137 | 14 | Contact the dealer. |
+
+### Compressor/Inverter Errors (r-Series)
+
+| Code | Description | Register | Bit | Resolution |
+|------|-------------|----------|-----|------------|
+| r01 | IPM module fault | 2137 | 13 | Contact the dealer. |
+| r02 | Compressor start fault | 2137 | 11 | Contact the dealer. |
+| r05 | IPM module temperature too high | 2138 | 4 | Contact the dealer. |
+| r06 | Compressor phase current protection | 2138 | 1 | This applies to 3-phase units where the phasing of the wires is incorrect and needs to be corrected. |
+| r10 | AC voltage too high or too low | 2137 | 15 | Contact the dealer. |
+| r11 | DC bus voltage protection | 2138 | 3 | Contact the dealer. |
+| r20 | Compressor protection | 2138 | 15 | Contact the dealer. |
+
+### Fan/Motor Errors (F-Series)
+
+| Code | Description | Register | Bit | Resolution |
+|------|-------------|----------|-----|------------|
+| FA | DC fan motor protection | 2138 | 2 | Contact the dealer. |
+
+### Pressure Errors (E/F-Series)
+
+| Code | Description | Register | Bit | Resolution |
+|------|-------------|----------|-----|------------|
+| EB | High pressure protection (pressure sensor) | 2138 | 6 | Check if the ambient temperature sensor is short circuit or disconnected. |
+| EC | EEV circuit low pressure protection | 2138 | 11 | 1) Check whether the unit is leaking refrigerant. 2) After leak repair and vacuum, refill with correct refrigerant amount per nameplate. |
+| ED | Low pressure protection (pressure sensor) | 2138 | 7 | Check if the ambient temperature sensor is short circuit or disconnected. |
+| FE | Startup differential pressure protection | 2138 | 15 | Contact the dealer. |
+| FF | Running differential protection | 2138 | 15 | Contact the dealer. |
+
+### Register Bit to Error Code Mapping
+
+#### Register 2134 - Error Code 1
+
+| Bit | Arctic Code | Description |
+|-----|-------------|-------------|
+| 0 | - | Brine side inlet water temperature sensor error |
+| 1 | - | Brine side outlet water temperature sensor error |
+| 2 | - | Brine side water flow protection |
+| 3 | E20 | Water tank temperature sensor error |
+| 4-15 | - | Reserved |
+
+#### Register 2137 - Error Code 2
+
+| Bit | Arctic Code | Description |
+|-----|-------------|-------------|
+| 0 | - | Indoor EE error |
+| 1 | E28 | Outdoor EE error |
+| 2 | E19 | Inlet water temp sensor error |
+| 3 | E18 | Outlet water temp sensor error |
+| 4 | P30/E13 | Cooling coil antifreeze/temp sensor |
+| 5 | E05 | External coil temp sensor error |
+| 6 | E01 | Discharge temperature sensor error |
+| 7 | E09/E34 | Suction temperature sensor error |
+| 8 | E22 | Ambient temperature sensor error |
+| 9 | - | Communication error between drive board and main board |
+| 10 | E21 | Wired controller communication error |
+| 11 | r02 | Compressor abnormal start |
+| 12 | - | Communication error between indoor and outdoor unit |
+| 13 | r01 | IPM error |
+| 14 | PA | High outlet water temperature protection |
+| 15 | r10 | AC voltage protection |
+
+#### Register 2138 - Error Code 3
+
+| Bit | Arctic Code | Description |
+|-----|-------------|-------------|
+| 0 | P19 | AC current protection |
+| 1 | r06 | Compressor current protection |
+| 2 | FA | DC fan motor protection |
+| 3 | r11 | Bus voltage protection |
+| 4 | r05 | IPM temperature protection |
+| 5 | P11 | High discharge temperature protection |
+| 6 | P02/E33/EB | High pressure switch protection |
+| 7 | P06/ED | Low pressure switch protection |
+| 8 | P01 | Water flow switch protection |
+| 9 | P27 | Cooling external coil overheat protection |
+| 10 | - | Low ambient temperature protection |
+| 11 | EC | Primary circuit low pressure protection |
+| 12 | - | Secondary circuit low pressure protection |
+| 13 | P15 | Large inlet/outlet temperature difference protection |
+| 14 | P16 | Low outlet water temperature protection |
+| 15 | r20/FE/FF | Compressor running differential |
+
+---
