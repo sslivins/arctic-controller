@@ -45,6 +45,11 @@ static struct {
     // Error list container
     lv_obj_t* error_list = nullptr;
     lv_obj_t* no_errors_label = nullptr;
+    
+    // Track previous error state to detect changes
+    uint16_t prev_error1 = 0;
+    uint16_t prev_error2 = 0;
+    int prev_history_count = 0;
 } state;
 
 // ============================================================================
@@ -80,11 +85,28 @@ static void error_card_tap_cb(lv_event_t* e) {
         bool is_hidden = lv_obj_has_flag(resolution_cont, LV_OBJ_FLAG_HIDDEN);
         if (is_hidden) {
             lv_obj_clear_flag(resolution_cont, LV_OBJ_FLAG_HIDDEN);
-            // Update border to show expanded state
             lv_obj_set_style_border_width(card, 3, LV_PART_MAIN);
         } else {
             lv_obj_add_flag(resolution_cont, LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_style_border_width(card, 2, LV_PART_MAIN);
+        }
+        
+        // Toggle arrow on the code label (stored as card user_data)
+        lv_obj_t* code_label = (lv_obj_t*)lv_obj_get_user_data(card);
+        if (code_label) {
+            const char* text = lv_label_get_text(code_label);
+            // Replace the last symbol (DOWN ↔ UP)
+            char buf[32];
+            strncpy(buf, text, sizeof(buf) - 1);
+            buf[sizeof(buf) - 1] = '\0';
+            // LVGL symbols are 3-byte UTF-8 sequences; find the last one
+            size_t len = strlen(buf);
+            if (len >= 3) {
+                // Overwrite the last 3 bytes with the new symbol
+                const char* sym = is_hidden ? LV_SYMBOL_UP : LV_SYMBOL_DOWN;
+                memcpy(buf + len - 3, sym, 3);
+            }
+            lv_label_set_text(code_label, buf);
         }
     }
 }
@@ -210,6 +232,7 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     
     // Make card clickable to expand/collapse resolution
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_user_data(card, code_label);  // So tap callback can toggle arrow
     lv_obj_add_event_cb(card, error_card_tap_cb, LV_EVENT_CLICKED, resolution_cont);
     
     return card;
@@ -237,7 +260,7 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* text) {
     lv_obj_t* label = lv_label_create(parent);
     lv_label_set_text(label, text);
     lv_obj_set_width(label, LV_PCT(100));
-    lv_obj_set_style_text_font(label, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(label, 5, LV_PART_MAIN);
     return label;
@@ -333,7 +356,7 @@ static void update_error_list() {
             
             lv_obj_t* hist_label = lv_label_create(hist_row);
             lv_label_set_text(hist_label, i18n_get(STR_HP_ERROR_HISTORY));
-            lv_obj_set_style_text_font(hist_label, UI_FONT_SMALL, LV_PART_MAIN);
+            lv_obj_set_style_text_font(hist_label, UI_FONT_BODY, LV_PART_MAIN);
             lv_obj_set_style_text_color(hist_label, COLOR_TEXT_DIM, LV_PART_MAIN);
             lv_obj_align(hist_label, LV_ALIGN_LEFT_MID, 0, 0);
             
@@ -398,6 +421,24 @@ static void update_error_list() {
                 create_error_card(state.error_list, &hist_err);
             }
         }
+    }
+}
+
+static void error_screen_timer_cb(lv_timer_t* timer) {
+    (void)timer;
+    arctic::HeatPumpState hp = arctic::getState();
+    
+    // Check if error registers or history count changed
+    arctic::ErrorHistoryEntry hist[arctic::ERROR_HISTORY_SIZE];
+    int hist_count = arctic::getErrorHistory(hist, arctic::ERROR_HISTORY_SIZE);
+    
+    if (hp.error1 != state.prev_error1 || hp.error2 != state.prev_error2 ||
+        hist_count != state.prev_history_count) {
+        state.prev_error1 = hp.error1;
+        state.prev_error2 = hp.error2;
+        state.prev_history_count = hist_count;
+        update_error_list();
+        ESP_LOGI(TAG, "Error state changed - refreshed list");
     }
 }
 
@@ -493,9 +534,18 @@ void heatpump_errors_show(heatpump_errors_close_cb_t on_close) {
     // Error list container
     state.error_list = content;
     
-    // Initial update (no auto-refresh timer - errors don't change frequently
-    // and rebuilding would collapse any expanded cards)
+    // Snapshot current error state for change detection
+    arctic::HeatPumpState hp = arctic::getState();
+    state.prev_error1 = hp.error1;
+    state.prev_error2 = hp.error2;
+    arctic::ErrorHistoryEntry hist_snap[arctic::ERROR_HISTORY_SIZE];
+    state.prev_history_count = arctic::getErrorHistory(hist_snap, arctic::ERROR_HISTORY_SIZE);
+    
+    // Initial update
     update_error_list();
+    
+    // Periodic check — only rebuilds when error registers or history actually change
+    state.update_timer = lv_timer_create(error_screen_timer_cb, 2000, nullptr);
     
     // Load screen with animation
     lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);

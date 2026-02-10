@@ -625,6 +625,12 @@ bool setDemoField(const char* field, int32_t value) {
     
     xSemaphoreGive(s_state_mutex);
     
+    // If an error register changed, update error history so cleared errors
+    // transition properly (get a cleared timestamp, move to history)
+    if (found && (strcmp(field, "error1") == 0 || strcmp(field, "error2") == 0)) {
+        updateErrorHistory(s_state.error1, s_state.error2);
+    }
+    
     if (found) {
         ESP_LOGI(TAG, "[DEMO] Field '%s' set to %ld", field, (long)value);
     }

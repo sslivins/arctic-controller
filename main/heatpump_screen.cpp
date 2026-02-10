@@ -146,6 +146,7 @@ static struct {
     // Error card (prominent)
     lv_obj_t* error_card = nullptr;
     lv_obj_t* error_label = nullptr;
+    lv_obj_t* error_chevron = nullptr;
     
     // Bottom button bar
     lv_obj_t* temps_btn = nullptr;
@@ -577,28 +578,39 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // ERROR CARD: Prominent error/status display
     // =========================================================================
     state.error_card = lv_obj_create(state.container);
-    lv_obj_set_size(state.error_card, LV_PCT(100), 60);
+    lv_obj_set_size(state.error_card, LV_PCT(100), 80);
     lv_obj_set_style_bg_color(state.error_card, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.error_card, lv_color_hex(0x1e2d4e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.error_card, COLOR_WARNING, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.error_card, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(state.error_card, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_all(state.error_card, 10, LV_PART_MAIN);
+    lv_obj_set_style_pad_right(state.error_card, 40, LV_PART_MAIN);  // Room for chevron
     lv_obj_clear_flag(state.error_card, LV_OBJ_FLAG_SCROLLABLE);
     
     state.error_label = lv_label_create(state.error_card);
     lv_label_set_text(state.error_label, "");
-    lv_obj_set_style_text_font(state.error_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state.error_label, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.error_label, COLOR_WARNING, LV_PART_MAIN);
     lv_obj_set_width(state.error_label, LV_PCT(100));
     lv_obj_set_style_text_align(state.error_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_center(state.error_label);
     
-    // Make error card clickable to show error details
+    // Right chevron — signals the card is tappable
+    state.error_chevron = lv_label_create(state.error_card);
+    lv_label_set_text(state.error_chevron, LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_font(state.error_chevron, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.error_chevron, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_align(state.error_chevron, LV_ALIGN_RIGHT_MID, 20, 0);
+    
+    // Make error card clickable to show error details / history
     lv_obj_add_flag(state.error_card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(state.error_card, error_card_cb, LV_EVENT_CLICKED, nullptr);
     
-    // Hide error card initially
-    lv_obj_add_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);
+    // Show "no errors" state initially (card always visible)
+    lv_label_set_text(state.error_label, i18n_get(STR_HP_SYSTEM_OK));
+    lv_obj_set_style_text_color(state.error_label, COLOR_SUCCESS, LV_PART_MAIN);
+    lv_obj_set_style_border_color(state.error_card, COLOR_CARD_BORDER, LV_PART_MAIN);
     
     // =========================================================================
     // CONTROLS CARD: Power, Mode, Single Setpoint
@@ -882,7 +894,6 @@ void heatpump_screen_update(void) {
         lv_label_set_text(state.error_label, i18n_get(STR_HP_NOT_CONNECTED));
         lv_obj_set_style_text_color(state.error_label, COLOR_ERROR, LV_PART_MAIN);
         lv_obj_set_style_border_color(state.error_card, COLOR_ERROR, LV_PART_MAIN);
-        lv_obj_remove_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);
         
         // Power button shows off state
         update_power_btn(false);
@@ -972,17 +983,20 @@ void heatpump_screen_update(void) {
         lv_label_set_text(state.power_meter_label, power_buf);
     }
     
-    // Error display
+    // Error display (card always visible — tap chevron ▶ to see history)
     if (hp.hasAnyError()) {
         char error_buf[256];
-        // Card is 700px wide with 10px pad each side = 680px usable
-        format_error_card_text(error_buf, sizeof(error_buf), UI_FONT_BODY, 660);
+        // Card is 700px wide, 10px left pad + 40px right pad (chevron) = 650px usable
+        format_error_card_text(error_buf, sizeof(error_buf), UI_FONT_HEADER, 620);
         lv_label_set_text(state.error_label, error_buf);
         lv_obj_set_style_text_color(state.error_label, COLOR_ERROR, LV_PART_MAIN);
         lv_obj_set_style_border_color(state.error_card, COLOR_ERROR, LV_PART_MAIN);
-        lv_obj_remove_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(state.error_chevron, COLOR_ERROR, LV_PART_MAIN);
     } else {
-        lv_obj_add_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(state.error_label, i18n_get(STR_HP_SYSTEM_OK));
+        lv_obj_set_style_text_color(state.error_label, COLOR_SUCCESS, LV_PART_MAIN);
+        lv_obj_set_style_border_color(state.error_card, COLOR_CARD_BORDER, LV_PART_MAIN);
+        lv_obj_set_style_text_color(state.error_chevron, COLOR_TEXT_DIM, LV_PART_MAIN);
     }
     
     // Update power button
