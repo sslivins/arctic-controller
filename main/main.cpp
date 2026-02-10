@@ -153,7 +153,8 @@ extern "C" void app_main(void)
 
     // Initialize Modbus and Arctic heat pump communication (skip in demo mode)
     if (app_prefs_is_demo_mode()) {
-        mclog::tagInfo(TAG, "Demo mode enabled - skipping Modbus initialization");
+        mclog::tagInfo(TAG, "Demo mode enabled - initializing demo state");
+        arctic::initDemoState();
     } else {
         esp_err_t modbus_ret = modbus::init();
         if (modbus_ret == ESP_OK) {

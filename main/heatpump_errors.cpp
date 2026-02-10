@@ -389,6 +389,37 @@ void clearErrorHistory() {
     ESP_LOGI(TAG, "Error history cleared");
 }
 
+void populateDemoErrorHistory() {
+    // Only populate once after boot
+    static bool s_demo_seeded = false;
+    if (s_demo_seeded) return;
+    s_demo_seeded = true;
+    
+    time_t now = time(nullptr);
+    
+    // E26 - Low ambient, cleared 15 minutes ago (was active for 45 min)
+    ErrorHistoryEntry& e1 = s_history[s_history_head];
+    strncpy(e1.code, "E26", sizeof(e1.code) - 1);
+    e1.code[sizeof(e1.code) - 1] = '\0';
+    e1.occurred = now - 3600;   // Started 1h ago
+    e1.cleared = now - 900;     // Cleared 15m ago
+    e1.is_active = false;
+    s_history_head = (s_history_head + 1) % ERROR_HISTORY_SIZE;
+    s_history_count++;
+    
+    // E19 - Inlet sensor, cleared 18 minutes ago (was active for 12 min)
+    ErrorHistoryEntry& e2 = s_history[s_history_head];
+    strncpy(e2.code, "E19", sizeof(e2.code) - 1);
+    e2.code[sizeof(e2.code) - 1] = '\0';
+    e2.occurred = now - 1800;   // Started 30m ago
+    e2.cleared = now - 1080;    // Cleared 18m ago
+    e2.is_active = false;
+    s_history_head = (s_history_head + 1) % ERROR_HISTORY_SIZE;
+    s_history_count++;
+    
+    ESP_LOGI(TAG, "Demo error history populated");
+}
+
 const char* severityToString(ErrorSeverity severity) {
     switch (severity) {
         case ErrorSeverity::INFO:     return "info";

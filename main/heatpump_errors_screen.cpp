@@ -15,6 +15,7 @@
 #include "i18n/i18n.h"
 #include <esp_log.h>
 #include <stdio.h>
+#include <string.h>
 
 static const char* TAG = "hp_errors_scr";
 
@@ -214,6 +215,34 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     return card;
 }
 
+// Forward declaration
+static void update_error_list();
+
+// Async callback to safely rebuild the error list after clearing history
+static void async_update_error_list(void* /*unused*/) {
+    update_error_list();
+}
+
+// Callback for the clear history button
+static void clear_history_btn_cb(lv_event_t* e) {
+    (void)e;
+    arctic::clearErrorHistory();
+    ESP_LOGI(TAG, "Error history cleared by user");
+    // Defer rebuild so the button isn't destroyed mid-callback
+    lv_async_call(async_update_error_list, nullptr);
+}
+
+// Helper to create a section header label
+static lv_obj_t* create_section_header(lv_obj_t* parent, const char* text) {
+    lv_obj_t* label = lv_label_create(parent);
+    lv_label_set_text(label, text);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_font(label, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(label, 5, LV_PART_MAIN);
+    return label;
+}
+
 static void update_error_list() {
     if (!state.error_list) return;
     
@@ -226,38 +255,8 @@ static void update_error_list() {
     arctic::HeatPumpState hp = arctic::getState();
     
     // Check demo mode
-    bool demo_mode = app_prefs_is_demo_mode();
+    // (not needed - getActiveErrors reads from s_state which is populated in demo mode)
     
-    if (demo_mode) {
-        // Show sample demo errors to demonstrate UI with Arctic error codes
-        // Use current time minus some offset for demo durations
-        time_t now = time(nullptr);
-        
-        // Create demo errors with realistic timestamps
-        arctic::ActiveError demo_errors[3];
-        
-        // P02 - High pressure, ACTIVE for 2 hours 15 minutes (still ongoing)
-        demo_errors[0] = { "P02", "HIGH_PRESSURE", "High pressure protection activated",
-            "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked or if evaporator fins are blocked. 3) Check whether snow or ice has built up inside the unit. 4) Check that the water tank temperature setting is not too high.",
-            arctic::ErrorSeverity::CRITICAL, 2, 0x0040, now - 8100, now, true };
-        
-        // E26 - Low ambient, CLEARED after 45 minutes (was active, now resolved)
-        demo_errors[1] = { "E26", "LOW_AMBIENT", "Low ambient temperature protection",
-            "Ambient temperature is too low for operation. Wait for conditions to improve.",
-            arctic::ErrorSeverity::WARNING, 2, 0x0400, now - 3600, now - 900, false };  // Started 1h ago, cleared 15m ago
-        
-        // E19 - Inlet sensor, CLEARED after 12 minutes
-        demo_errors[2] = { "E19", "INLET_SENS", "Inlet water temperature sensor fault",
-            "Check the inlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace.",
-            arctic::ErrorSeverity::ERROR, 1, 0x0004, now - 1800, now - 1080, false };  // Started 30m ago, cleared 18m ago (duration: 12m)
-        
-        for (int i = 0; i < 3; i++) {
-            create_error_card(state.error_list, &demo_errors[i]);
-        }
-        return;
-    }
-    
-    // Check if disconnected
     if (!hp.connected) {
         lv_obj_t* disconn_card = lv_obj_create(state.error_list);
         lv_obj_set_size(disconn_card, LV_PCT(100), LV_SIZE_CONTENT);
@@ -280,6 +279,9 @@ static void update_error_list() {
     }
     
     if (count == 0) {
+        // Active errors section header
+        create_section_header(state.error_list, i18n_get(STR_HP_ACTIVE_ERRORS));
+        
         // No errors - show success message
         lv_obj_t* ok_card = lv_obj_create(state.error_list);
         lv_obj_set_size(ok_card, LV_PCT(100), LV_SIZE_CONTENT);
@@ -299,9 +301,102 @@ static void update_error_list() {
         lv_obj_set_style_text_color(ok_label, COLOR_SUCCESS, LV_PART_MAIN);
         lv_obj_set_style_text_align(ok_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     } else {
+        // Active errors section header
+        create_section_header(state.error_list, i18n_get(STR_HP_ACTIVE_ERRORS));
+        
         // Create a card for each error
         for (int i = 0; i < count; i++) {
             create_error_card(state.error_list, &errors[i]);
+        }
+    }
+    
+    // Show error history (cleared errors from ring buffer)
+    {
+        arctic::ErrorHistoryEntry history[arctic::ERROR_HISTORY_SIZE];
+        int hist_count = arctic::getErrorHistory(history, arctic::ERROR_HISTORY_SIZE);
+        
+        // Filter to only cleared (non-active) entries
+        int cleared_count = 0;
+        for (int i = 0; i < hist_count; i++) {
+            if (!history[i].is_active) cleared_count++;
+        }
+        
+        if (cleared_count > 0) {
+            // History section header row: label + clear button
+            lv_obj_t* hist_row = lv_obj_create(state.error_list);
+            lv_obj_set_size(hist_row, LV_PCT(100), LV_SIZE_CONTENT);
+            lv_obj_set_style_bg_opa(hist_row, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_set_style_border_width(hist_row, 0, LV_PART_MAIN);
+            lv_obj_set_style_pad_all(hist_row, 0, LV_PART_MAIN);
+            lv_obj_set_style_pad_top(hist_row, 10, LV_PART_MAIN);
+            lv_obj_clear_flag(hist_row, LV_OBJ_FLAG_SCROLLABLE);
+            
+            lv_obj_t* hist_label = lv_label_create(hist_row);
+            lv_label_set_text(hist_label, i18n_get(STR_HP_ERROR_HISTORY));
+            lv_obj_set_style_text_font(hist_label, UI_FONT_SMALL, LV_PART_MAIN);
+            lv_obj_set_style_text_color(hist_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+            lv_obj_align(hist_label, LV_ALIGN_LEFT_MID, 0, 0);
+            
+            // Clear button (right side of history header)
+            lv_obj_t* clear_btn = lv_btn_create(hist_row);
+            lv_obj_set_size(clear_btn, LV_SIZE_CONTENT, 55);
+            lv_obj_set_style_min_width(clear_btn, 100, LV_PART_MAIN);
+            lv_obj_align(clear_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+            lv_obj_set_style_bg_color(clear_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(clear_btn, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_radius(clear_btn, 8, LV_PART_MAIN);
+            lv_obj_set_style_shadow_width(clear_btn, 0, LV_PART_MAIN);
+            lv_obj_set_style_border_width(clear_btn, 1, LV_PART_MAIN);
+            lv_obj_set_style_border_color(clear_btn, COLOR_WARNING, LV_PART_MAIN);
+            lv_obj_set_style_border_opa(clear_btn, LV_OPA_50, LV_PART_MAIN);
+            lv_obj_set_style_pad_hor(clear_btn, 25, LV_PART_MAIN);
+            lv_obj_add_event_cb(clear_btn, clear_history_btn_cb, LV_EVENT_CLICKED, nullptr);
+            
+            lv_obj_t* clear_lbl = lv_label_create(clear_btn);
+            lv_label_set_text(clear_lbl, i18n_get(STR_HP_CLEAR_HISTORY));
+            lv_obj_set_style_text_font(clear_lbl, UI_FONT_BODY, LV_PART_MAIN);
+            lv_obj_set_style_text_color(clear_lbl, COLOR_WARNING, LV_PART_MAIN);
+            lv_obj_center(clear_lbl);
+            
+            for (int i = 0; i < hist_count; i++) {
+                if (history[i].is_active) continue;  // Skip active entries
+                
+                // Create a simple card for each cleared history entry
+                arctic::ActiveError hist_err = {};
+                hist_err.code = history[i].code;
+                hist_err.name = "";
+                hist_err.description = "";
+                hist_err.resolution = nullptr;
+                hist_err.severity = arctic::ErrorSeverity::INFO;
+                hist_err.active = false;
+                hist_err.first_seen = history[i].occurred;
+                hist_err.last_seen = history[i].cleared;
+                
+                // Find matching error definition for description
+                int def_count;
+                const arctic::ErrorDef* defs = arctic::getError1Definitions(&def_count);
+                for (int d = 0; d < def_count; d++) {
+                    if (strcmp(defs[d].code, history[i].code) == 0) {
+                        hist_err.description = defs[d].description;
+                        hist_err.resolution = defs[d].resolution;
+                        hist_err.severity = defs[d].severity;
+                        break;
+                    }
+                }
+                if (hist_err.description[0] == '\0') {
+                    defs = arctic::getError2Definitions(&def_count);
+                    for (int d = 0; d < def_count; d++) {
+                        if (strcmp(defs[d].code, history[i].code) == 0) {
+                            hist_err.description = defs[d].description;
+                            hist_err.resolution = defs[d].resolution;
+                            hist_err.severity = defs[d].severity;
+                            break;
+                        }
+                    }
+                }
+                
+                create_error_card(state.error_list, &hist_err);
+            }
         }
     }
 }
@@ -377,13 +472,8 @@ void heatpump_errors_show(heatpump_errors_close_cb_t on_close) {
     
     // Title
     lv_obj_t* title = lv_label_create(header);
-    if (app_prefs_is_demo_mode()) {
-        lv_label_set_text(title, i18n_get(STR_HP_DEMO_ERRORS));
-        lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
-    } else {
-        lv_label_set_text(title, i18n_get(STR_HP_ERROR_STATUS));
-        lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    }
+    lv_label_set_text(title, i18n_get(STR_HP_ERROR_STATUS));
+    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
     

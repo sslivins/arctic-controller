@@ -196,6 +196,9 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_JUST_DETECTED] = "\xEF\x81\xB1 Just detected",
     [STR_HP_DISCONNECTED_MSG] = "\xEF\x81\xB1 Heat Pump Disconnected\n\nError status unavailable.\nCheck Modbus connection.",
     [STR_HP_NO_ERRORS] = "\xEF\x80\x8C No Active Errors\n\nAll systems operating normally.",
+    [STR_HP_ACTIVE_ERRORS] = "Active Errors",
+    [STR_HP_CLEAR_HISTORY] = "Clear",
+    [STR_HP_ERROR_HISTORY] = "Error History",
     
     // Heat Pump - Advanced/Params Screen
     [STR_HP_ADVANCED] = "Advanced",
@@ -415,6 +418,9 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_JUST_DETECTED] = "\xEF\x81\xB1 Détectée à l'instant",
     [STR_HP_DISCONNECTED_MSG] = "\xEF\x81\xB1 PAC déconnectée\n\nÉtat des erreurs indisponible.\nVérifiez la connexion Modbus.",
     [STR_HP_NO_ERRORS] = "\xEF\x80\x8C Aucune erreur\n\nTous les systèmes fonctionnent normalement.",
+    [STR_HP_ACTIVE_ERRORS] = "Erreurs actives",
+    [STR_HP_CLEAR_HISTORY] = "Effacer",
+    [STR_HP_ERROR_HISTORY] = "Historique des erreurs",
     
     // Heat Pump - Advanced/Params Screen
     [STR_HP_ADVANCED] = "Avancé",
@@ -634,6 +640,9 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_JUST_DETECTED] = "\xEF\x81\xB1 Recién detectado",
     [STR_HP_DISCONNECTED_MSG] = "\xEF\x81\xB1 Bomba de calor desconectada\n\nEstado de errores no disponible.\nVerifique la conexión Modbus.",
     [STR_HP_NO_ERRORS] = "\xEF\x80\x8C Sin errores activos\n\nTodos los sistemas funcionan normalmente.",
+    [STR_HP_ACTIVE_ERRORS] = "Errores activos",
+    [STR_HP_CLEAR_HISTORY] = "Borrar",
+    [STR_HP_ERROR_HISTORY] = "Historial de errores",
     
     // Heat Pump - Advanced/Params Screen
     [STR_HP_ADVANCED] = "Avanzado",

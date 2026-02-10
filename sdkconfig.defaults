@@ -5,6 +5,10 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Main task stack - needs headroom for LVGL deep layout/font measurement chains
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
 # Enable XIP from PSRAM - allows PSRAM reads (display framebuffer) to continue

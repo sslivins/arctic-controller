@@ -8,7 +8,7 @@
 #include "heatpump_system_screen.h"
 #include "heatpump_control_screen.h"
 #include "heatpump_errors_screen.h"
-#include "heatpump_demo_state.h"
+#include "heatpump_errors.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
 #include "app_preferences.h"
@@ -16,8 +16,83 @@
 #include "ui_common.h"
 #include <esp_log.h>
 #include <stdio.h>
+#include <string.h>
 
 static const char* TAG = "hp_screen";
+
+// Format error summary for the main screen error card.
+// Shows first error with code, truncates if needed, appends "+ N more" for additional errors.
+// max_width_px is the usable pixel width of the label.
+static void format_error_card_text(char* buf, size_t buf_size, const lv_font_t* font, lv_coord_t max_width_px) {
+    arctic::ActiveError errors[16];
+    int count = arctic::getActiveErrors(errors, 16);
+    if (count <= 0) {
+        buf[0] = '\0';
+        return;
+    }
+    
+    // Build first error: "P02: High pressure protection"
+    char first[128];
+    snprintf(first, sizeof(first), "\xEF\x81\xB1 %s: %s", errors[0].code, errors[0].description);
+    
+    if (count == 1) {
+        // Single error — truncate with ellipsis if too wide
+        lv_point_t size;
+        lv_txt_get_size(&size, first, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (size.x <= max_width_px) {
+            strncpy(buf, first, buf_size - 1);
+            buf[buf_size - 1] = '\0';
+        } else {
+            // Truncate with "..."
+            for (int len = (int)strlen(first) - 1; len > 10; len--) {
+                first[len] = '\0';
+                char trial[140];
+                snprintf(trial, sizeof(trial), "%s...", first);
+                lv_txt_get_size(&size, trial, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                if (size.x <= max_width_px) {
+                    strncpy(buf, trial, buf_size - 1);
+                    buf[buf_size - 1] = '\0';
+                    return;
+                }
+            }
+            strncpy(buf, first, buf_size - 1);
+            buf[buf_size - 1] = '\0';
+        }
+        return;
+    }
+    
+    // Multiple errors — need "+ N more" suffix
+    char suffix[24];
+    snprintf(suffix, sizeof(suffix), " + %d more", count - 1);
+    
+    // Measure suffix width
+    lv_point_t suffix_size;
+    lv_txt_get_size(&suffix_size, suffix, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_coord_t available = max_width_px - suffix_size.x;
+    
+    // Check if first error fits with suffix
+    lv_point_t first_size;
+    lv_txt_get_size(&first_size, first, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    
+    if (first_size.x <= available) {
+        snprintf(buf, buf_size, "%s%s", first, suffix);
+    } else {
+        // Truncate first error to fit
+        for (int len = (int)strlen(first) - 1; len > 10; len--) {
+            first[len] = '\0';
+            char trial[140];
+            snprintf(trial, sizeof(trial), "%s...", first);
+            lv_point_t trial_size;
+            lv_txt_get_size(&trial_size, trial, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (trial_size.x <= available) {
+                snprintf(buf, buf_size, "%s%s", trial, suffix);
+                return;
+            }
+        }
+        // Fallback: just show code + suffix
+        snprintf(buf, buf_size, "\xEF\x81\xB1 %s%s", errors[0].code, suffix);
+    }
+}
 
 // Helper: show error popup for write failures when disconnected
 static void show_write_error_popup(const char* message) {
@@ -246,16 +321,6 @@ static void on_control_close(void) {
 
 static void power_btn_cb(lv_event_t* e) {
     arctic::HeatPumpState hp = arctic::getState();
-    bool demo_mode = app_prefs_is_demo_mode();
-    
-    if (demo_mode) {
-        // Demo mode - update shared demo state
-        bool new_power = !heatpump_demo_get_power();
-        heatpump_demo_set_power(new_power);
-        ESP_LOGI(TAG, "[DEMO] Power %s", new_power ? "ON" : "OFF");
-        heatpump_screen_update();
-        return;
-    }
     
     if (!hp.connected) {
         // Disconnected - show error popup
@@ -266,31 +331,15 @@ static void power_btn_cb(lv_event_t* e) {
     arctic::setUnitPower(!hp.unit_on);
 }
 
+static bool s_dropdown_updating = false;
+
 static void mode_dropdown_cb(lv_event_t* e) {
+    if (s_dropdown_updating) return;
     lv_obj_t* dd = (lv_obj_t*)lv_event_get_target(e);
     uint16_t sel = lv_dropdown_get_selected(dd);
-    bool demo_mode = app_prefs_is_demo_mode();
-    
-    if (demo_mode) {
-        // Demo mode - update shared demo state
-        arctic::WorkingMode mode;
-        switch (sel) {
-            case 0: mode = arctic::WorkingMode::COOLING; break;
-            case 1: mode = arctic::WorkingMode::FLOOR_HEATING; break;
-            case 2: mode = arctic::WorkingMode::FAN_COIL_HEATING; break;
-            case 3: mode = arctic::WorkingMode::HOT_WATER; break;
-            case 4: mode = arctic::WorkingMode::AUTO; break;
-            default: return;
-        }
-        heatpump_demo_set_mode(mode);
-        const char* mode_names[] = {"Cooling", "Floor Heat", "Fan Heat", "Hot Water", "Auto"};
-        ESP_LOGI(TAG, "[DEMO] Mode: %s", mode_names[sel]);
-        return;
-    }
     
     arctic::HeatPumpState hp = arctic::getState();
     if (!hp.connected) {
-        // Disconnected - show error popup
         show_write_error_popup("Cannot change mode: Heat pump not connected");
         return;
     }
@@ -309,62 +358,29 @@ static void mode_dropdown_cb(lv_event_t* e) {
 
 // Get the active mode for setpoint adjustment
 static int get_active_mode() {
-    bool demo_mode = app_prefs_is_demo_mode();
-    
-    if (!demo_mode) {
-        arctic::HeatPumpState hp = arctic::getState();
-        if (hp.connected) {
-            switch (hp.working_mode) {
-                case arctic::WorkingMode::COOLING: return 0;
-                case arctic::WorkingMode::FLOOR_HEATING:
-                case arctic::WorkingMode::FAN_COIL_HEATING: return 1;
-                case arctic::WorkingMode::HOT_WATER: return 3;
-                case arctic::WorkingMode::AUTO: return 1;  // Default to heating in auto
-                default: return 1;
-            }
+    arctic::HeatPumpState hp = arctic::getState();
+    if (hp.connected) {
+        switch (hp.working_mode) {
+            case arctic::WorkingMode::COOLING: return 0;
+            case arctic::WorkingMode::FLOOR_HEATING: return 1;
+            case arctic::WorkingMode::FAN_COIL_HEATING: return 2;
+            case arctic::WorkingMode::HOT_WATER: return 3;
+            case arctic::WorkingMode::AUTO: return 4;
+            default: return 1;
         }
-        return 1;  // Default when disconnected
     }
-    
-    // Demo mode - get from shared state
-    arctic::WorkingMode mode = heatpump_demo_get_mode();
-    switch (mode) {
-        case arctic::WorkingMode::COOLING: return 0;
-        case arctic::WorkingMode::FLOOR_HEATING: return 1;
-        case arctic::WorkingMode::FAN_COIL_HEATING: return 2;
-        case arctic::WorkingMode::HOT_WATER: return 3;
-        case arctic::WorkingMode::AUTO: return 4;
-        default: return 1;
-    }
+    return 1;  // Default when disconnected
 }
 
 static void setpoint_minus_cb(lv_event_t* e) {
     (void)e;
-    bool demo_mode = app_prefs_is_demo_mode();
-    int mode = get_active_mode();
-    
-    if (demo_mode) {
-        // Demo mode - update shared state
-        if (mode == 0) {
-            int16_t val = heatpump_demo_get_cooling_setpoint();
-            if (val > 5) heatpump_demo_set_cooling_setpoint(val - 1);
-        } else if (mode == 3) {
-            int16_t val = heatpump_demo_get_hotwater_setpoint();
-            if (val > 30) heatpump_demo_set_hotwater_setpoint(val - 1);
-        } else {
-            int16_t val = heatpump_demo_get_heating_setpoint();
-            if (val > 20) heatpump_demo_set_heating_setpoint(val - 1);
-        }
-        return;
-    }
-    
     arctic::HeatPumpState hp = arctic::getState();
     if (!hp.connected) {
         show_write_error_popup("Cannot adjust setpoint: Heat pump not connected");
         return;
     }
     
-    // Real mode
+    int mode = get_active_mode();
     if (mode == 0) {
         int16_t val = hp.cooling_setpoint - 1;
         if (val >= 5) arctic::setCoolingSetpoint(val);
@@ -379,31 +395,13 @@ static void setpoint_minus_cb(lv_event_t* e) {
 
 static void setpoint_plus_cb(lv_event_t* e) {
     (void)e;
-    bool demo_mode = app_prefs_is_demo_mode();
-    int mode = get_active_mode();
-    
-    if (demo_mode) {
-        // Demo mode - update shared state
-        if (mode == 0) {
-            int16_t val = heatpump_demo_get_cooling_setpoint();
-            if (val < 30) heatpump_demo_set_cooling_setpoint(val + 1);
-        } else if (mode == 3) {
-            int16_t val = heatpump_demo_get_hotwater_setpoint();
-            if (val < 60) heatpump_demo_set_hotwater_setpoint(val + 1);
-        } else {
-            int16_t val = heatpump_demo_get_heating_setpoint();
-            if (val < 60) heatpump_demo_set_heating_setpoint(val + 1);
-        }
-        return;
-    }
-    
     arctic::HeatPumpState hp = arctic::getState();
     if (!hp.connected) {
         show_write_error_popup("Cannot adjust setpoint: Heat pump not connected");
         return;
     }
     
-    // Real mode
+    int mode = get_active_mode();
     if (mode == 0) {
         int16_t val = hp.cooling_setpoint + 1;
         if (val <= 30) arctic::setCoolingSetpoint(val);
@@ -445,7 +443,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     ESP_LOGI(TAG, "Creating heat pump status display");
     
     // Main container - fills from y_offset to near bottom of screen
-    // Screen is 1280px tall, leave 40px for footer
+    // Uses flex column layout so items stack automatically
     state.container = lv_obj_create(parent);
     lv_obj_set_size(state.container, 700, 1280 - y_offset - 40);
     lv_obj_align(state.container, LV_ALIGN_TOP_MID, 0, y_offset);
@@ -453,13 +451,51 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_border_width(state.container, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(state.container, 0, LV_PART_MAIN);
     lv_obj_clear_flag(state.container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(state.container, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(state.container, 15, LV_PART_MAIN);
+    lv_obj_set_flex_align(state.container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    
+    // =========================================================================
+    // DEMO MODE BANNER (shown only in demo mode)
+    // =========================================================================
+    if (app_prefs_is_demo_mode()) {
+        lv_obj_t* demo_banner = lv_obj_create(state.container);
+        lv_obj_set_size(demo_banner, LV_PCT(100), 40);
+        lv_obj_set_style_bg_color(demo_banner, COLOR_WARNING, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(demo_banner, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_width(demo_banner, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(demo_banner, 8, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(demo_banner, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(demo_banner, LV_OBJ_FLAG_SCROLLABLE);
+        
+        lv_obj_t* demo_label = lv_label_create(demo_banner);
+        lv_label_set_text(demo_label, i18n_get(STR_HP_DEMO_MODE_ENABLED));
+        lv_obj_set_style_text_font(demo_label, UI_FONT_BODY, LV_PART_MAIN);
+        lv_obj_set_style_text_color(demo_label, lv_color_hex(0x000000), LV_PART_MAIN);
+        lv_obj_center(demo_label);
+    }
+    
+    // =========================================================================
+    // POWER BUTTON (standalone, prominent at top)
+    // =========================================================================
+    state.power_btn = lv_btn_create(state.container);
+    lv_obj_set_size(state.power_btn, LV_PCT(100), 80);
+    lv_obj_set_style_bg_color(state.power_btn, COLOR_ERROR, LV_PART_MAIN);  // Red when off
+    lv_obj_set_style_bg_color(state.power_btn, lv_color_hex(0x8b0000), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(state.power_btn, 12, LV_PART_MAIN);
+    lv_obj_add_event_cb(state.power_btn, power_btn_cb, LV_EVENT_CLICKED, nullptr);
+    
+    state.power_btn_label = lv_label_create(state.power_btn);
+    lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_OFF));
+    lv_obj_set_style_text_font(state.power_btn_label, UI_FONT_TITLE, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(state.power_btn_label);
     
     // =========================================================================
     // TOP: Main Status Card
     // =========================================================================
     state.status_card = lv_obj_create(state.container);
     lv_obj_set_size(state.status_card, LV_PCT(100), 200);
-    lv_obj_align(state.status_card, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_color(state.status_card, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_border_color(state.status_card, COLOR_CARD_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.status_card, 2, LV_PART_MAIN);
@@ -516,7 +552,6 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // =========================================================================
     lv_obj_t* status_row = lv_obj_create(state.container);
     lv_obj_set_size(status_row, LV_PCT(100), 90);
-    lv_obj_align(status_row, LV_ALIGN_TOP_MID, 0, 215);
     lv_obj_set_style_bg_color(status_row, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_border_color(status_row, COLOR_CARD_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(status_row, 2, LV_PART_MAIN);
@@ -543,7 +578,6 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // =========================================================================
     state.error_card = lv_obj_create(state.container);
     lv_obj_set_size(state.error_card, LV_PCT(100), 60);
-    lv_obj_align(state.error_card, LV_ALIGN_TOP_MID, 0, 320);
     lv_obj_set_style_bg_color(state.error_card, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_border_color(state.error_card, COLOR_WARNING, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.error_card, 2, LV_PART_MAIN);
@@ -570,8 +604,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // CONTROLS CARD: Power, Mode, Single Setpoint
     // =========================================================================
     lv_obj_t* controls_card = lv_obj_create(state.container);
-    lv_obj_set_size(controls_card, LV_PCT(100), 330);
-    lv_obj_align(controls_card, LV_ALIGN_TOP_MID, 0, 395);
+    lv_obj_set_size(controls_card, LV_PCT(100), 230);
     lv_obj_set_style_bg_color(controls_card, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_border_color(controls_card, COLOR_CARD_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(controls_card, 2, LV_PART_MAIN);
@@ -579,25 +612,10 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_pad_all(controls_card, 20, LV_PART_MAIN);
     lv_obj_clear_flag(controls_card, LV_OBJ_FLAG_SCROLLABLE);
     
-    // --- Large Power Button (full width, prominent) ---
-    state.power_btn = lv_btn_create(controls_card);
-    lv_obj_set_size(state.power_btn, LV_PCT(100), 80);
-    lv_obj_align(state.power_btn, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(state.power_btn, COLOR_ERROR, LV_PART_MAIN);  // Red when off
-    lv_obj_set_style_bg_color(state.power_btn, lv_color_hex(0x8b0000), LV_STATE_PRESSED);
-    lv_obj_set_style_radius(state.power_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.power_btn, power_btn_cb, LV_EVENT_CLICKED, nullptr);
-    
-    state.power_btn_label = lv_label_create(state.power_btn);
-    lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_OFF));
-    lv_obj_set_style_text_font(state.power_btn_label, UI_FONT_TITLE, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(state.power_btn_label);
-    
     // --- Mode Row ---
     lv_obj_t* mode_row = lv_obj_create(controls_card);
     lv_obj_set_size(mode_row, LV_PCT(100), 60);
-    lv_obj_align(mode_row, LV_ALIGN_TOP_MID, 0, 95);
+    lv_obj_align(mode_row, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(mode_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(mode_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(mode_row, 0, LV_PART_MAIN);
@@ -629,7 +647,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // --- Active Setpoint Row (single row that changes label based on mode) ---
     lv_obj_t* setpoint_row = lv_obj_create(controls_card);
     lv_obj_set_size(setpoint_row, LV_PCT(100), 80);
-    lv_obj_align(setpoint_row, LV_ALIGN_TOP_MID, 0, 170);
+    lv_obj_align(setpoint_row, LV_ALIGN_TOP_MID, 0, 75);
     lv_obj_set_style_bg_opa(setpoint_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(setpoint_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(setpoint_row, 0, LV_PART_MAIN);
@@ -676,13 +694,31 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_center(plus_lbl);
     
     // =========================================================================
+    // SPACER: pushes buttons to the bottom of the screen
+    // =========================================================================
+    lv_obj_t* spacer = lv_obj_create(state.container);
+    lv_obj_set_size(spacer, 0, 0);
+    lv_obj_set_flex_grow(spacer, 1);
+    lv_obj_set_style_bg_opa(spacer, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(spacer, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(spacer, 0, LV_PART_MAIN);
+    
+    // =========================================================================
     // BOTTOM: Three button bar - Temps | System | Advanced
     // =========================================================================
     
+    // Bottom button row
+    lv_obj_t* btn_row = lv_obj_create(state.container);
+    lv_obj_set_size(btn_row, LV_PCT(100), 60);
+    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_opa(btn_row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(btn_row, 0, LV_PART_MAIN);
+
     // Temperatures button (left)
-    state.temps_btn = lv_btn_create(state.container);
+    state.temps_btn = lv_btn_create(btn_row);
     lv_obj_set_size(state.temps_btn, 200, 60);
-    lv_obj_align(state.temps_btn, LV_ALIGN_BOTTOM_LEFT, 10, 0);
     lv_obj_set_style_bg_color(state.temps_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.temps_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.temps_btn, COLOR_ACCENT, LV_PART_MAIN);
@@ -697,9 +733,8 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_center(state.temps_btn_label);
     
     // System readings button (center)
-    state.system_btn = lv_btn_create(state.container);
+    state.system_btn = lv_btn_create(btn_row);
     lv_obj_set_size(state.system_btn, 200, 60);
-    lv_obj_align(state.system_btn, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_bg_color(state.system_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.system_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.system_btn, COLOR_WARNING, LV_PART_MAIN);
@@ -714,9 +749,8 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_center(state.system_btn_label);
     
     // Advanced button (right) - heat pump P-parameters
-    state.controls_btn = lv_btn_create(state.container);
+    state.controls_btn = lv_btn_create(btn_row);
     lv_obj_set_size(state.controls_btn, 200, 60);
-    lv_obj_align(state.controls_btn, LV_ALIGN_BOTTOM_RIGHT, -10, 0);
     lv_obj_set_style_bg_color(state.controls_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.controls_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.controls_btn, COLOR_SUCCESS, LV_PART_MAIN);
@@ -762,58 +796,40 @@ void heatpump_screen_update(void) {
                  i18n_get(STR_HP_OPT_FAN_COIL_HEATING), i18n_get(STR_HP_OPT_HOT_WATER),
                  i18n_get(STR_HP_OPT_AUTO));
         uint16_t sel = lv_dropdown_get_selected(state.mode_dropdown);
-        lv_obj_remove_event_cb(state.mode_dropdown, mode_dropdown_cb);
+        s_dropdown_updating = true;
         lv_dropdown_set_options(state.mode_dropdown, dropdown_opts);
         lv_dropdown_set_selected(state.mode_dropdown, sel);
-        lv_obj_add_event_cb(state.mode_dropdown, mode_dropdown_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+        s_dropdown_updating = false;
     }
     
     // Connection indicator
     set_indicator_active(state.connection_indicator, hp.connected, COLOR_SUCCESS);
     
     // Helper: Get setpoint name, value, and color for active mode
-    auto get_active_setpoint_info = [&](bool connected, int mode, int16_t* value, const char** name, lv_color_t* color) {
-        if (!connected) {
-            // Demo mode - use shared state
-            if (mode == 0) {
-                *value = heatpump_demo_get_cooling_setpoint();
+    auto get_active_setpoint_info = [&](int16_t* value, const char** name, lv_color_t* color) {
+        switch (hp.working_mode) {
+            case arctic::WorkingMode::COOLING:
+                *value = hp.cooling_setpoint;
                 *name = i18n_get(STR_HP_COOLING);
                 *color = COLOR_COOLING;
-            } else if (mode == 3) {
-                *value = heatpump_demo_get_hotwater_setpoint();
-                *name = i18n_get(STR_HP_HOT_WATER);
-                *color = COLOR_ERROR;
-            } else {
-                *value = heatpump_demo_get_heating_setpoint();
+                break;
+            case arctic::WorkingMode::FLOOR_HEATING:
+            case arctic::WorkingMode::FAN_COIL_HEATING:
+                *value = hp.heating_setpoint;
                 *name = i18n_get(STR_HP_HEATING);
                 *color = COLOR_HEATING;
-            }
-        } else {
-            // Real mode
-            switch (hp.working_mode) {
-                case arctic::WorkingMode::COOLING:
-                    *value = hp.cooling_setpoint;
-                    *name = i18n_get(STR_HP_COOLING);
-                    *color = COLOR_COOLING;
-                    break;
-                case arctic::WorkingMode::FLOOR_HEATING:
-                case arctic::WorkingMode::FAN_COIL_HEATING:
-                    *value = hp.heating_setpoint;
-                    *name = i18n_get(STR_HP_HEATING);
-                    *color = COLOR_HEATING;
-                    break;
-                case arctic::WorkingMode::HOT_WATER:
-                    *value = hp.hot_water_setpoint;
-                    *name = i18n_get(STR_HP_HOT_WATER);
-                    *color = COLOR_ERROR;
-                    break;
-                case arctic::WorkingMode::AUTO:
-                default:
-                    *value = hp.heating_setpoint;
-                    *name = i18n_get(STR_HP_HEATING);
-                    *color = COLOR_HEATING;
-                    break;
-            }
+                break;
+            case arctic::WorkingMode::HOT_WATER:
+                *value = hp.hot_water_setpoint;
+                *name = i18n_get(STR_HP_HOT_WATER);
+                *color = COLOR_ERROR;
+                break;
+            case arctic::WorkingMode::AUTO:
+            default:
+                *value = hp.heating_setpoint;
+                *name = i18n_get(STR_HP_HEATING);
+                *color = COLOR_HEATING;
+                break;
         }
     };
     
@@ -837,111 +853,7 @@ void heatpump_screen_update(void) {
     };
     
     // Get demo mode and connection state
-    bool demo_mode_enabled = app_prefs_is_demo_mode();
     bool connected = hp.connected;
-    
-    if (demo_mode_enabled) {
-        // =====================================================================
-        // DEMO MODE - show simulated values and allow interaction
-        // =====================================================================
-        const char* demo_mode_names[] = {
-            i18n_get(STR_HP_MODE_COOLING), i18n_get(STR_HP_MODE_FLOOR_HEAT),
-            i18n_get(STR_HP_MODE_FAN_HEAT), i18n_get(STR_HP_MODE_HOT_WATER),
-            i18n_get(STR_HP_MODE_AUTO)
-        };
-        lv_color_t demo_mode_colors[] = {COLOR_COOLING, COLOR_HEATING, COLOR_HEATING, COLOR_ERROR, COLOR_SUCCESS};
-        
-        // Get demo state from shared state module
-        bool demo_power = heatpump_demo_get_power();
-        arctic::WorkingMode demo_mode_val = heatpump_demo_get_mode();
-        int demo_mode_idx = 1;  // Default to floor heat
-        switch (demo_mode_val) {
-            case arctic::WorkingMode::COOLING: demo_mode_idx = 0; break;
-            case arctic::WorkingMode::FLOOR_HEATING: demo_mode_idx = 1; break;
-            case arctic::WorkingMode::FAN_COIL_HEATING: demo_mode_idx = 2; break;
-            case arctic::WorkingMode::HOT_WATER: demo_mode_idx = 3; break;
-            case arctic::WorkingMode::AUTO: demo_mode_idx = 4; break;
-            default: demo_mode_idx = 1; break;
-        }
-        
-        if (!demo_power) {
-            char standby_buf[48];
-            snprintf(standby_buf, sizeof(standby_buf), "DEMO - %s", i18n_get(STR_HP_STANDBY));
-            lv_label_set_text(state.mode_label, standby_buf);
-            lv_obj_set_style_text_color(state.mode_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-        } else {
-            char mode_buf[32];
-            snprintf(mode_buf, sizeof(mode_buf), "DEMO - %s", demo_mode_names[demo_mode_idx]);
-            lv_label_set_text(state.mode_label, mode_buf);
-            lv_obj_set_style_text_color(state.mode_label, demo_mode_colors[demo_mode_idx], LV_PART_MAIN);
-        }
-        
-        // Demo tank temperature
-        char demo_tank_buf[16];
-        snprintf(demo_tank_buf, sizeof(demo_tank_buf), "%d %s", 
-                 app_prefs_convert_temp(42), app_prefs_temp_unit_str());
-        lv_label_set_text(state.tank_temp_label, demo_tank_buf);
-        
-        // Demo setpoint in status card
-        int16_t sp_val;
-        const char* sp_name;
-        lv_color_t sp_color;
-        get_active_setpoint_info(false, demo_mode_idx, &sp_val, &sp_name, &sp_color);
-        
-        char sp_buf[24];
-        snprintf(sp_buf, sizeof(sp_buf), "Set: %d %s", 
-                 app_prefs_convert_temp(sp_val), app_prefs_temp_unit_str());
-        lv_label_set_text(state.setpoint_label, sp_buf);
-        
-        // Demo component indicators (simulate some activity)
-        set_indicator_active(state.compressor_indicator, demo_power, COLOR_SUCCESS);
-        set_indicator_active(state.fan_indicator, demo_power, COLOR_SUCCESS);
-        set_indicator_active(state.pump_indicator, demo_power, COLOR_ACCENT);
-        set_indicator_active(state.heater_indicator, false, COLOR_WARNING);
-        
-        // Demo fan label
-        if (demo_power) {
-            char fan_buf[24];
-            snprintf(fan_buf, sizeof(fan_buf), "%s %s", i18n_get(STR_HP_FAN), i18n_get(STR_HP_FAN_MED));
-            lv_label_set_text(state.fan_label, fan_buf);
-        } else {
-            lv_label_set_text(state.fan_label, i18n_get(STR_HP_FAN));
-        }
-        
-        // Demo power meter (simulated 1.2 kW when running)
-        if (state.power_meter_label) {
-            lv_label_set_text(state.power_meter_label, demo_power ? "1200 W" : "0 W");
-        }
-        
-        // Show demo mode message in info card
-        lv_label_set_text(state.error_label, i18n_get(STR_HP_DEMO_MODE_ENABLED));
-        lv_obj_set_style_text_color(state.error_label, COLOR_WARNING, LV_PART_MAIN);
-        lv_obj_set_style_border_color(state.error_card, COLOR_WARNING, LV_PART_MAIN);
-        lv_obj_remove_flag(state.error_card, LV_OBJ_FLAG_HIDDEN);
-        
-        // Update power button
-        update_power_btn(demo_power);
-        
-        // Update mode dropdown
-        if (state.mode_dropdown) {
-            lv_obj_remove_event_cb(state.mode_dropdown, mode_dropdown_cb);
-            lv_dropdown_set_selected(state.mode_dropdown, demo_mode_idx);
-            lv_obj_add_event_cb(state.mode_dropdown, mode_dropdown_cb, LV_EVENT_VALUE_CHANGED, nullptr);
-        }
-        
-        // Update active setpoint row
-        if (state.active_setpoint_name) {
-            lv_label_set_text(state.active_setpoint_name, sp_name);
-            lv_obj_set_style_text_color(state.active_setpoint_name, sp_color, LV_PART_MAIN);
-        }
-        if (state.active_setpoint_label) {
-            snprintf(sp_buf, sizeof(sp_buf), "%d %s", 
-                     app_prefs_convert_temp(sp_val), app_prefs_temp_unit_str());
-            lv_label_set_text(state.active_setpoint_label, sp_buf);
-        }
-        
-        return;
-    }
     
     if (!connected) {
         // =====================================================================
@@ -977,9 +889,9 @@ void heatpump_screen_update(void) {
         
         // Mode dropdown - reset to first option
         if (state.mode_dropdown) {
-            lv_obj_remove_event_cb(state.mode_dropdown, mode_dropdown_cb);
+            s_dropdown_updating = true;
             lv_dropdown_set_selected(state.mode_dropdown, 0);
-            lv_obj_add_event_cb(state.mode_dropdown, mode_dropdown_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+            s_dropdown_updating = false;
         }
         
         // Active setpoint row - placeholders
@@ -1021,7 +933,7 @@ void heatpump_screen_update(void) {
     int16_t sp_val;
     const char* sp_name;
     lv_color_t sp_color;
-    get_active_setpoint_info(true, 0, &sp_val, &sp_name, &sp_color);
+    get_active_setpoint_info(&sp_val, &sp_name, &sp_color);
     
     snprintf(temp_buf, sizeof(temp_buf), "Set: %d %s", 
              app_prefs_convert_temp(sp_val), app_prefs_temp_unit_str());
@@ -1050,7 +962,10 @@ void heatpump_screen_update(void) {
         uint32_t power_watts = (hp.ac_voltage * hp.ac_current) / 10;
         char power_buf[32];
         if (power_watts >= 1000) {
-            snprintf(power_buf, sizeof(power_buf), "%.1f kW", power_watts / 1000.0f);
+            // Avoid float printf (huge stack usage on newlib nano)
+            uint32_t kw_int = power_watts / 1000;
+            uint32_t kw_frac = (power_watts % 1000) / 100;  // one decimal place
+            snprintf(power_buf, sizeof(power_buf), "%lu.%lu kW", (unsigned long)kw_int, (unsigned long)kw_frac);
         } else {
             snprintf(power_buf, sizeof(power_buf), "%lu W", (unsigned long)power_watts);
         }
@@ -1060,7 +975,8 @@ void heatpump_screen_update(void) {
     // Error display
     if (hp.hasAnyError()) {
         char error_buf[256];
-        arctic::getErrorDescriptions(error_buf, sizeof(error_buf));
+        // Card is 700px wide with 10px pad each side = 680px usable
+        format_error_card_text(error_buf, sizeof(error_buf), UI_FONT_BODY, 660);
         lv_label_set_text(state.error_label, error_buf);
         lv_obj_set_style_text_color(state.error_label, COLOR_ERROR, LV_PART_MAIN);
         lv_obj_set_style_border_color(state.error_card, COLOR_ERROR, LV_PART_MAIN);
@@ -1074,7 +990,6 @@ void heatpump_screen_update(void) {
     
     // Mode dropdown - update without triggering callback
     if (state.mode_dropdown) {
-        lv_obj_remove_event_cb(state.mode_dropdown, mode_dropdown_cb);
         uint16_t mode_idx = 0;
         switch (hp.working_mode) {
             case arctic::WorkingMode::COOLING: mode_idx = 0; break;
@@ -1083,8 +998,9 @@ void heatpump_screen_update(void) {
             case arctic::WorkingMode::HOT_WATER: mode_idx = 3; break;
             case arctic::WorkingMode::AUTO: mode_idx = 4; break;
         }
+        s_dropdown_updating = true;
         lv_dropdown_set_selected(state.mode_dropdown, mode_idx);
-        lv_obj_add_event_cb(state.mode_dropdown, mode_dropdown_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+        s_dropdown_updating = false;
     }
     
     // Update active setpoint row

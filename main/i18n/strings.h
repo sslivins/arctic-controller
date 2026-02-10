@@ -215,6 +215,9 @@ typedef enum {
     STR_HP_JUST_DETECTED,
     STR_HP_DISCONNECTED_MSG,
     STR_HP_NO_ERRORS,
+    STR_HP_ACTIVE_ERRORS,
+    STR_HP_CLEAR_HISTORY,
+    STR_HP_ERROR_HISTORY,
     
     // ========================================================================
     // Heat Pump - Advanced/Params Screen

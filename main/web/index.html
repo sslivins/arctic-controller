@@ -195,6 +195,7 @@
                 // Error Details
                 activeErrors: 'Active Errors',
                 errorHistory: 'Error History',
+                clearHistory: 'Clear',
                 noActiveErrors: 'No active errors',
                 noErrorHistory: 'No error history',
                 severity: 'Severity',
@@ -399,6 +400,7 @@
                 // Error Details
                 activeErrors: 'Erreurs actives',
                 errorHistory: 'Historique des erreurs',
+                clearHistory: 'Effacer',
                 noActiveErrors: 'Aucune erreur active',
                 noErrorHistory: 'Aucun historique',
                 severity: 'Sévérité',
@@ -603,6 +605,7 @@
                 // Error Details
                 activeErrors: 'Errores activos',
                 errorHistory: 'Historial de errores',
+                clearHistory: 'Borrar',
                 noActiveErrors: 'Sin errores activos',
                 noErrorHistory: 'Sin historial de errores',
                 severity: 'Severidad',
@@ -2149,7 +2152,10 @@
                                     <!-- Error History -->
                                     <template x-if="errors.history && errors.history.length > 0">
                                         <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
-                                            <h3 style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;" x-text="t('errorHistory')"></h3>
+                                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                                                <h3 style="font-size: 0.85rem; color: var(--text-secondary);" x-text="t('errorHistory')"></h3>
+                                                <button class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;" @click="clearErrorHistory()" x-text="t('clearHistory')"></button>
+                                            </div>
                                             <template x-for="err in errors.history" :key="err.code + err.occurred">
                                                 <div class="error-item cleared-error">
                                                     <div class="error-header">
@@ -3284,6 +3290,14 @@
                             active: data.active || [],
                             history: data.history || []
                         };
+                    } catch (e) { console.error(e); }
+                },
+                
+                async clearErrorHistory() {
+                    try {
+                        await this.apiFetch('/api/heatpump/errors/history', { method: 'DELETE' });
+                        this.errors.history = [];
+                        this.showToast(this.t('clearHistory'), 'success');
                     } catch (e) { console.error(e); }
                 },
                 

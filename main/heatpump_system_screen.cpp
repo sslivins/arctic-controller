@@ -185,17 +185,20 @@ static void update_readings() {
     snprintf(buf, sizeof(buf), "%d A", hp.ac_current);
     lv_label_set_text(state.ac_current, buf);
     
-    snprintf(buf, sizeof(buf), "%.1f V", hp.getDcVoltageV());
+    // dc_voltage is in tenths of volts
+    snprintf(buf, sizeof(buf), "%d.%d V", hp.dc_voltage / 10, hp.dc_voltage % 10);
     lv_label_set_text(state.dc_voltage, buf);
     
     snprintf(buf, sizeof(buf), "%d A", hp.dc_current);
     lv_label_set_text(state.dc_current, buf);
     
     // Pressures
-    snprintf(buf, sizeof(buf), "%.2f MPa", hp.getHighPressureMPa());
+    // high_pressure is in hundredths of MPa
+    snprintf(buf, sizeof(buf), "%d.%02d MPa", hp.high_pressure / 100, hp.high_pressure % 100);
     lv_label_set_text(state.high_pressure, buf);
     
-    snprintf(buf, sizeof(buf), "%.2f MPa", hp.getLowPressureMPa());
+    // low_pressure is in hundredths of MPa
+    snprintf(buf, sizeof(buf), "%d.%02d MPa", hp.low_pressure / 100, hp.low_pressure % 100);
     lv_label_set_text(state.low_pressure, buf);
     
     // EEV
@@ -291,13 +294,8 @@ void heatpump_system_show(heatpump_system_close_cb_t on_close) {
     
     // Title
     lv_obj_t* title = lv_label_create(header);
-    if (app_prefs_is_demo_mode()) {
-        lv_label_set_text(title, i18n_get(STR_HP_DEMO_SYSTEM));
-        lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
-    } else {
-        lv_label_set_text(title, i18n_get(STR_HP_SYSTEM_READINGS));
-        lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    }
+    lv_label_set_text(title, i18n_get(STR_HP_SYSTEM_READINGS));
+    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
     

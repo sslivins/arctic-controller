@@ -861,13 +861,8 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     
     // Title
     lv_obj_t* title = lv_label_create(header);
-    if (app_prefs_is_demo_mode()) {
-        lv_label_set_text(title, i18n_get(STR_HP_DEMO_ADVANCED));
-        lv_obj_set_style_text_color(title, COLOR_WARNING, LV_PART_MAIN);
-    } else {
-        lv_label_set_text(title, i18n_get(STR_HP_ADVANCED));
-        lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    }
+    lv_label_set_text(title, i18n_get(STR_HP_ADVANCED));
+    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
     

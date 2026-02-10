@@ -89,6 +89,10 @@ int getErrorHistory(ErrorHistoryEntry* history, int max_entries);
 // Clear error history
 void clearErrorHistory();
 
+// Populate error history with demo data (for demo mode)
+// Only populates if history is currently empty
+void populateDemoErrorHistory();
+
 // ============================================================================
 // JSON Helpers
 // ============================================================================

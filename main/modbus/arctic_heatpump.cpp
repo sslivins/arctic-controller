@@ -22,6 +22,7 @@ static HeatPumpState s_state;
 static SemaphoreHandle_t s_state_mutex = nullptr;
 static TaskHandle_t s_poll_task = nullptr;
 static bool s_polling_enabled = false;
+static bool s_demo_mode = false;
 
 // Connection state tracking
 static const uint8_t MAX_CONSECUTIVE_FAILURES = 5;
@@ -207,7 +208,79 @@ void init() {
     ESP_LOGI(TAG, "Heat pump controller initialized");
 }
 
+void initDemoState() {
+    if (s_state_mutex == nullptr) {
+        s_state_mutex = xSemaphoreCreateMutex();
+    }
+    
+    s_demo_mode = true;
+    
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_state = HeatPumpState();
+    
+    // Connection
+    s_state.connected = true;
+    s_state.last_successful_read_ms = getTimeMs();
+    
+    // Settings
+    s_state.unit_on = true;
+    s_state.working_mode = WorkingMode::FLOOR_HEATING;
+    s_state.cooling_setpoint = 18;
+    s_state.heating_setpoint = 45;
+    s_state.hot_water_setpoint = 50;
+    
+    // Temperatures (°C)
+    s_state.water_tank_temp = 42;
+    s_state.outlet_water_temp = 45;
+    s_state.inlet_water_temp = 38;
+    s_state.discharge_temp = 85;
+    s_state.suction_temp = 12;
+    s_state.outdoor_coil_temp = 35;
+    s_state.indoor_coil_temp = 40;
+    s_state.outdoor_ambient_temp = 22;
+    s_state.ipm_temp = 55;
+    
+    // System readings
+    s_state.compressor_freq = 60;
+    s_state.fan_speed = 850;
+    s_state.ac_voltage = 230;
+    s_state.ac_current = 52;     // tenths of amps → 5.2A → ~1200W
+    s_state.dc_voltage = 3800;   // ÷10 = 380V
+    s_state.dc_current = 3;
+    s_state.primary_eev_opening = 320;
+    s_state.secondary_eev_opening = 0;
+    s_state.high_pressure = 280; // ÷100 = 2.80 MPa
+    s_state.low_pressure = 85;   // ÷100 = 0.85 MPa
+    
+    // Status - compressor, fan medium, water pump running
+    s_state.status1 = status1::UNIT_ON | status1::COMPRESSOR | status1::FAN_MED | status1::WATER_PUMP;
+    s_state.status2 = 0;
+    
+    // Errors - P02 high pressure active
+    s_state.error1 = 0;
+    s_state.error2 = error2::HIGH_PRESSURE;
+    
+    xSemaphoreGive(s_state_mutex);
+    
+    // Seed error history with the current error state
+    updateErrorHistory(s_state.error1, s_state.error2);
+    
+    // Also seed some cleared historical errors
+    populateDemoErrorHistory();
+    
+    ESP_LOGI(TAG, "Demo state initialized");
+}
+
+bool isDemoMode() {
+    return s_demo_mode;
+}
+
 void startPolling() {
+    if (s_demo_mode) {
+        ESP_LOGI(TAG, "Demo mode - polling disabled");
+        return;
+    }
+    
     if (s_poll_task != nullptr) {
         ESP_LOGW(TAG, "Polling already running");
         return;
@@ -275,6 +348,19 @@ bool isConnected() {
 // ============================================================================
 
 bool setUnitPower(bool on) {
+    if (s_demo_mode) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_state.unit_on = on;
+        if (on) {
+            s_state.status1 = status1::UNIT_ON | status1::COMPRESSOR | status1::FAN_MED | status1::WATER_PUMP;
+        } else {
+            s_state.status1 = 0;
+        }
+        xSemaphoreGive(s_state_mutex);
+        ESP_LOGI(TAG, "[DEMO] Unit power set to %s", on ? "ON" : "OFF");
+        return true;
+    }
+    
     esp_err_t err = modbus::writeSingleRegister(SLAVE_ADDRESS, reg::UNIT_ON_OFF, on ? 1 : 0);
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -288,6 +374,14 @@ bool setUnitPower(bool on) {
 }
 
 bool setWorkingMode(WorkingMode mode) {
+    if (s_demo_mode) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_state.working_mode = mode;
+        xSemaphoreGive(s_state_mutex);
+        ESP_LOGI(TAG, "[DEMO] Working mode set to %s", workingModeToString(mode));
+        return true;
+    }
+    
     esp_err_t err = modbus::writeSingleRegister(SLAVE_ADDRESS, reg::WORKING_MODE, static_cast<uint16_t>(mode));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -301,6 +395,14 @@ bool setWorkingMode(WorkingMode mode) {
 }
 
 bool setCoolingSetpoint(int16_t temp) {
+    if (s_demo_mode) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_state.cooling_setpoint = temp;
+        xSemaphoreGive(s_state_mutex);
+        ESP_LOGI(TAG, "[DEMO] Cooling setpoint set to %d", temp);
+        return true;
+    }
+    
     esp_err_t err = modbus::writeSingleRegister(SLAVE_ADDRESS, reg::COOLING_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -314,6 +416,14 @@ bool setCoolingSetpoint(int16_t temp) {
 }
 
 bool setHeatingSetpoint(int16_t temp) {
+    if (s_demo_mode) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_state.heating_setpoint = temp;
+        xSemaphoreGive(s_state_mutex);
+        ESP_LOGI(TAG, "[DEMO] Heating setpoint set to %d", temp);
+        return true;
+    }
+    
     esp_err_t err = modbus::writeSingleRegister(SLAVE_ADDRESS, reg::HEATING_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -327,6 +437,14 @@ bool setHeatingSetpoint(int16_t temp) {
 }
 
 bool setHotWaterSetpoint(int16_t temp) {
+    if (s_demo_mode) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_state.hot_water_setpoint = temp;
+        xSemaphoreGive(s_state_mutex);
+        ESP_LOGI(TAG, "[DEMO] Hot water setpoint set to %d", temp);
+        return true;
+    }
+    
     esp_err_t err = modbus::writeSingleRegister(SLAVE_ADDRESS, reg::HOT_WATER_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -340,6 +458,11 @@ bool setHotWaterSetpoint(int16_t temp) {
 }
 
 bool writeRegister(uint16_t address, uint16_t value) {
+    if (s_demo_mode) {
+        ESP_LOGI(TAG, "[DEMO] Register %d set to %d (ignored)", address, value);
+        return true;
+    }
+    
     // Validate address is in writable range (2000-2057)
     if (address < 2000 || address > 2057) {
         ESP_LOGE(TAG, "Invalid register address %d (must be 2000-2057)", address);
@@ -358,6 +481,12 @@ bool writeRegister(uint16_t address, uint16_t value) {
 bool readRegister(uint16_t address, uint16_t* value_out) {
     if (value_out == nullptr) {
         return false;
+    }
+    
+    if (s_demo_mode) {
+        *value_out = 0;
+        ESP_LOGD(TAG, "[DEMO] Register %d read = 0", address);
+        return true;
     }
     
     esp_err_t err = modbus::readHoldingRegisters(SLAVE_ADDRESS, address, 1, value_out);
@@ -452,6 +581,54 @@ void forcePoll() {
     // Could implement a flag to trigger immediate poll
     // For now, just log
     ESP_LOGI(TAG, "Force poll requested");
+}
+
+bool setDemoField(const char* field, int32_t value) {
+    if (!s_demo_mode) return false;
+    
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool found = true;
+    
+    // Temperatures
+    if (strcmp(field, "water_tank_temp") == 0)       s_state.water_tank_temp = (int16_t)value;
+    else if (strcmp(field, "outlet_water_temp") == 0) s_state.outlet_water_temp = (int16_t)value;
+    else if (strcmp(field, "inlet_water_temp") == 0)  s_state.inlet_water_temp = (int16_t)value;
+    else if (strcmp(field, "discharge_temp") == 0)    s_state.discharge_temp = (int16_t)value;
+    else if (strcmp(field, "suction_temp") == 0)      s_state.suction_temp = (int16_t)value;
+    else if (strcmp(field, "outdoor_coil_temp") == 0) s_state.outdoor_coil_temp = (int16_t)value;
+    else if (strcmp(field, "indoor_coil_temp") == 0)  s_state.indoor_coil_temp = (int16_t)value;
+    else if (strcmp(field, "outdoor_ambient_temp") == 0) s_state.outdoor_ambient_temp = (int16_t)value;
+    else if (strcmp(field, "ipm_temp") == 0)          s_state.ipm_temp = (int16_t)value;
+    // System readings
+    else if (strcmp(field, "compressor_freq") == 0)   s_state.compressor_freq = (uint16_t)value;
+    else if (strcmp(field, "fan_speed") == 0)         s_state.fan_speed = (uint16_t)value;
+    else if (strcmp(field, "ac_voltage") == 0)        s_state.ac_voltage = (uint16_t)value;
+    else if (strcmp(field, "ac_current") == 0)        s_state.ac_current = (uint16_t)value;
+    else if (strcmp(field, "dc_voltage") == 0)        s_state.dc_voltage = (uint16_t)value;
+    else if (strcmp(field, "dc_current") == 0)        s_state.dc_current = (uint16_t)value;
+    else if (strcmp(field, "primary_eev_opening") == 0) s_state.primary_eev_opening = (uint16_t)value;
+    else if (strcmp(field, "secondary_eev_opening") == 0) s_state.secondary_eev_opening = (uint16_t)value;
+    else if (strcmp(field, "high_pressure") == 0)     s_state.high_pressure = (uint16_t)value;
+    else if (strcmp(field, "low_pressure") == 0)      s_state.low_pressure = (uint16_t)value;
+    // Status/error registers
+    else if (strcmp(field, "status1") == 0)           s_state.status1 = (uint16_t)value;
+    else if (strcmp(field, "status2") == 0)           s_state.status2 = (uint16_t)value;
+    else if (strcmp(field, "error1") == 0)            s_state.error1 = (uint16_t)value;
+    else if (strcmp(field, "error2") == 0)            s_state.error2 = (uint16_t)value;
+    // Settings (writable, but also accessible here)
+    else if (strcmp(field, "unit_on") == 0)           s_state.unit_on = (value != 0);
+    else if (strcmp(field, "working_mode") == 0)      s_state.working_mode = static_cast<WorkingMode>(value);
+    else if (strcmp(field, "cooling_setpoint") == 0)  s_state.cooling_setpoint = (int16_t)value;
+    else if (strcmp(field, "heating_setpoint") == 0)  s_state.heating_setpoint = (int16_t)value;
+    else if (strcmp(field, "hot_water_setpoint") == 0) s_state.hot_water_setpoint = (int16_t)value;
+    else found = false;
+    
+    xSemaphoreGive(s_state_mutex);
+    
+    if (found) {
+        ESP_LOGI(TAG, "[DEMO] Field '%s' set to %ld", field, (long)value);
+    }
+    return found;
 }
 
 }  // namespace arctic

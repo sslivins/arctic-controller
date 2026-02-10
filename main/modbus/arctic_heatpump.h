@@ -87,8 +87,15 @@ struct HeatPumpState {
 // ============================================================================
 
 // Initialize the heat pump communication
-// Must call modbus::init() first
+// Must call modbus::init() first (unless demo mode)
 void init();
+
+// Initialize demo mode - populates state with simulated values
+// No Modbus connection needed. Call instead of init() + startPolling().
+void initDemoState();
+
+// Check if running in demo mode
+bool isDemoMode();
 
 // Start/stop the polling task
 void startPolling();
@@ -97,11 +104,12 @@ void stopPolling();
 // Get current state (thread-safe copy)
 HeatPumpState getState();
 
-// Check if connected
+// Check if connected (always true in demo mode)
 bool isConnected();
 
 // ============================================================================
 // Control Functions (write to heat pump)
+// In demo mode, these update s_state directly instead of Modbus writes.
 // ============================================================================
 
 // Turn unit on/off
@@ -136,5 +144,13 @@ void getStatusDescription(char* buffer, size_t buffer_size);
 
 // Force an immediate poll (for testing)
 void forcePoll();
+
+// ============================================================================
+// Demo State Injection (only works in demo mode)
+// ============================================================================
+
+// Set a field in the heat pump state by name. Returns true if the field was found.
+// Allows testing read-only values (temps, readings, errors, status) via REST API.
+bool setDemoField(const char* field, int32_t value);
 
 }  // namespace arctic
