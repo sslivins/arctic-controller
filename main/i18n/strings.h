@@ -129,6 +129,9 @@ typedef enum {
     STR_HP_MODE,
     STR_HP_POWER_ON,
     STR_HP_POWER_OFF,
+    STR_HP_HOLD_POWER_OFF,
+    STR_HP_RESERVED_1,  // unused, kept for enum stability
+    STR_HP_RESERVED_2,  // unused, kept for enum stability
     STR_HP_DEMO_MODE_ENABLED,
     STR_HP_NOT_CONNECTED,
     STR_HP_BTN_TEMPS,

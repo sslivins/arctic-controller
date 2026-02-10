@@ -77,6 +77,16 @@ static struct {
     lv_obj_t* heating_value_label = nullptr;
     lv_obj_t* hotwater_value_label = nullptr;
     
+    // Power button
+    lv_obj_t* power_btn = nullptr;
+    lv_obj_t* power_btn_label = nullptr;
+    lv_obj_t* power_hold_bar = nullptr;
+    lv_timer_t* power_update_timer = nullptr;
+    lv_timer_t* power_hold_timer = nullptr;
+    uint32_t power_hold_start = 0;
+    bool power_holding = false;
+    bool power_hold_completed = false;  // Suppress CLICKED after successful hold
+    
     // Array of value labels for each parameter row
     lv_obj_t* value_labels[32] = {};
     
@@ -130,6 +140,11 @@ static void update_edit_value_display(void);
 static void load_timer_cb(lv_timer_t* timer);
 static void setpoint_row_cb(lv_event_t* e);
 static void show_setpoint_edit(int setpoint_type);  // 0=cooling, 1=heating, 2=hotwater
+static void power_btn_event_cb(lv_event_t* e);
+static void power_hold_timer_cb(lv_timer_t* timer);
+static void power_hold_cancel(void);
+static void power_update_timer_cb(lv_timer_t* timer);
+static void update_power_btn_appearance(bool power_on);
 
 // ============================================================================
 // Demo Setpoints (screen-local; P-parameters use shared heatpump_params.cpp)
@@ -168,6 +183,148 @@ static void show_settings_write_error(const char* message) {
     lv_msgbox_add_close_button(msgbox);
     lv_obj_center(msgbox);
     lv_obj_set_width(msgbox, 400);
+}
+
+// ============================================================================
+// Power Button
+// ============================================================================
+
+#define POWER_HOLD_DURATION_MS 3000
+#define POWER_HOLD_TICK_MS     100
+
+static void update_power_btn_appearance(bool power_on) {
+    if (!state.power_btn || !state.power_btn_label) return;
+    
+    if (power_on) {
+        lv_obj_set_style_bg_color(state.power_btn, COLOR_SUCCESS, LV_PART_MAIN);
+        lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_ON));
+        lv_obj_set_style_text_color(state.power_btn_label, lv_color_hex(0x0a2010), LV_PART_MAIN);
+    } else {
+        lv_obj_set_style_bg_color(state.power_btn, COLOR_ERROR, LV_PART_MAIN);
+        lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_OFF));
+        lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT, LV_PART_MAIN);
+    }
+    // Hide progress bar when not holding
+    if (state.power_hold_bar) {
+        lv_bar_set_value(state.power_hold_bar, 0, LV_ANIM_OFF);
+        lv_obj_add_flag(state.power_hold_bar, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void power_hold_cancel(void) {
+    if (!state.power_holding) return;
+    state.power_holding = false;
+    
+    if (state.power_hold_timer) {
+        lv_timer_del(state.power_hold_timer);
+        state.power_hold_timer = nullptr;
+    }
+    
+    // Restore normal appearance
+    arctic::HeatPumpState hp = arctic::getState();
+    update_power_btn_appearance(hp.connected ? hp.unit_on : false);
+}
+
+static void power_hold_timer_cb(lv_timer_t* timer) {
+    if (!state.power_holding || !state.power_btn) {
+        power_hold_cancel();
+        return;
+    }
+    
+    uint32_t elapsed = lv_tick_elaps(state.power_hold_start);
+    int pct = (int)((elapsed * 100) / POWER_HOLD_DURATION_MS);
+    if (pct > 100) pct = 100;
+    
+    // Update progress bar
+    if (state.power_hold_bar) {
+        lv_bar_set_value(state.power_hold_bar, pct, LV_ANIM_OFF);
+    }
+    
+    // Update countdown label: "Powering off in 3..."
+    int remaining = (int)((POWER_HOLD_DURATION_MS - elapsed + 999) / 1000);
+    if (remaining < 1) remaining = 1;
+    char buf[64];
+    snprintf(buf, sizeof(buf), i18n_get(STR_HP_HOLD_POWER_OFF), remaining);
+    lv_label_set_text(state.power_btn_label, buf);
+    lv_obj_set_style_text_color(state.power_btn_label, lv_color_hex(0x0a2010), LV_PART_MAIN);
+    
+    // Blend button color from green toward red as hold progresses
+    uint8_t r = (uint8_t)(0x4a + (0xef - 0x4a) * pct / 100);
+    uint8_t g = (uint8_t)(0xde - (0xde - 0x44) * pct / 100);
+    uint8_t b = (uint8_t)(0x80 - (0x80 - 0x44) * pct / 100);
+    lv_obj_set_style_bg_color(state.power_btn, lv_color_make(r, g, b), LV_PART_MAIN);
+    
+    if (elapsed >= POWER_HOLD_DURATION_MS) {
+        // Hold complete — power off!
+        state.power_holding = false;
+        state.power_hold_completed = true;  // Suppress the upcoming CLICKED event
+        if (state.power_hold_timer) {
+            lv_timer_del(state.power_hold_timer);
+            state.power_hold_timer = nullptr;
+        }
+        arctic::setUnitPower(false);
+        update_power_btn_appearance(false);
+    }
+}
+
+static void power_btn_event_cb(lv_event_t* e) {
+    lv_event_code_t code = lv_event_get_code(e);
+    
+    if (code == LV_EVENT_PRESSED) {
+        arctic::HeatPumpState hp = arctic::getState();
+        
+        if (!hp.connected && !app_prefs_is_demo_mode()) {
+            return;  // Will show error on CLICKED
+        }
+        
+        if (hp.unit_on) {
+            // Start hold-to-off sequence
+            state.power_holding = true;
+            state.power_hold_start = lv_tick_get();
+            
+            // Show countdown immediately
+            int secs = POWER_HOLD_DURATION_MS / 1000;
+            char buf[64];
+            snprintf(buf, sizeof(buf), i18n_get(STR_HP_HOLD_POWER_OFF), secs);
+            lv_label_set_text(state.power_btn_label, buf);
+            lv_obj_set_style_text_color(state.power_btn_label, lv_color_hex(0x0a2010), LV_PART_MAIN);
+            if (state.power_hold_bar) {
+                lv_bar_set_value(state.power_hold_bar, 0, LV_ANIM_OFF);
+                lv_obj_remove_flag(state.power_hold_bar, LV_OBJ_FLAG_HIDDEN);
+            }
+            
+            // Start tick timer
+            state.power_hold_timer = lv_timer_create(power_hold_timer_cb, POWER_HOLD_TICK_MS, nullptr);
+        }
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        if (state.power_holding) {
+            power_hold_cancel();
+        }
+    } else if (code == LV_EVENT_CLICKED) {
+        // Suppress click after a successful hold (hold sets power_hold_completed)
+        if (state.power_hold_completed) {
+            state.power_hold_completed = false;
+            return;
+        }
+        if (state.power_holding) return;  // Was a hold attempt, ignore click
+        
+        arctic::HeatPumpState hp = arctic::getState();
+        if (!hp.connected && !app_prefs_is_demo_mode()) {
+            show_settings_write_error("Cannot control power: Heat pump not connected");
+            return;
+        }
+        
+        if (!hp.unit_on) {
+            arctic::setUnitPower(true);
+            update_power_btn_appearance(true);
+        }
+    }
+}
+
+static void power_update_timer_cb(lv_timer_t* timer) {
+    if (!state.power_btn || state.power_holding) return;  // Don't overwrite hold animation
+    arctic::HeatPumpState hp = arctic::getState();
+    update_power_btn_appearance(hp.connected ? hp.unit_on : false);
 }
 
 // ============================================================================
@@ -496,23 +653,7 @@ static void create_edit_dialog(void) {
 static void close_btn_cb(lv_event_t* e) {
     (void)e;
     ESP_LOGI(TAG, "Close button clicked");
-    
-    // Stop load timer first to prevent use-after-free
-    if (state.load_timer) {
-        lv_timer_del(state.load_timer);
-        state.load_timer = nullptr;
-    }
-    
-    // Save and clear callback
-    heatpump_control_close_cb_t cb = state.on_close;
-    state.on_close = nullptr;
-    state.shown = false;
-    state.screen = nullptr;
-    
-    // Call callback - it will load the previous screen with auto_del=true
-    if (cb) {
-        cb();
-    }
+    heatpump_control_hide();
 }
 
 static void param_row_cb(lv_event_t* e) {
@@ -878,6 +1019,47 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     lv_obj_set_scrollbar_mode(state.scroll_container, LV_SCROLLBAR_MODE_AUTO);
     
     // =========================================================================
+    // POWER BUTTON (prominent at top of advanced screen)
+    // =========================================================================
+    state.power_btn = lv_btn_create(state.scroll_container);
+    lv_obj_set_size(state.power_btn, LV_PCT(100), 80);
+    lv_obj_set_style_bg_color(state.power_btn, COLOR_ERROR, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.power_btn, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(state.power_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(state.power_btn, power_btn_event_cb, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(state.power_btn, power_btn_event_cb, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(state.power_btn, power_btn_event_cb, LV_EVENT_PRESS_LOST, nullptr);
+    lv_obj_add_event_cb(state.power_btn, power_btn_event_cb, LV_EVENT_CLICKED, nullptr);
+    
+    // Progress bar (hidden until hold starts)
+    state.power_hold_bar = lv_bar_create(state.power_btn);
+    lv_obj_set_size(state.power_hold_bar, LV_PCT(92), 8);
+    lv_obj_align(state.power_hold_bar, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_bar_set_range(state.power_hold_bar, 0, 100);
+    lv_bar_set_value(state.power_hold_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(state.power_hold_bar, lv_color_hex(0x333333), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(state.power_hold_bar, LV_OPA_50, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.power_hold_bar, COLOR_TEXT, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(state.power_hold_bar, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.power_hold_bar, 4, LV_PART_INDICATOR);
+    lv_obj_add_flag(state.power_hold_bar, LV_OBJ_FLAG_HIDDEN);
+    
+    state.power_btn_label = lv_label_create(state.power_btn);
+    lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_OFF));
+    lv_obj_set_style_text_font(state.power_btn_label, UI_FONT_HEADER, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(state.power_btn_label, LV_ALIGN_CENTER, 0, -4);
+    
+    // Set initial appearance based on current state
+    {
+        arctic::HeatPumpState hp_state = arctic::getState();
+        update_power_btn_appearance(hp_state.connected ? hp_state.unit_on : false);
+    }
+    
+    // Timer to keep power button in sync (2s interval)
+    state.power_update_timer = lv_timer_create(power_update_timer_cb, 2000, nullptr);
+    
+    // =========================================================================
     // BASIC SETTINGS SECTION - Setpoints
     // =========================================================================
     create_section_header(state.scroll_container, i18n_get(STR_HP_SETPOINTS));
@@ -1005,6 +1187,16 @@ void heatpump_control_hide(void) {
         state.load_timer = nullptr;
     }
     
+    // Stop power timers
+    if (state.power_hold_timer) {
+        lv_timer_del(state.power_hold_timer);
+        state.power_hold_timer = nullptr;
+    }
+    if (state.power_update_timer) {
+        lv_timer_del(state.power_update_timer);
+        state.power_update_timer = nullptr;
+    }
+    
     heatpump_control_close_cb_t cb = state.on_close;
     
     // Reset state
@@ -1012,6 +1204,11 @@ void heatpump_control_hide(void) {
     state.on_close = nullptr;
     state.screen = nullptr;
     state.scroll_container = nullptr;
+    state.power_btn = nullptr;
+    state.power_btn_label = nullptr;
+    state.power_hold_bar = nullptr;
+    state.power_holding = false;
+    state.power_hold_completed = false;
     state.cooling_value_label = nullptr;
     state.heating_value_label = nullptr;
     state.hotwater_value_label = nullptr;

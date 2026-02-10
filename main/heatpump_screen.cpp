@@ -130,8 +130,6 @@ static struct {
     lv_obj_t* heater_label = nullptr;
     
     // Control elements
-    lv_obj_t* power_btn = nullptr;         // Large power button
-    lv_obj_t* power_btn_label = nullptr;   // Power button text
     lv_obj_t* mode_dropdown = nullptr;
     
     // Single active setpoint (changes based on mode)
@@ -320,18 +318,6 @@ static void on_control_close(void) {
     }
 }
 
-static void power_btn_cb(lv_event_t* e) {
-    arctic::HeatPumpState hp = arctic::getState();
-    
-    if (!hp.connected) {
-        // Disconnected - show error popup
-        show_write_error_popup("Cannot control power: Heat pump not connected");
-        return;
-    }
-    
-    arctic::setUnitPower(!hp.unit_on);
-}
-
 static bool s_dropdown_updating = false;
 
 static void mode_dropdown_cb(lv_event_t* e) {
@@ -475,22 +461,6 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
         lv_obj_set_style_text_color(demo_label, lv_color_hex(0x000000), LV_PART_MAIN);
         lv_obj_center(demo_label);
     }
-    
-    // =========================================================================
-    // POWER BUTTON (standalone, prominent at top)
-    // =========================================================================
-    state.power_btn = lv_btn_create(state.container);
-    lv_obj_set_size(state.power_btn, LV_PCT(100), 80);
-    lv_obj_set_style_bg_color(state.power_btn, COLOR_ERROR, LV_PART_MAIN);  // Red when off
-    lv_obj_set_style_bg_color(state.power_btn, lv_color_hex(0x8b0000), LV_STATE_PRESSED);
-    lv_obj_set_style_radius(state.power_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.power_btn, power_btn_cb, LV_EVENT_CLICKED, nullptr);
-    
-    state.power_btn_label = lv_label_create(state.power_btn);
-    lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_OFF));
-    lv_obj_set_style_text_font(state.power_btn_label, UI_FONT_TITLE, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(state.power_btn_label);
     
     // =========================================================================
     // TOP: Main Status Card
@@ -845,25 +815,6 @@ void heatpump_screen_update(void) {
         }
     };
     
-    // Helper: Update power button appearance
-    auto update_power_btn = [](bool power_on) {
-        if (!state.power_btn || !state.power_btn_label) return;
-        
-        if (power_on) {
-            lv_obj_set_style_bg_color(state.power_btn, COLOR_SUCCESS, LV_PART_MAIN);
-            lv_obj_set_style_bg_color(state.power_btn, lv_color_hex(0x2d8b3d), LV_STATE_PRESSED);
-            lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_ON));
-            // Dark text on green for better contrast
-            lv_obj_set_style_text_color(state.power_btn_label, lv_color_hex(0x0a2010), LV_PART_MAIN);
-        } else {
-            lv_obj_set_style_bg_color(state.power_btn, COLOR_ERROR, LV_PART_MAIN);
-            lv_obj_set_style_bg_color(state.power_btn, lv_color_hex(0x8b0000), LV_STATE_PRESSED);
-            lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_OFF));
-            // White text on red
-            lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT, LV_PART_MAIN);
-        }
-    };
-    
     // Get demo mode and connection state
     bool connected = hp.connected;
     
@@ -894,9 +845,6 @@ void heatpump_screen_update(void) {
         lv_label_set_text(state.error_label, i18n_get(STR_HP_NOT_CONNECTED));
         lv_obj_set_style_text_color(state.error_label, COLOR_ERROR, LV_PART_MAIN);
         lv_obj_set_style_border_color(state.error_card, COLOR_ERROR, LV_PART_MAIN);
-        
-        // Power button shows off state
-        update_power_btn(false);
         
         // Mode dropdown - reset to first option
         if (state.mode_dropdown) {
@@ -998,9 +946,6 @@ void heatpump_screen_update(void) {
         lv_obj_set_style_border_color(state.error_card, COLOR_CARD_BORDER, LV_PART_MAIN);
         lv_obj_set_style_text_color(state.error_chevron, COLOR_TEXT_DIM, LV_PART_MAIN);
     }
-    
-    // Update power button
-    update_power_btn(hp.unit_on);
     
     // Mode dropdown - update without triggering callback
     if (state.mode_dropdown) {
