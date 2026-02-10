@@ -75,6 +75,10 @@ static struct {
     lv_obj_t* temps_btn = nullptr;
     lv_obj_t* system_btn = nullptr;
     lv_obj_t* controls_btn = nullptr;
+    lv_obj_t* temps_btn_label = nullptr;
+    lv_obj_t* system_btn_label = nullptr;
+    lv_obj_t* controls_btn_label = nullptr;
+    lv_obj_t* mode_row_label = nullptr;
     
     // Saved screen for returning from details/controls
     lv_obj_t* saved_screen = nullptr;
@@ -598,11 +602,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_pad_all(mode_row, 0, LV_PART_MAIN);
     lv_obj_clear_flag(mode_row, LV_OBJ_FLAG_SCROLLABLE);
     
-    lv_obj_t* mode_lbl = lv_label_create(mode_row);
-    lv_label_set_text(mode_lbl, i18n_get(STR_HP_MODE));
-    lv_obj_set_style_text_font(mode_lbl, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(mode_lbl, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_align(mode_lbl, LV_ALIGN_LEFT_MID, 0, 0);
+    state.mode_row_label = lv_label_create(mode_row);
+    lv_label_set_text(state.mode_row_label, i18n_get(STR_HP_MODE));
+    lv_obj_set_style_text_font(state.mode_row_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.mode_row_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(state.mode_row_label, LV_ALIGN_LEFT_MID, 0, 0);
     
     state.mode_dropdown = lv_dropdown_create(mode_row);
     // Build dropdown options from i18n strings
@@ -685,11 +689,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_radius(state.temps_btn, 12, LV_PART_MAIN);
     lv_obj_add_event_cb(state.temps_btn, temps_btn_cb, LV_EVENT_CLICKED, nullptr);
     
-    lv_obj_t* temps_label = lv_label_create(state.temps_btn);
-    lv_label_set_text(temps_label, i18n_get(STR_HP_BTN_TEMPS));
-    lv_obj_set_style_text_font(temps_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(temps_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(temps_label);
+    state.temps_btn_label = lv_label_create(state.temps_btn);
+    lv_label_set_text(state.temps_btn_label, i18n_get(STR_HP_BTN_TEMPS));
+    lv_obj_set_style_text_font(state.temps_btn_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.temps_btn_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(state.temps_btn_label);
     
     // System readings button (center)
     state.system_btn = lv_btn_create(state.container);
@@ -702,11 +706,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_radius(state.system_btn, 12, LV_PART_MAIN);
     lv_obj_add_event_cb(state.system_btn, system_btn_cb, LV_EVENT_CLICKED, nullptr);
     
-    lv_obj_t* system_label = lv_label_create(state.system_btn);
-    lv_label_set_text(system_label, i18n_get(STR_HP_BTN_SYSTEM));
-    lv_obj_set_style_text_font(system_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(system_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(system_label);
+    state.system_btn_label = lv_label_create(state.system_btn);
+    lv_label_set_text(state.system_btn_label, i18n_get(STR_HP_BTN_SYSTEM));
+    lv_obj_set_style_text_font(state.system_btn_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.system_btn_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(state.system_btn_label);
     
     // Advanced button (right) - heat pump P-parameters
     state.controls_btn = lv_btn_create(state.container);
@@ -719,11 +723,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_radius(state.controls_btn, 12, LV_PART_MAIN);
     lv_obj_add_event_cb(state.controls_btn, controls_btn_cb, LV_EVENT_CLICKED, nullptr);
     
-    lv_obj_t* ctrl_label = lv_label_create(state.controls_btn);
-    lv_label_set_text(ctrl_label, i18n_get(STR_HP_BTN_ADVANCED));
-    lv_obj_set_style_text_font(ctrl_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(ctrl_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(ctrl_label);
+    state.controls_btn_label = lv_label_create(state.controls_btn);
+    lv_label_set_text(state.controls_btn_label, i18n_get(STR_HP_BTN_ADVANCED));
+    lv_obj_set_style_text_font(state.controls_btn_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.controls_btn_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(state.controls_btn_label);
 
     state.created = true;
     
@@ -740,6 +744,24 @@ void heatpump_screen_update(void) {
     }
     
     arctic::HeatPumpState hp = arctic::getState();
+    
+    // Refresh i18n labels (bottom buttons, mode row label, dropdown options)
+    if (state.temps_btn_label) lv_label_set_text(state.temps_btn_label, i18n_get(STR_HP_BTN_TEMPS));
+    if (state.system_btn_label) lv_label_set_text(state.system_btn_label, i18n_get(STR_HP_BTN_SYSTEM));
+    if (state.controls_btn_label) lv_label_set_text(state.controls_btn_label, i18n_get(STR_HP_BTN_ADVANCED));
+    if (state.mode_row_label) lv_label_set_text(state.mode_row_label, i18n_get(STR_HP_MODE));
+    if (state.mode_dropdown) {
+        char dropdown_opts[256];
+        snprintf(dropdown_opts, sizeof(dropdown_opts), "%s\n%s\n%s\n%s\n%s",
+                 i18n_get(STR_HP_OPT_COOLING), i18n_get(STR_HP_OPT_FLOOR_HEATING),
+                 i18n_get(STR_HP_OPT_FAN_COIL_HEATING), i18n_get(STR_HP_OPT_HOT_WATER),
+                 i18n_get(STR_HP_OPT_AUTO));
+        uint16_t sel = lv_dropdown_get_selected(state.mode_dropdown);
+        lv_obj_remove_event_cb(state.mode_dropdown, mode_dropdown_cb);
+        lv_dropdown_set_options(state.mode_dropdown, dropdown_opts);
+        lv_dropdown_set_selected(state.mode_dropdown, sel);
+        lv_obj_add_event_cb(state.mode_dropdown, mode_dropdown_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    }
     
     // Connection indicator
     set_indicator_active(state.connection_indicator, hp.connected, COLOR_SUCCESS);
