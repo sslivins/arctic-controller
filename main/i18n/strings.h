@@ -226,7 +226,7 @@ typedef enum {
     STR_HP_ERROR_HISTORY,
     
     // ========================================================================
-    // Heat Pump - Advanced/Params Screen
+    // Heat Pump - Control Screen
     // ========================================================================
     STR_HP_ADVANCED,
     STR_HP_DEMO_ADVANCED,
@@ -281,7 +281,7 @@ typedef enum {
     STR_HP_DELTA_AT,
     STR_HP_LABEL_INLET,
     STR_HP_LABEL_OUTLET,
-    STR_HP_LABEL_AMBIENT,
+    STR_HP_LABEL_OUTDOOR,
     STR_HP_LABEL_COIL,
     STR_HP_STATE_FAULT,
     STR_HP_ENERGY,

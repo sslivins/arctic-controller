@@ -134,7 +134,7 @@ static struct {
     lv_obj_t* temps_content = nullptr;
     lv_obj_t* inlet_value = nullptr;
     lv_obj_t* outlet_value = nullptr;
-    lv_obj_t* ambient_value = nullptr;
+    lv_obj_t* outdoor_value = nullptr;
     lv_obj_t* coil_value = nullptr;
     
     // Expandable: Compressor Details
@@ -696,7 +696,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     create_value_column(temps_row, i18n_get(STR_HP_LABEL_INLET), &state.inlet_value);
     create_value_column(temps_row, i18n_get(STR_HP_LABEL_OUTLET), &state.outlet_value);
-    create_value_column(temps_row, i18n_get(STR_HP_LABEL_AMBIENT), &state.ambient_value);
+    create_value_column(temps_row, i18n_get(STR_HP_LABEL_OUTDOOR), &state.outdoor_value);
     create_value_column(temps_row, i18n_get(STR_HP_LABEL_COIL), &state.coil_value);
     
     // =========================================================================
@@ -990,7 +990,7 @@ void heatpump_screen_update(void) {
         
         snprintf(temp_buf, sizeof(temp_buf), "%d%s",
                  app_prefs_convert_temp(hp.outdoor_ambient_temp), app_prefs_temp_unit_str());
-        lv_label_set_text(state.ambient_value, temp_buf);
+        lv_label_set_text(state.outdoor_value, temp_buf);
         
         snprintf(temp_buf, sizeof(temp_buf), "%d%s",
                  app_prefs_convert_temp(hp.outdoor_coil_temp), app_prefs_temp_unit_str());
@@ -998,7 +998,7 @@ void heatpump_screen_update(void) {
     } else {
         lv_label_set_text(state.inlet_value, "--");
         lv_label_set_text(state.outlet_value, "--");
-        lv_label_set_text(state.ambient_value, "--");
+        lv_label_set_text(state.outdoor_value, "--");
         lv_label_set_text(state.coil_value, "--");
     }
     

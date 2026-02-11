@@ -125,7 +125,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_NOT_CONNECTED] = "Heat pump not connected",
     [STR_HP_BTN_TEMPS] = "\xEF\x81\xA8 Temps",
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B System",
-    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Advanced",
+    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Control",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "COOLING",
@@ -206,9 +206,9 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_CLEAR_HISTORY] = "Clear",
     [STR_HP_ERROR_HISTORY] = "Error History",
     
-    // Heat Pump - Advanced/Params Screen
-    [STR_HP_ADVANCED] = "Advanced",
-    [STR_HP_DEMO_ADVANCED] = "DEMO MODE - Advanced",
+    // Heat Pump - Control Screen
+    [STR_HP_ADVANCED] = "Control",
+    [STR_HP_DEMO_ADVANCED] = "DEMO MODE - Control",
     [STR_HP_EDIT_PARAMETER] = "Edit Parameter",
     [STR_HP_RANGE_FMT] = "Range:",
     [STR_HP_COOLING_SETPOINT] = "Cooling Setpoint",
@@ -257,7 +257,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_DELTA_AT] = "At setpoint",
     [STR_HP_LABEL_INLET] = "INLET",
     [STR_HP_LABEL_OUTLET] = "OUTLET",
-    [STR_HP_LABEL_AMBIENT] = "AMBIENT",
+    [STR_HP_LABEL_OUTDOOR] = "OUTDOOR",
     [STR_HP_LABEL_COIL] = "COIL",
     [STR_HP_STATE_FAULT] = "FAULT",
     [STR_HP_ENERGY] = "Energy",
@@ -377,7 +377,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_NOT_CONNECTED] = "Pompe à chaleur non connectée",
     [STR_HP_BTN_TEMPS] = "\xEF\x81\xA8 Temp.",
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B Système",
-    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Avancé",
+    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Contr\xc3\xb4le",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "REFROIDISSEMENT",
@@ -458,9 +458,9 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_CLEAR_HISTORY] = "Effacer",
     [STR_HP_ERROR_HISTORY] = "Historique des erreurs",
     
-    // Heat Pump - Advanced/Params Screen
-    [STR_HP_ADVANCED] = "Avancé",
-    [STR_HP_DEMO_ADVANCED] = "DÉMO - Avancé",
+    // Heat Pump - Control Screen
+    [STR_HP_ADVANCED] = "Contr\xc3\xb4le",
+    [STR_HP_DEMO_ADVANCED] = "D\xc3\x89MO - Contr\xc3\xb4le",
     [STR_HP_EDIT_PARAMETER] = "Modifier le paramètre",
     [STR_HP_RANGE_FMT] = "Plage :",
     [STR_HP_COOLING_SETPOINT] = "Consigne refroidissement",
@@ -509,7 +509,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_DELTA_AT] = "\xc3\x80 la consigne",
     [STR_HP_LABEL_INLET] = "ENTR" "\xc3\x89" "E",
     [STR_HP_LABEL_OUTLET] = "SORTIE",
-    [STR_HP_LABEL_AMBIENT] = "EXT" "\xc3\x89" "RIEUR",
+    [STR_HP_LABEL_OUTDOOR] = "EXT" "\xc3\x89" "RIEUR",
     [STR_HP_LABEL_COIL] = "\xc3\x89" "CHANGEUR",
     [STR_HP_STATE_FAULT] = "PANNE",
     [STR_HP_ENERGY] = "\xc3\x89nergie",
@@ -629,7 +629,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_NOT_CONNECTED] = "Bomba de calor no conectada",
     [STR_HP_BTN_TEMPS] = "\xEF\x81\xA8 Temp.",
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B Sistema",
-    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Avanzado",
+    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Control",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "ENFRIAMIENTO",
@@ -710,9 +710,9 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_CLEAR_HISTORY] = "Borrar",
     [STR_HP_ERROR_HISTORY] = "Historial de errores",
     
-    // Heat Pump - Advanced/Params Screen
-    [STR_HP_ADVANCED] = "Avanzado",
-    [STR_HP_DEMO_ADVANCED] = "DEMO - Avanzado",
+    // Heat Pump - Control Screen
+    [STR_HP_ADVANCED] = "Control",
+    [STR_HP_DEMO_ADVANCED] = "DEMO - Control",
     [STR_HP_EDIT_PARAMETER] = "Editar parámetro",
     [STR_HP_RANGE_FMT] = "Rango:",
     [STR_HP_COOLING_SETPOINT] = "Consigna enfriamiento",
@@ -761,7 +761,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_DELTA_AT] = "En consigna",
     [STR_HP_LABEL_INLET] = "ENTRADA",
     [STR_HP_LABEL_OUTLET] = "SALIDA",
-    [STR_HP_LABEL_AMBIENT] = "EXTERIOR",
+    [STR_HP_LABEL_OUTDOOR] = "EXTERIOR",
     [STR_HP_LABEL_COIL] = "BOBINA",
     [STR_HP_STATE_FAULT] = "FALLO",
     [STR_HP_ENERGY] = "Energ" "\xc3\xad" "a",

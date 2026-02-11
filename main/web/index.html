@@ -145,6 +145,7 @@
                 power: 'Power',
                 turnOn: 'Power On',
                 turnOff: 'Power Off',
+                holdToTurnOff: 'Hold to turn OFF',
                 controls: 'Controls',
                 modeSelect: 'Operating Mode',
                 
@@ -180,8 +181,8 @@
                 setpointSaved: 'Setpoint saved',
                 setpointFailed: 'Failed to save setpoint',
                 
-                // Parameters Page
-                parameters: 'Parameters',
+                // Control Page
+                parameters: 'Control',
                 paramEditor: 'Heat Pump Parameters',
                 pCode: 'P-Code',
                 currentValue: 'Value',
@@ -211,7 +212,12 @@
                 catDefrost: 'Defrost',
                 catProtection: 'Protection',
                 catAutoMode: 'Auto Mode',
-                catPumpValve: 'Pump & Valve'
+                catPumpValve: 'Pump & Valve',
+                
+                // Dashboard panels
+                energy: 'Energy',
+                powerIn: 'Power In',
+                heatOut: 'Heat Out'
             },
             fr: {
                 // Header & Navigation
@@ -350,6 +356,7 @@
                 power: 'Alimentation',
                 turnOn: 'Marche',
                 turnOff: 'Arrêt',
+                holdToTurnOff: 'Maintenir pour ÉTEINDRE',
                 controls: 'Commandes',
                 modeSelect: 'Mode de fonctionnement',
                 
@@ -385,9 +392,9 @@
                 setpointSaved: 'Consigne enregistrée',
                 setpointFailed: 'Échec de la sauvegarde',
                 
-                // Parameters Page
-                parameters: 'Paramètres',
-                paramEditor: 'Paramètres pompe à chaleur',
+                // Control Page
+                parameters: 'Contr\u00f4le',
+                paramEditor: 'Param\u00e8tres pompe \u00e0 chaleur',
                 pCode: 'Code P',
                 currentValue: 'Valeur',
                 range: 'Plage',
@@ -416,7 +423,12 @@
                 catDefrost: 'Dégivrage',
                 catProtection: 'Protection',
                 catAutoMode: 'Mode auto',
-                catPumpValve: 'Pompe et vanne'
+                catPumpValve: 'Pompe et vanne',
+                
+                // Dashboard panels
+                energy: '\u00c9nergie',
+                powerIn: 'Puiss. entr\u00e9e',
+                heatOut: 'Chaleur sort.'
             },
             es: {
                 // Header & Navigation
@@ -555,6 +567,7 @@
                 power: 'Energía',
                 turnOn: 'Encendido',
                 turnOff: 'Apagado',
+                holdToTurnOff: 'Mantener para APAGAR',
                 controls: 'Controles',
                 modeSelect: 'Modo de operación',
                 
@@ -590,9 +603,9 @@
                 setpointSaved: 'Consigna guardada',
                 setpointFailed: 'Error al guardar la consigna',
                 
-                // Parameters Page
-                parameters: 'Parámetros',
-                paramEditor: 'Parámetros bomba de calor',
+                // Control Page
+                parameters: 'Control',
+                paramEditor: 'Par\u00e1metros bomba de calor',
                 pCode: 'Código P',
                 currentValue: 'Valor',
                 range: 'Rango',
@@ -621,23 +634,32 @@
                 catDefrost: 'Descongelación',
                 catProtection: 'Protección',
                 catAutoMode: 'Modo auto',
-                catPumpValve: 'Bomba y válvula'
+                catPumpValve: 'Bomba y v\u00e1lvula',
+                
+                // Dashboard panels
+                energy: 'Energ\u00eda',
+                powerIn: 'Pot. entrada',
+                heatOut: 'Calor salida'
             }
         };
     </script>
     <style>
         :root {
-            --bg-primary: #0d1117;
-            --bg-secondary: #161b22;
-            --bg-tertiary: #21262d;
-            --border: #30363d;
-            --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
-            --accent: #00d4aa;
-            --accent-dim: #00a883;
-            --error: #f85149;
-            --warning: #d29922;
-            --success: #3fb950;
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #1e2d4e;
+            --border: #0f3460;
+            --text-primary: #eaeaea;
+            --text-secondary: #888888;
+            --accent: #00d4ff;
+            --accent-dim: #00b8d4;
+            --error: #ef4444;
+            --warning: #fbbf24;
+            --success: #4ade80;
+            --heating: #f97316;
+            --cooling: #3b82f6;
+            --hot-water: #ef4444;
+            --defrost: #8b5cf6;
         }
         
         * {
@@ -872,11 +894,12 @@
         /* Hero Status Card - matches device main screen */
         .hero-card {
             background: var(--bg-secondary);
-            border: 1px solid var(--border);
+            border: 3px solid var(--border);
             border-radius: 12px;
             padding: 1.5rem;
-            margin-bottom: 1rem;
+            margin-bottom: 0.75rem;
             text-align: center;
+            transition: background 0.5s, border-color 0.5s;
         }
         
         .hero-top-row {
@@ -913,6 +936,97 @@
         
         .hero-power-btn:hover { opacity: 0.85; }
         .hero-power-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Hold-to-confirm power button (parameters page) */
+        .power-hold-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .power-hold-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+            max-width: 320px;
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            border: 2px solid transparent;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .power-hold-btn.on {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+            border-color: var(--error);
+        }
+
+        .power-hold-btn.off {
+            background: rgba(63, 185, 80, 0.1);
+            color: var(--success);
+            border-color: var(--success);
+        }
+
+        .power-hold-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Progress fill that animates from left during hold */
+        .power-hold-btn::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 0%;
+            border-radius: 10px;
+            transition: none;
+            z-index: 0;
+        }
+
+        .power-hold-btn.on::before {
+            background: rgba(239, 68, 68, 0.2);
+        }
+
+        .power-hold-btn.off::before {
+            background: rgba(63, 185, 80, 0.2);
+        }
+
+        .power-hold-btn.holding::before {
+            width: 100%;
+            transition: width 3s linear;
+        }
+
+        .power-hold-btn .btn-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .power-hold-hint {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+
+        .power-hold-countdown {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-left: 0.25rem;
+        }
         
         .hero-tank-temp {
             font-size: 4rem;
@@ -1807,6 +1921,174 @@
             border-radius: 4px;
         }
         
+        /* ==========================================
+           Device-matching dashboard components
+           ========================================== */
+        
+        /* Hero state text */
+        .hero-state-text {
+            font-size: 1.1rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .hero-outdoor-temp {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        
+        /* Component Dots Card */
+        .dots-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-around;
+        }
+        
+        .dot-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        
+        .dot-indicator {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            transition: all 0.3s;
+        }
+        
+        .dot-indicator.on {
+            background: var(--success);
+            box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+        }
+        
+        .dot-indicator.off {
+            background: #444;
+        }
+        
+        .dot-indicator.warning {
+            background: var(--warning);
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+        }
+        
+        .dot-indicator.unknown {
+            background: transparent;
+            border: 2px dashed #555;
+        }
+        
+        /* Performance Strip (COP / Power / Fan) */
+        .perf-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-around;
+        }
+        
+        .perf-item {
+            text-align: center;
+            flex: 1;
+        }
+        
+        .perf-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+        
+        .perf-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.15rem;
+        }
+        
+        /* Expandable Panels (matches device chevron panels) */
+        .expand-panel {
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 0.75rem;
+            overflow: hidden;
+        }
+        
+        .expand-panel.error-ok {
+            border-color: var(--success);
+        }
+        
+        .expand-panel.error-active {
+            border-color: var(--error);
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), var(--bg-secondary));
+        }
+        
+        .expand-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.25rem;
+            cursor: pointer;
+            min-height: 56px;
+            transition: background 0.15s;
+            user-select: none;
+        }
+        
+        .expand-header:hover {
+            background: var(--bg-tertiary);
+        }
+        
+        .expand-header .title {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        .expand-header .chevron {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+        
+        .expand-content {
+            padding: 0 1.25rem 1.25rem;
+        }
+        
+        /* Detail Grid (value on top, label below — matches device layout) */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+        }
+        
+        .detail-item {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 0.75rem;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+        
+        .detail-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .detail-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
         /* Responsive for new grids */
         @media (max-width: 600px) {
             .hero-tank-temp {
@@ -1827,6 +2109,18 @@
             }
             .readings-grid {
                 grid-template-columns: 1fr;
+            }
+            .detail-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .dots-card {
+                gap: 0.25rem;
+            }
+            .dot-item {
+                font-size: 0.7rem;
+            }
+            .perf-value {
+                font-size: 1.2rem;
             }
             .param-item {
                 flex-direction: column;
@@ -1913,294 +2207,333 @@
                 <main>
                     <!-- Dashboard Page -->
                     <div x-show="page === 'dashboard'">
-                            <!-- Hero Status Card - Power + Tank Temp + Active Setpoint -->
-                            <div class="hero-card">
-                                <!-- Top Row: Power button (left) + Mode badge (center) + Last updated (right) -->
-                                <div class="hero-top-row">
-                                    <button class="hero-power-btn"
-                                            :class="heatpump.unit_on ? 'on' : 'off'"
-                                            :disabled="!heatpump.connected || controlLoading"
-                                            @click="togglePower()">
-                                        <span x-text="heatpump.unit_on ? '⏻ ' + t('turnOn') : '⏻ ' + t('turnOff')"></span>
-                                    </button>
-                                    <div class="hp-mode-badge" 
-                                         :class="{ 
-                                             'mode-disconnected': !heatpump.connected,
-                                             'mode-standby': heatpump.connected && !heatpump.unit_on,
-                                             'mode-cooling': heatpump.connected && heatpump.unit_on && heatpump.mode === 'cooling',
-                                             'mode-heating': heatpump.connected && heatpump.unit_on && (heatpump.mode === 'floor_heating' || heatpump.mode === 'fan_coil_heating'),
-                                             'mode-hotwater': heatpump.connected && heatpump.unit_on && heatpump.mode === 'hot_water',
-                                             'mode-defrost': heatpump.connected && heatpump.defrosting
-                                         }"
-                                         x-text="!heatpump.connected ? t('disconnected') : 
-                                                 (!heatpump.unit_on ? t('standby') :
-                                                 (heatpump.defrosting ? t('defrost') :
-                                                 (heatpump.mode === 'cooling' ? t('cooling') :
-                                                 (heatpump.mode === 'floor_heating' ? t('floorHeating') :
-                                                 (heatpump.mode === 'fan_coil_heating' ? t('fanCoilHeating') :
-                                                 (heatpump.mode === 'hot_water' ? t('hotWater') :
-                                                 (heatpump.mode === 'auto' ? t('auto') : heatpump.mode)))))))">
-                                    </div>
-                                    <span class="version" x-text="formatTime(lastUpdate)"></span>
-                                </div>
-                                
-                                <!-- Tank Temperature (large, centered) -->
-                                <div class="hero-tank-temp" x-text="heatpump.connected ? heatpump.temperatures.tank + '°C' : '--'"></div>
-                                <div class="hero-tank-label" x-text="t('tankTemp')"></div>
-                                
-                                <!-- Active Setpoint with ± controls -->
-                                <div class="hero-setpoint-row" x-show="heatpump.connected">
-                                    <span class="hero-setpoint-label" x-text="getActiveSetpointLabel() + ':'"></span>
-                                    <button class="hero-setpoint-btn" 
-                                            @click="adjustSetpoint(getActiveSetpointKey(), -1)" 
-                                            :disabled="controlLoading || !heatpump.unit_on">−</button>
-                                    <span class="hero-setpoint-value" x-text="getActiveSetpointValue() + ' °C'"></span>
-                                    <button class="hero-setpoint-btn" 
-                                            @click="adjustSetpoint(getActiveSetpointKey(), 1)" 
-                                            :disabled="controlLoading || !heatpump.unit_on">+</button>
-                                </div>
-                                
-                                <!-- Bottom Row: Power meter (left) + Mode selector (right) -->
-                                <div class="hero-bottom-row">
-                                    <span class="hero-power-meter" x-text="heatpump.connected ? formatPower(heatpump.readings?.power_consumption) : '-- W'"></span>
-                                    <div class="mode-select-row">
-                                        <span class="label" x-text="t('modeSelect') + ':'"></span>
-                                        <select :disabled="!heatpump.connected || !heatpump.unit_on || controlLoading"
-                                                @change="setMode(heatpump.mode)"
-                                                x-model="heatpump.mode">
-                                            <template x-for="m in modes" :key="m.value">
-                                                <option :value="m.value" x-text="t(m.label)"></option>
-                                            </template>
-                                        </select>
-                                    </div>
-                                </div>
+                        <!-- Hero State Card - color-tinted background matching device -->
+                        <div class="hero-card" :style="getHeroStyle()">
+                            <!-- Top Row: State text | Timestamp -->
+                            <div class="hero-top-row">
+                                <div class="hero-state-text" :style="'color:' + getHeroTextColor()"
+                                     x-text="getHeroStateText()"></div>
+                                <span class="version" x-text="formatTime(lastUpdate)"></span>
                             </div>
                             
-                            <!-- Component Status + Error Banner -->
-                            <div class="card">
-                                <div class="card-body" style="padding: 0.75rem 1rem;">
-                                    <div class="status-grid">
-                                        <div class="status-item">
-                                            <div class="status-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.compressor ? 'on' : 'off')"></div>
-                                            <div class="label" x-text="t('compressor')"></div>
-                                        </div>
-                                        <div class="status-item">
-                                            <div class="status-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.fans ? 'on' : 'off')"></div>
-                                            <div class="label" x-text="t('airFlowFans')"></div>
-                                        </div>
-                                        <div class="status-item">
-                                            <div class="status-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.pump ? 'on' : 'off')"></div>
-                                            <div class="label" x-text="t('waterPump')"></div>
-                                        </div>
-                                        <div class="status-item">
-                                            <div class="status-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.aux_heater ? 'warning' : 'off')"></div>
-                                            <div class="label" x-text="t('auxHeater')"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                            <!-- Tank Temperature (large, centered) -->
+                            <div class="hero-tank-temp" x-text="heatpump.connected ? heatpump.temperatures.tank + '°C' : '--'"></div>
+                            <div class="hero-tank-label" x-text="t('tankTemp')"></div>
                             
-                            <!-- All Temperatures -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <h2 x-text="t('temperatures')"></h2>
-                                </div>
-                                <div class="card-body">
-                                    <div class="temp-grid">
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('tankTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.tank + ' °C' : '--'"></div>
-                                        </div>
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('outletTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.outlet + ' °C' : '--'"></div>
-                                        </div>
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('inletTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.inlet + ' °C' : '--'"></div>
-                                        </div>
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('outdoorTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.outdoor + ' °C' : '--'"></div>
-                                        </div>
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('dischargeTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.discharge + ' °C' : '--'"></div>
-                                        </div>
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('suctionTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.suction + ' °C' : '--'"></div>
-                                        </div>
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('outdoorCoilTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.outdoor_coil + ' °C' : '--'"></div>
-                                        </div>
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('indoorCoilTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.indoor_coil + ' °C' : '--'"></div>
-                                        </div>
-                                        <div class="temp-item">
-                                            <div class="label" x-text="t('ipmTemp')"></div>
-                                            <div class="value" x-text="heatpump.connected ? heatpump.temperatures.ipm + ' °C' : '--'"></div>
-                                        </div>
-                                    </div>
-                                </div>
+                            <!-- Bottom Row: Outdoor temp -->
+                            <div class="hero-bottom-row">
+                                <span class="hero-outdoor-temp" x-text="heatpump.connected ? t('outdoorTemp') + ' ' + heatpump.temperatures.outdoor + '°C' : ''"></span>
                             </div>
-                            
-                            <!-- All Setpoints -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <h2 x-text="t('setpointsTitle')"></h2>
-                                </div>
-                                <div class="card-body">
-                                    <div class="setpoint-grid">
-                                        <div class="setpoint-item">
-                                            <div class="label" x-text="t('coolingSetpoint')"></div>
-                                            <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.cooling + ' °C' : '-- °C'"></div>
-                                            <div class="setpoint-controls" x-show="heatpump.connected">
-                                                <button @click="adjustSetpoint('cooling', -1)" :disabled="controlLoading">−</button>
-                                                <button @click="adjustSetpoint('cooling', 1)" :disabled="controlLoading">+</button>
-                                            </div>
-                                        </div>
-                                        <div class="setpoint-item">
-                                            <div class="label" x-text="t('heatingSetpoint')"></div>
-                                            <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.heating + ' °C' : '-- °C'"></div>
-                                            <div class="setpoint-controls" x-show="heatpump.connected">
-                                                <button @click="adjustSetpoint('heating', -1)" :disabled="controlLoading">−</button>
-                                                <button @click="adjustSetpoint('heating', 1)" :disabled="controlLoading">+</button>
-                                            </div>
-                                        </div>
-                                        <div class="setpoint-item">
-                                            <div class="label" x-text="t('hotWaterSetpoint')"></div>
-                                            <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.hot_water + ' °C' : '-- °C'"></div>
-                                            <div class="setpoint-controls" x-show="heatpump.connected">
-                                                <button @click="adjustSetpoint('hot_water', -1)" :disabled="controlLoading">−</button>
-                                                <button @click="adjustSetpoint('hot_water', 1)" :disabled="controlLoading">+</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                        </div>
+                        
+                        <!-- Component Dots (matches device) -->
+                        <div class="dots-card">
+                            <div class="dot-item">
+                                <div class="dot-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.compressor ? 'on' : 'off')"></div>
+                                <span x-text="t('compressor')"></span>
                             </div>
-                            
-                            <!-- System Readings -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <h2 x-text="t('systemReadings')"></h2>
-                                </div>
-                                <div class="card-body">
-                                    <div class="readings-grid">
-                                        <div class="reading-item">
-                                            <span class="label" x-text="t('compressorFreq')"></span>
-                                            <span class="value" x-text="heatpump.connected ? (heatpump.readings?.compressor_freq || 0) + ' Hz' : '--'"></span>
-                                        </div>
-                                        <div class="reading-item">
-                                            <span class="label" x-text="t('fanRpm')"></span>
-                                            <span class="value" x-text="heatpump.connected ? (heatpump.readings?.fan_rpm || 0) + ' RPM' : '--'"></span>
-                                        </div>
-                                        <div class="reading-item">
-                                            <span class="label" x-text="t('acVoltage')"></span>
-                                            <span class="value" x-text="heatpump.connected ? (heatpump.readings?.ac_voltage || 0) + ' V' : '--'"></span>
-                                        </div>
-                                        <div class="reading-item">
-                                            <span class="label" x-text="t('acCurrent')"></span>
-                                            <span class="value" x-text="heatpump.connected ? (heatpump.readings?.ac_current || 0) + ' A' : '--'"></span>
-                                        </div>
-                                        <div class="reading-item">
-                                            <span class="label" x-text="t('highPressure')"></span>
-                                            <span class="value" x-text="heatpump.connected ? (heatpump.readings?.high_pressure || 0).toFixed(2) + ' MPa' : '--'"></span>
-                                        </div>
-                                        <div class="reading-item">
-                                            <span class="label" x-text="t('lowPressure')"></span>
-                                            <span class="value" x-text="heatpump.connected ? (heatpump.readings?.low_pressure || 0).toFixed(2) + ' MPa' : '--'"></span>
-                                        </div>
-                                        <div class="reading-item">
-                                            <span class="label" x-text="t('primaryEev')"></span>
-                                            <span class="value" x-text="heatpump.connected ? (heatpump.readings?.primary_eev || 0) + ' steps' : '--'"></span>
-                                        </div>
-                                        <div class="reading-item">
-                                            <span class="label" x-text="t('secondaryEev')"></span>
-                                            <span class="value" x-text="heatpump.connected ? (heatpump.readings?.secondary_eev || 0) + ' steps' : '--'"></span>
-                                        </div>
-                                    </div>
-                                </div>
+                            <div class="dot-item">
+                                <div class="dot-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.fans ? 'on' : 'off')"></div>
+                                <span x-text="t('airFlowFans')"></span>
                             </div>
-                            
-                            <!-- Active Errors -->
-                            <div class="card" x-show="heatpump.connected">
-                                <div class="card-header">
-                                    <h2 x-text="t('activeErrors')"></h2>
-                                    <span class="version" x-text="errors.active?.length ? errors.active.length + ' active' : ''"></span>
+                            <div class="dot-item">
+                                <div class="dot-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.pump ? 'on' : 'off')"></div>
+                                <span x-text="t('waterPump')"></span>
+                            </div>
+                            <div class="dot-item">
+                                <div class="dot-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.aux_heater ? 'warning' : 'off')"></div>
+                                <span x-text="t('auxHeater')"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Performance Strip (COP | Power | Fan — matches device) -->
+                        <div class="perf-card">
+                            <div class="perf-item">
+                                <div class="perf-value" x-text="getCOP()"></div>
+                                <div class="perf-label">COP</div>
+                            </div>
+                            <div class="perf-item">
+                                <div class="perf-value" x-text="heatpump.connected ? formatPower(heatpump.readings?.power_consumption) : '--'"></div>
+                                <div class="perf-label" x-text="t('power')"></div>
+                            </div>
+                            <div class="perf-item">
+                                <div class="perf-value" x-text="heatpump.connected ? ((heatpump.readings?.fan_rpm || 0) > 0 ? heatpump.readings.fan_rpm : t('off')) : '--'"></div>
+                                <div class="perf-label" x-text="t('airFlowFans')"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Error Card (expandable, matches device) -->
+                        <div class="expand-panel" :class="getErrorCardClass()" x-show="heatpump.connected">
+                            <div class="expand-header" @click="panels.errors = !panels.errors">
+                                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                    <span x-text="(!errors.active || errors.active.length === 0) ? '✓' : '⚠'"
+                                          :style="'font-size: 1.1rem; color: ' + ((!errors.active || errors.active.length === 0) ? 'var(--success)' : 'var(--error)')"></span>
+                                    <span class="title" x-text="(!errors.active || errors.active.length === 0) ? t('noActiveErrors') : (errors.active.length + ' ' + t('activeErrors').toLowerCase())"></span>
                                 </div>
-                                <div class="card-body">
-                                    <template x-if="!errors.active || errors.active.length === 0">
-                                        <div style="text-align: center; color: var(--success); padding: 1rem;">
-                                            ✅ <span x-text="t('noActiveErrors')"></span>
+                                <span class="chevron" x-text="panels.errors ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.errors">
+                                <template x-for="err in (errors.active || [])" :key="err.code">
+                                    <div class="error-item active-error">
+                                        <div class="error-header">
+                                            <span class="error-code" x-text="err.code"></span>
+                                            <span class="error-severity" :class="err.severity || 'warning'" x-text="t('error' + capitalize(err.severity || 'warning'))"></span>
                                         </div>
-                                    </template>
-                                    <template x-for="err in (errors.active || [])" :key="err.code">
-                                        <div class="error-item active-error">
-                                            <div class="error-header">
-                                                <span class="error-code" x-text="err.code"></span>
-                                                <span class="error-severity" :class="err.severity || 'warning'" x-text="t('error' + capitalize(err.severity || 'warning'))"></span>
-                                            </div>
-                                            <div class="error-desc" x-text="err.description"></div>
-                                            <div class="error-resolution" x-show="err.resolution" x-text="err.resolution"></div>
-                                            <div class="error-time" x-show="err.occurred" x-text="t('occurred') + ': ' + formatTimestamp(err.occurred)"></div>
+                                        <div class="error-desc" x-text="err.description"></div>
+                                        <div class="error-resolution" x-show="err.resolution" x-text="err.resolution"></div>
+                                        <div class="error-time" x-show="err.occurred" x-text="t('occurred') + ': ' + formatTimestamp(err.occurred)"></div>
+                                    </div>
+                                </template>
+                                <template x-if="errors.history && errors.history.length > 0">
+                                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border);">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                            <span style="font-size: 0.85rem; color: var(--text-secondary);" x-text="t('errorHistory')"></span>
+                                            <button class="btn btn-secondary" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;" @click="clearErrorHistory()" x-text="t('clearHistory')"></button>
                                         </div>
-                                    </template>
-                                    
-                                    <!-- Error History -->
-                                    <template x-if="errors.history && errors.history.length > 0">
-                                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
-                                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-                                                <h3 style="font-size: 0.85rem; color: var(--text-secondary);" x-text="t('errorHistory')"></h3>
-                                                <button class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;" @click="clearErrorHistory()" x-text="t('clearHistory')"></button>
-                                            </div>
-                                            <template x-for="err in errors.history" :key="err.code + err.occurred">
-                                                <div class="error-item cleared-error">
-                                                    <div class="error-header">
-                                                        <span class="error-code" x-text="err.code"></span>
-                                                    </div>
-                                                    <div class="error-desc" x-text="err.description"></div>
-                                                    <div class="error-time">
-                                                        <span x-text="t('occurred') + ': ' + formatTimestamp(err.occurred)"></span>
-                                                        <span x-show="err.cleared" x-text="' · ' + t('clearedAt') + ': ' + formatTimestamp(err.cleared)"></span>
-                                                    </div>
+                                        <template x-for="err in errors.history" :key="err.code + err.occurred">
+                                            <div class="error-item cleared-error">
+                                                <div class="error-header"><span class="error-code" x-text="err.code"></span></div>
+                                                <div class="error-desc" x-text="err.description"></div>
+                                                <div class="error-time">
+                                                    <span x-text="t('occurred') + ': ' + formatTimestamp(err.occurred)"></span>
+                                                    <span x-show="err.cleared" x-text="' · ' + t('clearedAt') + ': ' + formatTimestamp(err.cleared)"></span>
                                                 </div>
-                                            </template>
-                                        </div>
-                                    </template>
-                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
                             </div>
-                            
-                            <!-- System Overview -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <h2 x-text="t('systemOverview')"></h2>
-                                </div>
-                                <div class="card-body">
-                                    <div class="info-row">
-                                        <span class="label" x-text="t('device')"></span>
-                                        <span class="value" x-text="info.hostname + '.local'"></span>
+                        </div>
+                        
+                        <!-- Expandable: Temperatures (matches device) -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.temps = !panels.temps">
+                                <span class="title" x-text="t('temperatures')"></span>
+                                <span class="chevron" x-text="panels.temps ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.temps">
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.tank + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('tankTemp')"></span>
                                     </div>
-                                    <div class="info-row">
-                                        <span class="label" x-text="t('uptime')"></span>
-                                        <span class="value" x-text="formatUptime(status.uptime_ms)"></span>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.outlet + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('outletTemp')"></span>
                                     </div>
-                                    <div class="info-row">
-                                        <span class="label" x-text="t('currentTime')"></span>
-                                        <span class="value" x-text="status.time?.local || '--'"></span>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.inlet + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('inletTemp')"></span>
                                     </div>
-                                    <div class="info-row">
-                                        <span class="label" x-text="t('timezone')"></span>
-                                        <span class="value" x-text="status.time?.timezone || '--'"></span>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.outdoor + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('outdoorTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.outdoor_coil + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('outdoorCoilTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.indoor_coil + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('indoorCoilTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.ipm + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('ipmTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.discharge + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('dischargeTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.suction + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('suctionTemp')"></span>
                                     </div>
                                 </div>
                             </div>
                         </div>
+                        
+                        <!-- Expandable: Compressor Details (matches device) -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.compressor = !panels.compressor">
+                                <span class="title" x-text="t('compressor')"></span>
+                                <span class="chevron" x-text="panels.compressor ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.compressor">
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.compressor_freq || 0) + ' Hz' : '--'"></span>
+                                        <span class="detail-label" x-text="t('compressorFreq')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.discharge + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('dischargeTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.suction + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('suctionTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.high_pressure || 0).toFixed(2) + ' MPa' : '--'"></span>
+                                        <span class="detail-label" x-text="t('highPressure')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.low_pressure || 0).toFixed(2) + ' MPa' : '--'"></span>
+                                        <span class="detail-label" x-text="t('lowPressure')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.primary_eev || 0) + ' steps' : '--'"></span>
+                                        <span class="detail-label" x-text="t('primaryEev')"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Expandable: Energy (matches device) -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.energy = !panels.energy">
+                                <span class="title" x-text="t('energy') || 'Energy'"></span>
+                                <span class="chevron" x-text="panels.energy ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.energy">
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? formatPower(heatpump.readings?.power_consumption) : '--'"></span>
+                                        <span class="detail-label" x-text="t('powerIn') || 'Power In'"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value">--</span>
+                                        <span class="detail-label" x-text="t('heatOut') || 'Heat Out'"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="getCOP()"></span>
+                                        <span class="detail-label">COP</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.ac_voltage || 0) + ' V' : '--'"></span>
+                                        <span class="detail-label" x-text="t('acVoltage')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.ac_current || 0) + ' A' : '--'"></span>
+                                        <span class="detail-label" x-text="t('acCurrent')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.secondary_eev || 0) + ' steps' : '--'"></span>
+                                        <span class="detail-label" x-text="t('secondaryEev')"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Expandable: Setpoints (web-specific controls) -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.setpoints = !panels.setpoints">
+                                <span class="title" x-text="t('setpointsTitle')"></span>
+                                <span class="chevron" x-text="panels.setpoints ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.setpoints">
+                                <div class="setpoint-grid">
+                                    <div class="setpoint-item">
+                                        <div class="label" x-text="t('coolingSetpoint')"></div>
+                                        <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.cooling + ' °C' : '-- °C'"></div>
+                                        <div class="setpoint-controls" x-show="heatpump.connected">
+                                            <button @click="adjustSetpoint('cooling', -1)" :disabled="controlLoading">−</button>
+                                            <button @click="adjustSetpoint('cooling', 1)" :disabled="controlLoading">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="setpoint-item">
+                                        <div class="label" x-text="t('heatingSetpoint')"></div>
+                                        <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.heating + ' °C' : '-- °C'"></div>
+                                        <div class="setpoint-controls" x-show="heatpump.connected">
+                                            <button @click="adjustSetpoint('heating', -1)" :disabled="controlLoading">−</button>
+                                            <button @click="adjustSetpoint('heating', 1)" :disabled="controlLoading">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="setpoint-item">
+                                        <div class="label" x-text="t('hotWaterSetpoint')"></div>
+                                        <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.hot_water + ' °C' : '-- °C'"></div>
+                                        <div class="setpoint-controls" x-show="heatpump.connected">
+                                            <button @click="adjustSetpoint('hot_water', -1)" :disabled="controlLoading">−</button>
+                                            <button @click="adjustSetpoint('hot_water', 1)" :disabled="controlLoading">+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Expandable: System Overview -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.system = !panels.system">
+                                <span class="title" x-text="t('systemOverview')"></span>
+                                <span class="chevron" x-text="panels.system ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.system">
+                                <div class="info-row">
+                                    <span class="label" x-text="t('device')"></span>
+                                    <span class="value" x-text="info.hostname + '.local'"></span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="label" x-text="t('uptime')"></span>
+                                    <span class="value" x-text="formatUptime(status.uptime_ms)"></span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="label" x-text="t('currentTime')"></span>
+                                    <span class="value" x-text="status.time?.local || '--'"></span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="label" x-text="t('timezone')"></span>
+                                    <span class="value" x-text="status.time?.timezone || '--'"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     
-                    <!-- Parameters Page -->
+                    <!-- Control Page -->
                     <div x-show="page === 'parameters'">
+                        <!-- Power Button: simple click ON, hold-to-confirm OFF -->
+                        <div class="power-hold-card">
+                            <!-- Turn ON: simple click -->
+                            <button x-show="!heatpump.unit_on"
+                                    class="power-hold-btn off"
+                                    :disabled="!heatpump.connected || controlLoading"
+                                    @click="togglePower()">
+                                <span class="btn-content">⏻ <span x-text="t('turnOn')"></span></span>
+                            </button>
+                            <!-- Turn OFF: hold to confirm -->
+                            <button x-show="heatpump.unit_on"
+                                    class="power-hold-btn on"
+                                    :class="powerHolding ? 'holding' : ''"
+                                    :disabled="!heatpump.connected || controlLoading"
+                                    @mousedown.prevent="startPowerHold()"
+                                    @mouseup.prevent="cancelPowerHold()"
+                                    @mouseleave="cancelPowerHold()"
+                                    @touchstart.prevent="startPowerHold()"
+                                    @touchend.prevent="cancelPowerHold()"
+                                    @touchcancel="cancelPowerHold()">
+                                <span class="btn-content">
+                                    <span x-show="!powerHolding">
+                                        ⏻ <span x-text="t('holdToTurnOff')"></span>
+                                    </span>
+                                    <span x-show="powerHolding">
+                                        ⏻ <span class="power-hold-countdown" x-text="powerCountdown"></span>
+                                    </span>
+                                </span>
+                            </button>
+                        </div>
+
+                        <!-- Mode Selector -->
+                        <div class="power-hold-card" style="text-align: left;">
+                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;" x-text="t('modeSelect')"></div>
+                            <select style="width: 100%; padding: 0.75rem 1rem; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; font-size: 1rem;"
+                                    :disabled="!heatpump.connected || !heatpump.unit_on || controlLoading"
+                                    @change="setMode(heatpump.mode)"
+                                    x-model="heatpump.mode">
+                                <template x-for="m in modes" :key="m.value">
+                                    <option :value="m.value" x-text="t(m.label)"></option>
+                                </template>
+                            </select>
+                        </div>
+
                         <div class="card">
                             <div class="card-header">
                                 <h2 x-text="t('paramEditor')"></h2>
@@ -2603,6 +2936,9 @@
                 lastUpdate: null,
                 lang: localStorage.getItem('arctic_lang') || navigator.language.slice(0, 2) || 'en',
                 
+                // Expandable panel state (matches device dashboard layout)
+                panels: { errors: false, temps: false, compressor: false, energy: false, setpoints: false, system: false },
+                
                 loginForm: { username: '', password: '' },
                 loginError: '',
                 
@@ -2629,6 +2965,10 @@
                 
                 // Heat pump control state
                 controlLoading: false,
+                powerHolding: false,
+                powerCountdown: 3,
+                powerHoldTimer: null,
+                powerCountdownInterval: null,
                 modes: [
                     { value: 'cooling', label: 'cooling' },
                     { value: 'floor_heating', label: 'floorHeating' },
@@ -3215,6 +3555,46 @@
                 // Heat Pump Control Methods
                 // ==========================================
                 
+                startPowerHold() {
+                    if (!this.heatpump.connected || this.controlLoading) return;
+                    this.powerHolding = true;
+                    this.powerCountdown = 3;
+                    
+                    // Countdown ticker: 3 → 2 → 1
+                    this.powerCountdownInterval = setInterval(() => {
+                        this.powerCountdown--;
+                        if (this.powerCountdown <= 0) {
+                            clearInterval(this.powerCountdownInterval);
+                            this.powerCountdownInterval = null;
+                        }
+                    }, 1000);
+                    
+                    // Fire after 3 seconds
+                    this.powerHoldTimer = setTimeout(() => {
+                        this.powerHolding = false;
+                        this.powerCountdown = 3;
+                        if (this.powerCountdownInterval) {
+                            clearInterval(this.powerCountdownInterval);
+                            this.powerCountdownInterval = null;
+                        }
+                        this.togglePower();
+                    }, 3000);
+                },
+                
+                cancelPowerHold() {
+                    if (!this.powerHolding) return;
+                    this.powerHolding = false;
+                    this.powerCountdown = 3;
+                    if (this.powerHoldTimer) {
+                        clearTimeout(this.powerHoldTimer);
+                        this.powerHoldTimer = null;
+                    }
+                    if (this.powerCountdownInterval) {
+                        clearInterval(this.powerCountdownInterval);
+                        this.powerCountdownInterval = null;
+                    }
+                },
+                
                 async togglePower() {
                     this.controlLoading = true;
                     try {
@@ -3362,6 +3742,85 @@
                 formatTimestamp(ts) {
                     if (!ts) return '--';
                     return new Date(ts * 1000).toLocaleString();
+                },
+                
+                // ==========================================
+                // Hero State (matches device color scheme)
+                // ==========================================
+                
+                getHeroState() {
+                    if (!this.heatpump.connected) return 'disconnected';
+                    if (this.errors.active && this.errors.active.length > 0) return 'fault';
+                    if (!this.heatpump.unit_on) return 'standby';
+                    if (this.heatpump.defrosting) return 'defrost';
+                    if (this.heatpump.compressor) {
+                        if (this.heatpump.mode === 'cooling') return 'cooling';
+                        if (this.heatpump.mode === 'hot_water') return 'hotwater';
+                        return 'heating';
+                    }
+                    return 'idle';
+                },
+                
+                getHeroStyle() {
+                    const state = this.getHeroState();
+                    const styles = {
+                        heating:      { bg: 'rgba(249,115,22,0.15)', border: '#f97316' },
+                        cooling:      { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6' },
+                        hotwater:     { bg: 'rgba(239,68,68,0.12)', border: '#ef4444' },
+                        defrost:      { bg: 'rgba(139,92,246,0.15)', border: '#8b5cf6' },
+                        fault:        { bg: 'rgba(239,68,68,0.2)', border: '#ef4444' },
+                        disconnected: { bg: '', border: '#ef4444' },
+                        standby:      { bg: '', border: '' },
+                        idle:         { bg: '', border: '' }
+                    };
+                    const s = styles[state] || {};
+                    let css = '';
+                    if (s.bg) css += 'background:' + s.bg + ';';
+                    if (s.border) css += 'border-color:' + s.border + ';';
+                    return css;
+                },
+                
+                getHeroStateText() {
+                    const state = this.getHeroState();
+                    const m = this.heatpump.mode;
+                    const labels = {
+                        disconnected: this.t('disconnected'),
+                        fault: '⚠ ' + this.t('activeErrors'),
+                        standby: this.t('standby'),
+                        defrost: this.t('defrost'),
+                        cooling: this.t('cooling'),
+                        hotwater: this.t('hotWater'),
+                        heating: m === 'floor_heating' ? this.t('floorHeating') :
+                                 m === 'fan_coil_heating' ? this.t('fanCoilHeating') :
+                                 this.t('floorHeating'),
+                        idle: this.t('standby')
+                    };
+                    return labels[state] || '--';
+                },
+                
+                getHeroTextColor() {
+                    const state = this.getHeroState();
+                    const colors = {
+                        disconnected: '#ef4444',
+                        fault: '#ef4444',
+                        standby: '#888888',
+                        idle: '#888888',
+                        heating: '#f97316',
+                        cooling: '#3b82f6',
+                        hotwater: '#ef4444',
+                        defrost: '#8b5cf6'
+                    };
+                    return colors[state] || '#eaeaea';
+                },
+                
+                getCOP() {
+                    // COP will be computed when energy monitoring is implemented
+                    return '--';
+                },
+                
+                getErrorCardClass() {
+                    if (!this.errors.active || this.errors.active.length === 0) return 'error-ok';
+                    return 'error-active';
                 },
                 
                 // Maps the current operating mode to the corresponding setpoint key
