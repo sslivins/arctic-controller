@@ -267,7 +267,23 @@ typedef enum {
     STR_HP_PARAM_PUMP_INTERVAL,
     STR_HP_PARAM_PUMP_LOW_AMBIENT,
     STR_HP_PARAM_WATERWAY_CLEAN,
-    
+
+    // ========================================================================
+    // Heat Pump - Dashboard Labels (main screen redesign)
+    // ========================================================================
+    STR_HP_COMP_RUNNING,
+    STR_HP_COMP_IDLE,
+    STR_HP_STANDBY_DEMAND,
+    STR_HP_DELTA_ABOVE_FMT,
+    STR_HP_DELTA_BELOW_FMT,
+    STR_HP_DELTA_AT,
+    STR_HP_LABEL_INLET,
+    STR_HP_LABEL_OUTLET,
+    STR_HP_LABEL_AMBIENT,
+    STR_HP_LABEL_COIL,
+    STR_HP_STATE_FAULT,
+    STR_HP_ENERGY,
+
     // ========================================================================
     // Must be last - used for array sizing
     // ========================================================================

@@ -16,6 +16,9 @@
 
 #if MONTSERRAT_24_LATIN
 
+/* Misc glyphs fallback font (geometric shapes, etc.) */
+extern const lv_font_t montserrat_24_misc;
+
 /*-----------------
  *    BITMAPS
  *----------------*/
@@ -5776,7 +5779,7 @@ lv_font_t montserrat_24_latin = {
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
 #if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
-    .fallback = NULL,
+    .fallback = &montserrat_24_misc,
 #endif
     .user_data = NULL,
 };

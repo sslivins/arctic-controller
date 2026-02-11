@@ -245,6 +245,20 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_PARAM_PUMP_INTERVAL] = "Pump Interval",
     [STR_HP_PARAM_PUMP_LOW_AMBIENT] = "Pump Low Ambient",
     [STR_HP_PARAM_WATERWAY_CLEAN] = "Waterway Clean",
+
+    // Heat Pump - Dashboard Labels
+    [STR_HP_COMP_RUNNING] = "RUNNING",
+    [STR_HP_COMP_IDLE] = "IDLE",
+    [STR_HP_STANDBY_DEMAND] = "Standby \xe2\x80\x94 waiting for demand",
+    [STR_HP_DELTA_ABOVE_FMT] = "+%d\xc2\xb0 above set",
+    [STR_HP_DELTA_BELOW_FMT] = "%d\xc2\xb0 below set",
+    [STR_HP_DELTA_AT] = "At setpoint",
+    [STR_HP_LABEL_INLET] = "INLET",
+    [STR_HP_LABEL_OUTLET] = "OUTLET",
+    [STR_HP_LABEL_AMBIENT] = "AMBIENT",
+    [STR_HP_LABEL_COIL] = "COIL",
+    [STR_HP_STATE_FAULT] = "FAULT",
+    [STR_HP_ENERGY] = "Energy",
 };
 
 // French strings
@@ -471,6 +485,20 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_PARAM_PUMP_INTERVAL] = "Intervalle pompe",
     [STR_HP_PARAM_PUMP_LOW_AMBIENT] = "Pompe basse temp.",
     [STR_HP_PARAM_WATERWAY_CLEAN] = "Nettoyage circuit",
+
+    // Heat Pump - Dashboard Labels
+    [STR_HP_COMP_RUNNING] = "EN MARCHE",
+    [STR_HP_COMP_IDLE] = "INACTIF",
+    [STR_HP_STANDBY_DEMAND] = "Veille \xe2\x80\x94 en attente de demande",
+    [STR_HP_DELTA_ABOVE_FMT] = "+%d\xc2\xb0 au-dessus",
+    [STR_HP_DELTA_BELOW_FMT] = "%d\xc2\xb0 en dessous",
+    [STR_HP_DELTA_AT] = "\xc3\x80 la consigne",
+    [STR_HP_LABEL_INLET] = "ENTR" "\xc3\x89" "E",
+    [STR_HP_LABEL_OUTLET] = "SORTIE",
+    [STR_HP_LABEL_AMBIENT] = "EXT" "\xc3\x89" "RIEUR",
+    [STR_HP_LABEL_COIL] = "\xc3\x89" "CHANGEUR",
+    [STR_HP_STATE_FAULT] = "PANNE",
+    [STR_HP_ENERGY] = "\xc3\x89nergie",
 };
 
 // Spanish strings
@@ -697,6 +725,20 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_PARAM_PUMP_INTERVAL] = "Intervalo bomba",
     [STR_HP_PARAM_PUMP_LOW_AMBIENT] = "Bomba baja temp.",
     [STR_HP_PARAM_WATERWAY_CLEAN] = "Limpieza circuito",
+
+    // Heat Pump - Dashboard Labels
+    [STR_HP_COMP_RUNNING] = "EN MARCHA",
+    [STR_HP_COMP_IDLE] = "INACTIVO",
+    [STR_HP_STANDBY_DEMAND] = "Espera \xe2\x80\x94 esperando demanda",
+    [STR_HP_DELTA_ABOVE_FMT] = "+%d\xc2\xb0 arriba",
+    [STR_HP_DELTA_BELOW_FMT] = "%d\xc2\xb0 abajo",
+    [STR_HP_DELTA_AT] = "En consigna",
+    [STR_HP_LABEL_INLET] = "ENTRADA",
+    [STR_HP_LABEL_OUTLET] = "SALIDA",
+    [STR_HP_LABEL_AMBIENT] = "EXTERIOR",
+    [STR_HP_LABEL_COIL] = "BOBINA",
+    [STR_HP_STATE_FAULT] = "FALLO",
+    [STR_HP_ENERGY] = "Energ" "\xc3\xad" "a",
 };
 
 // Language names in their own language (native names)
