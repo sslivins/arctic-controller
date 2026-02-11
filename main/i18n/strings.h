@@ -37,6 +37,8 @@ typedef enum {
     STR_SETTINGS_WIFI,
     STR_SETTINGS_UPDATE,
     STR_SETTINGS_LANGUAGE,
+    STR_SETTINGS_DEMO_MODE,
+    STR_SETTINGS_TEMPERATURE,
     
     // ========================================================================
     // WiFi Panel
@@ -283,6 +285,16 @@ typedef enum {
     STR_HP_LABEL_COIL,
     STR_HP_STATE_FAULT,
     STR_HP_ENERGY,
+    STR_HP_LABEL_COP,
+    STR_HP_LABEL_POWER,
+    STR_HP_LABEL_FAN,
+    STR_HP_LABEL_DISCHARGE,
+    STR_HP_LABEL_SUCTION,
+    STR_HP_LABEL_EEV,
+    STR_HP_LABEL_HI_PRESS,
+    STR_HP_LABEL_LO_PRESS,
+    STR_HP_LABEL_POWER_IN,
+    STR_HP_LABEL_HEAT_OUT,
 
     // ========================================================================
     // Must be last - used for array sizing

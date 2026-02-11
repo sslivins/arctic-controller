@@ -374,7 +374,7 @@ static void create_menu_list(void)
     
     // Demo Mode toggle
     create_toggle_row(state.list_container, LV_SYMBOL_PLAY,
-                      "Demo Mode", app_prefs_is_demo_mode(),
+                      i18n_get(STR_SETTINGS_DEMO_MODE), app_prefs_is_demo_mode(),
                       &state.demo_mode_switch, demo_mode_switch_cb);
     
     // Temperature Units toggle with °C / °F labels
@@ -399,7 +399,7 @@ static void create_menu_list(void)
         
         // "Temperature" label
         lv_obj_t* text_label = lv_label_create(row);
-        lv_label_set_text(text_label, "Temperature");
+        lv_label_set_text(text_label, i18n_get(STR_SETTINGS_TEMPERATURE));
         lv_obj_set_style_text_font(text_label, FONT_NORMAL, LV_PART_MAIN);
         lv_obj_set_style_text_color(text_label, COLOR_TEXT, LV_PART_MAIN);
         lv_obj_align(text_label, LV_ALIGN_LEFT_MID, 45, 0);
@@ -409,11 +409,11 @@ static void create_menu_list(void)
         lv_label_set_text(celsius_lbl, "°C");
         lv_obj_set_style_text_font(celsius_lbl, FONT_LARGE, LV_PART_MAIN);
         lv_obj_set_style_text_color(celsius_lbl, is_fahrenheit ? COLOR_TEXT_DIM : COLOR_TEXT, LV_PART_MAIN);
-        lv_obj_align(celsius_lbl, LV_ALIGN_RIGHT_MID, -130, 0);
+        lv_obj_align(celsius_lbl, LV_ALIGN_RIGHT_MID, -145, 0);
         
         // Switch in middle-right
         lv_obj_t* sw = lv_switch_create(row);
-        lv_obj_set_size(sw, 60, 32);
+        lv_obj_set_size(sw, 80, 40);
         lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -55, 0);
         lv_obj_set_style_bg_color(sw, lv_color_hex(0x555555), LV_PART_MAIN);
         lv_obj_set_style_bg_color(sw, COLOR_ACCENT, 

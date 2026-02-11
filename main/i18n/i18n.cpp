@@ -38,6 +38,8 @@ static const char* strings_en[STR_COUNT] = {
     [STR_SETTINGS_WIFI] = "WiFi",
     [STR_SETTINGS_UPDATE] = "Update",
     [STR_SETTINGS_LANGUAGE] = "Language",
+    [STR_SETTINGS_DEMO_MODE] = "Demo Mode",
+    [STR_SETTINGS_TEMPERATURE] = "Temperature",
     
     // WiFi Panel
     [STR_WIFI_CONNECTED] = "Connected",
@@ -259,6 +261,16 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_LABEL_COIL] = "COIL",
     [STR_HP_STATE_FAULT] = "FAULT",
     [STR_HP_ENERGY] = "Energy",
+    [STR_HP_LABEL_COP] = "COP",
+    [STR_HP_LABEL_POWER] = "POWER",
+    [STR_HP_LABEL_FAN] = "FAN",
+    [STR_HP_LABEL_DISCHARGE] = "DISCHARGE",
+    [STR_HP_LABEL_SUCTION] = "SUCTION",
+    [STR_HP_LABEL_EEV] = "EEV",
+    [STR_HP_LABEL_HI_PRESS] = "HIGH PRESS",
+    [STR_HP_LABEL_LO_PRESS] = "LOW PRESS",
+    [STR_HP_LABEL_POWER_IN] = "POWER IN",
+    [STR_HP_LABEL_HEAT_OUT] = "HEAT OUT",
 };
 
 // French strings
@@ -278,6 +290,8 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_SETTINGS_WIFI] = "WiFi",
     [STR_SETTINGS_UPDATE] = "Mise à jour",
     [STR_SETTINGS_LANGUAGE] = "Langue",
+    [STR_SETTINGS_DEMO_MODE] = "Mode d\xc3\xa9mo",
+    [STR_SETTINGS_TEMPERATURE] = "Temp\xc3\xa9rature",
     
     // WiFi Panel
     [STR_WIFI_CONNECTED] = "Connecté",
@@ -499,6 +513,16 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_LABEL_COIL] = "\xc3\x89" "CHANGEUR",
     [STR_HP_STATE_FAULT] = "PANNE",
     [STR_HP_ENERGY] = "\xc3\x89nergie",
+    [STR_HP_LABEL_COP] = "COP",
+    [STR_HP_LABEL_POWER] = "PUISSANCE",
+    [STR_HP_LABEL_FAN] = "VENTIL.",
+    [STR_HP_LABEL_DISCHARGE] = "REFOUL.",
+    [STR_HP_LABEL_SUCTION] = "ASPIR.",
+    [STR_HP_LABEL_EEV] = "EEV",
+    [STR_HP_LABEL_HI_PRESS] = "HAUTE PR.",
+    [STR_HP_LABEL_LO_PRESS] = "BASSE PR.",
+    [STR_HP_LABEL_POWER_IN] = "PUISS. IN",
+    [STR_HP_LABEL_HEAT_OUT] = "CHALEUR",
 };
 
 // Spanish strings
@@ -518,6 +542,8 @@ static const char* strings_es[STR_COUNT] = {
     [STR_SETTINGS_WIFI] = "WiFi",
     [STR_SETTINGS_UPDATE] = "Actualizar",
     [STR_SETTINGS_LANGUAGE] = "Idioma",
+    [STR_SETTINGS_DEMO_MODE] = "Modo demo",
+    [STR_SETTINGS_TEMPERATURE] = "Temperatura",
     
     // WiFi Panel
     [STR_WIFI_CONNECTED] = "Conectado",
@@ -739,6 +765,16 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_LABEL_COIL] = "BOBINA",
     [STR_HP_STATE_FAULT] = "FALLO",
     [STR_HP_ENERGY] = "Energ" "\xc3\xad" "a",
+    [STR_HP_LABEL_COP] = "COP",
+    [STR_HP_LABEL_POWER] = "POTENCIA",
+    [STR_HP_LABEL_FAN] = "VENTIL.",
+    [STR_HP_LABEL_DISCHARGE] = "DESCARGA",
+    [STR_HP_LABEL_SUCTION] = "SUCCI" "\xc3\x93" "N",
+    [STR_HP_LABEL_EEV] = "EEV",
+    [STR_HP_LABEL_HI_PRESS] = "PRES. ALTA",
+    [STR_HP_LABEL_LO_PRESS] = "PRES. BAJA",
+    [STR_HP_LABEL_POWER_IN] = "POT. ENTR.",
+    [STR_HP_LABEL_HEAT_OUT] = "CALOR",
 };
 
 // Language names in their own language (native names)

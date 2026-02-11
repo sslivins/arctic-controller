@@ -644,9 +644,9 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_flow(state.perf_card, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(state.perf_card, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    create_value_column(state.perf_card, "COP", &state.perf_cop_value);
-    create_value_column(state.perf_card, "POWER", &state.perf_power_value);
-    create_value_column(state.perf_card, "FAN", &state.perf_fan_value);
+    create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_COP), &state.perf_cop_value);
+    create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_POWER), &state.perf_power_value);
+    create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_FAN), &state.perf_fan_value);
     
     // =========================================================================
     // ERROR CARD: Prominent error/status display (tap for details)
@@ -746,9 +746,9 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_flow(detail_row1, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(detail_row1, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    create_value_column(detail_row1, "DISCHARGE", &state.comp_discharge_value);
-    create_value_column(detail_row1, "SUCTION", &state.comp_suction_value);
-    create_value_column(detail_row1, "EEV", &state.comp_eev_value);
+    create_value_column(detail_row1, i18n_get(STR_HP_LABEL_DISCHARGE), &state.comp_discharge_value);
+    create_value_column(detail_row1, i18n_get(STR_HP_LABEL_SUCTION), &state.comp_suction_value);
+    create_value_column(detail_row1, i18n_get(STR_HP_LABEL_EEV), &state.comp_eev_value);
     
     // Detail row 2: High Press | Low Press | ΔT
     lv_obj_t* detail_row2 = lv_obj_create(state.comp_content);
@@ -760,8 +760,8 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_flow(detail_row2, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(detail_row2, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    create_value_column(detail_row2, "HIGH PRESS", &state.comp_hi_press_value);
-    create_value_column(detail_row2, "LOW PRESS", &state.comp_lo_press_value);
+    create_value_column(detail_row2, i18n_get(STR_HP_LABEL_HI_PRESS), &state.comp_hi_press_value);
+    create_value_column(detail_row2, i18n_get(STR_HP_LABEL_LO_PRESS), &state.comp_lo_press_value);
     lv_obj_t* dt_col = create_value_column(detail_row2, "\xCE\x94T", &state.comp_dt_value);
     state.comp_dt_label = lv_obj_get_child(dt_col, 1);
     
@@ -781,9 +781,9 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_flow(energy_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(energy_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    create_value_column(energy_row, "POWER IN", &state.energy_in_value);
-    create_value_column(energy_row, "HEAT OUT", &state.energy_out_value);
-    create_value_column(energy_row, "COP", &state.energy_cop_value);
+    create_value_column(energy_row, i18n_get(STR_HP_LABEL_POWER_IN), &state.energy_in_value);
+    create_value_column(energy_row, i18n_get(STR_HP_LABEL_HEAT_OUT), &state.energy_out_value);
+    create_value_column(energy_row, i18n_get(STR_HP_LABEL_COP), &state.energy_cop_value);
     
     // =========================================================================
     // FIXED FOOTER: Three button bar - Temps | System | Advanced
