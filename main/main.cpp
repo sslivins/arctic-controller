@@ -159,6 +159,7 @@ extern "C" void app_main(void)
     if (app_prefs_is_demo_mode()) {
         mclog::tagInfo(TAG, "Demo mode enabled - initializing demo state");
         arctic::initDemoState();
+        arctic::startPolling();
     } else {
         esp_err_t modbus_ret = modbus::init();
         if (modbus_ret == ESP_OK) {

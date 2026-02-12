@@ -7,6 +7,7 @@
 
 #include "event_log_screen.h"
 #include "event_log.h"
+#include "heatpump_errors.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "i18n/i18n.h"
@@ -68,6 +69,31 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_CONNECTED:       return STR_EVENT_CONNECTED;
         case EVENT_DISCONNECTED:    return STR_EVENT_DISCONNECTED;
         default:                    return STR_EVENT_SYSTEM_START;
+    }
+}
+
+static const char* event_type_icon(event_type_t type) {
+    switch (type) {
+        case EVENT_SYSTEM_START:    return LV_SYMBOL_CHARGE;
+        case EVENT_POWER_ON:        return LV_SYMBOL_POWER;
+        case EVENT_POWER_OFF:       return LV_SYMBOL_POWER;
+        case EVENT_MODE_CHANGED:    return LV_SYMBOL_LOOP;
+        case EVENT_SETPOINT_CHANGED:return LV_SYMBOL_EDIT;
+        case EVENT_COMPRESSOR_ON:   return LV_SYMBOL_SETTINGS;
+        case EVENT_COMPRESSOR_OFF:  return LV_SYMBOL_SETTINGS;
+        case EVENT_FAN_ON:          return LV_SYMBOL_SHUFFLE;
+        case EVENT_FAN_OFF:         return LV_SYMBOL_SHUFFLE;
+        case EVENT_PUMP_ON:         return LV_SYMBOL_TINT;
+        case EVENT_PUMP_OFF:        return LV_SYMBOL_TINT;
+        case EVENT_AUX_HEATER_ON:   return LV_SYMBOL_PLUS;
+        case EVENT_AUX_HEATER_OFF:  return LV_SYMBOL_PLUS;
+        case EVENT_DEFROST_START:   return LV_SYMBOL_REFRESH;
+        case EVENT_DEFROST_END:     return LV_SYMBOL_REFRESH;
+        case EVENT_ERROR_APPEARED:  return LV_SYMBOL_WARNING;
+        case EVENT_ERROR_CLEARED:   return LV_SYMBOL_OK;
+        case EVENT_CONNECTED:       return LV_SYMBOL_WIFI;
+        case EVENT_DISCONNECTED:    return LV_SYMBOL_WIFI;
+        default:                    return LV_SYMBOL_FILE;
     }
 }
 
@@ -135,8 +161,28 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
         case EVENT_ERROR_APPEARED:
         case EVENT_ERROR_CLEARED: {
             int reg = (p >> 16) & 0xFFFF;
-            int bit = p & 0xFFFF;
-            snprintf(buf, buf_size, "Reg %d bit %d", reg, bit);
+            uint16_t bit = p & 0xFFFF;
+            // Look up error code and description from error definitions
+            const arctic::ErrorDef* defs = nullptr;
+            int count = 0;
+            if (reg == 1) {
+                defs = arctic::getError1Definitions(&count);
+            } else if (reg == 2) {
+                defs = arctic::getError2Definitions(&count);
+            }
+            bool found = false;
+            if (defs) {
+                for (int i = 0; i < count; i++) {
+                    if (defs[i].mask == bit) {
+                        snprintf(buf, buf_size, "(%s) %s", defs[i].code, defs[i].description);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                snprintf(buf, buf_size, "Reg %d bit 0x%04X", reg, bit);
+            }
             break;
         }
         default:
@@ -160,6 +206,9 @@ static void format_event_time(char* buf, size_t buf_size, const event_entry_t* e
     }
 }
 
+// Forward declarations
+static void clear_btn_cb(lv_event_t* e);
+
 // ============================================================================
 // Build / Rebuild Event List
 // ============================================================================
@@ -170,6 +219,36 @@ static void rebuild_event_list() {
     // Remove all children from content
     lv_obj_clean(state.content);
     
+    // Clear History button row (inline, matching errors screen style)
+    lv_obj_t* clear_row = lv_obj_create(state.content);
+    lv_obj_set_size(clear_row, LV_PCT(100), 55);
+    lv_obj_set_style_bg_opa(clear_row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(clear_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(clear_row, 0, LV_PART_MAIN);
+    lv_obj_set_layout(clear_row, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(clear_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(clear_row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(clear_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* clear_btn = lv_btn_create(clear_row);
+    lv_obj_set_size(clear_btn, LV_SIZE_CONTENT, 50);
+    lv_obj_set_style_min_width(clear_btn, 100, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(clear_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(clear_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(clear_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(clear_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(clear_btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(clear_btn, COLOR_WARNING, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(clear_btn, LV_OPA_50, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(clear_btn, 25, LV_PART_MAIN);
+    lv_obj_add_event_cb(clear_btn, clear_btn_cb, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_t* clear_label = lv_label_create(clear_btn);
+    lv_label_set_text(clear_label, i18n_get(STR_HP_CLEAR_HISTORY));
+    lv_obj_set_style_text_font(clear_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(clear_label, COLOR_WARNING, LV_PART_MAIN);
+    lv_obj_center(clear_label);
+
     int count = event_log_count();
     
     // Update count label in header
@@ -195,26 +274,36 @@ static void rebuild_event_list() {
     event_entry_t events[EVENT_LOG_MAX_ENTRIES];
     int got = event_log_get(events, EVENT_LOG_MAX_ENTRIES, 0);
     
-    char detail_buf[64];
+    char detail_buf[128];
     char time_buf[32];
     
     for (int i = 0; i < got; i++) {
         const event_entry_t* evt = &events[i];
         
-        // Row container
+        // Row container - flex column layout like error cards
         lv_obj_t* row = lv_obj_create(state.content);
         lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-        lv_obj_set_style_min_height(row, 65, LV_PART_MAIN);
         lv_obj_set_style_bg_color(row, COLOR_CARD_BG, LV_PART_MAIN);
         lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
         lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(row, 12, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(row, 15, LV_PART_MAIN);
+        lv_obj_set_layout(row, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(row, 6, LV_PART_MAIN);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+        
+        // Top row: event name + timestamp
+        lv_obj_t* top_row = lv_obj_create(row);
+        lv_obj_set_size(top_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(top_row, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(top_row, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(top_row, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(top_row, LV_OBJ_FLAG_SCROLLABLE);
         
         // Color indicator bar on left
         lv_color_t evt_color = event_type_color(evt->type);
-        lv_obj_t* indicator = lv_obj_create(row);
-        lv_obj_set_size(indicator, 4, LV_PCT(80));
+        lv_obj_t* indicator = lv_obj_create(top_row);
+        lv_obj_set_size(indicator, 4, LV_PCT(100));
         lv_obj_align(indicator, LV_ALIGN_LEFT_MID, 0, 0);
         lv_obj_set_style_bg_color(indicator, evt_color, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(indicator, LV_OPA_COVER, LV_PART_MAIN);
@@ -222,30 +311,33 @@ static void rebuild_event_list() {
         lv_obj_set_style_radius(indicator, 2, LV_PART_MAIN);
         lv_obj_clear_flag(indicator, LV_OBJ_FLAG_SCROLLABLE);
         
-        // Event type name
-        lv_obj_t* name_lbl = lv_label_create(row);
-        lv_label_set_text(name_lbl, i18n_get(event_type_to_str_id(evt->type)));
-        lv_obj_set_style_text_font(name_lbl, &montserrat_24_latin, LV_PART_MAIN);
+        // Event type icon + name
+        char name_buf[96];
+        snprintf(name_buf, sizeof(name_buf), "%s  %s", event_type_icon(evt->type), i18n_get(event_type_to_str_id(evt->type)));
+        lv_obj_t* name_lbl = lv_label_create(top_row);
+        lv_label_set_text(name_lbl, name_buf);
+        lv_obj_set_style_text_font(name_lbl, &montserrat_32_latin, LV_PART_MAIN);
         lv_obj_set_style_text_color(name_lbl, evt_color, LV_PART_MAIN);
-        lv_obj_align(name_lbl, LV_ALIGN_TOP_LEFT, 16, 0);
+        lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 16, 0);
         
-        // Detail text (mode change, setpoint, error code)
+        // Timestamp on the right
+        format_event_time(time_buf, sizeof(time_buf), evt);
+        lv_obj_t* time_lbl = lv_label_create(top_row);
+        lv_label_set_text(time_lbl, time_buf);
+        lv_obj_set_style_text_font(time_lbl, &montserrat_24_latin, LV_PART_MAIN);
+        lv_obj_set_style_text_color(time_lbl, COLOR_TEXT_DIM, LV_PART_MAIN);
+        lv_obj_align(time_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
+        
+        // Detail text (mode change, setpoint, error description)
         format_event_detail(detail_buf, sizeof(detail_buf), evt);
         if (detail_buf[0] != '\0') {
             lv_obj_t* detail_lbl = lv_label_create(row);
             lv_label_set_text(detail_lbl, detail_buf);
-            lv_obj_set_style_text_font(detail_lbl, &montserrat_16_latin, LV_PART_MAIN);
+            lv_label_set_long_mode(detail_lbl, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(detail_lbl, LV_PCT(100));
+            lv_obj_set_style_text_font(detail_lbl, &montserrat_24_latin, LV_PART_MAIN);
             lv_obj_set_style_text_color(detail_lbl, COLOR_TEXT_DIM, LV_PART_MAIN);
-            lv_obj_align(detail_lbl, LV_ALIGN_BOTTOM_LEFT, 16, 0);
         }
-        
-        // Timestamp on the right
-        format_event_time(time_buf, sizeof(time_buf), evt);
-        lv_obj_t* time_lbl = lv_label_create(row);
-        lv_label_set_text(time_lbl, time_buf);
-        lv_obj_set_style_text_font(time_lbl, &montserrat_16_latin, LV_PART_MAIN);
-        lv_obj_set_style_text_color(time_lbl, COLOR_TEXT_DIM, LV_PART_MAIN);
-        lv_obj_align(time_lbl, LV_ALIGN_TOP_RIGHT, 0, 0);
     }
     
     state.last_count = count;
@@ -345,25 +437,6 @@ void event_log_screen_show(event_log_screen_close_cb_t on_close) {
     lv_obj_set_style_text_font(back_icon, &montserrat_32_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_center(back_icon);
-    
-    // Clear button (trash icon) to the left of close button
-    lv_obj_t* clear_btn = lv_btn_create(header);
-    lv_obj_set_size(clear_btn, 50, 50);
-    lv_obj_align(clear_btn, LV_ALIGN_RIGHT_MID, -60, 0);
-    lv_obj_set_style_bg_color(clear_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(clear_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(clear_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(clear_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(clear_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(clear_btn, COLOR_WARNING, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(clear_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(clear_btn, clear_btn_cb, LV_EVENT_CLICKED, nullptr);
-    
-    lv_obj_t* clear_icon = lv_label_create(clear_btn);
-    lv_label_set_text(clear_icon, LV_SYMBOL_TRASH);
-    lv_obj_set_style_text_font(clear_icon, &montserrat_24_latin, LV_PART_MAIN);
-    lv_obj_set_style_text_color(clear_icon, COLOR_WARNING, LV_PART_MAIN);
-    lv_obj_center(clear_icon);
     
     // Title
     state.count_label = lv_label_create(header);

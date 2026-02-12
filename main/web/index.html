@@ -2725,7 +2725,6 @@
                             <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
                                 <h2 x-text="t('events') + (eventLogTotal ? ' (' + eventLogTotal + ')' : '')"></h2>
                                 <div style="display: flex; gap: 0.5rem;">
-                                    <button class="btn btn-secondary" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;" @click="loadEvents()">↻</button>
                                     <button class="btn btn-secondary" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;" x-show="eventLog.length > 0" @click="clearEventLog()" x-text="t('clearEvents')"></button>
                                 </div>
                             </div>
@@ -3315,6 +3314,7 @@
                             await this.loadStatus();
                             await this.loadHeatpump();
                             await this.loadErrors();
+                            if (this.page === 'events') await this.loadEvents();
                             this.lastUpdate = Date.now();
                         }
                         
@@ -3994,7 +3994,43 @@
                     if (evt.type === 'error_appeared' || evt.type === 'error_cleared') {
                         const reg = (p >> 16) & 0xFFFF;
                         const bit = p & 0xFFFF;
-                        return 'Reg ' + reg + ' bit ' + bit;
+                        const errorMap = {
+                            // Error register 1 (2137)
+                            '1_1':    '(E27) Indoor unit EEPROM error',
+                            '1_2':    '(E28) Outdoor unit EEPROM fault',
+                            '1_4':    '(E19) Inlet water temperature sensor fault',
+                            '1_8':    '(E18) Outlet water temperature sensor fault',
+                            '1_16':   '(E13) Cooling coil temperature sensor fault',
+                            '1_32':   '(E05) Heat pump coil temperature sensor fault',
+                            '1_64':   '(E01) Compressor discharge temp sensor fault',
+                            '1_128':  '(E09) Compressor suction temp sensor fault',
+                            '1_256':  '(E22) Outdoor ambient temp sensor fault',
+                            '1_512':  '(E10) Drive/main board communication error',
+                            '1_1024': '(E21) Wired controller communication fault',
+                            '1_2048': '(r02) Compressor start fault',
+                            '1_4096': '(E12) Indoor/outdoor unit communication error',
+                            '1_8192': '(r01) IPM module fault',
+                            '1_16384':'(PA) Tank temperature protection',
+                            '1_32768':'(r10) AC voltage protection',
+                            // Error register 2 (2138)
+                            '2_1':    '(P19) AC current protection',
+                            '2_2':    '(r06) Compressor phase current protection',
+                            '2_4':    '(FA) DC fan motor protection',
+                            '2_8':    '(r11) DC bus voltage protection',
+                            '2_16':   '(r05) IPM module temperature too high',
+                            '2_32':   '(P11) Compressor discharge temp too high',
+                            '2_64':   '(P02) High pressure protection',
+                            '2_128':  '(P06) Low pressure protection',
+                            '2_256':  '(P01) Water flow switch protection',
+                            '2_512':  '(P27) Cooling coil overheating protection',
+                            '2_1024': '(E26) Low ambient temperature protection',
+                            '2_2048': '(EC) EEV circuit low pressure protection',
+                            '2_4096': '(ED) Low pressure sensor protection',
+                            '2_8192': '(P15) Inlet/outlet temp difference too large',
+                            '2_16384':'(P16) Outlet water temperature too low',
+                            '2_32768':'(r20) Compressor protection',
+                        };
+                        return errorMap[reg + '_' + bit] || ('Reg ' + reg + ' bit 0x' + bit.toString(16));
                     }
                     return '';
                 },
