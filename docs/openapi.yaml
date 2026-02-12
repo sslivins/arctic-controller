@@ -28,7 +28,7 @@ info:
     The API key can be retrieved from the web interface settings.
     
     Both authentication types can be independently enabled/disabled via `/api/auth/config`.
-  version: 2.0.0
+  version: 2.1.0
   contact:
     name: Arctic Controller
   license:
@@ -61,6 +61,8 @@ tags:
     description: Session and API key authentication
   - name: HeatPump
     description: Heat pump status and control
+  - name: Events
+    description: Operational event log
 
 paths:
   /login:
@@ -1509,6 +1511,69 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/events:
+    get:
+      tags:
+        - Events
+      summary: Get event log
+      description: |
+        Returns all recorded operational events, newest first.
+        Events are stored in a RAM ring buffer (max 128 entries) and are lost on reboot.
+        Each event has a type, optional payload, wall-clock timestamp, and uptime.
+      operationId: getEvents
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Event log retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    description: Total number of events in the log
+                    example: 12
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EventEntry'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags:
+        - Events
+      summary: Clear event log
+      description: Deletes all events from the ring buffer.
+      operationId: clearEvents
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Event log cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     apiKey:
@@ -1529,6 +1594,52 @@ components:
         error:
           type: string
           description: Error message
+
+    EventEntry:
+      type: object
+      description: A single operational event
+      properties:
+        type:
+          type: string
+          description: Event type identifier
+          enum:
+            - system_start
+            - power_on
+            - power_off
+            - mode_changed
+            - setpoint_changed
+            - compressor_on
+            - compressor_off
+            - fan_on
+            - fan_off
+            - pump_on
+            - pump_off
+            - aux_heater_on
+            - aux_heater_off
+            - defrost_start
+            - defrost_end
+            - error_appeared
+            - error_cleared
+            - connected
+            - disconnected
+          example: power_on
+        timestamp:
+          type: integer
+          description: Unix timestamp (seconds since epoch), 0 if NTP not synced
+          example: 1739404800
+        uptime_ms:
+          type: integer
+          description: Device uptime in milliseconds when event occurred
+          example: 125340
+        payload:
+          type: integer
+          description: |
+            Event-specific payload data:
+            - `mode_changed`: `(old_mode << 8) | new_mode`
+            - `setpoint_changed`: `(type << 16) | (old_val << 8) | new_val` where type: 0=cooling, 1=heating, 2=hot_water
+            - `error_appeared` / `error_cleared`: `(register << 16) | bit_mask` where register is 1 or 2
+            - All other events: 0
+          example: 0
 
     HeatPumpParam:
       type: object

@@ -11,6 +11,11 @@
 - [ ] Add COP/energy fields to REST API and demo mode injection
 - [ ] Add flow rate configuration to the Advanced/Params screen
 
+## Event Log Enhancements
+
+- [ ] Consider logging compressor frequency changes (e.g. significant jumps or thresholds)
+- [ ] Consider logging fan speed changes (RPM thresholds or level transitions)
+
 ## Main Screen Layout Redesign
 
 - [x] Hero state card with color-coded background (heating/cooling/defrost/fault/idle)

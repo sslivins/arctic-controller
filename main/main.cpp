@@ -25,6 +25,7 @@
 #include "modbus/arctic_heatpump.h"
 #include "heatpump_screen.h"
 #include "app_preferences.h"
+#include "event_log.h"
 
 static const char* TAG = "main";
 
@@ -151,10 +152,14 @@ extern "C" void app_main(void)
     // Initialize app preferences (demo mode, temp units, etc.)
     app_prefs_init();
 
+    // Initialize event log (RAM ring buffer for system events)
+    event_log_init();
+
     // Initialize Modbus and Arctic heat pump communication (skip in demo mode)
     if (app_prefs_is_demo_mode()) {
         mclog::tagInfo(TAG, "Demo mode enabled - initializing demo state");
         arctic::initDemoState();
+        arctic::startPolling();
     } else {
         esp_err_t modbus_ret = modbus::init();
         if (modbus_ret == ESP_OK) {

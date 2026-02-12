@@ -11,6 +11,7 @@
 #include "modbus/arctic_registers.h"
 #include "heatpump_params.h"
 #include "heatpump_errors.h"
+#include "event_log.h"
 #include "app_preferences.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
@@ -77,6 +78,8 @@ static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_errors_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req);
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
+static esp_err_t events_get_handler(httpd_req_t* req);
+static esp_err_t events_clear_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -608,9 +611,27 @@ bool api_server_start(void)
     };
     REGISTER_URI(heatpump_demo_uri);
     
+    // GET /api/events - Get event log
+    httpd_uri_t events_get_uri = {
+        .uri = "/api/events",
+        .method = HTTP_GET,
+        .handler = events_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(events_get_uri);
+    
+    // DELETE /api/events - Clear event log
+    httpd_uri_t events_clear_uri = {
+        .uri = "/api/events",
+        .method = HTTP_DELETE,
+        .handler = events_clear_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(events_clear_uri);
+    
     #undef REGISTER_URI
     
-    ESP_LOGI(TAG, "HTTP server started successfully (32 URI handlers registered)");
+    ESP_LOGI(TAG, "HTTP server started successfully (34 URI handlers registered)");
     ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
     
     return true;
@@ -2375,5 +2396,55 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
     free(json_str2);
     cJSON_Delete(resp);
     
+    return ESP_OK;
+}
+
+// ============================================================================
+// Events API
+// ============================================================================
+
+static esp_err_t events_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+    
+    // Get events (newest first, up to 128)
+    event_entry_t events[128];
+    int count = event_log_get(events, 128, 0);
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "total", event_log_count());
+    cJSON* arr = cJSON_AddArrayToObject(root, "events");
+    
+    for (int i = 0; i < count; i++) {
+        cJSON* evt = cJSON_CreateObject();
+        cJSON_AddStringToObject(evt, "type", event_type_name(events[i].type));
+        cJSON_AddNumberToObject(evt, "timestamp", events[i].timestamp);
+        cJSON_AddNumberToObject(evt, "uptime_ms", events[i].uptime_ms);
+        cJSON_AddNumberToObject(evt, "payload", events[i].payload);
+        cJSON_AddItemToArray(arr, evt);
+    }
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+static esp_err_t events_clear_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+    
+    event_log_clear();
+    httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;
 }

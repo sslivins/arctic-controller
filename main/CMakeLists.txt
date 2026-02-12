@@ -42,6 +42,8 @@ idf_component_register(
         "app_preferences.cpp"
         "heatpump_params.cpp"
         "heatpump_errors.cpp"
+        "event_log.cpp"
+        "event_log_screen.cpp"
         "settings/settings_menu.cpp"
         "settings/settings_wifi_screen.cpp"
         "settings/keyboard_maps.c"

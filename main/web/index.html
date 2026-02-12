@@ -217,7 +217,34 @@
                 // Dashboard panels
                 energy: 'Energy',
                 powerIn: 'Power In',
-                heatOut: 'Heat Out'
+                heatOut: 'Heat Out',
+
+                // Events
+                events: 'Events',
+                noEvents: 'No events recorded',
+                clearEvents: 'Clear Events',
+                clearEventsConfirm: 'Clear all events?',
+                eventsCleared: 'Events cleared',
+                eventsClearFailed: 'Failed to clear events',
+                evtSystemStart: 'System Start',
+                evtPowerOn: 'Power ON',
+                evtPowerOff: 'Power OFF',
+                evtModeChanged: 'Mode Changed',
+                evtSetpointChanged: 'Setpoint Changed',
+                evtCompressorOn: 'Compressor ON',
+                evtCompressorOff: 'Compressor OFF',
+                evtFanOn: 'Fan ON',
+                evtFanOff: 'Fan OFF',
+                evtPumpOn: 'Water Pump ON',
+                evtPumpOff: 'Water Pump OFF',
+                evtAuxHeaterOn: 'Aux Heater ON',
+                evtAuxHeaterOff: 'Aux Heater OFF',
+                evtDefrostStart: 'Defrost Start',
+                evtDefrostEnd: 'Defrost End',
+                evtErrorAppeared: 'Error Appeared',
+                evtErrorCleared: 'Error Cleared',
+                evtConnected: 'Connected',
+                evtDisconnected: 'Disconnected'
             },
             fr: {
                 // Header & Navigation
@@ -428,7 +455,34 @@
                 // Dashboard panels
                 energy: '\u00c9nergie',
                 powerIn: 'Puiss. entr\u00e9e',
-                heatOut: 'Chaleur sort.'
+                heatOut: 'Chaleur sort.',
+
+                // Events
+                events: '\u00c9v\u00e9nements',
+                noEvents: 'Aucun \u00e9v\u00e9nement',
+                clearEvents: 'Effacer',
+                clearEventsConfirm: 'Effacer tous les \u00e9v\u00e9nements ?',
+                eventsCleared: '\u00c9v\u00e9nements effac\u00e9s',
+                eventsClearFailed: '\u00c9chec de la suppression',
+                evtSystemStart: 'D\u00e9marrage syst\u00e8me',
+                evtPowerOn: 'Mise en marche',
+                evtPowerOff: 'Arr\u00eat',
+                evtModeChanged: 'Mode chang\u00e9',
+                evtSetpointChanged: 'Consigne modifi\u00e9e',
+                evtCompressorOn: 'Compresseur ON',
+                evtCompressorOff: 'Compresseur OFF',
+                evtFanOn: 'Ventilateur ON',
+                evtFanOff: 'Ventilateur OFF',
+                evtPumpOn: 'Pompe \u00e0 eau ON',
+                evtPumpOff: 'Pompe \u00e0 eau OFF',
+                evtAuxHeaterOn: 'Chauff. aux ON',
+                evtAuxHeaterOff: 'Chauff. aux OFF',
+                evtDefrostStart: 'D\u00e9but d\u00e9givrage',
+                evtDefrostEnd: 'Fin d\u00e9givrage',
+                evtErrorAppeared: 'Erreur apparue',
+                evtErrorCleared: 'Erreur effac\u00e9e',
+                evtConnected: 'Connect\u00e9',
+                evtDisconnected: 'D\u00e9connect\u00e9'
             },
             es: {
                 // Header & Navigation
@@ -639,7 +693,34 @@
                 // Dashboard panels
                 energy: 'Energ\u00eda',
                 powerIn: 'Pot. entrada',
-                heatOut: 'Calor salida'
+                heatOut: 'Calor salida',
+
+                // Events
+                events: 'Eventos',
+                noEvents: 'Sin eventos registrados',
+                clearEvents: 'Borrar',
+                clearEventsConfirm: '\u00bfBorrar todos los eventos?',
+                eventsCleared: 'Eventos borrados',
+                eventsClearFailed: 'Error al borrar eventos',
+                evtSystemStart: 'Inicio del sistema',
+                evtPowerOn: 'Encendido',
+                evtPowerOff: 'Apagado',
+                evtModeChanged: 'Modo cambiado',
+                evtSetpointChanged: 'Consigna cambiada',
+                evtCompressorOn: 'Compresor ON',
+                evtCompressorOff: 'Compresor OFF',
+                evtFanOn: 'Ventilador ON',
+                evtFanOff: 'Ventilador OFF',
+                evtPumpOn: 'Bomba de agua ON',
+                evtPumpOff: 'Bomba de agua OFF',
+                evtAuxHeaterOn: 'Calef. aux ON',
+                evtAuxHeaterOff: 'Calef. aux OFF',
+                evtDefrostStart: 'Inicio descong.',
+                evtDefrostEnd: 'Fin descong.',
+                evtErrorAppeared: 'Error detectado',
+                evtErrorCleared: 'Error eliminado',
+                evtConnected: 'Conectado',
+                evtDisconnected: 'Desconectado'
             }
         };
     </script>
@@ -726,11 +807,12 @@
             background: none;
             border: none;
             color: var(--text-secondary);
-            padding: 1rem 1.25rem;
+            padding: 1rem 1rem;
             cursor: pointer;
             font-size: 0.9rem;
             border-bottom: 2px solid transparent;
             transition: all 0.2s;
+            white-space: nowrap;
         }
         
         nav button:hover {
@@ -1819,6 +1901,45 @@
             margin-top: 0.25rem;
         }
         
+        /* Event Log */
+        .event-list {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .event-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .event-item:last-child {
+            border-bottom: none;
+        }
+        .event-icon {
+            font-size: 1.2rem;
+            flex-shrink: 0;
+            margin-top: 0.1rem;
+        }
+        .event-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .event-name {
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        .event-detail {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.15rem;
+        }
+        .event-time {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.2rem;
+        }
+        
         /* Parameter Card */
         .param-category {
             margin-bottom: 1.5rem;
@@ -2201,6 +2322,7 @@
                 <nav>
                     <button :class="{ active: page === 'dashboard' }" @click="page = 'dashboard'" x-text="t('dashboard')"></button>
                     <button :class="{ active: page === 'parameters' }" @click="page = 'parameters'; loadParams()" x-text="t('parameters')"></button>
+                    <button :class="{ active: page === 'events' }" @click="page = 'events'; loadEvents()" x-text="t('events')"></button>
                     <button :class="{ active: page === 'settings' }" @click="page = 'settings'" x-text="t('settings')"></button>
                 </nav>
                 
@@ -2597,6 +2719,40 @@
                         </div>
                     </div>
                     
+                    <!-- Events Page -->
+                    <div x-show="page === 'events'">
+                        <div class="card">
+                            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                                <h2 x-text="t('events') + (eventLogTotal ? ' (' + eventLogTotal + ')' : '')"></h2>
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <button class="btn btn-secondary" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;" x-show="eventLog.length > 0" @click="clearEventLog()" x-text="t('clearEvents')"></button>
+                                </div>
+                            </div>
+                            <div class="card-body" style="padding: 0;">
+                                <template x-if="eventLogLoading">
+                                    <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary);" x-text="t('loadingParams')"></div>
+                                </template>
+                                <template x-if="!eventLogLoading && eventLog.length === 0">
+                                    <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary);" x-text="t('noEvents')"></div>
+                                </template>
+                                <template x-if="!eventLogLoading && eventLog.length > 0">
+                                    <div class="event-list">
+                                        <template x-for="(evt, idx) in eventLog" :key="idx">
+                                            <div class="event-item">
+                                                <div class="event-icon" x-text="eventIcon(evt.type)"></div>
+                                                <div class="event-info">
+                                                    <div class="event-name" :style="'color:' + eventColor(evt.type)" x-text="eventTypeName(evt.type)"></div>
+                                                    <div class="event-detail" x-show="eventDetail(evt)" x-text="eventDetail(evt)"></div>
+                                                    <div class="event-time" x-text="evt.timestamp ? formatTimestamp(evt.timestamp) : formatUptime(evt.uptime_ms)"></div>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Settings Page -->
                     <div x-show="page === 'settings'">
                             <!-- Device Info -->
@@ -2980,6 +3136,11 @@
                 // Error state
                 errors: { active: [], history: [] },
                 
+                // Event log state
+                eventLog: [],
+                eventLogTotal: 0,
+                eventLogLoading: false,
+                
                 // Parameters state
                 params: {},
                 paramsConnected: false,
@@ -3153,6 +3314,7 @@
                             await this.loadStatus();
                             await this.loadHeatpump();
                             await this.loadErrors();
+                            if (this.page === 'events') await this.loadEvents();
                             this.lastUpdate = Date.now();
                         }
                         
@@ -3732,6 +3894,145 @@
                         this.showToast(this.t('paramFailed'), 'error');
                     }
                     this.controlLoading = false;
+                },
+                
+                // ==========================================
+                // Event Log
+                // ==========================================
+                
+                async loadEvents() {
+                    this.eventLogLoading = true;
+                    try {
+                        const res = await this.apiFetch('/api/events');
+                        const data = await res.json();
+                        this.eventLog = data.events || [];
+                        this.eventLogTotal = data.total || 0;
+                    } catch (e) {
+                        console.error('Failed to load events:', e);
+                    }
+                    this.eventLogLoading = false;
+                },
+                
+                async clearEventLog() {
+                    if (!confirm(this.t('clearEventsConfirm'))) return;
+                    try {
+                        await this.apiFetch('/api/events', { method: 'DELETE' });
+                        this.eventLog = [];
+                        this.eventLogTotal = 0;
+                        this.showToast(this.t('eventsCleared'), 'success');
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast(this.t('eventsClearFailed'), 'error');
+                    }
+                },
+                
+                eventTypeName(type) {
+                    const map = {
+                        'system_start': 'evtSystemStart',
+                        'power_on': 'evtPowerOn',
+                        'power_off': 'evtPowerOff',
+                        'mode_changed': 'evtModeChanged',
+                        'setpoint_changed': 'evtSetpointChanged',
+                        'compressor_on': 'evtCompressorOn',
+                        'compressor_off': 'evtCompressorOff',
+                        'fan_on': 'evtFanOn',
+                        'fan_off': 'evtFanOff',
+                        'pump_on': 'evtPumpOn',
+                        'pump_off': 'evtPumpOff',
+                        'aux_heater_on': 'evtAuxHeaterOn',
+                        'aux_heater_off': 'evtAuxHeaterOff',
+                        'defrost_start': 'evtDefrostStart',
+                        'defrost_end': 'evtDefrostEnd',
+                        'error_appeared': 'evtErrorAppeared',
+                        'error_cleared': 'evtErrorCleared',
+                        'connected': 'evtConnected',
+                        'disconnected': 'evtDisconnected'
+                    };
+                    return this.t(map[type] || type);
+                },
+                
+                eventIcon(type) {
+                    const icons = {
+                        'system_start': '\u26a1',
+                        'power_on': '\ud83d\udfe2', 'power_off': '\ud83d\udd34',
+                        'mode_changed': '\ud83d\udd04',
+                        'setpoint_changed': '\ud83c\udf21\ufe0f',
+                        'compressor_on': '\u2699\ufe0f', 'compressor_off': '\u2699\ufe0f',
+                        'fan_on': '\ud83c\udf2c\ufe0f', 'fan_off': '\ud83c\udf2c\ufe0f',
+                        'pump_on': '\ud83d\udca7', 'pump_off': '\ud83d\udca7',
+                        'aux_heater_on': '\ud83d\udd25', 'aux_heater_off': '\ud83d\udd25',
+                        'defrost_start': '\u2744\ufe0f', 'defrost_end': '\u2744\ufe0f',
+                        'error_appeared': '\u26a0\ufe0f', 'error_cleared': '\u2705',
+                        'connected': '\ud83d\udce1', 'disconnected': '\ud83d\udce1'
+                    };
+                    return icons[type] || '\u2139\ufe0f';
+                },
+                
+                eventColor(type) {
+                    if (type.includes('_on') || type === 'power_on' || type === 'connected' || type === 'defrost_end' || type === 'error_cleared') return 'var(--success)';
+                    if (type.includes('_off') || type === 'power_off' || type === 'disconnected' || type === 'defrost_start') return 'var(--text-secondary)';
+                    if (type.includes('error_appeared')) return 'var(--error)';
+                    if (type === 'mode_changed' || type === 'setpoint_changed') return 'var(--accent)';
+                    return 'var(--text-primary)';
+                },
+                
+                eventDetail(evt) {
+                    const p = evt.payload;
+                    if (evt.type === 'mode_changed') {
+                        const modes = ['Cooling', 'Floor Heating', 'Fan Heating', '', '', 'Hot Water', 'Auto'];
+                        const oldM = (p >> 8) & 0xFF;
+                        const newM = p & 0xFF;
+                        return (modes[oldM] || '?') + ' \u2192 ' + (modes[newM] || '?');
+                    }
+                    if (evt.type === 'setpoint_changed') {
+                        const types = ['Cooling', 'Heating', 'Hot Water'];
+                        const spType = (p >> 16) & 0xFF;
+                        const oldV = (p >> 8) & 0xFF;
+                        const newV = p & 0xFF;
+                        return (types[spType] || '?') + ': ' + oldV + '\u00b0 \u2192 ' + newV + '\u00b0';
+                    }
+                    if (evt.type === 'error_appeared' || evt.type === 'error_cleared') {
+                        const reg = (p >> 16) & 0xFFFF;
+                        const bit = p & 0xFFFF;
+                        const errorMap = {
+                            // Error register 1 (2137)
+                            '1_1':    '(E27) Indoor unit EEPROM error',
+                            '1_2':    '(E28) Outdoor unit EEPROM fault',
+                            '1_4':    '(E19) Inlet water temperature sensor fault',
+                            '1_8':    '(E18) Outlet water temperature sensor fault',
+                            '1_16':   '(E13) Cooling coil temperature sensor fault',
+                            '1_32':   '(E05) Heat pump coil temperature sensor fault',
+                            '1_64':   '(E01) Compressor discharge temp sensor fault',
+                            '1_128':  '(E09) Compressor suction temp sensor fault',
+                            '1_256':  '(E22) Outdoor ambient temp sensor fault',
+                            '1_512':  '(E10) Drive/main board communication error',
+                            '1_1024': '(E21) Wired controller communication fault',
+                            '1_2048': '(r02) Compressor start fault',
+                            '1_4096': '(E12) Indoor/outdoor unit communication error',
+                            '1_8192': '(r01) IPM module fault',
+                            '1_16384':'(PA) Tank temperature protection',
+                            '1_32768':'(r10) AC voltage protection',
+                            // Error register 2 (2138)
+                            '2_1':    '(P19) AC current protection',
+                            '2_2':    '(r06) Compressor phase current protection',
+                            '2_4':    '(FA) DC fan motor protection',
+                            '2_8':    '(r11) DC bus voltage protection',
+                            '2_16':   '(r05) IPM module temperature too high',
+                            '2_32':   '(P11) Compressor discharge temp too high',
+                            '2_64':   '(P02) High pressure protection',
+                            '2_128':  '(P06) Low pressure protection',
+                            '2_256':  '(P01) Water flow switch protection',
+                            '2_512':  '(P27) Cooling coil overheating protection',
+                            '2_1024': '(E26) Low ambient temperature protection',
+                            '2_2048': '(EC) EEV circuit low pressure protection',
+                            '2_4096': '(ED) Low pressure sensor protection',
+                            '2_8192': '(P15) Inlet/outlet temp difference too large',
+                            '2_16384':'(P16) Outlet water temperature too low',
+                            '2_32768':'(r20) Compressor protection',
+                        };
+                        return errorMap[reg + '_' + bit] || ('Reg ' + reg + ' bit 0x' + bit.toString(16));
+                    }
+                    return '';
                 },
                 
                 capitalize(str) {
