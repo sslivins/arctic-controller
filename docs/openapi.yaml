@@ -869,7 +869,9 @@ paths:
       tags:
         - HeatPump
       summary: Heat pump status
-      description: Returns current heat pump component status and any error codes.
+      description: |
+        Returns comprehensive heat pump status including connection state, operating mode,
+        component states, temperatures, setpoints, and any error conditions.
       operationId: getHeatpumpStatus
       security:
         - apiKey: []
@@ -882,23 +884,624 @@ paths:
               schema:
                 type: object
                 properties:
+                  connected:
+                    type: boolean
+                    description: Whether the heat pump is connected via Modbus (or demo mode active)
+                    example: true
+                  demo_mode:
+                    type: boolean
+                    description: Whether demo mode is active (simulated values)
+                    example: false
+                  unit_on:
+                    type: boolean
+                    description: Whether the unit is powered on
+                    example: true
+                  mode:
+                    type: string
+                    enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto, unknown]
+                    description: Current operating mode
+                    example: floor_heating
+                  defrosting:
+                    type: boolean
+                    description: Whether the unit is in defrost cycle
+                    example: false
                   compressor:
                     type: boolean
                     description: Compressor running state
-                    example: false
+                    example: true
                   fans:
                     type: boolean
                     description: Fan running state
-                    example: false
+                    example: true
+                  fan_speed:
+                    type: integer
+                    minimum: 0
+                    maximum: 3
+                    description: Fan speed level (0=off, 1=low, 2=med, 3=high)
+                    example: 2
                   pump:
                     type: boolean
-                    description: Circulation pump running state
+                    description: Water circulation pump running state
+                    example: true
+                  aux_heater:
+                    type: boolean
+                    description: Auxiliary/backup electrical heater running state
+                    example: false
+                  temperatures:
+                    type: object
+                    description: Temperature readings in degrees Celsius
+                    properties:
+                      tank:
+                        type: integer
+                        description: Water tank temperature
+                        example: 42
+                      outlet:
+                        type: integer
+                        description: Water outlet temperature
+                        example: 45
+                      inlet:
+                        type: integer
+                        description: Water inlet temperature
+                        example: 38
+                      outdoor:
+                        type: integer
+                        description: Outdoor ambient temperature
+                        example: 22
+                      discharge:
+                        type: integer
+                        description: Compressor discharge temperature
+                        example: 85
+                      suction:
+                        type: integer
+                        description: Compressor suction temperature
+                        example: 12
+                      outdoor_coil:
+                        type: integer
+                        description: Outdoor coil temperature
+                        example: 35
+                      indoor_coil:
+                        type: integer
+                        description: Indoor coil temperature
+                        example: 40
+                      ipm:
+                        type: integer
+                        description: IPM (Intelligent Power Module) temperature
+                        example: 55
+                  setpoints:
+                    type: object
+                    description: Temperature setpoints in degrees Celsius
+                    properties:
+                      cooling:
+                        type: integer
+                        description: Cooling mode setpoint
+                        example: 7
+                      heating:
+                        type: integer
+                        description: Heating mode setpoint
+                        example: 45
+                      hot_water:
+                        type: integer
+                        description: Hot water mode setpoint
+                        example: 55
+                  readings:
+                    type: object
+                    description: System readings
+                    properties:
+                      compressor_freq:
+                        type: integer
+                        description: Compressor frequency in Hz
+                        example: 60
+                      fan_rpm:
+                        type: integer
+                        description: Fan speed in RPM
+                        example: 850
+                      ac_voltage:
+                        type: integer
+                        description: AC input voltage
+                        example: 230
+                      ac_current:
+                        type: integer
+                        description: AC current draw in amps
+                        example: 5
+                      dc_voltage:
+                        type: number
+                        description: DC bus voltage
+                        example: 380.0
+                      dc_current:
+                        type: integer
+                        description: DC current in amps
+                        example: 4
+                      high_pressure:
+                        type: number
+                        description: High side pressure in MPa
+                        example: 2.50
+                      low_pressure:
+                        type: number
+                        description: Low side pressure in MPa
+                        example: 0.85
+                      primary_eev:
+                        type: integer
+                        description: Primary EEV opening in steps
+                        example: 350
+                      secondary_eev:
+                        type: integer
+                        description: Secondary EEV opening in steps
+                        example: 200
+                      power_consumption:
+                        type: integer
+                        description: Calculated power consumption in watts (AC voltage × AC current)
+                        example: 1150
+                  has_error:
+                    type: boolean
+                    description: Whether the unit has any active errors
                     example: false
                   error:
                     type: string
                     nullable: true
-                    description: Current error code or null if no error
+                    description: Comma-separated list of active errors, or null if no errors
                     example: null
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/power:
+    put:
+      tags:
+        - HeatPump
+      summary: Set power on/off
+      description: |
+        Turn the heat pump unit on or off. Works in demo mode (logs action but doesn't control real hardware).
+      operationId: setHeatpumpPower
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - 'on'
+              properties:
+                'on':
+                  type: boolean
+                  description: Power state
+                  example: true
+      responses:
+        '200':
+          description: Power state set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  'on':
+                    type: boolean
+                  demo_mode:
+                    type: boolean
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/mode:
+    put:
+      tags:
+        - HeatPump
+      summary: Set operating mode
+      description: |
+        Set the heat pump operating mode. Works in demo mode.
+      operationId: setHeatpumpMode
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mode
+              properties:
+                mode:
+                  type: string
+                  enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+                  description: Operating mode
+                  example: floor_heating
+      responses:
+        '200':
+          description: Mode set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  mode:
+                    type: string
+                  demo_mode:
+                    type: boolean
+        '400':
+          description: Invalid mode
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/setpoints:
+    put:
+      tags:
+        - HeatPump
+      summary: Set temperature setpoints
+      description: |
+        Set one or more temperature setpoints. All fields are optional - only provided fields are updated.
+        Temperatures are in degrees Celsius.
+      operationId: setHeatpumpSetpoints
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cooling:
+                  type: integer
+                  description: Cooling setpoint in °C
+                  example: 18
+                heating:
+                  type: integer
+                  description: Heating setpoint in °C
+                  example: 45
+                hot_water:
+                  type: integer
+                  description: Hot water setpoint in °C
+                  example: 50
+      responses:
+        '200':
+          description: Setpoints updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  setpoints:
+                    type: object
+                    properties:
+                      cooling:
+                        type: integer
+                      heating:
+                        type: integer
+                      hot_water:
+                        type: integer
+                  demo_mode:
+                    type: boolean
+        '400':
+          description: No valid setpoints provided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/errors:
+    get:
+      tags:
+        - HeatPump
+      summary: Get error information and history
+      description: |
+        Returns detailed information about active errors and error history.
+        Each error includes Arctic error code, name, description, resolution steps, and severity.
+        History shows when errors occurred and cleared with UTC timestamps.
+        In demo mode, returns sample errors for testing.
+        All timestamps are Unix epoch seconds in UTC.
+      operationId: getHeatpumpErrors
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Error information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  demo_mode:
+                    type: boolean
+                    description: Whether demo mode is enabled
+                  connected:
+                    type: boolean
+                    description: Whether heat pump is connected
+                  has_errors:
+                    type: boolean
+                    description: Whether any errors are currently active
+                  error_count:
+                    type: integer
+                    description: Number of active errors
+                  highest_severity:
+                    type: string
+                    enum: [info, warning, error, critical]
+                    description: Highest severity among active errors
+                  active:
+                    type: array
+                    description: List of currently active errors
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                          description: Arctic error code (e.g., "P02", "E01", "r01", "FA")
+                          example: "P02"
+                        name:
+                          type: string
+                          description: Short error name
+                          example: "HIGH_PRESSURE"
+                        description:
+                          type: string
+                          description: Human-readable description
+                          example: "High pressure protection activated"
+                        resolution:
+                          type: string
+                          description: Suggested resolution steps
+                          example: "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked."
+                        severity:
+                          type: string
+                          enum: [info, warning, error, critical]
+                          example: "warning"
+                        occurred:
+                          type: integer
+                          nullable: true
+                          description: Unix timestamp (UTC) when error first appeared
+                          example: 1739145600
+                        active:
+                          type: boolean
+                          description: Whether error is currently active
+                  history:
+                    type: array
+                    description: Error history (most recent first, up to 10 entries)
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                          description: Arctic error code
+                        occurred:
+                          type: integer
+                          nullable: true
+                          description: Unix timestamp (UTC) when error occurred
+                        cleared:
+                          type: integer
+                          nullable: true
+                          description: Unix timestamp (UTC) when error cleared
+                        active:
+                          type: boolean
+                          description: Whether error is still active
+              example:
+                demo_mode: true
+                connected: true
+                has_errors: true
+                error_count: 3
+                highest_severity: "warning"
+                active:
+                  - code: "P02"
+                    name: "HIGH_PRESSURE"
+                    description: "High pressure protection activated"
+                    resolution: "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked."
+                    severity: "warning"
+                    occurred: 1739145600
+                    active: true
+                history:
+                  - code: "E26"
+                    occurred: 1739138400
+                    cleared: 1739142000
+                    active: false
+                  - code: "E19"
+                    occurred: 1739131200
+                    cleared: 1739134800
+                    active: false
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/params:
+    get:
+      tags:
+        - HeatPump
+      summary: Get all P-parameters
+      description: |
+        Returns all configurable P-parameters with their current values.
+        In demo mode, returns simulated values. When disconnected, values are null.
+      operationId: getHeatpumpParams
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: All P-parameters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected:
+                    type: boolean
+                    description: Whether heat pump is connected (or demo mode active)
+                  demo_mode:
+                    type: boolean
+                    description: Whether demo mode is active
+                  params:
+                    type: object
+                    additionalProperties:
+                      $ref: '#/components/schemas/HeatPumpParam'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/params/{id}:
+    get:
+      tags:
+        - HeatPump
+      summary: Get single P-parameter
+      description: |
+        Returns a single P-parameter by its key (e.g., `defrost_cycle`) or P-code (e.g., `P29`).
+        P-code lookup is case-insensitive.
+      operationId: getHeatpumpParam
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Parameter key (e.g., `defrost_cycle`) or P-code (e.g., `P29`)
+          schema:
+            type: string
+          examples:
+            by_key:
+              value: defrost_cycle
+              summary: By descriptive key
+            by_pcode:
+              value: P29
+              summary: By P-code
+      responses:
+        '200':
+          description: Parameter details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/HeatPumpParam'
+                  - type: object
+                    properties:
+                      connected:
+                        type: boolean
+                      demo_mode:
+                        type: boolean
+        '404':
+          description: Unknown parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      tags:
+        - HeatPump
+      summary: Set P-parameter value
+      description: |
+        Sets a P-parameter value. The request body is a plain integer (not JSON).
+        Values are validated against min/max range. Works in demo mode (updates in-memory values).
+      operationId: setHeatpumpParam
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Parameter key or P-code
+          schema:
+            type: string
+      requestBody:
+        required: true
+        description: Plain integer value (not JSON)
+        content:
+          text/plain:
+            schema:
+              type: integer
+            example: 45
+      responses:
+        '200':
+          description: Value set successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  key:
+                    type: string
+                  p_code:
+                    type: string
+                  value:
+                    type: integer
+                  demo_mode:
+                    type: boolean
+        '400':
+          description: Invalid value or out of range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Unknown parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: API key required
           content:
@@ -926,3 +1529,46 @@ components:
         error:
           type: string
           description: Error message
+
+    HeatPumpParam:
+      type: object
+      description: Heat pump P-parameter definition and value
+      properties:
+        key:
+          type: string
+          description: Descriptive API key
+          example: defrost_cycle
+        p_code:
+          type: string
+          description: Arctic P-code identifier
+          example: P29
+        name:
+          type: string
+          description: Human-readable name
+          example: Defrost Cycle
+        description:
+          type: string
+          description: Detailed description
+          example: Minimum time between defrost cycles during heating operation.
+        unit:
+          type: string
+          description: Unit of measurement
+          enum: ['', steps, min, sec, °C]
+          example: min
+        min:
+          type: integer
+          description: Minimum allowed value
+          example: 30
+        max:
+          type: integer
+          description: Maximum allowed value
+          example: 120
+        category:
+          type: string
+          description: Parameter category for grouping
+          example: Defrost
+        value:
+          type: integer
+          nullable: true
+          description: Current value (null if disconnected and not in demo mode)
+          example: 45

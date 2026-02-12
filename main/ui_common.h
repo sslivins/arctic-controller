@@ -5,6 +5,7 @@
 #pragma once
 
 #include <lvgl.h>
+#include "fonts/fonts.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,14 +32,15 @@ extern "C" {
 #define UI_HEADER_HEIGHT      70
 
 // ============================================================================
-// Common Fonts
+// Common Fonts (using custom Latin-extended fonts for i18n support)
 // ============================================================================
-#define UI_FONT_TITLE         (&lv_font_montserrat_32)
-#define UI_FONT_SUBTITLE      (&lv_font_montserrat_24)
-#define UI_FONT_BODY          (&lv_font_montserrat_20)
-#define UI_FONT_SMALL         (&lv_font_montserrat_16)
-#define UI_FONT_ICON          (&lv_font_montserrat_32)  // Match status bar icons
-#define UI_FONT_ICON_LARGE    (&lv_font_montserrat_32)
+#define UI_FONT_HEADER        (&montserrat_32_latin)  // Screen titles/headers
+#define UI_FONT_TITLE         (&montserrat_32_latin)
+#define UI_FONT_SUBTITLE      (&montserrat_24_latin)
+#define UI_FONT_BODY          (&montserrat_24_latin)
+#define UI_FONT_SMALL         (&montserrat_16_latin)
+#define UI_FONT_ICON          (&montserrat_32_latin)  // Match status bar icons
+#define UI_FONT_ICON_LARGE    (&montserrat_32_latin)
 
 // ============================================================================
 // Helper Functions
@@ -55,10 +57,14 @@ static inline lv_obj_t* ui_create_close_button(lv_obj_t* parent, lv_event_cb_t e
     lv_obj_t* btn = lv_btn_create(parent);
     lv_obj_set_size(btn, UI_CLOSE_BTN_SIZE, UI_CLOSE_BTN_SIZE);
     lv_obj_align(btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(btn, UI_COLOR_PANEL, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(btn, UI_COLOR_BTN_PRESSED, LV_STATE_PRESSED);
     lv_obj_set_style_radius(btn, UI_CLOSE_BTN_RADIUS, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn, UI_COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(btn, LV_OPA_50, LV_PART_MAIN);
     
     if (event_cb) {
         lv_obj_add_event_cb(btn, event_cb, LV_EVENT_CLICKED, NULL);
@@ -67,7 +73,7 @@ static inline lv_obj_t* ui_create_close_button(lv_obj_t* parent, lv_event_cb_t e
     lv_obj_t* icon = lv_label_create(btn);
     lv_label_set_text(icon, LV_SYMBOL_CLOSE);
     lv_obj_set_style_text_font(icon, UI_FONT_ICON, LV_PART_MAIN);
-    lv_obj_set_style_text_color(icon, UI_COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(icon, UI_COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_center(icon);
     
     return btn;

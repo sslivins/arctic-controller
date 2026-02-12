@@ -5,6 +5,10 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Main task stack - needs headroom for LVGL deep layout/font measurement chains
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
 # Enable XIP from PSRAM - allows PSRAM reads (display framebuffer) to continue
@@ -94,6 +98,10 @@ CONFIG_LV_USE_PERF_MONITOR=y
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 # Increase LVGL memory pool for complex screens (language change needs 2 screens in memory)
 CONFIG_LV_MEM_SIZE_KILOBYTES=128
+
+# Display Configuration
+# Use 2 DPI frame buffers for hardware double-buffering
+CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
 
 # Fonts - Reduced set to save code space
 CONFIG_LV_FONT_MONTSERRAT_12=y

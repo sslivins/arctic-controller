@@ -14,13 +14,17 @@
 #include "time_manager.h"
 #include "status_bar.h"
 #include "ota_manager.h"
-#include "settings_screen.h"
-#include "settings/settings_time_panel.h"
-#include "settings/settings_display_panel.h"
+#include "settings/settings_menu.h"
+#include "settings/settings_wifi_screen.h"
+#include "settings/settings_firmware_screen.h"
+#include "settings/settings_time_screen.h"
+#include "settings/settings_display_screen.h"
 #include "i18n/i18n.h"
 #include "auth_manager.h"
 #include "modbus/modbus_manager.h"
 #include "modbus/arctic_heatpump.h"
+#include "heatpump_screen.h"
+#include "app_preferences.h"
 
 static const char* TAG = "main";
 
@@ -37,7 +41,7 @@ static void on_wifi_connect(const char* ssid, const char* password);
 static void on_wifi_scan(void);
 static void on_wifi_disconnect(void);
 static void on_settings_close(void);
-static void try_auto_connect(void);
+static void on_wifi_screen_close(void);  // For WiFi opened from status bar
 static void wifi_init_task(void* param);
 static void on_update_check_complete(bool update_available, const char* new_version);
 
@@ -56,6 +60,19 @@ static lv_timer_t* update_check_timer = NULL;
 #define WIFI_UNSTABLE_WINDOW_MS 300000  // 5 minute window to count disconnects
 static uint32_t wifi_disconnect_times[WIFI_UNSTABLE_THRESHOLD] = {0};
 static int wifi_disconnect_index = 0;
+
+// Helper to show error message on current screen
+static void show_error_message(const char* message)
+{
+    lv_obj_t* scr = lv_scr_act();
+    if (scr) {
+        lv_obj_t* msgbox = lv_msgbox_create(scr);
+        lv_msgbox_add_title(msgbox, "Error");
+        lv_msgbox_add_text(msgbox, message);
+        lv_msgbox_add_close_button(msgbox);
+        lv_obj_center(msgbox);
+    }
+}
 
 extern "C" void app_main(void)
 {
@@ -89,6 +106,11 @@ extern "C" void app_main(void)
     bsp_reset_tp();
 
     // Initialize Tab5 BSP (display, touch, etc.)
+    // NOTE: sw_rotate is disabled because it causes visible tearing during scrolling.
+    // The PPA-accelerated rotation process isn't synchronized with VSync, resulting in
+    // horizontal tear lines on animated content. Using native portrait mode (720x1280)
+    // eliminates tearing. MADCTL hardware rotation was tested but ST7123 DSI panel
+    // doesn't support it. If landscape is needed, re-enable sw_rotate and accept tearing.
     bsp_display_cfg_t display_cfg = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
         .buffer_size = BSP_LCD_H_RES * BSP_LCD_V_RES,
@@ -96,7 +118,7 @@ extern "C" void app_main(void)
         .flags = {
             .buff_dma = true,
             .buff_spiram = true,
-            .sw_rotate = true,
+            .sw_rotate = false,  // Disabled - causes tearing during scroll (see note above)
         }
     };
     display_cfg.lvgl_port_cfg.task_priority = 5;
@@ -107,12 +129,12 @@ extern "C" void app_main(void)
         return;
     }
 
-    // Set rotation and turn on backlight
-    lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);
+    // Portrait mode - rotation has no effect with sw_rotate disabled
+    lv_display_set_rotation(display, LV_DISPLAY_ROTATION_0);
     bsp_display_backlight_on();
     
     // Initialize display brightness from saved settings
-    display_panel_init_brightness();
+    display_screen_init_brightness();
 
     mclog::tagInfo(TAG, "Display initialized: {}x{}", BSP_LCD_H_RES, BSP_LCD_V_RES);
 
@@ -126,14 +148,22 @@ extern "C" void app_main(void)
     // Initialize time manager (NTP will start when WiFi connects)
     time_mgr_init();
 
-    // Initialize Modbus and Arctic heat pump communication
-    esp_err_t modbus_ret = modbus::init();
-    if (modbus_ret == ESP_OK) {
-        arctic::init();
-        arctic::startPolling();
-        mclog::tagInfo(TAG, "Modbus initialized, heat pump polling started");
+    // Initialize app preferences (demo mode, temp units, etc.)
+    app_prefs_init();
+
+    // Initialize Modbus and Arctic heat pump communication (skip in demo mode)
+    if (app_prefs_is_demo_mode()) {
+        mclog::tagInfo(TAG, "Demo mode enabled - initializing demo state");
+        arctic::initDemoState();
     } else {
-        mclog::tagError(TAG, "Failed to initialize Modbus: {}", (int)modbus_ret);
+        esp_err_t modbus_ret = modbus::init();
+        if (modbus_ret == ESP_OK) {
+            arctic::init();
+            arctic::startPolling();
+            mclog::tagInfo(TAG, "Modbus initialized, heat pump polling started");
+        } else {
+            mclog::tagError(TAG, "Failed to initialize Modbus: {}", (int)modbus_ret);
+        }
     }
 
     // Initialize authentication manager
@@ -195,57 +225,16 @@ void create_ui(void)
     };
     status_bar_create(&bar_config);
     
-    // Create title label (adjusted for larger status bar - 80px)
-    lv_obj_t* title = lv_label_create(scr);
-    lv_label_set_text(title, "Arctic Heat Pump");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x00d4ff), LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 100);
-
-    // Create subtitle
-    lv_obj_t* subtitle = lv_label_create(scr);
-    lv_label_set_text(subtitle, "Controller v0.1");
-    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(subtitle, lv_color_hex(0x888888), LV_PART_MAIN);
-    lv_obj_align(subtitle, LV_ALIGN_TOP_MID, 0, 150);
-
-    // Create a container for the main content
-    lv_obj_t* container = lv_obj_create(scr);
-    lv_obj_set_size(container, 600, 380);
-    lv_obj_align(container, LV_ALIGN_CENTER, 0, 50);
-    lv_obj_set_style_bg_color(container, lv_color_hex(0x16213e), LV_PART_MAIN);
-    lv_obj_set_style_border_color(container, lv_color_hex(0x0f3460), LV_PART_MAIN);
-    lv_obj_set_style_border_width(container, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(container, 20, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(container, 30, LV_PART_MAIN);
-    lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Temperature display (placeholder)
-    lv_obj_t* temp_label = lv_label_create(container);
-    lv_label_set_text(temp_label, "-- °C");
-    lv_obj_set_style_text_font(temp_label, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(temp_label, lv_color_hex(0xffffff), LV_PART_MAIN);
-    lv_obj_align(temp_label, LV_ALIGN_TOP_MID, 0, 40);
-
-    lv_obj_t* temp_desc = lv_label_create(container);
-    lv_label_set_text(temp_desc, "Current Temperature");
-    lv_obj_set_style_text_font(temp_desc, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(temp_desc, lv_color_hex(0x888888), LV_PART_MAIN);
-    lv_obj_align(temp_desc, LV_ALIGN_TOP_MID, 0, 110);
-
-    // Status label
-    lv_obj_t* status = lv_label_create(container);
-    lv_label_set_text(status, "Status: Ready");
-    lv_obj_set_style_text_font(status, &lv_font_montserrat_24, LV_PART_MAIN);
-    lv_obj_set_style_text_color(status, lv_color_hex(0x00d4ff), LV_PART_MAIN);
-    lv_obj_align(status, LV_ALIGN_CENTER, 0, 50);
-
+    // Create heat pump status display (main content area)
+    // Status bar is 80px, leave some margin
+    heatpump_screen_create(scr, 90);
+    
     // Footer
     lv_obj_t* footer = lv_label_create(scr);
-    lv_label_set_text(footer, "M5Stack Tab5 • ESP32-P4 • LVGL 9.2");
-    lv_obj_set_style_text_font(footer, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_label_set_text(footer, "M5Stack Tab5 • ESP32-P4");
+    lv_obj_set_style_text_font(footer, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_style_text_color(footer, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -10);
     
     // WiFi init happens in background task, just update status bar when ready
     if (wifi_init_complete && wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
@@ -274,10 +263,12 @@ static void on_scan_done(const wifi_mgr_ap_info_t* ap_list, uint16_t count)
         networks[i].authmode = ap_list[i].authmode;
     }
     
-    // Update UI (must be done with LVGL lock)
+    // Update WiFi screen if visible
     bsp_display_lock(0);
-    settings_screen_set_scanning(false);
-    settings_screen_update_networks(networks, count);
+    if (wifi_screen_is_visible()) {
+        wifi_screen_set_scanning(false);
+        wifi_screen_update_networks(networks, count);
+    }
     bsp_display_unlock();
     
     delete[] networks;
@@ -298,7 +289,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             ESP_LOGI(TAG, "WiFi connected to '%s'", ssid ? ssid : "?");
             char ip[16] = {};
             wifi_mgr_get_ip_addr(ip, sizeof(ip));
-            settings_screen_set_wifi_status(true, ssid, ip);
+            settings_menu_update_wifi_status(true, ssid);
             status_bar_set_wifi_state(true, ssid);
             // Save credentials on successful connection
             if (pending_ssid[0] != '\0') {
@@ -309,13 +300,13 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             // Start periodic firmware update checks (if not already running)
             if (!update_check_timer) {
                 // Check immediately on first connect
-                settings_screen_check_for_updates_async(on_update_check_complete);
+                firmware_screen_check_for_updates_async(on_update_check_complete);
                 // Then check periodically
                 update_check_timer = lv_timer_create([](lv_timer_t* t) {
                     (void)t;
                     if (wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
                         ESP_LOGI("main", "Periodic firmware update check...");
-                        settings_screen_check_for_updates_async(on_update_check_complete);
+                        firmware_screen_check_for_updates_async(on_update_check_complete);
                     }
                 }, UPDATE_CHECK_INTERVAL_MS, NULL);
             }
@@ -326,7 +317,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             
         case WIFI_MGR_STATE_DISCONNECTED: {
             ESP_LOGI(TAG, "WiFi disconnected");
-            settings_screen_set_wifi_status(false, NULL, NULL);
+            settings_menu_update_wifi_status(false, NULL);
             status_bar_set_wifi_state(false, NULL);
             
             // Track disconnect for instability detection
@@ -357,7 +348,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             
         case WIFI_MGR_STATE_ERROR:
             ESP_LOGE(TAG, "WiFi error");
-            settings_screen_show_error("Connection failed.\nPlease check password and try again.");
+            show_error_message("Connection failed.\nPlease check password and try again.");
             status_bar_set_wifi_state(false, NULL);
             // Clear pending credentials on error
             pending_ssid[0] = '\0';
@@ -373,7 +364,7 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
 
 static void on_status_bar_wifi_click(void)
 {
-    mclog::tagInfo(TAG, "Status bar WiFi clicked - opening settings");
+    mclog::tagInfo(TAG, "Status bar WiFi clicked - opening WiFi settings directly");
     
     // WiFi manager is initialized at startup, but check just in case
     if (!wifi_mgr_is_initialized()) {
@@ -383,8 +374,17 @@ static void on_status_bar_wifi_click(void)
         }
     }
     
-    // Open settings screen (WiFi is now integrated there)
-    on_status_bar_settings_click();
+    // Open WiFi screen directly (back button will fade back to main screen)
+    bsp_display_lock(0);
+    wifi_screen_config_t wifi_cfg = {
+        .on_wifi_scan = on_wifi_scan,
+        .on_wifi_connect = on_wifi_connect,
+        .on_wifi_disconnect = on_wifi_disconnect,
+        .on_back = on_wifi_screen_close,  // Fade back to main screen
+        .use_fade = true,                  // Fade in from status bar
+    };
+    wifi_screen_create(&wifi_cfg);
+    bsp_display_unlock();
 }
 
 static void on_wifi_connect(const char* ssid, const char* password)
@@ -392,7 +392,7 @@ static void on_wifi_connect(const char* ssid, const char* password)
     mclog::tagInfo(TAG, "WiFi connect requested: SSID='{}'", ssid);
     
     if (!wifi_mgr_is_initialized()) {
-        settings_screen_show_error("WiFi not initialized.\nPlease try again.");
+        show_error_message("WiFi not initialized.\nPlease try again.");
         return;
     }
     
@@ -401,7 +401,7 @@ static void on_wifi_connect(const char* ssid, const char* password)
     strncpy(pending_password, password ? password : "", sizeof(pending_password) - 1);
     
     if (!wifi_mgr_connect(ssid, password, on_wifi_state_changed)) {
-        settings_screen_show_error("Failed to start connection.\nPlease try again.");
+        show_error_message("Failed to start connection.\nPlease try again.");
     }
 }
 
@@ -412,17 +412,15 @@ static void on_wifi_scan(void)
     if (!wifi_mgr_is_initialized()) {
         mclog::tagInfo(TAG, "Initializing WiFi manager for scan...");
         if (!wifi_mgr_init()) {
-            settings_screen_set_scanning(false);
-            settings_screen_show_error("Failed to initialize WiFi.\nCheck ESP32-C6 module.");
+            wifi_screen_set_scanning(false);
             return;
         }
     }
     
-    settings_screen_set_scanning(true);
+    wifi_screen_set_scanning(true);
     
     if (!wifi_mgr_start_scan(on_scan_done)) {
-        settings_screen_set_scanning(false);
-        settings_screen_show_error("Failed to start scan.\nPlease try again.");
+        wifi_screen_set_scanning(false);
     }
 }
 
@@ -447,13 +445,15 @@ static void on_status_bar_settings_click(void)
     }
     
     bsp_display_lock(0);
-    settings_screen_config_t config = {
+    settings_menu_config_t config = {
         .on_close = on_settings_close,
-        .on_wifi_connect = on_wifi_connect,
         .on_wifi_scan = on_wifi_scan,
+        .on_wifi_connect = on_wifi_connect,
         .on_wifi_disconnect = on_wifi_disconnect,
+        .on_check_updates = nullptr,
+        .on_update_firmware = nullptr,
     };
-    settings_screen_create(&config);
+    settings_menu_create(&config);
     bsp_display_unlock();
 }
 
@@ -462,13 +462,28 @@ static void on_settings_close(void)
     mclog::tagInfo(TAG, "Settings screen closed");
     
     bsp_display_lock(0);
-    settings_screen_close();
     
-    // Return to main screen
+    // Load main screen with slide-up animation (auto_del=true will delete settings menu)
     if (main_screen) {
-        lv_scr_load(main_screen);
+        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
     }
+    
+    // Mark settings as closed (screen will be auto-deleted by LVGL)
+    settings_menu_close();
+    
     bsp_display_unlock();
+}
+
+// Called when WiFi screen (opened from status bar) back button is pressed
+// Note: wifi_screen_close() is called by the WiFi screen's back_btn_cb after this returns
+static void on_wifi_screen_close(void)
+{
+    mclog::tagInfo(TAG, "WiFi screen closed (from status bar)");
+    
+    // Load main screen with fade animation (auto_del=true deletes WiFi screen)
+    if (main_screen) {
+        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
+    }
 }
 
 // Notification item clicked - handle based on type
@@ -483,13 +498,23 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
     
     // Handle specific actions based on type
     switch (type) {
-        case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
-            // Open settings screen and go directly to firmware panel
-            on_status_bar_settings_click();
+        case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE: {
+            // Open firmware screen directly with fade animation
             bsp_display_lock(0);
-            settings_screen_show_firmware_panel();
+            firmware_screen_config_t fw_cfg = {
+                .on_back = []() {
+                    // Fade back to main screen
+                    extern lv_obj_t* main_screen;
+                    if (main_screen) {
+                        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
+                    }
+                    firmware_screen_close();
+                },
+            };
+            firmware_screen_create(&fw_cfg);
             bsp_display_unlock();
             break;
+        }
         
         case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:
             // Open WiFi screen - user might want to switch networks
@@ -569,14 +594,4 @@ static void wifi_init_task(void* param)
     mclog::tagInfo(TAG, "[BG] WiFi init task complete");
     
     vTaskDelete(NULL);
-}
-
-// Legacy function - now just checks if we need to init (shouldn't be called)
-static void try_auto_connect(void)
-{
-    // WiFi init now happens in background task during startup animation
-    // This function is kept for backwards compatibility
-    if (!wifi_mgr_is_initialized()) {
-        mclog::tagWarn(TAG, "WiFi not initialized - init task may have failed");
-    }
 }

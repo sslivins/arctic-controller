@@ -4,7 +4,7 @@
  */
 #include "status_bar.h"
 #include "time_manager.h"
-#include "settings/settings_time_panel.h"
+#include "settings/settings_time_screen.h"
 #include "wifi_manager.h"
 #include <esp_log.h>
 #include <string.h>
@@ -242,7 +242,7 @@ void status_bar_update_time(void)
     
     char time_str[16];
     // Use 12h or 24h format based on user setting
-    const char* format = time_panel_get_24h_format() ? "%H:%M" : "%I:%M %p";
+    const char* format = time_screen_get_24h_format() ? "%H:%M" : "%I:%M %p";
     
     // Get current time
     time_t now;

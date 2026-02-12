@@ -2,28 +2,30 @@
  * Arctic Heat Pump Controller
  * Settings Screen - Common Definitions
  * 
- * Shared colors, state, and helpers used across all settings panels.
+ * Shared colors, constants, and helpers used across all settings screens.
  */
 #pragma once
 
-#include "settings_screen.h"
 #include <lvgl.h>
 #include <esp_log.h>
 #include "fonts/fonts.h"
+#include "settings_types.h"
+#include "ui_common.h"
 
 // ============================================================================
-// Custom Fonts with Latin Extended Support
+// Fonts (use Latin-extended fonts for i18n support)
 // ============================================================================
 
-#define FONT_NORMAL   &montserrat_16_latin
-#define FONT_LARGE    &montserrat_24_latin
+#define FONT_NORMAL   (&montserrat_24_latin)  // Body text
+#define FONT_LARGE    (&montserrat_32_latin)  // Large text (not headers - use UI_FONT_HEADER for screen titles)
 
 // ============================================================================
 // Colors and Styles
 // ============================================================================
 
 #define COLOR_BG            lv_color_hex(0x1a1a2e)
-#define COLOR_CARD          lv_color_hex(0x16213e)
+#define COLOR_CARD          lv_color_hex(0x1e2a4a)
+#define COLOR_HEADER        lv_color_hex(0x16213e)
 #define COLOR_SIDEBAR       lv_color_hex(0x0f1a2e)
 #define COLOR_SIDEBAR_BTN   lv_color_hex(0x1a2a4e)
 #define COLOR_SIDEBAR_SEL   lv_color_hex(0x00d4ff)
@@ -44,19 +46,6 @@
 #define SCAN_INTERVAL_MS    10000
 
 // ============================================================================
-// Panel Types
-// ============================================================================
-
-typedef enum {
-    PANEL_WIFI,
-    PANEL_FIRMWARE,
-    PANEL_TIME,
-    PANEL_LANGUAGE,
-    PANEL_DISPLAY,
-    PANEL_COUNT
-} panel_type_t;
-
-// ============================================================================
 // Firmware Update State
 // ============================================================================
 
@@ -69,101 +58,6 @@ typedef enum {
     UPDATE_STATE_READY_TO_REBOOT,
     UPDATE_STATE_FAILED
 } update_ui_state_t;
-
-// ============================================================================
-// Shared State Structure
-// ============================================================================
-
-typedef struct {
-    bool visible;
-    settings_screen_config_t config;
-    panel_type_t active_panel;
-    
-    // Screen objects
-    lv_obj_t* screen;
-    lv_obj_t* header;
-    lv_obj_t* sidebar;
-    lv_obj_t* content_area;
-    
-    // Sidebar buttons
-    lv_obj_t* wifi_btn;
-    lv_obj_t* firmware_btn;
-    
-    // WiFi panel objects
-    lv_obj_t* wifi_panel;
-    lv_obj_t* wifi_connected_section;
-    lv_obj_t* wifi_ssid_label;
-    lv_obj_t* wifi_ip_label;
-    lv_obj_t* wifi_signal_label;
-    lv_obj_t* wifi_disconnect_btn;
-    lv_obj_t* wifi_networks_section;
-    lv_obj_t* wifi_networks_title;
-    lv_obj_t* wifi_network_list;
-    lv_obj_t* wifi_password_dialog;
-    lv_obj_t* wifi_password_ssid_label;
-    lv_obj_t* wifi_password_textarea;
-    lv_obj_t* wifi_show_password_btn;
-    lv_obj_t* wifi_show_password_icon;
-    lv_obj_t* wifi_keyboard;
-    lv_obj_t* wifi_connect_btn;
-    lv_obj_t* wifi_cancel_btn;
-    bool wifi_password_visible;
-    bool wifi_is_connected;
-    char wifi_connected_ssid[33];
-    char wifi_connected_ip[16];
-    char wifi_selected_ssid[33];
-    bool wifi_selected_is_open;
-    settings_wifi_network_t wifi_networks[20];
-    uint8_t wifi_network_count;
-    lv_timer_t* wifi_scan_timer;
-    
-    // Firmware panel objects
-    lv_obj_t* fw_panel;
-    lv_obj_t* fw_current_version_label;
-    lv_obj_t* fw_latest_version_label;
-    lv_obj_t* fw_status_label;
-    lv_obj_t* fw_progress_bar;
-    lv_obj_t* fw_progress_label;
-    lv_obj_t* fw_update_btn;
-    update_ui_state_t update_state;
-    volatile update_ui_state_t pending_state;
-    char current_version[32];
-    char latest_version[32];
-    char download_url[256];
-    lv_timer_t* progress_timer;
-    
-    // Language panel objects
-    lv_obj_t* lang_panel;
-    lv_obj_t* lang_btn;  // Sidebar button
-    
-    // Time panel objects
-    lv_obj_t* time_panel;
-    lv_obj_t* time_btn;  // Sidebar button
-    
-    // Display panel objects
-    lv_obj_t* display_panel;
-    lv_obj_t* display_btn;  // Sidebar button
-    lv_obj_t* brightness_slider;
-    lv_obj_t* brightness_label;
-    
-} settings_state_t;
-
-// ============================================================================
-// Screen Dimensions (set at runtime)
-// ============================================================================
-
-extern int32_t screen_width;
-extern int32_t screen_height;
-extern int32_t sidebar_width;
-extern int32_t header_height;
-extern int32_t content_width;
-extern int32_t content_height;
-
-// ============================================================================
-// Shared State Access
-// ============================================================================
-
-settings_state_t* settings_get_state(void);
 
 // ============================================================================
 // Helper Functions
@@ -186,3 +80,4 @@ void sanitize_ssid_for_display(char* dest, const char* src, size_t dest_size);
  * @brief Get WiFi signal icon based on RSSI
  */
 const char* get_signal_icon(int8_t rssi);
+

@@ -151,29 +151,6 @@ static void update_preview(void)
     }
 }
 
-// Create a styled section panel
-static lv_obj_t* create_section(lv_obj_t* parent, const char* title, int height)
-{
-    lv_obj_t* panel = lv_obj_create(parent);
-    lv_obj_set_width(panel, LV_PCT(100));
-    lv_obj_set_height(panel, height);
-    lv_obj_set_style_bg_color(panel, lv_color_hex(COLOR_PANEL), LV_PART_MAIN);
-    lv_obj_set_style_border_color(panel, lv_color_hex(COLOR_BORDER), LV_PART_MAIN);
-    lv_obj_set_style_border_width(panel, 1, LV_PART_MAIN);
-    lv_obj_set_style_radius(panel, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(panel, 20, LV_PART_MAIN);
-    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Title
-    lv_obj_t* lbl = lv_label_create(panel);
-    lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
-    lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, 0);
-    
-    return panel;
-}
-
 lv_obj_t* time_screen_create(const time_screen_config_t* config)
 {
     if (!config) {
@@ -204,7 +181,7 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     
     lv_obj_t* title = lv_label_create(header);
     lv_label_set_text(title, "Time Settings");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_set_style_text_color(title, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
     
@@ -223,14 +200,14 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     
     // Current time (left)
     screen_state.preview_label = lv_label_create(time_row);
-    lv_obj_set_style_text_font(screen_state.preview_label, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen_state.preview_label, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(screen_state.preview_label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_align(screen_state.preview_label, LV_ALIGN_LEFT_MID, 10, 0);
     update_preview();
     
     // Sync status (right)
     lv_obj_t* sync_status = lv_label_create(time_row);
-    lv_obj_set_style_text_font(sync_status, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(sync_status, UI_FONT_SMALL, LV_PART_MAIN);
     lv_obj_align(sync_status, LV_ALIGN_RIGHT_MID, -10, 0);
     if (time_mgr_is_synced()) {
         lv_label_set_text(sync_status, LV_SYMBOL_OK " Synced");
@@ -263,7 +240,7 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     // Format section title
     lv_obj_t* format_title = lv_label_create(left_col);
     lv_label_set_text(format_title, "Display Format");
-    lv_obj_set_style_text_font(format_title, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(format_title, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(format_title, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
     lv_obj_align(format_title, LV_ALIGN_TOP_MID, 0, 0);
     
@@ -277,7 +254,7 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     
     lv_obj_t* lbl_12h = lv_label_create(toggle_container);
     lv_label_set_text(lbl_12h, "12h");
-    lv_obj_set_style_text_font(lbl_12h, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl_12h, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_12h, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_align(lbl_12h, LV_ALIGN_LEFT_MID, 20, 0);
     
@@ -285,7 +262,7 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     lv_obj_set_size(screen_state.format_switch, 80, 45);
     lv_obj_align(screen_state.format_switch, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(screen_state.format_switch, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(screen_state.format_switch, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(screen_state.format_switch, lv_color_hex(COLOR_ACCENT), LV_PART_INDICATOR | (lv_style_selector_t)LV_STATE_CHECKED);
     if (screen_state.use_24h) {
         lv_obj_add_state(screen_state.format_switch, LV_STATE_CHECKED);
     }
@@ -293,14 +270,14 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     
     lv_obj_t* lbl_24h = lv_label_create(toggle_container);
     lv_label_set_text(lbl_24h, "24h");
-    lv_obj_set_style_text_font(lbl_24h, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl_24h, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_24h, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_align(lbl_24h, LV_ALIGN_RIGHT_MID, -20, 0);
     
     // Info text
     lv_obj_t* info_text = lv_label_create(left_col);
     lv_label_set_text(info_text, "Choose how time is\ndisplayed in the UI");
-    lv_obj_set_style_text_font(info_text, &lv_font_montserrat_16, LV_PART_MAIN);
+    lv_obj_set_style_text_font(info_text, UI_FONT_SMALL, LV_PART_MAIN);
     lv_obj_set_style_text_color(info_text, lv_color_hex(0x666666), LV_PART_MAIN);
     lv_obj_set_style_text_align(info_text, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_align(info_text, LV_ALIGN_BOTTOM_MID, 0, -20);
@@ -319,7 +296,7 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     // Timezone section title
     lv_obj_t* tz_title = lv_label_create(right_col);
     lv_label_set_text(tz_title, "Timezone");
-    lv_obj_set_style_text_font(tz_title, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(tz_title, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(tz_title, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
     lv_obj_align(tz_title, LV_ALIGN_TOP_MID, 0, 0);
     
@@ -344,7 +321,7 @@ lv_obj_t* time_screen_create(const time_screen_config_t* config)
     lv_obj_set_style_text_color(screen_state.tz_dropdown, lv_color_hex(0x666666), LV_PART_MAIN);
     lv_obj_set_style_border_color(screen_state.tz_dropdown, lv_color_hex(COLOR_BORDER), LV_PART_MAIN);
     lv_obj_set_style_border_width(screen_state.tz_dropdown, 1, LV_PART_MAIN);
-    lv_obj_set_style_text_font(screen_state.tz_dropdown, &lv_font_montserrat_24, LV_PART_MAIN);
+    lv_obj_set_style_text_font(screen_state.tz_dropdown, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_radius(screen_state.tz_dropdown, 8, LV_PART_MAIN);
     lv_obj_set_style_line_width(screen_state.tz_dropdown, 0, LV_PART_MAIN);
     
@@ -414,6 +391,15 @@ static void close_btn_event_cb(lv_event_t* e)
 {
     (void)e;
     ESP_LOGI(TAG, "Close button clicked");
+    
+    // Stop the timer FIRST to prevent use-after-free
+    if (screen_state.preview_timer) {
+        lv_timer_del(screen_state.preview_timer);
+        screen_state.preview_timer = NULL;
+    }
+    
+    // Clear preview_label to prevent any lingering updates
+    screen_state.preview_label = NULL;
     
     if (screen_state.on_close) {
         screen_state.on_close();

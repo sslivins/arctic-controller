@@ -40,6 +40,36 @@ constexpr uint16_t HOT_WATER_SETPOINT  = 2004;  // Hot water temperature setting
 constexpr uint16_t COOLING_DELTA_T     = 2005;  // Fan coil cooling ΔT
 constexpr uint16_t HEATING_DELTA_T     = 2006;  // Underfloor heating ΔT
 constexpr uint16_t HOT_WATER_DELTA_T   = 2007;  // Hot water tank ΔT
+constexpr uint16_t FAN_COIL_HEATING_DT = 2008;  // Fan coil heating ΔT
+
+// Technician parameters (P1-P47) - Addresses 2009-2057
+constexpr uint16_t P1_EEV_INITIAL_OPENING   = 2009;  // Main EEV initial opening (0-500 steps)
+constexpr uint16_t P5_STERILIZING_TIME      = 2013;  // Sterilizing time setting
+constexpr uint16_t P13_MAX_TEMP_SETTING     = 2021;  // Maximum setting temperature
+constexpr uint16_t P23_COOLING_AUTO_TEMP    = 2031;  // Cooling ambient temp for auto mode
+constexpr uint16_t P24_HEATING_AUTO_TEMP    = 2032;  // Heating ambient temp for auto mode
+constexpr uint16_t P28_MODE_SWITCH_DELAY    = 2036;  // Mode switch delay under auto mode
+constexpr uint16_t P29_DEFROST_CYCLE        = 2037;  // Defrost cycle
+constexpr uint16_t P30_DEFROST_ENTER_TEMP   = 2038;  // Coil temp to enter defrost
+constexpr uint16_t P31_DEFROST_EXTEND_TEMP  = 2039;  // Ambient temp to extend defrost time
+constexpr uint16_t P32_DEFROST_TEMP_DIFF    = 2040;  // Ambient-coil temp diff to enter defrost
+constexpr uint16_t P33_DEFROST_EXTEND_TIME  = 2041;  // Extend defrost cycle time
+constexpr uint16_t P34_MAX_DEFROST_TIME     = 2042;  // Maximum defrost time
+constexpr uint16_t P35_DEFROST_EXIT_TEMP    = 2043;  // Coil temp to exit defrost
+constexpr uint16_t P36_WATER_RETURN_TEMP    = 2044;  // Water return cycle temp
+constexpr uint16_t P37_WATER_RETURN_TIME    = 2045;  // Water return cycle time
+constexpr uint16_t P38_LOW_AMBIENT_PROTECT  = 2046;  // Low ambient temp protection setting
+constexpr uint16_t P39_FREQ_REDUCTION       = 2047;  // Freq reduction near target temp
+constexpr uint16_t P40_COOLING_LOW_AMBIENT  = 2048;  // Cooling low ambient temp protection
+constexpr uint16_t P41_EEV_SUPERHEAT_MODE   = 2049;  // 0=Superheat adj, 1=Fixed-point adj
+constexpr uint16_t P42_EEV_TARGET_SUPERHEAT = 2050;  // Main EEV target superheat degree
+constexpr uint16_t P43_3WAY_VALVE_TIME      = 2051;  // 3-way valve 2 switching time
+constexpr uint16_t P44_PUMP_TARGET_MODE     = 2052;  // 0=per P45, 1=OFF, 2=ON
+constexpr uint16_t P45_PUMP_INTERVAL        = 2053;  // Water pump running interval
+constexpr uint16_t P46_PUMP_LOW_AMBIENT     = 2054;  // Low ambient temp to turn on pump
+constexpr uint16_t P47_WATERWAY_CLEANING    = 2055;  // 0=OFF, 1=Pump, 2=Pump+3WV1, 3=Pump+3WV1+3WV2
+constexpr uint16_t FREQ_CONTROL_ENABLE      = 2056;  // Accept frequency control (0=NO, 1=YES)
+constexpr uint16_t FREQ_CONTROL_SETTING     = 2057;  // Host compressor frequency (0-120)
 
 // ============================================================================
 // Input Registers (Read-Only) - Addresses 2100-2138
@@ -194,12 +224,12 @@ namespace error2 {
 // Convert working mode enum to string
 inline const char* workingModeToString(WorkingMode mode) {
     switch (mode) {
-        case WorkingMode::COOLING:         return "Cooling";
-        case WorkingMode::FLOOR_HEATING:   return "Floor Heating";
-        case WorkingMode::FAN_COIL_HEATING: return "Fan Coil Heating";
-        case WorkingMode::HOT_WATER:       return "Hot Water";
-        case WorkingMode::AUTO:            return "Auto";
-        default:                           return "Unknown";
+        case WorkingMode::COOLING:         return "cooling";
+        case WorkingMode::FLOOR_HEATING:   return "floor_heating";
+        case WorkingMode::FAN_COIL_HEATING: return "fan_coil_heating";
+        case WorkingMode::HOT_WATER:       return "hot_water";
+        case WorkingMode::AUTO:            return "auto";
+        default:                           return "unknown";
     }
 }
 

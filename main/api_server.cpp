@@ -7,6 +7,11 @@
 #include "time_manager.h"
 #include "ota_manager.h"
 #include "auth_manager.h"
+#include "modbus/arctic_heatpump.h"
+#include "modbus/arctic_registers.h"
+#include "heatpump_params.h"
+#include "heatpump_errors.h"
+#include "app_preferences.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <mdns.h>
@@ -62,6 +67,16 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_get_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req);
 static esp_err_t heatpump_status_handler(httpd_req_t* req);
+static esp_err_t heatpump_control_handler(httpd_req_t* req);
+static esp_err_t heatpump_params_get_handler(httpd_req_t* req);
+static esp_err_t heatpump_param_get_handler(httpd_req_t* req);
+static esp_err_t heatpump_param_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_power_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_errors_get_handler(httpd_req_t* req);
+static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req);
+static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -241,7 +256,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 32;  // Increased for all endpoints
+    config.max_uri_handlers = 40;  // Increased for all endpoints
     config.stack_size = 8192;      // Larger stack for file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -503,9 +518,99 @@ bool api_server_start(void)
     };
     REGISTER_URI(heatpump_uri);
     
+    // POST /api/heatpump/control
+    httpd_uri_t heatpump_control_uri = {
+        .uri = "/api/heatpump/control",
+        .method = HTTP_POST,
+        .handler = heatpump_control_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_control_uri);
+    
+    // GET /api/heatpump/params - List all parameters
+    httpd_uri_t heatpump_params_uri = {
+        .uri = "/api/heatpump/params",
+        .method = HTTP_GET,
+        .handler = heatpump_params_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_params_uri);
+    
+    // GET /api/heatpump/params/* - Get single parameter (wildcard)
+    httpd_uri_t heatpump_param_get_uri = {
+        .uri = "/api/heatpump/params/*",
+        .method = HTTP_GET,
+        .handler = heatpump_param_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_param_get_uri);
+    
+    // PUT /api/heatpump/params/* - Set single parameter (wildcard)
+    httpd_uri_t heatpump_param_put_uri = {
+        .uri = "/api/heatpump/params/*",
+        .method = HTTP_PUT,
+        .handler = heatpump_param_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_param_put_uri);
+    
+    // PUT /api/heatpump/power - Set power on/off
+    httpd_uri_t heatpump_power_uri = {
+        .uri = "/api/heatpump/power",
+        .method = HTTP_PUT,
+        .handler = heatpump_power_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_power_uri);
+    
+    // PUT /api/heatpump/mode - Set operating mode
+    httpd_uri_t heatpump_mode_uri = {
+        .uri = "/api/heatpump/mode",
+        .method = HTTP_PUT,
+        .handler = heatpump_mode_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_mode_uri);
+    
+    // PUT /api/heatpump/setpoints - Set temperature setpoints
+    httpd_uri_t heatpump_setpoints_uri = {
+        .uri = "/api/heatpump/setpoints",
+        .method = HTTP_PUT,
+        .handler = heatpump_setpoints_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_setpoints_uri);
+    
+    // GET /api/heatpump/errors - Get active errors and history
+    httpd_uri_t heatpump_errors_uri = {
+        .uri = "/api/heatpump/errors",
+        .method = HTTP_GET,
+        .handler = heatpump_errors_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_errors_uri);
+    
+    // DELETE /api/heatpump/errors/history - Clear error history (keeps active errors)
+    httpd_uri_t heatpump_errors_clear_uri = {
+        .uri = "/api/heatpump/errors/history",
+        .method = HTTP_DELETE,
+        .handler = heatpump_errors_clear_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_errors_clear_uri);
+    
+    // PATCH /api/heatpump/demo - Write fields in demo mode (for testing)
+    httpd_uri_t heatpump_demo_uri = {
+        .uri = "/api/heatpump/demo",
+        .method = HTTP_PATCH,
+        .handler = heatpump_demo_patch_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_demo_uri);
+    
     #undef REGISTER_URI
     
-    ESP_LOGI(TAG, "HTTP server started successfully (26 URI handlers registered)");
+    ESP_LOGI(TAG, "HTTP server started successfully (32 URI handlers registered)");
     ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
     
     return true;
@@ -1482,7 +1587,7 @@ static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req)
 }
 
 // ============================================================================
-// Heat Pump Status (Placeholder)
+// Heat Pump Status
 // ============================================================================
 
 static esp_err_t heatpump_status_handler(httpd_req_t* req)
@@ -1494,33 +1599,781 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     
     set_json_content_type(req);
     
-    // Placeholder - will be implemented when heat pump communication is added
+    arctic::HeatPumpState hp = arctic::getState();
+    bool demo_mode = arctic::isDemoMode();
+    
     cJSON* root = cJSON_CreateObject();
     
-    cJSON_AddBoolToObject(root, "connected", false);
-    cJSON_AddStringToObject(root, "status", "not_connected");
+    // Connection status
+    cJSON_AddBoolToObject(root, "connected", hp.connected);
+    cJSON_AddBoolToObject(root, "demo_mode", demo_mode);
     
-    // Placeholder values
-    cJSON* compressor = cJSON_AddObjectToObject(root, "compressor");
-    cJSON_AddBoolToObject(compressor, "running", false);
-    cJSON_AddStringToObject(compressor, "status", "unknown");
+    // Unified path — demo mode populates hp state at the arctic:: level
+    cJSON_AddBoolToObject(root, "unit_on", hp.unit_on);
+    cJSON_AddStringToObject(root, "mode", arctic::workingModeToString(hp.working_mode));
+    cJSON_AddBoolToObject(root, "defrosting", hp.isDefrosting());
     
-    cJSON* fan = cJSON_AddObjectToObject(root, "fan");
-    cJSON_AddBoolToObject(fan, "running", false);
-    cJSON_AddStringToObject(fan, "status", "unknown");
+    // Components
+    cJSON_AddBoolToObject(root, "compressor", hp.isCompressorRunning());
+    cJSON_AddBoolToObject(root, "fans", hp.isFanRunning());
+    cJSON_AddNumberToObject(root, "fan_speed", hp.getFanSpeedLevel());
+    cJSON_AddBoolToObject(root, "pump", hp.isWaterPumpRunning());
+    cJSON_AddBoolToObject(root, "aux_heater", hp.isBackupHeaterOn());
     
-    cJSON* pump = cJSON_AddObjectToObject(root, "pump");
-    cJSON_AddBoolToObject(pump, "running", false);
-    cJSON_AddStringToObject(pump, "status", "unknown");
+    // All temperatures
+    cJSON* temps = cJSON_AddObjectToObject(root, "temperatures");
+    cJSON_AddNumberToObject(temps, "tank", hp.water_tank_temp);
+    cJSON_AddNumberToObject(temps, "outlet", hp.outlet_water_temp);
+    cJSON_AddNumberToObject(temps, "inlet", hp.inlet_water_temp);
+    cJSON_AddNumberToObject(temps, "outdoor", hp.outdoor_ambient_temp);
+    cJSON_AddNumberToObject(temps, "discharge", hp.discharge_temp);
+    cJSON_AddNumberToObject(temps, "suction", hp.suction_temp);
+    cJSON_AddNumberToObject(temps, "outdoor_coil", hp.outdoor_coil_temp);
+    cJSON_AddNumberToObject(temps, "indoor_coil", hp.indoor_coil_temp);
+    cJSON_AddNumberToObject(temps, "ipm", hp.ipm_temp);
     
-    cJSON* errors = cJSON_AddArrayToObject(root, "errors");
-    // No errors for now
-    (void)errors;
+    // Setpoints
+    cJSON* setpoints = cJSON_AddObjectToObject(root, "setpoints");
+    cJSON_AddNumberToObject(setpoints, "cooling", hp.cooling_setpoint);
+    cJSON_AddNumberToObject(setpoints, "heating", hp.heating_setpoint);
+    cJSON_AddNumberToObject(setpoints, "hot_water", hp.hot_water_setpoint);
+    
+    // System readings
+    cJSON* readings = cJSON_AddObjectToObject(root, "readings");
+    cJSON_AddNumberToObject(readings, "compressor_freq", hp.compressor_freq);
+    cJSON_AddNumberToObject(readings, "fan_rpm", hp.fan_speed);
+    cJSON_AddNumberToObject(readings, "ac_voltage", hp.ac_voltage);
+    cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
+    cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
+    cJSON_AddNumberToObject(readings, "dc_current", hp.dc_current);
+    cJSON_AddNumberToObject(readings, "high_pressure", hp.getHighPressureMPa());
+    cJSON_AddNumberToObject(readings, "low_pressure", hp.getLowPressureMPa());
+    cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
+    cJSON_AddNumberToObject(readings, "secondary_eev", hp.secondary_eev_opening);
+    cJSON_AddNumberToObject(readings, "power_consumption", (hp.ac_voltage * hp.ac_current) / 10);
+    
+    // Errors
+    cJSON_AddBoolToObject(root, "has_error", hp.hasAnyError());
+    if (hp.hasAnyError()) {
+        char error_buf[256];
+        arctic::getErrorDescriptions(error_buf, sizeof(error_buf));
+        cJSON_AddStringToObject(root, "error", error_buf);
+    } else {
+        cJSON_AddNullToObject(root, "error");
+    }
     
     char* json_str = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json_str);
     free(json_str);
     cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+// POST /api/heatpump/control
+// Body: {"command": "power", "value": true}
+//       {"command": "mode", "value": "heating"}
+//       {"command": "setpoint", "type": "cooling|heating|hot_water", "value": 25}
+//       {"command": "register", "address": 2046, "value": -20}  // technician mode
+static esp_err_t heatpump_control_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    // Check connection
+    if (!arctic::isConnected()) {
+        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char body[256];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    cJSON* cmd = cJSON_GetObjectItem(root, "command");
+    if (!cmd || !cJSON_IsString(cmd)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Missing 'command' field");
+        return ESP_OK;
+    }
+    
+    bool success = false;
+    const char* command = cmd->valuestring;
+    
+    if (strcmp(command, "power") == 0) {
+        cJSON* value = cJSON_GetObjectItem(root, "value");
+        if (value && cJSON_IsBool(value)) {
+            success = arctic::setUnitPower(cJSON_IsTrue(value));
+        } else {
+            cJSON_Delete(root);
+            send_json_error(req, "400 Bad Request", "power requires boolean 'value'");
+            return ESP_OK;
+        }
+    }
+    else if (strcmp(command, "mode") == 0) {
+        cJSON* value = cJSON_GetObjectItem(root, "value");
+        if (value && cJSON_IsString(value)) {
+            const char* mode_str = value->valuestring;
+            arctic::WorkingMode mode;
+            if (strcmp(mode_str, "cooling") == 0) {
+                mode = arctic::WorkingMode::COOLING;
+            } else if (strcmp(mode_str, "floor_heating") == 0) {
+                mode = arctic::WorkingMode::FLOOR_HEATING;
+            } else if (strcmp(mode_str, "fan_coil_heating") == 0) {
+                mode = arctic::WorkingMode::FAN_COIL_HEATING;
+            } else if (strcmp(mode_str, "hot_water") == 0) {
+                mode = arctic::WorkingMode::HOT_WATER;
+            } else if (strcmp(mode_str, "auto") == 0) {
+                mode = arctic::WorkingMode::AUTO;
+            } else {
+                cJSON_Delete(root);
+                send_json_error(req, "400 Bad Request", "Invalid mode value");
+                return ESP_OK;
+            }
+            success = arctic::setWorkingMode(mode);
+        } else {
+            cJSON_Delete(root);
+            send_json_error(req, "400 Bad Request", "mode requires string 'value'");
+            return ESP_OK;
+        }
+    }
+    else if (strcmp(command, "setpoint") == 0) {
+        cJSON* type = cJSON_GetObjectItem(root, "type");
+        cJSON* value = cJSON_GetObjectItem(root, "value");
+        if (type && cJSON_IsString(type) && value && cJSON_IsNumber(value)) {
+            int16_t temp = (int16_t)value->valueint;
+            const char* type_str = type->valuestring;
+            if (strcmp(type_str, "cooling") == 0) {
+                success = arctic::setCoolingSetpoint(temp);
+            } else if (strcmp(type_str, "heating") == 0) {
+                success = arctic::setHeatingSetpoint(temp);
+            } else if (strcmp(type_str, "hot_water") == 0) {
+                success = arctic::setHotWaterSetpoint(temp);
+            } else {
+                cJSON_Delete(root);
+                send_json_error(req, "400 Bad Request", "Invalid setpoint type");
+                return ESP_OK;
+            }
+        } else {
+            cJSON_Delete(root);
+            send_json_error(req, "400 Bad Request", "setpoint requires 'type' and 'value'");
+            return ESP_OK;
+        }
+    }
+    else if (strcmp(command, "register") == 0) {
+        // Technician mode: direct register write
+        cJSON* addr = cJSON_GetObjectItem(root, "address");
+        cJSON* value = cJSON_GetObjectItem(root, "value");
+        if (addr && cJSON_IsNumber(addr) && value && cJSON_IsNumber(value)) {
+            uint16_t address = (uint16_t)addr->valueint;
+            uint16_t val = (uint16_t)value->valueint;
+            success = arctic::writeRegister(address, val);
+        } else {
+            cJSON_Delete(root);
+            send_json_error(req, "400 Bad Request", "register requires 'address' and 'value'");
+            return ESP_OK;
+        }
+    }
+    else {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Unknown command");
+        return ESP_OK;
+    }
+    
+    cJSON_Delete(root);
+    
+    // Send response
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", success);
+    if (!success) {
+        cJSON_AddStringToObject(resp, "error", "Command failed - check connection");
+    }
+    char* json_str2 = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str2);
+    free(json_str2);
+    cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// ============================================================================
+// Heat Pump Parameters API
+// ============================================================================
+
+// Helper to add a single parameter to a cJSON object
+static void add_param_to_json(cJSON* parent, const HeatPumpParam* param, int16_t value) {
+    cJSON* obj = cJSON_CreateObject();
+    cJSON_AddNumberToObject(obj, "value", value);
+    cJSON_AddStringToObject(obj, "p_code", param->p_code);
+    cJSON_AddStringToObject(obj, "name", param->name);
+    cJSON_AddStringToObject(obj, "description", param->description);
+    cJSON_AddStringToObject(obj, "unit", param_unit_to_string(param->unit_type));
+    cJSON_AddNumberToObject(obj, "min", param->min_val);
+    cJSON_AddNumberToObject(obj, "max", param->max_val);
+    cJSON_AddStringToObject(obj, "category", param->category);
+    cJSON_AddItemToObject(parent, param->key, obj);
+}
+
+// GET /api/heatpump/params - List all parameters
+static esp_err_t heatpump_params_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    bool connected = arctic::isConnected();
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "connected", connected);
+    cJSON_AddBoolToObject(root, "demo_mode", arctic::isDemoMode());
+    
+    cJSON* params = cJSON_AddObjectToObject(root, "params");
+    
+    for (int i = 0; i < NUM_HEATPUMP_PARAMS; i++) {
+        const HeatPumpParam* param = &HEATPUMP_PARAMS[i];
+        
+        // Read current value (handles demo mode)
+        bool read_ok = false;
+        int16_t value = heatpump_param_read_by_index(i, &read_ok);
+        
+        add_param_to_json(params, param, read_ok ? value : 0);
+    }
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+// GET /api/heatpump/params/:id - Get single parameter
+static esp_err_t heatpump_param_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    // Extract param ID from URI (after /api/heatpump/params/)
+    const char* uri = req->uri;
+    const char* id = uri + strlen("/api/heatpump/params/");
+    
+    if (!id || strlen(id) == 0) {
+        send_json_error(req, "400 Bad Request", "Parameter ID required");
+        return ESP_OK;
+    }
+    
+    // Find parameter by key or p_code
+    const HeatPumpParam* param = heatpump_param_find(id);
+    if (!param) {
+        send_json_error(req, "404 Not Found", "Unknown parameter");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    // Read current value (handles demo mode)
+    bool read_ok = false;
+    int16_t value = heatpump_param_read(param, &read_ok);
+    
+    bool connected = arctic::isConnected();
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "key", param->key);
+    cJSON_AddStringToObject(root, "p_code", param->p_code);
+    cJSON_AddStringToObject(root, "name", param->name);
+    cJSON_AddStringToObject(root, "description", param->description);
+    cJSON_AddStringToObject(root, "unit", param_unit_to_string(param->unit_type));
+    cJSON_AddNumberToObject(root, "min", param->min_val);
+    cJSON_AddNumberToObject(root, "max", param->max_val);
+    cJSON_AddStringToObject(root, "category", param->category);
+    
+    if (read_ok) {
+        cJSON_AddNumberToObject(root, "value", value);
+    } else {
+        cJSON_AddNullToObject(root, "value");
+    }
+    cJSON_AddBoolToObject(root, "connected", connected);
+    cJSON_AddBoolToObject(root, "demo_mode", arctic::isDemoMode());
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+// PUT /api/heatpump/params/:id - Set single parameter
+// Body: just the integer value (e.g., "25" or "-5")
+static esp_err_t heatpump_param_put_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    // Check connection (demo mode reports connected via getState)
+    if (!arctic::isConnected()) {
+        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
+        return ESP_OK;
+    }
+    
+    // Extract param ID from URI
+    const char* uri = req->uri;
+    const char* id = uri + strlen("/api/heatpump/params/");
+    
+    if (!id || strlen(id) == 0) {
+        send_json_error(req, "400 Bad Request", "Parameter ID required");
+        return ESP_OK;
+    }
+    
+    // Find parameter
+    const HeatPumpParam* param = heatpump_param_find(id);
+    if (!param) {
+        send_json_error(req, "404 Not Found", "Unknown parameter");
+        return ESP_OK;
+    }
+    
+    // Read request body - expect plain integer
+    char body[32];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse integer value (trim whitespace)
+    char* endptr;
+    long val_long = strtol(body, &endptr, 10);
+    
+    // Check if parsing succeeded (endptr should point to end or whitespace)
+    while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') endptr++;
+    if (endptr == body || *endptr != '\0') {
+        send_json_error(req, "400 Bad Request", "Invalid integer value");
+        return ESP_OK;
+    }
+    
+    int16_t value = (int16_t)val_long;
+    
+    // Validate range
+    if (value < param->min_val || value > param->max_val) {
+        char err_buf[128];
+        snprintf(err_buf, sizeof(err_buf), "Value out of range (%d to %d)", 
+                 param->min_val, param->max_val);
+        send_json_error(req, "400 Bad Request", err_buf);
+        return ESP_OK;
+    }
+    
+    // Write value (handles demo mode)
+    bool success = heatpump_param_write(param, value);
+    
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", success);
+    cJSON_AddStringToObject(resp, "key", param->key);
+    cJSON_AddStringToObject(resp, "p_code", param->p_code);
+    cJSON_AddNumberToObject(resp, "value", value);
+    cJSON_AddBoolToObject(resp, "demo_mode", arctic::isDemoMode());
+    
+    if (!success) {
+        cJSON_AddStringToObject(resp, "error", "Write failed");
+    }
+    
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// PUT /api/heatpump/power - Set power on/off
+// Body: { "on": true/false }
+static esp_err_t heatpump_power_put_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    // Check connection (demo mode reports connected via getState)
+    if (!arctic::isConnected()) {
+        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char body[64];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    cJSON* on_val = cJSON_GetObjectItem(root, "on");
+    if (!on_val || !cJSON_IsBool(on_val)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Missing or invalid 'on' field (boolean required)");
+        return ESP_OK;
+    }
+    
+    bool power_on = cJSON_IsTrue(on_val);
+    cJSON_Delete(root);
+    
+    bool success = arctic::setUnitPower(power_on);
+    
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", success);
+    cJSON_AddBoolToObject(resp, "on", power_on);
+    cJSON_AddBoolToObject(resp, "demo_mode", arctic::isDemoMode());
+    
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// PUT /api/heatpump/mode - Set operating mode
+// Body: { "mode": "cooling" | "floor_heating" | "fan_coil_heating" | "hot_water" | "auto" }
+static esp_err_t heatpump_mode_put_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    // Check connection (demo mode reports connected via getState)
+    if (!arctic::isConnected()) {
+        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char body[64];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    cJSON* mode_val = cJSON_GetObjectItem(root, "mode");
+    if (!mode_val || !cJSON_IsString(mode_val)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Missing or invalid 'mode' field (string required)");
+        return ESP_OK;
+    }
+    
+    const char* mode_str = mode_val->valuestring;
+    arctic::WorkingMode mode;
+    
+    if (strcmp(mode_str, "cooling") == 0) {
+        mode = arctic::WorkingMode::COOLING;
+    } else if (strcmp(mode_str, "floor_heating") == 0) {
+        mode = arctic::WorkingMode::FLOOR_HEATING;
+    } else if (strcmp(mode_str, "fan_coil_heating") == 0) {
+        mode = arctic::WorkingMode::FAN_COIL_HEATING;
+    } else if (strcmp(mode_str, "hot_water") == 0) {
+        mode = arctic::WorkingMode::HOT_WATER;
+    } else if (strcmp(mode_str, "auto") == 0) {
+        mode = arctic::WorkingMode::AUTO;
+    } else {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", 
+            "Invalid mode. Valid: cooling, floor_heating, fan_coil_heating, hot_water, auto");
+        return ESP_OK;
+    }
+    
+    cJSON_Delete(root);
+    
+    bool success = arctic::setWorkingMode(mode);
+    
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", success);
+    cJSON_AddStringToObject(resp, "mode", arctic::workingModeToString(mode));
+    cJSON_AddBoolToObject(resp, "demo_mode", arctic::isDemoMode());
+    
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// PUT /api/heatpump/setpoints - Set temperature setpoints
+// Body: { "cooling": 18, "heating": 45, "hot_water": 50 }
+// All fields optional - only provided fields are updated
+static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    // Check connection (demo mode reports connected via getState)
+    if (!arctic::isConnected()) {
+        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char body[128];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    bool any_set = false;
+    bool all_success = true;
+    
+    cJSON* cooling = cJSON_GetObjectItem(root, "cooling");
+    cJSON* heating = cJSON_GetObjectItem(root, "heating");
+    cJSON* hot_water = cJSON_GetObjectItem(root, "hot_water");
+    
+    int cooling_val = -999, heating_val = -999, hot_water_val = -999;
+    
+    if (cooling && cJSON_IsNumber(cooling)) {
+        cooling_val = cooling->valueint;
+        any_set = true;
+        if (!arctic::setCoolingSetpoint((int16_t)cooling_val)) {
+            all_success = false;
+        }
+    }
+    
+    if (heating && cJSON_IsNumber(heating)) {
+        heating_val = heating->valueint;
+        any_set = true;
+        if (!arctic::setHeatingSetpoint((int16_t)heating_val)) {
+            all_success = false;
+        }
+    }
+    
+    if (hot_water && cJSON_IsNumber(hot_water)) {
+        hot_water_val = hot_water->valueint;
+        any_set = true;
+        if (!arctic::setHotWaterSetpoint((int16_t)hot_water_val)) {
+            all_success = false;
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    if (!any_set) {
+        send_json_error(req, "400 Bad Request", 
+            "At least one setpoint required: cooling, heating, or hot_water");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", all_success);
+    
+    cJSON* setpoints = cJSON_AddObjectToObject(resp, "setpoints");
+    if (cooling_val != -999) cJSON_AddNumberToObject(setpoints, "cooling", cooling_val);
+    if (heating_val != -999) cJSON_AddNumberToObject(setpoints, "heating", heating_val);
+    if (hot_water_val != -999) cJSON_AddNumberToObject(setpoints, "hot_water", hot_water_val);
+    
+    cJSON_AddBoolToObject(resp, "demo_mode", arctic::isDemoMode());
+    
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    
+    return ESP_OK;
+}
+
+// DELETE /api/heatpump/errors/history - Clear error history (keeps active errors)
+static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    arctic::clearErrorHistory();
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    cJSON_AddStringToObject(root, "message", "Error history cleared");
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+// GET /api/heatpump/errors - Get active errors and error history
+static esp_err_t heatpump_errors_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    arctic::HeatPumpState hp = arctic::getState();
+    
+    cJSON* root = cJSON_CreateObject();
+    
+    // Summary
+    cJSON_AddBoolToObject(root, "demo_mode", arctic::isDemoMode());
+    cJSON_AddBoolToObject(root, "connected", hp.connected);
+    
+    // Unified path — active errors come from s_state in both modes
+    int error_count = arctic::getActiveErrorCount();
+    cJSON_AddBoolToObject(root, "has_errors", error_count > 0);
+    cJSON_AddNumberToObject(root, "error_count", error_count);
+    cJSON_AddStringToObject(root, "highest_severity", 
+        arctic::severityToString(arctic::getHighestSeverity()));
+    
+    // Active errors array
+    char* active_json = arctic::getErrorsAsJson();
+    if (active_json) {
+        cJSON* active = cJSON_Parse(active_json);
+        if (active) {
+            cJSON_AddItemToObject(root, "active", active);
+        }
+        free(active_json);
+    }
+    
+    // Error history array
+    char* history_json = arctic::getErrorHistoryAsJson();
+    if (history_json) {
+        cJSON* history = cJSON_Parse(history_json);
+        if (history) {
+            cJSON_AddItemToObject(root, "history", history);
+        }
+        free(history_json);
+    }
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+// PATCH /api/heatpump/demo - Write read-only fields for testing
+// Body: { "field1": value1, "field2": value2, ... }
+// Only available when demo mode is enabled
+static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    
+    if (!arctic::isDemoMode()) {
+        send_json_error(req, "403 Forbidden", "Demo mode is not enabled");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char body[512];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    
+    // Parse JSON
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    cJSON* resp = cJSON_CreateObject();
+    cJSON* results = cJSON_AddObjectToObject(resp, "results");
+    int success_count = 0;
+    int fail_count = 0;
+    
+    // Iterate all keys in the JSON object
+    cJSON* item = NULL;
+    cJSON_ArrayForEach(item, root) {
+        if (!cJSON_IsNumber(item)) {
+            cJSON_AddStringToObject(results, item->string, "error: value must be a number");
+            fail_count++;
+            continue;
+        }
+        
+        int32_t value = (int32_t)item->valuedouble;
+        if (arctic::setDemoField(item->string, value)) {
+            cJSON_AddStringToObject(results, item->string, "ok");
+            success_count++;
+        } else {
+            cJSON_AddStringToObject(results, item->string, "error: unknown field");
+            fail_count++;
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    cJSON_AddBoolToObject(resp, "success", fail_count == 0 && success_count > 0);
+    cJSON_AddNumberToObject(resp, "updated", success_count);
+    cJSON_AddNumberToObject(resp, "failed", fail_count);
+    
+    char* json_str2 = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str2);
+    free(json_str2);
+    cJSON_Delete(resp);
     
     return ESP_OK;
 }

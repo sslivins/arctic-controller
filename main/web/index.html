@@ -26,12 +26,28 @@
                 heatPumpStatus: 'Heat Pump Status',
                 lastUpdated: 'Last updated',
                 compressor: 'Compressor',
-                airFlowFans: 'Air Flow Fans',
+                airFlowFans: 'Fan',
                 waterPump: 'Water Pump',
+                auxHeater: 'Aux Heater',
                 systemStatus: 'System Status',
                 on: 'ON',
                 off: 'OFF',
                 ok: 'OK',
+                disconnected: 'Disconnected',
+                standby: 'Standby',
+                tankTemp: 'Tank',
+                setpoint: 'Setpoint',
+                outdoorTemp: 'Outdoor',
+                mode: 'Mode',
+                cooling: 'Cooling',
+                floorHeating: 'Floor Heating',
+                fanCoilHeating: 'Fan Heating',
+                hotWater: 'Hot Water',
+                auto: 'Auto',
+                defrost: 'Defrost',
+                fanLow: 'Low',
+                fanMed: 'Med',
+                fanHigh: 'High',
                 
                 // Dashboard - System Overview
                 systemOverview: 'System Overview',
@@ -123,7 +139,85 @@
                 rebootingMsg: 'Device is rebooting. Please wait...',
                 
                 // Language
-                language: 'Language'
+                language: 'Language',
+                
+                // Heat Pump Controls
+                power: 'Power',
+                turnOn: 'Power On',
+                turnOff: 'Power Off',
+                holdToTurnOff: 'Hold to turn OFF',
+                controls: 'Controls',
+                modeSelect: 'Operating Mode',
+                
+                // Temperatures (all sensors)
+                temperatures: 'Temperatures',
+                outletTemp: 'Outlet',
+                inletTemp: 'Inlet',
+                dischargeTemp: 'Discharge',
+                suctionTemp: 'Suction',
+                outdoorCoilTemp: 'Outdoor Coil',
+                indoorCoilTemp: 'Indoor Coil',
+                ipmTemp: 'IPM Module',
+                
+                // System Readings
+                systemReadings: 'System Readings',
+                compressorFreq: 'Compressor',
+                fanRpm: 'Fan Speed',
+                acVoltage: 'AC Voltage',
+                acCurrent: 'AC Current',
+                highPressure: 'High Pressure',
+                lowPressure: 'Low Pressure',
+                primaryEev: 'Primary EEV',
+                secondaryEev: 'Secondary EEV',
+                powerConsumption: 'Power',
+                
+                // Setpoint Editing
+                setpointsTitle: 'Setpoints',
+                coolingSetpoint: 'Cooling',
+                heatingSetpoint: 'Heating',
+                hotWaterSetpoint: 'Hot Water',
+                save: 'Save',
+                cancel: 'Cancel',
+                setpointSaved: 'Setpoint saved',
+                setpointFailed: 'Failed to save setpoint',
+                
+                // Control Page
+                parameters: 'Control',
+                paramEditor: 'Heat Pump Parameters',
+                pCode: 'P-Code',
+                currentValue: 'Value',
+                range: 'Range',
+                editParam: 'Edit',
+                paramSaved: 'Parameter saved',
+                paramFailed: 'Failed to save parameter',
+                noParams: 'Heat pump not connected',
+                loadingParams: 'Loading...',
+                
+                // Error Details
+                activeErrors: 'Active Errors',
+                errorHistory: 'Error History',
+                clearHistory: 'Clear',
+                noActiveErrors: 'No active errors',
+                noErrorHistory: 'No error history',
+                severity: 'Severity',
+                resolution: 'Resolution',
+                occurred: 'Occurred',
+                clearedAt: 'Cleared',
+                errorWarning: 'Warning',
+                errorCritical: 'Critical',
+                errorInfo: 'Info',
+                
+                // Parameter Categories
+                catEev: 'EEV Settings',
+                catDefrost: 'Defrost',
+                catProtection: 'Protection',
+                catAutoMode: 'Auto Mode',
+                catPumpValve: 'Pump & Valve',
+                
+                // Dashboard panels
+                energy: 'Energy',
+                powerIn: 'Power In',
+                heatOut: 'Heat Out'
             },
             fr: {
                 // Header & Navigation
@@ -143,12 +237,28 @@
                 heatPumpStatus: 'État de la pompe à chaleur',
                 lastUpdated: 'Dernière mise à jour',
                 compressor: 'Compresseur',
-                airFlowFans: 'Ventilateurs',
+                airFlowFans: 'Ventilateur',
                 waterPump: "Pompe à eau",
+                auxHeater: 'Chauff. Aux',
                 systemStatus: 'État du système',
                 on: 'MARCHE',
                 off: 'ARRÊT',
                 ok: 'OK',
+                disconnected: 'Déconnecté',
+                standby: 'Veille',
+                tankTemp: 'Réservoir',
+                setpoint: 'Consigne',
+                outdoorTemp: 'Extérieur',
+                mode: 'Mode',
+                cooling: 'Refroidissement',
+                floorHeating: 'Chauffage sol',
+                fanCoilHeating: 'Chauffage ventilo',
+                hotWater: 'Eau chaude',
+                auto: 'Auto',
+                defrost: 'Dégivrage',
+                fanLow: 'Bas',
+                fanMed: 'Moyen',
+                fanHigh: 'Haut',
                 
                 // Dashboard - System Overview
                 systemOverview: 'Aperçu du système',
@@ -240,7 +350,85 @@
                 rebootingMsg: "L'appareil redémarre. Veuillez patienter...",
                 
                 // Language
-                language: 'Langue'
+                language: 'Langue',
+                
+                // Heat Pump Controls
+                power: 'Alimentation',
+                turnOn: 'Marche',
+                turnOff: 'Arrêt',
+                holdToTurnOff: 'Maintenir pour ÉTEINDRE',
+                controls: 'Commandes',
+                modeSelect: 'Mode de fonctionnement',
+                
+                // Temperatures (all sensors)
+                temperatures: 'Températures',
+                outletTemp: 'Sortie',
+                inletTemp: 'Entrée',
+                dischargeTemp: 'Refoulement',
+                suctionTemp: 'Aspiration',
+                outdoorCoilTemp: 'Batterie ext.',
+                indoorCoilTemp: 'Batterie int.',
+                ipmTemp: 'Module IPM',
+                
+                // System Readings
+                systemReadings: 'Données système',
+                compressorFreq: 'Compresseur',
+                fanRpm: 'Vitesse ventilateur',
+                acVoltage: 'Tension AC',
+                acCurrent: 'Courant AC',
+                highPressure: 'Haute pression',
+                lowPressure: 'Basse pression',
+                primaryEev: 'VEE primaire',
+                secondaryEev: 'VEE secondaire',
+                powerConsumption: 'Puissance',
+                
+                // Setpoint Editing
+                setpointsTitle: 'Consignes',
+                coolingSetpoint: 'Refroidissement',
+                heatingSetpoint: 'Chauffage',
+                hotWaterSetpoint: 'Eau chaude',
+                save: 'Enregistrer',
+                cancel: 'Annuler',
+                setpointSaved: 'Consigne enregistrée',
+                setpointFailed: 'Échec de la sauvegarde',
+                
+                // Control Page
+                parameters: 'Contr\u00f4le',
+                paramEditor: 'Param\u00e8tres pompe \u00e0 chaleur',
+                pCode: 'Code P',
+                currentValue: 'Valeur',
+                range: 'Plage',
+                editParam: 'Modifier',
+                paramSaved: 'Paramètre enregistré',
+                paramFailed: 'Échec de la sauvegarde du paramètre',
+                noParams: 'Pompe à chaleur non connectée',
+                loadingParams: 'Chargement...',
+                
+                // Error Details
+                activeErrors: 'Erreurs actives',
+                errorHistory: 'Historique des erreurs',
+                clearHistory: 'Effacer',
+                noActiveErrors: 'Aucune erreur active',
+                noErrorHistory: 'Aucun historique',
+                severity: 'Sévérité',
+                resolution: 'Résolution',
+                occurred: 'Survenue',
+                clearedAt: 'Résolue',
+                errorWarning: 'Avertissement',
+                errorCritical: 'Critique',
+                errorInfo: 'Info',
+                
+                // Parameter Categories
+                catEev: 'Réglages VEE',
+                catDefrost: 'Dégivrage',
+                catProtection: 'Protection',
+                catAutoMode: 'Mode auto',
+                catPumpValve: 'Pompe et vanne',
+                
+                // Dashboard panels
+                energy: '\u00c9nergie',
+                powerIn: 'Puiss. entr\u00e9e',
+                heatOut: 'Chaleur sort.'
             },
             es: {
                 // Header & Navigation
@@ -260,12 +448,28 @@
                 heatPumpStatus: 'Estado de la bomba de calor',
                 lastUpdated: 'Última actualización',
                 compressor: 'Compresor',
-                airFlowFans: 'Ventiladores',
+                airFlowFans: 'Ventilador',
                 waterPump: 'Bomba de agua',
+                auxHeater: 'Calent. Aux',
                 systemStatus: 'Estado del sistema',
                 on: 'ENCENDIDO',
                 off: 'APAGADO',
                 ok: 'OK',
+                disconnected: 'Desconectado',
+                standby: 'En espera',
+                tankTemp: 'Tanque',
+                setpoint: 'Consigna',
+                outdoorTemp: 'Exterior',
+                mode: 'Modo',
+                cooling: 'Enfriamiento',
+                floorHeating: 'Calef. suelo',
+                fanCoilHeating: 'Calef. ventilador',
+                hotWater: 'Agua caliente',
+                auto: 'Auto',
+                defrost: 'Descongelación',
+                fanLow: 'Bajo',
+                fanMed: 'Medio',
+                fanHigh: 'Alto',
                 
                 // Dashboard - System Overview
                 systemOverview: 'Resumen del sistema',
@@ -357,23 +561,105 @@
                 rebootingMsg: 'El dispositivo está reiniciando. Por favor espere...',
                 
                 // Language
-                language: 'Idioma'
+                language: 'Idioma',
+                
+                // Heat Pump Controls
+                power: 'Energía',
+                turnOn: 'Encendido',
+                turnOff: 'Apagado',
+                holdToTurnOff: 'Mantener para APAGAR',
+                controls: 'Controles',
+                modeSelect: 'Modo de operación',
+                
+                // Temperatures (all sensors)
+                temperatures: 'Temperaturas',
+                outletTemp: 'Salida',
+                inletTemp: 'Entrada',
+                dischargeTemp: 'Descarga',
+                suctionTemp: 'Succión',
+                outdoorCoilTemp: 'Serpentín ext.',
+                indoorCoilTemp: 'Serpentín int.',
+                ipmTemp: 'Módulo IPM',
+                
+                // System Readings
+                systemReadings: 'Datos del sistema',
+                compressorFreq: 'Compresor',
+                fanRpm: 'Velocidad ventilador',
+                acVoltage: 'Voltaje AC',
+                acCurrent: 'Corriente AC',
+                highPressure: 'Alta presión',
+                lowPressure: 'Baja presión',
+                primaryEev: 'VEE primaria',
+                secondaryEev: 'VEE secundaria',
+                powerConsumption: 'Potencia',
+                
+                // Setpoint Editing
+                setpointsTitle: 'Consignas',
+                coolingSetpoint: 'Enfriamiento',
+                heatingSetpoint: 'Calefacción',
+                hotWaterSetpoint: 'Agua caliente',
+                save: 'Guardar',
+                cancel: 'Cancelar',
+                setpointSaved: 'Consigna guardada',
+                setpointFailed: 'Error al guardar la consigna',
+                
+                // Control Page
+                parameters: 'Control',
+                paramEditor: 'Par\u00e1metros bomba de calor',
+                pCode: 'Código P',
+                currentValue: 'Valor',
+                range: 'Rango',
+                editParam: 'Editar',
+                paramSaved: 'Parámetro guardado',
+                paramFailed: 'Error al guardar el parámetro',
+                noParams: 'Bomba de calor no conectada',
+                loadingParams: 'Cargando...',
+                
+                // Error Details
+                activeErrors: 'Errores activos',
+                errorHistory: 'Historial de errores',
+                clearHistory: 'Borrar',
+                noActiveErrors: 'Sin errores activos',
+                noErrorHistory: 'Sin historial de errores',
+                severity: 'Severidad',
+                resolution: 'Resolución',
+                occurred: 'Ocurrido',
+                clearedAt: 'Resuelto',
+                errorWarning: 'Advertencia',
+                errorCritical: 'Crítico',
+                errorInfo: 'Info',
+                
+                // Parameter Categories
+                catEev: 'Ajustes VEE',
+                catDefrost: 'Descongelación',
+                catProtection: 'Protección',
+                catAutoMode: 'Modo auto',
+                catPumpValve: 'Bomba y v\u00e1lvula',
+                
+                // Dashboard panels
+                energy: 'Energ\u00eda',
+                powerIn: 'Pot. entrada',
+                heatOut: 'Calor salida'
             }
         };
     </script>
     <style>
         :root {
-            --bg-primary: #0d1117;
-            --bg-secondary: #161b22;
-            --bg-tertiary: #21262d;
-            --border: #30363d;
-            --text-primary: #e6edf3;
-            --text-secondary: #8b949e;
-            --accent: #00d4aa;
-            --accent-dim: #00a883;
-            --error: #f85149;
-            --warning: #d29922;
-            --success: #3fb950;
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-tertiary: #1e2d4e;
+            --border: #0f3460;
+            --text-primary: #eaeaea;
+            --text-secondary: #888888;
+            --accent: #00d4ff;
+            --accent-dim: #00b8d4;
+            --error: #ef4444;
+            --warning: #fbbf24;
+            --success: #4ade80;
+            --heating: #f97316;
+            --cooling: #3b82f6;
+            --hot-water: #ef4444;
+            --defrost: #8b5cf6;
         }
         
         * {
@@ -492,7 +778,7 @@
         /* Status Grid */
         .status-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(4, 1fr);
             gap: 1rem;
         }
         
@@ -501,14 +787,49 @@
             padding: 1rem;
             background: var(--bg-tertiary);
             border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
         }
         
         .status-item .label {
             color: var(--text-secondary);
             font-size: 0.8rem;
-            margin-bottom: 0.5rem;
         }
         
+        /* Status indicator circles */
+        .status-indicator {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            border: 2px solid #444;
+        }
+        
+        .status-indicator.on {
+            background: var(--success);
+            border-color: var(--success);
+            box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+        }
+        
+        .status-indicator.off {
+            background: #333;
+            border-color: #555;
+        }
+        
+        .status-indicator.warning {
+            background: var(--warning);
+            border-color: var(--warning);
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+        }
+        
+        .status-indicator.unknown {
+            background: transparent;
+            border: 2px dashed #555;
+        }
+        
+        /* Legacy .value styles (keep for compatibility) */
         .status-item .value {
             font-size: 1.1rem;
             font-weight: 600;
@@ -522,8 +843,302 @@
             color: var(--text-secondary);
         }
         
+        .status-item .value.warning {
+            color: var(--warning);
+        }
+        
         .status-item .value.error {
             color: var(--error);
+        }
+        
+        /* Heat Pump Display */
+        .hp-mode-badge {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            text-transform: uppercase;
+        }
+        
+        .hp-mode-badge.mode-disconnected {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+        
+        .hp-mode-badge.mode-standby {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+        
+        .hp-mode-badge.mode-cooling {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+        }
+        
+        .hp-mode-badge.mode-heating {
+            background: rgba(249, 115, 22, 0.2);
+            color: #f97316;
+        }
+        
+        .hp-mode-badge.mode-hotwater {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+        
+        .hp-mode-badge.mode-defrost {
+            background: rgba(139, 92, 246, 0.2);
+            color: #8b5cf6;
+        }
+        
+        /* Hero Status Card - matches device main screen */
+        .hero-card {
+            background: var(--bg-secondary);
+            border: 3px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 0.75rem;
+            text-align: center;
+            transition: background 0.5s, border-color 0.5s;
+        }
+        
+        .hero-top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.25rem;
+        }
+        
+        .hero-power-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1.25rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+        
+        .hero-power-btn.on {
+            background: rgba(63, 185, 80, 0.2);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+        
+        .hero-power-btn.off {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--error);
+            border: 1px solid var(--error);
+        }
+        
+        .hero-power-btn:hover { opacity: 0.85; }
+        .hero-power-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Hold-to-confirm power button (parameters page) */
+        .power-hold-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .power-hold-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            width: 100%;
+            max-width: 320px;
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 1rem;
+            cursor: pointer;
+            border: 2px solid transparent;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .power-hold-btn.on {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+            border-color: var(--error);
+        }
+
+        .power-hold-btn.off {
+            background: rgba(63, 185, 80, 0.1);
+            color: var(--success);
+            border-color: var(--success);
+        }
+
+        .power-hold-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* Progress fill that animates from left during hold */
+        .power-hold-btn::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 0%;
+            border-radius: 10px;
+            transition: none;
+            z-index: 0;
+        }
+
+        .power-hold-btn.on::before {
+            background: rgba(239, 68, 68, 0.2);
+        }
+
+        .power-hold-btn.off::before {
+            background: rgba(63, 185, 80, 0.2);
+        }
+
+        .power-hold-btn.holding::before {
+            width: 100%;
+            transition: width 3s linear;
+        }
+
+        .power-hold-btn .btn-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .power-hold-hint {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+
+        .power-hold-countdown {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-left: 0.25rem;
+        }
+        
+        .hero-tank-temp {
+            font-size: 4rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.1;
+        }
+        
+        .hero-tank-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+        
+        .hero-setpoint-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            margin-top: 1.25rem;
+        }
+        
+        .hero-setpoint-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        
+        .hero-setpoint-value {
+            font-size: 1.75rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .hero-setpoint-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 1.2rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+        
+        .hero-setpoint-btn:hover {
+            border-color: var(--accent);
+            background: rgba(0, 212, 170, 0.1);
+        }
+        
+        .hero-setpoint-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        .hero-bottom-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 1.25rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+        
+        .hero-power-meter {
+            font-size: 1rem;
+            font-weight: 500;
+            color: #fbbf24;
+        }
+        
+        .hp-temp {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        
+        .hp-setpoint {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .hp-outdoor {
+            font-size: 1.25rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+        
+        /* Mode Select Row */
+        .mode-select-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .mode-select-row .label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        
+        .mode-select-row select {
+            flex: 1;
+            padding: 0.4rem 0.6rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 0.85rem;
         }
         
         /* Forms */
@@ -951,6 +1566,572 @@
             align-items: center;
             gap: 1rem;
         }
+        
+        /* Power Toggle */
+        .power-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.625rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+        
+        .power-btn.on {
+            background: rgba(63, 185, 80, 0.2);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+        
+        .power-btn.off {
+            background: rgba(139, 148, 158, 0.15);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+        
+        .power-btn:hover {
+            opacity: 0.85;
+        }
+        
+        .power-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        
+        /* Mode Selector */
+        .mode-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        
+        .mode-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        
+        .mode-btn:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+        
+        .mode-btn.active {
+            background: rgba(0, 212, 170, 0.15);
+            border-color: var(--accent);
+            color: var(--accent);
+            font-weight: 600;
+        }
+        
+        .mode-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        
+        /* Setpoint Card */
+        .setpoint-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+        }
+        
+        .setpoint-item {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+        }
+        
+        .setpoint-item .label {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .setpoint-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        
+        .setpoint-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        
+        .setpoint-controls button {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 1.1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+        
+        .setpoint-controls button:hover {
+            border-color: var(--accent);
+            background: rgba(0, 212, 170, 0.1);
+        }
+        
+        .setpoint-controls button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        /* Temperature Grid */
+        .temp-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+        }
+        
+        .temp-item {
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            padding: 0.75rem;
+            text-align: center;
+        }
+        
+        .temp-item .label {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .temp-item .value {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        
+        /* Readings Grid */
+        .readings-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+        }
+        
+        .reading-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+        
+        .reading-item .label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+        
+        .reading-item .value {
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+        
+        /* Error Card */
+        .error-item {
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            border-left: 3px solid;
+        }
+        
+        .error-item.active-error {
+            background: rgba(248, 81, 73, 0.1);
+            border-left-color: var(--error);
+        }
+        
+        .error-item.cleared-error {
+            background: rgba(139, 148, 158, 0.08);
+            border-left-color: var(--text-secondary);
+            opacity: 0.7;
+        }
+        
+        .error-item .error-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.25rem;
+        }
+        
+        .error-item .error-code {
+            font-weight: 700;
+            font-size: 0.95rem;
+        }
+        
+        .error-item .error-severity {
+            font-size: 0.75rem;
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .error-severity.warning {
+            background: rgba(210, 153, 34, 0.2);
+            color: var(--warning);
+        }
+        
+        .error-severity.critical {
+            background: rgba(248, 81, 73, 0.2);
+            color: var(--error);
+        }
+        
+        .error-severity.info {
+            background: rgba(0, 212, 170, 0.2);
+            color: var(--accent);
+        }
+        
+        .error-item .error-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        
+        .error-item .error-resolution {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid var(--border);
+        }
+        
+        .error-item .error-time {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+        
+        /* Parameter Card */
+        .param-category {
+            margin-bottom: 1.5rem;
+        }
+        
+        .param-category h3 {
+            font-size: 0.9rem;
+            color: var(--accent);
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .param-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+        
+        .param-info {
+            flex: 1;
+        }
+        
+        .param-name {
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+        
+        .param-meta {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 0.15rem;
+        }
+        
+        .param-pcode {
+            font-family: monospace;
+            background: rgba(0, 212, 170, 0.1);
+            color: var(--accent);
+            padding: 0.1rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.75rem;
+        }
+        
+        .param-value-display {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .param-value {
+            font-weight: 600;
+            font-size: 1rem;
+            min-width: 60px;
+            text-align: right;
+        }
+        
+        .param-edit-btn {
+            padding: 0.3rem 0.75rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.15s;
+        }
+        
+        .param-edit-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        
+        /* Param Edit Inline */
+        .param-edit-inline {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .param-edit-inline input {
+            width: 80px;
+            padding: 0.3rem 0.5rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        
+        .param-edit-inline .btn-sm {
+            padding: 0.3rem 0.6rem;
+            font-size: 0.8rem;
+            border-radius: 4px;
+        }
+        
+        /* ==========================================
+           Device-matching dashboard components
+           ========================================== */
+        
+        /* Hero state text */
+        .hero-state-text {
+            font-size: 1.1rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        .hero-outdoor-temp {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        
+        /* Component Dots Card */
+        .dots-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-around;
+        }
+        
+        .dot-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        
+        .dot-indicator {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            transition: all 0.3s;
+        }
+        
+        .dot-indicator.on {
+            background: var(--success);
+            box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+        }
+        
+        .dot-indicator.off {
+            background: #444;
+        }
+        
+        .dot-indicator.warning {
+            background: var(--warning);
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+        }
+        
+        .dot-indicator.unknown {
+            background: transparent;
+            border: 2px dashed #555;
+        }
+        
+        /* Performance Strip (COP / Power / Fan) */
+        .perf-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-around;
+        }
+        
+        .perf-item {
+            text-align: center;
+            flex: 1;
+        }
+        
+        .perf-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.2;
+        }
+        
+        .perf-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.15rem;
+        }
+        
+        /* Expandable Panels (matches device chevron panels) */
+        .expand-panel {
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 0.75rem;
+            overflow: hidden;
+        }
+        
+        .expand-panel.error-ok {
+            border-color: var(--success);
+        }
+        
+        .expand-panel.error-active {
+            border-color: var(--error);
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), var(--bg-secondary));
+        }
+        
+        .expand-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.25rem;
+            cursor: pointer;
+            min-height: 56px;
+            transition: background 0.15s;
+            user-select: none;
+        }
+        
+        .expand-header:hover {
+            background: var(--bg-tertiary);
+        }
+        
+        .expand-header .title {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        .expand-header .chevron {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+        
+        .expand-content {
+            padding: 0 1.25rem 1.25rem;
+        }
+        
+        /* Detail Grid (value on top, label below — matches device layout) */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.75rem;
+        }
+        
+        .detail-item {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 0.75rem;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+        
+        .detail-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .detail-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        /* Responsive for new grids */
+        @media (max-width: 600px) {
+            .hero-tank-temp {
+                font-size: 3rem;
+            }
+            .hero-setpoint-value {
+                font-size: 1.5rem;
+            }
+            .hero-bottom-row {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            .setpoint-grid {
+                grid-template-columns: 1fr;
+            }
+            .temp-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .readings-grid {
+                grid-template-columns: 1fr;
+            }
+            .detail-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .dots-card {
+                gap: 0.25rem;
+            }
+            .dot-item {
+                font-size: 0.7rem;
+            }
+            .perf-value {
+                font-size: 1.2rem;
+            }
+            .param-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+            .param-value-display {
+                width: 100%;
+                justify-content: space-between;
+            }
+        }
     </style>
 </head>
 <body>
@@ -1019,63 +2200,402 @@
                 
                 <nav>
                     <button :class="{ active: page === 'dashboard' }" @click="page = 'dashboard'" x-text="t('dashboard')"></button>
+                    <button :class="{ active: page === 'parameters' }" @click="page = 'parameters'; loadParams()" x-text="t('parameters')"></button>
                     <button :class="{ active: page === 'settings' }" @click="page = 'settings'" x-text="t('settings')"></button>
                 </nav>
                 
                 <main>
                     <!-- Dashboard Page -->
                     <div x-show="page === 'dashboard'">
-                            <div class="card">
-                                <div class="card-header">
-                                    <h2 x-text="t('heatPumpStatus')"></h2>
-                                    <span class="version" x-text="t('lastUpdated') + ': ' + formatTime(lastUpdate)"></span>
-                                </div>
-                                <div class="card-body">
-                                    <div class="status-grid">
-                                        <div class="status-item">
-                                            <div class="label" x-text="t('compressor')"></div>
-                                            <div class="value" :class="heatpump.compressor ? 'on' : 'off'" x-text="heatpump.compressor ? t('on') : t('off')"></div>
-                                        </div>
-                                        <div class="status-item">
-                                            <div class="label" x-text="t('airFlowFans')"></div>
-                                            <div class="value" :class="heatpump.fans ? 'on' : 'off'" x-text="heatpump.fans ? t('on') : t('off')"></div>
-                                        </div>
-                                        <div class="status-item">
-                                            <div class="label" x-text="t('waterPump')"></div>
-                                            <div class="value" :class="heatpump.pump ? 'on' : 'off'" x-text="heatpump.pump ? t('on') : t('off')"></div>
-                                        </div>
-                                        <div class="status-item">
-                                            <div class="label" x-text="t('systemStatus')"></div>
-                                            <div class="value" :class="heatpump.error ? 'error' : 'on'" x-text="heatpump.error || t('ok')"></div>
-                                        </div>
-                                    </div>
-                                </div>
+                        <!-- Hero State Card - color-tinted background matching device -->
+                        <div class="hero-card" :style="getHeroStyle()">
+                            <!-- Top Row: State text | Timestamp -->
+                            <div class="hero-top-row">
+                                <div class="hero-state-text" :style="'color:' + getHeroTextColor()"
+                                     x-text="getHeroStateText()"></div>
+                                <span class="version" x-text="formatTime(lastUpdate)"></span>
                             </div>
                             
-                            <div class="card">
-                                <div class="card-header">
-                                    <h2 x-text="t('systemOverview')"></h2>
+                            <!-- Tank Temperature (large, centered) -->
+                            <div class="hero-tank-temp" x-text="heatpump.connected ? heatpump.temperatures.tank + '°C' : '--'"></div>
+                            <div class="hero-tank-label" x-text="t('tankTemp')"></div>
+                            
+                            <!-- Bottom Row: Outdoor temp -->
+                            <div class="hero-bottom-row">
+                                <span class="hero-outdoor-temp" x-text="heatpump.connected ? t('outdoorTemp') + ' ' + heatpump.temperatures.outdoor + '°C' : ''"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Component Dots (matches device) -->
+                        <div class="dots-card">
+                            <div class="dot-item">
+                                <div class="dot-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.compressor ? 'on' : 'off')"></div>
+                                <span x-text="t('compressor')"></span>
+                            </div>
+                            <div class="dot-item">
+                                <div class="dot-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.fans ? 'on' : 'off')"></div>
+                                <span x-text="t('airFlowFans')"></span>
+                            </div>
+                            <div class="dot-item">
+                                <div class="dot-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.pump ? 'on' : 'off')"></div>
+                                <span x-text="t('waterPump')"></span>
+                            </div>
+                            <div class="dot-item">
+                                <div class="dot-indicator" :class="!heatpump.connected ? 'unknown' : (heatpump.aux_heater ? 'warning' : 'off')"></div>
+                                <span x-text="t('auxHeater')"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Performance Strip (COP | Power | Fan — matches device) -->
+                        <div class="perf-card">
+                            <div class="perf-item">
+                                <div class="perf-value" x-text="getCOP()"></div>
+                                <div class="perf-label">COP</div>
+                            </div>
+                            <div class="perf-item">
+                                <div class="perf-value" x-text="heatpump.connected ? formatPower(heatpump.readings?.power_consumption) : '--'"></div>
+                                <div class="perf-label" x-text="t('power')"></div>
+                            </div>
+                            <div class="perf-item">
+                                <div class="perf-value" x-text="heatpump.connected ? ((heatpump.readings?.fan_rpm || 0) > 0 ? heatpump.readings.fan_rpm : t('off')) : '--'"></div>
+                                <div class="perf-label" x-text="t('airFlowFans')"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Error Card (expandable, matches device) -->
+                        <div class="expand-panel" :class="getErrorCardClass()" x-show="heatpump.connected">
+                            <div class="expand-header" @click="panels.errors = !panels.errors">
+                                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                    <span x-text="(!errors.active || errors.active.length === 0) ? '✓' : '⚠'"
+                                          :style="'font-size: 1.1rem; color: ' + ((!errors.active || errors.active.length === 0) ? 'var(--success)' : 'var(--error)')"></span>
+                                    <span class="title" x-text="(!errors.active || errors.active.length === 0) ? t('noActiveErrors') : (errors.active.length + ' ' + t('activeErrors').toLowerCase())"></span>
                                 </div>
-                                <div class="card-body">
-                                    <div class="info-row">
-                                        <span class="label" x-text="t('device')"></span>
-                                        <span class="value" x-text="info.hostname + '.local'"></span>
+                                <span class="chevron" x-text="panels.errors ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.errors">
+                                <template x-for="err in (errors.active || [])" :key="err.code">
+                                    <div class="error-item active-error">
+                                        <div class="error-header">
+                                            <span class="error-code" x-text="err.code"></span>
+                                            <span class="error-severity" :class="err.severity || 'warning'" x-text="t('error' + capitalize(err.severity || 'warning'))"></span>
+                                        </div>
+                                        <div class="error-desc" x-text="err.description"></div>
+                                        <div class="error-resolution" x-show="err.resolution" x-text="err.resolution"></div>
+                                        <div class="error-time" x-show="err.occurred" x-text="t('occurred') + ': ' + formatTimestamp(err.occurred)"></div>
                                     </div>
-                                    <div class="info-row">
-                                        <span class="label" x-text="t('uptime')"></span>
-                                        <span class="value" x-text="formatUptime(status.uptime_ms)"></span>
+                                </template>
+                                <template x-if="errors.history && errors.history.length > 0">
+                                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border);">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                            <span style="font-size: 0.85rem; color: var(--text-secondary);" x-text="t('errorHistory')"></span>
+                                            <button class="btn btn-secondary" style="padding: 0.2rem 0.6rem; font-size: 0.75rem;" @click="clearErrorHistory()" x-text="t('clearHistory')"></button>
+                                        </div>
+                                        <template x-for="err in errors.history" :key="err.code + err.occurred">
+                                            <div class="error-item cleared-error">
+                                                <div class="error-header"><span class="error-code" x-text="err.code"></span></div>
+                                                <div class="error-desc" x-text="err.description"></div>
+                                                <div class="error-time">
+                                                    <span x-text="t('occurred') + ': ' + formatTimestamp(err.occurred)"></span>
+                                                    <span x-show="err.cleared" x-text="' · ' + t('clearedAt') + ': ' + formatTimestamp(err.cleared)"></span>
+                                                </div>
+                                            </div>
+                                        </template>
                                     </div>
-                                    <div class="info-row">
-                                        <span class="label" x-text="t('currentTime')"></span>
-                                        <span class="value" x-text="status.time?.local || '--'"></span>
+                                </template>
+                            </div>
+                        </div>
+                        
+                        <!-- Expandable: Temperatures (matches device) -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.temps = !panels.temps">
+                                <span class="title" x-text="t('temperatures')"></span>
+                                <span class="chevron" x-text="panels.temps ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.temps">
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.tank + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('tankTemp')"></span>
                                     </div>
-                                    <div class="info-row">
-                                        <span class="label" x-text="t('timezone')"></span>
-                                        <span class="value" x-text="status.time?.timezone || '--'"></span>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.outlet + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('outletTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.inlet + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('inletTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.outdoor + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('outdoorTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.outdoor_coil + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('outdoorCoilTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.indoor_coil + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('indoorCoilTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.ipm + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('ipmTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.discharge + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('dischargeTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.suction + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('suctionTemp')"></span>
                                     </div>
                                 </div>
                             </div>
                         </div>
+                        
+                        <!-- Expandable: Compressor Details (matches device) -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.compressor = !panels.compressor">
+                                <span class="title" x-text="t('compressor')"></span>
+                                <span class="chevron" x-text="panels.compressor ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.compressor">
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.compressor_freq || 0) + ' Hz' : '--'"></span>
+                                        <span class="detail-label" x-text="t('compressorFreq')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.discharge + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('dischargeTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? heatpump.temperatures.suction + ' °C' : '--'"></span>
+                                        <span class="detail-label" x-text="t('suctionTemp')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.high_pressure || 0).toFixed(2) + ' MPa' : '--'"></span>
+                                        <span class="detail-label" x-text="t('highPressure')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.low_pressure || 0).toFixed(2) + ' MPa' : '--'"></span>
+                                        <span class="detail-label" x-text="t('lowPressure')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.primary_eev || 0) + ' steps' : '--'"></span>
+                                        <span class="detail-label" x-text="t('primaryEev')"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Expandable: Energy (matches device) -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.energy = !panels.energy">
+                                <span class="title" x-text="t('energy') || 'Energy'"></span>
+                                <span class="chevron" x-text="panels.energy ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.energy">
+                                <div class="detail-grid">
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? formatPower(heatpump.readings?.power_consumption) : '--'"></span>
+                                        <span class="detail-label" x-text="t('powerIn') || 'Power In'"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value">--</span>
+                                        <span class="detail-label" x-text="t('heatOut') || 'Heat Out'"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="getCOP()"></span>
+                                        <span class="detail-label">COP</span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.ac_voltage || 0) + ' V' : '--'"></span>
+                                        <span class="detail-label" x-text="t('acVoltage')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.ac_current || 0) + ' A' : '--'"></span>
+                                        <span class="detail-label" x-text="t('acCurrent')"></span>
+                                    </div>
+                                    <div class="detail-item">
+                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.secondary_eev || 0) + ' steps' : '--'"></span>
+                                        <span class="detail-label" x-text="t('secondaryEev')"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Expandable: Setpoints (web-specific controls) -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.setpoints = !panels.setpoints">
+                                <span class="title" x-text="t('setpointsTitle')"></span>
+                                <span class="chevron" x-text="panels.setpoints ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.setpoints">
+                                <div class="setpoint-grid">
+                                    <div class="setpoint-item">
+                                        <div class="label" x-text="t('coolingSetpoint')"></div>
+                                        <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.cooling + ' °C' : '-- °C'"></div>
+                                        <div class="setpoint-controls" x-show="heatpump.connected">
+                                            <button @click="adjustSetpoint('cooling', -1)" :disabled="controlLoading">−</button>
+                                            <button @click="adjustSetpoint('cooling', 1)" :disabled="controlLoading">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="setpoint-item">
+                                        <div class="label" x-text="t('heatingSetpoint')"></div>
+                                        <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.heating + ' °C' : '-- °C'"></div>
+                                        <div class="setpoint-controls" x-show="heatpump.connected">
+                                            <button @click="adjustSetpoint('heating', -1)" :disabled="controlLoading">−</button>
+                                            <button @click="adjustSetpoint('heating', 1)" :disabled="controlLoading">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="setpoint-item">
+                                        <div class="label" x-text="t('hotWaterSetpoint')"></div>
+                                        <div class="setpoint-value" x-text="heatpump.connected ? heatpump.setpoints.hot_water + ' °C' : '-- °C'"></div>
+                                        <div class="setpoint-controls" x-show="heatpump.connected">
+                                            <button @click="adjustSetpoint('hot_water', -1)" :disabled="controlLoading">−</button>
+                                            <button @click="adjustSetpoint('hot_water', 1)" :disabled="controlLoading">+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Expandable: System Overview -->
+                        <div class="expand-panel">
+                            <div class="expand-header" @click="panels.system = !panels.system">
+                                <span class="title" x-text="t('systemOverview')"></span>
+                                <span class="chevron" x-text="panels.system ? '▾' : '▸'"></span>
+                            </div>
+                            <div class="expand-content" x-show="panels.system">
+                                <div class="info-row">
+                                    <span class="label" x-text="t('device')"></span>
+                                    <span class="value" x-text="info.hostname + '.local'"></span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="label" x-text="t('uptime')"></span>
+                                    <span class="value" x-text="formatUptime(status.uptime_ms)"></span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="label" x-text="t('currentTime')"></span>
+                                    <span class="value" x-text="status.time?.local || '--'"></span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="label" x-text="t('timezone')"></span>
+                                    <span class="value" x-text="status.time?.timezone || '--'"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Control Page -->
+                    <div x-show="page === 'parameters'">
+                        <!-- Power Button: simple click ON, hold-to-confirm OFF -->
+                        <div class="power-hold-card">
+                            <!-- Turn ON: simple click -->
+                            <button x-show="!heatpump.unit_on"
+                                    class="power-hold-btn off"
+                                    :disabled="!heatpump.connected || controlLoading"
+                                    @click="togglePower()">
+                                <span class="btn-content">⏻ <span x-text="t('turnOn')"></span></span>
+                            </button>
+                            <!-- Turn OFF: hold to confirm -->
+                            <button x-show="heatpump.unit_on"
+                                    class="power-hold-btn on"
+                                    :class="powerHolding ? 'holding' : ''"
+                                    :disabled="!heatpump.connected || controlLoading"
+                                    @mousedown.prevent="startPowerHold()"
+                                    @mouseup.prevent="cancelPowerHold()"
+                                    @mouseleave="cancelPowerHold()"
+                                    @touchstart.prevent="startPowerHold()"
+                                    @touchend.prevent="cancelPowerHold()"
+                                    @touchcancel="cancelPowerHold()">
+                                <span class="btn-content">
+                                    <span x-show="!powerHolding">
+                                        ⏻ <span x-text="t('holdToTurnOff')"></span>
+                                    </span>
+                                    <span x-show="powerHolding">
+                                        ⏻ <span class="power-hold-countdown" x-text="powerCountdown"></span>
+                                    </span>
+                                </span>
+                            </button>
+                        </div>
+
+                        <!-- Mode Selector -->
+                        <div class="power-hold-card" style="text-align: left;">
+                            <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;" x-text="t('modeSelect')"></div>
+                            <select style="width: 100%; padding: 0.75rem 1rem; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; font-size: 1rem;"
+                                    :disabled="!heatpump.connected || !heatpump.unit_on || controlLoading"
+                                    @change="setMode(heatpump.mode)"
+                                    x-model="heatpump.mode">
+                                <template x-for="m in modes" :key="m.value">
+                                    <option :value="m.value" x-text="t(m.label)"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h2 x-text="t('paramEditor')"></h2>
+                                <button class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" @click="loadParams()" :disabled="paramsLoading">
+                                    🔄 <span x-text="paramsLoading ? t('loadingParams') : t('checkForUpdates').split(' ')[0]"></span>
+                                </button>
+                            </div>
+                            <div class="card-body">
+                                <template x-if="paramsLoading && Object.keys(params).length === 0">
+                                    <div style="text-align: center; color: var(--text-secondary); padding: 2rem;">
+                                        ⏳ <span x-text="t('loadingParams')"></span>
+                                    </div>
+                                </template>
+                                
+                                <template x-if="!paramsLoading && !paramsConnected">
+                                    <div style="text-align: center; color: var(--text-secondary); padding: 2rem;">
+                                        ⚠️ <span x-text="t('noParams')"></span>
+                                    </div>
+                                </template>
+                                
+                                <template x-if="paramsConnected && Object.keys(params).length > 0">
+                                    <div>
+                                        <template x-for="cat in paramCategories" :key="cat.key">
+                                            <div class="param-category" x-show="getParamsByCategory(cat.key).length > 0">
+                                                <h3 x-text="t(cat.label)"></h3>
+                                                <template x-for="[key, p] in getParamsByCategory(cat.key)" :key="key">
+                                                    <div class="param-item">
+                                                        <div class="param-info">
+                                                            <div class="param-name" x-text="p.name"></div>
+                                                            <div class="param-meta">
+                                                                <span class="param-pcode" x-text="p.p_code"></span>
+                                                                <span x-text="t('range') + ': ' + p.min + ' – ' + p.max + ' ' + p.unit"></span>
+                                                            </div>
+                                                        </div>
+                                                        <div class="param-value-display">
+                                                            <template x-if="editingParam !== key">
+                                                                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                                                    <span class="param-value" x-text="(p.value !== null ? p.value : '--') + ' ' + p.unit"></span>
+                                                                    <button class="param-edit-btn" @click="startEditParam(key, p)" x-text="t('editParam')"></button>
+                                                                </div>
+                                                            </template>
+                                                            <template x-if="editingParam === key">
+                                                                <div class="param-edit-inline">
+                                                                    <input type="number" 
+                                                                           x-model.number="editingParamValue" 
+                                                                           :min="p.min" :max="p.max"
+                                                                           @keydown.enter="saveParam(key)"
+                                                                           @keydown.escape="editingParam = null">
+                                                                    <button class="btn btn-primary btn-sm" @click="saveParam(key)" :disabled="controlLoading" x-text="t('save')"></button>
+                                                                    <button class="btn btn-secondary btn-sm" @click="editingParam = null" x-text="t('cancel')"></button>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
                     
                     <!-- Settings Page -->
                     <div x-show="page === 'settings'">
@@ -1416,14 +2936,63 @@
                 lastUpdate: null,
                 lang: localStorage.getItem('arctic_lang') || navigator.language.slice(0, 2) || 'en',
                 
+                // Expandable panel state (matches device dashboard layout)
+                panels: { errors: false, temps: false, compressor: false, energy: false, setpoints: false, system: false },
+                
                 loginForm: { username: '', password: '' },
                 loginError: '',
                 
                 info: { version: '--', platform: '--', hostname: 'arctic', free_heap: 0 },
                 status: { uptime_ms: 0, time: {} },
                 wifi: {},
-                heatpump: { compressor: false, fans: false, pump: false, error: null },
+                heatpump: { 
+                    connected: false, 
+                    unit_on: false,
+                    mode: 'unknown',
+                    defrosting: false,
+                    compressor: false, 
+                    fans: false, 
+                    fan_speed: 0,
+                    pump: false, 
+                    aux_heater: false,
+                    temperatures: { tank: 0, outlet: 0, inlet: 0, outdoor: 0, discharge: 0, suction: 0, outdoor_coil: 0, indoor_coil: 0, ipm: 0 },
+                    setpoints: { cooling: 0, heating: 0, hot_water: 0 },
+                    readings: { compressor_freq: 0, fan_rpm: 0, ac_voltage: 0, ac_current: 0, high_pressure: 0, low_pressure: 0, primary_eev: 0, secondary_eev: 0, power_consumption: 0 },
+                    has_error: false,
+                    error: null 
+                },
                 ota: { state: 'idle', progress: 0, current_version: '--' },
+                
+                // Heat pump control state
+                controlLoading: false,
+                powerHolding: false,
+                powerCountdown: 3,
+                powerHoldTimer: null,
+                powerCountdownInterval: null,
+                modes: [
+                    { value: 'cooling', label: 'cooling' },
+                    { value: 'floor_heating', label: 'floorHeating' },
+                    { value: 'fan_coil_heating', label: 'fanCoilHeating' },
+                    { value: 'hot_water', label: 'hotWater' },
+                    { value: 'auto', label: 'auto' }
+                ],
+                
+                // Error state
+                errors: { active: [], history: [] },
+                
+                // Parameters state
+                params: {},
+                paramsConnected: false,
+                paramsLoading: false,
+                editingParam: null,
+                editingParamValue: 0,
+                paramCategories: [
+                    { key: 'EEV', label: 'catEev' },
+                    { key: 'Defrost', label: 'catDefrost' },
+                    { key: 'Protection', label: 'catProtection' },
+                    { key: 'Auto Mode', label: 'catAutoMode' },
+                    { key: 'Pump & Valve', label: 'catPumpValve' }
+                ],
                 
                 // GitHub update state
                 github: {
@@ -1497,6 +3066,18 @@
                     localStorage.setItem('arctic_lang', lang);
                 },
                 
+                // Central fetch wrapper - reloads page on 401 (session expired after device reboot)
+                async apiFetch(url, options) {
+                    const res = await fetch(url, options);
+                    if (res.status === 401) {
+                        console.warn('Session expired (401), reloading page...');
+                        location.reload();
+                        // Return a never-resolving promise to stop further processing
+                        return new Promise(() => {});
+                    }
+                    return res;
+                },
+                
                 async checkAuth() {
                     try {
                         const res = await fetch('/api/auth/status');
@@ -1539,7 +3120,8 @@
                         this.loadOta(),
                         this.loadTimeConfig(),
                         this.loadSecurity(),
-                        this.loadHeatpump()
+                        this.loadHeatpump(),
+                        this.loadErrors()
                     ]);
                     this.dataLoaded = true;
                     this.lastUpdate = Date.now();
@@ -1570,6 +3152,7 @@
                         if (!otaActive) {
                             await this.loadStatus();
                             await this.loadHeatpump();
+                            await this.loadErrors();
                             this.lastUpdate = Date.now();
                         }
                         
@@ -1580,35 +3163,35 @@
                 
                 async loadInfo() {
                     try {
-                        const res = await fetch('/api/info');
+                        const res = await this.apiFetch('/api/info');
                         this.info = await res.json();
                     } catch (e) { console.error(e); }
                 },
                 
                 async loadStatus() {
                     try {
-                        const res = await fetch('/api/status');
+                        const res = await this.apiFetch('/api/status');
                         this.status = await res.json();
                     } catch (e) { console.error(e); }
                 },
                 
                 async loadWifi() {
                     try {
-                        const res = await fetch('/api/wifi');
+                        const res = await this.apiFetch('/api/wifi');
                         this.wifi = await res.json();
                     } catch (e) { console.error(e); }
                 },
                 
                 async loadOta() {
                     try {
-                        const res = await fetch('/api/ota/status');
+                        const res = await this.apiFetch('/api/ota/status');
                         this.ota = await res.json();
                     } catch (e) { console.error(e); }
                 },
                 
                 async loadTimeConfig() {
                     try {
-                        const res = await fetch('/api/time/config');
+                        const res = await this.apiFetch('/api/time/config');
                         const data = await res.json();
                         // Store what we're loading BEFORE setting reactive properties
                         // This prevents race conditions with @change handlers
@@ -1625,7 +3208,7 @@
                 
                 async loadSecurity() {
                     try {
-                        const res = await fetch('/api/auth/config');
+                        const res = await this.apiFetch('/api/auth/config');
                         const data = await res.json();
                         // Map snake_case response to camelCase UI model
                         this.security.webAuthEnabled = data.web_auth_enabled || false;
@@ -1633,7 +3216,7 @@
                         this.security.username = data.username || '';
                         
                         // Also fetch the API key (requires authentication)
-                        const keyRes = await fetch('/api/auth/apikey');
+                        const keyRes = await this.apiFetch('/api/auth/apikey');
                         if (keyRes.ok) {
                             const keyData = await keyRes.json();
                             this.security.apiKey = keyData.api_key || '';
@@ -1643,11 +3226,27 @@
                 
                 async loadHeatpump() {
                     try {
-                        const res = await fetch('/api/heatpump/status');
-                        this.heatpump = await res.json();
+                        const res = await this.apiFetch('/api/heatpump/status');
+                        const data = await res.json();
+                        // Merge with defaults to ensure all properties exist
+                        this.heatpump = {
+                            connected: data.connected || false,
+                            unit_on: data.unit_on || false,
+                            mode: data.mode || 'unknown',
+                            defrosting: data.defrosting || false,
+                            compressor: data.compressor || false,
+                            fans: data.fans || false,
+                            fan_speed: data.fan_speed || 0,
+                            pump: data.pump || false,
+                            aux_heater: data.aux_heater || false,
+                            temperatures: data.temperatures || { tank: 0, outlet: 0, inlet: 0, outdoor: 0, discharge: 0, suction: 0, outdoor_coil: 0, indoor_coil: 0, ipm: 0 },
+                            setpoints: data.setpoints || { cooling: 0, heating: 0, hot_water: 0 },
+                            readings: data.readings || { compressor_freq: 0, fan_rpm: 0, ac_voltage: 0, ac_current: 0, high_pressure: 0, low_pressure: 0, primary_eev: 0, secondary_eev: 0, power_consumption: 0 },
+                            has_error: data.has_error || false,
+                            error: data.error || null
+                        };
                     } catch (e) { 
-                        // Placeholder - endpoint might not exist yet
-                        this.heatpump = { compressor: false, fans: false, pump: false, error: null };
+                        console.error('Failed to load heatpump status:', e);
                     }
                 },
                 
@@ -1656,7 +3255,7 @@
                     this.github.error = '';
                     
                     try {
-                        const res = await fetch('/api/ota/releases');
+                        const res = await this.apiFetch('/api/ota/releases');
                         if (!res.ok) {
                             const err = await res.json();
                             this.github.error = err.error || this.t('checkFailed');
@@ -1682,7 +3281,7 @@
                     
                     this.loading = true;
                     try {
-                        const res = await fetch('/api/ota/github', { method: 'POST' });
+                        const res = await this.apiFetch('/api/ota/github', { method: 'POST' });
                         if (!res.ok) {
                             const err = await res.json();
                             this.showToast(err.error || 'Update failed', 'error');
@@ -1705,7 +3304,7 @@
                         return;
                     }
                     try {
-                        await fetch('/api/time/config', {
+                        await this.apiFetch('/api/time/config', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1722,7 +3321,7 @@
                 async syncTime() {
                     this.loading = true;
                     try {
-                        await fetch('/api/time/sync', { method: 'POST' });
+                        await this.apiFetch('/api/time/sync', { method: 'POST' });
                         await this.loadTimeConfig();
                     } catch (e) { console.error(e); }
                     this.loading = false;
@@ -1730,7 +3329,7 @@
                 
                 async saveSecurityConfig() {
                     try {
-                        const res = await fetch('/api/auth/config', {
+                        const res = await this.apiFetch('/api/auth/config', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1779,7 +3378,7 @@
                 async saveCredentials() {
                     this.loading = true;
                     try {
-                        await fetch('/api/auth/credentials', {
+                        await this.apiFetch('/api/auth/credentials', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -1812,7 +3411,7 @@
                 async regenerateApiKey() {
                     if (!confirm(this.t('regenerateConfirm'))) return;
                     try {
-                        const res = await fetch('/api/auth/apikey/regenerate', { method: 'POST' });
+                        const res = await this.apiFetch('/api/auth/apikey/regenerate', { method: 'POST' });
                         const data = await res.json();
                         this.security.apiKey = data.api_key;
                     } catch (e) { console.error(e); }
@@ -1948,8 +3547,308 @@
                 
                 async reboot() {
                     if (!confirm(this.t('rebootConfirm'))) return;
-                    await fetch('/api/ota/reboot', { method: 'POST' });
+                    await this.apiFetch('/api/ota/reboot', { method: 'POST' });
                     this.showToast(this.t('rebootingMsg'), 'info', 5000);
+                },
+                
+                // ==========================================
+                // Heat Pump Control Methods
+                // ==========================================
+                
+                startPowerHold() {
+                    if (!this.heatpump.connected || this.controlLoading) return;
+                    this.powerHolding = true;
+                    this.powerCountdown = 3;
+                    
+                    // Countdown ticker: 3 → 2 → 1
+                    this.powerCountdownInterval = setInterval(() => {
+                        this.powerCountdown--;
+                        if (this.powerCountdown <= 0) {
+                            clearInterval(this.powerCountdownInterval);
+                            this.powerCountdownInterval = null;
+                        }
+                    }, 1000);
+                    
+                    // Fire after 3 seconds
+                    this.powerHoldTimer = setTimeout(() => {
+                        this.powerHolding = false;
+                        this.powerCountdown = 3;
+                        if (this.powerCountdownInterval) {
+                            clearInterval(this.powerCountdownInterval);
+                            this.powerCountdownInterval = null;
+                        }
+                        this.togglePower();
+                    }, 3000);
+                },
+                
+                cancelPowerHold() {
+                    if (!this.powerHolding) return;
+                    this.powerHolding = false;
+                    this.powerCountdown = 3;
+                    if (this.powerHoldTimer) {
+                        clearTimeout(this.powerHoldTimer);
+                        this.powerHoldTimer = null;
+                    }
+                    if (this.powerCountdownInterval) {
+                        clearInterval(this.powerCountdownInterval);
+                        this.powerCountdownInterval = null;
+                    }
+                },
+                
+                async togglePower() {
+                    this.controlLoading = true;
+                    try {
+                        const res = await this.apiFetch('/api/heatpump/power', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ on: !this.heatpump.unit_on })
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            this.heatpump.unit_on = data.on;
+                            this.showToast(data.on ? this.t('turnOn') : this.t('turnOff'), 'success');
+                        }
+                    } catch (e) { console.error(e); }
+                    this.controlLoading = false;
+                    await this.loadHeatpump();
+                },
+                
+                async setMode(mode) {
+                    this.controlLoading = true;
+                    try {
+                        const res = await this.apiFetch('/api/heatpump/mode', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ mode })
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            this.heatpump.mode = data.mode;
+                        }
+                    } catch (e) { console.error(e); }
+                    this.controlLoading = false;
+                    await this.loadHeatpump();
+                },
+                
+                async adjustSetpoint(type, delta) {
+                    const current = this.heatpump.setpoints[type];
+                    if (current === undefined) return;
+                    
+                    const newVal = current + delta;
+                    this.controlLoading = true;
+                    try {
+                        const body = {};
+                        body[type] = newVal;
+                        const res = await this.apiFetch('/api/heatpump/setpoints', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body)
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            this.heatpump.setpoints[type] = newVal;
+                            this.showToast(this.t('setpointSaved'), 'success');
+                        } else {
+                            this.showToast(this.t('setpointFailed'), 'error');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast(this.t('setpointFailed'), 'error');
+                    }
+                    this.controlLoading = false;
+                },
+                
+                // ==========================================
+                // Error Methods
+                // ==========================================
+                
+                async loadErrors() {
+                    try {
+                        const res = await this.apiFetch('/api/heatpump/errors');
+                        const data = await res.json();
+                        this.errors = {
+                            active: data.active || [],
+                            history: data.history || []
+                        };
+                    } catch (e) { console.error(e); }
+                },
+                
+                async clearErrorHistory() {
+                    try {
+                        await this.apiFetch('/api/heatpump/errors/history', { method: 'DELETE' });
+                        this.errors.history = [];
+                        this.showToast(this.t('clearHistory'), 'success');
+                    } catch (e) { console.error(e); }
+                },
+                
+                // ==========================================
+                // Parameters Methods
+                // ==========================================
+                
+                async loadParams() {
+                    this.paramsLoading = true;
+                    try {
+                        const res = await this.apiFetch('/api/heatpump/params');
+                        const data = await res.json();
+                        this.paramsConnected = data.connected || false;
+                        this.params = data.params || {};
+                    } catch (e) {
+                        console.error(e);
+                        this.paramsConnected = false;
+                    }
+                    this.paramsLoading = false;
+                },
+                
+                getParamsByCategory(category) {
+                    return Object.entries(this.params).filter(([k, p]) => p.category === category);
+                },
+                
+                startEditParam(key, p) {
+                    this.editingParam = key;
+                    this.editingParamValue = p.value !== null ? p.value : 0;
+                },
+                
+                async saveParam(key) {
+                    this.controlLoading = true;
+                    try {
+                        const res = await this.apiFetch('/api/heatpump/params/' + key, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'text/plain' },
+                            body: String(this.editingParamValue)
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            // Update local value
+                            if (this.params[key]) {
+                                this.params[key].value = this.editingParamValue;
+                            }
+                            this.editingParam = null;
+                            this.showToast(this.t('paramSaved'), 'success');
+                        } else {
+                            this.showToast(data.error || this.t('paramFailed'), 'error');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast(this.t('paramFailed'), 'error');
+                    }
+                    this.controlLoading = false;
+                },
+                
+                capitalize(str) {
+                    if (!str) return '';
+                    return str.charAt(0).toUpperCase() + str.slice(1);
+                },
+                
+                formatTimestamp(ts) {
+                    if (!ts) return '--';
+                    return new Date(ts * 1000).toLocaleString();
+                },
+                
+                // ==========================================
+                // Hero State (matches device color scheme)
+                // ==========================================
+                
+                getHeroState() {
+                    if (!this.heatpump.connected) return 'disconnected';
+                    if (this.errors.active && this.errors.active.length > 0) return 'fault';
+                    if (!this.heatpump.unit_on) return 'standby';
+                    if (this.heatpump.defrosting) return 'defrost';
+                    if (this.heatpump.compressor) {
+                        if (this.heatpump.mode === 'cooling') return 'cooling';
+                        if (this.heatpump.mode === 'hot_water') return 'hotwater';
+                        return 'heating';
+                    }
+                    return 'idle';
+                },
+                
+                getHeroStyle() {
+                    const state = this.getHeroState();
+                    const styles = {
+                        heating:      { bg: 'rgba(249,115,22,0.15)', border: '#f97316' },
+                        cooling:      { bg: 'rgba(59,130,246,0.15)', border: '#3b82f6' },
+                        hotwater:     { bg: 'rgba(239,68,68,0.12)', border: '#ef4444' },
+                        defrost:      { bg: 'rgba(139,92,246,0.15)', border: '#8b5cf6' },
+                        fault:        { bg: 'rgba(239,68,68,0.2)', border: '#ef4444' },
+                        disconnected: { bg: '', border: '#ef4444' },
+                        standby:      { bg: '', border: '' },
+                        idle:         { bg: '', border: '' }
+                    };
+                    const s = styles[state] || {};
+                    let css = '';
+                    if (s.bg) css += 'background:' + s.bg + ';';
+                    if (s.border) css += 'border-color:' + s.border + ';';
+                    return css;
+                },
+                
+                getHeroStateText() {
+                    const state = this.getHeroState();
+                    const m = this.heatpump.mode;
+                    const labels = {
+                        disconnected: this.t('disconnected'),
+                        fault: '⚠ ' + this.t('activeErrors'),
+                        standby: this.t('standby'),
+                        defrost: this.t('defrost'),
+                        cooling: this.t('cooling'),
+                        hotwater: this.t('hotWater'),
+                        heating: m === 'floor_heating' ? this.t('floorHeating') :
+                                 m === 'fan_coil_heating' ? this.t('fanCoilHeating') :
+                                 this.t('floorHeating'),
+                        idle: this.t('standby')
+                    };
+                    return labels[state] || '--';
+                },
+                
+                getHeroTextColor() {
+                    const state = this.getHeroState();
+                    const colors = {
+                        disconnected: '#ef4444',
+                        fault: '#ef4444',
+                        standby: '#888888',
+                        idle: '#888888',
+                        heating: '#f97316',
+                        cooling: '#3b82f6',
+                        hotwater: '#ef4444',
+                        defrost: '#8b5cf6'
+                    };
+                    return colors[state] || '#eaeaea';
+                },
+                
+                getCOP() {
+                    // COP will be computed when energy monitoring is implemented
+                    return '--';
+                },
+                
+                getErrorCardClass() {
+                    if (!this.errors.active || this.errors.active.length === 0) return 'error-ok';
+                    return 'error-active';
+                },
+                
+                // Maps the current operating mode to the corresponding setpoint key
+                getActiveSetpointKey() {
+                    const mode = this.heatpump.mode;
+                    if (mode === 'cooling') return 'cooling';
+                    if (mode === 'hot_water') return 'hot_water';
+                    return 'heating'; // floor_heating, fan_coil_heating, auto all use heating
+                },
+                
+                // Returns the translated label for the active setpoint
+                getActiveSetpointLabel() {
+                    const mode = this.heatpump.mode;
+                    if (mode === 'cooling') return this.t('coolingSetpoint');
+                    if (mode === 'hot_water') return this.t('hotWaterSetpoint');
+                    return this.t('heatingSetpoint');
+                },
+                
+                // Returns the numeric value of the active setpoint
+                getActiveSetpointValue() {
+                    const key = this.getActiveSetpointKey();
+                    return this.heatpump.setpoints[key] ?? '--';
+                },
+                
+                formatPower(watts) {
+                    if (!watts && watts !== 0) return '--';
+                    if (watts >= 1000) return (watts / 1000).toFixed(1) + ' kW';
+                    return watts + ' W';
                 },
                 
                 formatUptime(ms) {
