@@ -28,7 +28,7 @@ info:
     The API key can be retrieved from the web interface settings.
     
     Both authentication types can be independently enabled/disabled via `/api/auth/config`.
-  version: 2.0.0
+  version: 2.1.0
   contact:
     name: Arctic Controller
   license:
