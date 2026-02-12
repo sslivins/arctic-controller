@@ -271,6 +271,30 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_LABEL_LO_PRESS] = "LOW PRESS",
     [STR_HP_LABEL_POWER_IN] = "POWER IN",
     [STR_HP_LABEL_HEAT_OUT] = "HEAT OUT",
+
+    // Event Log
+    [STR_EVENT_LOG] = "Events",
+    [STR_EVENT_SYSTEM_START] = "System Start",
+    [STR_EVENT_POWER_ON] = "Power ON",
+    [STR_EVENT_POWER_OFF] = "Power OFF",
+    [STR_EVENT_MODE_CHANGED] = "Mode Changed",
+    [STR_EVENT_SETPOINT_CHANGED] = "Setpoint Changed",
+    [STR_EVENT_COMPRESSOR_ON] = "Compressor ON",
+    [STR_EVENT_COMPRESSOR_OFF] = "Compressor OFF",
+    [STR_EVENT_FAN_ON] = "Fan ON",
+    [STR_EVENT_FAN_OFF] = "Fan OFF",
+    [STR_EVENT_PUMP_ON] = "Water Pump ON",
+    [STR_EVENT_PUMP_OFF] = "Water Pump OFF",
+    [STR_EVENT_AUX_HEATER_ON] = "Aux Heater ON",
+    [STR_EVENT_AUX_HEATER_OFF] = "Aux Heater OFF",
+    [STR_EVENT_DEFROST_START] = "Defrost Start",
+    [STR_EVENT_DEFROST_END] = "Defrost End",
+    [STR_EVENT_ERROR_APPEARED] = "Error Appeared",
+    [STR_EVENT_ERROR_CLEARED] = "Error Cleared",
+    [STR_EVENT_CONNECTED] = "Connected",
+    [STR_EVENT_DISCONNECTED] = "Disconnected",
+    [STR_EVENT_CLEAR] = "Clear Events",
+    [STR_EVENT_NO_EVENTS] = "No events recorded",
 };
 
 // French strings
@@ -523,6 +547,30 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_LABEL_LO_PRESS] = "BASSE PR.",
     [STR_HP_LABEL_POWER_IN] = "PUISS. IN",
     [STR_HP_LABEL_HEAT_OUT] = "CHALEUR",
+
+    // Event Log
+    [STR_EVENT_LOG] = "Événements",
+    [STR_EVENT_SYSTEM_START] = "Démarrage système",
+    [STR_EVENT_POWER_ON] = "Mise en marche",
+    [STR_EVENT_POWER_OFF] = "Arrêt",
+    [STR_EVENT_MODE_CHANGED] = "Mode changé",
+    [STR_EVENT_SETPOINT_CHANGED] = "Consigne modifiée",
+    [STR_EVENT_COMPRESSOR_ON] = "Compresseur ON",
+    [STR_EVENT_COMPRESSOR_OFF] = "Compresseur OFF",
+    [STR_EVENT_FAN_ON] = "Ventilateur ON",
+    [STR_EVENT_FAN_OFF] = "Ventilateur OFF",
+    [STR_EVENT_PUMP_ON] = "Pompe à eau ON",
+    [STR_EVENT_PUMP_OFF] = "Pompe à eau OFF",
+    [STR_EVENT_AUX_HEATER_ON] = "Chauff. aux ON",
+    [STR_EVENT_AUX_HEATER_OFF] = "Chauff. aux OFF",
+    [STR_EVENT_DEFROST_START] = "Début dégivrage",
+    [STR_EVENT_DEFROST_END] = "Fin dégivrage",
+    [STR_EVENT_ERROR_APPEARED] = "Erreur apparue",
+    [STR_EVENT_ERROR_CLEARED] = "Erreur effacée",
+    [STR_EVENT_CONNECTED] = "Connecté",
+    [STR_EVENT_DISCONNECTED] = "Déconnecté",
+    [STR_EVENT_CLEAR] = "Effacer événements",
+    [STR_EVENT_NO_EVENTS] = "Aucun événement",
 };
 
 // Spanish strings
@@ -775,6 +823,30 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_LABEL_LO_PRESS] = "PRES. BAJA",
     [STR_HP_LABEL_POWER_IN] = "POT. ENTR.",
     [STR_HP_LABEL_HEAT_OUT] = "CALOR",
+
+    // Event Log
+    [STR_EVENT_LOG] = "Eventos",
+    [STR_EVENT_SYSTEM_START] = "Inicio del sistema",
+    [STR_EVENT_POWER_ON] = "Encendido",
+    [STR_EVENT_POWER_OFF] = "Apagado",
+    [STR_EVENT_MODE_CHANGED] = "Modo cambiado",
+    [STR_EVENT_SETPOINT_CHANGED] = "Consigna cambiada",
+    [STR_EVENT_COMPRESSOR_ON] = "Compresor ON",
+    [STR_EVENT_COMPRESSOR_OFF] = "Compresor OFF",
+    [STR_EVENT_FAN_ON] = "Ventilador ON",
+    [STR_EVENT_FAN_OFF] = "Ventilador OFF",
+    [STR_EVENT_PUMP_ON] = "Bomba de agua ON",
+    [STR_EVENT_PUMP_OFF] = "Bomba de agua OFF",
+    [STR_EVENT_AUX_HEATER_ON] = "Calef. aux ON",
+    [STR_EVENT_AUX_HEATER_OFF] = "Calef. aux OFF",
+    [STR_EVENT_DEFROST_START] = "Inicio descongelación",
+    [STR_EVENT_DEFROST_END] = "Fin descongelación",
+    [STR_EVENT_ERROR_APPEARED] = "Error detectado",
+    [STR_EVENT_ERROR_CLEARED] = "Error eliminado",
+    [STR_EVENT_CONNECTED] = "Conectado",
+    [STR_EVENT_DISCONNECTED] = "Desconectado",
+    [STR_EVENT_CLEAR] = "Borrar eventos",
+    [STR_EVENT_NO_EVENTS] = "Sin eventos registrados",
 };
 
 // Language names in their own language (native names)

@@ -297,6 +297,32 @@ typedef enum {
     STR_HP_LABEL_HEAT_OUT,
 
     // ========================================================================
+    // Event Log
+    // ========================================================================
+    STR_EVENT_LOG,
+    STR_EVENT_SYSTEM_START,
+    STR_EVENT_POWER_ON,
+    STR_EVENT_POWER_OFF,
+    STR_EVENT_MODE_CHANGED,
+    STR_EVENT_SETPOINT_CHANGED,
+    STR_EVENT_COMPRESSOR_ON,
+    STR_EVENT_COMPRESSOR_OFF,
+    STR_EVENT_FAN_ON,
+    STR_EVENT_FAN_OFF,
+    STR_EVENT_PUMP_ON,
+    STR_EVENT_PUMP_OFF,
+    STR_EVENT_AUX_HEATER_ON,
+    STR_EVENT_AUX_HEATER_OFF,
+    STR_EVENT_DEFROST_START,
+    STR_EVENT_DEFROST_END,
+    STR_EVENT_ERROR_APPEARED,
+    STR_EVENT_ERROR_CLEARED,
+    STR_EVENT_CONNECTED,
+    STR_EVENT_DISCONNECTED,
+    STR_EVENT_CLEAR,
+    STR_EVENT_NO_EVENTS,
+
+    // ========================================================================
     // Must be last - used for array sizing
     // ========================================================================
     STR_COUNT
