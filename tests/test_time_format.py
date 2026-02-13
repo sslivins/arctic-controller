@@ -28,6 +28,10 @@ def _is_24h(text: str) -> bool:
     return bool(_24H_PATTERN.match(text.strip()))
 
 
+# Capture the initial time format so we can restore it after tests
+_initial_format_24h = None
+
+
 def _navigate_to_time_screen(device: DeviceClient):
     """Open settings → time sub-screen."""
     device.click(tag="settings")
@@ -56,6 +60,10 @@ def _get_main_screen_time_text(device: DeviceClient) -> str:
 
 def test_toggle_to_24h_format(device: DeviceClient):
     """Toggling the switch to 24h should change the time preview format."""
+    global _initial_format_24h
+    if _initial_format_24h is None:
+        _initial_format_24h = device.get_preferences()["format_24h"]
+
     _navigate_to_time_screen(device)
 
     # Read current switch state
@@ -183,16 +191,15 @@ def test_main_screen_shows_12h(device: DeviceClient):
 
 
 def test_restore_time_format(device: DeviceClient):
-    """Restore 24h format (default) so other tests aren't affected."""
+    """Restore time format to whatever it was before the tests ran."""
+    target = _initial_format_24h if _initial_format_24h is not None else False
     prefs = device.get_preferences()
 
-    if not prefs.get("format_24h", True):
+    if prefs["format_24h"] != target:
         _navigate_to_time_screen(device)
-        sw = device.find_widget(tag="time_format_switch")
-        if not sw.checked:
-            device.toggle("time_format_switch")
-            time.sleep(0.5)
+        device.toggle("time_format_switch")
+        time.sleep(0.5)
 
     prefs = device.get_preferences()
-    assert prefs["format_24h"] is True, \
-        f"Expected format_24h=True after restore, got {prefs['format_24h']}"
+    assert prefs["format_24h"] == target, \
+        f"Expected format_24h={target} after restore, got {prefs['format_24h']}"
