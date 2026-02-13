@@ -305,6 +305,7 @@ static void create_content(void)
     lv_obj_set_style_text_font(s_state.preview_label, &lv_font_montserrat_32, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_state.preview_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(s_state.preview_label, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_set_user_data(s_state.preview_label, (void*)"time_preview");
     
     // Sync status (right)
     s_state.sync_status_label = lv_label_create(time_row);

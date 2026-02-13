@@ -2502,6 +2502,7 @@ static esp_err_t preferences_get_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(root, "brightness", display_screen_get_brightness());
     cJSON_AddStringToObject(root, "language",
         i18n_get_language_name(i18n_get_language()));
+    cJSON_AddBoolToObject(root, "format_24h", time_mgr_get_24h_format());
 
     char* json = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json);
