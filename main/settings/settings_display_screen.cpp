@@ -370,3 +370,22 @@ void display_screen_init_brightness(void)
     
     ESP_LOGI(TAG, "Initialized display brightness to %d%%", brightness);
 }
+
+int display_screen_get_brightness(void)
+{
+    // If screen has been created, use live state
+    if (s_state.current_brightness > 0) {
+        return s_state.current_brightness;
+    }
+    // Otherwise read from NVS
+    nvs_handle_t nvs;
+    int brightness = DEFAULT_BRIGHTNESS;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        uint8_t val = DEFAULT_BRIGHTNESS;
+        nvs_get_u8(nvs, NVS_KEY_BRIGHTNESS, &val);
+        brightness = val;
+        nvs_close(nvs);
+    }
+    return brightness;
+}

@@ -62,6 +62,11 @@ def test_change_brightness(device: DeviceClient):
     assert slider.value == new_value, \
         f"Expected slider value {new_value}, got {slider.value}"
 
+    # Verify the actual display brightness via the permanent API
+    actual = device.get_brightness()
+    assert actual == new_value, \
+        f"Expected device brightness {new_value}%, got {actual}%"
+
 
 def test_restore_brightness(device: DeviceClient):
     """Restore brightness to 80% (default) after test."""
@@ -78,6 +83,10 @@ def test_restore_brightness(device: DeviceClient):
     result = device.set_slider("brightness_slider", 80)
     assert result["success"] is True
     assert result["value"] == 80
+
+    # Verify brightness was actually applied
+    actual = device.get_brightness()
+    assert actual == 80, f"Expected device brightness 80%, got {actual}%"
 
     time.sleep(0.5)
     value_label = device.find_widget(tag="brightness_value")

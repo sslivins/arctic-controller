@@ -3,6 +3,7 @@
  * REST API Server with mDNS, Web Interface, and Authentication
  */
 #include "api_server.h"
+#include "settings/settings_display_screen.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
 #include "ota_manager.h"
@@ -81,6 +82,7 @@ static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req);
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
+static esp_err_t display_brightness_get_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -629,6 +631,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(events_clear_uri);
+
+    // GET /api/display/brightness - Get current display brightness
+    httpd_uri_t display_brightness_uri = {
+        .uri = "/api/display/brightness",
+        .method = HTTP_GET,
+        .handler = display_brightness_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(display_brightness_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
     test_endpoints_register(server);
@@ -2452,5 +2463,19 @@ static esp_err_t events_clear_handler(httpd_req_t* req)
     
     event_log_clear();
     httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// ============================================================================
+// Display API
+// ============================================================================
+
+static esp_err_t display_brightness_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    int brightness = display_screen_get_brightness();
+    char buf[64];
+    snprintf(buf, sizeof(buf), "{\"brightness\":%d}", brightness);
+    httpd_resp_sendstr(req, buf);
     return ESP_OK;
 }

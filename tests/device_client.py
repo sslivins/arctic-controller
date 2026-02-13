@@ -121,6 +121,18 @@ class DeviceClient:
         return r.json()
 
     # ------------------------------------------------------------------
+    # Display
+    # ------------------------------------------------------------------
+
+    def get_brightness(self) -> int:
+        """GET /api/display/brightness — returns the current backlight brightness %."""
+        r = self.session.get(
+            f"{self.base_url}/api/display/brightness", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json()["brightness"]
+
+    # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
 
