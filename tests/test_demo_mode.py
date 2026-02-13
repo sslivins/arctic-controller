@@ -3,17 +3,24 @@ Test: Demo Mode Toggle
 
 Verifies that toggling the demo mode switch in the settings menu
 changes the preference and is reflected back by the preferences API.
+The initial state is captured once and restored after the toggle test.
 """
 
 import time
+import pytest
 from device_client import DeviceClient
 
+# Module-level storage for the initial demo mode state
+_initial_demo_mode: bool | None = None
 
-def test_toggle_demo_mode_on(device: DeviceClient):
+
+def test_toggle_demo_mode(device: DeviceClient):
     """Toggling demo mode switch should change the preference."""
-    # Read initial state
+    global _initial_demo_mode
+
+    # Read and remember the initial state
     prefs = device.get_preferences()
-    initial = prefs["demo_mode"]
+    _initial_demo_mode = prefs["demo_mode"]
 
     # Open settings
     device.click(tag="settings")
@@ -23,7 +30,7 @@ def test_toggle_demo_mode_on(device: DeviceClient):
     # Toggle the switch
     result = device.toggle("demo_mode_switch")
     assert result["success"] is True
-    expected = not initial
+    expected = not _initial_demo_mode
     assert result["checked"] == expected, \
         f"Expected checked={expected}, got {result['checked']}"
     time.sleep(0.3)
@@ -34,24 +41,25 @@ def test_toggle_demo_mode_on(device: DeviceClient):
         f"Expected demo_mode={expected}, got {prefs['demo_mode']}"
 
 
-def test_toggle_demo_mode_restore(device: DeviceClient):
-    """Toggle demo mode back to its original state."""
-    # Read current state
+def test_restore_demo_mode(device: DeviceClient):
+    """Restore demo mode to whatever it was before the test."""
+    global _initial_demo_mode
+    assert _initial_demo_mode is not None, "test_toggle_demo_mode must run first"
+
     prefs = device.get_preferences()
     current = prefs["demo_mode"]
 
-    # Open settings
-    device.click(tag="settings")
-    assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
+    # Toggle back only if the current state differs from the initial state
+    if current != _initial_demo_mode:
+        device.click(tag="settings")
+        assert device.wait_for_screen("settings", timeout=5.0)
+        time.sleep(0.5)
 
-    # If demo mode is on, toggle it off (restore to off)
-    if current:
         result = device.toggle("demo_mode_switch")
         assert result["success"] is True
-        assert result["checked"] is False
+        assert result["checked"] == _initial_demo_mode
         time.sleep(0.3)
 
     prefs = device.get_preferences()
-    assert prefs["demo_mode"] is False, \
-        f"Expected demo_mode=False, got {prefs['demo_mode']}"
+    assert prefs["demo_mode"] == _initial_demo_mode, \
+        f"Expected demo_mode={_initial_demo_mode}, got {prefs['demo_mode']}"
