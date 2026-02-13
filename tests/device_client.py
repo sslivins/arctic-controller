@@ -120,6 +120,21 @@ class DeviceClient:
             raise DeviceError(f"Set slider failed ({r.status_code}): {msg}")
         return r.json()
 
+    def toggle(self, tag: str) -> dict:
+        """POST /api/test/toggle — toggle a switch widget by tag. Returns {success, checked}."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/toggle",
+            json={"tag": tag},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Toggle failed ({r.status_code}): {msg}")
+        return r.json()
+
     # ------------------------------------------------------------------
     # Display
     # ------------------------------------------------------------------
@@ -131,6 +146,14 @@ class DeviceClient:
         )
         r.raise_for_status()
         return r.json()["brightness"]
+
+    def get_preferences(self) -> dict:
+        """GET /api/preferences — returns {demo_mode, temp_unit, brightness}."""
+        r = self.session.get(
+            f"{self.base_url}/api/preferences", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json()
 
     # ------------------------------------------------------------------
     # Convenience helpers

@@ -4,6 +4,7 @@
  */
 #include "api_server.h"
 #include "settings/settings_display_screen.h"
+#include "app_preferences.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
 #include "ota_manager.h"
@@ -83,6 +84,7 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
 static esp_err_t display_brightness_get_handler(httpd_req_t* req);
+static esp_err_t preferences_get_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -262,7 +264,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 44;  // Increased for all endpoints (including test)
+    config.max_uri_handlers = 50;  // Increased for all endpoints (including test)
     config.stack_size = 16384;     // Larger stack for tree walker + file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -640,6 +642,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(display_brightness_uri);
+
+    // GET /api/preferences - Get current app preferences
+    httpd_uri_t preferences_uri = {
+        .uri = "/api/preferences",
+        .method = HTTP_GET,
+        .handler = preferences_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(preferences_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
     test_endpoints_register(server);
@@ -2477,5 +2488,21 @@ static esp_err_t display_brightness_get_handler(httpd_req_t* req)
     char buf[64];
     snprintf(buf, sizeof(buf), "{\"brightness\":%d}", brightness);
     httpd_resp_sendstr(req, buf);
+    return ESP_OK;
+}
+
+static esp_err_t preferences_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "demo_mode", app_prefs_is_demo_mode());
+    cJSON_AddStringToObject(root, "temp_unit",
+        app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT ? "fahrenheit" : "celsius");
+    cJSON_AddNumberToObject(root, "brightness", display_screen_get_brightness());
+
+    char* json = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(root);
     return ESP_OK;
 }

@@ -365,6 +365,7 @@ static void create_menu_list(void)
                       i18n_get(STR_SETTINGS_DEMO_MODE), app_prefs_is_demo_mode(),
                       &state.demo_mode_switch, demo_mode_switch_cb);
     lv_obj_set_user_data(demo_row, (void*)"settings_demo_mode");
+    lv_obj_set_user_data(state.demo_mode_switch, (void*)"demo_mode_switch");
     
     // Temperature Units toggle with °C / °F labels
     {
@@ -423,6 +424,7 @@ static void create_menu_list(void)
         // Tag the row for test automation
         lv_obj_set_user_data(row, (void*)"settings_temp_unit");
         lv_obj_add_event_cb(sw, temp_unit_switch_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+        lv_obj_set_user_data(sw, (void*)"temp_unit_switch");
         
         state.temp_unit_switch = sw;
     }

@@ -545,6 +545,92 @@ static esp_err_t set_slider_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/toggle
+// Body: {"tag": "demo_mode_switch"}
+// Toggles a switch widget and fires LV_EVENT_VALUE_CHANGED
+// ============================================================================
+
+static esp_err_t toggle_post_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+
+    int content_len = req->content_len;
+    if (content_len <= 0 || content_len > 1024) {
+        send_json_error(req, "400 Bad Request", "Invalid body");
+        return ESP_OK;
+    }
+
+    char buf[1024];
+    int received = httpd_req_recv(req, buf, content_len);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Failed to read body");
+        return ESP_OK;
+    }
+    buf[received] = '\0';
+
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* j_tag = cJSON_GetObjectItem(body, "tag");
+    if (!j_tag || !cJSON_IsString(j_tag)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Provide 'tag' (string)");
+        return ESP_OK;
+    }
+
+    char search_tag[64] = {0};
+    strncpy(search_tag, j_tag->valuestring, sizeof(search_tag) - 1);
+    cJSON_Delete(body);
+
+    ESP_LOGI(TAG, "toggle: tag='%s'", search_tag);
+
+    if (!bsp_display_lock(1000)) {
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
+
+    lv_obj_t* scr = lv_scr_act();
+    lv_obj_t* found = find_by_tag(scr, search_tag, 0);
+
+    if (!found) {
+        bsp_display_unlock();
+        send_json_error(req, "404 Not Found", search_tag);
+        return ESP_OK;
+    }
+
+    if (!lv_obj_check_type(found, &lv_switch_class)) {
+        bsp_display_unlock();
+        send_json_error(req, "400 Bad Request", "Widget is not a switch");
+        return ESP_OK;
+    }
+
+    // Toggle the switch state
+    if (lv_obj_has_state(found, LV_STATE_CHECKED)) {
+        lv_obj_remove_state(found, LV_STATE_CHECKED);
+    } else {
+        lv_obj_add_state(found, LV_STATE_CHECKED);
+    }
+    lv_obj_send_event(found, LV_EVENT_VALUE_CHANGED, NULL);
+
+    bool checked = lv_obj_has_state(found, LV_STATE_CHECKED);
+    bsp_display_unlock();
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddBoolToObject(resp, "checked", checked);
+
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+
+    return ESP_OK;
+}
+
+// ============================================================================
 // CORS preflight handler for POST endpoints
 // ============================================================================
 
@@ -603,6 +689,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &set_slider_options_uri);
+
+    httpd_uri_t toggle_uri = {
+        .uri = "/api/test/toggle",
+        .method = HTTP_POST,
+        .handler = toggle_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &toggle_uri);
+
+    httpd_uri_t toggle_options_uri = {
+        .uri = "/api/test/toggle",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &toggle_options_uri);
 
     ESP_LOGI(TAG, "Test instrumentation endpoints registered");
 }
