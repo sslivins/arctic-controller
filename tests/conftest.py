@@ -43,10 +43,18 @@ def ensure_main_screen(device: DeviceClient):
             return  # Can't reach device, let the test itself handle it
 
     if current == "main":
+        # Even if screen name is "main", widget tree may still be transitioning
+        device.wait_for_widget(tag="settings", timeout=3.0)
         return
 
     # If on a sub-screen (display, wifi, etc.), go back to settings first
     if current in ("display", "wifi", "firmware", "time", "language"):
+        # Reset WiFi mock mode if we were on the WiFi screen
+        if current == "wifi":
+            try:
+                device.wifi_mock_reset()
+            except Exception:
+                pass
         try:
             device.click(tag=f"{current}_back")
         except Exception:
@@ -66,4 +74,6 @@ def ensure_main_screen(device: DeviceClient):
         except Exception:
             pass
     device.wait_for_screen("main", timeout=5.0)
-    time.sleep(1)
+    # Wait until the main screen widget tree is fully rendered
+    # (screen name transitions before overlay animation completes)
+    device.wait_for_widget(tag="settings", timeout=5.0)

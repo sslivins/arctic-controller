@@ -23,6 +23,7 @@
 #include "settings/settings_firmware_screen.h"
 #include "settings/settings_time_screen.h"
 #include "settings/settings_language_screen.h"
+#include "settings/settings_types.h"
 #include "i18n/i18n.h"
 
 static const char* TAG = "test_api";
@@ -132,6 +133,9 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
             cJSON_AddNumberToObject(w, "value", lv_slider_get_value(obj));
             cJSON_AddNumberToObject(w, "min", lv_slider_get_min_value(obj));
             cJSON_AddNumberToObject(w, "max", lv_slider_get_max_value(obj));
+        }
+        if (lv_obj_check_type(obj, &lv_textarea_class)) {
+            cJSON_AddBoolToObject(w, "password_mode", lv_textarea_get_password_mode(obj));
         }
         if (lv_obj_has_state(obj, LV_STATE_DISABLED)) {
             cJSON_AddBoolToObject(w, "disabled", true);
@@ -648,6 +652,157 @@ static esp_err_t test_options_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/wifi-mock — inject fake WiFi networks and pause scanning
+// Body: {"networks": [{"ssid": "Name", "rssi": -45, "authmode": 3}, ...]}
+// ============================================================================
+
+static esp_err_t wifi_mock_post_handler(httpd_req_t* req)
+{
+    char buf[1024] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty body");
+        return ESP_OK;
+    }
+
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* networks_arr = cJSON_GetObjectItem(body, "networks");
+    if (!networks_arr || !cJSON_IsArray(networks_arr)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Missing 'networks' array");
+        return ESP_OK;
+    }
+
+    int count = cJSON_GetArraySize(networks_arr);
+    if (count > 20) count = 20;
+
+    settings_wifi_network_t nets[20] = {};
+    for (int i = 0; i < count; i++) {
+        cJSON* item = cJSON_GetArrayItem(networks_arr, i);
+        cJSON* j_ssid = cJSON_GetObjectItem(item, "ssid");
+        cJSON* j_rssi = cJSON_GetObjectItem(item, "rssi");
+        cJSON* j_auth = cJSON_GetObjectItem(item, "authmode");
+
+        if (j_ssid && cJSON_IsString(j_ssid)) {
+            strncpy(nets[i].ssid, j_ssid->valuestring, sizeof(nets[i].ssid) - 1);
+        }
+        nets[i].rssi = (j_rssi && cJSON_IsNumber(j_rssi)) ? (int8_t)j_rssi->valueint : -50;
+        nets[i].authmode = (j_auth && cJSON_IsNumber(j_auth)) ? (uint8_t)j_auth->valueint : 0;
+    }
+    cJSON_Delete(body);
+
+    // Enable mock mode (pauses scan timer, blocks real connects)
+    bsp_display_lock(0);
+    wifi_screen_set_mock_mode(true);
+    wifi_screen_update_networks(nets, (uint8_t)count);
+    wifi_screen_set_scanning(false);
+    bsp_display_unlock();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddNumberToObject(resp, "injected", count);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/wifi-mock-reset — exit mock mode, resume real scanning
+// ============================================================================
+
+static esp_err_t wifi_mock_reset_post_handler(httpd_req_t* req)
+{
+    bsp_display_lock(0);
+    wifi_screen_set_mock_mode(false);
+    wifi_screen_trigger_scan();
+    bsp_display_unlock();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/type-text — type text into a textarea widget
+// Body: {"tag": "wifi_password_input", "text": "mypassword"}
+// ============================================================================
+
+static esp_err_t type_text_post_handler(httpd_req_t* req)
+{
+    char buf[512] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty body");
+        return ESP_OK;
+    }
+
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* j_tag = cJSON_GetObjectItem(body, "tag");
+    cJSON* j_text = cJSON_GetObjectItem(body, "text");
+    if (!j_tag || !cJSON_IsString(j_tag) || !j_text || !cJSON_IsString(j_text)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Need 'tag' and 'text' strings");
+        return ESP_OK;
+    }
+
+    bsp_display_lock(0);
+    lv_obj_t* screen = lv_screen_active();
+    lv_obj_t* obj = find_by_tag(screen, j_tag->valuestring, 0);
+
+    if (!obj) {
+        bsp_display_unlock();
+        cJSON_Delete(body);
+        send_json_error(req, "404 Not Found", "Widget not found");
+        return ESP_OK;
+    }
+
+    if (!lv_obj_check_type(obj, &lv_textarea_class)) {
+        bsp_display_unlock();
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Widget is not a textarea");
+        return ESP_OK;
+    }
+
+    lv_textarea_set_text(obj, j_text->valuestring);
+
+    // Check password mode state for the response
+    bool is_password_mode = lv_textarea_get_password_mode(obj);
+    const char* displayed_text = lv_textarea_get_text(obj);
+
+    bsp_display_unlock();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddStringToObject(resp, "text", displayed_text);
+    cJSON_AddBoolToObject(resp, "password_mode", is_password_mode);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    cJSON_Delete(body);
+    return ESP_OK;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -708,6 +863,54 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &toggle_options_uri);
+
+    httpd_uri_t wifi_mock_uri = {
+        .uri = "/api/test/wifi-mock",
+        .method = HTTP_POST,
+        .handler = wifi_mock_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &wifi_mock_uri);
+
+    httpd_uri_t wifi_mock_options_uri = {
+        .uri = "/api/test/wifi-mock",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &wifi_mock_options_uri);
+
+    httpd_uri_t wifi_mock_reset_uri = {
+        .uri = "/api/test/wifi-mock-reset",
+        .method = HTTP_POST,
+        .handler = wifi_mock_reset_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &wifi_mock_reset_uri);
+
+    httpd_uri_t wifi_mock_reset_options_uri = {
+        .uri = "/api/test/wifi-mock-reset",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &wifi_mock_reset_options_uri);
+
+    httpd_uri_t type_text_uri = {
+        .uri = "/api/test/type-text",
+        .method = HTTP_POST,
+        .handler = type_text_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &type_text_uri);
+
+    httpd_uri_t type_text_options_uri = {
+        .uri = "/api/test/type-text",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &type_text_options_uri);
 
     ESP_LOGI(TAG, "Test instrumentation endpoints registered");
 }

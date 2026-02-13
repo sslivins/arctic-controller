@@ -29,6 +29,7 @@ class Widget:
     value: Optional[int] = None
     min: Optional[int] = None
     max: Optional[int] = None
+    password_mode: Optional[bool] = None
 
 
 class DeviceError(Exception):
@@ -148,11 +149,67 @@ class DeviceClient:
         return r.json()["brightness"]
 
     def get_preferences(self) -> dict:
-        """GET /api/preferences — returns {demo_mode, temp_unit, brightness}."""
+        """GET /api/preferences — returns {demo_mode, temp_unit, brightness, language}."""
         r = self.session.get(
             f"{self.base_url}/api/preferences", timeout=self.timeout
         )
         r.raise_for_status()
+        return r.json()
+
+    # ------------------------------------------------------------------
+    # WiFi mock
+    # ------------------------------------------------------------------
+
+    def wifi_mock(self, networks: list[dict]) -> dict:
+        """POST /api/test/wifi-mock — inject fake networks, pause scan timer.
+
+        Each network dict: {"ssid": "Name", "rssi": -50, "authmode": 3}
+        authmode: 0=open, 3=WPA2, 4=WPA3
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/wifi-mock",
+            json={"networks": networks},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"WiFi mock failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def wifi_mock_reset(self) -> dict:
+        """POST /api/test/wifi-mock-reset — exit mock mode, resume scanning."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/wifi-mock-reset",
+            json={},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"WiFi mock reset failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def type_text(self, tag: str, text: str) -> dict:
+        """POST /api/test/type-text — set text in a textarea widget.
+
+        Returns {success, text, password_mode}.
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/type-text",
+            json={"tag": tag, "text": text},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Type text failed ({r.status_code}): {msg}")
         return r.json()
 
     # ------------------------------------------------------------------
@@ -164,6 +221,16 @@ class DeviceClient:
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self.screen == name:
+                return True
+            time.sleep(poll)
+        return False
+
+    def wait_for_widget(self, *, tag: Optional[str] = None, text: Optional[str] = None,
+                        timeout: float = 5.0, poll: float = 0.3) -> bool:
+        """Poll until a widget with the given tag or text appears in the tree."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.has_widget(tag=tag, text=text):
                 return True
             time.sleep(poll)
         return False

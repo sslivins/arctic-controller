@@ -107,6 +107,7 @@ typedef struct {
     bool selected_is_open;
     bool password_visible;
     bool is_scanning;
+    bool mock_mode;
     lv_timer_t* scan_timer;
     
 } wifi_screen_state_t;
@@ -538,6 +539,7 @@ static void create_password_dialog(void)
     lv_obj_set_style_border_color(s_state.cancel_btn, COLOR_ERROR, LV_PART_MAIN);
     lv_obj_set_style_border_opa(s_state.cancel_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.cancel_btn, cancel_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(s_state.cancel_btn, (void*)"wifi_cancel_btn");
     
     lv_obj_t* cancel_icon = lv_label_create(s_state.cancel_btn);
     lv_label_set_text(cancel_icon, LV_SYMBOL_CLOSE);
@@ -557,6 +559,7 @@ static void create_password_dialog(void)
     lv_obj_set_style_border_color(s_state.connect_btn, COLOR_SUCCESS, LV_PART_MAIN);
     lv_obj_set_style_border_opa(s_state.connect_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.connect_btn, connect_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(s_state.connect_btn, (void*)"wifi_connect_btn");
     
     lv_obj_t* connect_icon = lv_label_create(s_state.connect_btn);
     lv_label_set_text(connect_icon, LV_SYMBOL_OK);
@@ -581,6 +584,7 @@ static void create_password_dialog(void)
     lv_obj_set_style_text_font(s_state.password_ssid_label, &montserrat_32_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_state.password_ssid_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(s_state.password_ssid_label, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_set_user_data(s_state.password_ssid_label, (void*)"wifi_password_ssid");
     
     // Password input row - below SSID
     lv_obj_t* input_row = lv_obj_create(content);
@@ -598,6 +602,7 @@ static void create_password_dialog(void)
     lv_textarea_set_one_line(s_state.password_textarea, true);
     lv_textarea_set_password_mode(s_state.password_textarea, true);
     lv_textarea_set_placeholder_text(s_state.password_textarea, i18n_get(STR_WIFI_PASSWORD));
+    lv_obj_set_user_data(s_state.password_textarea, (void*)"wifi_password_input");
     lv_obj_set_style_text_font(s_state.password_textarea, &lv_font_montserrat_32, LV_PART_MAIN);
     
     // Show password button
@@ -607,6 +612,7 @@ static void create_password_dialog(void)
     lv_obj_set_style_bg_color(s_state.show_password_btn, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_radius(s_state.show_password_btn, 10, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.show_password_btn, show_password_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(s_state.show_password_btn, (void*)"wifi_show_password");
     
     s_state.show_password_icon = lv_label_create(s_state.show_password_btn);
     lv_label_set_text(s_state.show_password_icon, LV_SYMBOL_EYE_CLOSE);
@@ -799,7 +805,10 @@ static void network_item_cb(lv_event_t* e)
         
         if (is_open) {
             // Open network - connect directly without password dialog
-            if (s_state.config.on_wifi_connect) {
+            if (s_state.mock_mode) {
+                // In mock mode, don't actually connect — just log
+                ESP_LOGI(TAG, "Mock mode: suppressing connect to open network '%s'", net->ssid);
+            } else if (s_state.config.on_wifi_connect) {
                 s_state.config.on_wifi_connect(net->ssid, "");
             }
         } else {
@@ -817,7 +826,10 @@ static void connect_btn_cb(lv_event_t* e)
     
     ESP_LOGI(TAG, "Connecting to %s", s_state.selected_ssid);
     
-    if (s_state.config.on_wifi_connect) {
+    if (s_state.mock_mode) {
+        // In mock mode, don't actually connect — just log and dismiss
+        ESP_LOGI(TAG, "Mock mode: suppressing connect to '%s'", s_state.selected_ssid);
+    } else if (s_state.config.on_wifi_connect) {
         s_state.config.on_wifi_connect(s_state.selected_ssid, 
                                        s_state.selected_is_open ? "" : password);
     }
@@ -860,4 +872,29 @@ static void scan_timer_cb(lv_timer_t* timer)
         ESP_LOGI(TAG, "Auto-scan triggered");
         wifi_screen_trigger_scan();
     }
+}
+
+void wifi_screen_set_mock_mode(bool enable)
+{
+    s_state.mock_mode = enable;
+    
+    if (enable) {
+        // Pause scan timer so real scans don't overwrite injected networks
+        if (s_state.scan_timer) {
+            lv_timer_pause(s_state.scan_timer);
+            ESP_LOGI(TAG, "Mock mode ON: scan timer paused");
+        }
+    } else {
+        // Resume scan timer
+        if (s_state.scan_timer) {
+            lv_timer_resume(s_state.scan_timer);
+            ESP_LOGI(TAG, "Mock mode OFF: scan timer resumed");
+        }
+    }
+}
+
+bool wifi_screen_is_password_dialog_visible(void)
+{
+    if (!s_state.password_dialog) return false;
+    return !lv_obj_has_flag(s_state.password_dialog, LV_OBJ_FLAG_HIDDEN);
 }
