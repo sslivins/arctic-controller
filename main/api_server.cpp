@@ -13,6 +13,7 @@
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "app_preferences.h"
+#include "test_endpoints.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <mdns.h>
@@ -259,7 +260,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 40;  // Increased for all endpoints
+    config.max_uri_handlers = 44;  // Increased for all endpoints (including test)
     config.stack_size = 8192;      // Larger stack for file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -628,10 +629,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(events_clear_uri);
+
+#ifdef CONFIG_TEST_ENDPOINTS
+    test_endpoints_register(server);
+    ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
+#endif
     
     #undef REGISTER_URI
     
-    ESP_LOGI(TAG, "HTTP server started successfully (34 URI handlers registered)");
+    ESP_LOGI(TAG, "HTTP server started successfully");
     ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
     
     return true;

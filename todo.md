@@ -16,6 +16,38 @@
 - [ ] Consider logging compressor frequency changes (e.g. significant jumps or thresholds)
 - [ ] Consider logging fan speed changes (RPM thresholds or level transitions)
 
+## Modbus Heat Pump Simulator (M5Stack AtomS3 Lite + RS485)
+
+Standalone ESP32-S3 project that acts as a Modbus RTU slave, emulating the ECO-600 heat pump register map. Connects to the Tab5 controller via RS485 for end-to-end Modbus testing without a real heat pump.
+
+### Hardware
+- [ ] M5Stack AtomS3 Lite (ESP32-S3) + RS485 unit
+- [ ] Wire RS485 A/B to Tab5 RS485 port (half-duplex, shared bus)
+
+### Firmware
+- [ ] New ESP-IDF project: `arctic-heatpump-simulator/`
+- [ ] Modbus RTU slave, address 1, 2400 baud, 8E1 (matching `arctic_registers.h`)
+- [ ] Holding register map: reuse `arctic_registers.h` definitions (registers 2000-2138)
+- [ ] Respond to function code 0x03 (read holding registers) — return current register values
+- [ ] Respond to function code 0x06 (write single register) — update register and log change
+- [ ] All registers pre-populated with realistic defaults (same as `initDemoState()`)
+
+### Simulation Features
+- [ ] **Scenario presets**: idle, heating, cooling, defrost, fault — each preset sets a coherent combination of temps/status/errors
+- [ ] **Auto-behavior**: when unit_on and mode set, slowly ramp temps toward setpoint, toggle compressor/fan/pump status bits, update frequency/RPM
+- [ ] **Error injection**: cycle through error1/error2 bit patterns on command
+- [ ] **Serial console menu**: switch presets, inject errors, adjust individual registers via UART commands
+- [ ] **Temperature drift**: ambient/coil/discharge temps change gradually based on mode, making the controller's polling feel realistic
+
+### Test Scenarios
+- [ ] Controller connects and reads valid data → verify dashboard populates correctly
+- [ ] Simulator injects P02 error → verify controller shows error on device + web
+- [ ] Controller sends mode change (write reg 2001) → verify simulator receives and updates
+- [ ] Controller sends setpoint change → verify simulator register updated
+- [ ] Controller sends power off (write reg 2000 = 0) → verify simulator stops "running"
+- [ ] Simulate communication failure (stop responding) → verify controller shows DISCONNECTED after timeout
+- [ ] Defrost cycle simulation → verify controller detects state transition and logs events
+
 ## Main Screen Layout Redesign
 
 - [x] Hero state card with color-coded background (heating/cooling/defrost/fault/idle)
@@ -37,7 +69,30 @@
 
 ## Testing
 
+### CI / Automated Testing (no device required)
+- [ ] **Unit tests**: Extract pure logic (event ring buffer, °C↔°F conversion, error lookups, demo register mapping, i18n string resolution, setpoint validation) into host-compilable modules; test with Google Test or Catch2 on GitHub Actions runner
+- [ ] **API contract tests**: Build Python mock server (FastAPI) implementing the same REST API; validate against `openapi.yaml` with schemathesis; run pytest suite for all endpoints; add to CI workflow
+- [ ] **OpenAPI spec validation**: Add spectral or openapi-generator lint step to CI to catch spec drift and malformed schemas
+- [ ] **Web dashboard tests**: Run Playwright against mock server serving `index.html`; test page load, real-time updates, mode/setpoint controls, language switching, mobile viewport
+- [ ] Add unit test and API contract test stages to `.github/workflows/build.yml`
+
 ### Device / Hardware Testing
+
+#### Test Instrumentation Endpoints (behind `#ifdef CONFIG_TEST_ENDPOINTS`)
+- [ ] `GET /api/test/ui-state` — Walk LVGL object tree, return all visible labels/buttons/states as JSON (type, text, visible, position)
+- [ ] `POST /api/test/click` — Find widget by label text (`{"label": "Errors"}` or `{"label_contains": "P02"}`) and fire `lv_obj_send_event(LV_EVENT_CLICKED)` from LVGL thread; supports `user_data` tag matching for tagged widgets
+- [ ] `GET /api/test/screenshot` — Capture framebuffer via `lv_snapshot_take()` and return as PNG
+- [ ] Queue mechanism: HTTP handler posts action to LVGL task queue, LVGL tick processes it (same pattern as existing screen navigation callbacks)
+- [ ] Add `CONFIG_TEST_ENDPOINTS` Kconfig option so endpoints are stripped from production builds
+- [ ] Add test endpoints to OpenAPI spec (under a `Test` tag)
+
+#### On-Device Test Runner (pytest on PC → device over HTTP)
+- [ ] Test flow: boot device in demo mode with test endpoints → Python test runner injects state via demo API → clicks buttons by label → reads `ui-state` → asserts expected labels/values
+- [ ] Example: inject P02 error → click "Errors" button → verify label containing "P02" appears on errors screen
+- [ ] Example: switch language to French → navigate to dashboard → verify hero card labels are in French
+- [ ] Example: set demo temps → navigate to dashboard → verify temperature labels show correct values
+
+#### Manual Device Testing
 - [ ] Verify all screens render correctly on 720×1280 display (Tab5)
 - [ ] Test scrolling behavior with multiple expandable panels open
 - [ ] Confirm fixed footer stays visible during scroll

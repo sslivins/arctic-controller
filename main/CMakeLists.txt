@@ -65,6 +65,7 @@ idf_component_register(
         "heatpump_system_screen.cpp"
         "heatpump_params_screen.cpp"
         "heatpump_errors_screen.cpp"
+        "test_endpoints.cpp"
     INCLUDE_DIRS
         "."
         "settings"
