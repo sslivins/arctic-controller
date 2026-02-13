@@ -48,6 +48,27 @@ typedef void (*firmware_update_check_cb_t)(bool update_available, const char* ne
  */
 void firmware_screen_check_for_updates_async(firmware_update_check_cb_t callback);
 
+/**
+ * @brief Inject a mock firmware check result (for testing).
+ * 
+ * Sets the latest version and UI state directly, bypassing the GitHub check.
+ * The mock stays active until firmware_screen_clear_mock() is called.
+ * Must be called from LVGL thread (within bsp_display_lock).
+ * 
+ * @param latest_version  Version string to show (e.g. "99.0.0")
+ * @param update_available  If true, shows update-available state with Install button
+ */
+void firmware_screen_set_mock_result(const char* latest_version, bool update_available);
+
+/**
+ * @brief Clear mock firmware state.
+ * 
+ * Resets the screen to idle. The next time the screen is opened,
+ * it will perform a real GitHub check.
+ * Must be called from LVGL thread (within bsp_display_lock).
+ */
+void firmware_screen_clear_mock(void);
+
 #ifdef __cplusplus
 }
 #endif

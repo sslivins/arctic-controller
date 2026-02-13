@@ -33,6 +33,11 @@ def _return_to_main(device: DeviceClient):
                 device.wifi_mock_reset()
             except Exception:
                 pass
+        if current == "firmware":
+            try:
+                device.firmware_mock_reset()
+            except Exception:
+                pass
         try:
             device.click(tag=f"{current}_back")
         except Exception:

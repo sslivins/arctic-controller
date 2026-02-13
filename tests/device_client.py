@@ -214,6 +214,44 @@ class DeviceClient:
             raise DeviceError(f"WiFi mock reset failed ({r.status_code}): {msg}")
         return r.json()
 
+    # ------------------------------------------------------------------
+    # Firmware mock
+    # ------------------------------------------------------------------
+
+    def firmware_mock(self, version: str, update_available: bool = True) -> dict:
+        """POST /api/test/firmware-mock — inject fake firmware check result.
+
+        Sets the firmware screen to show the given version and update state,
+        bypassing the real GitHub check.
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/firmware-mock",
+            json={"version": version, "update_available": update_available},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Firmware mock failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def firmware_mock_reset(self) -> dict:
+        """POST /api/test/firmware-mock-reset — clear mock firmware state."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/firmware-mock-reset",
+            json={},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Firmware mock reset failed ({r.status_code}): {msg}")
+        return r.json()
+
     def type_text(self, tag: str, text: str) -> dict:
         """POST /api/test/type-text — set text in a textarea widget.
 

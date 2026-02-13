@@ -165,6 +165,26 @@ Standalone ESP32-S3 project that acts as a Modbus RTU slave, emulating the ECO-6
 - [ ] Confirm firmware version displays correctly on settings screen
 - [ ] Verify device reboots cleanly after OTA update
 
+### OTA Install Button — Future Test Options
+The automated firmware tests verify version display, GitHub check completion,
+update-available UI state, and Install button visibility — but intentionally
+never *click* the Install button (it triggers a real OTA download + auto-reboot
+with no confirmation dialog, which would kill the test session).
+
+Options for future coverage:
+- [ ] **Dry-run mode**: Add a `CONFIG_TEST_OTA_DRY_RUN` flag that replaces the
+      real `ota_mgr_start_update()` with a fake task that simulates progress
+      (0→100%) and sets state to `OTA_STATE_READY_TO_REBOOT` without actually
+      flashing or rebooting. Tests could then verify the progress bar, download
+      status text, and completion UI.
+- [ ] **Destructive marker**: Mark a dedicated test with `@pytest.mark.destructive`
+      that actually clicks Install, waits for the device to reboot (polling until
+      it comes back online), and verifies the new version. Only run on demand
+      (`pytest -m destructive`) against a throwaway device.
+- [ ] **CI with hardware-in-the-loop**: Flash a known old version, run the
+      destructive update test, verify the device comes back with the new version.
+      Requires a dedicated test device on the CI network.
+
 ### WiFi Testing  
 - [ ] Test WiFi scan and connect from settings
 - [ ] Verify mDNS discovery (`arctic.local`)

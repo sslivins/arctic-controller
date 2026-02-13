@@ -909,6 +909,74 @@ static esp_err_t type_text_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/firmware-mock — inject fake firmware check result
+// Body: {"version": "99.0.0", "update_available": true}
+// ============================================================================
+
+static esp_err_t firmware_mock_post_handler(httpd_req_t* req)
+{
+    char buf[256] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty body");
+        return ESP_OK;
+    }
+
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* j_version = cJSON_GetObjectItem(body, "version");
+    cJSON* j_update = cJSON_GetObjectItem(body, "update_available");
+
+    if (!j_version || !cJSON_IsString(j_version)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Missing 'version' string");
+        return ESP_OK;
+    }
+
+    bool update_available = (j_update && cJSON_IsBool(j_update)) ? cJSON_IsTrue(j_update) : false;
+
+    bsp_display_lock(0);
+    firmware_screen_set_mock_result(j_version->valuestring, update_available);
+    bsp_display_unlock();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddStringToObject(resp, "version", j_version->valuestring);
+    cJSON_AddBoolToObject(resp, "update_available", update_available);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    cJSON_Delete(body);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/firmware-mock-reset — clear mock state
+// ============================================================================
+
+static esp_err_t firmware_mock_reset_post_handler(httpd_req_t* req)
+{
+    bsp_display_lock(0);
+    firmware_screen_clear_mock();
+    bsp_display_unlock();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -1033,6 +1101,38 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &type_text_options_uri);
+
+    httpd_uri_t firmware_mock_uri = {
+        .uri = "/api/test/firmware-mock",
+        .method = HTTP_POST,
+        .handler = firmware_mock_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &firmware_mock_uri);
+
+    httpd_uri_t firmware_mock_options_uri = {
+        .uri = "/api/test/firmware-mock",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &firmware_mock_options_uri);
+
+    httpd_uri_t firmware_mock_reset_uri = {
+        .uri = "/api/test/firmware-mock-reset",
+        .method = HTTP_POST,
+        .handler = firmware_mock_reset_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &firmware_mock_reset_uri);
+
+    httpd_uri_t firmware_mock_reset_options_uri = {
+        .uri = "/api/test/firmware-mock-reset",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &firmware_mock_reset_options_uri);
 
     ESP_LOGI(TAG, "Test instrumentation endpoints registered");
 }
