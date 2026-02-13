@@ -102,6 +102,9 @@ static struct {
     bool created = false;
     lv_obj_t* container = nullptr;
     
+    // Demo mode banner
+    lv_obj_t* demo_banner = nullptr;
+    
     // Hero state card (color-coded background)
     lv_obj_t* hero_card = nullptr;
     lv_obj_t* hero_state_label = nullptr;
@@ -548,23 +551,26 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_scrollbar_mode(state.container, LV_SCROLLBAR_MODE_AUTO);
     
     // =========================================================================
-    // DEMO MODE BANNER (shown only in demo mode)
+    // DEMO MODE BANNER (always created, hidden when not in demo mode)
     // =========================================================================
-    if (app_prefs_is_demo_mode()) {
-        lv_obj_t* demo_banner = lv_obj_create(state.container);
-        lv_obj_set_size(demo_banner, LV_PCT(100), 40);
-        lv_obj_set_style_bg_color(demo_banner, COLOR_WARNING, LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(demo_banner, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_border_width(demo_banner, 0, LV_PART_MAIN);
-        lv_obj_set_style_radius(demo_banner, 8, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(demo_banner, 0, LV_PART_MAIN);
-        lv_obj_clear_flag(demo_banner, LV_OBJ_FLAG_SCROLLABLE);
-        
-        lv_obj_t* demo_label = lv_label_create(demo_banner);
-        lv_label_set_text(demo_label, i18n_get(STR_HP_DEMO_MODE_ENABLED));
-        lv_obj_set_style_text_font(demo_label, UI_FONT_BODY, LV_PART_MAIN);
-        lv_obj_set_style_text_color(demo_label, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_center(demo_label);
+    state.demo_banner = lv_obj_create(state.container);
+    lv_obj_set_size(state.demo_banner, LV_PCT(100), 40);
+    lv_obj_set_style_bg_color(state.demo_banner, COLOR_WARNING, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(state.demo_banner, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.demo_banner, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.demo_banner, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(state.demo_banner, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(state.demo_banner, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_user_data(state.demo_banner, (void*)"demo_banner");
+
+    lv_obj_t* demo_label = lv_label_create(state.demo_banner);
+    lv_label_set_text(demo_label, i18n_get(STR_HP_DEMO_MODE_ENABLED));
+    lv_obj_set_style_text_font(demo_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(demo_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_center(demo_label);
+
+    if (!app_prefs_is_demo_mode()) {
+        lv_obj_add_flag(state.demo_banner, LV_OBJ_FLAG_HIDDEN);
     }
     
     // =========================================================================
@@ -1164,4 +1170,15 @@ void heatpump_screen_delete(void) {
 
 bool heatpump_screen_is_created(void) {
     return state.created;
+}
+
+void heatpump_screen_set_demo_banner(bool visible) {
+    if (!state.created || !state.demo_banner) {
+        return;
+    }
+    if (visible) {
+        lv_obj_clear_flag(state.demo_banner, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(state.demo_banner, LV_OBJ_FLAG_HIDDEN);
+    }
 }

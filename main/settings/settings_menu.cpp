@@ -14,6 +14,7 @@
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
+#include "../heatpump_screen.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include "wifi_manager.h"
@@ -197,6 +198,7 @@ static void demo_mode_switch_cb(lv_event_t* e)
     lv_obj_t* sw = (lv_obj_t*)lv_event_get_target(e);
     bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
     app_prefs_set_demo_mode(on);
+    heatpump_screen_set_demo_banner(on);
     ESP_LOGI(TAG, "Demo mode %s", on ? "enabled" : "disabled");
 }
 
