@@ -30,6 +30,8 @@ class Widget:
     min: Optional[int] = None
     max: Optional[int] = None
     password_mode: Optional[bool] = None
+    option_count: Optional[int] = None
+    selected_text: Optional[str] = None
 
 
 class DeviceError(Exception):
@@ -119,6 +121,24 @@ class DeviceClient:
             except Exception:
                 msg = r.text
             raise DeviceError(f"Set slider failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def set_roller(self, tag: str, index: int) -> dict:
+        """POST /api/test/set-roller — set a roller's selected index by tag.
+
+        Returns {success, value, selected_text}.
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/set-roller",
+            json={"tag": tag, "index": index},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Set roller failed ({r.status_code}): {msg}")
         return r.json()
 
     def toggle(self, tag: str) -> dict:

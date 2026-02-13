@@ -418,6 +418,7 @@ static void create_content(void)
     lv_obj_set_style_text_color(s_state.tz_roller, lv_color_hex(0x0d1117), LV_PART_SELECTED);
     
     lv_obj_add_event_cb(s_state.tz_roller, tz_roller_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_set_user_data(s_state.tz_roller, (void*)"timezone_roller");
 }
 
 // ============================================================================

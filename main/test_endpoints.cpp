@@ -59,6 +59,7 @@ static const char* get_widget_type(lv_obj_t* obj)
     if (lv_obj_check_type(obj, &lv_checkbox_class))     return "checkbox";
     if (lv_obj_check_type(obj, &lv_slider_class))       return "slider";
     if (lv_obj_check_type(obj, &lv_dropdown_class))     return "dropdown";
+    if (lv_obj_check_type(obj, &lv_roller_class))        return "roller";
     if (lv_obj_check_type(obj, &lv_textarea_class))     return "textarea";
     if (lv_obj_check_type(obj, &lv_image_class))        return "image";
     if (lv_obj_check_type(obj, &lv_bar_class))          return "bar";
@@ -101,6 +102,7 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
                           strcmp(type, "checkbox") == 0 ||
                           strcmp(type, "slider") == 0 ||
                           strcmp(type, "dropdown") == 0 ||
+                          strcmp(type, "roller") == 0 ||
                           strcmp(type, "textarea") == 0;
 
     if (is_interesting && !hidden) {
@@ -136,6 +138,14 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
         }
         if (lv_obj_check_type(obj, &lv_textarea_class)) {
             cJSON_AddBoolToObject(w, "password_mode", lv_textarea_get_password_mode(obj));
+        }
+        if (lv_obj_check_type(obj, &lv_roller_class)) {
+            uint32_t sel = lv_roller_get_selected(obj);
+            cJSON_AddNumberToObject(w, "value", sel);
+            cJSON_AddNumberToObject(w, "option_count", lv_roller_get_option_count(obj));
+            char sel_text[64] = {0};
+            lv_roller_get_selected_str(obj, sel_text, sizeof(sel_text));
+            cJSON_AddStringToObject(w, "selected_text", sel_text);
         }
         if (lv_obj_has_state(obj, LV_STATE_DISABLED)) {
             cJSON_AddBoolToObject(w, "disabled", true);
@@ -552,6 +562,102 @@ static esp_err_t set_slider_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/set-roller
+// Body: {"tag": "timezone_roller", "index": 3}
+// Sets a roller widget's selected index and fires LV_EVENT_VALUE_CHANGED
+// ============================================================================
+
+static esp_err_t set_roller_post_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+
+    int content_len = req->content_len;
+    if (content_len <= 0 || content_len > 1024) {
+        send_json_error(req, "400 Bad Request", "Invalid body");
+        return ESP_OK;
+    }
+
+    char buf[1024];
+    int received = httpd_req_recv(req, buf, content_len);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Failed to read body");
+        return ESP_OK;
+    }
+    buf[received] = '\0';
+
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* j_tag = cJSON_GetObjectItem(body, "tag");
+    cJSON* j_index = cJSON_GetObjectItem(body, "index");
+
+    if (!j_tag || !cJSON_IsString(j_tag) || !j_index || !cJSON_IsNumber(j_index)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Provide 'tag' (string) and 'index' (number)");
+        return ESP_OK;
+    }
+
+    char search_tag[64] = {0};
+    strncpy(search_tag, j_tag->valuestring, sizeof(search_tag) - 1);
+    int index = (int)j_index->valuedouble;
+    cJSON_Delete(body);
+
+    ESP_LOGI(TAG, "set-roller: tag='%s', index=%d", search_tag, index);
+
+    if (!bsp_display_lock(1000)) {
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
+
+    lv_obj_t* scr = lv_scr_act();
+    lv_obj_t* found = find_by_tag(scr, search_tag, 0);
+
+    if (!found) {
+        bsp_display_unlock();
+        send_json_error(req, "404 Not Found", search_tag);
+        return ESP_OK;
+    }
+
+    if (!lv_obj_check_type(found, &lv_roller_class)) {
+        bsp_display_unlock();
+        send_json_error(req, "400 Bad Request", "Widget is not a roller");
+        return ESP_OK;
+    }
+
+    uint32_t option_count = lv_roller_get_option_count(found);
+    if (index < 0 || (uint32_t)index >= option_count) {
+        bsp_display_unlock();
+        char err[64];
+        snprintf(err, sizeof(err), "Index %d out of range (0-%lu)", index, (unsigned long)(option_count - 1));
+        send_json_error(req, "400 Bad Request", err);
+        return ESP_OK;
+    }
+
+    lv_roller_set_selected(found, index, LV_ANIM_ON);
+    lv_obj_send_event(found, LV_EVENT_VALUE_CHANGED, NULL);
+
+    uint32_t actual = lv_roller_get_selected(found);
+    char sel_text[64] = {0};
+    lv_roller_get_selected_str(found, sel_text, sizeof(sel_text));
+    bsp_display_unlock();
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddNumberToObject(resp, "value", (int)actual);
+    cJSON_AddStringToObject(resp, "selected_text", sel_text);
+
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/toggle
 // Body: {"tag": "demo_mode_switch"}
 // Toggles a switch widget and fires LV_EVENT_VALUE_CHANGED
@@ -847,6 +953,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &set_slider_options_uri);
+
+    httpd_uri_t set_roller_uri = {
+        .uri = "/api/test/set-roller",
+        .method = HTTP_POST,
+        .handler = set_roller_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &set_roller_uri);
+
+    httpd_uri_t set_roller_options_uri = {
+        .uri = "/api/test/set-roller",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &set_roller_options_uri);
 
     httpd_uri_t toggle_uri = {
         .uri = "/api/test/toggle",
