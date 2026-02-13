@@ -39,6 +39,9 @@ typedef struct {
 
 static language_screen_state_t s_state = {};
 
+// String tags for language buttons (indexed by language_t)
+static const char* lang_button_tags[] = {"lang_english", "lang_french", "lang_spanish"};
+
 // ============================================================================
 // Forward Declarations
 // ============================================================================
@@ -196,6 +199,7 @@ static void create_content(void)
         lv_obj_set_style_bg_color(btn, lv_color_hex(0x2a3a5e), LV_PART_MAIN);  // Lighter than card
         lv_obj_set_style_radius(btn, 10, LV_PART_MAIN);
         lv_obj_add_event_cb(btn, language_btn_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+        lv_obj_set_user_data(btn, (void*)lang_button_tags[i]);
         
         // Highlight current selection
         if ((language_t)i == current_lang) {

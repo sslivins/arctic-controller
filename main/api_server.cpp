@@ -5,6 +5,7 @@
 #include "api_server.h"
 #include "settings/settings_display_screen.h"
 #include "app_preferences.h"
+#include "i18n/i18n.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
 #include "ota_manager.h"
@@ -2499,6 +2500,8 @@ static esp_err_t preferences_get_handler(httpd_req_t* req)
     cJSON_AddStringToObject(root, "temp_unit",
         app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT ? "fahrenheit" : "celsius");
     cJSON_AddNumberToObject(root, "brightness", display_screen_get_brightness());
+    cJSON_AddStringToObject(root, "language",
+        i18n_get_language_name(i18n_get_language()));
 
     char* json = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json);

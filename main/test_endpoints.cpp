@@ -91,7 +91,10 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
     const char* text = get_widget_text(obj);
 
     // Report widgets that have text or are interactive (buttons, switches, etc.)
-    bool is_interesting = (text != NULL) ||
+    // Also report any widget with a user_data tag (for containers used as menu rows)
+    bool has_tag = (lv_obj_get_user_data(obj) != NULL);
+    bool is_interesting = has_tag ||
+                          (text != NULL) ||
                           strcmp(type, "button") == 0 ||
                           strcmp(type, "switch") == 0 ||
                           strcmp(type, "checkbox") == 0 ||
