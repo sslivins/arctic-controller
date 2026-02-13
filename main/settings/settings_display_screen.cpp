@@ -181,6 +181,7 @@ static void create_header(void)
     lv_obj_set_style_border_color(s_state.back_btn, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_border_opa(s_state.back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(s_state.back_btn, (void*)"display_back");
     
     lv_obj_t* back_icon = lv_label_create(s_state.back_btn);
     lv_label_set_text(back_icon, LV_SYMBOL_LEFT);
@@ -252,6 +253,7 @@ static void create_content(void)
     lv_label_set_text(s_state.brightness_value_label, buf);
     lv_obj_set_style_text_font(s_state.brightness_value_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_state.brightness_value_label, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_user_data(s_state.brightness_value_label, (void*)"brightness_value");
     
     // Slider row with Low/High labels
     lv_obj_t* slider_row = lv_obj_create(card);
@@ -286,6 +288,7 @@ static void create_content(void)
     lv_obj_set_style_bg_color(s_state.brightness_slider, COLOR_ACCENT, LV_PART_KNOB);
     lv_obj_set_style_pad_all(s_state.brightness_slider, 12, LV_PART_KNOB);
     lv_obj_set_ext_click_area(s_state.brightness_slider, 20);
+    lv_obj_set_user_data(s_state.brightness_slider, (void*)"brightness_slider");
     
     // Add event handlers
     lv_obj_add_event_cb(s_state.brightness_slider, slider_cb, LV_EVENT_VALUE_CHANGED, NULL);

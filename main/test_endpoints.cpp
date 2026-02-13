@@ -18,6 +18,11 @@
 #include <lvgl.h>
 #include <bsp/m5stack_tab5.h>
 #include "settings/settings_menu.h"
+#include "settings/settings_display_screen.h"
+#include "settings/settings_wifi_screen.h"
+#include "settings/settings_firmware_screen.h"
+#include "settings/settings_time_screen.h"
+#include "settings/settings_language_screen.h"
 #include "i18n/i18n.h"
 
 static const char* TAG = "test_api";
@@ -79,7 +84,7 @@ static const char* get_widget_text(lv_obj_t* obj)
 // Recursively walk LVGL object tree and add widgets to JSON array
 static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
 {
-    if (!obj || depth > 20) return;  // prevent runaway recursion
+    if (!obj || depth > 10) return;  // prevent runaway recursion (keep stack usage low)
 
     bool hidden = lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
     const char* type = get_widget_type(obj);
@@ -120,6 +125,11 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
         if (lv_obj_check_type(obj, &lv_switch_class) || lv_obj_check_type(obj, &lv_checkbox_class)) {
             cJSON_AddBoolToObject(w, "checked", lv_obj_has_state(obj, LV_STATE_CHECKED));
         }
+        if (lv_obj_check_type(obj, &lv_slider_class)) {
+            cJSON_AddNumberToObject(w, "value", lv_slider_get_value(obj));
+            cJSON_AddNumberToObject(w, "min", lv_slider_get_min_value(obj));
+            cJSON_AddNumberToObject(w, "max", lv_slider_get_max_value(obj));
+        }
         if (lv_obj_has_state(obj, LV_STATE_DISABLED)) {
             cJSON_AddBoolToObject(w, "disabled", true);
         }
@@ -146,7 +156,7 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
 // Returns the label itself, not its parent
 static lv_obj_t* find_label_by_text(lv_obj_t* root, const char* exact, const char* contains, int depth)
 {
-    if (!root || depth > 20) return NULL;
+    if (!root || depth > 10) return NULL;
 
     if (!lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN)) {
         const char* text = get_widget_text(root);
@@ -167,7 +177,7 @@ static lv_obj_t* find_label_by_text(lv_obj_t* root, const char* exact, const cha
 // Find a widget by its user_data tag string
 static lv_obj_t* find_by_tag(lv_obj_t* root, const char* tag, int depth)
 {
-    if (!root || depth > 20) return NULL;
+    if (!root || depth > 10) return NULL;
 
     if (!lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN)) {
         void* ud = lv_obj_get_user_data(root);
@@ -198,11 +208,13 @@ static lv_obj_t* find_clickable_parent(lv_obj_t* obj)
 // Determine what screen is currently showing
 static const char* get_screen_name(void)
 {
+    if (display_screen_is_visible()) return "display";
+    if (wifi_screen_is_visible()) return "wifi";
+    if (firmware_screen_is_visible()) return "firmware";
+    if (time_screen_is_visible()) return "time";
+    if (language_screen_is_visible()) return "language";
     if (settings_menu_is_visible()) return "settings";
 
-    // Check active screen — try to identify by known patterns
-    // For now return "main" as default; screens don't self-identify
-    // This can be extended by having each screen register itself
     return "main";
 }
 
@@ -231,14 +243,17 @@ static esp_err_t ui_state_get_handler(httpd_req_t* req)
     bsp_display_unlock();
 
     cJSON_AddItemToObject(root, "widgets", widgets);
-    cJSON_AddNumberToObject(root, "count", cJSON_GetArraySize(widgets));
+    int widget_count = cJSON_GetArraySize(widgets);
+    cJSON_AddNumberToObject(root, "count", widget_count);
 
     char* json = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json);
     free(json);
-    cJSON_Delete(root);
 
-    ESP_LOGI(TAG, "ui-state: screen=%s, %d widgets", get_screen_name(), cJSON_GetArraySize(widgets));
+    // Log before delete (screen_name pointer is inside root)
+    ESP_LOGI(TAG, "ui-state: screen=%s, %d widgets",
+             cJSON_GetObjectItem(root, "screen")->valuestring, widget_count);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 
@@ -444,6 +459,92 @@ static esp_err_t click_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/set-slider
+// Body: {"tag": "brightness_slider", "value": 50}
+// Sets a slider widget's value and fires LV_EVENT_VALUE_CHANGED + LV_EVENT_RELEASED
+// ============================================================================
+
+static esp_err_t set_slider_post_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+
+    int content_len = req->content_len;
+    if (content_len <= 0 || content_len > 1024) {
+        send_json_error(req, "400 Bad Request", "Invalid body");
+        return ESP_OK;
+    }
+
+    char buf[1024];
+    int received = httpd_req_recv(req, buf, content_len);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Failed to read body");
+        return ESP_OK;
+    }
+    buf[received] = '\0';
+
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* j_tag = cJSON_GetObjectItem(body, "tag");
+    cJSON* j_value = cJSON_GetObjectItem(body, "value");
+
+    if (!j_tag || !cJSON_IsString(j_tag) || !j_value || !cJSON_IsNumber(j_value)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Provide 'tag' (string) and 'value' (number)");
+        return ESP_OK;
+    }
+
+    char search_tag[64] = {0};
+    strncpy(search_tag, j_tag->valuestring, sizeof(search_tag) - 1);
+    int value = (int)j_value->valuedouble;
+    cJSON_Delete(body);
+
+    ESP_LOGI(TAG, "set-slider: tag='%s', value=%d", search_tag, value);
+
+    if (!bsp_display_lock(1000)) {
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
+
+    lv_obj_t* scr = lv_scr_act();
+    lv_obj_t* found = find_by_tag(scr, search_tag, 0);
+
+    if (!found) {
+        bsp_display_unlock();
+        send_json_error(req, "404 Not Found", search_tag);
+        return ESP_OK;
+    }
+
+    if (!lv_obj_check_type(found, &lv_slider_class)) {
+        bsp_display_unlock();
+        send_json_error(req, "400 Bad Request", "Widget is not a slider");
+        return ESP_OK;
+    }
+
+    // Set the slider value and fire events (mimics user dragging + releasing)
+    lv_slider_set_value(found, value, LV_ANIM_OFF);
+    lv_obj_send_event(found, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_send_event(found, LV_EVENT_RELEASED, NULL);
+
+    int actual = lv_slider_get_value(found);
+    bsp_display_unlock();
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddNumberToObject(resp, "value", actual);
+
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+
+    return ESP_OK;
+}
+
+// ============================================================================
 // CORS preflight handler for POST endpoints
 // ============================================================================
 
@@ -486,6 +587,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &click_options_uri);
+
+    httpd_uri_t set_slider_uri = {
+        .uri = "/api/test/set-slider",
+        .method = HTTP_POST,
+        .handler = set_slider_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &set_slider_uri);
+
+    httpd_uri_t set_slider_options_uri = {
+        .uri = "/api/test/set-slider",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &set_slider_options_uri);
 
     ESP_LOGI(TAG, "Test instrumentation endpoints registered");
 }
