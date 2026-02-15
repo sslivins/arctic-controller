@@ -50,10 +50,10 @@ jobs:
 
   device-tests:
     needs: build
-    runs-on: [self-hosted, device-test]
+    runs-on: [self-hosted, tab5]
     timeout-minutes: 30
     env:
-      ARCTIC_URL: http://192.168.1.23
+      ARCTIC_URL: http://arctic.local
 
     steps:
       - name: Checkout code
@@ -128,7 +128,7 @@ jobs:
       - name: Run device tests
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml
         env:
-          ARCTIC_URL: http://192.168.1.23
+          ARCTIC_URL: http://arctic.local
 
       - name: Publish test results
         uses: dorny/test-reporter@v1
