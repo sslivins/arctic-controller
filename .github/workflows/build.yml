@@ -45,6 +45,10 @@ jobs:
       - name: Fetch dependencies
         run: python3 fetch_repos.py
 
+      - name: Disable test endpoints for production build
+        run: |
+          echo "CONFIG_TEST_ENDPOINTS=n" >> sdkconfig.defaults
+
       - name: ESP-IDF Build
         uses: espressif/esp-idf-ci-action@v1
         with:

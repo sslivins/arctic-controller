@@ -32,6 +32,7 @@ class Widget:
     password_mode: Optional[bool] = None
     option_count: Optional[int] = None
     selected_text: Optional[str] = None
+    bg_color: Optional[str] = None
 
 
 class DeviceError(Exception):
@@ -273,6 +274,42 @@ class DeviceClient:
     # ------------------------------------------------------------------
     # Convenience helpers
     # ------------------------------------------------------------------
+
+    def get_heatpump_status(self) -> dict:
+        """GET /api/heatpump/status — returns heat pump state including temps, components, errors."""
+        r = self.session.get(
+            f"{self.base_url}/api/heatpump/status", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def set_demo_fields(self, **fields) -> dict:
+        """POST /api/test/set-demo-field — set demo state fields.
+
+        Example: device.set_demo_fields(water_tank_temp=50, fan_speed=0)
+        Only works when demo mode is enabled.
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/set-demo-field",
+            json=fields,
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Set demo fields failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def clear_error_history(self) -> dict:
+        """POST /api/test/clear-error-history — clear the error history ring buffer."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/clear-error-history",
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        return r.json()
 
     def wait_for_screen(self, name: str, timeout: float = 3.0, poll: float = 0.3) -> bool:
         """Poll until the screen name matches, or timeout."""

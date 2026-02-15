@@ -69,6 +69,30 @@ Standalone ESP32-S3 project that acts as a Modbus RTU slave, emulating the ECO-6
 
 ## Testing
 
+### CI Pipeline — Self-Hosted Runner on Raspberry Pi
+
+Set up a Raspberry Pi as a GitHub Actions self-hosted runner on the same LAN as the test device. The Pi runs pytest over HTTP — no internet exposure needed.
+
+#### Hardware Setup
+- [ ] Acquire Raspberry Pi (Zero 2 W / Pi 4 / Pi 5) + power supply + SD card
+- [ ] Connect Pi to LAN (WiFi or Ethernet) — same network as test device
+- [ ] Connect Pi to test device via USB for flashing (`/dev/ttyUSB0`)
+- [ ] Install Raspberry Pi OS Lite (headless, no desktop needed)
+- [ ] Install Python 3.11+, pytest, esptool.py on the Pi
+
+#### GitHub Actions Self-Hosted Runner
+- [ ] Install GitHub Actions runner on Pi (repo Settings → Actions → Runners → New self-hosted runner → Linux ARM)
+- [ ] Configure runner with label `device-test`
+- [ ] Set up runner as a systemd service (`sudo ./svc.sh install`) so it auto-starts on boot
+
+#### CI Workflow
+- [ ] Create `.github/workflows/device-tests.yml` with two jobs:
+  - **Job 1** (`ubuntu-latest`): Build firmware using `espressif/esp-idf-ci-action`, upload `.bin` artifacts
+  - **Job 2** (`self-hosted, device-test`): Download artifacts, flash device via esptool, run `pytest tests/device/`
+- [ ] Set `ARCTIC_URL` as a repository variable or runner environment variable
+- [ ] Configure workflow trigger (on push to `feature/device-ui-tests`, on PR, manual dispatch)
+- [ ] Add test result reporting (pytest JUnit XML output → GitHub Actions summary)
+
 ### CI / Automated Testing (no device required)
 - [ ] **Unit tests**: Extract pure logic (event ring buffer, °C↔°F conversion, error lookups, demo register mapping, i18n string resolution, setpoint validation) into host-compilable modules; test with Google Test or Catch2 on GitHub Actions runner
 - [ ] **API contract tests**: Build Python mock server (FastAPI) implementing the same REST API; validate against `openapi.yaml` with schemathesis; run pytest suite for all endpoints; add to CI workflow

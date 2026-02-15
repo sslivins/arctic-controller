@@ -25,6 +25,8 @@
 #include "settings/settings_language_screen.h"
 #include "settings/settings_types.h"
 #include "i18n/i18n.h"
+#include "modbus/arctic_heatpump.h"
+#include "heatpump_errors.h"
 
 static const char* TAG = "test_api";
 
@@ -155,6 +157,12 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
         void* ud = lv_obj_get_user_data(obj);
         if (ud) {
             cJSON_AddStringToObject(w, "tag", (const char*)ud);
+
+            // Report bg_color for tagged objects (useful for status indicators)
+            lv_color_t bg = lv_obj_get_style_bg_color(obj, LV_PART_MAIN);
+            char hex[8];
+            snprintf(hex, sizeof(hex), "#%02x%02x%02x", bg.red, bg.green, bg.blue);
+            cJSON_AddStringToObject(w, "bg_color", hex);
         }
 
         cJSON_AddItemToArray(arr, w);
@@ -977,6 +985,84 @@ static esp_err_t firmware_mock_reset_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/set-demo-field — set demo state fields (no auth)
+// ============================================================================
+
+static esp_err_t set_demo_field_post_handler(httpd_req_t* req)
+{
+    if (!arctic::isDemoMode()) {
+        send_json_error(req, "403 Forbidden", "Demo mode is not enabled");
+        return ESP_OK;
+    }
+
+    char body[512];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON* results = cJSON_AddObjectToObject(resp, "results");
+    int success_count = 0;
+    int fail_count = 0;
+
+    cJSON* item = NULL;
+    cJSON_ArrayForEach(item, root) {
+        if (!cJSON_IsNumber(item)) {
+            cJSON_AddStringToObject(results, item->string, "error: value must be a number");
+            fail_count++;
+            continue;
+        }
+        int32_t value = (int32_t)item->valuedouble;
+        if (arctic::setDemoField(item->string, value)) {
+            cJSON_AddStringToObject(results, item->string, "ok");
+            success_count++;
+        } else {
+            cJSON_AddStringToObject(results, item->string, "error: unknown field");
+            fail_count++;
+        }
+    }
+    cJSON_Delete(root);
+
+    cJSON_AddBoolToObject(resp, "success", fail_count == 0 && success_count > 0);
+    cJSON_AddNumberToObject(resp, "updated", success_count);
+    cJSON_AddNumberToObject(resp, "failed", fail_count);
+
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/clear-error-history — clear the error history ring buffer
+// ============================================================================
+
+static esp_err_t clear_error_history_post_handler(httpd_req_t* req)
+{
+    arctic::clearErrorHistory();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -1133,6 +1219,38 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &firmware_mock_reset_options_uri);
+
+    httpd_uri_t set_demo_field_uri = {
+        .uri = "/api/test/set-demo-field",
+        .method = HTTP_POST,
+        .handler = set_demo_field_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &set_demo_field_uri);
+
+    httpd_uri_t set_demo_field_options_uri = {
+        .uri = "/api/test/set-demo-field",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &set_demo_field_options_uri);
+
+    httpd_uri_t clear_error_history_uri = {
+        .uri = "/api/test/clear-error-history",
+        .method = HTTP_POST,
+        .handler = clear_error_history_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &clear_error_history_uri);
+
+    httpd_uri_t clear_error_history_options_uri = {
+        .uri = "/api/test/clear-error-history",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &clear_error_history_options_uri);
 
     ESP_LOGI(TAG, "Test instrumentation endpoints registered");
 }

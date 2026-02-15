@@ -11,8 +11,8 @@
 
 namespace arctic {
 
-// Maximum number of error history entries (keep short, use event log for full history)
-constexpr int ERROR_HISTORY_SIZE = 10;
+// Maximum number of error history entries (ring buffer — oldest entries are overwritten)
+constexpr int ERROR_HISTORY_SIZE = 50;
 
 // Error severity levels
 enum class ErrorSeverity {
