@@ -1,12 +1,10 @@
 name: Device Tests
 
 on:
-  push:
-    branches:
-      - feature/device-ui-tests
   pull_request:
     branches:
       - main
+  workflow_call:
   workflow_dispatch:
 
 permissions:
