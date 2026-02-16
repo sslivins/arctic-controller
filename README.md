@@ -235,6 +235,18 @@ Run `idf.py menuconfig` to configure ESP-IDF options.
 | Web Login | `arctic` | `arctic` |
 | API Key | N/A | Auto-generated (view in Settings) |
 
+## Development
+
+### Branch Protection
+
+The `main` branch is protected to ensure code quality. All changes must go through pull requests, and the build workflow must pass before merging.
+
+To set up branch protection, see [.github/BRANCH_PROTECTION.md](.github/BRANCH_PROTECTION.md) or run:
+
+```bash
+./scripts/setup-branch-protection.sh
+```
+
 ## TODO
 
 - [ ] Add automatic update option checkbox - allow users to enable auto-updates so firmware installs automatically when available
