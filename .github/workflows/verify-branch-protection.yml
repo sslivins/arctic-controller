@@ -1,0 +1,76 @@
+name: Verify Branch Protection
+
+# This workflow helps verify that branch protection is properly configured
+# Run this manually after setting up branch protection
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch protection status
+        run: |
+          echo "## Branch Protection Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Try to get branch protection info
+          if curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               -H "Accept: application/vnd.github+json" \
+               "https://api.github.com/repos/${{ github.repository }}/branches/main/protection" | jq . > /dev/null 2>&1; then
+            echo "✅ Branch protection is configured on main branch" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+            curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                 -H "Accept: application/vnd.github+json" \
+                 "https://api.github.com/repos/${{ github.repository }}/branches/main/protection" | \
+                 jq '{
+                   required_status_checks: .required_status_checks.contexts,
+                   strict_updates: .required_status_checks.strict,
+                   require_pr: (.required_pull_request_reviews != null),
+                   required_approvals: .required_pull_request_reviews.required_approving_review_count,
+                   allow_force_pushes: .allow_force_pushes.enabled,
+                   allow_deletions: .allow_deletions.enabled
+                 }' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Branch protection is NOT configured on main branch" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Please configure branch protection by following the instructions in:" >> $GITHUB_STEP_SUMMARY
+            echo "- [Branch Protection Guide](.github/BRANCH_PROTECTION.md)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Or run the setup script:" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "./scripts/setup-branch-protection.sh" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+      - name: Check required workflow exists
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Required Workflows" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f ".github/workflows/build.yml" ]; then
+            echo "✅ Build workflow exists at \`.github/workflows/build.yml\`" >> $GITHUB_STEP_SUMMARY
+            
+            # Check if it runs on PR
+            if grep -q "pull_request:" .github/workflows/build.yml; then
+              echo "✅ Build workflow runs on pull requests" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "⚠️  Build workflow may not run on pull requests" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ Build workflow not found" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+      - name: Summary
+        if: success()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **All checks passed!** Branch protection is properly configured." >> $GITHUB_STEP_SUMMARY

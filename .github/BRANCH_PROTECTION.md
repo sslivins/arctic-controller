@@ -2,6 +2,8 @@
 
 This guide explains how to protect the `main` branch to ensure all tests pass before merging.
 
+> **Quick Start:** For a condensed version of this guide, see [QUICKSTART.md](QUICKSTART.md)
+
 ## Overview
 
 Branch protection ensures code quality by requiring specific checks to pass before code can be merged into the `main` branch.
