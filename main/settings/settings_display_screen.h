@@ -41,6 +41,12 @@ bool display_screen_is_visible(void);
  */
 void display_screen_init_brightness(void);
 
+/**
+ * @brief Get the current display brightness percentage
+ * @return Brightness 5-100, or the default if not yet loaded
+ */
+int display_screen_get_brightness(void);
+
 #ifdef __cplusplus
 }
 #endif

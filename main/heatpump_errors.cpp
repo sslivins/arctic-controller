@@ -350,8 +350,8 @@ void updateErrorHistory(uint16_t error1, uint16_t error2) {
         if (cleared_error1 & s_error1_defs[i].mask) {
             time_t occurred = s_error1_first_seen[i];
             time_t duration = (occurred > 0 && now > occurred) ? (now - occurred) : 0;
-            ESP_LOGI(TAG, "Error CLEARED: %s - %s (duration: %lld sec)", 
-                     s_error1_defs[i].code, s_error1_defs[i].description, (long long)duration);
+            ESP_LOGI(TAG, "Error CLEARED: %s - %s (duration: %d sec)", 
+                     s_error1_defs[i].code, s_error1_defs[i].description, (int)duration);
             addHistoryEntry(s_error1_defs[i].code, true, occurred);
             s_error1_first_seen[i] = 0;  // Clear tracking
         }
@@ -360,8 +360,8 @@ void updateErrorHistory(uint16_t error1, uint16_t error2) {
         if (cleared_error2 & s_error2_defs[i].mask) {
             time_t occurred = s_error2_first_seen[i];
             time_t duration = (occurred > 0 && now > occurred) ? (now - occurred) : 0;
-            ESP_LOGI(TAG, "Error CLEARED: %s - %s (duration: %lld sec)", 
-                     s_error2_defs[i].code, s_error2_defs[i].description, (long long)duration);
+            ESP_LOGI(TAG, "Error CLEARED: %s - %s (duration: %d sec)", 
+                     s_error2_defs[i].code, s_error2_defs[i].description, (int)duration);
             addHistoryEntry(s_error2_defs[i].code, true, occurred);
             s_error2_first_seen[i] = 0;  // Clear tracking
         }
@@ -449,7 +449,7 @@ const char* formatDuration(time_t start_time, time_t end_time) {
     time_t duration = now - start_time;
     
     if (duration < 60) {
-        snprintf(buf, sizeof(buf), "%llds", (long long)duration);
+        snprintf(buf, sizeof(buf), "%ds", (int)duration);
     } else if (duration < 3600) {
         int mins = duration / 60;
         int secs = duration % 60;

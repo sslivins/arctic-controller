@@ -39,6 +39,9 @@ typedef struct {
 
 static language_screen_state_t s_state = {};
 
+// String tags for language buttons (indexed by language_t)
+static const char* lang_button_tags[] = {"lang_english", "lang_french", "lang_spanish"};
+
 // ============================================================================
 // Forward Declarations
 // ============================================================================
@@ -125,6 +128,7 @@ static void create_header(void)
     lv_obj_set_style_border_color(s_state.back_btn, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_border_opa(s_state.back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(s_state.back_btn, (void*)"language_back");
     
     lv_obj_t* back_icon = lv_label_create(s_state.back_btn);
     lv_label_set_text(back_icon, LV_SYMBOL_LEFT);
@@ -195,6 +199,7 @@ static void create_content(void)
         lv_obj_set_style_bg_color(btn, lv_color_hex(0x2a3a5e), LV_PART_MAIN);  // Lighter than card
         lv_obj_set_style_radius(btn, 10, LV_PART_MAIN);
         lv_obj_add_event_cb(btn, language_btn_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)i);
+        lv_obj_set_user_data(btn, (void*)lang_button_tags[i]);
         
         // Highlight current selection
         if ((language_t)i == current_lang) {

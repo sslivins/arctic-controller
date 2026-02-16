@@ -202,6 +202,7 @@ static void create_header(void)
     lv_obj_set_style_border_color(s_state.back_btn, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_border_opa(s_state.back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.back_btn, back_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(s_state.back_btn, (void*)"firmware_back");
     
     lv_obj_t* back_icon = lv_label_create(s_state.back_btn);
     lv_label_set_text(back_icon, LV_SYMBOL_LEFT);
@@ -259,6 +260,7 @@ static void create_content(void)
     lv_label_set_text(s_state.current_version_label, buf);
     lv_obj_set_style_text_font(s_state.current_version_label, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_state.current_version_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_set_user_data(s_state.current_version_label, (void*)"firmware_current_version");
     
     // Latest version
     s_state.latest_version_label = lv_label_create(card);
@@ -266,12 +268,14 @@ static void create_content(void)
     lv_label_set_text(s_state.latest_version_label, buf);
     lv_obj_set_style_text_font(s_state.latest_version_label, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_state.latest_version_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_user_data(s_state.latest_version_label, (void*)"firmware_latest_version");
     
     // Status
     s_state.status_label = lv_label_create(card);
     lv_label_set_text(s_state.status_label, "");
     lv_obj_set_style_text_font(s_state.status_label, FONT_LARGE, LV_PART_MAIN);
     lv_obj_set_style_text_color(s_state.status_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_set_user_data(s_state.status_label, (void*)"firmware_status");
     
     // Progress bar
     s_state.progress_bar = lv_bar_create(card);
@@ -298,6 +302,7 @@ static void create_content(void)
     lv_obj_set_style_radius(s_state.update_btn, 10, LV_PART_MAIN);
     lv_obj_add_event_cb(s_state.update_btn, update_btn_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_flag(s_state.update_btn, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_user_data(s_state.update_btn, (void*)"firmware_update_btn");
     
     lv_obj_t* btn_label = lv_label_create(s_state.update_btn);
     snprintf(buf, sizeof(buf), LV_SYMBOL_DOWNLOAD " %s", i18n_get(STR_FW_INSTALL_UPDATE));
@@ -571,6 +576,38 @@ static void progress_timer_cb(lv_timer_t* timer)
         default:
             break;
     }
+}
+
+// ============================================================================
+// Mock Support (for testing)
+// ============================================================================
+
+void firmware_screen_set_mock_result(const char* latest_version, bool update_available)
+{
+    if (!s_state.visible) {
+        ESP_LOGW(TAG, "firmware_screen_set_mock_result: screen not visible");
+        return;
+    }
+
+    strncpy(s_state.latest_version, latest_version, sizeof(s_state.latest_version) - 1);
+    s_state.latest_version[sizeof(s_state.latest_version) - 1] = '\0';
+
+    // Clear download URL so the Install button can't actually start OTA
+    s_state.download_url[0] = '\0';
+
+    if (update_available) {
+        update_ui_state(FW_STATE_UPDATE_AVAILABLE);
+    } else {
+        update_ui_state(FW_STATE_NO_UPDATE);
+    }
+    ESP_LOGI(TAG, "Mock firmware result: latest=%s update_available=%d", latest_version, update_available);
+}
+
+void firmware_screen_clear_mock(void)
+{
+    if (!s_state.visible) return;
+    update_ui_state(FW_STATE_IDLE);
+    ESP_LOGI(TAG, "Mock firmware state cleared");
 }
 
 // ============================================================================

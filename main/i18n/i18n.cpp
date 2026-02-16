@@ -908,6 +908,46 @@ const char* i18n_get(string_id_t id)
     return "???";
 }
 
+string_id_t i18n_find_by_english(const char* english_text)
+{
+    if (!english_text) return STR_COUNT;
+    for (int i = 0; i < STR_COUNT; i++) {
+        if (strings_en[i] && strcmp(strings_en[i], english_text) == 0) {
+            return (string_id_t)i;
+        }
+    }
+    return STR_COUNT;
+}
+
+const char* i18n_translate(const char* english_text)
+{
+    string_id_t id = i18n_find_by_english(english_text);
+    if (id < STR_COUNT) {
+        return i18n_get(id);
+    }
+    return english_text;  // no match, return as-is
+}
+
+const char* i18n_get_english(const char* localized_text)
+{
+    if (!localized_text) return NULL;
+    // Check if it's already English
+    for (int i = 0; i < STR_COUNT; i++) {
+        if (strings_en[i] && strcmp(strings_en[i], localized_text) == 0) {
+            return strings_en[i];
+        }
+    }
+    // Search all language tables for a match, then return the English equivalent
+    for (int lang = 0; lang < LANG_COUNT; lang++) {
+        for (int i = 0; i < STR_COUNT; i++) {
+            if (string_tables[lang][i] && strcmp(string_tables[lang][i], localized_text) == 0) {
+                return strings_en[i];  // return English version
+            }
+        }
+    }
+    return NULL;
+}
+
 language_t i18n_get_language(void)
 {
     return s_current_language;

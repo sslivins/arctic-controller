@@ -1,0 +1,951 @@
+openapi: 3.0.3
+info:
+  title: Arctic Controller — Test Instrumentation API
+  description: |
+    HTTP endpoints compiled into the firmware only when `CONFIG_TEST_ENDPOINTS=y`.
+    Used by pytest device tests to inspect and manipulate the LVGL UI over the
+    network.  All mutating endpoints (except lock/unlock) require an active
+    session lock via the `X-Session-Id` header.
+
+    **Not present in production builds.**
+  version: "1.0.0"
+  contact:
+    name: Arctic Controller
+    url: https://github.com/sslivins/arctic-controller
+
+servers:
+  - url: http://arctic.local
+    description: Device (mDNS)
+  - url: http://192.168.1.23
+    description: Device (static IP — example)
+
+tags:
+  - name: UI State
+    description: Read the LVGL widget tree
+  - name: Interaction
+    description: Click, toggle, type, and set widget values
+  - name: Mocking
+    description: Inject fake WiFi networks, firmware results, notifications, and demo state
+  - name: Session Lock
+    description: Exclusive device lock to prevent concurrent test sessions
+
+# ---------------------------------------------------------------------------
+# Reusable components
+# ---------------------------------------------------------------------------
+components:
+  headers:
+    X-Session-Id:
+      description: |
+        UUID identifying the current test session.  Set automatically after
+        `POST /api/test/lock` succeeds.  Required on all mutating endpoints.
+      schema:
+        type: string
+        format: uuid
+      required: false
+
+  schemas:
+    # --- Common -----------------------------------------------------------
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    LockedError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Device is locked by another test session
+        locked_by:
+          type: string
+          description: Session ID of the lock holder
+        remaining_seconds:
+          type: integer
+          description: Seconds until the lock auto-expires
+      required: [error, locked_by, remaining_seconds]
+
+    # --- UI State ---------------------------------------------------------
+    Widget:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - label
+            - button
+            - switch
+            - checkbox
+            - slider
+            - dropdown
+            - roller
+            - textarea
+            - image
+            - bar
+            - spinner
+            - container
+            - unknown
+        text:
+          type: string
+          description: Visible text (labels, checkboxes, textareas)
+        text_en:
+          type: string
+          description: English translation when `text` is in another language
+        x:
+          type: integer
+        "y":
+          type: integer
+        w:
+          type: integer
+        h:
+          type: integer
+        checked:
+          type: boolean
+          description: Switch/checkbox state
+        value:
+          type: integer
+          description: Slider current value or roller selected index
+        min:
+          type: integer
+          description: Slider minimum
+        max:
+          type: integer
+          description: Slider maximum
+        password_mode:
+          type: boolean
+          description: Textarea password masking
+        option_count:
+          type: integer
+          description: Number of roller options
+        selected_text:
+          type: string
+          description: Currently selected roller option text
+        disabled:
+          type: boolean
+          description: True when widget has LV_STATE_DISABLED
+        tag:
+          type: string
+          description: User-data tag assigned in C++ UI code
+        bg_color:
+          type: string
+          pattern: "^#[0-9a-fA-F]{6}$"
+          description: Background color of tagged widgets
+      required: [type, x, "y", w, h]
+
+    UiState:
+      type: object
+      properties:
+        screen:
+          type: string
+          enum: [main, settings, display, wifi, firmware, time, language]
+        widgets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Widget"
+        count:
+          type: integer
+          description: Number of widgets in the array
+      required: [screen, widgets, count]
+
+    # --- Click ------------------------------------------------------------
+    ClickRequest:
+      type: object
+      description: Exactly one search field must be provided.
+      properties:
+        tag:
+          type: string
+          description: Match widget by user_data tag
+        symbol:
+          type: string
+          description: LVGL symbol name (e.g. SETTINGS, HOME, WIFI, CLOSE)
+          enum:
+            - AUDIO
+            - VIDEO
+            - LIST
+            - OK
+            - CLOSE
+            - POWER
+            - SETTINGS
+            - HOME
+            - DOWNLOAD
+            - REFRESH
+            - EDIT
+            - PREV
+            - NEXT
+            - PLAY
+            - PAUSE
+            - STOP
+            - IMAGE
+            - TINT
+            - PLUS
+            - MINUS
+            - WARNING
+            - SHUFFLE
+            - UP
+            - DOWN
+            - LEFT
+            - RIGHT
+            - TRASH
+            - BACKSPACE
+            - CHARGE
+            - EYE_OPEN
+            - EYE_CLOSE
+            - WIFI
+            - LOOP
+        label:
+          type: string
+          description: Exact label text (auto-translated via i18n)
+        label_contains:
+          type: string
+          description: Substring match (auto-translated via i18n)
+
+    ClickResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        clicked_type:
+          type: string
+        clicked_text:
+          type: string
+      required: [success, clicked_type]
+
+    # --- Slider -----------------------------------------------------------
+    SetSliderRequest:
+      type: object
+      properties:
+        tag:
+          type: string
+        value:
+          type: integer
+      required: [tag, value]
+
+    SetSliderResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        value:
+          type: integer
+          description: Actual slider value after setting
+      required: [success, value]
+
+    # --- Roller -----------------------------------------------------------
+    SetRollerRequest:
+      type: object
+      properties:
+        tag:
+          type: string
+        index:
+          type: integer
+          description: 0-based option index
+      required: [tag, index]
+
+    SetRollerResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        value:
+          type: integer
+        selected_text:
+          type: string
+      required: [success, value, selected_text]
+
+    # --- Toggle -----------------------------------------------------------
+    ToggleRequest:
+      type: object
+      properties:
+        tag:
+          type: string
+      required: [tag]
+
+    ToggleResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        checked:
+          type: boolean
+      required: [success, checked]
+
+    # --- Type Text --------------------------------------------------------
+    TypeTextRequest:
+      type: object
+      properties:
+        tag:
+          type: string
+        text:
+          type: string
+      required: [tag, text]
+
+    TypeTextResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        text:
+          type: string
+        password_mode:
+          type: boolean
+      required: [success, text, password_mode]
+
+    # --- WiFi Mock --------------------------------------------------------
+    WifiMockNetwork:
+      type: object
+      properties:
+        ssid:
+          type: string
+        rssi:
+          type: integer
+          default: -50
+        authmode:
+          type: integer
+          description: "0=open, 3=WPA2, 4=WPA3"
+          default: 0
+      required: [ssid]
+
+    WifiMockRequest:
+      type: object
+      properties:
+        networks:
+          type: array
+          items:
+            $ref: "#/components/schemas/WifiMockNetwork"
+          maxItems: 20
+      required: [networks]
+
+    WifiMockResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        injected:
+          type: integer
+      required: [success, injected]
+
+    # --- Firmware Mock ----------------------------------------------------
+    FirmwareMockRequest:
+      type: object
+      properties:
+        version:
+          type: string
+          example: "99.0.0"
+        update_available:
+          type: boolean
+          default: false
+      required: [version]
+
+    FirmwareMockResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        version:
+          type: string
+        update_available:
+          type: boolean
+      required: [success, version, update_available]
+
+    # --- Notification Mock ------------------------------------------------
+    NotificationMockRequest:
+      type: object
+      properties:
+        type:
+          type: integer
+          description: "0=firmware update, 1=wifi unstable, 2=low battery"
+          enum: [0, 1, 2]
+        message:
+          type: string
+          description: Optional custom notification text
+      required: [type]
+
+    NotificationMockResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        type:
+          type: integer
+        message:
+          type: string
+      required: [success, type]
+
+    # --- Demo Field -------------------------------------------------------
+    SetDemoFieldRequest:
+      type: object
+      description: |
+        Arbitrary key/value pairs where keys are demo state field names and
+        values are numbers.  Requires demo mode to be enabled.
+      additionalProperties:
+        type: number
+      example:
+        water_tank_temp: 50
+        fan_speed: 0
+
+    SetDemoFieldResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        updated:
+          type: integer
+        failed:
+          type: integer
+        results:
+          type: object
+          additionalProperties:
+            type: string
+            description: '"ok" or "error: <reason>"'
+      required: [success, updated, failed, results]
+
+    # --- Success-only response --------------------------------------------
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required: [success]
+
+    # --- Lock -------------------------------------------------------------
+    LockStatusUnlocked:
+      type: object
+      properties:
+        locked:
+          type: boolean
+          enum: [false]
+      required: [locked]
+
+    LockStatusLocked:
+      type: object
+      properties:
+        locked:
+          type: boolean
+          enum: [true]
+        session_id:
+          type: string
+        remaining_seconds:
+          type: integer
+      required: [locked, session_id, remaining_seconds]
+
+    LockRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+          description: Unique session identifier
+        ttl_seconds:
+          type: integer
+          default: 900
+          description: Lock time-to-live in seconds (default 15 min)
+      required: [session_id]
+
+    LockAcquiredResponse:
+      type: object
+      properties:
+        acquired:
+          type: boolean
+        session_id:
+          type: string
+        ttl_seconds:
+          type: integer
+      required: [acquired, session_id, ttl_seconds]
+
+    UnlockRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+          description: Must match lock holder unless force is true
+        force:
+          type: boolean
+          default: false
+
+    UnlockResponse:
+      type: object
+      properties:
+        released:
+          type: boolean
+      required: [released]
+
+  responses:
+    Locked:
+      description: Device is locked by another test session
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/LockedError"
+    BadRequest:
+      description: Invalid or missing request parameters
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Widget not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    DisplayTimeout:
+      description: LVGL display lock timed out
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+  /api/test/ui-state:
+    get:
+      tags: [UI State]
+      summary: Walk the LVGL widget tree
+      description: |
+        Returns all visible widgets on the current screen with their type,
+        position, text, and state.  Read-only — does not require a session lock.
+      responses:
+        "200":
+          description: Widget tree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiState"
+        "503":
+          $ref: "#/components/responses/DisplayTimeout"
+
+  /api/test/click:
+    post:
+      tags: [Interaction]
+      summary: Click a widget
+      description: |
+        Find a widget by tag, symbol, exact label, or label substring and fire
+        `LV_EVENT_CLICKED`.  Exactly one search field must be provided.
+        Labels are auto-translated through the i18n layer.
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClickRequest"
+      responses:
+        "200":
+          description: Widget clicked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClickResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "503":
+          $ref: "#/components/responses/DisplayTimeout"
+
+  /api/test/set-slider:
+    post:
+      tags: [Interaction]
+      summary: Set a slider value
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetSliderRequest"
+      responses:
+        "200":
+          description: Slider value set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetSliderResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "503":
+          $ref: "#/components/responses/DisplayTimeout"
+
+  /api/test/set-roller:
+    post:
+      tags: [Interaction]
+      summary: Set a roller selection by index
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetRollerRequest"
+      responses:
+        "200":
+          description: Roller selection set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetRollerResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "503":
+          $ref: "#/components/responses/DisplayTimeout"
+
+  /api/test/toggle:
+    post:
+      tags: [Interaction]
+      summary: Toggle a switch widget
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ToggleRequest"
+      responses:
+        "200":
+          description: Switch toggled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ToggleResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "423":
+          $ref: "#/components/responses/Locked"
+        "503":
+          $ref: "#/components/responses/DisplayTimeout"
+
+  /api/test/type-text:
+    post:
+      tags: [Interaction]
+      summary: Type text into a textarea
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TypeTextRequest"
+      responses:
+        "200":
+          description: Text entered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TypeTextResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/wifi-mock:
+    post:
+      tags: [Mocking]
+      summary: Inject fake WiFi scan results
+      description: |
+        Pauses real WiFi scanning and injects up to 20 fake networks.
+        The WiFi screen will display these instead of real scan results.
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WifiMockRequest"
+      responses:
+        "200":
+          description: Networks injected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WifiMockResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/wifi-mock-reset:
+    post:
+      tags: [Mocking]
+      summary: Clear WiFi mock and resume real scanning
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Mock cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/firmware-mock:
+    post:
+      tags: [Mocking]
+      summary: Inject a fake firmware check result
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FirmwareMockRequest"
+      responses:
+        "200":
+          description: Firmware mock set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FirmwareMockResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/firmware-mock-reset:
+    post:
+      tags: [Mocking]
+      summary: Clear firmware mock state
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Mock cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/notification-mock:
+    post:
+      tags: [Mocking]
+      summary: Add a status bar notification
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationMockRequest"
+      responses:
+        "200":
+          description: Notification added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationMockResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/notification-mock-reset:
+    post:
+      tags: [Mocking]
+      summary: Clear all notifications
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Notifications cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/set-demo-field:
+    post:
+      tags: [Mocking]
+      summary: Inject demo state field values
+      description: |
+        Set arbitrary demo state fields by name.  Requires demo mode to be
+        enabled on the device (toggle via the settings menu or the
+        `demo_mode_switch` widget).  Returns 403 if demo mode is off.
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetDemoFieldRequest"
+      responses:
+        "200":
+          description: Fields updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetDemoFieldResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Demo mode is not enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/clear-error-history:
+    post:
+      tags: [Mocking]
+      summary: Clear the error history ring buffer
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: History cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/lock:
+    get:
+      tags: [Session Lock]
+      summary: Check lock status
+      description: Returns whether the device is currently locked and by whom.
+      responses:
+        "200":
+          description: Lock status
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/LockStatusUnlocked"
+                  - $ref: "#/components/schemas/LockStatusLocked"
+    post:
+      tags: [Session Lock]
+      summary: Acquire or renew the exclusive session lock
+      description: |
+        Acquires the device lock for the given session ID.  If the lock is
+        already held by the same session, the TTL is renewed.  If held by a
+        different session, returns 423.
+
+        After acquiring, set `X-Session-Id` header on all subsequent requests.
+        The lock auto-expires after `ttl_seconds` (default 15 minutes) to
+        handle test runner crashes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LockRequest"
+      responses:
+        "200":
+          description: Lock acquired or renewed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LockAcquiredResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/unlock:
+    post:
+      tags: [Session Lock]
+      summary: Release the session lock
+      description: |
+        Releases the device lock.  The session_id must match the current holder
+        unless `force: true` is set.  An empty body is treated as a force-unlock
+        (useful for manual cleanup).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UnlockRequest"
+      responses:
+        "200":
+          description: Lock released
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnlockResponse"
+        "423":
+          $ref: "#/components/responses/Locked"

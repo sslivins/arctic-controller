@@ -9,11 +9,22 @@ on:
         default: false
         type: boolean
 
+# Only one release at a time (shares the physical device via device-tests)
+concurrency:
+  group: device-tests
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  checks: write
 
 jobs:
+  device-tests:
+    uses: ./.github/workflows/device-tests.yml
+    secrets: inherit
+
   release:
+    needs: device-tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

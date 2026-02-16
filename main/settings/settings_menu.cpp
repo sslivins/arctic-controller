@@ -14,6 +14,7 @@
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
+#include "../heatpump_screen.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include "wifi_manager.h"
@@ -64,6 +65,10 @@ typedef struct {
     lv_obj_t* demo_mode_switch;
     lv_obj_t* temp_unit_switch;
     
+    // Temperature unit label pointers (for switch callback)
+    lv_obj_t* celsius_label;
+    lv_obj_t* fahrenheit_label;
+    
     // Track which sub-screen is active
     settings_item_t active_sub_screen;
     bool sub_screen_active;
@@ -93,7 +98,7 @@ static void disable_scrolling(lv_obj_t* obj)
 }
 
 static lv_obj_t* create_settings_row(lv_obj_t* parent, const char* icon, 
-                                       const char* label, settings_item_t item)
+                                       const char* label, const char* tag)
 {
     lv_obj_t* row = lv_obj_create(parent);
     lv_obj_set_size(row, LV_PCT(100), 88);
@@ -108,8 +113,8 @@ static lv_obj_t* create_settings_row(lv_obj_t* parent, const char* icon,
     // Pressed state
     lv_obj_set_style_bg_color(row, COLOR_ROW_PRESSED, LV_PART_MAIN | (lv_style_selector_t)LV_STATE_PRESSED);
     
-    // Store item type in user data
-    lv_obj_set_user_data(row, (void*)(intptr_t)item);
+    // Store string tag in user data for test automation
+    lv_obj_set_user_data(row, (void*)tag);
     lv_obj_add_event_cb(row, row_click_cb, LV_EVENT_CLICKED, NULL);
     
     // Icon on left
@@ -193,6 +198,7 @@ static void demo_mode_switch_cb(lv_event_t* e)
     lv_obj_t* sw = (lv_obj_t*)lv_event_get_target(e);
     bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
     app_prefs_set_demo_mode(on);
+    heatpump_screen_set_demo_banner(on);
     ESP_LOGI(TAG, "Demo mode %s", on ? "enabled" : "disabled");
 }
 
@@ -203,14 +209,9 @@ static void temp_unit_switch_cb(lv_event_t* e)
     app_prefs_set_temp_unit(fahrenheit ? TEMP_UNIT_FAHRENHEIT : TEMP_UNIT_CELSIUS);
     
     // Update the label colors to show which is active
-    lv_obj_t* row = lv_obj_get_parent(sw);
-    if (row) {
-        lv_obj_t* celsius_lbl = (lv_obj_t*)lv_obj_get_user_data(row);
-        lv_obj_t* fahrenheit_lbl = (lv_obj_t*)lv_event_get_user_data(e);
-        if (celsius_lbl && fahrenheit_lbl) {
-            lv_obj_set_style_text_color(celsius_lbl, fahrenheit ? COLOR_TEXT_DIM : COLOR_TEXT, LV_PART_MAIN);
-            lv_obj_set_style_text_color(fahrenheit_lbl, fahrenheit ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
-        }
+    if (state.celsius_label && state.fahrenheit_label) {
+        lv_obj_set_style_text_color(state.celsius_label, fahrenheit ? COLOR_TEXT_DIM : COLOR_TEXT, LV_PART_MAIN);
+        lv_obj_set_style_text_color(state.fahrenheit_label, fahrenheit ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
     }
     
     ESP_LOGI(TAG, "Temperature unit set to %s", fahrenheit ? "Fahrenheit" : "Celsius");
@@ -233,67 +234,55 @@ static void row_click_cb(lv_event_t* e)
     }
     
     lv_obj_t* row = (lv_obj_t*)lv_event_get_target(e);
-    settings_item_t item = (settings_item_t)(intptr_t)lv_obj_get_user_data(row);
+    const char* tag = (const char*)lv_obj_get_user_data(row);
+    if (!tag) return;
     
-    ESP_LOGI(TAG, "Settings row clicked: %d", item);
+    ESP_LOGI(TAG, "Settings row clicked: %s", tag);
     
-    switch (item) {
-        case SETTINGS_WIFI: {
-            ESP_LOGI(TAG, "Opening WiFi settings...");
-            wifi_screen_config_t wifi_cfg = {
-                .on_wifi_scan = state.config.on_wifi_scan,
-                .on_wifi_connect = state.config.on_wifi_connect,
-                .on_wifi_disconnect = state.config.on_wifi_disconnect,
-                .on_back = settings_menu_show,
-                .use_fade = false,
-            };
-            wifi_screen_create(&wifi_cfg);
-            state.sub_screen_active = true;
-            state.active_sub_screen = SETTINGS_WIFI;
-            break;
-        }
-        case SETTINGS_FIRMWARE: {
-            ESP_LOGI(TAG, "Opening Firmware settings...");
-            firmware_screen_config_t fw_cfg = {
-                .on_back = settings_menu_show,
-            };
-            firmware_screen_create(&fw_cfg);
-            state.sub_screen_active = true;
-            state.active_sub_screen = SETTINGS_FIRMWARE;
-            break;
-        }
-        case SETTINGS_TIME: {
-            ESP_LOGI(TAG, "Opening Time settings...");
-            time_screen_config_t time_cfg = {
-                .on_back = settings_menu_show,
-            };
-            time_screen_create(&time_cfg);
-            state.sub_screen_active = true;
-            state.active_sub_screen = SETTINGS_TIME;
-            break;
-        }
-        case SETTINGS_LANGUAGE: {
-            ESP_LOGI(TAG, "Opening Language settings...");
-            language_screen_config_t lang_cfg = {
-                .on_back = settings_menu_show,
-            };
-            language_screen_create(&lang_cfg);
-            state.sub_screen_active = true;
-            state.active_sub_screen = SETTINGS_LANGUAGE;
-            break;
-        }
-        case SETTINGS_DISPLAY: {
-            ESP_LOGI(TAG, "Opening Display settings...");
-            display_screen_config_t disp_cfg = {
-                .on_back = settings_menu_show,
-            };
-            display_screen_create(&disp_cfg);
-            state.sub_screen_active = true;
-            state.active_sub_screen = SETTINGS_DISPLAY;
-            break;
-        }
-        default:
-            break;
+    if (strcmp(tag, "settings_wifi") == 0) {
+        ESP_LOGI(TAG, "Opening WiFi settings...");
+        wifi_screen_config_t wifi_cfg = {
+            .on_wifi_scan = state.config.on_wifi_scan,
+            .on_wifi_connect = state.config.on_wifi_connect,
+            .on_wifi_disconnect = state.config.on_wifi_disconnect,
+            .on_back = settings_menu_show,
+            .use_fade = false,
+        };
+        wifi_screen_create(&wifi_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_WIFI;
+    } else if (strcmp(tag, "settings_firmware") == 0) {
+        ESP_LOGI(TAG, "Opening Firmware settings...");
+        firmware_screen_config_t fw_cfg = {
+            .on_back = settings_menu_show,
+        };
+        firmware_screen_create(&fw_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_FIRMWARE;
+    } else if (strcmp(tag, "settings_time") == 0) {
+        ESP_LOGI(TAG, "Opening Time settings...");
+        time_screen_config_t time_cfg = {
+            .on_back = settings_menu_show,
+        };
+        time_screen_create(&time_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_TIME;
+    } else if (strcmp(tag, "settings_language") == 0) {
+        ESP_LOGI(TAG, "Opening Language settings...");
+        language_screen_config_t lang_cfg = {
+            .on_back = settings_menu_show,
+        };
+        language_screen_create(&lang_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_LANGUAGE;
+    } else if (strcmp(tag, "settings_display") == 0) {
+        ESP_LOGI(TAG, "Opening Display settings...");
+        display_screen_config_t disp_cfg = {
+            .on_back = settings_menu_show,
+        };
+        display_screen_create(&disp_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_DISPLAY;
     }
 }
 
@@ -324,7 +313,8 @@ static void create_header(void)
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 10, 0);
     
     // Close button
-    ui_create_close_button(state.header, close_btn_event_cb);
+    lv_obj_t* close_btn = ui_create_close_button(state.header, close_btn_event_cb);
+    lv_obj_set_user_data(close_btn, (void*)"settings_close");
 }
 
 static void create_menu_list(void)
@@ -346,7 +336,7 @@ static void create_menu_list(void)
     // Create setting rows
     state.rows[SETTINGS_WIFI] = create_settings_row(
         state.list_container, LV_SYMBOL_WIFI, 
-        i18n_get(STR_SETTINGS_WIFI), SETTINGS_WIFI);
+        i18n_get(STR_SETTINGS_WIFI), "settings_wifi");
     
     // Add WiFi status subtitle
     lv_obj_t* wifi_row = state.rows[SETTINGS_WIFI];
@@ -358,24 +348,26 @@ static void create_menu_list(void)
     
     state.rows[SETTINGS_FIRMWARE] = create_settings_row(
         state.list_container, LV_SYMBOL_DOWNLOAD, 
-        i18n_get(STR_SETTINGS_UPDATE), SETTINGS_FIRMWARE);
+        i18n_get(STR_SETTINGS_UPDATE), "settings_firmware");
     
     state.rows[SETTINGS_TIME] = create_settings_row(
         state.list_container, LV_SYMBOL_BELL, 
-        i18n_get(STR_SETTINGS_TIME), SETTINGS_TIME);
+        i18n_get(STR_SETTINGS_TIME), "settings_time");
     
     state.rows[SETTINGS_LANGUAGE] = create_settings_row(
         state.list_container, LV_SYMBOL_SETTINGS, 
-        i18n_get(STR_SETTINGS_LANGUAGE), SETTINGS_LANGUAGE);
+        i18n_get(STR_SETTINGS_LANGUAGE), "settings_language");
     
     state.rows[SETTINGS_DISPLAY] = create_settings_row(
         state.list_container, LV_SYMBOL_IMAGE, 
-        i18n_get(STR_SETTINGS_DISPLAY), SETTINGS_DISPLAY);
+        i18n_get(STR_SETTINGS_DISPLAY), "settings_display");
     
     // Demo Mode toggle
-    create_toggle_row(state.list_container, LV_SYMBOL_PLAY,
+    lv_obj_t* demo_row = create_toggle_row(state.list_container, LV_SYMBOL_PLAY,
                       i18n_get(STR_SETTINGS_DEMO_MODE), app_prefs_is_demo_mode(),
                       &state.demo_mode_switch, demo_mode_switch_cb);
+    lv_obj_set_user_data(demo_row, (void*)"settings_demo_mode");
+    lv_obj_set_user_data(state.demo_mode_switch, (void*)"demo_mode_switch");
     
     // Temperature Units toggle with °C / °F labels
     {
@@ -410,6 +402,7 @@ static void create_menu_list(void)
         lv_obj_set_style_text_font(celsius_lbl, FONT_LARGE, LV_PART_MAIN);
         lv_obj_set_style_text_color(celsius_lbl, is_fahrenheit ? COLOR_TEXT_DIM : COLOR_TEXT, LV_PART_MAIN);
         lv_obj_align(celsius_lbl, LV_ALIGN_RIGHT_MID, -145, 0);
+        state.celsius_label = celsius_lbl;
         
         // Switch in middle-right
         lv_obj_t* sw = lv_switch_create(row);
@@ -428,10 +421,12 @@ static void create_menu_list(void)
         lv_obj_set_style_text_font(fahrenheit_lbl, FONT_LARGE, LV_PART_MAIN);
         lv_obj_set_style_text_color(fahrenheit_lbl, is_fahrenheit ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
         lv_obj_align(fahrenheit_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
+        state.fahrenheit_label = fahrenheit_lbl;
         
-        // Store celsius label in row's user data, fahrenheit label passed via event
-        lv_obj_set_user_data(row, celsius_lbl);
-        lv_obj_add_event_cb(sw, temp_unit_switch_cb, LV_EVENT_VALUE_CHANGED, fahrenheit_lbl);
+        // Tag the row for test automation
+        lv_obj_set_user_data(row, (void*)"settings_temp_unit");
+        lv_obj_add_event_cb(sw, temp_unit_switch_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+        lv_obj_set_user_data(sw, (void*)"temp_unit_switch");
         
         state.temp_unit_switch = sw;
     }

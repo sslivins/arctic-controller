@@ -33,6 +33,12 @@ void heatpump_screen_delete(void);
  */
 bool heatpump_screen_is_created(void);
 
+/**
+ * @brief Show or hide the demo mode banner on the main screen
+ * @param visible true to show, false to hide
+ */
+void heatpump_screen_set_demo_banner(bool visible);
+
 #ifdef __cplusplus
 }
 #endif

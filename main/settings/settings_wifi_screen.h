@@ -66,6 +66,19 @@ void wifi_screen_set_scanning(bool scanning);
  */
 void wifi_screen_trigger_scan(void);
 
+/**
+ * @brief Enable/disable mock mode for testing
+ * When enabled: scan timer is paused, connect callbacks are suppressed
+ * @param enable True to enter mock mode, false to exit
+ */
+void wifi_screen_set_mock_mode(bool enable);
+
+/**
+ * @brief Check if the password dialog is currently visible
+ * @return True if password dialog is shown
+ */
+bool wifi_screen_is_password_dialog_visible(void);
+
 #ifdef __cplusplus
 }
 #endif

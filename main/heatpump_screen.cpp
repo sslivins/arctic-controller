@@ -102,6 +102,9 @@ static struct {
     bool created = false;
     lv_obj_t* container = nullptr;
     
+    // Demo mode banner
+    lv_obj_t* demo_banner = nullptr;
+    
     // Hero state card (color-coded background)
     lv_obj_t* hero_card = nullptr;
     lv_obj_t* hero_state_label = nullptr;
@@ -548,23 +551,26 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_scrollbar_mode(state.container, LV_SCROLLBAR_MODE_AUTO);
     
     // =========================================================================
-    // DEMO MODE BANNER (shown only in demo mode)
+    // DEMO MODE BANNER (always created, hidden when not in demo mode)
     // =========================================================================
-    if (app_prefs_is_demo_mode()) {
-        lv_obj_t* demo_banner = lv_obj_create(state.container);
-        lv_obj_set_size(demo_banner, LV_PCT(100), 40);
-        lv_obj_set_style_bg_color(demo_banner, COLOR_WARNING, LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(demo_banner, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_border_width(demo_banner, 0, LV_PART_MAIN);
-        lv_obj_set_style_radius(demo_banner, 8, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(demo_banner, 0, LV_PART_MAIN);
-        lv_obj_clear_flag(demo_banner, LV_OBJ_FLAG_SCROLLABLE);
-        
-        lv_obj_t* demo_label = lv_label_create(demo_banner);
-        lv_label_set_text(demo_label, i18n_get(STR_HP_DEMO_MODE_ENABLED));
-        lv_obj_set_style_text_font(demo_label, UI_FONT_BODY, LV_PART_MAIN);
-        lv_obj_set_style_text_color(demo_label, lv_color_hex(0x000000), LV_PART_MAIN);
-        lv_obj_center(demo_label);
+    state.demo_banner = lv_obj_create(state.container);
+    lv_obj_set_size(state.demo_banner, LV_PCT(100), 40);
+    lv_obj_set_style_bg_color(state.demo_banner, COLOR_WARNING, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(state.demo_banner, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.demo_banner, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.demo_banner, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(state.demo_banner, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(state.demo_banner, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_user_data(state.demo_banner, (void*)"demo_banner");
+
+    lv_obj_t* demo_label = lv_label_create(state.demo_banner);
+    lv_label_set_text(demo_label, i18n_get(STR_HP_DEMO_MODE_ENABLED));
+    lv_obj_set_style_text_font(demo_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(demo_label, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_center(demo_label);
+
+    if (!app_prefs_is_demo_mode()) {
+        lv_obj_add_flag(state.demo_banner, LV_OBJ_FLAG_HIDDEN);
     }
     
     // =========================================================================
@@ -587,6 +593,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_text_font(state.hero_state_label, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.hero_state_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_align(state.hero_state_label, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_set_user_data(state.hero_state_label, (void*)"hero_state");
     
     // Tank temperature (large)
     state.hero_tank_label = lv_label_create(state.hero_card);
@@ -594,6 +601,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_text_font(state.hero_tank_label, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.hero_tank_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(state.hero_tank_label, LV_ALIGN_CENTER, 0, 10);
+    lv_obj_set_user_data(state.hero_tank_label, (void*)"hero_tank_temp");
     
     // "Tank Temperature" descriptor
     state.hero_tank_desc = lv_label_create(state.hero_card);
@@ -642,9 +650,13 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     };
     
     make_dot(dots_row, i18n_get(STR_HP_COMPRESSOR), &state.comp_dot, &state.comp_dot_label);
+    lv_obj_set_user_data(state.comp_dot, (void*)"comp_dot");
     make_dot(dots_row, i18n_get(STR_HP_FAN), &state.fan_dot, &state.fan_dot_label);
+    lv_obj_set_user_data(state.fan_dot, (void*)"fan_dot");
     make_dot(dots_row, i18n_get(STR_HP_PUMP), &state.pump_dot, &state.pump_dot_label);
+    lv_obj_set_user_data(state.pump_dot, (void*)"pump_dot");
     make_dot(dots_row, i18n_get(STR_HP_AUX_HEAT), &state.heater_dot, &state.heater_dot_label);
+    lv_obj_set_user_data(state.heater_dot, (void*)"heater_dot");
     
     // =========================================================================
     // PERFORMANCE STRIP: COP | Power | Fan (dimmed when idle)
@@ -661,8 +673,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_align(state.perf_card, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
     create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_COP), &state.perf_cop_value);
+    lv_obj_set_user_data(state.perf_cop_value, (void*)"perf_cop");
     create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_POWER), &state.perf_power_value);
+    lv_obj_set_user_data(state.perf_power_value, (void*)"perf_power");
     create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_FAN), &state.perf_fan_value);
+    lv_obj_set_user_data(state.perf_fan_value, (void*)"perf_fan");
     
     // =========================================================================
     // ERROR CARD: Prominent error/status display (tap for details)
@@ -687,6 +702,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_width(state.error_label, LV_PCT(100));
     lv_obj_set_style_text_align(state.error_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     lv_obj_center(state.error_label);
+    lv_obj_set_user_data(state.error_label, (void*)"error_label");
     
     state.error_chevron = lv_label_create(state.error_card);
     lv_label_set_text(state.error_chevron, LV_SYMBOL_RIGHT);
@@ -1164,4 +1180,15 @@ void heatpump_screen_delete(void) {
 
 bool heatpump_screen_is_created(void) {
     return state.created;
+}
+
+void heatpump_screen_set_demo_banner(bool visible) {
+    if (!state.created || !state.demo_banner) {
+        return;
+    }
+    if (visible) {
+        lv_obj_clear_flag(state.demo_banner, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(state.demo_banner, LV_OBJ_FLAG_HIDDEN);
+    }
 }

@@ -3,6 +3,9 @@
  * REST API Server with mDNS, Web Interface, and Authentication
  */
 #include "api_server.h"
+#include "settings/settings_display_screen.h"
+#include "app_preferences.h"
+#include "i18n/i18n.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
 #include "ota_manager.h"
@@ -13,6 +16,7 @@
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "app_preferences.h"
+#include "test_endpoints.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <mdns.h>
@@ -80,6 +84,8 @@ static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req);
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
+static esp_err_t display_brightness_get_handler(httpd_req_t* req);
+static esp_err_t preferences_get_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -259,8 +265,8 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 40;  // Increased for all endpoints
-    config.stack_size = 8192;      // Larger stack for file upload
+    config.max_uri_handlers = 80;  // 40 api_server + 32 test_endpoints = 72 needed
+    config.stack_size = 16384;     // Larger stack for tree walker + file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
     config.max_open_sockets = 4;   // Reduced to leave sockets for OTA/API calls
@@ -628,10 +634,33 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(events_clear_uri);
+
+    // GET /api/display/brightness - Get current display brightness
+    httpd_uri_t display_brightness_uri = {
+        .uri = "/api/display/brightness",
+        .method = HTTP_GET,
+        .handler = display_brightness_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(display_brightness_uri);
+
+    // GET /api/preferences - Get current app preferences
+    httpd_uri_t preferences_uri = {
+        .uri = "/api/preferences",
+        .method = HTTP_GET,
+        .handler = preferences_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(preferences_uri);
+
+#ifdef CONFIG_TEST_ENDPOINTS
+    test_endpoints_register(server);
+    ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
+#endif
     
     #undef REGISTER_URI
     
-    ESP_LOGI(TAG, "HTTP server started successfully (34 URI handlers registered)");
+    ESP_LOGI(TAG, "HTTP server started successfully");
     ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
     
     return true;
@@ -2446,5 +2475,39 @@ static esp_err_t events_clear_handler(httpd_req_t* req)
     
     event_log_clear();
     httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// ============================================================================
+// Display API
+// ============================================================================
+
+static esp_err_t display_brightness_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    int brightness = display_screen_get_brightness();
+    char buf[64];
+    snprintf(buf, sizeof(buf), "{\"brightness\":%d}", brightness);
+    httpd_resp_sendstr(req, buf);
+    return ESP_OK;
+}
+
+static esp_err_t preferences_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "demo_mode", app_prefs_is_demo_mode());
+    cJSON_AddStringToObject(root, "temp_unit",
+        app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT ? "fahrenheit" : "celsius");
+    cJSON_AddNumberToObject(root, "brightness", display_screen_get_brightness());
+    cJSON_AddStringToObject(root, "language",
+        i18n_get_language_name(i18n_get_language()));
+    cJSON_AddBoolToObject(root, "format_24h", time_mgr_get_24h_format());
+    cJSON_AddStringToObject(root, "timezone", time_mgr_get_timezone());
+
+    char* json = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(root);
     return ESP_OK;
 }

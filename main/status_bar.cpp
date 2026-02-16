@@ -115,6 +115,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     lv_obj_set_style_shadow_width(bar_state.time_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(bar_state.time_btn, 8, LV_PART_MAIN);
     lv_obj_add_event_cb(bar_state.time_btn, time_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(bar_state.time_btn, (void*)"time");
     
     // Time label inside button - large font for visibility
     bar_state.time_label = lv_label_create(bar_state.time_btn);
@@ -133,6 +134,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     lv_obj_set_style_shadow_width(bar_state.wifi_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(bar_state.wifi_btn, 8, LV_PART_MAIN);
     lv_obj_add_event_cb(bar_state.wifi_btn, wifi_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(bar_state.wifi_btn, (void*)"wifi");
     
     // WiFi icon inside button - large font for visibility
     bar_state.wifi_icon = lv_label_create(bar_state.wifi_btn);
@@ -151,6 +153,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     lv_obj_set_style_shadow_width(bar_state.settings_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(bar_state.settings_btn, 8, LV_PART_MAIN);
     lv_obj_add_event_cb(bar_state.settings_btn, settings_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(bar_state.settings_btn, (void*)"settings");
     
     // Settings icon
     bar_state.settings_icon = lv_label_create(bar_state.settings_btn);
@@ -169,6 +172,7 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     lv_obj_set_style_shadow_width(bar_state.notify_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(bar_state.notify_btn, 8, LV_PART_MAIN);
     lv_obj_add_event_cb(bar_state.notify_btn, notify_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(bar_state.notify_btn, (void*)"notifications");
     
     // Notification bell icon
     bar_state.notify_icon = lv_label_create(bar_state.notify_btn);

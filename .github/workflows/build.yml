@@ -4,9 +4,33 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'main/**'
+      - 'components/**'
+      - 'managed_components/**'
+      - 'dependencies/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig*'
+      - 'partitions.csv'
+      - 'lv_conf.h'
+      - 'repos.json'
+      - 'fetch_repos.py'
+      - '.github/workflows/build.yml'
   pull_request:
     branches:
       - main
+    paths:
+      - 'main/**'
+      - 'components/**'
+      - 'managed_components/**'
+      - 'dependencies/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig*'
+      - 'partitions.csv'
+      - 'lv_conf.h'
+      - 'repos.json'
+      - 'fetch_repos.py'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
       target:
@@ -44,6 +68,10 @@ jobs:
 
       - name: Fetch dependencies
         run: python3 fetch_repos.py
+
+      - name: Disable test endpoints for production build
+        run: |
+          echo "CONFIG_TEST_ENDPOINTS=n" >> sdkconfig.defaults
 
       - name: ESP-IDF Build
         uses: espressif/esp-idf-ci-action@v1
