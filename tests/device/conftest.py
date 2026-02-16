@@ -24,11 +24,6 @@ def _return_to_main(device: DeviceClient):
 
     if current == "main":
         device.wait_for_widget(tag="settings", timeout=3.0)
-        # Clear any notifications that might be showing
-        try:
-            device.notification_mock_reset()
-        except Exception:
-            pass
         return
 
     # If on a sub-screen, go back to settings first
@@ -63,12 +58,6 @@ def _return_to_main(device: DeviceClient):
             pass
     device.wait_for_screen("main", timeout=5.0)
     device.wait_for_widget(tag="settings", timeout=5.0)
-    
-    # Clear any notifications
-    try:
-        device.notification_mock_reset()
-    except Exception:
-        pass
 
 
 @pytest.fixture(scope="session")
@@ -81,6 +70,19 @@ def device() -> DeviceClient:
         client.get_ui_state()
     except Exception as e:
         pytest.skip(f"Device not reachable at {url}: {e}")
+
+    # Ensure demo mode is enabled (many tests depend on set_demo_fields)
+    try:
+        prefs = client.get_preferences()
+        if not prefs.get("demo_mode"):
+            client.click(tag="settings")
+            client.wait_for_screen("settings", timeout=5.0)
+            time.sleep(0.5)
+            client.toggle("demo_mode_switch")
+            time.sleep(0.3)
+            _return_to_main(client)
+    except Exception:
+        pass  # Best effort — tests will fail with clear errors if demo mode is off
 
     yield client
 

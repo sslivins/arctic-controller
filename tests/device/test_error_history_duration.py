@@ -64,20 +64,23 @@ class TestErrorHistoryDuration:
         time.sleep(1.0)  # panel animation
 
         # 6. Find duration text in the widget tree
+        #    The duration label is language-dependent (Duration:/Duración:/Durée :)
+        #    but the time format is always like "3s", "5m 30s", etc.
+        #    Look for labels containing a time duration pattern after a pipe separator.
         widgets = device.widgets
         duration_texts = [
             w.text for w in widgets
-            if w.text and "Duration:" in w.text
+            if w.text and re.search(r'\|\s*\S+\s+\d+[smhd]', w.text)
         ]
 
         assert len(duration_texts) > 0, \
-            "No 'Duration:' label found — error history may be empty"
+            "No duration label found — error history may be empty"
 
         # 7. Verify the duration contains a proper seconds format
-        #    Should match something like "Duration: 3s" or "Duration: 4s"
-        #    Bug produces "Duration: lds" or "Duration: 3lds"
+        #    Should match something like "3s" or "4s"
+        #    Bug produces "lds" or "3lds"
         duration_line = duration_texts[0]
-        match = re.search(r'Duration:\s*(\S+)', duration_line)
+        match = re.search(r'\|\s*\S+\s+(\d+[smhd])', duration_line)
         assert match, f"Could not parse duration from: '{duration_line}'"
         duration_value = match.group(1)
 

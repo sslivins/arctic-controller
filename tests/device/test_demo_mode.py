@@ -84,24 +84,21 @@ def test_demo_banner_hidden_when_disabled(device: DeviceClient):
 
 
 def test_restore_demo_mode(device: DeviceClient):
-    """Restore demo mode to whatever it was before the test."""
-    global _initial_demo_mode
-    assert _initial_demo_mode is not None, "test_toggle_demo_mode must run first"
-
+    """Restore demo mode to ON — other tests depend on demo mode being enabled."""
     prefs = device.get_preferences()
     current = prefs["demo_mode"]
 
-    # Toggle back only if the current state differs from the initial state
-    if current != _initial_demo_mode:
+    # Ensure demo mode is ON (other tests require it for set_demo_fields)
+    if not current:
         device.click(tag="settings")
         assert device.wait_for_screen("settings", timeout=5.0)
         time.sleep(0.5)
 
         result = device.toggle("demo_mode_switch")
         assert result["success"] is True
-        assert result["checked"] == _initial_demo_mode
+        assert result["checked"] is True
         time.sleep(0.3)
 
     prefs = device.get_preferences()
-    assert prefs["demo_mode"] == _initial_demo_mode, \
-        f"Expected demo_mode={_initial_demo_mode}, got {prefs['demo_mode']}"
+    assert prefs["demo_mode"] is True, \
+        f"Expected demo_mode=True, got {prefs['demo_mode']}"

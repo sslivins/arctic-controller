@@ -86,6 +86,22 @@ static const char* get_widget_text(lv_obj_t* obj)
     return NULL;
 }
 
+// Check if user_data looks like a valid tag string (printable ASCII, reasonable length).
+// LVGL user_data is void* — it could be a tag string or anything else (struct ptr, number).
+// Only treat it as a string if the first N bytes are printable ASCII or common UTF-8.
+static bool is_valid_tag(const void* ud)
+{
+    if (!ud) return false;
+    const unsigned char* p = (const unsigned char*)ud;
+    // Check first 4 bytes: must be printable ASCII (0x20-0x7E) or underscore-style identifiers
+    for (int i = 0; i < 4 && p[i] != '\0'; i++) {
+        unsigned char c = p[i];
+        if (c < 0x20 || c > 0x7E) return false;  // non-printable or high byte → not a tag
+    }
+    // Must have at least 1 character
+    return p[0] >= 0x20 && p[0] <= 0x7E;
+}
+
 // Recursively walk LVGL object tree and add widgets to JSON array
 static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
 {
@@ -97,7 +113,7 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
 
     // Report widgets that have text or are interactive (buttons, switches, etc.)
     // Also report any widget with a user_data tag (for containers used as menu rows)
-    bool has_tag = (lv_obj_get_user_data(obj) != NULL);
+    bool has_tag = is_valid_tag(lv_obj_get_user_data(obj));
     bool is_interesting = has_tag ||
                           (text != NULL) ||
                           strcmp(type, "button") == 0 ||
@@ -154,9 +170,9 @@ static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
             cJSON_AddBoolToObject(w, "disabled", true);
         }
 
-        // User data tag (if set)
+        // User data tag (if set and valid)
         void* ud = lv_obj_get_user_data(obj);
-        if (ud) {
+        if (is_valid_tag(ud)) {
             cJSON_AddStringToObject(w, "tag", (const char*)ud);
 
             // Report bg_color for tagged objects (useful for status indicators)
@@ -207,7 +223,7 @@ static lv_obj_t* find_by_tag(lv_obj_t* root, const char* tag, int depth)
 
     if (!lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN)) {
         void* ud = lv_obj_get_user_data(root);
-        if (ud && strcmp((const char*)ud, tag) == 0) {
+        if (is_valid_tag(ud) && strcmp((const char*)ud, tag) == 0) {
             return root;
         }
         uint32_t count = lv_obj_get_child_count(root);

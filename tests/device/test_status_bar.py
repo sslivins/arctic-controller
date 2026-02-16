@@ -74,8 +74,8 @@ def test_notification_icon_shows_dropdown(device: DeviceClient):
     # and on the main screen (dropdown is an overlay, not a new screen)
     assert device.screen == "main", "Should remain on main screen when dropdown opens"
     
-    # Click somewhere else to close dropdown (click on time area)
-    device.click(tag="time")
+    # Close dropdown by toggling the notification bell again
+    device.click(tag="notifications")
     time.sleep(0.5)
     
     # Clean up

@@ -85,19 +85,22 @@ def test_mock_update_available(device: DeviceClient):
     _open_firmware_screen(device)
 
     # Wait for the real check to settle first, so it doesn't overwrite our mock
-    _wait_for_check_complete(device, timeout=15.0)
+    assert _wait_for_check_complete(device, timeout=30.0), \
+        "Firmware check must complete before injecting mock"
 
     device.firmware_mock(version="99.0.0", update_available=True)
-    time.sleep(0.5)
+
+    # Poll for the button to appear (UI update may take a moment)
+    assert device.wait_for_widget(tag="firmware_update_btn", timeout=3.0), \
+        "Install Update button should be visible when update is available"
 
     # Latest version label should mention 99.0.0
     latest = device.find_widget(tag="firmware_latest_version")
     assert latest is not None
     assert "99.0.0" in latest.text, f"Expected '99.0.0' in '{latest.text}'"
 
-    # The Install Update button should now be visible
     btn = device.find_widget(tag="firmware_update_btn")
-    assert btn is not None, "Install Update button should be visible when update is available"
+    assert btn is not None
 
     # Status should indicate an update is available
     status = device.find_widget(tag="firmware_status")
@@ -111,7 +114,8 @@ def test_mock_update_available(device: DeviceClient):
 def test_mock_no_update(device: DeviceClient):
     """Injecting 'no update' with the same version should hide the Install button."""
     _open_firmware_screen(device)
-    _wait_for_check_complete(device, timeout=15.0)
+    assert _wait_for_check_complete(device, timeout=30.0), \
+        "Firmware check must complete before injecting mock"
 
     # Get current version from the label
     ver_widget = device.find_widget(tag="firmware_current_version")
@@ -143,13 +147,14 @@ def test_mock_update_button_not_clicked(device: DeviceClient):
     but never trigger a real OTA download.  See todo.md for future plans.
     """
     _open_firmware_screen(device)
-    _wait_for_check_complete(device, timeout=15.0)
+    assert _wait_for_check_complete(device, timeout=30.0), \
+        "Firmware check must complete before injecting mock"
 
     device.firmware_mock(version="99.0.0", update_available=True)
-    time.sleep(0.5)
 
+    assert device.wait_for_widget(tag="firmware_update_btn", timeout=3.0), \
+        "Install Update button should be visible"
     btn = device.find_widget(tag="firmware_update_btn")
-    assert btn is not None, "Install Update button should be visible"
     assert btn.type == "button", f"Expected button type, got '{btn.type}'"
 
     # Confirm we can see the button dimensions (it's actually rendered)
