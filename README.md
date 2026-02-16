@@ -239,7 +239,7 @@ Run `idf.py menuconfig` to configure ESP-IDF options.
 
 ### Branch Protection
 
-The `main` branch is protected to ensure code quality. All changes must go through pull requests, and the build workflow must pass before merging.
+The `main` branch is protected to ensure code quality. All changes must go through pull requests, and the Device Tests workflow (build + device tests) must pass before merging.
 
 To set up branch protection, see [.github/BRANCH_PROTECTION.md](.github/BRANCH_PROTECTION.md) or run:
 

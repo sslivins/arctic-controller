@@ -58,7 +58,7 @@ echo -e "${BLUE}Configuring branch protection...${NC}"
 echo ""
 echo "The following settings will be applied:"
 echo -e "  ${GREEN}✓${NC} Require pull request before merging (0 approvals needed)"
-echo -e "  ${GREEN}✓${NC} Require status checks: 'build' workflow must pass"
+echo -e "  ${GREEN}✓${NC} Require status checks: Device Tests workflow (build + tests)"
 echo -e "  ${GREEN}✓${NC} Require branches to be up-to-date before merging"
 echo -e "  ${GREEN}✓${NC} Dismiss stale pull request approvals on new commits"
 echo -e "  ${GREEN}✓${NC} Require conversation resolution before merging"
@@ -84,7 +84,7 @@ if gh api "repos/$REPO/branches/$BRANCH/protection" \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["build"]
+    "contexts": ["Device Tests / build", "Device Tests / device-tests"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {

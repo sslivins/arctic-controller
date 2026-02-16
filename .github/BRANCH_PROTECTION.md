@@ -41,8 +41,10 @@ Branch protection ensures code quality by requiring specific checks to pass befo
      
    - ✅ **Require status checks to pass before merging**
      - ✅ **Require branches to be up to date before merging**
-     - In the search box that appears, type `build` and select:
-       - ✅ **build** (this is the job name from `.github/workflows/build.yml`)
+     - In the search box that appears, search and select:
+       - ✅ **Device Tests / build** (builds the firmware)
+       - ✅ **Device Tests / device-tests** (runs device tests)
+     - **Note:** The standalone `build` workflow is redundant since Device Tests already builds the firmware
    
    - ✅ **Require conversation resolution before merging** (optional, recommended)
    
@@ -62,7 +64,7 @@ gh api repos/sslivins/arctic-controller/branches/main/protection \
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": ["build"]
+    "contexts": ["Device Tests / build", "Device Tests / device-tests"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
@@ -122,8 +124,8 @@ After protection is enabled:
    - Click "Create pull request"
 
 5. Wait for checks to pass:
-   - The `build` workflow will run automatically
-   - Once it passes (green checkmark), you can merge
+   - The `Device Tests` workflow will run automatically (build + tests)
+   - Once both jobs pass (green checkmarks), you can merge
 
 6. Merge the PR:
    - Click "Merge pull request"
@@ -137,11 +139,20 @@ After protection is enabled:
 
 The following workflow checks are required to pass:
 
-- **build** - Compiles the firmware for ESP32-P4 target
+- **Device Tests / build** - Compiles the firmware for ESP32-P4 target
   - Checks out code with submodules
   - Fetches dependencies
+  - Enables test endpoints
   - Builds with ESP-IDF v5.4.3
-  - Creates firmware artifacts
+  - Uploads firmware artifacts
+
+- **Device Tests / device-tests** - Runs device tests on actual hardware
+  - Downloads firmware from build job
+  - Flashes device via OTA or USB
+  - Executes device tests
+  - Publishes test results
+
+**Note:** The standalone `Build` workflow (`.github/workflows/build.yml`) is redundant since the Device Tests workflow already includes a build step. You may want to remove or disable it to avoid confusion.
 
 ## Verifying Protection is Active
 

@@ -36,7 +36,7 @@ This requires:
      - Set required approvals to `0`
    - ✅ **Require status checks to pass before merging**
      - ✅ **Require branches to be up to date**
-     - Search and select: `build`
+     - Search and select: `Device Tests / build` and `Device Tests / device-tests`
    - ✅ **Require conversation resolution before merging**
 
 5. Click **Create** or **Save changes**
@@ -93,17 +93,21 @@ The following must pass before merging:
 
 | Check | Description | Defined In |
 |-------|-------------|------------|
-| `build` | Compiles firmware for ESP32-P4 | `.github/workflows/build.yml` |
+| `Device Tests / build` | Compiles firmware for ESP32-P4 | `.github/workflows/device-tests.yml` |
+| `Device Tests / device-tests` | Runs tests on actual hardware | `.github/workflows/device-tests.yml` |
+
+**Note:** The standalone `Build` workflow is redundant since Device Tests already builds the firmware.
 
 ## Troubleshooting
 
-### "build" check not appearing
+### Required checks not appearing
 
-The workflow must run at least once on main for GitHub to recognize it.
+The workflows must run at least once on main for GitHub to recognize them.
 
 **Solution:**
-- Merge this PR first (which will run the build workflow)
-- Then the check will be available for future PRs
+- The Device Tests workflow needs to run on main first
+- Then the checks will be available for future PRs
+- You can trigger it manually or wait for it to run on the next PR
 
 ### Can't push to main anymore
 

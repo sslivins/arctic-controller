@@ -57,14 +57,16 @@ Once enabled, the protection:
 
 ## Current Build Workflow
 
-The existing `.github/workflows/build.yml` already:
+The repository has a `.github/workflows/device-tests.yml` workflow that:
 - ✅ Runs on push to main
 - ✅ Runs on pull requests to main
-- ✅ Builds ESP32-P4 firmware
-- ✅ Uses ESP-IDF v5.4.3
+- ✅ Job 1 (build): Compiles ESP32-P4 firmware with ESP-IDF v5.4.3
+- ✅ Job 2 (device-tests): Runs tests on actual hardware
 - ✅ Creates firmware artifacts
 
-This workflow is what will be required to pass before merging.
+Both jobs in this workflow are required to pass before merging.
+
+**Note:** The standalone `Build` workflow (`.github/workflows/build.yml`) is now redundant since Device Tests already builds the firmware before testing.
 
 ## New Development Workflow
 
@@ -82,7 +84,7 @@ git push origin feature/my-feature
 
 # 4. Create PR on GitHub
 
-# 5. Wait for build to pass (automatic)
+# 5. Wait for Device Tests to pass (build + device tests, automatic)
 
 # 6. Merge PR (you can merge your own PRs)
 
@@ -107,17 +109,21 @@ git push origin main
 gh workflow run verify-branch-protection.yml
 ```
 
-## No Tests Currently
+## Device Tests
 
-**Note:** This repository currently has no test suite. The branch protection requires the `build` workflow to pass, which:
-- Compiles the firmware
-- Validates dependencies
-- Creates artifacts
+**Updated:** This repository now has a comprehensive device testing workflow. The branch protection requires both jobs of the `Device Tests` workflow to pass:
 
-If you add tests in the future:
-1. Add them to the `build` workflow or create a new `test` workflow
-2. Update branch protection to require the new workflow
-3. The protection will automatically enforce the new tests
+1. **Device Tests / build** - Compiles the firmware
+   - Validates dependencies
+   - Builds with ESP-IDF v5.4.3
+   - Creates firmware artifacts
+
+2. **Device Tests / device-tests** - Runs on actual hardware
+   - Flashes device via OTA or USB
+   - Executes device tests
+   - Validates functionality
+
+The standalone `Build` workflow is now redundant and can be removed to avoid confusion.
 
 ## Benefits for Solo Development
 

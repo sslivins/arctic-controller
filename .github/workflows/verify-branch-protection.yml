@@ -54,17 +54,22 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Required Workflows" >> $GITHUB_STEP_SUMMARY
           
-          if [ -f ".github/workflows/build.yml" ]; then
-            echo "✅ Build workflow exists at \`.github/workflows/build.yml\`" >> $GITHUB_STEP_SUMMARY
+          if [ -f ".github/workflows/device-tests.yml" ]; then
+            echo "✅ Device Tests workflow exists at \`.github/workflows/device-tests.yml\`" >> $GITHUB_STEP_SUMMARY
             
             # Check if it runs on PR
-            if grep -q "pull_request:" .github/workflows/build.yml; then
-              echo "✅ Build workflow runs on pull requests" >> $GITHUB_STEP_SUMMARY
+            if grep -q "pull_request:" .github/workflows/device-tests.yml 2>/dev/null; then
+              echo "✅ Device Tests workflow runs on pull requests" >> $GITHUB_STEP_SUMMARY
             else
-              echo "⚠️  Build workflow may not run on pull requests" >> $GITHUB_STEP_SUMMARY
+              echo "⚠️  Device Tests workflow may not run on pull requests" >> $GITHUB_STEP_SUMMARY
             fi
           else
-            echo "❌ Build workflow not found" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️  Device Tests workflow not found - it may be on main branch only" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -f ".github/workflows/build.yml" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️  Note: The standalone Build workflow is redundant since Device Tests already builds the firmware" >> $GITHUB_STEP_SUMMARY
           fi
           
       - name: Summary
