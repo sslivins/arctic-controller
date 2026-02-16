@@ -9,10 +9,8 @@ on:
         default: false
         type: boolean
 
-# Only one release at a time (shares the physical device via device-tests)
-concurrency:
-  group: device-tests
-  cancel-in-progress: false
+# Device serialization is handled by the device-tests.yml reusable workflow's
+# own concurrency group — no need to duplicate it here.
 
 permissions:
   contents: write
