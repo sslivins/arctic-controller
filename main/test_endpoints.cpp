@@ -27,6 +27,7 @@
 #include "i18n/i18n.h"
 #include "modbus/arctic_heatpump.h"
 #include "heatpump_errors.h"
+#include "status_bar.h"
 
 static const char* TAG = "test_api";
 
@@ -985,6 +986,84 @@ static esp_err_t firmware_mock_reset_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/notification-mock — add a notification to the status bar
+// Body: {"type": 0, "message": "Firmware update available"}
+// type: 0=firmware update, 1=wifi unstable, 2=low battery
+// ============================================================================
+
+static esp_err_t notification_mock_post_handler(httpd_req_t* req)
+{
+    char buf[256] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty body");
+        return ESP_OK;
+    }
+
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* j_type = cJSON_GetObjectItem(body, "type");
+    cJSON* j_message = cJSON_GetObjectItem(body, "message");
+
+    if (!j_type || !cJSON_IsNumber(j_type)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Missing or invalid 'type' number");
+        return ESP_OK;
+    }
+
+    int type_val = j_type->valueint;
+    if (type_val < 0 || type_val >= STATUS_BAR_NOTIFY_MAX) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Invalid notification type");
+        return ESP_OK;
+    }
+
+    const char* message = (j_message && cJSON_IsString(j_message)) ? j_message->valuestring : NULL;
+
+    bsp_display_lock(0);
+    status_bar_add_notification((status_bar_notify_type_t)type_val, message);
+    bsp_display_unlock();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddNumberToObject(resp, "type", type_val);
+    if (message) {
+        cJSON_AddStringToObject(resp, "message", message);
+    }
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    cJSON_Delete(body);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/notification-mock-reset — clear all notifications
+// ============================================================================
+
+static esp_err_t notification_mock_reset_post_handler(httpd_req_t* req)
+{
+    bsp_display_lock(0);
+    status_bar_clear_all_notifications();
+    bsp_display_unlock();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/set-demo-field — set demo state fields (no auth)
 // ============================================================================
 
@@ -1251,6 +1330,38 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &clear_error_history_options_uri);
+
+    httpd_uri_t notification_mock_uri = {
+        .uri = "/api/test/notification-mock",
+        .method = HTTP_POST,
+        .handler = notification_mock_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &notification_mock_uri);
+
+    httpd_uri_t notification_mock_options_uri = {
+        .uri = "/api/test/notification-mock",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &notification_mock_options_uri);
+
+    httpd_uri_t notification_mock_reset_uri = {
+        .uri = "/api/test/notification-mock-reset",
+        .method = HTTP_POST,
+        .handler = notification_mock_reset_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &notification_mock_reset_uri);
+
+    httpd_uri_t notification_mock_reset_options_uri = {
+        .uri = "/api/test/notification-mock-reset",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &notification_mock_reset_options_uri);
 
     ESP_LOGI(TAG, "Test instrumentation endpoints registered");
 }

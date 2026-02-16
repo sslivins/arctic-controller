@@ -253,6 +253,45 @@ class DeviceClient:
             raise DeviceError(f"Firmware mock reset failed ({r.status_code}): {msg}")
         return r.json()
 
+    def notification_mock(self, notification_type: int, message: str = None) -> dict:
+        """POST /api/test/notification-mock — add a notification to the status bar.
+
+        Args:
+            notification_type: Notification type (0=firmware update, 1=wifi unstable, 2=low battery)
+            message: Optional message text
+        """
+        payload = {"type": notification_type}
+        if message is not None:
+            payload["message"] = message
+
+        r = self.session.post(
+            f"{self.base_url}/api/test/notification-mock",
+            json=payload,
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Notification mock failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def notification_mock_reset(self) -> dict:
+        """POST /api/test/notification-mock-reset — clear all notifications."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/notification-mock-reset",
+            json={},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Notification mock reset failed ({r.status_code}): {msg}")
+        return r.json()
+
     def type_text(self, tag: str, text: str) -> dict:
         """POST /api/test/type-text — set text in a textarea widget.
 

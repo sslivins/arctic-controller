@@ -24,6 +24,11 @@ def _return_to_main(device: DeviceClient):
 
     if current == "main":
         device.wait_for_widget(tag="settings", timeout=3.0)
+        # Clear any notifications that might be showing
+        try:
+            device.notification_mock_reset()
+        except Exception:
+            pass
         return
 
     # If on a sub-screen, go back to settings first
@@ -58,6 +63,12 @@ def _return_to_main(device: DeviceClient):
             pass
     device.wait_for_screen("main", timeout=5.0)
     device.wait_for_widget(tag="settings", timeout=5.0)
+    
+    # Clear any notifications
+    try:
+        device.notification_mock_reset()
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="session")
