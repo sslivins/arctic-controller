@@ -4,9 +4,33 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'main/**'
+      - 'components/**'
+      - 'managed_components/**'
+      - 'dependencies/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig*'
+      - 'partitions.csv'
+      - 'lv_conf.h'
+      - 'repos.json'
+      - 'fetch_repos.py'
+      - '.github/workflows/build.yml'
   pull_request:
     branches:
       - main
+    paths:
+      - 'main/**'
+      - 'components/**'
+      - 'managed_components/**'
+      - 'dependencies/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig*'
+      - 'partitions.csv'
+      - 'lv_conf.h'
+      - 'repos.json'
+      - 'fetch_repos.py'
+      - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
       target:

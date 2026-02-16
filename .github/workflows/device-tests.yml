@@ -4,6 +4,19 @@ on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'main/**'
+      - 'components/**'
+      - 'managed_components/**'
+      - 'dependencies/**'
+      - 'CMakeLists.txt'
+      - 'sdkconfig*'
+      - 'partitions.csv'
+      - 'lv_conf.h'
+      - 'repos.json'
+      - 'fetch_repos.py'
+      - 'tests/**'
+      - '.github/workflows/device-tests.yml'
   workflow_call:
   workflow_dispatch:
 
