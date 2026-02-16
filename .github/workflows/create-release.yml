@@ -21,7 +21,7 @@ jobs:
     uses: ./.github/workflows/device-tests.yml
     secrets: inherit
 
-  release:
+  build-and-release:
     needs: device-tests
     runs-on: ubuntu-latest
     steps:
@@ -55,7 +55,7 @@ jobs:
       - name: Fetch dependencies
         run: python3 fetch_repos.py
 
-      - name: ESP-IDF Build
+      - name: ESP-IDF Production Build (no test endpoints)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4.3

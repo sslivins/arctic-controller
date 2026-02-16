@@ -30,7 +30,7 @@ permissions:
   checks: write
 
 jobs:
-  build:
+  build-test-firmware:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -45,7 +45,7 @@ jobs:
         run: |
           echo "CONFIG_TEST_ENDPOINTS=y" >> sdkconfig.defaults
 
-      - name: ESP-IDF Build
+      - name: ESP-IDF Build (test firmware)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4.3
@@ -64,8 +64,8 @@ jobs:
             build/flasher_args.json
           retention-days: 7
 
-  device-tests:
-    needs: build
+  run-device-tests:
+    needs: build-test-firmware
     runs-on: [self-hosted, tab5]
     timeout-minutes: 30
     env:
