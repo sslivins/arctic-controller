@@ -30,6 +30,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: 'recursive'
+          token: ${{ secrets.ARCTIC_RELEASE_TOKEN }}
 
       - name: Extract version from CMakeLists.txt
         id: version
@@ -71,7 +72,7 @@ jobs:
           echo "Build: ✅ Success"
           echo "No tag or release was created."
 
-      - name: Create tag
+      - name: Create and push tag
         if: ${{ !inputs.dry_run }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
