@@ -47,6 +47,7 @@ class DeviceClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
+        self._session_id: Optional[str] = None
 
     # ------------------------------------------------------------------
     # UI State
@@ -381,3 +382,53 @@ class DeviceClient:
     def has_widget(self, *, tag: Optional[str] = None, text: Optional[str] = None) -> bool:
         """Check if a widget with the given tag or text exists."""
         return self.find_widget(tag=tag, text=text) is not None
+
+    # ------------------------------------------------------------------
+    # Session Lock
+    # ------------------------------------------------------------------
+
+    def lock(self, ttl_seconds: int = 900) -> dict:
+        """POST /api/test/lock — acquire exclusive device lock.
+
+        Generates a unique session ID and sends it as X-Session-Id header
+        on all subsequent requests.
+        """
+        import uuid
+        self._session_id = str(uuid.uuid4())
+        self.session.headers["X-Session-Id"] = self._session_id
+        r = self.session.post(
+            f"{self.base_url}/api/test/lock",
+            json={"session_id": self._session_id, "ttl_seconds": ttl_seconds},
+            timeout=self.timeout,
+        )
+        if r.status_code == 423:
+            data = r.json()
+            raise DeviceError(
+                f"Device is locked by another session: {data.get('locked_by', '?')} "
+                f"(expires in {data.get('remaining_seconds', '?')}s)"
+            )
+        r.raise_for_status()
+        return r.json()
+
+    def unlock(self, force: bool = False) -> dict:
+        """POST /api/test/unlock — release device lock."""
+        payload = {"session_id": self._session_id or ""}
+        if force:
+            payload["force"] = True
+        r = self.session.post(
+            f"{self.base_url}/api/test/unlock",
+            json=payload,
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        self._session_id = None
+        self.session.headers.pop("X-Session-Id", None)
+        return r.json()
+
+    def check_lock(self) -> dict:
+        """GET /api/test/lock — check if device is locked."""
+        r = self.session.get(
+            f"{self.base_url}/api/test/lock", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json()

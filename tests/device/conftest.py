@@ -71,6 +71,12 @@ def device() -> DeviceClient:
     except Exception as e:
         pytest.skip(f"Device not reachable at {url}: {e}")
 
+    # Acquire exclusive device lock (prevents concurrent test sessions)
+    try:
+        client.lock(ttl_seconds=900)  # 15 minute TTL
+    except Exception as e:
+        pytest.exit(f"Cannot acquire device lock: {e}", returncode=1)
+
     # Ensure demo mode is enabled (many tests depend on set_demo_fields)
     try:
         prefs = client.get_preferences()
@@ -88,6 +94,12 @@ def device() -> DeviceClient:
 
     # After all tests complete, leave the device on the main screen
     _return_to_main(client)
+
+    # Release device lock
+    try:
+        client.unlock(force=True)
+    except Exception:
+        pass  # Best effort — lock will expire via TTL
 
 
 @pytest.fixture(autouse=True)

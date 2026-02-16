@@ -9,6 +9,11 @@ on:
         default: false
         type: boolean
 
+# Only one release at a time (shares the physical device via device-tests)
+concurrency:
+  group: device-tests
+  cancel-in-progress: false
+
 permissions:
   contents: write
   checks: write

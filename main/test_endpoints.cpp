@@ -28,8 +28,17 @@
 #include "modbus/arctic_heatpump.h"
 #include "heatpump_errors.h"
 #include "status_bar.h"
+#include <esp_timer.h>
 
 static const char* TAG = "test_api";
+
+// ============================================================================
+// Session Lock State — prevents concurrent test sessions on the device
+// ============================================================================
+
+static char s_lock_session_id[64] = {0};       // Current lock holder (empty = unlocked)
+static int64_t s_lock_acquired_us = 0;          // Timestamp when lock was acquired
+static int64_t s_lock_ttl_us = 15 * 60 * 1000000LL;  // Default TTL: 15 minutes
 
 // ============================================================================
 // Helpers
@@ -52,6 +61,52 @@ static void send_json_error(httpd_req_t* req, const char* status, const char* me
     free(json);
     cJSON_Delete(root);
 }
+
+// ============================================================================
+// Session Lock Helpers
+// ============================================================================
+
+static bool is_lock_held(void)
+{
+    if (s_lock_session_id[0] == '\0') return false;
+    int64_t elapsed = esp_timer_get_time() - s_lock_acquired_us;
+    if (elapsed > s_lock_ttl_us) {
+        ESP_LOGW(TAG, "Session lock expired (held by '%s' for %llds)", s_lock_session_id, elapsed / 1000000LL);
+        s_lock_session_id[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
+static bool check_session_lock(httpd_req_t* req)
+{
+    if (!is_lock_held()) return true;
+    char session_id[64] = {0};
+    if (httpd_req_get_hdr_value_str(req, "X-Session-Id", session_id, sizeof(session_id)) == ESP_OK) {
+        if (strcmp(session_id, s_lock_session_id) == 0) return true;
+    }
+    return false;
+}
+
+static void reject_locked(httpd_req_t* req)
+{
+    httpd_resp_set_status(req, "423 Locked");
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "error", "Device is locked by another test session");
+    cJSON_AddStringToObject(root, "locked_by", s_lock_session_id);
+    int64_t remaining_s = (s_lock_ttl_us - (esp_timer_get_time() - s_lock_acquired_us)) / 1000000LL;
+    cJSON_AddNumberToObject(root, "remaining_seconds", remaining_s > 0 ? remaining_s : 0);
+    char* json = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(root);
+}
+
+// Macro: reject request if device is locked by a different session
+#define CHECK_SESSION_LOCK(req) do { \
+    if (!check_session_lock(req)) { reject_locked(req); return ESP_OK; } \
+} while(0)
 
 // Get a human-readable type name for an LVGL object
 static const char* get_widget_type(lv_obj_t* obj)
@@ -353,6 +408,7 @@ static const char* resolve_symbol(const char* name)
 
 static esp_err_t click_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     set_json_content_type(req);
 
     // Read request body
@@ -508,6 +564,7 @@ static esp_err_t click_post_handler(httpd_req_t* req)
 
 static esp_err_t set_slider_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     set_json_content_type(req);
 
     int content_len = req->content_len;
@@ -594,6 +651,7 @@ static esp_err_t set_slider_post_handler(httpd_req_t* req)
 
 static esp_err_t set_roller_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     set_json_content_type(req);
 
     int content_len = req->content_len;
@@ -690,6 +748,7 @@ static esp_err_t set_roller_post_handler(httpd_req_t* req)
 
 static esp_err_t toggle_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     set_json_content_type(req);
 
     int content_len = req->content_len;
@@ -789,6 +848,7 @@ static esp_err_t test_options_handler(httpd_req_t* req)
 
 static esp_err_t wifi_mock_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     char buf[1024] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -851,6 +911,7 @@ static esp_err_t wifi_mock_post_handler(httpd_req_t* req)
 
 static esp_err_t wifi_mock_reset_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     bsp_display_lock(0);
     wifi_screen_set_mock_mode(false);
     wifi_screen_trigger_scan();
@@ -873,6 +934,7 @@ static esp_err_t wifi_mock_reset_post_handler(httpd_req_t* req)
 
 static esp_err_t type_text_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     char buf[512] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -940,6 +1002,7 @@ static esp_err_t type_text_post_handler(httpd_req_t* req)
 
 static esp_err_t firmware_mock_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     char buf[256] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -987,6 +1050,7 @@ static esp_err_t firmware_mock_post_handler(httpd_req_t* req)
 
 static esp_err_t firmware_mock_reset_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     bsp_display_lock(0);
     firmware_screen_clear_mock();
     bsp_display_unlock();
@@ -1009,6 +1073,7 @@ static esp_err_t firmware_mock_reset_post_handler(httpd_req_t* req)
 
 static esp_err_t notification_mock_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     char buf[256] = {0};
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -1065,6 +1130,7 @@ static esp_err_t notification_mock_post_handler(httpd_req_t* req)
 
 static esp_err_t notification_mock_reset_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     bsp_display_lock(0);
     status_bar_clear_all_notifications();
     bsp_display_unlock();
@@ -1085,6 +1151,7 @@ static esp_err_t notification_mock_reset_post_handler(httpd_req_t* req)
 
 static esp_err_t set_demo_field_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     if (!arctic::isDemoMode()) {
         send_json_error(req, "403 Forbidden", "Demo mode is not enabled");
         return ESP_OK;
@@ -1145,11 +1212,141 @@ static esp_err_t set_demo_field_post_handler(httpd_req_t* req)
 
 static esp_err_t clear_error_history_post_handler(httpd_req_t* req)
 {
+    CHECK_SESSION_LOCK(req);
     arctic::clearErrorHistory();
 
     set_json_content_type(req);
     cJSON* resp = cJSON_CreateObject();
     cJSON_AddBoolToObject(resp, "success", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/lock — acquire session lock
+// Body: {"session_id": "uuid-here", "ttl_seconds": 900}
+// ============================================================================
+
+static esp_err_t lock_post_handler(httpd_req_t* req)
+{
+    char buf[256] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty body");
+        return ESP_OK;
+    }
+
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* j_session = cJSON_GetObjectItem(body, "session_id");
+    if (!j_session || !cJSON_IsString(j_session) || strlen(j_session->valuestring) == 0) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Missing 'session_id' string");
+        return ESP_OK;
+    }
+
+    // Check if already locked by someone else
+    if (is_lock_held() && strcmp(s_lock_session_id, j_session->valuestring) != 0) {
+        cJSON_Delete(body);
+        reject_locked(req);
+        return ESP_OK;
+    }
+
+    // Acquire or renew lock
+    strncpy(s_lock_session_id, j_session->valuestring, sizeof(s_lock_session_id) - 1);
+    s_lock_session_id[sizeof(s_lock_session_id) - 1] = '\0';
+    s_lock_acquired_us = esp_timer_get_time();
+
+    cJSON* j_ttl = cJSON_GetObjectItem(body, "ttl_seconds");
+    if (j_ttl && cJSON_IsNumber(j_ttl) && j_ttl->valueint > 0) {
+        s_lock_ttl_us = (int64_t)j_ttl->valueint * 1000000LL;
+    } else {
+        s_lock_ttl_us = 15 * 60 * 1000000LL;  // Default 15 min
+    }
+
+    ESP_LOGI(TAG, "Session lock acquired: '%s' (TTL %llds)", s_lock_session_id, s_lock_ttl_us / 1000000LL);
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "acquired", true);
+    cJSON_AddStringToObject(resp, "session_id", s_lock_session_id);
+    cJSON_AddNumberToObject(resp, "ttl_seconds", (double)(s_lock_ttl_us / 1000000LL));
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    cJSON_Delete(body);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/unlock — release session lock
+// Body: {"session_id": "uuid-here"}  (must match holder, or force with "force": true)
+// ============================================================================
+
+static esp_err_t unlock_post_handler(httpd_req_t* req)
+{
+    char buf[256] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+
+    // Allow empty body to force-unlock (useful for cleanup/debugging)
+    bool force = false;
+    char session_id[64] = {0};
+
+    if (ret > 0) {
+        cJSON* body = cJSON_Parse(buf);
+        if (body) {
+            cJSON* j_session = cJSON_GetObjectItem(body, "session_id");
+            if (j_session && cJSON_IsString(j_session)) {
+                strncpy(session_id, j_session->valuestring, sizeof(session_id) - 1);
+            }
+            cJSON* j_force = cJSON_GetObjectItem(body, "force");
+            force = (j_force && cJSON_IsTrue(j_force));
+            cJSON_Delete(body);
+        }
+    }
+
+    if (!force && is_lock_held() && strlen(session_id) > 0
+        && strcmp(session_id, s_lock_session_id) != 0) {
+        reject_locked(req);
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Session lock released (was '%s')", s_lock_session_id);
+    s_lock_session_id[0] = '\0';
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "released", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
+// GET /api/test/lock — check lock status
+// ============================================================================
+
+static esp_err_t lock_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    bool locked = is_lock_held();
+    cJSON_AddBoolToObject(resp, "locked", locked);
+    if (locked) {
+        cJSON_AddStringToObject(resp, "session_id", s_lock_session_id);
+        int64_t remaining_s = (s_lock_ttl_us - (esp_timer_get_time() - s_lock_acquired_us)) / 1000000LL;
+        cJSON_AddNumberToObject(resp, "remaining_seconds", remaining_s > 0 ? remaining_s : 0);
+    }
     char* json = cJSON_PrintUnformatted(resp);
     httpd_resp_sendstr(req, json);
     free(json);
@@ -1378,6 +1575,48 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &notification_mock_reset_options_uri);
+
+    // --- Session lock endpoints ---
+
+    httpd_uri_t lock_get_uri = {
+        .uri = "/api/test/lock",
+        .method = HTTP_GET,
+        .handler = lock_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &lock_get_uri);
+
+    httpd_uri_t lock_post_uri = {
+        .uri = "/api/test/lock",
+        .method = HTTP_POST,
+        .handler = lock_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &lock_post_uri);
+
+    httpd_uri_t lock_options_uri = {
+        .uri = "/api/test/lock",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &lock_options_uri);
+
+    httpd_uri_t unlock_uri = {
+        .uri = "/api/test/unlock",
+        .method = HTTP_POST,
+        .handler = unlock_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &unlock_uri);
+
+    httpd_uri_t unlock_options_uri = {
+        .uri = "/api/test/unlock",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &unlock_options_uri);
 
     ESP_LOGI(TAG, "Test instrumentation endpoints registered");
 }
