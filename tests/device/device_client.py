@@ -253,14 +253,14 @@ class DeviceClient:
             raise DeviceError(f"Firmware mock reset failed ({r.status_code}): {msg}")
         return r.json()
 
-    def notification_mock(self, type: int, message: str = None) -> dict:
+    def notification_mock(self, notification_type: int, message: str = None) -> dict:
         """POST /api/test/notification-mock — add a notification to the status bar.
 
         Args:
-            type: Notification type (0=firmware update, 1=wifi unstable, 2=low battery)
+            notification_type: Notification type (0=firmware update, 1=wifi unstable, 2=low battery)
             message: Optional message text
         """
-        payload = {"type": type}
+        payload = {"type": notification_type}
         if message is not None:
             payload["message"] = message
 

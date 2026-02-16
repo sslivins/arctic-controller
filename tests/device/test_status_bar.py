@@ -40,7 +40,7 @@ def test_notification_badge_appears_with_update(device: DeviceClient):
     time.sleep(0.5)
     
     # Add a firmware update notification (type 0)
-    device.notification_mock(type=0, message="Firmware v99.0.0 available")
+    device.notification_mock(notification_type=0, message="Firmware v99.0.0 available")
     time.sleep(0.5)
     
     # Check that the notification button exists and is visible
@@ -50,7 +50,6 @@ def test_notification_badge_appears_with_update(device: DeviceClient):
     
     # Clean up
     device.notification_mock_reset()
-
 
 def test_notification_icon_shows_dropdown(device: DeviceClient):
     """Clicking the notification icon should show the dropdown with notifications.
@@ -64,7 +63,7 @@ def test_notification_icon_shows_dropdown(device: DeviceClient):
     device.notification_mock_reset()
     time.sleep(0.5)
     
-    device.notification_mock(type=0, message="Firmware v99.0.0 available")
+    device.notification_mock(notification_type=0, message="Firmware v99.0.0 available")
     time.sleep(0.5)
     
     # Click the notification bell icon
@@ -89,7 +88,7 @@ def test_notification_firmware_update_opens_firmware_screen(device: DeviceClient
     device.notification_mock_reset()
     time.sleep(0.5)
     
-    device.notification_mock(type=0, message="Firmware v99.0.0 available")
+    device.notification_mock(notification_type=0, message="Firmware v99.0.0 available")
     time.sleep(0.5)
     
     # Click the notification bell to open dropdown
@@ -113,7 +112,6 @@ def test_notification_firmware_update_opens_firmware_screen(device: DeviceClient
         # Clean up
         device.notification_mock_reset()
 
-
 def test_notification_clears_after_clicking(device: DeviceClient):
     """After clicking a notification, it should be cleared from the status bar.
     
@@ -126,7 +124,7 @@ def test_notification_clears_after_clicking(device: DeviceClient):
     device.notification_mock_reset()
     time.sleep(0.5)
     
-    device.notification_mock(type=0, message="Firmware v99.0.0 available")
+    device.notification_mock(notification_type=0, message="Firmware v99.0.0 available")
     time.sleep(0.5)
     
     # Click the notification bell to open dropdown
