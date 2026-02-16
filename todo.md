@@ -218,6 +218,36 @@ Set up a Raspberry Pi as a GitHub Actions self-hosted runner on the same LAN as 
 
 ### Device / Hardware Testing
 
+#### Testing Gaps — Uncovered Screens & Features
+The current 129-test suite covers: main screen, settings menu, navigation, WiFi
+dialogs, firmware check, display brightness, time format, timezone, temperature
+unit, language switching, localization (FR/ES), demo mode, status bar/notifications,
+error mapping, and error history duration.
+
+The following screens and features have **no automated test coverage** yet:
+
+- [ ] **Event log screen** — `event_log_screen.cpp` exists but has zero tests.
+      Test ideas: navigate to event log, verify events appear after state changes,
+      verify event timestamps, test clearing events, test scrolling with many entries.
+- [ ] **Heatpump control screen** — power/mode/setpoint control UI untested.
+      Needs: navigate to control screen, toggle power, change mode, adjust setpoints,
+      verify UI reflects changes.
+- [ ] **Heatpump params screen** — parameter display/editing untested.
+      Needs: navigate to params, verify parameter values display, test editing a param.
+- [ ] **Heatpump system screen** — system info display untested.
+      Needs: navigate to system screen, verify labels and values render.
+- [ ] **Heatpump temps screen** — temperature detail view untested.
+      Needs: navigate to temps screen, verify all temperature labels and values.
+- [ ] **Heatpump errors screen** — dedicated errors screen not tested (only the error
+      card on the main screen is covered by `test_error_mapping.py`).
+      Needs: navigate to errors screen, verify error list, test with 0/1/many errors.
+- [ ] **OTA update flow UI** — firmware *check* is tested (`test_firmware.py`) but not
+      the download progress, status text, or completion UI. See "OTA Install Button"
+      section below for options.
+- [ ] **Startup animation** — transient and hard to test; low priority.
+- [ ] **WiFi connection flow** — password dialog and mock networks are tested, but
+      actual connect/disconnect/reconnect behavior is not (requires real network changes).
+
 #### Test Instrumentation Endpoints (behind `#ifdef CONFIG_TEST_ENDPOINTS`)
 - [ ] `GET /api/test/ui-state` — Walk LVGL object tree, return all visible labels/buttons/states as JSON (type, text, visible, position)
 - [ ] `POST /api/test/click` — Find widget by label text (`{"label": "Errors"}` or `{"label_contains": "P02"}`) and fire `lv_obj_send_event(LV_EVENT_CLICKED)` from LVGL thread; supports `user_data` tag matching for tagged widgets
