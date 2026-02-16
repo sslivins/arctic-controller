@@ -55,9 +55,9 @@ def test_notification_icon_shows_dropdown(device: DeviceClient):
     """Clicking the notification icon should show the dropdown with notifications.
     
     Note: The dropdown is created dynamically and doesn't have persistent widget tags.
-    We verify correct behavior by ensuring the system remains on the main screen
-    (rather than crashing or navigating away) and that subsequent interaction works.
-    Full visual verification would require the physical device.
+    This test verifies that clicking the notification icon doesn't cause crashes or
+    navigation errors. Full verification of dropdown visibility would require checking
+    the physical device or enhancing the test infrastructure to detect dynamic overlays.
     """
     # Clear and add a notification
     device.notification_mock_reset()
@@ -113,12 +113,13 @@ def test_notification_firmware_update_opens_firmware_screen(device: DeviceClient
         device.notification_mock_reset()
 
 def test_notification_clears_after_clicking(device: DeviceClient):
-    """After clicking a notification, it should be cleared from the status bar.
+    """Clicking a notification in the dropdown should navigate to the appropriate screen.
     
-    Note: The notification is cleared by the callback in main.cpp when the dropdown
-    item is clicked. We verify this by confirming the notification no longer triggers
-    navigation after being clicked once. Full verification of badge disappearance
-    would require checking the physical device's visual state.
+    Note: This test verifies the complete interaction flow - opening the notification
+    dropdown, clicking on a firmware update notification, and navigating to the firmware
+    screen. The notification is cleared by a callback in main.cpp, but we don't directly
+    verify badge disappearance due to test infrastructure limitations. We verify correct
+    behavior by ensuring the navigation works and the system remains stable.
     """
     # Add a firmware update notification
     device.notification_mock_reset()
@@ -144,13 +145,13 @@ def test_notification_clears_after_clicking(device: DeviceClient):
         assert device.wait_for_screen("main", timeout=5.0)
         time.sleep(0.5)
         
-        # The notification was cleared when clicked (by the callback in main.cpp)
-        # We verify this by ensuring the system remains stable
-        # In a real scenario, the badge would no longer be visible
+        # Clicking the notification button again should not cause errors
+        # (In production, the notification was cleared by the callback, but we can't
+        # directly verify badge visibility in this test infrastructure)
         device.click(tag="notifications")
         time.sleep(0.5)
         
-        # Should still be on main screen (dropdown shows no notifications or doesn't appear)
+        # Should still be on main screen
         assert device.screen == "main"
     finally:
         # Clean up
