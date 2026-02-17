@@ -29,14 +29,7 @@
 #include "heatpump_errors.h"
 #include "status_bar.h"
 #include <esp_timer.h>
-
-// Forward-declare lodepng functions we need (can't include lodepng.h directly
-// from C++ because its extern "C" block conflicts with C++ template headers).
-extern "C" {
-    unsigned lodepng_encode24(unsigned char** out, size_t* outsize,
-                              const unsigned char* image, unsigned w, unsigned h);
-    const char* lodepng_error_text(unsigned code);
-}
+#include "png_encoder.h"
 
 static const char* TAG = "test_api";
 
@@ -1371,65 +1364,92 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     // Screenshot is read-only, no session lock needed
     ESP_LOGI(TAG, "Screenshot requested");
 
-    // Take snapshot under LVGL lock
+    // Get screen dimensions under LVGL lock
     bsp_display_lock(0);
     lv_obj_t* screen = lv_screen_active();
-    lv_draw_buf_t* snapshot = lv_snapshot_take(screen, LV_COLOR_FORMAT_RGB888);
+    lv_obj_update_layout(screen);
+    int32_t w = lv_obj_get_width(screen);
+    int32_t h = lv_obj_get_height(screen);
     bsp_display_unlock();
 
-    if (!snapshot || !snapshot->data) {
+    ESP_LOGI(TAG, "Screen size: %ldx%ld", w, h);
+
+    // Allocate pixel buffer in PSRAM (720x1280x3 ≈ 2.7MB — too large for internal RAM)
+    uint32_t stride = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB888);
+    uint32_t buf_size = stride * h;
+    void* pixel_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!pixel_buf) {
+        ESP_LOGE(TAG, "Failed to allocate snapshot buffer (%lu bytes in PSRAM)", (unsigned long)buf_size);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        set_json_content_type(req);
+        httpd_resp_sendstr(req, "{\"error\":\"Out of memory\"}");
+        return ESP_OK;
+    }
+
+    // Init draw buffer with our PSRAM-backed memory
+    lv_draw_buf_t snapshot;
+    lv_draw_buf_init(&snapshot, w, h, LV_COLOR_FORMAT_RGB888, stride, pixel_buf, buf_size);
+
+    // Take snapshot under LVGL lock
+    bsp_display_lock(0);
+    screen = lv_screen_active();
+    lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
+    bsp_display_unlock();
+
+    if (snap_res != LV_RESULT_OK) {
         ESP_LOGE(TAG, "Failed to take snapshot");
+        heap_caps_free(pixel_buf);
         httpd_resp_set_status(req, "500 Internal Server Error");
         set_json_content_type(req);
         httpd_resp_sendstr(req, "{\"error\":\"Failed to capture screenshot\"}");
         return ESP_OK;
     }
 
-    uint32_t w = snapshot->header.w;
-    uint32_t h = snapshot->header.h;
-    uint32_t stride = snapshot->header.stride;
-    ESP_LOGI(TAG, "Snapshot captured: %lux%lu, stride=%lu", w, h, stride);
+    ESP_LOGI(TAG, "Snapshot captured: %ldx%ld, stride=%lu", w, h, (unsigned long)stride);
 
     // lodepng expects tightly packed RGB rows (w*3 bytes per row)
     // LVGL draw buf may have stride padding, so we need to pack it
     uint8_t* rgb_packed = NULL;
-    const uint8_t* src = snapshot->data;
-    bool needs_packing = (stride != w * 3);
+    const uint8_t* src = snapshot.data;
+    bool needs_packing = (stride != (uint32_t)(w * 3));
 
     if (needs_packing) {
         rgb_packed = (uint8_t*)heap_caps_malloc(w * h * 3, MALLOC_CAP_SPIRAM);
         if (!rgb_packed) {
             ESP_LOGE(TAG, "Failed to allocate RGB packing buffer");
-            lv_draw_buf_destroy(snapshot);
+            heap_caps_free(pixel_buf);
             httpd_resp_set_status(req, "500 Internal Server Error");
             set_json_content_type(req);
             httpd_resp_sendstr(req, "{\"error\":\"Out of memory\"}");
             return ESP_OK;
         }
-        for (uint32_t y = 0; y < h; y++) {
+        for (int32_t y = 0; y < h; y++) {
             memcpy(rgb_packed + y * w * 3, src + y * stride, w * 3);
         }
         src = rgb_packed;
     }
 
-    // Encode to PNG
-    unsigned char* png_data = NULL;
+    // Encode to PNG (uncompressed — avoids lodepng's lv_malloc OOM on large images)
+    uint8_t* png_data = NULL;
     size_t png_size = 0;
     int64_t encode_start = esp_timer_get_time();
-    unsigned error = lodepng_encode24(&png_data, &png_size, src, w, h);
+    png_encode_result_t error = png_encode_rgb888(src, w, h, &png_data, &png_size);
     int64_t encode_ms = (esp_timer_get_time() - encode_start) / 1000;
 
     if (needs_packing) {
         heap_caps_free(rgb_packed);
     }
-    lv_draw_buf_destroy(snapshot);
+    heap_caps_free(pixel_buf);
 
-    if (error) {
-        ESP_LOGE(TAG, "PNG encoding failed: %s", lodepng_error_text(error));
-        free(png_data);
+    if (error != PNG_ENCODE_OK) {
+        ESP_LOGE(TAG, "PNG encoding failed (code %d)", error);
+        if (png_data) heap_caps_free(png_data);
         httpd_resp_set_status(req, "500 Internal Server Error");
         set_json_content_type(req);
-        httpd_resp_sendstr(req, "{\"error\":\"PNG encoding failed\"}");
+        char err_json[128];
+        snprintf(err_json, sizeof(err_json),
+                 "{\"error\":\"PNG encoding failed\",\"code\":%d}", error);
+        httpd_resp_sendstr(req, err_json);
         return ESP_OK;
     }
 
@@ -1459,7 +1479,7 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
         httpd_resp_send_chunk(req, NULL, 0);
     }
 
-    free(png_data);
+    heap_caps_free(png_data);
     return ESP_OK;
 }
 

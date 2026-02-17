@@ -113,7 +113,7 @@ CONFIG_LV_USE_FONT_COMPRESSED=y
 
 # Screenshot support (test endpoint captures display as PNG)
 CONFIG_LV_USE_SNAPSHOT=y
-CONFIG_LV_USE_LODEPNG=y
+# CONFIG_LV_USE_LODEPNG is not set
 
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 
