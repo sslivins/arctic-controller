@@ -186,19 +186,19 @@ jobs:
 
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run }}
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Arctic Controller ${{ steps.version.outputs.tag }}
           body_path: /tmp/release_body.md
+          draft: false
           files: |
             build/arctic_controller.bin
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
             build/ota_data_initial.bin
-          generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ARCTIC_RELEASE_TOKEN }}
 
       - name: Release summary
         if: ${{ !inputs.dry_run }}
