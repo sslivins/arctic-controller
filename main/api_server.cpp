@@ -15,6 +15,7 @@
 #include "heatpump_params.h"
 #include "heatpump_errors.h"
 #include "event_log.h"
+#include "log_buffer.h"
 #include "app_preferences.h"
 #include "test_endpoints.h"
 #include <esp_http_server.h>
@@ -86,6 +87,8 @@ static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
 static esp_err_t display_brightness_get_handler(httpd_req_t* req);
 static esp_err_t preferences_get_handler(httpd_req_t* req);
+static esp_err_t logs_get_handler(httpd_req_t* req);
+static esp_err_t logs_clear_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -265,7 +268,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 80;  // 40 api_server + 32 test_endpoints = 72 needed
+    config.max_uri_handlers = 82;  // 42 api_server + 32 test_endpoints = 74 needed
     config.stack_size = 16384;     // Larger stack for tree walker + file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -652,6 +655,24 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(preferences_uri);
+
+    // GET /api/logs - Get log buffer entries
+    httpd_uri_t logs_get_uri = {
+        .uri = "/api/logs",
+        .method = HTTP_GET,
+        .handler = logs_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(logs_get_uri);
+
+    // DELETE /api/logs - Clear log buffer
+    httpd_uri_t logs_clear_uri = {
+        .uri = "/api/logs",
+        .method = HTTP_DELETE,
+        .handler = logs_clear_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(logs_clear_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
     test_endpoints_register(server);
@@ -2509,5 +2530,91 @@ static esp_err_t preferences_get_handler(httpd_req_t* req)
     httpd_resp_sendstr(req, json);
     free(json);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// ============================================================================
+// Logs API
+// ============================================================================
+
+static esp_err_t logs_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+
+    // Parse query parameters: ?since=<seq>&level=<E|W|I|D|V>&limit=<n>
+    uint32_t since_seq = 0;
+    esp_log_level_t min_level = ESP_LOG_VERBOSE;  // Default: all levels
+    int limit = LOG_BUFFER_MAX_ENTRIES;
+
+    char query[128] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char param[32];
+
+        if (httpd_query_key_value(query, "since", param, sizeof(param)) == ESP_OK) {
+            since_seq = (uint32_t)atoi(param);
+        }
+        if (httpd_query_key_value(query, "limit", param, sizeof(param)) == ESP_OK) {
+            int l = atoi(param);
+            if (l > 0 && l < limit) limit = l;
+        }
+        if (httpd_query_key_value(query, "level", param, sizeof(param)) == ESP_OK) {
+            switch (param[0]) {
+                case 'E': case 'e': min_level = ESP_LOG_ERROR;   break;
+                case 'W': case 'w': min_level = ESP_LOG_WARN;    break;
+                case 'I': case 'i': min_level = ESP_LOG_INFO;    break;
+                case 'D': case 'd': min_level = ESP_LOG_DEBUG;   break;
+                case 'V': case 'v': min_level = ESP_LOG_VERBOSE; break;
+            }
+        }
+    }
+
+    // Allocate entries on heap (each entry is ~220 bytes, 256 entries = ~56 KB)
+    log_entry_t* entries = (log_entry_t*)malloc(limit * sizeof(log_entry_t));
+    if (!entries) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+
+    int count = log_buffer_get(entries, limit, since_seq, min_level);
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "total", log_buffer_count());
+    cJSON_AddNumberToObject(root, "latest_seq", log_buffer_get_latest_seq());
+    cJSON* arr = cJSON_AddArrayToObject(root, "entries");
+
+    for (int i = 0; i < count; i++) {
+        cJSON* entry = cJSON_CreateObject();
+        cJSON_AddNumberToObject(entry, "seq", entries[i].seq);
+        cJSON_AddNumberToObject(entry, "uptime_ms", entries[i].uptime_ms);
+        cJSON_AddStringToObject(entry, "level", log_level_char(entries[i].level));
+        cJSON_AddStringToObject(entry, "tag", entries[i].tag);
+        cJSON_AddStringToObject(entry, "message", entries[i].message);
+        cJSON_AddItemToArray(arr, entry);
+    }
+
+    free(entries);
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+
+    return ESP_OK;
+}
+
+static esp_err_t logs_clear_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+
+    log_buffer_clear();
+    httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;
 }

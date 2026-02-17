@@ -26,6 +26,7 @@
 #include "heatpump_screen.h"
 #include "app_preferences.h"
 #include "event_log.h"
+#include "log_buffer.h"
 
 static const char* TAG = "main";
 
@@ -77,6 +78,9 @@ static void show_error_message(const char* message)
 
 extern "C" void app_main(void)
 {
+    // Initialize log buffer first to capture boot logs
+    log_buffer_init();
+
     mclog::tagInfo(TAG, "Arctic Heat Pump Controller Starting...");
 
     // Initialize NVS (required for storing settings like timezone, WiFi credentials, etc.)

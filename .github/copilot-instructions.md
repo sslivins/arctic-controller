@@ -10,6 +10,10 @@
 - After completing file operations, confirm briefly rather than restating what was done.
 - When committing, write clear conventional-commit messages (e.g. `feat:`, `fix:`,
   `docs:`, `ci:`, `refactor:`, `test:`).
+- **Always work on a feature branch** — never commit directly to `main`. Create a
+  branch (e.g. `feat/log-api`, `fix/modbus-timeout`) before making changes. The user
+  will merge via PR.
+- When asked for a PR description, always output it in **Markdown** format.
 
 ## Project Overview
 
@@ -45,6 +49,11 @@ REST API + WebSocket dashboard for monitoring and control.
 - LVGL widgets use `lv_obj_set_user_data()` with string tags for test addressability
 - All user-facing strings go through the i18n translation layer (`i18n.h`)
 - Three languages: English, French, Spanish — update all three when adding strings
+
+### Web Dashboard (`main/web/index.html`)
+- After editing `index.html`, run `idf.py reconfigure` before `idf.py build`.
+  The gzip compression step only runs during CMake configure, not on every ninja
+  build. Without reconfigure, the firmware will embed a stale `index.html.gz`.
 - Test-only code is guarded by `#ifdef CONFIG_TEST_ENDPOINTS`
 - When adding HTTP endpoints: bump `max_uri_handlers` in `api_server.cpp` if needed
   (currently 80 = ~40 production + ~32 test + headroom)

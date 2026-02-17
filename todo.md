@@ -178,10 +178,11 @@ Test flow: pytest script → sets state on simulator via REST → waits for Tab5
 ## Logging
 
 - [ ] Audit and clean up serial log output (remove excessive/noisy ESP_LOGI/LOGD calls, standardize TAG usage)
-- [ ] Implement a circular RAM log buffer (e.g. 16–32 KB ring buffer) for recent log messages
-- [ ] Add `GET /api/logs` endpoint to retrieve buffered logs as JSON or plain text
-- [ ] Add a live log viewer panel to the web dashboard (auto-scroll, filterable by level)
-- [ ] Hook into `esp_log_set_vprintf()` to capture logs into the ring buffer alongside serial output
+- [x] Implement a circular RAM log buffer (256-entry ring buffer in `log_buffer.cpp`)
+- [x] Add `GET /api/logs` endpoint to retrieve buffered logs as JSON (with `since`, `level`, `limit` params)
+- [x] Add `DELETE /api/logs` endpoint to clear the log buffer
+- [x] Add a live log viewer panel to the web dashboard (auto-scroll, filterable by level, 2s polling)
+- [x] Hook into `esp_log_set_vprintf()` to capture logs into the ring buffer alongside serial output
 
 ## Testing
 

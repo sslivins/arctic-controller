@@ -63,6 +63,8 @@ tags:
     description: Heat pump status and control
   - name: Events
     description: Operational event log
+  - name: Logs
+    description: System debug log buffer
 
 paths:
   /login:
@@ -1574,6 +1576,102 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/logs:
+    get:
+      tags:
+        - Logs
+      summary: Get system log entries
+      description: |
+        Returns ESP_LOG output captured in a RAM ring buffer (max 256 entries).
+        Supports incremental fetching via the `since` parameter and filtering by log level.
+        Entries are returned in chronological order (oldest first).
+      operationId: getLogs
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      parameters:
+        - name: since
+          in: query
+          description: Only return entries with sequence number greater than this value (for incremental polling)
+          required: false
+          schema:
+            type: integer
+            example: 0
+        - name: level
+          in: query
+          description: |
+            Minimum log level filter:
+            - `E` — errors only
+            - `W` — warnings and errors
+            - `I` — info, warnings, and errors
+            - `D` — debug and above
+            - `V` — all (verbose), this is the default
+          required: false
+          schema:
+            type: string
+            enum: [E, W, I, D, V]
+            default: V
+        - name: limit
+          in: query
+          description: Maximum number of entries to return
+          required: false
+          schema:
+            type: integer
+            default: 256
+      responses:
+        '200':
+          description: Log entries retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    description: Total number of entries currently in the buffer
+                    example: 42
+                  latest_seq:
+                    type: integer
+                    description: Sequence number of the most recent entry (use as `since` for next poll)
+                    example: 128
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LogEntry'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags:
+        - Logs
+      summary: Clear log buffer
+      description: Deletes all entries from the log buffer. Sequence numbers continue to increment.
+      operationId: clearLogs
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Log buffer cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     apiKey:
@@ -1594,6 +1692,32 @@ components:
         error:
           type: string
           description: Error message
+
+    LogEntry:
+      type: object
+      description: A single captured ESP_LOG entry
+      properties:
+        seq:
+          type: integer
+          description: Monotonically increasing sequence number (unique across clears)
+          example: 42
+        uptime_ms:
+          type: integer
+          description: Device uptime in milliseconds when logged
+          example: 12345
+        level:
+          type: string
+          description: Log level character
+          enum: [E, W, I, D, V]
+          example: I
+        tag:
+          type: string
+          description: ESP_LOG component tag
+          example: api_server
+        message:
+          type: string
+          description: Log message text (without level/tag prefix)
+          example: HTTP server started successfully
 
     EventEntry:
       type: object

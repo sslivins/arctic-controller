@@ -48,6 +48,11 @@ The following screens and features have **no automated test coverage** yet:
 - [ ] Verify API auth (missing/wrong API key returns 401)
 - [ ] Test API responses when device is disconnected (non-demo mode)
 - [ ] Verify `demo_mode` flag is present in all API responses
+- [ ] `GET /api/logs` — verify entries returned with seq, level, tag, message fields
+- [ ] `GET /api/logs?level=E` — verify only error-level entries returned
+- [ ] `GET /api/logs?since=N` — verify incremental fetch returns only newer entries
+- [ ] `GET /api/logs?limit=10` — verify at most 10 entries returned
+- [ ] `DELETE /api/logs` — verify buffer is cleared, seq numbers keep incrementing
 
 ## Web Dashboard Testing
 
