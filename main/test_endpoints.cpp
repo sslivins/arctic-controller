@@ -1407,43 +1407,30 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "Snapshot captured: %ldx%ld, stride=%lu", w, h, (unsigned long)stride);
 
-    // lodepng expects tightly packed RGB rows (w*3 bytes per row)
-    // LVGL draw buf may have stride padding, so we need to pack it.
-    // LVGL's RGB888 format stores bytes as B, G, R in memory, but PNG
-    // expects R, G, B — so we swap R and B channels while packing.
-    uint8_t* rgb_packed = (uint8_t*)heap_caps_malloc(w * h * 3, MALLOC_CAP_SPIRAM);
-    if (!rgb_packed) {
-        ESP_LOGE(TAG, "Failed to allocate RGB packing buffer");
-        heap_caps_free(pixel_buf);
-        httpd_resp_set_status(req, "500 Internal Server Error");
-        set_json_content_type(req);
-        httpd_resp_sendstr(req, "{\"error\":\"Out of memory\"}");
-        return ESP_OK;
-    }
-
-    const uint8_t* src_row = snapshot.data;
-    uint8_t* dst = rgb_packed;
+    // LVGL's RGB888 stores pixels as B,G,R in memory but PNG expects R,G,B.
+    // Swap R↔B in-place and pack rows (remove stride padding) in one pass.
+    uint8_t* dst = (uint8_t*)pixel_buf;
+    const uint8_t* src_row = (const uint8_t*)pixel_buf;
     for (int32_t y = 0; y < h; y++) {
         const uint8_t* s = src_row;
         for (int32_t x = 0; x < w; x++) {
-            dst[0] = s[2];  // R ← B
-            dst[1] = s[1];  // G ← G
-            dst[2] = s[0];  // B ← R
+            uint8_t b = s[0], g = s[1], r = s[2];
+            dst[0] = r;
+            dst[1] = g;
+            dst[2] = b;
             dst += 3;
             s += 3;
         }
         src_row += stride;
     }
-    const uint8_t* src = rgb_packed;
 
-    // Encode to PNG (uncompressed — avoids lodepng's lv_malloc OOM on large images)
+    // Encode to PNG
     uint8_t* png_data = NULL;
     size_t png_size = 0;
     int64_t encode_start = esp_timer_get_time();
-    png_encode_result_t error = png_encode_rgb888(src, w, h, &png_data, &png_size);
+    png_encode_result_t error = png_encode_rgb888((const uint8_t*)pixel_buf, w, h, &png_data, &png_size);
     int64_t encode_ms = (esp_timer_get_time() - encode_start) / 1000;
 
-    heap_caps_free(rgb_packed);
     heap_caps_free(pixel_buf);
 
     if (error != PNG_ENCODE_OK) {
