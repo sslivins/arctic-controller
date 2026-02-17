@@ -37,6 +37,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Test failure screenshots
+tests/device/screenshots/
+
 # Compiled files
 *.o
 *.obj
