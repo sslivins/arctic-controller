@@ -8,8 +8,17 @@
 - When multiple approaches exist, pick the best one and proceed. Only ask if the
   choice has significant irreversible consequences.
 - After completing file operations, confirm briefly rather than restating what was done.
-- When committing, write clear conventional-commit messages (e.g. `feat:`, `fix:`,
-  `docs:`, `ci:`, `refactor:`, `test:`).
+- When committing, write clear **conventional-commit** messages. The release
+  workflow auto-generates changelogs from these prefixes, so consistent usage
+  matters:
+  - `feat:` — new feature or capability
+  - `fix:` — bug fix
+  - `docs:` — documentation only
+  - `ci:` — CI/workflow changes
+  - `refactor:` — code restructuring (no behavior change)
+  - `test:` — adding or updating tests
+  - `chore:` — maintenance tasks (skipped in release notes)
+  - Scoped variants are fine: `fix(ci):`, `feat(modbus):`
 - **Always work on a feature branch** — never commit directly to `main`. Create a
   branch (e.g. `feat/log-api`, `fix/modbus-timeout`) before making changes. The user
   will merge via PR.
