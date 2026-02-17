@@ -259,7 +259,7 @@
                 logLevelInfo: 'Info',
                 logLevelDebug: 'Debug',
                 logAutoScroll: 'Auto-scroll',
-                logPaused: 'Paused'
+                logPaused: 'Paused — Jump to Live ↓',
             },
             fr: {
                 // Header & Navigation
@@ -512,7 +512,7 @@
                 logLevelInfo: 'Info',
                 logLevelDebug: 'D\u00e9bug',
                 logAutoScroll: 'D\u00e9fil. auto',
-                logPaused: 'En pause'
+                logPaused: 'En pause — Aller au direct ↓',
             },
             es: {
                 // Header & Navigation
@@ -765,7 +765,7 @@
                 logLevelInfo: 'Info',
                 logLevelDebug: 'Depura.',
                 logAutoScroll: 'Auto-despl.',
-                logPaused: 'Pausado'
+                logPaused: 'Pausado — Ir al directo ↓',
             }
         };
     </script>
@@ -2070,6 +2070,11 @@
             font-size: 0.8rem;
             border-radius: 4px;
             margin-bottom: 0.5rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .log-paused-banner:hover {
+            background: rgba(251, 191, 36, 0.3);
         }
 
         /* Parameter Card */
@@ -2908,7 +2913,7 @@
                             </div>
                             <div class="card-body" style="padding: 0.5rem;">
                                 <template x-if="logPaused">
-                                    <div class="log-paused-banner" x-text="t('logPaused')"></div>
+                                    <div class="log-paused-banner" @click="jumpToLive()" x-text="t('logPaused')"></div>
                                 </template>
                                 <template x-if="filteredLogs().length === 0">
                                     <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary);" x-text="t('noLogs')"></div>
@@ -4187,6 +4192,17 @@
                     const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
                     this.logAutoScroll = atBottom;
                     this.logPaused = !atBottom;
+                },
+                
+                jumpToLive() {
+                    this.logAutoScroll = true;
+                    this.logPaused = false;
+                    this.$nextTick(() => {
+                        const container = this.$refs.logContainer;
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    });
                 },
                 
                 async clearLogs() {
