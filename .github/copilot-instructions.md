@@ -13,6 +13,7 @@
 - **Always work on a feature branch** — never commit directly to `main`. Create a
   branch (e.g. `feat/log-api`, `fix/modbus-timeout`) before making changes. The user
   will merge via PR.
+- When asked for a PR description, always output it in **Markdown** format.
 
 ## Project Overview
 
