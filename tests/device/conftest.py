@@ -8,7 +8,11 @@ Example: ARCTIC_URL=http://192.168.1.42 pytest
 import os
 import time
 import pytest
+from pathlib import Path
 from device_client import DeviceClient
+
+# Directory for failure screenshots
+SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
 
 
 def _return_to_main(device: DeviceClient):
@@ -110,3 +114,26 @@ def ensure_main_screen(device: DeviceClient):
     This keeps tests independent of each other.
     """
     _return_to_main(device)
+
+
+@pytest.fixture(autouse=True)
+def screenshot_on_failure(request, device: DeviceClient):
+    """Capture a screenshot when a test fails, for visual debugging."""
+    yield
+    if request.node.rep_call and request.node.rep_call.failed:
+        SCREENSHOT_DIR.mkdir(exist_ok=True)
+        name = request.node.name.replace("/", "_").replace("::", "_")
+        path = SCREENSHOT_DIR / f"{name}.png"
+        try:
+            device.screenshot(str(path))
+            print(f"\n📸 Failure screenshot saved: {path}")
+        except Exception as e:
+            print(f"\n⚠️ Failed to capture screenshot: {e}")
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Stash test result on the item so fixtures can check pass/fail."""
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, f"rep_{rep.when}", rep)

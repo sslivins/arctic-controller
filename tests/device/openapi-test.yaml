@@ -949,3 +949,26 @@ paths:
                 $ref: "#/components/schemas/UnlockResponse"
         "423":
           $ref: "#/components/responses/Locked"
+
+  /api/test/screenshot:
+    get:
+      tags: [UI State]
+      summary: Capture a screenshot of the display
+      description: |
+        Takes a snapshot of the current LVGL screen and returns it as a PNG image.
+        The display is 720×1280 pixels.  The operation takes ~1-2 seconds due to
+        framebuffer capture and PNG encoding.  No session lock required (read-only).
+      responses:
+        "200":
+          description: PNG screenshot
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "500":
+          description: Capture or encoding failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"

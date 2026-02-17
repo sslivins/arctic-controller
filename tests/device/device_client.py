@@ -432,3 +432,16 @@ class DeviceClient:
         )
         r.raise_for_status()
         return r.json()
+
+    def screenshot(self, path: str = "screenshot.png") -> str:
+        """GET /api/test/screenshot — capture display as PNG and save to path.
+
+        Returns the path the screenshot was saved to.
+        """
+        r = self.session.get(
+            f"{self.base_url}/api/test/screenshot", timeout=30.0
+        )
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            f.write(r.content)
+        return path

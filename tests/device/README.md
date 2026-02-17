@@ -12,7 +12,7 @@ test-only instrumentation API and asserting on widget state.
 │  (host/CI)   │          │  (ESP32-P4)      │
 │              │          │                  │
 │  DeviceClient│ ───────► │  /api/test/*     │
-│              │          │  (17 endpoints)  │
+│              │          │  (18 endpoints)  │
 │              │ ◄─────── │                  │
 │  assertions  │   JSON   │  LVGL UI engine  │
 └─────────────┘          └──────────────────┘
@@ -91,6 +91,7 @@ All test endpoints are documented in the OpenAPI 3.0 spec:
 | **Mocking** | `wifi-mock`, `firmware-mock`, `notification-mock`, `set-demo-field` | Inject fake state |
 | **Cleanup** | `*-mock-reset`, `clear-error-history` | Reset mocked state |
 | **Session Lock** | `lock`, `unlock` (GET + POST) | Exclusive device access |
+| **Screenshot** | `GET /api/test/screenshot` | Capture display as PNG |
 
 ### Session Lock Protocol
 
@@ -110,8 +111,8 @@ The `conftest.py` session fixture handles this automatically.
 
 | File | Purpose |
 |------|---------|
-| [`conftest.py`](conftest.py) | Session fixture (device client, lock, demo mode, auto-return to main screen) |
-| [`device_client.py`](device_client.py) | Python HTTP client wrapping all 17 test endpoints + production API |
+| [`conftest.py`](conftest.py) | Session fixture (device client, lock, demo mode, auto-return to main screen, screenshot on failure) |
+| [`device_client.py`](device_client.py) | Python HTTP client wrapping all 18 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
 ### Test Files (129 tests)
@@ -148,6 +149,8 @@ The `DeviceClient` class provides typed wrappers for all device communication:
 **Polling**: `wait_for_screen()`, `wait_for_widget()` — poll with configurable timeout
 
 **Session lock**: `lock()`, `unlock()`, `check_lock()`
+
+**Screenshot**: `screenshot(path)` — capture display as PNG, save to file
 
 **Production API**: `get_brightness()`, `get_preferences()`, `get_heatpump_status()`
 
@@ -190,7 +193,7 @@ def test_something(device):
 
 1. Add the handler in `main/test_endpoints.cpp` with `CHECK_SESSION_LOCK(req)`
 2. Register it in `register_test_endpoints()` (watch `max_uri_handlers` in
-   `api_server.cpp` — currently 80)
+   `api_server.cpp` — currently 83)
 3. Add a client method in `device_client.py`
 4. Document in `openapi-test.yaml`
 5. Write tests

@@ -153,3 +153,12 @@ jobs:
           name: Device Test Results
           path: test-results.xml
           reporter: java-junit
+
+      - name: Upload failure screenshots
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: failure-screenshots
+          path: tests/device/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14

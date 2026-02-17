@@ -29,6 +29,7 @@
 #include "heatpump_errors.h"
 #include "status_bar.h"
 #include <esp_timer.h>
+#include "png_encoder.h"
 
 static const char* TAG = "test_api";
 
@@ -1355,6 +1356,126 @@ static esp_err_t lock_get_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// Screenshot — capture display as PNG
+// ============================================================================
+
+static esp_err_t screenshot_get_handler(httpd_req_t* req)
+{
+    // Screenshot is read-only, no session lock needed
+    ESP_LOGI(TAG, "Screenshot requested");
+
+    // Get screen dimensions under LVGL lock
+    bsp_display_lock(0);
+    lv_obj_t* screen = lv_screen_active();
+    lv_obj_update_layout(screen);
+    int32_t w = lv_obj_get_width(screen);
+    int32_t h = lv_obj_get_height(screen);
+    bsp_display_unlock();
+
+    ESP_LOGI(TAG, "Screen size: %ldx%ld", w, h);
+
+    // Allocate pixel buffer in PSRAM (720x1280x3 ≈ 2.7MB — too large for internal RAM)
+    uint32_t stride = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB888);
+    uint32_t buf_size = stride * h;
+    void* pixel_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!pixel_buf) {
+        ESP_LOGE(TAG, "Failed to allocate snapshot buffer (%lu bytes in PSRAM)", (unsigned long)buf_size);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        set_json_content_type(req);
+        httpd_resp_sendstr(req, "{\"error\":\"Out of memory\"}");
+        return ESP_OK;
+    }
+
+    // Init draw buffer with our PSRAM-backed memory
+    lv_draw_buf_t snapshot;
+    lv_draw_buf_init(&snapshot, w, h, LV_COLOR_FORMAT_RGB888, stride, pixel_buf, buf_size);
+
+    // Take snapshot under LVGL lock
+    bsp_display_lock(0);
+    screen = lv_screen_active();
+    lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
+    bsp_display_unlock();
+
+    if (snap_res != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "Failed to take snapshot");
+        heap_caps_free(pixel_buf);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        set_json_content_type(req);
+        httpd_resp_sendstr(req, "{\"error\":\"Failed to capture screenshot\"}");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Snapshot captured: %ldx%ld, stride=%lu", w, h, (unsigned long)stride);
+
+    // LVGL's RGB888 stores pixels as B,G,R in memory but PNG expects R,G,B.
+    // Swap R↔B in-place and pack rows (remove stride padding) in one pass.
+    uint8_t* dst = (uint8_t*)pixel_buf;
+    const uint8_t* src_row = (const uint8_t*)pixel_buf;
+    for (int32_t y = 0; y < h; y++) {
+        const uint8_t* s = src_row;
+        for (int32_t x = 0; x < w; x++) {
+            uint8_t b = s[0], g = s[1], r = s[2];
+            dst[0] = r;
+            dst[1] = g;
+            dst[2] = b;
+            dst += 3;
+            s += 3;
+        }
+        src_row += stride;
+    }
+
+    // Encode to PNG
+    uint8_t* png_data = NULL;
+    size_t png_size = 0;
+    int64_t encode_start = esp_timer_get_time();
+    png_encode_result_t error = png_encode_rgb888((const uint8_t*)pixel_buf, w, h, &png_data, &png_size);
+    int64_t encode_ms = (esp_timer_get_time() - encode_start) / 1000;
+
+    heap_caps_free(pixel_buf);
+
+    if (error != PNG_ENCODE_OK) {
+        ESP_LOGE(TAG, "PNG encoding failed (code %d)", error);
+        if (png_data) heap_caps_free(png_data);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        set_json_content_type(req);
+        char err_json[128];
+        snprintf(err_json, sizeof(err_json),
+                 "{\"error\":\"PNG encoding failed\",\"code\":%d}", error);
+        httpd_resp_sendstr(req, err_json);
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "PNG encoded: %u bytes in %ld ms", (unsigned)png_size, (long)encode_ms);
+
+    // Send PNG response
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"screenshot.png\"");
+
+    // Send in chunks to avoid stack issues with large buffers
+    const size_t chunk_size = 8192;
+    size_t sent = 0;
+    esp_err_t ret = ESP_OK;
+    while (sent < png_size) {
+        size_t to_send = png_size - sent;
+        if (to_send > chunk_size) to_send = chunk_size;
+        ret = httpd_resp_send_chunk(req, (const char*)(png_data + sent), to_send);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to send PNG chunk at offset %u", (unsigned)sent);
+            break;
+        }
+        sent += to_send;
+    }
+    // Finalize chunked response
+    if (ret == ESP_OK) {
+        httpd_resp_send_chunk(req, NULL, 0);
+    }
+
+    heap_caps_free(png_data);
+    return ESP_OK;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -1617,6 +1738,15 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &unlock_options_uri);
+
+    // Screenshot endpoint
+    httpd_uri_t screenshot_uri = {
+        .uri = "/api/test/screenshot",
+        .method = HTTP_GET,
+        .handler = screenshot_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &screenshot_uri);
 
     ESP_LOGI(TAG, "Test instrumentation endpoints registered");
 }
