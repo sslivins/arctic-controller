@@ -244,7 +244,22 @@
                 evtErrorAppeared: 'Error Appeared',
                 evtErrorCleared: 'Error Cleared',
                 evtConnected: 'Connected',
-                evtDisconnected: 'Disconnected'
+                evtDisconnected: 'Disconnected',
+
+                // Logs
+                logs: 'Logs',
+                noLogs: 'No log entries',
+                clearLogs: 'Clear Logs',
+                clearLogsConfirm: 'Clear all log entries?',
+                logsCleared: 'Logs cleared',
+                logsClearFailed: 'Failed to clear logs',
+                logLevelAll: 'All',
+                logLevelError: 'Error',
+                logLevelWarn: 'Warn',
+                logLevelInfo: 'Info',
+                logLevelDebug: 'Debug',
+                logAutoScroll: 'Auto-scroll',
+                logPaused: 'Paused'
             },
             fr: {
                 // Header & Navigation
@@ -482,7 +497,22 @@
                 evtErrorAppeared: 'Erreur apparue',
                 evtErrorCleared: 'Erreur effac\u00e9e',
                 evtConnected: 'Connect\u00e9',
-                evtDisconnected: 'D\u00e9connect\u00e9'
+                evtDisconnected: 'D\u00e9connect\u00e9',
+
+                // Logs
+                logs: 'Journaux',
+                noLogs: 'Aucune entr\u00e9e',
+                clearLogs: 'Effacer',
+                clearLogsConfirm: 'Effacer tous les journaux ?',
+                logsCleared: 'Journaux effac\u00e9s',
+                logsClearFailed: '\u00c9chec de la suppression',
+                logLevelAll: 'Tout',
+                logLevelError: 'Erreur',
+                logLevelWarn: 'Avert.',
+                logLevelInfo: 'Info',
+                logLevelDebug: 'D\u00e9bug',
+                logAutoScroll: 'D\u00e9fil. auto',
+                logPaused: 'En pause'
             },
             es: {
                 // Header & Navigation
@@ -720,7 +750,22 @@
                 evtErrorAppeared: 'Error detectado',
                 evtErrorCleared: 'Error eliminado',
                 evtConnected: 'Conectado',
-                evtDisconnected: 'Desconectado'
+                evtDisconnected: 'Desconectado',
+
+                // Logs
+                logs: 'Registros',
+                noLogs: 'Sin entradas',
+                clearLogs: 'Borrar',
+                clearLogsConfirm: '\u00bfBorrar todos los registros?',
+                logsCleared: 'Registros borrados',
+                logsClearFailed: 'Error al borrar registros',
+                logLevelAll: 'Todo',
+                logLevelError: 'Error',
+                logLevelWarn: 'Advert.',
+                logLevelInfo: 'Info',
+                logLevelDebug: 'Depura.',
+                logAutoScroll: 'Auto-despl.',
+                logPaused: 'Pausado'
             }
         };
     </script>
@@ -1940,6 +1985,93 @@
             margin-top: 0.2rem;
         }
         
+        /* Log Viewer */
+        .log-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .log-level-filters {
+            display: flex;
+            gap: 0.25rem;
+        }
+        .log-level-filters button {
+            padding: 0.2rem 0.5rem;
+            font-size: 0.75rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .log-level-filters button.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(0, 212, 255, 0.1);
+        }
+        .log-container {
+            max-height: 70vh;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.78rem;
+            line-height: 1.5;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            padding: 0.5rem;
+        }
+        .log-entry {
+            display: flex;
+            gap: 0.5rem;
+            padding: 0.15rem 0.25rem;
+            border-radius: 3px;
+        }
+        .log-entry:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+        .log-seq {
+            color: var(--text-secondary);
+            opacity: 0.5;
+            flex-shrink: 0;
+            min-width: 3.5rem;
+            text-align: right;
+        }
+        .log-level {
+            flex-shrink: 0;
+            font-weight: 700;
+            min-width: 1rem;
+            text-align: center;
+        }
+        .log-level-E { color: var(--error); }
+        .log-level-W { color: var(--warning); }
+        .log-level-I { color: var(--accent); }
+        .log-level-D { color: var(--text-secondary); }
+        .log-level-V { color: var(--text-secondary); opacity: 0.6; }
+        .log-tag {
+            color: var(--accent-dim);
+            flex-shrink: 0;
+            max-width: 12rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .log-msg {
+            color: var(--text-primary);
+            word-break: break-all;
+            flex: 1;
+            min-width: 0;
+        }
+        .log-paused-banner {
+            text-align: center;
+            padding: 0.3rem;
+            background: rgba(251, 191, 36, 0.15);
+            color: var(--warning);
+            font-size: 0.8rem;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+        }
+
         /* Parameter Card */
         .param-category {
             margin-bottom: 1.5rem;
@@ -2320,10 +2452,11 @@
                 </header>
                 
                 <nav>
-                    <button :class="{ active: page === 'dashboard' }" @click="page = 'dashboard'" x-text="t('dashboard')"></button>
-                    <button :class="{ active: page === 'parameters' }" @click="page = 'parameters'; loadParams()" x-text="t('parameters')"></button>
-                    <button :class="{ active: page === 'events' }" @click="page = 'events'; loadEvents()" x-text="t('events')"></button>
-                    <button :class="{ active: page === 'settings' }" @click="page = 'settings'" x-text="t('settings')"></button>
+                    <button :class="{ active: page === 'dashboard' }" @click="page = 'dashboard'; stopLogPolling()" x-text="t('dashboard')"></button>
+                    <button :class="{ active: page === 'parameters' }" @click="page = 'parameters'; stopLogPolling(); loadParams()" x-text="t('parameters')"></button>
+                    <button :class="{ active: page === 'events' }" @click="page = 'events'; stopLogPolling(); loadEvents()" x-text="t('events')"></button>
+                    <button :class="{ active: page === 'logs' }" @click="page = 'logs'; startLogPolling()" x-text="t('logs')"></button>
+                    <button :class="{ active: page === 'settings' }" @click="page = 'settings'; stopLogPolling()" x-text="t('settings')"></button>
                 </nav>
                 
                 <main>
@@ -2753,6 +2886,49 @@
                         </div>
                     </div>
                     
+                    <!-- Logs Page -->
+                    <div x-show="page === 'logs'">
+                        <div class="card">
+                            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                                <h2 x-text="t('logs') + (logEntries.length ? ' (' + logEntries.length + ')' : '')"></h2>
+                                <div class="log-toolbar">
+                                    <div class="log-level-filters">
+                                        <button :class="{ active: logLevelFilter === 'V' }" @click="logLevelFilter = 'V'; logLatestSeq = 0; loadLogs(true)" x-text="t('logLevelAll')"></button>
+                                        <button :class="{ active: logLevelFilter === 'E' }" @click="logLevelFilter = 'E'; logLatestSeq = 0; loadLogs(true)" x-text="t('logLevelError')"></button>
+                                        <button :class="{ active: logLevelFilter === 'W' }" @click="logLevelFilter = 'W'; logLatestSeq = 0; loadLogs(true)" x-text="t('logLevelWarn')"></button>
+                                        <button :class="{ active: logLevelFilter === 'I' }" @click="logLevelFilter = 'I'; logLatestSeq = 0; loadLogs(true)" x-text="t('logLevelInfo')"></button>
+                                        <button :class="{ active: logLevelFilter === 'D' }" @click="logLevelFilter = 'D'; logLatestSeq = 0; loadLogs(true)" x-text="t('logLevelDebug')"></button>
+                                    </div>
+                                    <label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--text-secondary); cursor: pointer;">
+                                        <input type="checkbox" x-model="logAutoScroll" style="accent-color: var(--accent);">
+                                        <span x-text="t('logAutoScroll')"></span>
+                                    </label>
+                                    <button class="btn btn-secondary" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;" x-show="logEntries.length > 0" @click="clearLogs()" x-text="t('clearLogs')"></button>
+                                </div>
+                            </div>
+                            <div class="card-body" style="padding: 0.5rem;">
+                                <template x-if="logPaused">
+                                    <div class="log-paused-banner" x-text="t('logPaused')"></div>
+                                </template>
+                                <template x-if="filteredLogs().length === 0">
+                                    <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary);" x-text="t('noLogs')"></div>
+                                </template>
+                                <template x-if="filteredLogs().length > 0">
+                                    <div class="log-container" x-ref="logContainer" @scroll="onLogScroll()">
+                                        <template x-for="entry in filteredLogs()" :key="entry.seq">
+                                            <div class="log-entry">
+                                                <span class="log-seq" x-text="entry.seq"></span>
+                                                <span class="log-level" :class="'log-level-' + entry.level" x-text="entry.level"></span>
+                                                <span class="log-tag" x-text="entry.tag"></span>
+                                                <span class="log-msg" x-text="entry.message"></span>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Settings Page -->
                     <div x-show="page === 'settings'">
                             <!-- Device Info -->
@@ -3140,6 +3316,15 @@
                 eventLog: [],
                 eventLogTotal: 0,
                 eventLogLoading: false,
+                
+                // Log viewer state
+                logEntries: [],
+                logLatestSeq: 0,
+                logLevelFilter: 'V',       // V=all, I=info+warn+error, W=warn+error, E=error only, D=debug+
+                logAutoScroll: true,
+                logPaused: false,
+                logPollTimer: null,
+                logPollInterval: 2000,      // Poll every 2 seconds
                 
                 // Parameters state
                 params: {},
@@ -3923,6 +4108,97 @@
                     } catch (e) {
                         console.error(e);
                         this.showToast(this.t('eventsClearFailed'), 'error');
+                    }
+                },
+                
+                // ==========================================
+                // Log Viewer
+                // ==========================================
+                
+                startLogPolling() {
+                    // Stop any existing timer
+                    this.stopLogPolling();
+                    // Load initial batch
+                    this.loadLogs(true);
+                    // Start incremental polling
+                    this.logPollTimer = setInterval(() => {
+                        if (this.page === 'logs' && !this.logPaused) {
+                            this.loadLogs(false);
+                        }
+                    }, this.logPollInterval);
+                },
+                
+                stopLogPolling() {
+                    if (this.logPollTimer) {
+                        clearInterval(this.logPollTimer);
+                        this.logPollTimer = null;
+                    }
+                },
+                
+                async loadLogs(fullLoad) {
+                    try {
+                        const sinceParam = fullLoad ? 0 : this.logLatestSeq;
+                        const res = await this.apiFetch(`/api/logs?since=${sinceParam}&level=${this.logLevelFilter}`);
+                        const data = await res.json();
+                        
+                        if (fullLoad) {
+                            this.logEntries = data.entries || [];
+                        } else {
+                            // Append new entries
+                            const newEntries = data.entries || [];
+                            if (newEntries.length > 0) {
+                                this.logEntries = this.logEntries.concat(newEntries);
+                                // Cap at 1000 entries in the UI to prevent memory bloat
+                                if (this.logEntries.length > 1000) {
+                                    this.logEntries = this.logEntries.slice(-1000);
+                                }
+                            }
+                        }
+                        
+                        this.logLatestSeq = data.latest_seq || 0;
+                        
+                        // Auto-scroll to bottom
+                        if (this.logAutoScroll) {
+                            this.$nextTick(() => {
+                                const container = this.$refs.logContainer;
+                                if (container) {
+                                    container.scrollTop = container.scrollHeight;
+                                }
+                            });
+                        }
+                    } catch (e) {
+                        console.error('Failed to load logs:', e);
+                    }
+                },
+                
+                filteredLogs() {
+                    // Server-side filtering handles level. Client just returns all.
+                    // But if we had entries loaded at a broader level and user narrows,
+                    // we filter client-side too for instant feedback.
+                    const levels = { 'E': 1, 'W': 2, 'I': 3, 'D': 4, 'V': 5 };
+                    const maxLevel = levels[this.logLevelFilter] || 5;
+                    return this.logEntries.filter(e => (levels[e.level] || 5) <= maxLevel);
+                },
+                
+                onLogScroll() {
+                    // Pause auto-scroll if user scrolls up
+                    const container = this.$refs.logContainer;
+                    if (!container) return;
+                    const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50;
+                    this.logAutoScroll = atBottom;
+                    this.logPaused = !atBottom;
+                },
+                
+                async clearLogs() {
+                    if (!confirm(this.t('clearLogsConfirm'))) return;
+                    try {
+                        await this.apiFetch('/api/logs', { method: 'DELETE' });
+                        this.logEntries = [];
+                        this.logLatestSeq = 0;
+                        this.showToast(this.t('logsCleared'), 'success');
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast(this.t('logsClearFailed'), 'error');
                     }
                 },
                 

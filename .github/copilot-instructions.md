@@ -10,6 +10,9 @@
 - After completing file operations, confirm briefly rather than restating what was done.
 - When committing, write clear conventional-commit messages (e.g. `feat:`, `fix:`,
   `docs:`, `ci:`, `refactor:`, `test:`).
+- **Always work on a feature branch** — never commit directly to `main`. Create a
+  branch (e.g. `feat/log-api`, `fix/modbus-timeout`) before making changes. The user
+  will merge via PR.
 
 ## Project Overview
 

@@ -124,7 +124,7 @@ jobs:
             ```bash
             curl -X POST http://arctic.local/api/ota/update \
               -H "Content-Type: application/json" \
-              -d '{"url":"http://your-server/arctic_controller.bin"}'
+              -d '{"url":"https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/arctic_controller.bin"}'
             ```
           files: |
             build/arctic_controller.bin
