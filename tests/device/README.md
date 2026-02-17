@@ -37,7 +37,7 @@ test-only instrumentation API and asserting on widget state.
 
 ### Host Setup
 ```bash
-pip install requests pytest
+pip install requests pytest schemathesis
 ```
 
 ### Environment Variable
@@ -74,6 +74,29 @@ The workflow uses `concurrency: group: device-tests` to serialize runs —
 only one session can use the physical device at a time.
 
 See `.github/workflows/device-tests.yml` for the full workflow.
+
+## API Contract Tests
+
+Separate from the UI-driven tests, `test_api_schema.py` validates that the
+production REST API conforms to the OpenAPI spec in `docs/openapi.yaml`.
+
+**How it works:**
+
+- **Schemathesis** loads the spec and generates HTTP requests for every safe
+  GET endpoint, validating that responses match the documented schema (status
+  codes, field types, required properties, enum values).
+- **Targeted smoke tests** verify specific response values beyond schema shape
+  (e.g., `status == "ok"`, `platform == "ESP32-P4"`, `progress == 0`).
+- **Dangerous endpoints** (OTA, reboot, credential changes) and all mutating
+  methods (POST/PUT/DELETE) are skipped to protect the device.
+
+**Running locally:**
+```bash
+pytest tests/api/ -v
+```
+
+**In CI**, API contract tests run as a separate step after UI tests,
+with their own JUnit report.
 
 ## Test API Reference
 
@@ -115,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 18 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (129 tests)
+### Test Files (129 UI tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -134,6 +157,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_display_brightness.py`](test_display_brightness.py) | 3 | Brightness slider control and label |
 | [`test_temperature_unit.py`](test_temperature_unit.py) | 2 | °C/°F toggle and preferences |
 | [`test_error_history_duration.py`](test_error_history_duration.py) | 1 | Error history duration format ("3s") |
+| [`../api/test_api_schema.py`](../api/test_api_schema.py) | 8+ | API contract validation via Schemathesis + targeted smoke tests |
 
 ### DeviceClient Methods
 

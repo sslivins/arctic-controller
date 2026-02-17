@@ -141,17 +141,34 @@ jobs:
           echo "Device did not come back online within 45s"
           exit 1
 
-      - name: Run device tests
+      - name: Run device UI tests
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml
         env:
           ARCTIC_URL: http://arctic.local
 
-      - name: Publish test results
+      - name: Install API test dependencies
+        run: pip install schemathesis
+
+      - name: Run API contract tests
+        run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml
+        env:
+          ARCTIC_URL: http://arctic.local
+          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+
+      - name: Publish UI test results
         uses: dorny/test-reporter@v1
         if: always()
         with:
           name: Device Test Results
           path: test-results.xml
+          reporter: java-junit
+
+      - name: Publish API contract test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: API Contract Test Results
+          path: api-test-results.xml
           reporter: java-junit
 
       - name: Upload failure screenshots

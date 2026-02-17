@@ -154,9 +154,9 @@ Options for future coverage:
 - [ ] **Unit tests (no device)**: Extract pure logic (event ring buffer, °C↔°F conversion,
       error lookups, demo register mapping, i18n string resolution, setpoint validation)
       into host-compilable modules; test with Google Test or Catch2 on GitHub Actions runner
-- [ ] **API contract tests**: Build Python mock server (FastAPI) implementing the same REST
-      API; validate against `openapi.yaml` with schemathesis; run pytest suite for all
-      endpoints; add to CI workflow
+- [x] **API contract tests**: Schemathesis validates all safe GET endpoints against
+      `docs/openapi.yaml`; targeted smoke tests verify key response values; integrated
+      into `device-tests.yml` workflow as a separate step
 - [ ] **OpenAPI spec validation**: Add spectral or openapi-generator lint step to CI to catch
       spec drift and malformed schemas
 - [ ] **Web dashboard tests**: Run Playwright against mock server serving `index.html`; test
