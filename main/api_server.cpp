@@ -268,7 +268,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 82;  // 42 api_server + 32 test_endpoints = 74 needed
+    config.max_uri_handlers = 83;  // 42 api_server + 33 test_endpoints = 75 needed
     config.stack_size = 16384;     // Larger stack for tree walker + file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout

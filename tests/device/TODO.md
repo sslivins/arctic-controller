@@ -162,7 +162,7 @@ Options for future coverage:
 - [ ] **Web dashboard tests**: Run Playwright against mock server serving `index.html`; test
       page load, real-time updates, mode/setpoint controls, language switching, mobile viewport
 - [ ] Add unit test and API contract test stages to `.github/workflows/build.yml`
-- [ ] `GET /api/test/screenshot` — Capture framebuffer via `lv_snapshot_take()` and return
+- [x] `GET /api/test/screenshot` — Capture framebuffer via `lv_snapshot_take()` and return
       as PNG (useful for visual regression and CI artifacts)
 
 ## End-to-End Tests with Modbus Simulator
