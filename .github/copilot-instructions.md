@@ -46,6 +46,10 @@ REST API + WebSocket dashboard for monitoring and control.
 
 ### C++ / Firmware
 - Follow ESP-IDF patterns: `ESP_LOGI/LOGW/LOGE` for logging, `esp_err_t` returns
+- **Printf format specifiers**: The RISC-V toolchain does not reliably handle `%lld`
+  for `int64_t`. Always cast to `(long)` and use `%ld`, or cast to `(unsigned long)`
+  and use `%lu`. This applies to `esp_timer_get_time()` results and any other
+  `int64_t` / `uint64_t` values in log statements.
 - LVGL widgets use `lv_obj_set_user_data()` with string tags for test addressability
 - All user-facing strings go through the i18n translation layer (`i18n.h`)
 - Three languages: English, French, Spanish — update all three when adding strings
