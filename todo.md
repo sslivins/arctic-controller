@@ -175,6 +175,10 @@ Test flow: pytest script → sets state on simulator via REST → waits for Tab5
 - [ ] Fine-tune hero card sizing and spacing after hardware testing
 - [ ] Consider adding tank setpoint to hero card if available
 
+## API Enhancements
+
+- [ ] Add raw snapshot endpoint (`GET /api/snapshot`) — returns uncompressed RGB888 bitmap (720×1280×3 ≈ 2.7 MB) with `image/bmp` or raw content type for fast local-network screen capture. Complements the existing PNG screenshot endpoint which is better for remote/bandwidth-constrained use.
+
 ## Logging
 
 - [ ] Audit and clean up serial log output (remove excessive/noisy ESP_LOGI/LOGD calls, standardize TAG usage)
