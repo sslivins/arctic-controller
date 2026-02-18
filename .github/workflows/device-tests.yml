@@ -81,6 +81,15 @@ jobs:
           name: firmware
           path: build/
 
+      - name: Set up Python environment
+        run: |
+          python3 -m venv $HOME/test-venv
+          source $HOME/test-venv/bin/activate
+          echo "$HOME/test-venv/bin" >> $GITHUB_PATH
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
       - name: Flash device via OTA
         id: ota_flash
         continue-on-error: true
@@ -145,9 +154,6 @@ jobs:
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml
         env:
           ARCTIC_URL: http://arctic.local
-
-      - name: Install API test dependencies
-        run: pip install schemathesis
 
       - name: Run API contract tests
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
