@@ -5,7 +5,8 @@ Verifies the production screenshot endpoint returns a valid PNG image
 of the expected dimensions (720×1280 RGB).
 
 This tests the production endpoint, not the test-only /api/test/screenshot.
-The production endpoint requires API key authentication.
+The production endpoint uses the standard API auth (API key or session cookie).
+When web auth is disabled, unauthenticated access is allowed.
 """
 
 import io
@@ -28,15 +29,40 @@ EXPECTED_HEIGHT = 1280
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
-def _get_screenshot(api_key: str = API_KEY) -> requests.Response:
-    """Fetch a screenshot from the production endpoint."""
+def _api_headers(api_key: str = API_KEY) -> dict:
+    """Build request headers with optional API key."""
     headers = {}
     if api_key:
         headers["X-API-Key"] = api_key
+    return headers
+
+
+def _get_screenshot(api_key: str = API_KEY) -> requests.Response:
+    """Fetch a screenshot from the production endpoint."""
     return requests.get(
         f"{ARCTIC_URL}/api/screenshot",
-        headers=headers,
+        headers=_api_headers(api_key),
         timeout=30.0,
+    )
+
+
+def _enable_web_auth():
+    """Enable web auth so that API key enforcement kicks in."""
+    requests.post(
+        f"{ARCTIC_URL}/api/auth/config",
+        json={"web_auth_enabled": True},
+        headers=_api_headers(),
+        timeout=5,
+    )
+
+
+def _disable_web_auth():
+    """Disable web auth (restore normal test state)."""
+    requests.post(
+        f"{ARCTIC_URL}/api/auth/config",
+        json={"web_auth_enabled": False},
+        headers=_api_headers(),
+        timeout=5,
     )
 
 
@@ -112,15 +138,23 @@ class TestScreenshotAPI:
         cd = r.headers.get("Content-Disposition", "")
         assert "screenshot.png" in cd
 
-    def test_requires_api_key(self):
-        """Request without API key returns 401."""
-        r = _get_screenshot(api_key=None)
-        assert r.status_code == 401
+    def test_requires_auth_when_web_auth_enabled(self):
+        """Request without API key returns 401 when web auth is on."""
+        _enable_web_auth()
+        try:
+            r = _get_screenshot(api_key=None)
+            assert r.status_code == 401
+        finally:
+            _disable_web_auth()
 
-    def test_invalid_api_key(self):
-        """Request with wrong API key returns 401."""
-        r = _get_screenshot(api_key="wrong-key-12345")
-        assert r.status_code == 401
+    def test_invalid_api_key_when_web_auth_enabled(self):
+        """Request with wrong API key returns 401 when web auth is on."""
+        _enable_web_auth()
+        try:
+            r = _get_screenshot(api_key="wrong-key-12345")
+            assert r.status_code == 401
+        finally:
+            _disable_web_auth()
 
     def test_consecutive_screenshots_differ(self):
         """Two rapid screenshots should both be valid (no crash/leak).
