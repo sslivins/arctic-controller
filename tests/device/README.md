@@ -138,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 18 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (129 UI tests + 9 screenshot API tests + 123 REST API functional tests + API contract tests)
+### Test Files (129 UI tests + 9 screenshot API tests + 132 REST API functional tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -159,7 +159,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_error_history_duration.py`](test_error_history_duration.py) | 1 | Error history duration format ("3s") |
 | [`test_screenshot_api.py`](test_screenshot_api.py) | 9 | Production screenshot endpoint: PNG validity, dimensions, auth |
 | [`../api/test_api_schema.py`](../api/test_api_schema.py) | 8+ | API contract validation via Schemathesis + targeted smoke tests |
-| [`../api/test_heatpump_api.py`](../api/test_heatpump_api.py) | 52 | Heat pump status, demo injection, power/mode/setpoint control, params, errors |
+| [`../api/test_heatpump_api.py`](../api/test_heatpump_api.py) | 61 | Heat pump status, demo injection, status1 bits, power/mode/setpoint control, params, errors |
 | [`../api/test_logs_api.py`](../api/test_logs_api.py) | 17 | Log buffer retrieval, filtering (since/level/limit), incremental polling, clear |
 | [`../api/test_auth_api.py`](../api/test_auth_api.py) | 17 | Auth config, login/logout sessions, API key management, auth enforcement |
 | [`../api/test_events_and_misc_api.py`](../api/test_events_and_misc_api.py) | 37 | Events, health, status, time, WiFi, info, display brightness, preferences |

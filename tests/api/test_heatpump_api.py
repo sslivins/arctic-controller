@@ -304,6 +304,102 @@ class TestDemoModeInjection:
         assert r.status_code in (200, 403)
 
 
+# ── Status1 Bit Manipulation ─────────────────────────────────────────────
+
+# status1 register (2135) bit definitions — must match arctic_registers.h
+_UNIT_ON        = 0x0001  # Bit 0
+_COMPRESSOR     = 0x0002  # Bit 1
+_FAN_HIGH       = 0x0004  # Bit 2
+_FAN_MED        = 0x0008  # Bit 3
+_FAN_LOW        = 0x0010  # Bit 4
+_WATER_PUMP     = 0x0020  # Bit 5
+_FOUR_WAY_VALVE = 0x0040  # Bit 6
+_BACKUP_HEATER  = 0x0080  # Bit 7
+
+# Demo default: UNIT_ON | COMPRESSOR | FAN_MED | WATER_PUMP = 0x2B
+_DEMO_STATUS1_DEFAULT = _UNIT_ON | _COMPRESSOR | _FAN_MED | _WATER_PUMP
+
+
+class TestStatus1BitManipulation:
+    """Inject status1 register via demo API and verify component flags in status response."""
+
+    def _inject_and_read(self, status1_val):
+        """Helper: inject status1, wait for poll, return status JSON."""
+        _inject_demo({"status1": status1_val})
+        time.sleep(0.6)
+        return _get("/api/heatpump/status").json()
+
+    def test_all_components_off(self):
+        """status1=0 → all component flags false, fan_speed=0."""
+        data = self._inject_and_read(0)
+        assert data["compressor"] is False
+        assert data["fans"] is False
+        assert data["fan_speed"] == 0
+        assert data["pump"] is False
+        assert data["aux_heater"] is False
+
+    def test_compressor_only(self):
+        """Only COMPRESSOR bit set → compressor=true, others false."""
+        data = self._inject_and_read(_COMPRESSOR)
+        assert data["compressor"] is True
+        assert data["fans"] is False
+        assert data["pump"] is False
+        assert data["aux_heater"] is False
+
+    def test_water_pump_only(self):
+        """Only WATER_PUMP bit set → pump=true, others false."""
+        data = self._inject_and_read(_WATER_PUMP)
+        assert data["pump"] is True
+        assert data["compressor"] is False
+        assert data["fans"] is False
+        assert data["aux_heater"] is False
+
+    def test_backup_heater_only(self):
+        """Only BACKUP_HEATER bit set → aux_heater=true, others false."""
+        data = self._inject_and_read(_BACKUP_HEATER)
+        assert data["aux_heater"] is True
+        assert data["compressor"] is False
+        assert data["fans"] is False
+        assert data["pump"] is False
+
+    def test_fan_speed_low(self):
+        """FAN_LOW bit → fans=true, fan_speed=1."""
+        data = self._inject_and_read(_FAN_LOW)
+        assert data["fans"] is True
+        assert data["fan_speed"] == 1
+
+    def test_fan_speed_medium(self):
+        """FAN_MED bit → fans=true, fan_speed=2."""
+        data = self._inject_and_read(_FAN_MED)
+        assert data["fans"] is True
+        assert data["fan_speed"] == 2
+
+    def test_fan_speed_high(self):
+        """FAN_HIGH bit → fans=true, fan_speed=3."""
+        data = self._inject_and_read(_FAN_HIGH)
+        assert data["fans"] is True
+        assert data["fan_speed"] == 3
+
+    def test_all_components_on(self):
+        """All major component bits set at once."""
+        val = _UNIT_ON | _COMPRESSOR | _FAN_HIGH | _WATER_PUMP | _BACKUP_HEATER
+        data = self._inject_and_read(val)
+        assert data["compressor"] is True
+        assert data["fans"] is True
+        assert data["fan_speed"] == 3
+        assert data["pump"] is True
+        assert data["aux_heater"] is True
+
+    def test_restore_demo_default(self):
+        """Restore the default status1 value after bit manipulation tests."""
+        data = self._inject_and_read(_DEMO_STATUS1_DEFAULT)
+        assert data["compressor"] is True
+        assert data["fans"] is True
+        assert data["fan_speed"] == 2  # FAN_MED
+        assert data["pump"] is True
+        assert data["aux_heater"] is False
+
+
 # ── Heat Pump Control ─────────────────────────────────────────────────────
 
 
