@@ -84,7 +84,7 @@ jobs:
       - name: Set up Python environment
         run: |
           python3 -m venv $HOME/test-venv
-          source $HOME/test-venv/bin/activate
+          . $HOME/test-venv/bin/activate
           echo "$HOME/test-venv/bin" >> $GITHUB_PATH
 
       - name: Install test dependencies
@@ -151,7 +151,7 @@ jobs:
           exit 1
 
       - name: Run device UI tests
-        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml
+        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
 
