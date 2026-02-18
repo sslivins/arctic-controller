@@ -163,6 +163,8 @@ jobs:
         env:
           ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           HYPOTHESIS_PROFILE: ci
           PYTHONDONTWRITEBYTECODE: '1'
 

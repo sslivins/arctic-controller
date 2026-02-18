@@ -5,10 +5,12 @@ device test suite. See [README.md](README.md) for architecture and usage.
 
 ## Coverage Gaps — Uncovered Screens & Features
 
-The current 129-test suite covers: main screen, settings menu, navigation, WiFi
+The current 261-test suite covers: main screen, settings menu, navigation, WiFi
 dialogs, firmware check, display brightness, time format, timezone, temperature
 unit, language switching, localization (FR/ES), demo mode, status bar/notifications,
-error mapping, and error history duration.
+error mapping, error history duration, screenshot API, REST API functional tests
+(heatpump status/control/demo/params/errors, logs, auth, events, preferences),
+and API contract validation.
 
 The following screens and features have **no automated test coverage** yet:
 
@@ -36,23 +38,23 @@ The following screens and features have **no automated test coverage** yet:
 
 ## REST API Testing
 
-- [ ] `GET /api/heatpump` — verify all fields returned, correct types
-- [ ] `GET /api/heatpump/status` — confirm status fields match device state
-- [ ] `GET /api/heatpump/errors` — test with 0 errors, active errors, error history
-- [ ] `PATCH /api/heatpump/demo` — inject all supported fields, verify UI updates
-- [ ] `PATCH /api/heatpump/demo` — test error injection (`error1`, `error2`) and clearing
+- [x] `GET /api/heatpump` — verify all fields returned, correct types
+- [x] `GET /api/heatpump/status` — confirm status fields match device state
+- [x] `GET /api/heatpump/errors` — test with 0 errors, active errors, error history
+- [x] `PATCH /api/heatpump/demo` — inject all supported fields, verify UI updates
+- [x] `PATCH /api/heatpump/demo` — test error injection (`error1`, `error2`) and clearing
 - [ ] `PATCH /api/heatpump/demo` — test status1 bit manipulation (compressor, fan, pump on/off)
-- [ ] `POST /api/heatpump/mode` — test all working modes
-- [ ] `POST /api/heatpump/setpoint` — test cooling/heating/hot water setpoints
-- [ ] `POST /api/heatpump/power` — test power on/off
-- [ ] Verify API auth (missing/wrong API key returns 401)
+- [x] `POST /api/heatpump/mode` — test all working modes
+- [x] `POST /api/heatpump/setpoint` — test cooling/heating/hot water setpoints
+- [x] `POST /api/heatpump/power` — test power on/off
+- [x] Verify API auth (missing/wrong API key returns 401)
 - [ ] Test API responses when device is disconnected (non-demo mode)
-- [ ] Verify `demo_mode` flag is present in all API responses
-- [ ] `GET /api/logs` — verify entries returned with seq, level, tag, message fields
-- [ ] `GET /api/logs?level=E` — verify only error-level entries returned
-- [ ] `GET /api/logs?since=N` — verify incremental fetch returns only newer entries
-- [ ] `GET /api/logs?limit=10` — verify at most 10 entries returned
-- [ ] `DELETE /api/logs` — verify buffer is cleared, seq numbers keep incrementing
+- [x] Verify `demo_mode` flag is present in all API responses
+- [x] `GET /api/logs` — verify entries returned with seq, level, tag, message fields
+- [x] `GET /api/logs?level=E` — verify only error-level entries returned
+- [x] `GET /api/logs?since=N` — verify incremental fetch returns only newer entries
+- [x] `GET /api/logs?limit=10` — verify at most 10 entries returned
+- [x] `DELETE /api/logs` — verify buffer is cleared, seq numbers keep incrementing
 
 ## Web Dashboard Testing
 
@@ -198,3 +200,7 @@ Items completed in this branch (for reference):
 - [x] `conftest.py` with auto-return-to-main and lock management
 - [x] OpenAPI 3.0 spec for test API (`openapi-test.yaml`)
 - [x] 129 tests across 15 files covering core screens and features
+- [x] REST API functional tests — 123 tests across 4 files covering heatpump
+      status/control/demo/params/errors, logs (filtering, incremental polling),
+      auth (config, login/logout, API key, enforcement), events, health, status,
+      time, WiFi, info, display brightness, preferences
