@@ -150,10 +150,12 @@ jobs:
         run: pip install schemathesis
 
       - name: Run API contract tests
-        run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml
+        run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+          HYPOTHESIS_PROFILE: ci
+          PYTHONDONTWRITEBYTECODE: 1
 
       - name: Publish UI test results
         uses: dorny/test-reporter@v1

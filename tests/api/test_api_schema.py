@@ -18,6 +18,7 @@ Run:
   pytest tests/api/ -v
 """
 
+import gc
 import os
 import time
 
@@ -25,8 +26,22 @@ import pytest
 import requests
 import schemathesis
 import yaml
-from hypothesis import HealthCheck, assume, settings
+from hypothesis import HealthCheck, Phase, assume, settings
 from pathlib import Path
+
+# Reduce memory footprint for constrained runners (Pi Zero 2 W = 512 MB).
+# Disable the hypothesis example database (no caching to disk/memory) and
+# use derandomize mode so runs are reproducible without storing state.
+settings.register_profile(
+    "ci",
+    max_examples=5,
+    database=None,
+    deadline=None,
+    derandomize=True,
+    phases=[Phase.explicit, Phase.generate],  # skip shrinking to save RAM
+    suppress_health_check=list(HealthCheck),
+)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci"))
 
 # Load .env from repo root if present (local dev — never committed)
 _env_file = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -124,11 +139,6 @@ _setup_auth()
 
 
 @schema.parametrize()
-@settings(
-    max_examples=5,
-    deadline=None,
-    suppress_health_check=[HealthCheck.too_slow],
-)
 def test_production_api_schema(case):
     """Response from every safe endpoint must match the OpenAPI schema."""
     # Skip entirely for dangerous endpoints (all methods)
