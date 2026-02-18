@@ -18,6 +18,7 @@
 #include "log_buffer.h"
 #include "app_preferences.h"
 #include "test_endpoints.h"
+#include "png_uncompressed.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
 #include <mdns.h>
@@ -25,6 +26,10 @@
 #include <string.h>
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
+#include <lvgl.h>
+#include <bsp/m5stack_tab5.h>
+#include <esp_heap_caps.h>
+#include <esp_timer.h>
 
 static const char* TAG = "api_server";
 
@@ -89,6 +94,7 @@ static esp_err_t display_brightness_get_handler(httpd_req_t* req);
 static esp_err_t preferences_get_handler(httpd_req_t* req);
 static esp_err_t logs_get_handler(httpd_req_t* req);
 static esp_err_t logs_clear_handler(httpd_req_t* req);
+static esp_err_t screenshot_get_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -268,7 +274,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 83;  // 42 api_server + 34 test_endpoints = 76 needed
+    config.max_uri_handlers = 84;  // 43 api_server + 34 test_endpoints = 77 needed
     config.stack_size = 16384;     // Larger stack for tree walker + file upload
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -673,6 +679,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(logs_clear_uri);
+
+    // GET /api/screenshot - Capture live screen as uncompressed PNG
+    httpd_uri_t screenshot_uri = {
+        .uri = "/api/screenshot",
+        .method = HTTP_GET,
+        .handler = screenshot_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(screenshot_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
     test_endpoints_register(server);
@@ -2616,5 +2631,103 @@ static esp_err_t logs_clear_handler(httpd_req_t* req)
 
     log_buffer_clear();
     httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// ============================================================================
+// Screenshot
+// ============================================================================
+
+/**
+ * Write callback that forwards PNG data to the HTTP chunked response.
+ */
+static esp_err_t png_http_write(void *ctx, const void *buf, size_t len)
+{
+    return httpd_resp_send_chunk((httpd_req_t *)ctx, (const char *)buf, len);
+}
+
+static esp_err_t screenshot_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "Screenshot requested");
+
+    // Get screen dimensions under LVGL lock
+    bsp_display_lock(0);
+    lv_obj_t* screen = lv_screen_active();
+    lv_obj_update_layout(screen);
+    int32_t w = lv_obj_get_width(screen);
+    int32_t h = lv_obj_get_height(screen);
+    bsp_display_unlock();
+
+    // Allocate pixel buffer in PSRAM (720x1280x3 ≈ 2.7 MB)
+    uint32_t stride = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB888);
+    uint32_t buf_size = stride * h;
+    void* pixel_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!pixel_buf) {
+        ESP_LOGE(TAG, "Failed to allocate snapshot buffer (%lu bytes)", (unsigned long)buf_size);
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+
+    // Init draw buffer with our PSRAM-backed memory
+    lv_draw_buf_t snapshot;
+    lv_draw_buf_init(&snapshot, w, h, LV_COLOR_FORMAT_RGB888, stride, pixel_buf, buf_size);
+
+    // Capture screen under LVGL lock
+    bsp_display_lock(0);
+    screen = lv_screen_active();
+    lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
+    bsp_display_unlock();
+
+    if (snap_res != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "Snapshot capture failed");
+        heap_caps_free(pixel_buf);
+        send_json_error(req, "500 Internal Server Error", "Snapshot capture failed");
+        return ESP_OK;
+    }
+
+    // LVGL RGB888 stores B,G,R — swap to R,G,B and pack rows (remove stride padding)
+    uint8_t* dst = (uint8_t*)pixel_buf;
+    const uint8_t* src_row = (const uint8_t*)pixel_buf;
+    for (int32_t y = 0; y < h; y++) {
+        const uint8_t* s = src_row;
+        for (int32_t x = 0; x < w; x++) {
+            uint8_t b = s[0], g = s[1], r = s[2];
+            dst[0] = r;
+            dst[1] = g;
+            dst[2] = b;
+            dst += 3;
+            s += 3;
+        }
+        src_row += stride;
+    }
+
+    // Stream-encode as uncompressed PNG directly to HTTP response
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"screenshot.png\"");
+
+    int64_t t0 = esp_timer_get_time();
+    esp_err_t ret = png_encode_uncompressed_rgb888(
+        (const uint8_t*)pixel_buf, w, h, png_http_write, req);
+    int64_t encode_ms = (esp_timer_get_time() - t0) / 1000;
+
+    heap_caps_free(pixel_buf);
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "PNG streaming failed: %s", esp_err_to_name(ret));
+        // Can't send error JSON — headers already sent as image/png.
+        // The incomplete chunked response will cause a client-side error.
+        return ret;
+    }
+
+    // Finalize chunked transfer
+    httpd_resp_send_chunk(req, NULL, 0);
+
+    ESP_LOGI(TAG, "Screenshot streamed: %ldx%ld in %ld ms (uncompressed PNG)",
+             (long)w, (long)h, (long)encode_ms);
     return ESP_OK;
 }

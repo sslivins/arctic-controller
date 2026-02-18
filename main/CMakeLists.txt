@@ -68,6 +68,7 @@ idf_component_register(
         "heatpump_errors_screen.cpp"
         "test_endpoints.cpp"
         "png_encoder.c"
+        "png_uncompressed.c"
     INCLUDE_DIRS
         "."
         "settings"

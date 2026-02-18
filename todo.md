@@ -177,7 +177,7 @@ Test flow: pytest script → sets state on simulator via REST → waits for Tab5
 
 ## API Enhancements
 
-- [ ] Add raw snapshot endpoint (`GET /api/snapshot`) — returns uncompressed RGB888 bitmap (720×1280×3 ≈ 2.7 MB) with `image/bmp` or raw content type for fast local-network screen capture. Complements the existing PNG screenshot endpoint which is better for remote/bandwidth-constrained use.
+- [x] Add screenshot endpoint (`GET /api/screenshot`) — returns uncompressed PNG (DEFLATE stored blocks, ~2.77 MB for 720×1280) with minimal CPU overhead. Streamed via HTTP chunked transfer, no extra heap allocation beyond the framebuffer capture.
 
 ## Logging
 
