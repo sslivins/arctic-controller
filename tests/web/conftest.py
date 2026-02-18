@@ -26,6 +26,7 @@ if _env_file.exists():
 # Credentials from env (defaults match auth_manager defaults)
 WEB_USERNAME = os.environ.get("ARCTIC_USERNAME", "arctic")
 WEB_PASSWORD = os.environ.get("ARCTIC_PASSWORD", "arctic")
+API_KEY = os.environ.get("ARCTIC_API_KEY")
 
 # Screenshot directory for failures
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
@@ -72,8 +73,12 @@ def _ensure_auth_disabled(base_url: str):
 
     import requests
 
+    headers = {}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+
     try:
-        r = requests.get(f"{base_url}/api/auth/status", timeout=5)
+        r = requests.get(f"{base_url}/api/auth/status", headers=headers, timeout=5)
         r.raise_for_status()
         status = r.json()
 
@@ -81,7 +86,19 @@ def _ensure_auth_disabled(base_url: str):
             _auth_disabled = True
             return True
 
-        # Try to login and disable auth
+        # If we have an API key, use it directly to disable auth
+        if API_KEY:
+            r = requests.post(
+                f"{base_url}/api/auth/config",
+                json={"web_auth_enabled": False},
+                headers=headers,
+                timeout=5,
+            )
+            if r.status_code == 200:
+                _auth_disabled = True
+                return True
+
+        # Fall back to login + disable
         session = requests.Session()
         login_r = session.post(
             f"{base_url}/login",
@@ -112,18 +129,30 @@ def _enable_web_auth(base_url: str):
     global _auth_disabled
     import requests
 
+    headers = {}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
+
     try:
-        session = requests.Session()
-        session.post(
-            f"{base_url}/login",
-            json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
-            timeout=5,
-        )
-        session.post(
-            f"{base_url}/api/auth/config",
-            json={"web_auth_enabled": True},
-            timeout=5,
-        )
+        if API_KEY:
+            requests.post(
+                f"{base_url}/api/auth/config",
+                json={"web_auth_enabled": True},
+                headers=headers,
+                timeout=5,
+            )
+        else:
+            session = requests.Session()
+            session.post(
+                f"{base_url}/login",
+                json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
+                timeout=5,
+            )
+            session.post(
+                f"{base_url}/api/auth/config",
+                json={"web_auth_enabled": True},
+                timeout=5,
+            )
         _auth_disabled = False
     except Exception:
         pass
