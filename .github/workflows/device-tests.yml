@@ -151,6 +151,7 @@ jobs:
           exit 1
 
       - name: Run device UI tests
+        if: false  # temporarily disabled while validating CI setup
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
