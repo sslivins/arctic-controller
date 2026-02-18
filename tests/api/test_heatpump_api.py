@@ -192,10 +192,10 @@ class TestDemoModeInjection:
 
     def test_inject_temperature(self):
         """Injecting water_tank_temp should be reflected in status."""
-        _inject_demo({"water_tank_temp": 42})
-        time.sleep(0.2)
+        _inject_demo({"water_tank_temp": 77})
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
-        assert data["temperatures"]["tank"] == 42
+        assert data["temperatures"]["tank"] == 77
 
     def test_inject_multiple_temperatures(self):
         """Inject multiple temperatures at once."""
@@ -205,7 +205,7 @@ class TestDemoModeInjection:
             "inlet_water_temp": 35,
             "outdoor_ambient_temp": 22,
         })
-        time.sleep(0.2)
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
         temps = data["temperatures"]
         assert temps["tank"] == 50
@@ -216,7 +216,7 @@ class TestDemoModeInjection:
     def test_inject_compressor_readings(self):
         """Inject compressor freq and verify in readings."""
         _inject_demo({"compressor_freq": 75, "fan_speed": 850})
-        time.sleep(0.2)
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
         assert data["readings"]["compressor_freq"] == 75
         assert data["readings"]["fan_rpm"] == 850
@@ -224,7 +224,7 @@ class TestDemoModeInjection:
     def test_inject_electrical_readings(self):
         """Inject voltage/current and verify power_consumption calculation."""
         _inject_demo({"ac_voltage": 230, "ac_current": 50})
-        time.sleep(0.2)
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
         assert data["readings"]["ac_voltage"] == 230
         assert data["readings"]["ac_current"] == 50
@@ -234,20 +234,20 @@ class TestDemoModeInjection:
     def test_inject_setpoints(self):
         """Injecting setpoint registers should be reflected in status."""
         _inject_demo({
-            "cooling_setpoint": 18,
-            "heating_setpoint": 45,
-            "hot_water_setpoint": 55,
+            "cooling_setpoint": 24,
+            "heating_setpoint": 40,
+            "hot_water_setpoint": 48,
         })
-        time.sleep(0.2)
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
-        assert data["setpoints"]["cooling"] == 18
-        assert data["setpoints"]["heating"] == 45
-        assert data["setpoints"]["hot_water"] == 55
+        assert data["setpoints"]["cooling"] == 24
+        assert data["setpoints"]["heating"] == 40
+        assert data["setpoints"]["hot_water"] == 48
 
     def test_inject_errors(self):
         """Injecting error registers should set has_error and error string."""
         _inject_demo({"error1": 1})  # Bit 0 = first error code
-        time.sleep(0.3)
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
         assert data["has_error"] is True
         assert data["error"] is not None
@@ -255,7 +255,7 @@ class TestDemoModeInjection:
     def test_clear_errors(self):
         """Clearing error registers should clear error state."""
         _inject_demo({"error1": 0, "error2": 0})
-        time.sleep(0.3)
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
         assert data["has_error"] is False
         assert data["error"] is None
@@ -263,22 +263,22 @@ class TestDemoModeInjection:
     def test_inject_unit_on_off(self):
         """Injecting unit_on field controls power state."""
         _inject_demo({"unit_on": 1})
-        time.sleep(0.2)
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
         assert data["unit_on"] is True
 
         _inject_demo({"unit_on": 0})
-        time.sleep(0.2)
+        time.sleep(0.6)
         data = _get("/api/heatpump/status").json()
         assert data["unit_on"] is False
 
     def test_inject_working_mode(self):
         """Injecting working_mode changes reported mode."""
-        # Mode values: 1=cooling, 2=floor_heating, 3=fan_coil_heating, 4=hot_water, 5=auto
-        modes = {1: "cooling", 2: "floor_heating", 3: "fan_coil_heating", 4: "hot_water", 5: "auto"}
+        # Enum values: 0=cooling, 1=floor_heating, 2=fan_coil_heating, 5=hot_water, 6=auto
+        modes = {0: "cooling", 1: "floor_heating", 2: "fan_coil_heating", 5: "hot_water", 6: "auto"}
         for mode_val, mode_name in modes.items():
             _inject_demo({"working_mode": mode_val})
-            time.sleep(0.2)
+            time.sleep(0.6)
             data = _get("/api/heatpump/status").json()
             assert data["mode"] == mode_name, f"Expected {mode_name} for value {mode_val}, got {data['mode']}"
 
