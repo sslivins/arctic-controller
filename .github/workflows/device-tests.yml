@@ -152,14 +152,12 @@ jobs:
 
       - name: Run device UI tests
         id: ui_tests
-        if: false  # temporarily disabled while validating CI setup
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
 
       - name: Run API contract tests
         id: api_tests
-        if: false  # temporarily disabled while validating CI setup
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
