@@ -167,7 +167,6 @@ jobs:
       - name: Install Playwright for web tests
         run: |
           pip install -r tests/web/requirements.txt
-          sudo playwright install-deps chromium
           playwright install chromium
 
       - name: Run web dashboard tests
