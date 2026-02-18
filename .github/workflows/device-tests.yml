@@ -155,6 +155,7 @@ jobs:
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
+          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Run API contract tests
         id: api_tests

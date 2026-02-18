@@ -1672,6 +1672,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/screenshot:
+    get:
+      tags:
+        - Display
+      summary: Capture live screen as PNG
+      description: |
+        Returns a PNG screenshot of the current LVGL display.
+        The image is encoded as an **uncompressed PNG** (DEFLATE stored blocks)
+        for minimal CPU overhead on the ESP32. The response is streamed via
+        HTTP chunked transfer — no extra memory allocation beyond the
+        framebuffer capture (~2.7 MB in PSRAM).
+
+        Image dimensions: 720×1280 (portrait), RGB888 color.
+        Typical response size: ~2.77 MB.
+      operationId: getScreenshot
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: PNG screenshot of the current display
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Capture or encoding failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     apiKey:

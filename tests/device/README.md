@@ -138,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 18 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (129 UI tests + API contract tests)
+### Test Files (129 UI tests + 9 screenshot API tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -157,6 +157,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_display_brightness.py`](test_display_brightness.py) | 3 | Brightness slider control and label |
 | [`test_temperature_unit.py`](test_temperature_unit.py) | 2 | °C/°F toggle and preferences |
 | [`test_error_history_duration.py`](test_error_history_duration.py) | 1 | Error history duration format ("3s") |
+| [`test_screenshot_api.py`](test_screenshot_api.py) | 9 | Production screenshot endpoint: PNG validity, dimensions, auth |
 | [`../api/test_api_schema.py`](../api/test_api_schema.py) | 8+ | API contract validation via Schemathesis + targeted smoke tests |
 
 ### DeviceClient Methods
