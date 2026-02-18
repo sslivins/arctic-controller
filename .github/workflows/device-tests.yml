@@ -156,18 +156,29 @@ jobs:
           ARCTIC_URL: http://arctic.local
 
       - name: Run API contract tests
+        if: always()
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           HYPOTHESIS_PROFILE: ci
-          PYTHONDONTWRITEBYTECODE: 1
+          PYTHONDONTWRITEBYTECODE: '1'
+
+      - name: Install Playwright for web tests
+        run: |
+          pip install -r tests/web/requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Run web dashboard tests
+        run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
+        env:
+          ARCTIC_URL: http://arctic.local
 
       - name: Publish UI test results
         uses: dorny/test-reporter@v1
         if: always()
         with:
-          name: Device Test Results
+          name: Device UI Test Results
           path: test-results.xml
           reporter: java-junit
 
@@ -179,11 +190,21 @@ jobs:
           path: api-test-results.xml
           reporter: java-junit
 
+      - name: Publish web test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Web Dashboard Test Results
+          path: web-test-results.xml
+          reporter: java-junit
+
       - name: Upload failure screenshots
         uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: failure-screenshots
-          path: tests/device/screenshots/
+          path: |
+            tests/device/screenshots/
+            tests/web/screenshots/
           if-no-files-found: ignore
           retention-days: 14
