@@ -15,8 +15,9 @@ class TestNavigation:
         """Clicking Parameters nav button shows the parameters page."""
         dashboard_page.locator("nav button").nth(1).click()
         dashboard_page.wait_for_timeout(500)
-        # Parameters page should show power controls
-        expect(dashboard_page.locator(".power-hold-btn")).to_be_visible()
+        # Parameters page should show one of the two power buttons (ON or OFF)
+        visible_power = dashboard_page.locator(".power-hold-btn").locator("visible=true")
+        expect(visible_power).to_be_visible()
 
     def test_navigate_to_events(self, dashboard_page: Page):
         """Clicking Events nav button shows the events page."""
@@ -129,8 +130,8 @@ class TestParametersPage:
     def test_power_button_visible(self, dashboard_page: Page):
         """Power ON/OFF button is shown on parameters page."""
         self._go_to_params(dashboard_page)
-        power_btn = dashboard_page.locator(".power-hold-btn")
-        expect(power_btn.first).to_be_visible()
+        visible_power = dashboard_page.locator(".power-hold-btn").locator("visible=true")
+        expect(visible_power).to_be_visible()
 
     def test_mode_selector_visible(self, dashboard_page: Page):
         """Mode dropdown (cooling/heating/etc) is shown."""

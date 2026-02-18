@@ -3,7 +3,7 @@
 import pytest
 from playwright.sync_api import Page, expect
 
-from conftest import DEFAULT_USERNAME, DEFAULT_PASSWORD
+from conftest import WEB_USERNAME, WEB_PASSWORD
 
 
 class TestLoginPage:
@@ -26,8 +26,8 @@ class TestLoginPage:
 
     def test_login_success(self, login_page: Page):
         """Successful login navigates to the dashboard."""
-        login_page.locator(".login-box input[type='text']").fill(DEFAULT_USERNAME)
-        login_page.locator(".login-box input[type='password']").fill(DEFAULT_PASSWORD)
+        login_page.locator(".login-box input[type='text']").fill(WEB_USERNAME)
+        login_page.locator(".login-box input[type='password']").fill(WEB_PASSWORD)
         login_page.locator(".login-box button[type='submit']").click()
 
         # After login, nav bar should appear (dashboard loaded)

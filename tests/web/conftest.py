@@ -3,6 +3,10 @@ Pytest fixtures for Arctic Controller web dashboard tests (Playwright).
 
 Set ARCTIC_URL env var to override the default device address.
 Example: ARCTIC_URL=http://192.168.1.23 pytest tests/web/ -v
+
+Credentials are read from environment variables or .env file:
+  ARCTIC_USERNAME (default: arctic)
+  ARCTIC_PASSWORD (default: arctic)
 """
 
 import os
@@ -10,9 +14,18 @@ import pytest
 from pathlib import Path
 from playwright.sync_api import Page, Browser, BrowserContext, expect
 
-# Default credentials (matching auth_manager defaults)
-DEFAULT_USERNAME = "admin"
-DEFAULT_PASSWORD = "arctic"
+# Load .env file if present (for local development)
+_env_file = Path(__file__).parent.parent.parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
+# Credentials from env (defaults match auth_manager defaults)
+WEB_USERNAME = os.environ.get("ARCTIC_USERNAME", "arctic")
+WEB_PASSWORD = os.environ.get("ARCTIC_PASSWORD", "arctic")
 
 # Screenshot directory for failures
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
@@ -24,12 +37,6 @@ def pytest_addoption(parser):
         "--arctic-url",
         default=os.environ.get("ARCTIC_URL", "http://arctic.local"),
         help="Base URL of the Arctic Controller device",
-    )
-    parser.addoption(
-        "--headed",
-        action="store_true",
-        default=False,
-        help="Run browser in headed mode (visible window)",
     )
 
 
@@ -48,62 +55,88 @@ def browser_context_args():
     }
 
 
-@pytest.fixture(scope="session")
-def browser_type_launch_args(request):
-    """Launch args for the browser (headed mode support)."""
-    args = {"args": ["--disable-gpu"]}
-    if request.config.getoption("--headed"):
-        args["headless"] = False
-    return args
-
-
 # ---------- Auth helpers ----------
 
+# Track auth state to avoid repeated API calls
+_auth_disabled = False
+_auth_needs_login = False
 
-def _disable_web_auth(base_url: str):
-    """Disable web auth via API so tests can access the dashboard without login."""
+
+def _ensure_auth_disabled(base_url: str):
+    """Disable web auth once, then cache the result for the session."""
+    global _auth_disabled, _auth_needs_login
+    if _auth_disabled:
+        return True
+    if _auth_needs_login:
+        return False
+
     import requests
 
-    # Check current auth status
-    r = requests.get(f"{base_url}/api/auth/status", timeout=5)
-    r.raise_for_status()
-    status = r.json()
+    try:
+        r = requests.get(f"{base_url}/api/auth/status", timeout=5)
+        r.raise_for_status()
+        status = r.json()
 
-    if not status.get("web_auth_enabled"):
-        return  # Already disabled
+        if not status.get("web_auth_enabled"):
+            _auth_disabled = True
+            return True
 
-    # Try to login first to get a session cookie
-    session = requests.Session()
-    session.post(
-        f"{base_url}/login",
-        json={"username": DEFAULT_USERNAME, "password": DEFAULT_PASSWORD},
-        timeout=5,
-    )
+        # Try to login and disable auth
+        session = requests.Session()
+        login_r = session.post(
+            f"{base_url}/login",
+            json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
+            timeout=5,
+        )
+        if login_r.status_code != 200 or not login_r.json().get("success"):
+            _auth_needs_login = True
+            return False
 
-    # Disable web auth
-    session.post(
-        f"{base_url}/api/auth/config",
-        json={"web_auth_enabled": False, "api_auth_enabled": False},
-        timeout=5,
-    )
+        r = session.post(
+            f"{base_url}/api/auth/config",
+            json={"web_auth_enabled": False},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            _auth_disabled = True
+            return True
+    except Exception:
+        pass
+
+    _auth_needs_login = True
+    return False
 
 
 def _enable_web_auth(base_url: str):
     """Re-enable web auth via API."""
+    global _auth_disabled
     import requests
 
-    session = requests.Session()
-    # Login first (may need session to change config)
-    session.post(
-        f"{base_url}/login",
-        json={"username": DEFAULT_USERNAME, "password": DEFAULT_PASSWORD},
-        timeout=5,
-    )
-    session.post(
-        f"{base_url}/api/auth/config",
-        json={"web_auth_enabled": True},
-        timeout=5,
-    )
+    try:
+        session = requests.Session()
+        session.post(
+            f"{base_url}/login",
+            json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
+            timeout=5,
+        )
+        session.post(
+            f"{base_url}/api/auth/config",
+            json={"web_auth_enabled": True},
+            timeout=5,
+        )
+        _auth_disabled = False
+    except Exception:
+        pass
+
+
+def _browser_login(page: Page):
+    """Log in via the browser login form."""
+    login_box = page.locator(".login-box")
+    if login_box.is_visible():
+        page.locator(".login-box input[type='text']").fill(WEB_USERNAME)
+        page.locator(".login-box input[type='password']").fill(WEB_PASSWORD)
+        page.locator(".login-box button[type='submit']").click()
+        page.wait_for_selector("nav", timeout=10000)
 
 
 # ---------- Page fixtures ----------
@@ -113,13 +146,18 @@ def _enable_web_auth(base_url: str):
 def dashboard_page(page: Page, base_url: str) -> Page:
     """Navigate to the dashboard and wait for it to load.
 
-    Disables web auth first so no login is required.
-    After the test, the page is automatically closed by Playwright.
+    Tries to disable web auth first. If that fails (e.g. credentials changed),
+    falls back to logging in via the browser.
     """
-    _disable_web_auth(base_url)
+    auth_disabled = _ensure_auth_disabled(base_url)
     page.goto(base_url, wait_until="networkidle")
-    # Wait for Alpine.js to initialize — the nav bar should be visible
-    page.wait_for_selector("nav", timeout=10000)
+
+    if not auth_disabled:
+        # Auth is still on — log in via the browser
+        _browser_login(page)
+    else:
+        page.wait_for_selector("nav", timeout=10000)
+
     return page
 
 
@@ -135,8 +173,11 @@ def login_page(page: Page, base_url: str) -> Page:
     # Wait for the login box to appear
     page.wait_for_selector(".login-box", timeout=10000)
     yield page
-    # Cleanup: disable auth so other tests aren't affected
-    _disable_web_auth(base_url)
+    # Cleanup: disable auth so dashboard tests work without login
+    global _auth_disabled, _auth_needs_login
+    _auth_disabled = False
+    _auth_needs_login = False
+    _ensure_auth_disabled(base_url)
 
 
 # ---------- Failure screenshot ----------
@@ -146,7 +187,8 @@ def login_page(page: Page, base_url: str) -> Page:
 def screenshot_on_failure(request, page: Page):
     """Capture a browser screenshot when a test fails."""
     yield
-    if request.node.rep_call and request.node.rep_call.failed:
+    rep = getattr(request.node, "rep_call", None)
+    if rep and rep.failed:
         SCREENSHOT_DIR.mkdir(exist_ok=True)
         name = request.node.name.replace("/", "_").replace("::", "_")
         path = SCREENSHOT_DIR / f"web_{name}.png"
