@@ -84,7 +84,7 @@ jobs:
       - name: Set up Python environment
         run: |
           python3 -m venv $HOME/test-venv
-          source $HOME/test-venv/bin/activate
+          . $HOME/test-venv/bin/activate
           echo "$HOME/test-venv/bin" >> $GITHUB_PATH
 
       - name: Install test dependencies
@@ -151,32 +151,56 @@ jobs:
           exit 1
 
       - name: Run device UI tests
-        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml
+        id: ui_tests
+        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
 
       - name: Run API contract tests
+        id: api_tests
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           HYPOTHESIS_PROFILE: ci
-          PYTHONDONTWRITEBYTECODE: 1
+          PYTHONDONTWRITEBYTECODE: '1'
+
+      - name: Install Playwright for web tests
+        run: |
+          pip install -r tests/web/requirements.txt
+          playwright install chromium
+
+      - name: Run web dashboard tests
+        id: web_tests
+        run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
+        env:
+          ARCTIC_URL: http://arctic.local
+          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
 
       - name: Publish UI test results
         uses: dorny/test-reporter@v1
-        if: always()
+        if: always() && steps.ui_tests.outcome != 'skipped'
         with:
-          name: Device Test Results
+          name: Device UI Test Results
           path: test-results.xml
           reporter: java-junit
 
       - name: Publish API contract test results
         uses: dorny/test-reporter@v1
-        if: always()
+        if: always() && steps.api_tests.outcome != 'skipped'
         with:
           name: API Contract Test Results
           path: api-test-results.xml
+          reporter: java-junit
+
+      - name: Publish web test results
+        uses: dorny/test-reporter@v1
+        if: always() && steps.web_tests.outcome != 'skipped'
+        with:
+          name: Web Dashboard Test Results
+          path: web-test-results.xml
           reporter: java-junit
 
       - name: Upload failure screenshots
@@ -184,6 +208,8 @@ jobs:
         if: failure()
         with:
           name: failure-screenshots
-          path: tests/device/screenshots/
+          path: |
+            tests/device/screenshots/
+            tests/web/screenshots/
           if-no-files-found: ignore
           retention-days: 14

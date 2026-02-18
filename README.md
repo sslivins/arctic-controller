@@ -153,6 +153,34 @@ curl -X POST http://arctic.local/api/ota/update \
 - Concurrent update protection
 - URL restriction to official GitHub repository
 
+## Testing
+
+### Device Tests (LVGL UI)
+Tests that interact with the device's LVGL touch interface via the test API.
+See [tests/device/README.md](tests/device/README.md).
+
+```bash
+ARCTIC_URL=http://arctic.local pytest tests/device/ -v
+```
+
+### Web Dashboard Tests (Playwright)
+Browser-based tests for the web dashboard using Playwright.
+See [tests/web/README.md](tests/web/README.md).
+
+```bash
+pip install -r tests/web/requirements.txt
+playwright install chromium
+ARCTIC_URL=http://arctic.local pytest tests/web/ -v
+```
+
+### API Contract Tests (Schemathesis)
+Fuzz testing of the REST API against the OpenAPI spec.
+See [tests/api/](tests/api/).
+
+```bash
+ARCTIC_URL=http://arctic.local pytest tests/api/ -v
+```
+
 ## Project Structure
 
 ```

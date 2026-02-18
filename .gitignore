@@ -40,6 +40,7 @@ Thumbs.db
 
 # Test failure screenshots
 tests/device/screenshots/
+tests/web/screenshots/
 
 # Compiled files
 *.o
