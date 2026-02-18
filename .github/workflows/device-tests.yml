@@ -151,12 +151,14 @@ jobs:
           exit 1
 
       - name: Run device UI tests
+        id: ui_tests
         if: false  # temporarily disabled while validating CI setup
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
         env:
           ARCTIC_URL: http://arctic.local
 
       - name: Run API contract tests
+        id: api_tests
         if: false  # temporarily disabled while validating CI setup
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
@@ -171,6 +173,7 @@ jobs:
           playwright install chromium
 
       - name: Run web dashboard tests
+        id: web_tests
         run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
         env:
           ARCTIC_URL: http://arctic.local
@@ -180,7 +183,7 @@ jobs:
 
       - name: Publish UI test results
         uses: dorny/test-reporter@v1
-        if: always()
+        if: always() && steps.ui_tests.outcome != 'skipped'
         with:
           name: Device UI Test Results
           path: test-results.xml
@@ -188,7 +191,7 @@ jobs:
 
       - name: Publish API contract test results
         uses: dorny/test-reporter@v1
-        if: always()
+        if: always() && steps.api_tests.outcome != 'skipped'
         with:
           name: API Contract Test Results
           path: api-test-results.xml
@@ -196,7 +199,7 @@ jobs:
 
       - name: Publish web test results
         uses: dorny/test-reporter@v1
-        if: always()
+        if: always() && steps.web_tests.outcome != 'skipped'
         with:
           name: Web Dashboard Test Results
           path: web-test-results.xml
