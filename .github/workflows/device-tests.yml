@@ -66,7 +66,7 @@ jobs:
 
   device-tests:
     needs: build
-    runs-on: [self-hosted, tab5]
+    runs-on: [self-hosted, vm-mi]
     timeout-minutes: 30
     env:
       ARCTIC_URL: http://arctic.local
