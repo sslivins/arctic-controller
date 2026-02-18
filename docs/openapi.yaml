@@ -247,7 +247,7 @@ paths:
                     example: "2026-02-05"
                   iso:
                     type: string
-                    format: date-time
+                    description: Local ISO 8601 datetime (no timezone offset)
                     example: "2026-02-05T14:30:45"
                   timezone:
                     type: string

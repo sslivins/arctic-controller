@@ -12,6 +12,7 @@ is tested only for *visibility* when an update is available.
 import re
 import time
 import pytest
+import requests
 from device_client import DeviceClient
 
 
@@ -37,10 +38,18 @@ def _wait_for_check_complete(device: DeviceClient, timeout: float = 15.0):
     The status label will contain a checkmark (OK) or warning symbol
     once the real GitHub check completes (or fails due to no internet).
     We just need it to stop saying "Checking...".
+
+    While the ESP32 is performing the outbound HTTPS request to GitHub,
+    it may be too busy to respond to our polling requests — catch
+    ReadTimeout and keep retrying instead of letting it crash the test.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        status = device.find_widget(tag="firmware_status")
+        try:
+            status = device.find_widget(tag="firmware_status")
+        except requests.exceptions.ReadTimeout:
+            time.sleep(1.0)
+            continue
         if status and status.text and status.text.strip() != "":
             # Any non-empty text that isn't the checking string means done
             checking_words = ("checking", "comprobando", "vérification")
@@ -71,8 +80,8 @@ def test_github_check_completes(device: DeviceClient):
     """
     _open_firmware_screen(device)
 
-    assert _wait_for_check_complete(device, timeout=15.0), \
-        "Firmware check did not complete within 15 seconds"
+    assert _wait_for_check_complete(device, timeout=30.0), \
+        "Firmware check did not complete within 30 seconds"
 
     # After the check, the latest-version label should have content
     latest = device.find_widget(tag="firmware_latest_version")
