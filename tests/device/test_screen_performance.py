@@ -51,11 +51,14 @@ def _render_us(result: dict) -> int:
 def _assert_under_budget(result: dict, label: str, budget_us: int = RENDER_BUDGET_US):
     us = _render_us(result)
     ms = us / 1000
+    budget_ms = budget_us / 1000
+    pct = us / budget_us * 100
     assert us > 0, f"{label}: render_time_us missing from response"
+    print(f"  ⏱  {label}: {ms:.1f} ms  ({pct:.0f}% of {budget_ms:.0f} ms budget)")
     assert us <= budget_us, (
-        f"{label}: render took {ms:.1f} ms — exceeds {budget_us / 1000:.0f} ms budget"
+        f"{label}: render took {ms:.1f} ms — exceeds {budget_ms:.0f} ms budget"
     )
-    return us  # return for logging
+    return us
 
 
 # =========================================================================
@@ -198,6 +201,11 @@ class TestRepeatedTransitionPerformance:
             device.click(tag="event_log_close")
             device.wait_for_screen("main", timeout=3.0)
 
+        # Report all iteration times
+        for i, us in enumerate(times_us):
+            pct = us / RENDER_BUDGET_US * 100
+            print(f"  ⏱  event_log #{i+1}: {us/1000:.1f} ms  ({pct:.0f}% of {RENDER_BUDGET_US/1000:.0f} ms budget)")
+
         # All iterations should be within budget
         for i, us in enumerate(times_us):
             assert us <= RENDER_BUDGET_US, (
@@ -207,6 +215,7 @@ class TestRepeatedTransitionPerformance:
         # No significant degradation: last should be ≤2× first
         if times_us[0] > 0:
             ratio = times_us[-1] / times_us[0]
+            print(f"  📈 degradation: {ratio:.2f}× ({times_us[0]/1000:.1f} → {times_us[-1]/1000:.1f} ms)")
             assert ratio < 3.0, (
                 f"Render time degraded {ratio:.1f}× over 5 iterations "
                 f"({times_us[0]/1000:.1f} → {times_us[-1]/1000:.1f} ms) — "
@@ -225,6 +234,11 @@ class TestRepeatedTransitionPerformance:
             device.click(tag="temps_close")
             device.wait_for_screen("main", timeout=3.0)
 
+        # Report all iteration times
+        for i, us in enumerate(times_us):
+            pct = us / RENDER_BUDGET_US * 100
+            print(f"  ⏱  temps #{i+1}: {us/1000:.1f} ms  ({pct:.0f}% of {RENDER_BUDGET_US/1000:.0f} ms budget)")
+
         for i, us in enumerate(times_us):
             assert us <= RENDER_BUDGET_US, (
                 f"Iteration {i+1}: {us/1000:.1f} ms exceeds budget"
@@ -232,6 +246,7 @@ class TestRepeatedTransitionPerformance:
 
         if times_us[0] > 0:
             ratio = times_us[-1] / times_us[0]
+            print(f"  📈 degradation: {ratio:.2f}× ({times_us[0]/1000:.1f} → {times_us[-1]/1000:.1f} ms)")
             assert ratio < 3.0, (
                 f"Render time degraded {ratio:.1f}× over 5 iterations — "
                 f"possible widget leak"
