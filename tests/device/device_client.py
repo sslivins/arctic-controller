@@ -91,7 +91,11 @@ class DeviceClient:
         label: Optional[str] = None,
         label_contains: Optional[str] = None,
     ) -> dict:
-        """POST /api/test/click — click a widget by tag, symbol, or label text."""
+        """POST /api/test/click — click a widget by tag, symbol, or label text.
+
+        Returns dict with ``success``, ``clicked_type``, ``clicked_text``, and
+        ``render_time_us`` (microseconds spent inside ``lv_obj_send_event``).
+        """
         body: dict = {}
         if tag is not None:
             body["tag"] = tag

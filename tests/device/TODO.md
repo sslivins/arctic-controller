@@ -5,13 +5,13 @@ device test suite. See [README.md](README.md) for architecture and usage.
 
 ## Coverage Gaps — Uncovered Screens & Features
 
-The current 377-test suite covers: main screen, settings menu, navigation, WiFi
+The current 388-test suite covers: main screen, settings menu, navigation, WiFi
 dialogs, firmware check, display brightness, time format, timezone, temperature
 unit, language switching, localization (FR/ES), demo mode, status bar/notifications,
 error mapping, error history duration, screenshot API, heat pump sub-screens
-(temps, system, control, errors, event log), REST API functional tests (heatpump
-status/control/demo/params/errors, logs, auth, events, preferences), and API
-contract validation.
+(temps, system, control, errors, event log), screen render performance,
+REST API functional tests (heatpump status/control/demo/params/errors, logs,
+auth, events, preferences), and API contract validation.
 
 The following screens and features have **no automated test coverage** yet:
 
@@ -199,8 +199,9 @@ Items completed in this branch (for reference):
 - [x] Session lock protocol with TTL auto-expiry
 - [x] `conftest.py` with auto-return-to-main and lock management
 - [x] OpenAPI 3.0 spec for test API (`openapi-test.yaml`)
-- [x] 232 tests across 20 files covering core screens and features
+- [x] 243 tests across 21 files covering core screens and features
 - [x] Heat pump sub-screen tests: temps (22), system (31), control (19), errors (12), event log (10)
+- [x] Screen render performance tests (11): 300 ms budget for all transitions, heavy state, leak detection
 - [x] Lightweight `/api/test/screen` endpoint for fast screen detection
 - [x] Iterative widget tree walk with PSRAM buffer (handles 100+ widget screens)
 - [x] REST API functional tests — 145 tests across 4 files covering heatpump

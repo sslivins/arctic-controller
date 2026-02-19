@@ -138,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (232 UI tests + 9 screenshot API tests + 145 REST API functional tests + API contract tests)
+### Test Files (243 UI tests + 9 screenshot API tests + 145 REST API functional tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -149,6 +149,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_control_screen.py`](test_control_screen.py) | 19 | Control sub-screen: power button, mode buttons, setpoints, P-parameters |
 | [`test_localization.py`](test_localization.py) | 18 | French and Spanish translations on main screen |
 | [`test_errors_screen.py`](test_errors_screen.py) | 12 | Errors sub-screen: active/cleared errors, descriptions, clear history |
+| [`test_screen_performance.py`](test_screen_performance.py) | 11 | Render budget (300 ms) for all screen transitions, heavy state, leak detection |
 | [`test_event_log_screen.py`](test_event_log_screen.py) | 10 | Event log sub-screen: navigation, title, events, clear via API |
 | [`test_navigation.py`](test_navigation.py) | 10 | Settings sub-screen navigation and back buttons |
 | [`test_language.py`](test_language.py) | 7 | Language switching via roller + preferences API |

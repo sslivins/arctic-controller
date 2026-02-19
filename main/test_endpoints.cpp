@@ -637,8 +637,10 @@ static esp_err_t click_post_handler(httpd_req_t* req)
         target = found;
     }
 
-    // Fire the click event
+    // Fire the click event (measure render time for performance profiling)
+    int64_t t0 = esp_timer_get_time();
     lv_obj_send_event(target, LV_EVENT_CLICKED, NULL);
+    int64_t render_us = esp_timer_get_time() - t0;
 
     // Get info about what was clicked for the response
     const char* clicked_text = get_widget_text(found);
@@ -653,6 +655,7 @@ static esp_err_t click_post_handler(httpd_req_t* req)
     if (clicked_text) {
         cJSON_AddStringToObject(resp, "clicked_text", clicked_text);
     }
+    cJSON_AddNumberToObject(resp, "render_time_us", (double)render_us);
 
     char* json = cJSON_PrintUnformatted(resp);
     httpd_resp_sendstr(req, json);

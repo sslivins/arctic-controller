@@ -209,7 +209,12 @@ components:
           type: string
         clicked_text:
           type: string
-      required: [success, clicked_type]
+        render_time_us:
+          type: number
+          description: >-
+            Wall-clock microseconds spent inside lv_obj_send_event(LV_EVENT_CLICKED).
+            Measures the synchronous widget-tree creation triggered by the click.
+      required: [success, clicked_type, render_time_us]
 
     # --- Slider -----------------------------------------------------------
     SetSliderRequest:

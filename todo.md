@@ -13,6 +13,12 @@
 
 ## Event Log Enhancements
 
+- [ ] **Lazy-load scroll**: Replace the fixed display cap (`MAX_DISPLAYED_EVENTS`)
+      with incremental loading — render the first ~10 events, then append more on
+      `LV_EVENT_SCROLL_END` as the user scrolls toward the bottom. LVGL scroll
+      callbacks run in the display task context (no `bsp_display_lock()` needed),
+      so appending 3-5 widgets per scroll event is safe and avoids the O(n²) flex
+      layout issue that caused the original hang at 128 items.
 - [ ] Consider logging compressor frequency changes (e.g. significant jumps or thresholds)
 - [ ] Consider logging fan speed changes (RPM thresholds or level transitions)
 
