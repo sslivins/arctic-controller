@@ -5,7 +5,7 @@ device test suite. See [README.md](README.md) for architecture and usage.
 
 ## Coverage Gaps — Uncovered Screens & Features
 
-The current 261-test suite covers: main screen, settings menu, navigation, WiFi
+The current 283-test suite covers: main screen, settings menu, navigation, WiFi
 dialogs, firmware check, display brightness, time format, timezone, temperature
 unit, language switching, localization (FR/ES), demo mode, status bar/notifications,
 error mapping, error history duration, screenshot API, REST API functional tests
@@ -43,7 +43,7 @@ The following screens and features have **no automated test coverage** yet:
 - [x] `GET /api/heatpump/errors` — test with 0 errors, active errors, error history
 - [x] `PATCH /api/heatpump/demo` — inject all supported fields, verify UI updates
 - [x] `PATCH /api/heatpump/demo` — test error injection (`error1`, `error2`) and clearing
-- [ ] `PATCH /api/heatpump/demo` — test status1 bit manipulation (compressor, fan, pump on/off)
+- [x] `PATCH /api/heatpump/demo` — test status1 bit manipulation (compressor, fan, pump on/off)
 - [x] `POST /api/heatpump/mode` — test all working modes
 - [x] `POST /api/heatpump/setpoint` — test cooling/heating/hot water setpoints
 - [x] `POST /api/heatpump/power` — test power on/off
@@ -55,13 +55,17 @@ The following screens and features have **no automated test coverage** yet:
 - [x] `GET /api/logs?since=N` — verify incremental fetch returns only newer entries
 - [x] `GET /api/logs?limit=10` — verify at most 10 entries returned
 - [x] `DELETE /api/logs` — verify buffer is cleared, seq numbers keep incrementing
+- [x] `GET /api/time/config` — verify timezone, format_24h, synced fields
+- [x] `POST /api/time/config` — round-trip set/restore timezone and format_24h
+- [x] `GET /api/ota/status` — verify idle state, progress, version, download fields
+- [x] `POST /api/time/sync` — verify NTP sync trigger returns success
 
 ## Web Dashboard Testing
 
-- [ ] Verify web dashboard loads and connects via WebSocket
-- [ ] Confirm real-time updates: temperatures, status, errors refresh live
-- [ ] Test web dashboard in demo mode: all values update when injected via API
-- [ ] Verify mode/setpoint controls work from web interface
+- [x] Verify web dashboard loads and connects via WebSocket
+- [x] Confirm real-time updates: temperatures, status, errors refresh live
+- [x] Test web dashboard in demo mode: all values update when injected via API
+- [x] Verify mode/setpoint controls work from web interface
 - [ ] Test web dashboard on mobile browsers (responsive layout)
 - [ ] Verify error display matches device error screen
 - [ ] Test web dashboard reconnection after WiFi dropout
@@ -161,8 +165,8 @@ Options for future coverage:
       into `device-tests.yml` workflow as a separate step
 - [ ] **OpenAPI spec validation**: Add spectral or openapi-generator lint step to CI to catch
       spec drift and malformed schemas
-- [ ] **Web dashboard tests**: Run Playwright against mock server serving `index.html`; test
-      page load, real-time updates, mode/setpoint controls, language switching, mobile viewport
+- [x] **Web dashboard tests**: 50 Playwright tests across 5 files (dashboard, navigation,
+      login, i18n, settings) — page load, real-time updates, controls, language switching
 - [ ] Add unit test and API contract test stages to `.github/workflows/build.yml`
 - [ ] **Out-of-box / factory-reset testing**: Erase NVS before a test run to verify
       default credentials (`arctic`/`arctic`), default API key generation, default
@@ -199,8 +203,11 @@ Items completed in this branch (for reference):
 - [x] Session lock protocol with TTL auto-expiry
 - [x] `conftest.py` with auto-return-to-main and lock management
 - [x] OpenAPI 3.0 spec for test API (`openapi-test.yaml`)
-- [x] 129 tests across 15 files covering core screens and features
-- [x] REST API functional tests — 123 tests across 4 files covering heatpump
-      status/control/demo/params/errors, logs (filtering, incremental polling),
-      auth (config, login/logout, API key, enforcement), events, health, status,
-      time, WiFi, info, display brightness, preferences
+- [x] 138 tests across 15 files covering core screens and features
+- [x] REST API functional tests — 145 tests across 4 files covering heatpump
+      status/control/demo/params/errors/status1-bits, logs (filtering, incremental
+      polling), auth (config, login/logout, API key, enforcement), events, health,
+      status, time config (round-trip), OTA status, time sync, WiFi, info,
+      display brightness, preferences
+- [x] Web dashboard tests — 50 Playwright tests across 5 files (dashboard,
+      navigation, login, i18n, settings) in `tests/web/`
