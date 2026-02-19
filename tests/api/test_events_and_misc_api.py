@@ -44,6 +44,10 @@ def _get(path, **kwargs):
     return requests.get(f"{BASE_URL}{path}", headers=_headers(), timeout=10, **kwargs)
 
 
+def _post(path, json=None, **kwargs):
+    return requests.post(f"{BASE_URL}{path}", headers=_headers(), json=json, timeout=10, **kwargs)
+
+
 def _delete(path):
     return requests.delete(f"{BASE_URL}{path}", headers=_headers(), timeout=10)
 
@@ -327,3 +331,123 @@ class TestPreferences:
     def test_preferences_format_24h_is_bool(self):
         data = _get("/api/preferences").json()
         assert isinstance(data["format_24h"], bool)
+
+
+# ── Time Config API ───────────────────────────────────────────────────────
+
+
+class TestTimeConfig:
+    """GET/POST /api/time/config — timezone and time format configuration."""
+
+    def test_get_time_config_returns_200(self):
+        r = _get("/api/time/config")
+        assert r.status_code == 200
+
+    def test_time_config_has_timezone(self):
+        data = _get("/api/time/config").json()
+        assert "timezone" in data
+        assert isinstance(data["timezone"], str)
+
+    def test_time_config_has_format_24h(self):
+        data = _get("/api/time/config").json()
+        assert "format_24h" in data
+        assert isinstance(data["format_24h"], bool)
+
+    def test_time_config_has_synced(self):
+        data = _get("/api/time/config").json()
+        assert "synced" in data
+        assert isinstance(data["synced"], bool)
+
+    def test_set_and_restore_timezone(self):
+        """POST a different timezone, verify it took, then restore original."""
+        # Read original
+        original = _get("/api/time/config").json()
+        orig_tz = original["timezone"]
+
+        # Set a different timezone
+        test_tz = "PST8PDT,M3.2.0,M11.1.0" if orig_tz != "PST8PDT,M3.2.0,M11.1.0" else "UTC0"
+        r = _post("/api/time/config", json={"timezone": test_tz})
+        assert r.status_code == 200
+        assert r.json().get("success") is True
+
+        # Verify it changed
+        updated = _get("/api/time/config").json()
+        assert updated["timezone"] == test_tz
+
+        # Restore original
+        r = _post("/api/time/config", json={"timezone": orig_tz})
+        assert r.status_code == 200
+        restored = _get("/api/time/config").json()
+        assert restored["timezone"] == orig_tz
+
+    def test_set_and_restore_format_24h(self):
+        """Toggle format_24h, verify, then restore."""
+        original = _get("/api/time/config").json()
+        orig_fmt = original["format_24h"]
+
+        # Toggle
+        r = _post("/api/time/config", json={"format_24h": not orig_fmt})
+        assert r.status_code == 200
+
+        updated = _get("/api/time/config").json()
+        assert updated["format_24h"] is (not orig_fmt)
+
+        # Restore
+        _post("/api/time/config", json={"format_24h": orig_fmt})
+        restored = _get("/api/time/config").json()
+        assert restored["format_24h"] is orig_fmt
+
+
+# ── OTA Status API ────────────────────────────────────────────────────────
+
+
+class TestOtaStatus:
+    """GET /api/ota/status — read-only OTA state check."""
+
+    def test_ota_status_returns_200(self):
+        r = _get("/api/ota/status")
+        assert r.status_code == 200
+
+    def test_ota_status_is_idle(self):
+        """When no update is in progress, state should be idle."""
+        data = _get("/api/ota/status").json()
+        assert data["state"] == "idle"
+
+    def test_ota_status_progress_zero(self):
+        data = _get("/api/ota/status").json()
+        assert data["progress"] == 0
+
+    def test_ota_status_has_current_version(self):
+        data = _get("/api/ota/status").json()
+        assert "current_version" in data
+        assert isinstance(data["current_version"], str)
+        # Should be semver-ish
+        parts = data["current_version"].split(".")
+        assert len(parts) >= 2
+
+    def test_ota_status_has_download_fields(self):
+        data = _get("/api/ota/status").json()
+        assert "bytes_downloaded" in data
+        assert isinstance(data["bytes_downloaded"], int)
+        assert "total_bytes" in data
+        assert isinstance(data["total_bytes"], int)
+
+    def test_ota_status_state_is_valid_enum(self):
+        data = _get("/api/ota/status").json()
+        valid_states = {"idle", "uploading", "downloading", "verifying",
+                        "ready_to_reboot", "failed"}
+        assert data["state"] in valid_states
+
+
+# ── Time Sync API ─────────────────────────────────────────────────────────
+
+
+class TestTimeSync:
+    """POST /api/time/sync — trigger NTP synchronization."""
+
+    def test_time_sync_returns_200(self):
+        """Triggering NTP sync should return success."""
+        r = _post("/api/time/sync")
+        assert r.status_code == 200
+        data = r.json()
+        assert data.get("success") is True
