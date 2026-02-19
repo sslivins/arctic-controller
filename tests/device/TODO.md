@@ -5,30 +5,26 @@ device test suite. See [README.md](README.md) for architecture and usage.
 
 ## Coverage Gaps — Uncovered Screens & Features
 
-The current 283-test suite covers: main screen, settings menu, navigation, WiFi
+The current 377-test suite covers: main screen, settings menu, navigation, WiFi
 dialogs, firmware check, display brightness, time format, timezone, temperature
 unit, language switching, localization (FR/ES), demo mode, status bar/notifications,
-error mapping, error history duration, screenshot API, REST API functional tests
-(heatpump status/control/demo/params/errors, logs, auth, events, preferences),
-and API contract validation.
+error mapping, error history duration, screenshot API, heat pump sub-screens
+(temps, system, control, errors, event log), REST API functional tests (heatpump
+status/control/demo/params/errors, logs, auth, events, preferences), and API
+contract validation.
 
 The following screens and features have **no automated test coverage** yet:
 
-- [ ] **Event log screen** — `event_log_screen.cpp` exists but has zero tests.
-      Test ideas: navigate to event log, verify events appear after state changes,
-      verify event timestamps, test clearing events, test scrolling with many entries.
-- [ ] **Heatpump control screen** — power/mode/setpoint control UI untested.
-      Needs: navigate to control screen, toggle power, change mode, adjust setpoints,
-      verify UI reflects changes.
-- [ ] **Heatpump params screen** — parameter display/editing untested.
-      Needs: navigate to params, verify parameter values display, test editing a param.
-- [ ] **Heatpump system screen** — system info display untested.
-      Needs: navigate to system screen, verify labels and values render.
-- [ ] **Heatpump temps screen** — temperature detail view untested.
-      Needs: navigate to temps screen, verify all temperature labels and values.
-- [ ] **Heatpump errors screen** — dedicated errors screen not tested (only the error
-      card on the main screen is covered by `test_error_mapping.py`).
-      Needs: navigate to errors screen, verify error list, test with 0/1/many errors.
+- [x] **Event log screen** — 10 tests in `test_event_log_screen.py`: navigation,
+      title, clear button, empty state, system start event, events via API, clear via API.
+- [x] **Heatpump control screen** — 19 tests in `test_control_screen.py`: power ON/OFF,
+      5 mode buttons, active mode, 3 setpoint labels + values, P-parameter visibility.
+- [x] **Heatpump system screen** — 31 tests in `test_system_screen.py`: temps, flows,
+      component states, section headers, navigation.
+- [x] **Heatpump temps screen** — 22 tests in `test_temps_screen.py`: all temperature
+      rows, labels, values, navigation.
+- [x] **Heatpump errors screen** — 12 tests in `test_errors_screen.py`: active/cleared
+      errors, descriptions, clear history, errors API.
 - [ ] **OTA update flow UI** — firmware *check* is tested (`test_firmware.py`) but not
       the download progress, status text, or completion UI. See OTA Install Button
       section below for options.
@@ -203,7 +199,10 @@ Items completed in this branch (for reference):
 - [x] Session lock protocol with TTL auto-expiry
 - [x] `conftest.py` with auto-return-to-main and lock management
 - [x] OpenAPI 3.0 spec for test API (`openapi-test.yaml`)
-- [x] 138 tests across 15 files covering core screens and features
+- [x] 232 tests across 20 files covering core screens and features
+- [x] Heat pump sub-screen tests: temps (22), system (31), control (19), errors (12), event log (10)
+- [x] Lightweight `/api/test/screen` endpoint for fast screen detection
+- [x] Iterative widget tree walk with PSRAM buffer (handles 100+ widget screens)
 - [x] REST API functional tests — 145 tests across 4 files covering heatpump
       status/control/demo/params/errors/status1-bits, logs (filtering, incremental
       polling), auth (config, login/logout, API key, enforcement), events, health,

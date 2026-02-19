@@ -14,6 +14,7 @@
 #include "test_endpoints.h"
 #include <cstring>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <cJSON.h>
 #include <lvgl.h>
 #include <bsp/m5stack_tab5.h>
@@ -27,6 +28,11 @@
 #include "i18n/i18n.h"
 #include "modbus/arctic_heatpump.h"
 #include "heatpump_errors.h"
+#include "heatpump_temps_screen.h"
+#include "heatpump_system_screen.h"
+#include "heatpump_control_screen.h"
+#include "heatpump_errors_screen.h"
+#include "event_log_screen.h"
 #include "status_bar.h"
 #include <esp_timer.h>
 #include "png_encoder.h"
@@ -144,10 +150,14 @@ static const char* get_widget_text(lv_obj_t* obj)
 
 // Check if user_data looks like a valid tag string (printable ASCII, reasonable length).
 // LVGL user_data is void* — it could be a tag string or anything else (struct ptr, number).
-// Only treat it as a string if the first N bytes are printable ASCII or common UTF-8.
+// Only treat it as a string if it points to valid memory and the first N bytes are printable ASCII.
 static bool is_valid_tag(const void* ud)
 {
     if (!ud) return false;
+    // Reject small integers masquerading as pointers (e.g. user_data = (void*)1)
+    // Valid pointers on ESP32-P4 are in IRAM (0x4ff...), flash (0x480...) or PSRAM (0x485...)
+    uintptr_t addr = (uintptr_t)ud;
+    if (addr < 0x40000000) return false;  // clearly not a valid pointer
     const unsigned char* p = (const unsigned char*)ud;
     // Check first 4 bytes: must be printable ASCII (0x20-0x7E) or underscore-style identifiers
     for (int i = 0; i < 4 && p[i] != '\0'; i++) {
@@ -158,96 +168,152 @@ static bool is_valid_tag(const void* ud)
     return p[0] >= 0x20 && p[0] <= 0x7E;
 }
 
-// Recursively walk LVGL object tree and add widgets to JSON array
-static void walk_tree(lv_obj_t* obj, cJSON* arr, int depth)
+// Helper: JSON-escape a string into buf (handles \, ", control chars)
+static int json_escape_into(char* buf, int max, const char* s)
 {
-    if (!obj || depth > 10) return;  // prevent runaway recursion (keep stack usage low)
+    int p = 0;
+    for (; *s && p < max - 2; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '"') { if (p + 2 > max - 1) break; buf[p++] = '\\'; buf[p++] = '"'; }
+        else if (c == '\\') { if (p + 2 > max - 1) break; buf[p++] = '\\'; buf[p++] = '\\'; }
+        else if (c == '\n') { if (p + 2 > max - 1) break; buf[p++] = '\\'; buf[p++] = 'n'; }
+        else if (c == '\r') { if (p + 2 > max - 1) break; buf[p++] = '\\'; buf[p++] = 'r'; }
+        else if (c < 0x20) { continue; }  // skip other control chars
+        else { buf[p++] = c; }
+    }
+    buf[p] = '\0';
+    return p;
+}
+
+// Serialize a single widget into the JSON buffer using snprintf (no cJSON, no heap alloc).
+// Returns true if the widget was added, false if buffer full or not interesting.
+static bool serialize_widget(lv_obj_t* obj, char* buf, int* pos, int buf_size, int* widget_count)
+{
+    if (*pos >= buf_size - 1024 || *widget_count >= 300) return false;
 
     bool hidden = lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    if (hidden) return false;
+
     const char* type = get_widget_type(obj);
     const char* text = get_widget_text(obj);
-
-    // Report widgets that have text or are interactive (buttons, switches, etc.)
-    // Also report any widget with a user_data tag (for containers used as menu rows)
     bool has_tag = is_valid_tag(lv_obj_get_user_data(obj));
-    bool is_interesting = has_tag ||
-                          (text != NULL) ||
-                          strcmp(type, "button") == 0 ||
-                          strcmp(type, "switch") == 0 ||
-                          strcmp(type, "checkbox") == 0 ||
-                          strcmp(type, "slider") == 0 ||
-                          strcmp(type, "dropdown") == 0 ||
-                          strcmp(type, "roller") == 0 ||
+
+    bool is_interesting = has_tag || (text != NULL) ||
+                          strcmp(type, "button") == 0 || strcmp(type, "switch") == 0 ||
+                          strcmp(type, "checkbox") == 0 || strcmp(type, "slider") == 0 ||
+                          strcmp(type, "dropdown") == 0 || strcmp(type, "roller") == 0 ||
                           strcmp(type, "textarea") == 0;
+    if (!is_interesting) return false;
 
-    if (is_interesting && !hidden) {
-        cJSON* w = cJSON_CreateObject();
-        cJSON_AddStringToObject(w, "type", type);
+    // Temporary buffer on stack for building this widget's JSON
+    char tmp[512];
+    int tp = 0;
+    int rem = sizeof(tmp);
 
-        if (text) {
-            cJSON_AddStringToObject(w, "text", text);
+    #define TPRINTF(...) do { int n = snprintf(tmp + tp, rem, __VA_ARGS__); if (n > 0 && n < rem) { tp += n; rem -= n; } } while(0)
 
-            // Include English key so tests can match language-independently
-            const char* en = i18n_get_english(text);
-            if (en && strcmp(en, text) != 0) {
-                cJSON_AddStringToObject(w, "text_en", en);
-            }
+    TPRINTF("{\"type\":\"%s\"", type);
+
+    if (text) {
+        char escaped[256];
+        json_escape_into(escaped, sizeof(escaped), text);
+        TPRINTF(",\"text\":\"%s\"", escaped);
+        const char* en = i18n_get_english(text);
+        if (en && strcmp(en, text) != 0) {
+            json_escape_into(escaped, sizeof(escaped), en);
+            TPRINTF(",\"text_en\":\"%s\"", escaped);
         }
-
-        // Position and size
-        lv_area_t coords;
-        lv_obj_get_coords(obj, &coords);
-        cJSON_AddNumberToObject(w, "x", coords.x1);
-        cJSON_AddNumberToObject(w, "y", coords.y1);
-        cJSON_AddNumberToObject(w, "w", lv_area_get_width(&coords));
-        cJSON_AddNumberToObject(w, "h", lv_area_get_height(&coords));
-
-        // State info
-        if (lv_obj_check_type(obj, &lv_switch_class) || lv_obj_check_type(obj, &lv_checkbox_class)) {
-            cJSON_AddBoolToObject(w, "checked", lv_obj_has_state(obj, LV_STATE_CHECKED));
-        }
-        if (lv_obj_check_type(obj, &lv_slider_class)) {
-            cJSON_AddNumberToObject(w, "value", lv_slider_get_value(obj));
-            cJSON_AddNumberToObject(w, "min", lv_slider_get_min_value(obj));
-            cJSON_AddNumberToObject(w, "max", lv_slider_get_max_value(obj));
-        }
-        if (lv_obj_check_type(obj, &lv_textarea_class)) {
-            cJSON_AddBoolToObject(w, "password_mode", lv_textarea_get_password_mode(obj));
-        }
-        if (lv_obj_check_type(obj, &lv_roller_class)) {
-            uint32_t sel = lv_roller_get_selected(obj);
-            cJSON_AddNumberToObject(w, "value", sel);
-            cJSON_AddNumberToObject(w, "option_count", lv_roller_get_option_count(obj));
-            char sel_text[64] = {0};
-            lv_roller_get_selected_str(obj, sel_text, sizeof(sel_text));
-            cJSON_AddStringToObject(w, "selected_text", sel_text);
-        }
-        if (lv_obj_has_state(obj, LV_STATE_DISABLED)) {
-            cJSON_AddBoolToObject(w, "disabled", true);
-        }
-
-        // User data tag (if set and valid)
-        void* ud = lv_obj_get_user_data(obj);
-        if (is_valid_tag(ud)) {
-            cJSON_AddStringToObject(w, "tag", (const char*)ud);
-
-            // Report bg_color for tagged objects (useful for status indicators)
-            lv_color_t bg = lv_obj_get_style_bg_color(obj, LV_PART_MAIN);
-            char hex[8];
-            snprintf(hex, sizeof(hex), "#%02x%02x%02x", bg.red, bg.green, bg.blue);
-            cJSON_AddStringToObject(w, "bg_color", hex);
-        }
-
-        cJSON_AddItemToArray(arr, w);
     }
 
-    // Recurse into children (only for visible containers)
-    if (!hidden) {
+    lv_area_t coords;
+    lv_obj_get_coords(obj, &coords);
+    TPRINTF(",\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld",
+            (long)coords.x1, (long)coords.y1,
+            (long)lv_area_get_width(&coords), (long)lv_area_get_height(&coords));
+
+    if (lv_obj_check_type(obj, &lv_switch_class) || lv_obj_check_type(obj, &lv_checkbox_class)) {
+        TPRINTF(",\"checked\":%s", lv_obj_has_state(obj, LV_STATE_CHECKED) ? "true" : "false");
+    }
+    if (lv_obj_check_type(obj, &lv_slider_class)) {
+        TPRINTF(",\"value\":%ld,\"min\":%ld,\"max\":%ld",
+                (long)lv_slider_get_value(obj),
+                (long)lv_slider_get_min_value(obj),
+                (long)lv_slider_get_max_value(obj));
+    }
+    if (lv_obj_check_type(obj, &lv_textarea_class)) {
+        TPRINTF(",\"password_mode\":%s", lv_textarea_get_password_mode(obj) ? "true" : "false");
+    }
+    if (lv_obj_check_type(obj, &lv_roller_class)) {
+        char sel_text[64] = {0};
+        lv_roller_get_selected_str(obj, sel_text, sizeof(sel_text));
+        char escaped[128];
+        json_escape_into(escaped, sizeof(escaped), sel_text);
+        TPRINTF(",\"value\":%lu,\"option_count\":%lu,\"selected_text\":\"%s\"",
+                (unsigned long)lv_roller_get_selected(obj),
+                (unsigned long)lv_roller_get_option_count(obj), escaped);
+    }
+    if (lv_obj_has_state(obj, LV_STATE_DISABLED)) {
+        TPRINTF(",\"disabled\":true");
+    }
+
+    void* ud = lv_obj_get_user_data(obj);
+    if (is_valid_tag(ud)) {
+        char escaped[128];
+        json_escape_into(escaped, sizeof(escaped), (const char*)ud);
+        TPRINTF(",\"tag\":\"%s\"", escaped);
+        lv_color_t bg = lv_obj_get_style_bg_color(obj, LV_PART_MAIN);
+        TPRINTF(",\"bg_color\":\"#%02x%02x%02x\"", bg.red, bg.green, bg.blue);
+    }
+
+    TPRINTF("}");
+    #undef TPRINTF
+
+    // Append to output buffer
+    if (*pos + tp + 2 < buf_size - 512) {
+        if (*widget_count > 0) buf[(*pos)++] = ',';
+        memcpy(buf + *pos, tmp, tp);
+        *pos += tp;
+        (*widget_count)++;
+        return true;
+    }
+    return false;
+}
+
+// Iteratively walk LVGL object tree using an explicit stack (avoids thread stack overflow).
+// The stack is allocated from PSRAM to avoid using precious internal RAM.
+static void walk_tree_iterative(lv_obj_t* root, char* buf, int* pos, int buf_size, int* widget_count)
+{
+    if (!root) return;
+
+    // Explicit traversal stack in PSRAM — supports up to 512 pending nodes
+    static const int MAX_STACK = 512;
+    lv_obj_t** stack = (lv_obj_t**)heap_caps_malloc(MAX_STACK * sizeof(lv_obj_t*), MALLOC_CAP_SPIRAM);
+    if (!stack) return;
+
+    int top = 0;
+    int node_num = 0;
+    stack[top++] = root;
+
+    while (top > 0 && *widget_count < 300 && *pos < buf_size - 1024) {
+        lv_obj_t* obj = stack[--top];
+        if (!obj) continue;
+
+        // Skip hidden subtrees entirely
+        if (lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) continue;
+
+        node_num++;
+
+        // Try to serialize this widget (only emits "interesting" ones)
+        serialize_widget(obj, buf, pos, buf_size, widget_count);
+
+        // Push children in reverse order so first child is processed first
         uint32_t count = lv_obj_get_child_count(obj);
-        for (uint32_t i = 0; i < count; i++) {
-            walk_tree(lv_obj_get_child(obj, i), arr, depth + 1);
+        for (int i = (int)count - 1; i >= 0 && top < MAX_STACK; i--) {
+            stack[top++] = lv_obj_get_child(obj, (uint32_t)i);
         }
     }
+
+    heap_caps_free(stack);
 }
 
 // Find a label widget whose text matches (exact or contains)
@@ -312,46 +378,85 @@ static const char* get_screen_name(void)
     if (time_screen_is_visible()) return "time";
     if (language_screen_is_visible()) return "language";
     if (settings_menu_is_visible()) return "settings";
+    if (heatpump_temps_is_shown()) return "temps";
+    if (heatpump_system_is_shown()) return "system";
+    if (heatpump_control_is_shown()) return "control";
+    if (heatpump_errors_is_shown()) return "errors";
+    if (event_log_screen_is_shown()) return "event_log";
 
     return "main";
 }
 
 // ============================================================================
 // GET /api/test/ui-state
+// Uses a pre-allocated PSRAM buffer to avoid heap fragmentation on complex screens
 // ============================================================================
 
 static esp_err_t ui_state_get_handler(httpd_req_t* req)
 {
     set_json_content_type(req);
 
-    cJSON* root = cJSON_CreateObject();
-    cJSON* widgets = cJSON_CreateArray();
-
-    if (!bsp_display_lock(1000)) {
-        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
-        cJSON_Delete(root);
+    // Allocate response buffer from PSRAM (64KB) to avoid internal RAM fragmentation
+    static const int BUF_SIZE = 65536;
+    char* buf = (char*)heap_caps_malloc(BUF_SIZE, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGW(TAG, "ui-state: PSRAM alloc failed, trying malloc");
+        buf = (char*)malloc(BUF_SIZE);
+    }
+    if (!buf) {
+        ESP_LOGE(TAG, "ui-state: all allocation failed!");
+        send_json_error(req, "500 Internal Server Error", "Out of memory for ui-state buffer");
         return ESP_OK;
     }
 
-    cJSON_AddStringToObject(root, "screen", get_screen_name());
+    if (!bsp_display_lock(1000)) {
+        heap_caps_free(buf);
+        ESP_LOGW(TAG, "ui-state: display lock timeout!");
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
 
+    const char* screen_name = get_screen_name();
+
+    int pos = 0;
+    pos += snprintf(buf + pos, BUF_SIZE - pos, "{\"screen\":\"%s\",\"widgets\":[", screen_name);
+
+    int widget_count = 0;
     lv_obj_t* scr = lv_scr_act();
-    walk_tree(scr, widgets, 0);
+    walk_tree_iterative(scr, buf, &pos, BUF_SIZE, &widget_count);
 
     bsp_display_unlock();
 
-    cJSON_AddItemToObject(root, "widgets", widgets);
-    int widget_count = cJSON_GetArraySize(widgets);
-    cJSON_AddNumberToObject(root, "count", widget_count);
+    pos += snprintf(buf + pos, BUF_SIZE - pos, "],\"count\":%d}", widget_count);
+    buf[pos] = '\0';
 
-    char* json = cJSON_PrintUnformatted(root);
-    httpd_resp_sendstr(req, json);
-    free(json);
+    httpd_resp_sendstr(req, buf);
+    ESP_LOGI(TAG, "ui-state: screen=%s, %d widgets, %d bytes", screen_name, widget_count, pos);
+    heap_caps_free(buf);
+    return ESP_OK;
+}
 
-    // Log before delete (screen_name pointer is inside root)
-    ESP_LOGI(TAG, "ui-state: screen=%s, %d widgets",
-             cJSON_GetObjectItem(root, "screen")->valuestring, widget_count);
-    cJSON_Delete(root);
+// ============================================================================
+// GET /api/test/screen
+// Lightweight endpoint returning only the screen name (no widget tree walk)
+// ============================================================================
+
+static esp_err_t screen_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+
+    if (!bsp_display_lock(1000)) {
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
+
+    const char* screen_name = get_screen_name();
+
+    bsp_display_unlock();
+
+    char buf[128];
+    snprintf(buf, sizeof(buf), "{\"screen\":\"%s\"}", screen_name);
+    httpd_resp_sendstr(req, buf);
     return ESP_OK;
 }
 
@@ -1488,6 +1593,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &ui_state_uri);
+
+    httpd_uri_t screen_uri = {
+        .uri = "/api/test/screen",
+        .method = HTTP_GET,
+        .handler = screen_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &screen_uri);
 
     httpd_uri_t click_uri = {
         .uri = "/api/test/click",

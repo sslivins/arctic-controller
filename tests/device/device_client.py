@@ -63,8 +63,15 @@ class DeviceClient:
 
     @property
     def screen(self) -> str:
-        """Current screen name (e.g. 'main', 'settings')."""
-        return self.get_ui_state()["screen"]
+        """Current screen name (e.g. 'main', 'settings').
+
+        Uses the lightweight /api/test/screen endpoint (no widget tree walk).
+        """
+        r = self.session.get(
+            f"{self.base_url}/api/test/screen", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json()["screen"]
 
     @property
     def widgets(self) -> list[Widget]:

@@ -242,6 +242,7 @@ static void rebuild_event_list() {
     lv_obj_set_style_border_opa(clear_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(clear_btn, 25, LV_PART_MAIN);
     lv_obj_add_event_cb(clear_btn, clear_btn_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_user_data(clear_btn, (void*)"event_log_clear");
 
     lv_obj_t* clear_label = lv_label_create(clear_btn);
     lv_label_set_text(clear_label, i18n_get(STR_HP_CLEAR_HISTORY));
@@ -262,6 +263,7 @@ static void rebuild_event_list() {
         // Show "no events" message
         lv_obj_t* msg = lv_label_create(state.content);
         lv_label_set_text(msg, i18n_get(STR_EVENT_NO_EVENTS));
+        lv_obj_set_user_data(msg, (void*)"event_log_empty");
         lv_obj_set_style_text_color(msg, COLOR_TEXT_DIM, LV_PART_MAIN);
         lv_obj_set_style_text_font(msg, &montserrat_24_latin, LV_PART_MAIN);
         lv_obj_set_width(msg, LV_PCT(100));
@@ -431,6 +433,7 @@ void event_log_screen_show(event_log_screen_close_cb_t on_close) {
     lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_user_data(back_btn, (void*)"event_log_close");
     
     lv_obj_t* back_icon = lv_label_create(back_btn);
     lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
@@ -446,6 +449,7 @@ void event_log_screen_show(event_log_screen_close_cb_t on_close) {
     lv_obj_set_style_text_color(state.count_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_style_text_font(state.count_label, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_align(state.count_label, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_set_user_data(state.count_label, (void*)"event_log_title");
     
     // Scrollable content
     state.content = lv_obj_create(state.screen);

@@ -833,6 +833,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
 
     state.temps_btn = lv_btn_create(btn_row);
     lv_obj_set_size(state.temps_btn, 155, 60);
+    lv_obj_set_user_data(state.temps_btn, (void*)"nav_temps");
     lv_obj_set_style_bg_color(state.temps_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.temps_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.temps_btn, COLOR_ACCENT, LV_PART_MAIN);
@@ -848,6 +849,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     state.system_btn = lv_btn_create(btn_row);
     lv_obj_set_size(state.system_btn, 155, 60);
+    lv_obj_set_user_data(state.system_btn, (void*)"nav_system");
     lv_obj_set_style_bg_color(state.system_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.system_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.system_btn, COLOR_WARNING, LV_PART_MAIN);
@@ -863,6 +865,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     state.controls_btn = lv_btn_create(btn_row);
     lv_obj_set_size(state.controls_btn, 155, 60);
+    lv_obj_set_user_data(state.controls_btn, (void*)"nav_control");
     lv_obj_set_style_bg_color(state.controls_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.controls_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.controls_btn, COLOR_SUCCESS, LV_PART_MAIN);
@@ -878,6 +881,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     state.events_btn = lv_btn_create(btn_row);
     lv_obj_set_size(state.events_btn, 155, 60);
+    lv_obj_set_user_data(state.events_btn, (void*)"nav_events");
     lv_obj_set_style_bg_color(state.events_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.events_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.events_btn, lv_color_hex(0xa78bfa), LV_PART_MAIN);

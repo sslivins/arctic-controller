@@ -1086,6 +1086,7 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(back_btn, close_btn_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_user_data(back_btn, (void*)"control_close");
     
     lv_obj_t* back_icon = lv_label_create(back_btn);
     lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
@@ -1099,6 +1100,7 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_user_data(title, (void*)"control_title");
     
     // Scrollable content - 1280 - 100 header = 1180
     state.scroll_container = lv_obj_create(state.screen);

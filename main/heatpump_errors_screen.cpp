@@ -323,6 +323,7 @@ static void update_error_list() {
         lv_obj_set_style_text_font(ok_label, UI_FONT_BODY, LV_PART_MAIN);
         lv_obj_set_style_text_color(ok_label, COLOR_SUCCESS, LV_PART_MAIN);
         lv_obj_set_style_text_align(ok_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_set_user_data(ok_label, (void*)"errors_no_errors");
     } else {
         // Active errors section header
         create_section_header(state.error_list, i18n_get(STR_HP_ACTIVE_ERRORS));
@@ -374,6 +375,7 @@ static void update_error_list() {
             lv_obj_set_style_border_opa(clear_btn, LV_OPA_50, LV_PART_MAIN);
             lv_obj_set_style_pad_hor(clear_btn, 25, LV_PART_MAIN);
             lv_obj_add_event_cb(clear_btn, clear_history_btn_cb, LV_EVENT_CLICKED, nullptr);
+            lv_obj_set_user_data(clear_btn, (void*)"errors_clear");
             
             lv_obj_t* clear_lbl = lv_label_create(clear_btn);
             lv_label_set_text(clear_lbl, i18n_get(STR_HP_CLEAR_HISTORY));
@@ -504,6 +506,7 @@ void heatpump_errors_show(heatpump_errors_close_cb_t on_close) {
     lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
     lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_user_data(back_btn, (void*)"errors_close");
     
     lv_obj_t* back_icon = lv_label_create(back_btn);
     lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
@@ -517,6 +520,7 @@ void heatpump_errors_show(heatpump_errors_close_cb_t on_close) {
     lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_user_data(title, (void*)"errors_title");
     
     // Note: Error count label removed - visual distinction between active/cleared is sufficient
     

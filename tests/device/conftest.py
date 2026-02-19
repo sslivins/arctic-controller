@@ -30,6 +30,19 @@ def _return_to_main(device: DeviceClient):
         device.wait_for_widget(tag="settings", timeout=3.0)
         return
 
+    # If on a heat pump sub-screen, close it to return to main
+    if current in ("temps", "system", "control", "errors", "event_log"):
+        try:
+            device.click(tag=f"{current}_close")
+        except Exception:
+            try:
+                device.click(symbol="CLOSE")
+            except Exception:
+                pass
+        device.wait_for_screen("main", timeout=5.0)
+        device.wait_for_widget(tag="settings", timeout=3.0)
+        return
+
     # If on a sub-screen, go back to settings first
     if current in ("display", "wifi", "firmware", "time", "language"):
         if current == "wifi":
