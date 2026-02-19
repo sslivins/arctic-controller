@@ -213,11 +213,19 @@ static void clear_btn_cb(lv_event_t* e);
 // Build / Rebuild Event List
 // ============================================================================
 
+// Limit displayed events — rendering 128 rows (each ~6 widgets) inside a flex
+// container triggers O(n²) layout recalculation, which can take 10+ seconds and
+// cause HTTP timeouts when the click handler holds the display lock.
+static const int MAX_DISPLAYED_EVENTS = 50;
+
 static void rebuild_event_list() {
     if (!state.content) return;
     
     // Remove all children from content
     lv_obj_clean(state.content);
+
+    // Disable scrolling/layout during batch creation to avoid O(n²) recalc
+    lv_obj_add_flag(state.content, LV_OBJ_FLAG_HIDDEN);
     
     // Clear History button row (inline, matching errors screen style)
     lv_obj_t* clear_row = lv_obj_create(state.content);
@@ -269,12 +277,15 @@ static void rebuild_event_list() {
         lv_obj_set_width(msg, LV_PCT(100));
         lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_set_style_pad_top(msg, 40, LV_PART_MAIN);
+
+        lv_obj_clear_flag(state.content, LV_OBJ_FLAG_HIDDEN);
+        state.last_count = count;
         return;
     }
     
-    // Get all events (newest first)
-    event_entry_t events[EVENT_LOG_MAX_ENTRIES];
-    int got = event_log_get(events, EVENT_LOG_MAX_ENTRIES, 0);
+    // Get events (newest first), capped for display performance
+    event_entry_t events[MAX_DISPLAYED_EVENTS];
+    int got = event_log_get(events, MAX_DISPLAYED_EVENTS, 0);
     
     char detail_buf[128];
     char time_buf[32];
@@ -342,6 +353,23 @@ static void rebuild_event_list() {
         }
     }
     
+    // Show a "... and N more" footer if events were truncated
+    if (count > MAX_DISPLAYED_EVENTS) {
+        lv_obj_t* more_label = lv_label_create(state.content);
+        char more_buf[64];
+        snprintf(more_buf, sizeof(more_buf), "... +%d older events", count - MAX_DISPLAYED_EVENTS);
+        lv_label_set_text(more_label, more_buf);
+        lv_obj_set_style_text_color(more_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+        lv_obj_set_style_text_font(more_label, &montserrat_24_latin, LV_PART_MAIN);
+        lv_obj_set_width(more_label, LV_PCT(100));
+        lv_obj_set_style_text_align(more_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(more_label, 10, LV_PART_MAIN);
+    }
+
+    // Re-enable visibility and force layout calculation once
+    lv_obj_clear_flag(state.content, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(state.content);
+
     state.last_count = count;
 }
 
