@@ -19,6 +19,11 @@
 
 static const char* TAG = "hp_errors_scr";
 
+// Maximum number of error cards to display per section (active / history)
+// to keep render time within budget.  Additional errors are summarised in
+// a "+ N more" footer label.
+static constexpr int MAX_DISPLAYED_ERRORS = 16;
+
 // ============================================================================
 // Colors
 // ============================================================================
@@ -269,6 +274,9 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* text) {
 static void update_error_list() {
     if (!state.error_list) return;
     
+    // Hide during batch widget creation to avoid O(n²) flex layout recalculation
+    lv_obj_add_flag(state.error_list, LV_OBJ_FLAG_HIDDEN);
+    
     // Clear existing error cards
     lv_obj_clean(state.error_list);
     
@@ -298,6 +306,7 @@ static void update_error_list() {
         lv_obj_set_style_text_font(disconn_label, UI_FONT_BODY, LV_PART_MAIN);
         lv_obj_set_style_text_color(disconn_label, COLOR_WARNING, LV_PART_MAIN);
         lv_obj_set_style_text_align(disconn_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_clear_flag(state.error_list, LV_OBJ_FLAG_HIDDEN);
         return;
     }
     
@@ -328,9 +337,21 @@ static void update_error_list() {
         // Active errors section header
         create_section_header(state.error_list, i18n_get(STR_HP_ACTIVE_ERRORS));
         
-        // Create a card for each error
-        for (int i = 0; i < count; i++) {
+        // Create a card for each error (capped for render performance)
+        int display_count = count < MAX_DISPLAYED_ERRORS ? count : MAX_DISPLAYED_ERRORS;
+        for (int i = 0; i < display_count; i++) {
             create_error_card(state.error_list, &errors[i]);
+        }
+        if (count > display_count) {
+            char more_buf[64];
+            snprintf(more_buf, sizeof(more_buf), "… +%d more active errors", count - display_count);
+            lv_obj_t* more_label = lv_label_create(state.error_list);
+            lv_label_set_text(more_label, more_buf);
+            lv_obj_set_width(more_label, LV_PCT(100));
+            lv_obj_set_style_text_font(more_label, UI_FONT_BODY, LV_PART_MAIN);
+            lv_obj_set_style_text_color(more_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+            lv_obj_set_style_text_align(more_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+            lv_obj_set_style_pad_top(more_label, 10, LV_PART_MAIN);
         }
     }
     
@@ -383,8 +404,10 @@ static void update_error_list() {
             lv_obj_set_style_text_color(clear_lbl, COLOR_WARNING, LV_PART_MAIN);
             lv_obj_center(clear_lbl);
             
+            int hist_displayed = 0;
             for (int i = 0; i < hist_count; i++) {
                 if (history[i].is_active) continue;  // Skip active entries
+                if (hist_displayed >= MAX_DISPLAYED_ERRORS) break;
                 
                 // Create a simple card for each cleared history entry
                 arctic::ActiveError hist_err = {};
@@ -421,9 +444,26 @@ static void update_error_list() {
                 }
                 
                 create_error_card(state.error_list, &hist_err);
+                hist_displayed++;
+            }
+            if (cleared_count > hist_displayed) {
+                char more_buf[64];
+                snprintf(more_buf, sizeof(more_buf), "… +%d older cleared errors",
+                         cleared_count - hist_displayed);
+                lv_obj_t* more_label = lv_label_create(state.error_list);
+                lv_label_set_text(more_label, more_buf);
+                lv_obj_set_width(more_label, LV_PCT(100));
+                lv_obj_set_style_text_font(more_label, UI_FONT_BODY, LV_PART_MAIN);
+                lv_obj_set_style_text_color(more_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+                lv_obj_set_style_text_align(more_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+                lv_obj_set_style_pad_top(more_label, 10, LV_PART_MAIN);
             }
         }
     }
+    
+    // Re-enable visibility and force single layout calculation
+    lv_obj_clear_flag(state.error_list, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(state.error_list);
 }
 
 static void error_screen_timer_cb(lv_timer_t* timer) {
