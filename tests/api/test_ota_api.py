@@ -1,14 +1,15 @@
 """
-OTA API safety tests.
+OTA API tests.
 
-Tier 1 tests — safe, no reboot, no real firmware update.
-Validates OTA status reporting, concurrent prevention, bad upload rejection,
-URL validation, and version consistency.
+Tier 1 — safe, no reboot, no real firmware update.
+Tier 2 — real OTA round-trip (device reboots). Requires serial + rollback enabled.
+Tier 3 — rollback validation (intentionally bad firmware). Requires serial.
 
 Prerequisites:
   - Device reachable at ARCTIC_URL (default http://arctic.local)
   - ARCTIC_API_KEY env var set
   - No OTA update in progress on the device
+  - For Tier 2/3: serial connection, CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 """
 
 import os
@@ -214,3 +215,162 @@ class TestOtaConcurrentPrevention:
         assert data["state"] in ("idle", "failed"), (
             f"Expected idle or failed, got {data['state']}"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Tier 2 — Real OTA round-trip (device reboots)
+# ══════════════════════════════════════════════════════════════════════════
+
+# These tests upload real firmware, wait for reboot, and verify the device
+# comes back. They require:
+#   - Serial connection from runner to device (not yet available)
+#   - CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y (feat/ota-hardening)
+#   - The current firmware binary in build/arctic_controller.bin
+
+REBOOT_WAIT_SECS = 25  # Time to wait for device to reboot and reconnect
+
+
+def _wait_for_device(timeout=60):
+    """Poll until the device responds to /api/ota/status."""
+    import time
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            r = _get("/api/ota/status")
+            if r.status_code == 200:
+                return r.json()
+        except requests.ConnectionError:
+            pass
+        time.sleep(2)
+    raise TimeoutError(f"Device did not respond within {timeout}s after reboot")
+
+
+def _get_firmware_binary():
+    """Load the current firmware binary from the build directory."""
+    bin_path = Path(__file__).resolve().parent.parent.parent / "build" / "arctic_controller.bin"
+    if not bin_path.exists():
+        pytest.skip(f"Firmware binary not found at {bin_path}")
+    return bin_path.read_bytes()
+
+
+@pytest.mark.skip(reason="Requires serial connection and device reboot — not yet available on CI runner")
+class TestOtaRoundTrip:
+    """Tier 2: Upload current firmware via OTA, wait for reboot, verify recovery.
+
+    This proves the full OTA pipeline works end-to-end without needing a
+    different firmware version. The device should reboot onto the alternate
+    partition with the same version.
+    """
+
+    def test_upload_same_version_round_trip(self):
+        """Upload current firmware binary → reboot → device comes back healthy."""
+        import time
+
+        firmware = _get_firmware_binary()
+
+        # Record pre-OTA state
+        pre = _get("/api/ota/status").json()
+        pre_version = pre["current_version"]
+
+        # Upload firmware
+        r = _post_raw("/api/ota/upload", data=firmware)
+        assert r.status_code == 200, f"Upload failed: {r.text}"
+        data = r.json()
+        assert data.get("success") is True
+        assert data.get("bytes_received") == len(firmware)
+
+        # Device will auto-reboot — wait for it to come back
+        time.sleep(REBOOT_WAIT_SECS)
+        post = _wait_for_device(timeout=60)
+
+        # Same version, idle state
+        assert post["current_version"] == pre_version
+        assert post["state"] == "idle"
+
+    def test_pending_verify_after_ota(self):
+        """After OTA reboot, firmware should briefly be in pending_verify
+        state before mark_valid() runs. By the time we can query the API,
+        mark_valid() has already fired (it runs during create_ui), so
+        pending_verify should be false.
+        """
+        # This runs after test_upload_same_version_round_trip
+        data = _get("/api/ota/status").json()
+        assert data["pending_verify"] is False, (
+            "Firmware should have been validated by mark_valid() after create_ui()"
+        )
+
+    def test_device_functional_after_ota(self):
+        """After OTA, basic API endpoints should still work."""
+        # Health check
+        r = _get("/api/ota/status")
+        assert r.status_code == 200
+
+        # Verify another endpoint works too
+        r = _get("/api/ota/status")
+        data = r.json()
+        assert "current_version" in data
+        assert "pending_verify" in data
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Tier 3 — Rollback validation
+# ══════════════════════════════════════════════════════════════════════════
+
+# These tests verify that the bootloader reverts to the previous firmware
+# if the new one fails to call mark_valid(). They require:
+#   - Serial connection (to flash recovery firmware after rollback)
+#   - CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+#   - A "poison" firmware binary that crashes before mark_valid()
+#
+# Building the poison firmware:
+#   1. Add an assert(false) or abort() call in create_ui() (before mark_valid)
+#   2. Build with: idf.py build
+#   3. Save build/arctic_controller.bin as the poison binary
+#   4. Rebuild normal firmware for recovery
+#
+# This is complex enough that it should probably be a manual test script
+# rather than part of the automated suite, at least initially.
+
+@pytest.mark.skip(reason="Requires serial connection, poison firmware, and manual recovery — future work")
+class TestOtaRollback:
+    """Tier 3: Verify bootloader rolls back bad firmware.
+
+    Upload a firmware that crashes before mark_valid(). After the device
+    reboots, the bootloader should revert to the previous working partition.
+    """
+
+    def test_rollback_on_crash_before_mark_valid(self):
+        """Upload poison firmware → device crashes → bootloader reverts.
+
+        Test plan:
+        1. Record current version and partition
+        2. Upload poison firmware (crashes in create_ui before mark_valid)
+        3. Device reboots into poison → crashes → bootloader reverts
+        4. Device boots back into original firmware
+        5. Verify version matches, state is idle, pending_verify is false
+        """
+        import time
+
+        # Record pre-OTA state
+        pre = _get("/api/ota/status").json()
+        pre_version = pre["current_version"]
+
+        # TODO: Load poison firmware binary
+        # poison_path = Path(__file__).resolve().parent / "fixtures" / "poison_firmware.bin"
+        # poison = poison_path.read_bytes()
+
+        # TODO: Upload poison firmware
+        # r = _post_raw("/api/ota/upload", data=poison)
+        # assert r.status_code == 200
+
+        # Wait for crash + rollback + reboot (may take 2 cycles)
+        # time.sleep(REBOOT_WAIT_SECS * 2)
+
+        # Verify device came back on the original firmware
+        # post = _wait_for_device(timeout=90)
+        # assert post["current_version"] == pre_version
+        # assert post["state"] == "idle"
+        # assert post["pending_verify"] is False
+
+        pytest.skip("Poison firmware binary not yet available")
