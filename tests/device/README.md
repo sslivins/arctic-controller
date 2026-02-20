@@ -135,16 +135,22 @@ The `conftest.py` session fixture handles this automatically.
 | File | Purpose |
 |------|---------|
 | [`conftest.py`](conftest.py) | Session fixture (device client, lock, demo mode, auto-return to main screen, screenshot on failure) |
-| [`device_client.py`](device_client.py) | Python HTTP client wrapping all 18 test endpoints + production API |
+| [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (138 UI tests + 9 screenshot API tests + 145 REST API functional tests + API contract tests)
+### Test Files (243 UI tests + 9 screenshot API tests + 145 REST API functional tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
 | [`test_main_screen.py`](test_main_screen.py) | 20 | Hero card states, tank temp, component dots, performance strip, error card |
 | [`test_error_mapping.py`](test_error_mapping.py) | 36 | All 32 error1/error2 bits → correct code + description on UI |
+| [`test_system_screen.py`](test_system_screen.py) | 31 | System sub-screen: temps, flows, component states, section headers |
+| [`test_temps_screen.py`](test_temps_screen.py) | 22 | Temps sub-screen: all temperature rows, labels, values, navigation |
+| [`test_control_screen.py`](test_control_screen.py) | 19 | Control sub-screen: power button, mode buttons, setpoints, P-parameters |
 | [`test_localization.py`](test_localization.py) | 18 | French and Spanish translations on main screen |
+| [`test_errors_screen.py`](test_errors_screen.py) | 12 | Errors sub-screen: active/cleared errors, descriptions, clear history |
+| [`test_screen_performance.py`](test_screen_performance.py) | 11 | Render budget (300 ms) for all screen transitions, heavy state, leak detection |
+| [`test_event_log_screen.py`](test_event_log_screen.py) | 10 | Event log sub-screen: navigation, title, events, clear via API |
 | [`test_navigation.py`](test_navigation.py) | 10 | Settings sub-screen navigation and back buttons |
 | [`test_language.py`](test_language.py) | 7 | Language switching via roller + preferences API |
 | [`test_status_bar.py`](test_status_bar.py) | 6 | WiFi icon, notification badge, dropdown, firmware notification |
@@ -222,7 +228,7 @@ def test_something(device):
 
 1. Add the handler in `main/test_endpoints.cpp` with `CHECK_SESSION_LOCK(req)`
 2. Register it in `register_test_endpoints()` (watch `max_uri_handlers` in
-   `api_server.cpp` — currently 83)
+   `api_server.cpp` — currently 84)
 3. Add a client method in `device_client.py`
 4. Document in `openapi-test.yaml`
 5. Write tests

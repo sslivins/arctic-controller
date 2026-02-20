@@ -63,8 +63,15 @@ class DeviceClient:
 
     @property
     def screen(self) -> str:
-        """Current screen name (e.g. 'main', 'settings')."""
-        return self.get_ui_state()["screen"]
+        """Current screen name (e.g. 'main', 'settings').
+
+        Uses the lightweight /api/test/screen endpoint (no widget tree walk).
+        """
+        r = self.session.get(
+            f"{self.base_url}/api/test/screen", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json()["screen"]
 
     @property
     def widgets(self) -> list[Widget]:
@@ -84,7 +91,11 @@ class DeviceClient:
         label: Optional[str] = None,
         label_contains: Optional[str] = None,
     ) -> dict:
-        """POST /api/test/click — click a widget by tag, symbol, or label text."""
+        """POST /api/test/click — click a widget by tag, symbol, or label text.
+
+        Returns dict with ``success``, ``clicked_type``, ``clicked_text``, and
+        ``render_time_us`` (microseconds spent inside ``lv_obj_send_event``).
+        """
         body: dict = {}
         if tag is not None:
             body["tag"] = tag

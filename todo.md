@@ -11,8 +11,42 @@
 - [ ] Add COP/energy fields to REST API and demo mode injection
 - [ ] Add flow rate configuration to the Advanced/Params screen
 
+## Screen Render Performance
+
+Baseline numbers measured Feb 2026 (ESP32-P4, ESP-IDF 5.4.3, LVGL 9.2).
+Budget: 300 ms normal / 500 ms heavy-state. All currently passing.
+
+| Screen | Render (ms) | Budget (ms) | Usage | Notes |
+|--------|-------------|-------------|-------|-------|
+| temps | 10 | 300 | 3% | |
+| system | 16 | 300 | 5% | |
+| settings | 20 | 300 | 7% | |
+| errors (empty) | 28 | 300 | 9% | |
+| control | 56 | 300 | 19% | |
+| errors (history) | 187 | 500 | 37% | active + cleared errors |
+| event_log | 274 | 300 | 91% | ⚠️ tightest margin |
+| event_log (full) | 275 | 300 | 92% | ⚠️ 50 cards, near budget |
+| errors (heavy) | 311 | 500 | 62% | 16 active errors, capped |
+
+Future optimizations:
+- [ ] **Event log screen**: reduce per-card widget count (eliminate nested `top_row`
+      container — use absolute alignment on the card instead of inner flex). Target: < 200 ms
+- [ ] **Event log screen**: lazy-load scroll (see below) — only create visible cards,
+      append on scroll. Would bring initial render to ~50 ms regardless of event count
+- [ ] **Errors screen (heavy)**: evaluate if the error card structure can be simplified
+      (currently ~9 widgets per card). Less urgent since the 16-error cap keeps it well
+      under the 500 ms heavy budget
+- [ ] **Control screen**: profile why 56 ms — relatively high for a single-screen with
+      sliders/toggles. May have unnecessary nested containers
+
 ## Event Log Enhancements
 
+- [ ] **Lazy-load scroll**: Replace the fixed display cap (`MAX_DISPLAYED_EVENTS`)
+      with incremental loading — render the first ~10 events, then append more on
+      `LV_EVENT_SCROLL_END` as the user scrolls toward the bottom. LVGL scroll
+      callbacks run in the display task context (no `bsp_display_lock()` needed),
+      so appending 3-5 widgets per scroll event is safe and avoids the O(n²) flex
+      layout issue that caused the original hang at 128 items.
 - [ ] Consider logging compressor frequency changes (e.g. significant jumps or thresholds)
 - [ ] Consider logging fan speed changes (RPM thresholds or level transitions)
 
