@@ -134,6 +134,33 @@ class TestOtaUploadBadData:
         assert data["state"] == "idle"
         assert data["progress"] == 0
 
+    def test_upload_truncated_firmware_rejected(self):
+        """Valid 0xE9 header but truncated body should fail validation."""
+        # ESP32 binary header (0xE9) + some plausible header bytes + truncated
+        # This passes the magic byte check but fails esp_ota_end() validation
+        truncated = b"\xE9" + (b"\x00" * 4095)
+        r = _post_raw("/api/ota/upload", data=truncated)
+        # Should fail with 500 (OTA validation failed) — not 200
+        assert r.status_code in (400, 500), (
+            f"Truncated firmware should be rejected, got {r.status_code}"
+        )
+        # Device must not reboot
+        data = _get("/api/ota/status").json()
+        assert data["state"] in ("idle", "failed")
+
+    def test_upload_valid_header_garbage_body_rejected(self):
+        """Valid header byte + random garbage should fail validation."""
+        import os
+        # 64KB: enough to pass header check, but random data won't pass OTA end
+        garbage = b"\xE9" + os.urandom(65535)
+        r = _post_raw("/api/ota/upload", data=garbage)
+        assert r.status_code in (400, 500), (
+            f"Garbage firmware should be rejected, got {r.status_code}"
+        )
+        # Verify device didn't reboot
+        data = _get("/api/ota/status").json()
+        assert data["state"] in ("idle", "failed")
+
 
 # ── OTA Update — URL validation ──────────────────────────────────────────
 
