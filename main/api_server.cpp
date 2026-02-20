@@ -1180,6 +1180,7 @@ static esp_err_t ota_status_get_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(root, "bytes_downloaded", (double)status.bytes_downloaded);
     cJSON_AddNumberToObject(root, "total_bytes", (double)status.total_bytes);
     cJSON_AddStringToObject(root, "current_version", status.current_version);
+    cJSON_AddBoolToObject(root, "pending_verify", ota_mgr_is_pending_verify());
     
     if (status.new_version[0] != '\0') {
         cJSON_AddStringToObject(root, "new_version", status.new_version);

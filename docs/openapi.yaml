@@ -480,6 +480,13 @@ paths:
                   current_version:
                     type: string
                     example: "1.2.3"
+                  pending_verify:
+                    type: boolean
+                    description: |
+                      True if the running firmware was loaded via OTA and hasn't
+                      been validated yet. If the device reboots before validation,
+                      the bootloader reverts to the previous partition.
+                    example: false
                   new_version:
                     type: string
                     description: Version being installed (only during URL update)
