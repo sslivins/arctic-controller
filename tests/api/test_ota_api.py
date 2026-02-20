@@ -14,6 +14,7 @@ Prerequisites:
 
 import os
 import re
+import time
 
 import pytest
 import requests
@@ -471,7 +472,15 @@ class TestOtaAuthEnforcement:
 
     def test_upload_rejects_bad_key(self):
         """POST /api/ota/upload with invalid API key → 401."""
-        r = _post_raw_with_bad_key("/api/ota/upload", data=b"\x00")
+        # Retry on transient connection timeouts (mDNS/network flakes)
+        for attempt in range(3):
+            try:
+                r = _post_raw_with_bad_key("/api/ota/upload", data=b"\x00")
+                break
+            except requests.exceptions.ConnectionError:
+                if attempt == 2:
+                    raise
+                time.sleep(2)
         assert r.status_code == 401
 
     def test_reboot_rejects_bad_key(self):

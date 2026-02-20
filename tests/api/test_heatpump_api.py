@@ -510,8 +510,13 @@ class TestHeatpumpErrors:
     def test_errors_with_injected_error(self):
         """Injecting an error should appear in active errors."""
         _inject_demo({"error1": 1})  # Bit 0
-        time.sleep(0.3)
-        data = _get("/api/heatpump/errors").json()
+        # Poll until the error propagates (up to 3s)
+        data = None
+        for _ in range(6):
+            time.sleep(0.5)
+            data = _get("/api/heatpump/errors").json()
+            if data["has_errors"]:
+                break
         assert data["has_errors"] is True
         assert data["error_count"] > 0
         assert len(data["active"]) > 0
