@@ -114,18 +114,24 @@ is called and the firmware crash-loops later, no automatic rollback occurs.
 
 These can run in the normal test suite without risk:
 
-- [ ] **URL allowlist enforcement** — `POST /api/ota/update` with a non-GitHub URL
-      (e.g. `http://evil.com/firmware.bin`) → expect 400 rejection
-- [ ] **Concurrent OTA prevention** — start an OTA (mock or use a slow/unreachable
-      URL), then send a second `POST /api/ota/update` → expect 409 or busy state
-- [ ] **Upload with bad data** — `POST /api/ota/upload` with truncated/random bytes
-      → expect failure without bricking
-- [ ] **OTA progress polling** — mock an OTA in progress, poll `GET /api/ota/status`
-      and verify `state`, `progress`, `bytes_downloaded` fields update
-- [ ] **Version reporting** — verify `GET /api/ota/status` returns correct
-      `current_version` matching the `CMakeLists.txt` version string
-- [ ] Verify OTA update check works from settings menu
-- [ ] Confirm firmware version displays correctly on settings screen
+- [x] **URL allowlist enforcement** — `POST /api/ota/update` with non-GitHub,
+      HTTP, wrong owner/repo, bare domain, empty URL → 403 rejection (9 tests)
+- [x] **Concurrent OTA prevention** — start a URL download to a nonexistent
+      GitHub URL, then attempt upload → 409 (1 test)
+- [x] **Upload with bad data** — random bytes, empty body, truncated header,
+      garbage body, JSON content type → rejection without bricking (6 tests)
+- [x] **Status schema validation** — verify all required fields, types, enum
+      values, idle baseline (zero counters, no error/new_version) (7 tests)
+- [x] **Version reporting** — verify `current_version` matches `CMakeLists.txt`,
+      semver format (2 tests)
+- [x] **Auth enforcement** — all 6 OTA endpoints reject invalid API key (6 tests)
+- [x] **Releases endpoint** — field presence, version consistency (2 tests)
+- [x] **GitHub update precondition** — 400 without prior release check (1 test)
+- [x] **Error state** — failed download populates error field (1 test)
+- [x] **pending_verify field** — boolean presence and value checks (2 tests,
+      skip on firmware without ota-hardening)
+- [ ] Verify OTA update check works from settings menu (UI test)
+- [ ] Confirm firmware version displays correctly on settings screen (UI test)
 
 ### Tier 2 — Real OTA (requires reboot)
 
@@ -161,9 +167,8 @@ These validate that a bad firmware gets reverted by the bootloader.
 - [ ] **CI with hardware-in-the-loop**: Flash a known old version, run the
       destructive update test, verify the device comes back with the new version.
       Requires a dedicated test device on the CI network.
-- [ ] **`is_pending_verify` API field** — expose `ota_mgr_is_pending_verify()`
-      in the `/api/ota/status` response so tests can programmatically verify
-      rollback state without parsing serial logs.
+- [x] **`is_pending_verify` API field** — exposed `ota_mgr_is_pending_verify()`
+      in `/api/ota/status` response; tested in `test_ota_api.py`.
 
 ## WiFi Testing (expanded)
 
@@ -240,10 +245,12 @@ Items completed in this branch (for reference):
 - [x] Screen render performance tests (11): 300 ms budget for all transitions, heavy state, leak detection
 - [x] Lightweight `/api/test/screen` endpoint for fast screen detection
 - [x] Iterative widget tree walk with PSRAM buffer (handles 100+ widget screens)
-- [x] REST API functional tests — 145 tests across 4 files covering heatpump
-      status/control/demo/params/errors/status1-bits, logs (filtering, incremental
-      polling), auth (config, login/logout, API key, enforcement), events, health,
-      status, time config (round-trip), OTA status, time sync, WiFi, info,
-      display brightness, preferences
-- [x] Web dashboard tests — 50 Playwright tests across 5 files (dashboard,
-      navigation, login, i18n, settings) in `tests/web/`
+- [x] REST API functional tests — 254 tests across 7 files covering heatpump
+      status/control/demo/params/errors/status1-bits, logs, auth (config,
+      login/logout, API key, sessions), events, health, time config, OTA
+      (status schema, auth, URL allowlist, bad uploads, releases, error state),
+      WiFi, info, display brightness, preferences
+- [x] Session lifecycle tests — 23 tests covering login/logout, concurrent
+      sessions (max 4), credential changes, auth toggle, API key via session
+- [x] Web dashboard tests — 53 Playwright tests across 6 files (dashboard,
+      navigation, login, i18n, settings, password change) in `tests/web/`

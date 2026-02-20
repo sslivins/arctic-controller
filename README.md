@@ -1,5 +1,12 @@
 # Arctic Controller
 
+[![Build](https://github.com/sslivins/arctic-controller/actions/workflows/build.yml/badge.svg)](https://github.com/sslivins/arctic-controller/actions/workflows/build.yml)
+[![Device Tests](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml/badge.svg)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
+
+[![Device UI Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/sslivins/b37c67c774075a8a90afd54b7c3a4592/raw/ui_tests.json)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
+[![API Contract Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/sslivins/b37c67c774075a8a90afd54b7c3a4592/raw/api_tests.json)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
+[![Web Dashboard Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/sslivins/b37c67c774075a8a90afd54b7c3a4592/raw/web_tests.json)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
+
 Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based management interface.
 
 ## Hardware

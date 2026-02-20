@@ -216,3 +216,64 @@ jobs:
             tests/web/screenshots/
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Extract test results for badges
+        id: test_results
+        if: always()
+        run: |
+          python3 -c "
+          import xml.etree.ElementTree as ET
+          import os
+
+          def parse_junit(path):
+              if not os.path.exists(path):
+                  return 0, 0, 0
+              root = ET.parse(path).getroot()
+              tests = int(root.get('tests', 0))
+              failures = int(root.get('failures', 0)) + int(root.get('errors', 0))
+              skipped = int(root.get('skipped', 0))
+              return tests - failures - skipped, failures, skipped
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as gh:
+              for name, path in [('ui', 'test-results.xml'), ('api', 'api-test-results.xml'), ('web', 'web-test-results.xml')]:
+                  p, f, s = parse_junit(path)
+                  msg = f'{p} passed'
+                  if s: msg += f', {s} skipped'
+                  if f: msg += f', {f} failed'
+                  color = 'red' if f > 0 else 'brightgreen'
+                  gh.write(f'{name}_msg={msg}\n')
+                  gh.write(f'{name}_color={color}\n')
+          "
+
+      - name: Update Device UI Tests badge
+        if: always() && steps.test_results.outcome == 'success'
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: b37c67c774075a8a90afd54b7c3a4592
+          filename: ui_tests.json
+          label: Device UI Tests
+          message: ${{ steps.test_results.outputs.ui_msg }}
+          color: ${{ steps.test_results.outputs.ui_color }}
+
+      - name: Update API Contract Tests badge
+        if: always() && steps.test_results.outcome == 'success'
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: b37c67c774075a8a90afd54b7c3a4592
+          filename: api_tests.json
+          label: API Contract Tests
+          message: ${{ steps.test_results.outputs.api_msg }}
+          color: ${{ steps.test_results.outputs.api_color }}
+
+      - name: Update Web Dashboard Tests badge
+        if: always() && steps.test_results.outcome == 'success'
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: b37c67c774075a8a90afd54b7c3a4592
+          filename: web_tests.json
+          label: Web Dashboard Tests
+          message: ${{ steps.test_results.outputs.web_msg }}
+          color: ${{ steps.test_results.outputs.web_color }}

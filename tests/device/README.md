@@ -66,7 +66,7 @@ The pipeline:
 
 1. **Build** (ubuntu-latest) — compiles firmware with `CONFIG_TEST_ENDPOINTS=y`
    using `espressif/esp-idf-ci-action`
-2. **Flash** (self-hosted Pi Zero 2 W, label `tab5`) — uploads firmware via OTA
+2. **Flash** (self-hosted VM, label `vm-mi`) — uploads firmware via OTA
    (falls back to USB serial on failure)
 3. **Test** — runs `pytest tests/device/ -v` against the freshly flashed device
 
@@ -138,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (243 UI tests + 9 screenshot API tests + 145 REST API functional tests + API contract tests)
+### Test Files (243 UI tests + 9 screenshot API tests + 254 REST API tests + 53 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -168,7 +168,15 @@ The `conftest.py` session fixture handles this automatically.
 | [`../api/test_heatpump_api.py`](../api/test_heatpump_api.py) | 65 | Heat pump status, demo injection, status1 bits, power/mode/setpoint control, params, errors |
 | [`../api/test_logs_api.py`](../api/test_logs_api.py) | 17 | Log buffer retrieval, filtering (since/level/limit), incremental polling, clear |
 | [`../api/test_auth_api.py`](../api/test_auth_api.py) | 17 | Auth config, login/logout sessions, API key management, auth enforcement |
+| [`../api/test_session_api.py`](../api/test_session_api.py) | 23 | Session lifecycle: login/logout, concurrent (max 4), credential changes, auth toggle |
+| [`../api/test_ota_api.py`](../api/test_ota_api.py) | 41 | OTA safety: URL allowlist, bad uploads, auth enforcement, releases, error state, schema |
 | [`../api/test_events_and_misc_api.py`](../api/test_events_and_misc_api.py) | 50 | Events, health, status, time config (round-trip), OTA status, time sync, WiFi, info, display brightness, preferences |
+| [`../web/test_dashboard.py`](../web/test_dashboard.py) | — | Web dashboard: page load, real-time updates, temperature displays, controls |
+| [`../web/test_navigation.py`](../web/test_navigation.py) | — | Web navigation: tab switching, responsive layout, scroll behavior |
+| [`../web/test_login.py`](../web/test_login.py) | — | Web auth: login form, session persistence, logout |
+| [`../web/test_i18n.py`](../web/test_i18n.py) | — | Web i18n: language switching, label updates |
+| [`../web/test_settings.py`](../web/test_settings.py) | — | Web settings: all controls, persistence |
+| [`../web/test_change_password.py`](../web/test_change_password.py) | 3 | Web password change: enable auth, change creds, restore defaults |
 
 ### DeviceClient Methods
 
