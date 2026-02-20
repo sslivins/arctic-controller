@@ -88,6 +88,7 @@ static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_errors_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req);
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
+static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
 static esp_err_t display_brightness_get_handler(httpd_req_t* req);
@@ -274,7 +275,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 84;  // 43 api_server + 34 test_endpoints = 77 needed
+    config.max_uri_handlers = 86;  // 44 api_server + 34 test_endpoints = 78 needed
     config.stack_size = 16384;     // Default task stack (tree walk is iterative, not recursive)
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -617,6 +618,15 @@ bool api_server_start(void)
     };
     REGISTER_URI(heatpump_errors_clear_uri);
     
+    // GET /api/heatpump/diagnostic - Download diagnostic CSV dump
+    httpd_uri_t heatpump_diagnostic_uri = {
+        .uri = "/api/heatpump/diagnostic",
+        .method = HTTP_GET,
+        .handler = heatpump_diagnostic_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_diagnostic_uri);
+
     // PATCH /api/heatpump/demo - Write fields in demo mode (for testing)
     httpd_uri_t heatpump_demo_uri = {
         .uri = "/api/heatpump/demo",
@@ -2338,6 +2348,190 @@ static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req)
     free(json_str);
     cJSON_Delete(root);
     
+    return ESP_OK;
+}
+
+// ============================================================================
+// GET /api/heatpump/diagnostic - Download complete system diagnostic as CSV
+// ============================================================================
+static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    // Get current timestamp for filename
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    char filename[128];
+    snprintf(filename, sizeof(filename), "attachment; filename=\"arctic-diagnostic-%04d%02d%02d-%02d%02d%02d.csv\"",
+             timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+             timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
+    httpd_resp_set_type(req, "text/csv");
+    httpd_resp_set_hdr(req, "Content-Disposition", filename);
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+    // Line buffer for CSV rows
+    char line[256];
+
+    // UTF-8 BOM so Excel interprets the file correctly (degree signs, accents, etc.)
+    httpd_resp_send_chunk(req, "\xEF\xBB\xBF", 3);
+
+    // CSV header
+    httpd_resp_sendstr_chunk(req, "Category,Name,P-Code,Modbus Address,Value,Unit\r\n");
+
+    arctic::HeatPumpState hp = arctic::getState();
+    bool demo = arctic::isDemoMode();
+
+    // --- System State ---
+    snprintf(line, sizeof(line), "System,Connected,,,\"%s\",\r\n", hp.connected ? "Yes" : "No");
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "System,Demo Mode,,,\"%s\",\r\n", demo ? "Yes" : "No");
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "System,Unit Power,,2000,\"%s\",\r\n", hp.unit_on ? "ON" : "OFF");
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "System,Working Mode,,2001,\"%s\",\r\n", arctic::workingModeToString(hp.working_mode));
+    httpd_resp_sendstr_chunk(req, line);
+
+    // --- Temperatures (stored as tenths of °C) ---
+    #define DIAG_TEMP(name_str, field, addr) \
+        snprintf(line, sizeof(line), "Temperature,%s,,%d,%.1f,°C\r\n", name_str, addr, (field) / 10.0f); \
+        httpd_resp_sendstr_chunk(req, line);
+
+    DIAG_TEMP("Water Tank",       hp.water_tank_temp,       2100)
+    DIAG_TEMP("Outlet Water",     hp.outlet_water_temp,     2102)
+    DIAG_TEMP("Inlet Water",      hp.inlet_water_temp,      2103)
+    DIAG_TEMP("Discharge",        hp.discharge_temp,        2104)
+    DIAG_TEMP("Suction",          hp.suction_temp,          2105)
+    DIAG_TEMP("Outdoor Coil",     hp.outdoor_coil_temp,     2107)
+    DIAG_TEMP("Indoor Coil",      hp.indoor_coil_temp,      2108)
+    DIAG_TEMP("Outdoor Ambient",  hp.outdoor_ambient_temp,  2110)
+    DIAG_TEMP("IPM Module",       hp.ipm_temp,              2114)
+    #undef DIAG_TEMP
+
+    // --- Setpoints ---
+    snprintf(line, sizeof(line), "Setpoint,Cooling,,2002,%d,°C\r\n", hp.cooling_setpoint);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Setpoint,Heating,,2003,%d,°C\r\n", hp.heating_setpoint);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Setpoint,Hot Water,,2004,%d,°C\r\n", hp.hot_water_setpoint);
+    httpd_resp_sendstr_chunk(req, line);
+
+    // --- System Readings ---
+    snprintf(line, sizeof(line), "Reading,Compressor Frequency,,2118,%u,Hz\r\n", hp.compressor_freq);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,Fan Speed,,2119,%u,RPM\r\n", hp.fan_speed);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,AC Voltage,,2120,%u,V\r\n", hp.ac_voltage);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,AC Current,,2121,%.1f,A\r\n", hp.ac_current / 10.0f);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,DC Voltage,,2122,%.1f,V\r\n", hp.getDcVoltageV());
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,DC Current,,2123,%.1f,A\r\n", hp.dc_current / 10.0f);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,2124,%u,steps\r\n", hp.primary_eev_opening);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,Secondary EEV Opening,,2125,%u,steps\r\n", hp.secondary_eev_opening);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,High Pressure,,2126,%.2f,MPa\r\n", hp.getHighPressureMPa());
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,Low Pressure,,2127,%.2f,MPa\r\n", hp.getLowPressureMPa());
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,Power Consumption,,,%.0f,W\r\n", (hp.ac_voltage * hp.ac_current) / 10.0f);
+    httpd_resp_sendstr_chunk(req, line);
+
+    // --- Component Status (register 2135) ---
+    #define DIAG_STATUS1(name_str, mask) \
+        snprintf(line, sizeof(line), "Status,%s,,2135,\"%s\",\r\n", name_str, (hp.status1 & arctic::status1::mask) ? "ON" : "OFF"); \
+        httpd_resp_sendstr_chunk(req, line);
+
+    DIAG_STATUS1("Unit",            UNIT_ON)
+    DIAG_STATUS1("Compressor",      COMPRESSOR)
+    DIAG_STATUS1("Fan High",        FAN_HIGH)
+    DIAG_STATUS1("Fan Medium",      FAN_MED)
+    DIAG_STATUS1("Fan Low",         FAN_LOW)
+    DIAG_STATUS1("Water Pump",      WATER_PUMP)
+    DIAG_STATUS1("Four-Way Valve",  FOUR_WAY_VALVE)
+    DIAG_STATUS1("Backup Heater",   BACKUP_HEATER)
+    DIAG_STATUS1("Water Flow Switch", WATER_FLOW_SW)
+    DIAG_STATUS1("High Press Switch", HIGH_PRESS_SW)
+    DIAG_STATUS1("Low Press Switch",  LOW_PRESS_SW)
+    DIAG_STATUS1("Emergency Switch",  EMERGENCY_SW)
+    DIAG_STATUS1("AC Online",       AC_ONLINE)
+    DIAG_STATUS1("Mode Switch",     MODE_SWITCH)
+    DIAG_STATUS1("3-Way Valve 1",   THREE_WAY_V1)
+    DIAG_STATUS1("3-Way Valve 2",   THREE_WAY_V2)
+    #undef DIAG_STATUS1
+
+    // --- Component Status (register 2136) ---
+    #define DIAG_STATUS2(name_str, mask) \
+        snprintf(line, sizeof(line), "Status,%s,,2136,\"%s\",\r\n", name_str, (hp.status2 & arctic::status2::mask) ? "ON" : "OFF"); \
+        httpd_resp_sendstr_chunk(req, line);
+
+    DIAG_STATUS2("Solenoid Valve",    SOLENOID_VALVE)
+    DIAG_STATUS2("Unloading Valve",   UNLOADING_VALVE)
+    DIAG_STATUS2("Oil Return Valve",  OIL_RETURN_VALVE)
+    DIAG_STATUS2("Defrosting",        DEFROSTING)
+    DIAG_STATUS2("Refrigerant Recovery", REFRIG_RECOVERY)
+    DIAG_STATUS2("Oil Return",        OIL_RETURN)
+    DIAG_STATUS2("Wired Controller",  WIRED_CTRL_CONN)
+    DIAG_STATUS2("Energy Saving",     ENERGY_SAVING)
+    DIAG_STATUS2("Antifreeze Level 1", ANTIFREEZE_1)
+    DIAG_STATUS2("Antifreeze Level 2", ANTIFREEZE_2)
+    DIAG_STATUS2("Sterilization",     STERILIZATION)
+    #undef DIAG_STATUS2
+
+    // --- Raw status/error register values ---
+    snprintf(line, sizeof(line), "Register,Status 1 (raw),,2135,0x%04X,\r\n", hp.status1);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Register,Status 2 (raw),,2136,0x%04X,\r\n", hp.status2);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Register,Error 1 (raw),,2137,0x%04X,\r\n", hp.error1);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Register,Error 2 (raw),,2138,0x%04X,\r\n", hp.error2);
+    httpd_resp_sendstr_chunk(req, line);
+
+    // --- Active Errors (from ErrorDef arrays with Arctic codes) ---
+    int err_count = 0;
+    const arctic::ErrorDef* err1_defs = arctic::getError1Definitions(&err_count);
+    for (int i = 0; i < err_count; i++) {
+        if (hp.error1 & err1_defs[i].mask) {
+            snprintf(line, sizeof(line), "Error,\"%s\",%s,2137,ACTIVE,\r\n",
+                     err1_defs[i].description, err1_defs[i].code);
+            httpd_resp_sendstr_chunk(req, line);
+        }
+    }
+    err1_defs = arctic::getError2Definitions(&err_count);
+    for (int i = 0; i < err_count; i++) {
+        if (hp.error2 & err1_defs[i].mask) {
+            snprintf(line, sizeof(line), "Error,\"%s\",%s,2138,ACTIVE,\r\n",
+                     err1_defs[i].description, err1_defs[i].code);
+            httpd_resp_sendstr_chunk(req, line);
+        }
+    }
+
+    // --- P-Parameters (technician settings) ---
+    for (int i = 0; i < NUM_HEATPUMP_PARAMS; i++) {
+        const HeatPumpParam* p = &HEATPUMP_PARAMS[i];
+        bool read_ok = false;
+        int16_t value = heatpump_param_read_by_index(i, &read_ok);
+        if (read_ok) {
+            snprintf(line, sizeof(line), "Parameter,\"%s\",%s,%u,%d,%s\r\n",
+                     p->name, p->p_code, p->reg_addr, value, param_unit_to_string(p->unit_type));
+        } else {
+            snprintf(line, sizeof(line), "Parameter,\"%s\",%s,%u,READ_ERROR,%s\r\n",
+                     p->name, p->p_code, p->reg_addr, param_unit_to_string(p->unit_type));
+        }
+        httpd_resp_sendstr_chunk(req, line);
+    }
+
+    // Terminate chunked response
+    httpd_resp_sendstr_chunk(req, NULL);
     return ESP_OK;
 }
 

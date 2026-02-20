@@ -137,6 +137,11 @@
                 rebootController: 'Reboot Controller',
                 rebootConfirm: 'Reboot the device now?',
                 rebootingMsg: 'Device is rebooting. Please wait...',
+
+                // Settings - Diagnostics
+                diagnostics: 'Diagnostics',
+                diagnosticsDesc: 'Download a complete snapshot of all Modbus registers, sensor readings, and system parameters as a CSV file. Useful for troubleshooting with Arctic support.',
+                downloadDiagnostic: 'Download Diagnostic Report',
                 
                 // Language
                 language: 'Language',
@@ -390,6 +395,11 @@
                 rebootController: 'Redémarrer le contrôleur',
                 rebootConfirm: "Redémarrer l'appareil maintenant?",
                 rebootingMsg: "L'appareil redémarre. Veuillez patienter...",
+
+                // Settings - Diagnostics
+                diagnostics: 'Diagnostics',
+                diagnosticsDesc: 'Télécharger un instantané complet de tous les registres Modbus, les lectures des capteurs et les paramètres système au format CSV. Utile pour le dépannage avec le support Arctic.',
+                downloadDiagnostic: 'Télécharger le rapport de diagnostic',
                 
                 // Language
                 language: 'Langue',
@@ -643,6 +653,11 @@
                 rebootController: 'Reiniciar controlador',
                 rebootConfirm: '¿Reiniciar el dispositivo ahora?',
                 rebootingMsg: 'El dispositivo está reiniciando. Por favor espere...',
+
+                // Settings - Diagnostics
+                diagnostics: 'Diagnósticos',
+                diagnosticsDesc: 'Descargar una instantánea completa de todos los registros Modbus, lecturas de sensores y parámetros del sistema en formato CSV. Útil para resolver problemas con el soporte de Arctic.',
+                downloadDiagnostic: 'Descargar informe de diagnóstico',
                 
                 // Language
                 language: 'Idioma',
@@ -3245,6 +3260,19 @@
                                 </div>
                             </div>
                             
+                            <!-- Diagnostics -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('diagnostics')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <p style="color: var(--text-secondary); margin-bottom: 1rem;" x-text="t('diagnosticsDesc')"></p>
+                                    <a href="/api/heatpump/diagnostic" class="btn btn-secondary" style="width: 100%; text-align: center; text-decoration: none; display: block;">
+                                        📋 <span x-text="t('downloadDiagnostic')"></span>
+                                    </a>
+                                </div>
+                            </div>
+
                             <!-- Reboot Controller -->
                             <div class="card">
                                 <div class="card-header">
