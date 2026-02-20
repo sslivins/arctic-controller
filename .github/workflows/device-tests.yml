@@ -19,6 +19,7 @@ on:
       - 'repos.json'
       - 'fetch_repos.py'
       - 'tests/**'
+      - '!tests/**/*.md'
       - '.github/workflows/device-tests.yml'
   workflow_call:
   workflow_dispatch:
