@@ -188,6 +188,19 @@ Test flow: pytest script → sets state on simulator via REST → waits for Tab5
 - [x] Add a live log viewer panel to the web dashboard (auto-scroll, filterable by level, 2s polling)
 - [x] Hook into `esp_log_set_vprintf()` to capture logs into the ring buffer alongside serial output
 
+## OTA Hardening
+
+- [x] Enable `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` — bootloader reverts to
+      previous partition if new firmware fails to call `mark_valid()`
+- [x] Defer `ota_mgr_mark_valid()` to after `create_ui()` — proves display,
+      LVGL, and UI stack are functional before committing to new firmware
+- [x] Add `ota_mgr_is_pending_verify()` query function
+- [ ] Expose `is_pending_verify` in `/api/ota/status` response for test automation
+- [ ] Add Tier 1 OTA safety tests (URL allowlist, concurrent prevention, bad upload)
+- [ ] Add Tier 2 real OTA round-trip test (`@pytest.mark.destructive`)
+- [ ] Add Tier 3 rollback validation test (crash-before-mark-valid)
+- [ ] Consider adding a watchdog timer that reboots if firmware hangs before `mark_valid()`
+
 ## Testing
 
 > **Test backlog and coverage details have moved to [`tests/device/TODO.md`](tests/device/TODO.md).**

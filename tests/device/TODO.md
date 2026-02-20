@@ -106,32 +106,68 @@ The following screens and features have **no automated test coverage** yet:
 
 ## OTA / Firmware Testing (expanded)
 
+### Current state
+
+Bootloader rollback is enabled (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`).
+After an OTA update, the new firmware must call `ota_mgr_mark_valid()` (which
+happens after `create_ui()` succeeds) before the next reboot, or the bootloader
+reverts to the previous partition. This is a one-shot mechanism — if `mark_valid()`
+is called and the firmware crash-loops later, no automatic rollback occurs.
+
+### Tier 1 — Safe tests (no reboot, no real OTA)
+
+These can run in the normal test suite without risk:
+
+- [ ] **URL allowlist enforcement** — `POST /api/ota/update` with a non-GitHub URL
+      (e.g. `http://evil.com/firmware.bin`) → expect 400 rejection
+- [ ] **Concurrent OTA prevention** — start an OTA (mock or use a slow/unreachable
+      URL), then send a second `POST /api/ota/update` → expect 409 or busy state
+- [ ] **Upload with bad data** — `POST /api/ota/upload` with truncated/random bytes
+      → expect failure without bricking
+- [ ] **OTA progress polling** — mock an OTA in progress, poll `GET /api/ota/status`
+      and verify `state`, `progress`, `bytes_downloaded` fields update
+- [ ] **Version reporting** — verify `GET /api/ota/status` returns correct
+      `current_version` matching the `CMakeLists.txt` version string
 - [ ] Verify OTA update check works from settings menu
-- [ ] Test OTA download and install process
 - [ ] Confirm firmware version displays correctly on settings screen
-- [ ] Verify device reboots cleanly after OTA update
 
-### OTA Install Button — Future Options
+### Tier 2 — Real OTA (requires reboot)
 
-The automated firmware tests verify version display, GitHub check completion,
-update-available UI state, and Install button visibility — but intentionally
-never *click* the Install button (it triggers a real OTA download + auto-reboot
-with no confirmation dialog, which would kill the test session).
+These tests trigger an actual firmware update. The device reboots, so the test
+must wait for it to come back online. Mark with `@pytest.mark.destructive`.
 
-Options for future coverage:
+- [ ] **Same-version OTA round-trip** — upload the current firmware binary via
+      `POST /api/ota/upload`, let it flash, wait for reboot, verify device
+      returns to idle with same version on the alternate partition
+- [ ] **GitHub release OTA** — trigger `POST /api/ota/github` with the current
+      release, wait for download + reboot, verify device comes back healthy
+- [ ] **Verify `mark_valid()` fires** — after OTA reboot, check that the device
+      is NOT in `PENDING_VERIFY` state (query new `/api/ota/status` field or
+      check serial log for "Firmware validated")
+
+### Tier 3 — Rollback (complex, manual or CI-only)
+
+These validate that a bad firmware gets reverted by the bootloader.
+
+- [ ] **Crash-before-mark-valid** — build a firmware that crashes in `create_ui()`
+      (before `mark_valid()`). Flash via OTA. Verify the bootloader reverts to the
+      previous working partition after reboot. This proves the rollback mechanism.
+- [ ] **Hang-before-mark-valid** — similar, but firmware hangs instead of crashing.
+      Requires watchdog to trigger reboot.
+
+### Future enhancements
 
 - [ ] **Dry-run mode**: Add a `CONFIG_TEST_OTA_DRY_RUN` flag that replaces the
       real `ota_mgr_start_update()` with a fake task that simulates progress
       (0→100%) and sets state to `OTA_STATE_READY_TO_REBOOT` without actually
       flashing or rebooting. Tests could then verify the progress bar, download
       status text, and completion UI.
-- [ ] **Destructive marker**: Mark a dedicated test with `@pytest.mark.destructive`
-      that actually clicks Install, waits for the device to reboot (polling until
-      it comes back online), and verifies the new version. Only run on demand
-      (`pytest -m destructive`) against a throwaway device.
 - [ ] **CI with hardware-in-the-loop**: Flash a known old version, run the
       destructive update test, verify the device comes back with the new version.
       Requires a dedicated test device on the CI network.
+- [ ] **`is_pending_verify` API field** — expose `ota_mgr_is_pending_verify()`
+      in the `/api/ota/status` response so tests can programmatically verify
+      rollback state without parsing serial logs.
 
 ## WiFi Testing (expanded)
 
