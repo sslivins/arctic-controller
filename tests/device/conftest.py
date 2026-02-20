@@ -14,6 +14,22 @@ from device_client import DeviceClient
 # Directory for failure screenshots
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
 
+# Circuit breaker — abort the entire session if the device stops responding.
+# When a test can't reach the device, _consecutive_failures is incremented.
+# After MAX_CONSECUTIVE_FAILURES in a row, pytest.exit() is called to avoid
+# burning hours on HTTP timeouts for a dead device.
+MAX_CONSECUTIVE_FAILURES = 3
+_consecutive_failures = 0
+
+
+def _device_alive(device: DeviceClient) -> bool:
+    """Quick health check — returns True if the device responds."""
+    try:
+        device.screen  # lightweight /api/test/screen call
+        return True
+    except Exception:
+        return False
+
 
 def _return_to_main(device: DeviceClient):
     """Navigate the device back to the main screen from wherever it is."""
@@ -27,6 +43,19 @@ def _return_to_main(device: DeviceClient):
             return
 
     if current == "main":
+        device.wait_for_widget(tag="settings", timeout=3.0)
+        return
+
+    # If on a heat pump sub-screen, close it to return to main
+    if current in ("temps", "system", "control", "errors", "event_log"):
+        try:
+            device.click(tag=f"{current}_close")
+        except Exception:
+            try:
+                device.click(symbol="CLOSE")
+            except Exception:
+                pass
+        device.wait_for_screen("main", timeout=5.0)
         device.wait_for_widget(tag="settings", timeout=3.0)
         return
 
@@ -110,17 +139,29 @@ def device() -> DeviceClient:
 def ensure_main_screen(device: DeviceClient):
     """Before each test, make sure we're on the main screen.
     
-    If the settings menu is open, click the back/close button to return.
-    This keeps tests independent of each other.
+    If the device is unreachable, skip immediately — the circuit breaker
+    (pytest_runtest_makereport) will abort the session after repeated failures.
     """
+    global _consecutive_failures
+    if _consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+        pytest.exit(
+            f"Device unreachable — {_consecutive_failures} consecutive failures, aborting session",
+            returncode=1,
+        )
+    if not _device_alive(device):
+        pytest.fail("Device unreachable — cannot navigate to main screen")
     _return_to_main(device)
 
 
 @pytest.fixture(autouse=True)
 def screenshot_on_failure(request, device: DeviceClient):
-    """Capture a screenshot when a test fails, for visual debugging."""
+    """Capture a screenshot when a test fails, for visual debugging.
+    
+    Skips the screenshot if the device is unreachable (avoids a 30s timeout).
+    """
     yield
-    if request.node.rep_call and request.node.rep_call.failed:
+    rep = getattr(request.node, "rep_call", None)
+    if rep and rep.failed and _consecutive_failures < MAX_CONSECUTIVE_FAILURES:
         SCREENSHOT_DIR.mkdir(exist_ok=True)
         name = request.node.name.replace("/", "_").replace("::", "_")
         path = SCREENSHOT_DIR / f"{name}.png"
@@ -133,7 +174,20 @@ def screenshot_on_failure(request, device: DeviceClient):
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    """Stash test result on the item so fixtures can check pass/fail."""
+    """Stash test result on the item and track consecutive failures.
+
+    After MAX_CONSECUTIVE_FAILURES tests fail in a row (any phase),
+    the session is aborted via ensure_main_screen to avoid spending
+    hours on HTTP timeouts for a dead device.
+    """
+    global _consecutive_failures
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
+
+    # Track consecutive failures (setup or call phase)
+    if rep.when in ("setup", "call"):
+        if rep.failed:
+            _consecutive_failures += 1
+        elif rep.when == "call" and rep.passed:
+            _consecutive_failures = 0

@@ -138,7 +138,7 @@ components:
       properties:
         screen:
           type: string
-          enum: [main, settings, display, wifi, firmware, time, language]
+          enum: [main, settings, display, wifi, firmware, time, language, temps, system, control, errors, event_log]
         widgets:
           type: array
           items:
@@ -209,7 +209,12 @@ components:
           type: string
         clicked_text:
           type: string
-      required: [success, clicked_type]
+        render_time_us:
+          type: number
+          description: >-
+            Wall-clock microseconds spent inside lv_obj_send_event(LV_EVENT_CLICKED).
+            Measures the synchronous widget-tree creation triggered by the click.
+      required: [success, clicked_type, render_time_us]
 
     # --- Slider -----------------------------------------------------------
     SetSliderRequest:
@@ -514,6 +519,28 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UiState"
+        "503":
+          $ref: "#/components/responses/DisplayTimeout"
+
+  /api/test/screen:
+    get:
+      tags: [UI State]
+      summary: Get current screen name
+      description: |
+        Lightweight endpoint that returns only the current screen name without
+        walking the widget tree.  Useful for navigation assertions.
+      responses:
+        "200":
+          description: Current screen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  screen:
+                    type: string
+                    enum: [main, settings, display, wifi, firmware, time, language, temps, system, control, errors, event_log]
+                required: [screen]
         "503":
           $ref: "#/components/responses/DisplayTimeout"
 
