@@ -1,5 +1,8 @@
 # Arctic Controller
 
+[![Build](https://github.com/sslivins/arctic-controller/actions/workflows/build.yml/badge.svg)](https://github.com/sslivins/arctic-controller/actions/workflows/build.yml)
+[![Device Tests](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml/badge.svg)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
+
 Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based management interface.
 
 ## Hardware
