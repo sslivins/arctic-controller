@@ -1238,6 +1238,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/heatpump/diagnostic:
+    get:
+      tags:
+        - HeatPump
+      summary: Download diagnostic CSV report
+      description: |
+        Returns a comprehensive system diagnostic as a downloadable CSV file.
+        Includes all Modbus register values, sensor readings, component status,
+        active errors, and technician P-parameters with current values.
+        Useful for remote troubleshooting with Arctic support.
+        
+        CSV columns: Category, Name, P-Code, Modbus Address, Value, Unit
+        
+        Sections:
+        - System State (power, mode, connection)
+        - Temperatures (all sensor readings in °C)
+        - Setpoints (cooling, heating, hot water)
+        - System Readings (compressor freq, fan RPM, voltages, currents, pressures)
+        - Component Status (individual bits from registers 2135/2136)
+        - Raw Register Values (hex values of status/error registers)
+        - Active Errors (individual error flags from registers 2137/2138)
+        - P-Parameters (all technician settings with live values)
+      responses:
+        '200':
+          description: CSV diagnostic file
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="arctic-diagnostic-YYYYMMDD-HHMMSS.csv"'
+          content:
+            text/csv:
+              schema:
+                type: string
+                description: CSV formatted diagnostic data
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/heatpump/errors:
     get:
       tags:

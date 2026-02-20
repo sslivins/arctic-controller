@@ -17,7 +17,7 @@ class TestSettingsCards:
         """All 6 settings cards are rendered."""
         _go_to_settings(dashboard_page)
         cards = dashboard_page.locator(".card")
-        assert cards.count() >= 6, f"Expected at least 6 settings cards, got {cards.count()}"
+        assert cards.count() >= 7, f"Expected at least 7 settings cards, got {cards.count()}"
 
     def test_device_info_card(self, dashboard_page: Page):
         """Device Info card shows version, platform, free heap, uptime."""
@@ -105,6 +105,22 @@ class TestFirmwareSettings:
         _go_to_settings(dashboard_page)
         file_input = dashboard_page.locator("input[type='file'][accept='.bin']")
         assert file_input.count() == 1
+
+
+class TestDiagnosticsSettings:
+    """Diagnostics card in Settings."""
+
+    def test_diagnostics_card_visible(self, dashboard_page: Page):
+        """Diagnostics card is present on Settings page."""
+        _go_to_settings(dashboard_page)
+        link = dashboard_page.locator("a[href='/api/heatpump/diagnostic']")
+        expect(link).to_be_visible()
+
+    def test_diagnostics_download_link_href(self, dashboard_page: Page):
+        """Download link points to the diagnostic CSV endpoint."""
+        _go_to_settings(dashboard_page)
+        link = dashboard_page.locator("a[href='/api/heatpump/diagnostic']")
+        assert link.get_attribute("href") == "/api/heatpump/diagnostic"
 
 
 class TestSystemSettings:
