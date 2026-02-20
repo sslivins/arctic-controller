@@ -138,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (243 UI tests + 9 screenshot API tests + 254 REST API tests + 53 web tests + API contract tests)
+### Test Files (243 UI tests + 9 screenshot API tests + 286 REST API tests + 55 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -170,6 +170,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`../api/test_auth_api.py`](../api/test_auth_api.py) | 17 | Auth config, login/logout sessions, API key management, auth enforcement |
 | [`../api/test_session_api.py`](../api/test_session_api.py) | 23 | Session lifecycle: login/logout, concurrent (max 4), credential changes, auth toggle |
 | [`../api/test_ota_api.py`](../api/test_ota_api.py) | 41 | OTA safety: URL allowlist, bad uploads, auth enforcement, releases, error state, schema |
+| [`../api/test_diagnostic_api.py`](../api/test_diagnostic_api.py) | 32 | Diagnostic CSV download: format, BOM, headers, categories, content, error injection, auth, idempotency |
 | [`../api/test_events_and_misc_api.py`](../api/test_events_and_misc_api.py) | 50 | Events, health, status, time config (round-trip), OTA status, time sync, WiFi, info, display brightness, preferences |
 | [`../web/test_dashboard.py`](../web/test_dashboard.py) | — | Web dashboard: page load, real-time updates, temperature displays, controls |
 | [`../web/test_navigation.py`](../web/test_navigation.py) | — | Web navigation: tab switching, responsive layout, scroll behavior |
