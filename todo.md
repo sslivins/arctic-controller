@@ -240,3 +240,43 @@ Test flow: pytest script → sets state on simulator via REST → waits for Tab5
 > **Test backlog and coverage details have moved to [`tests/device/TODO.md`](tests/device/TODO.md).**
 > See [`tests/device/README.md`](tests/device/README.md) for architecture,
 > setup instructions, and how to write new tests.
+
+## Cloud Telemetry (Azure)
+
+Send heat pump operational data to Azure for long-term monitoring, analytics,
+and alerting. The device already has all sensor data via Modbus — this adds
+cloud connectivity to enable remote dashboards, historical trends, and
+anomaly detection.
+
+### Phase 1 — Device to Cloud
+
+- [ ] **Azure IoT Hub integration** — register device, authenticate via SAS token
+      or X.509 cert, send telemetry via MQTT (ESP-IDF `esp-mqtt` or Azure IoT SDK)
+- [ ] **Telemetry payload** — periodic messages (every 30–60s) with: temperatures
+      (water tank, outdoor, discharge, suction, condenser, evaporator), compressor
+      frequency, fan speed, power state, working mode, error codes, COP metrics
+- [ ] **Connection management** — reconnect on WiFi drop, buffer unsent messages
+      in PSRAM, backoff on repeated failures
+- [ ] **Device twin / desired properties** — allow cloud-side configuration of
+      poll interval, telemetry fields, alert thresholds
+- [ ] **Kconfig option** — `CONFIG_CLOUD_TELEMETRY` to enable/disable at build
+      time (off by default, no impact on production binary size when disabled)
+
+### Phase 2 — Cloud Backend
+
+- [ ] **IoT Hub → Event Hubs / Stream Analytics** — route telemetry for processing
+- [ ] **Azure Data Explorer or Cosmos DB** — store time-series data for historical
+      queries (temperature trends, runtime hours, defrost cycles)
+- [ ] **Azure Monitor / Alerts** — trigger alerts on error codes, unusual temps,
+      compressor stalls, or extended defrost cycles
+- [ ] **Power BI / Grafana dashboard** — visualize historical data, COP trends,
+      energy consumption patterns
+
+### Phase 3 — Cloud to Device
+
+- [ ] **Remote commands** — change mode, setpoints, power on/off from cloud
+      dashboard (via IoT Hub direct methods or cloud-to-device messages)
+- [ ] **OTA from cloud** — trigger firmware updates via IoT Hub instead of
+      direct API (useful for fleet management with multiple controllers)
+- [ ] **Remote diagnostics** — pull device logs, capture screenshots, check
+      health status from cloud portal
