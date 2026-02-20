@@ -91,7 +91,7 @@ REST API + WebSocket dashboard for monitoring and control.
 - **Path filters**: `build.yml` and `device-tests.yml` use `paths:` allowlists —
   only firmware source, config, and test file changes trigger builds. Doc-only
   changes (`.md`, `docs/`) do **not** trigger builds.
-- **Device tests** run on a single physical device (Pi Zero 2 W, runner label `tab5`)
+- **Device tests** run on a self-hosted runner (4-core VM, 4 GB RAM, runner label `vm-mi`)
 - **Concurrency group** `device-tests` serializes all device access (build + release)
 - `CONFIG_TEST_ENDPOINTS=y` is set only in `device-tests.yml`, not production builds
 - **Release workflow** (`create-release.yml`) gates on device tests passing and

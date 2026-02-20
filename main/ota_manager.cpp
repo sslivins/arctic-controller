@@ -224,10 +224,23 @@ void ota_mgr_mark_valid(void)
     
     if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-            ESP_LOGI(TAG, "Marking current firmware as valid");
+            ESP_LOGI(TAG, "Marking current firmware as valid — rollback cancelled");
             esp_ota_mark_app_valid_cancel_rollback();
+        } else {
+            ESP_LOGI(TAG, "Firmware already validated (state=%d)", ota_state);
         }
     }
+}
+
+bool ota_mgr_is_pending_verify(void)
+{
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+    
+    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
+        return ota_state == ESP_OTA_IMG_PENDING_VERIFY;
+    }
+    return false;
 }
 
 void ota_mgr_get_partition_info(char* label, uint32_t* address, uint32_t* size)

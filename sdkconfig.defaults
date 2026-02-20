@@ -120,3 +120,10 @@ CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 # Certificate bundle for HTTPS (required for OTA from GitHub)
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# OTA Rollback Protection
+# When enabled, after an OTA update the bootloader marks the new partition as
+# ESP_OTA_IMG_PENDING_VERIFY.  The firmware must call esp_ota_mark_app_valid()
+# before the next reboot; otherwise the bootloader rolls back to the previous
+# working partition.  This prevents a bad OTA from bricking the device.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

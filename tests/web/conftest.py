@@ -59,16 +59,16 @@ def browser_context_args():
 # ---------- Auth helpers ----------
 
 # Track auth state to avoid repeated API calls
-_auth_disabled = False
+_auth_disabled = None   # None = not checked yet, True = disabled, False = could not disable
 _auth_needs_login = False
 
 
 def _ensure_auth_disabled(base_url: str):
     """Disable web auth once, then cache the result for the session."""
     global _auth_disabled, _auth_needs_login
-    if _auth_disabled:
+    if _auth_disabled is True:
         return True
-    if _auth_needs_login:
+    if _auth_disabled is False and _auth_needs_login:
         return False
 
     import requests
@@ -204,7 +204,7 @@ def login_page(page: Page, base_url: str) -> Page:
     yield page
     # Cleanup: disable auth so dashboard tests work without login
     global _auth_disabled, _auth_needs_login
-    _auth_disabled = False
+    _auth_disabled = None
     _auth_needs_login = False
     _ensure_auth_disabled(base_url)
 

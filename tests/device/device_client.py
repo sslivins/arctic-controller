@@ -7,6 +7,7 @@ Wraps the /api/test/* instrumentation endpoints so tests read like plain English
     assert device.screen == "settings"
 """
 
+import os
 import requests
 import time
 from dataclasses import dataclass, field
@@ -48,6 +49,11 @@ class DeviceClient:
         self.timeout = timeout
         self.session = requests.Session()
         self._session_id: Optional[str] = None
+
+        # Authenticate against production endpoints if an API key is available
+        api_key = os.environ.get("ARCTIC_API_KEY", "")
+        if api_key:
+            self.session.headers["X-API-Key"] = api_key
 
     # ------------------------------------------------------------------
     # UI State
