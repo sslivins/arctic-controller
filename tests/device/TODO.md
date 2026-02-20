@@ -133,6 +133,54 @@ These can run in the normal test suite without risk:
 - [ ] Verify OTA update check works from settings menu (UI test)
 - [ ] Confirm firmware version displays correctly on settings screen (UI test)
 
+### OTA via Device UI (Tier 1 — safe, no real update)
+
+The device screen tests (`test_firmware.py`) cover check/mock but not the full
+update flow UI. These tests use `firmware_mock()` to simulate update states
+without triggering a real OTA.
+
+- [ ] **Progress bar display** — mock OTA state to DOWNLOADING with progress 0→50→100,
+      verify progress bar widget appears and updates
+- [ ] **Status text updates** — verify status label changes through states:
+      "Checking...", "Downloading...", "Verifying...", "Ready to reboot"
+- [ ] **Error state UI** — mock a failed download, verify error message displays
+      on the update screen
+- [ ] **Install button behavior** — when update is available (mocked), verify
+      install button is visible and tappable (but don't actually trigger OTA)
+- [ ] **Cancel/dismiss during update check** — verify user can navigate away
+      from the update screen during a check
+
+### OTA via Web Dashboard (Tier 1 — safe, no real update)
+
+The web tests (`test_settings.py`) verify UI elements exist but don't test the
+OTA flow. These tests use API mocking to simulate update states.
+
+- [ ] **Check for Updates button** — click button, verify spinner/loading state
+      appears, then result (no update / update available)
+- [ ] **Update available card** — mock `GET /api/ota/releases` to return a newer
+      version, click check, verify "Update Available" banner with version + release
+      notes appears
+- [ ] **Install Update button** — when update available, verify install button
+      appears and is clickable (intercept the POST to avoid real install)
+- [ ] **File upload via drag-and-drop zone** — upload a small invalid .bin file,
+      verify error message appears (header validation rejects it)
+- [ ] **File upload via file picker** — use the hidden file input to select a
+      .bin file, verify upload starts (intercept to avoid real flash)
+- [ ] **Upload progress display** — verify progress bar appears during file upload
+- [ ] **OTA status polling** — verify the web dashboard polls `/api/ota/status`
+      and reflects state changes (idle → downloading → complete/failed)
+
+### Cross-path OTA consistency
+
+Verify that OTA state is consistent across all three interfaces.
+
+- [ ] **API-triggered update visible on web** — start OTA via API, verify web
+      dashboard shows download progress
+- [ ] **API-triggered update visible on device UI** — start OTA via API, verify
+      device screen shows update status
+- [ ] **Web-triggered update visible via API** — start OTA from web dashboard,
+      verify `/api/ota/status` reflects progress
+
 ### Tier 2 — Real OTA (requires reboot)
 
 These tests trigger an actual firmware update. The device reboots, so the test
