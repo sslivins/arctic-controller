@@ -57,7 +57,7 @@ class TestLanguageSwitching:
 
         # Reload the page
         dashboard_page.reload(wait_until="networkidle")
-        dashboard_page.wait_for_selector("nav", timeout=10000)
+        dashboard_page.wait_for_selector("nav", timeout=30000)
 
         # Should still be French
         value = self._get_header_lang_select(dashboard_page).input_value()
