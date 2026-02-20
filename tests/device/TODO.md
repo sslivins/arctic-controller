@@ -81,14 +81,18 @@ The following screens and features have **no automated test coverage** yet:
 
 ## Fahrenheit / Unit Conversion Testing (expanded)
 
-- [ ] Switch to °F: verify all temperature displays convert correctly
-- [ ] Verify dashboard hero card tank temp shows °F
-- [ ] Verify expandable temps panel (inlet/outlet/ambient/coil) shows °F
-- [ ] Verify compressor panel discharge/suction temps show °F
+- [x] Switch to °F: verify all temperature displays convert correctly (test_fahrenheit.py)
+- [x] Verify dashboard hero card tank temp shows °F (test_fahrenheit.py::TestHeroTankFahrenheit)
+- [ ] Verify expandable temps panel (inlet/outlet/ambient/coil) shows °F (panels hidden when collapsed — needs expand API)
+- [ ] Verify compressor panel discharge/suction temps show °F (panels hidden when collapsed — needs expand API)
 - [ ] Verify setpoint editing works in °F (converts back to °C for Modbus write)
-- [ ] Verify web dashboard respects unit preference
+- [ ] Verify web dashboard respects unit preference (web dashboard hardcodes °C — feature gap)
 - [ ] Test switching units while on temperature screens — values should update immediately
 - [ ] Verify ΔT values use correct Fahrenheit differential conversion
+- [x] Verify temps sub-screen shows all 9 values in °F (test_fahrenheit.py::TestTempsScreenFahrenheit)
+- [x] Verify no °C symbols appear when in °F mode (test_fahrenheit.py::test_no_celsius_symbol_in_f_mode)
+- [x] Verify preferences API reports correct unit (test_fahrenheit.py::TestPreferencesUnitAPI)
+- [x] Verify C→F→C round-trip math (test_fahrenheit.py::TestConversionMath)
 
 ## Error Handling Testing (expanded)
 
