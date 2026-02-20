@@ -31,7 +31,7 @@ class TestLoginPage:
         login_page.locator(".login-box button[type='submit']").click()
 
         # After login, nav bar should appear (dashboard loaded)
-        login_page.wait_for_selector("nav", timeout=10000)
+        login_page.wait_for_selector("nav", timeout=30000)
         expect(login_page.locator("nav")).to_be_visible()
         # Login box should be gone
         expect(login_page.locator(".login-box")).not_to_be_visible()

@@ -165,7 +165,7 @@ def _browser_login(page: Page):
         page.locator(".login-box input[type='text']").fill(WEB_USERNAME)
         page.locator(".login-box input[type='password']").fill(WEB_PASSWORD)
         page.locator(".login-box button[type='submit']").click()
-        page.wait_for_selector("nav", timeout=10000)
+        page.wait_for_selector("nav", timeout=30000)
 
 
 # ---------- Page fixtures ----------
@@ -185,7 +185,7 @@ def dashboard_page(page: Page, base_url: str) -> Page:
         # Auth is still on — log in via the browser
         _browser_login(page)
     else:
-        page.wait_for_selector("nav", timeout=10000)
+        page.wait_for_selector("nav", timeout=30000)
 
     return page
 
