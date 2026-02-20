@@ -20,7 +20,7 @@ on:
   workflow_call:
   workflow_dispatch:
 
-# Only one device-test run at a time (single physical device)
+# Only one device-test run at a time (single device on the network)
 concurrency:
   group: device-tests
   cancel-in-progress: false  # queue new runs rather than cancelling in-progress
