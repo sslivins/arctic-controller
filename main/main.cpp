@@ -181,8 +181,15 @@ extern "C" void app_main(void)
     // Initialize OTA manager
     ota_mgr_init();
     
-    // Mark firmware as valid (prevents rollback after successful boot)
-    ota_mgr_mark_valid();
+    // NOTE: ota_mgr_mark_valid() is NOT called here.  With rollback enabled,
+    // new firmware boots in PENDING_VERIFY state.  We defer mark_valid()
+    // until after the UI has been created and critical subsystems are up,
+    // proving the firmware is functional.  If the device crash-loops before
+    // reaching that point, the bootloader rolls back to the previous version.
+    if (ota_mgr_is_pending_verify()) {
+        ESP_LOGW(TAG, "*** First boot after OTA — firmware pending verification ***");
+        ESP_LOGW(TAG, "*** Will mark valid after UI creation succeeds ***");
+    }
 
     // Start WiFi initialization in background task (runs parallel to animation)
     xTaskCreate(wifi_init_task, "wifi_init", 4096, NULL, 5, NULL);
@@ -203,6 +210,14 @@ extern "C" void app_main(void)
             bsp_display_unlock();
             mclog::tagInfo(TAG, "UI Created");
             show_main_ui = false;  // Only create once
+            
+            // NOW mark firmware as valid — display init succeeded, LVGL is
+            // running, UI rendered, Modbus/demo started, event log is up.
+            // If we got here, the firmware is functional.
+            if (ota_mgr_is_pending_verify()) {
+                ESP_LOGI(TAG, "Post-OTA health check passed — marking firmware valid");
+                ota_mgr_mark_valid();
+            }
         }
         
         vTaskDelay(pdMS_TO_TICKS(10));

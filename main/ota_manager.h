@@ -96,9 +96,19 @@ void ota_mgr_reboot(void);
 
 /**
  * @brief Mark current firmware as valid (rollback protection)
- * Call this after successful boot to prevent rollback
+ * Call this after successful boot to prevent rollback.
+ * With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, new firmware boots in
+ * ESP_OTA_IMG_PENDING_VERIFY state.  If this function is not called
+ * before the next reboot, the bootloader rolls back to the previous
+ * working partition.
  */
 void ota_mgr_mark_valid(void);
+
+/**
+ * @brief Check if firmware is pending OTA verification
+ * @return true if running partition is in PENDING_VERIFY state
+ */
+bool ota_mgr_is_pending_verify(void);
 
 /**
  * @brief Get running partition info
