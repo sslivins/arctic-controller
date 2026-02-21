@@ -246,6 +246,10 @@ These validate that a bad firmware gets reverted by the bootloader.
 
 ## CI / Infrastructure Improvements
 
+- [ ] **Test execution speed**: CI test suite takes ~45 min (267 device tests + web tests).
+      Opportunities to reduce: batch Fahrenheit tests to minimize settings toggle round-trips,
+      share fixture state across related tests, reduce `time.sleep()` guards where
+      `wait_for_widget()` polling would suffice, parallelize API tests (no UI dependency).
 - [ ] **Unit tests (no device)**: Extract pure logic (event ring buffer, °C↔°F conversion,
       error lookups, demo register mapping, i18n string resolution, setpoint validation)
       into host-compilable modules; test with Google Test or Catch2 on GitHub Actions runner
