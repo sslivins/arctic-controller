@@ -20,6 +20,8 @@ import time
 import pytest
 import requests
 from pathlib import Path
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Load .env from repo root if present (local dev)
 _env_file = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -31,6 +33,13 @@ BASE_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 API_KEY = os.environ.get("ARCTIC_API_KEY")
 
 VALID_MODES = ["cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto"]
+
+# Retry-enabled session for all API calls
+_session = requests.Session()
+_retry = Retry(total=3, backoff_factor=1, allowed_methods=None,
+               status_forcelist=[502, 503, 504])
+_session.mount("http://", HTTPAdapter(max_retries=_retry))
+_session.mount("https://", HTTPAdapter(max_retries=_retry))
 
 
 def _headers(api_key=None):
@@ -44,29 +53,29 @@ def _headers(api_key=None):
 
 def _get(path, **kwargs):
     """Authenticated GET helper."""
-    return requests.get(f"{BASE_URL}{path}", headers=_headers(), timeout=10, **kwargs)
+    return _session.get(f"{BASE_URL}{path}", headers=_headers(), timeout=10, **kwargs)
 
 
 def _put(path, json=None, data=None, **kwargs):
     """Authenticated PUT helper."""
-    return requests.put(
+    return _session.put(
         f"{BASE_URL}{path}", headers=_headers(), json=json, data=data, timeout=10, **kwargs
     )
 
 
 def _patch(path, json=None, **kwargs):
     """Authenticated PATCH helper."""
-    return requests.patch(f"{BASE_URL}{path}", headers=_headers(), json=json, timeout=10, **kwargs)
+    return _session.patch(f"{BASE_URL}{path}", headers=_headers(), json=json, timeout=10, **kwargs)
 
 
 def _post(path, json=None, **kwargs):
     """Authenticated POST helper."""
-    return requests.post(f"{BASE_URL}{path}", headers=_headers(), json=json, timeout=10, **kwargs)
+    return _session.post(f"{BASE_URL}{path}", headers=_headers(), json=json, timeout=10, **kwargs)
 
 
 def _delete(path, **kwargs):
     """Authenticated DELETE helper."""
-    return requests.delete(f"{BASE_URL}{path}", headers=_headers(), timeout=10, **kwargs)
+    return _session.delete(f"{BASE_URL}{path}", headers=_headers(), timeout=10, **kwargs)
 
 
 def _inject_demo(fields: dict):

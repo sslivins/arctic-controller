@@ -16,6 +16,8 @@ import time
 
 import pytest
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Device URL and API key from environment
 ARCTIC_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
@@ -26,6 +28,13 @@ EXPECTED_WIDTH = 720
 EXPECTED_HEIGHT = 1280
 
 # PNG magic bytes
+# Retry-enabled session for API calls
+_session = requests.Session()
+_retry = Retry(total=3, backoff_factor=1, allowed_methods=None,
+               status_forcelist=[502, 503, 504])
+_session.mount("http://", HTTPAdapter(max_retries=_retry))
+_session.mount("https://", HTTPAdapter(max_retries=_retry))
+
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -39,7 +48,7 @@ def _api_headers(api_key: str = API_KEY) -> dict:
 
 def _get_screenshot(api_key: str = API_KEY) -> requests.Response:
     """Fetch a screenshot from the production endpoint."""
-    return requests.get(
+    return _session.get(
         f"{ARCTIC_URL}/api/screenshot",
         headers=_api_headers(api_key),
         timeout=30.0,
