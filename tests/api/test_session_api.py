@@ -66,51 +66,72 @@ def _admin_session(username=None, password=None):
 def _enable_web_auth():
     """Enable web auth.  Only called when web auth is currently OFF,
     so API-key auth (check_api_auth bypass) is sufficient."""
-    requests.post(
-        f"{BASE_URL}/api/auth/config",
-        json={"web_auth_enabled": True},
-        headers=_api_headers(),
-        timeout=5,
-    )
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/auth/config",
+                json={"web_auth_enabled": True},
+                headers=_api_headers(),
+                timeout=5,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _disable_web_auth():
     """Disable web auth.  When it is currently ON, admin endpoints require
     a session cookie — so we log in first."""
-    # Try API-key first (works when web auth is already off)
-    r = requests.post(
-        f"{BASE_URL}/api/auth/config",
-        json={"web_auth_enabled": False},
-        headers=_api_headers(),
-        timeout=5,
-    )
-    if r.status_code == 401:
-        # Web auth is on — use a session
-        s = _admin_session()
-        s.post(
-            f"{BASE_URL}/api/auth/config",
-            json={"web_auth_enabled": False},
-            timeout=5,
-        )
+    for attempt in range(3):
+        try:
+            # Try API-key first (works when web auth is already off)
+            r = requests.post(
+                f"{BASE_URL}/api/auth/config",
+                json={"web_auth_enabled": False},
+                headers=_api_headers(),
+                timeout=5,
+            )
+            if r.status_code == 401:
+                # Web auth is on — use a session
+                s = _admin_session()
+                s.post(
+                    f"{BASE_URL}/api/auth/config",
+                    json={"web_auth_enabled": False},
+                    timeout=5,
+                )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _restore_credentials():
     """Reset username/password back to the CI-known values."""
-    # Try API-key first (works when web auth is off)
-    r = requests.post(
-        f"{BASE_URL}/api/auth/credentials",
-        json={"username": USERNAME, "password": PASSWORD},
-        headers=_api_headers(),
-        timeout=5,
-    )
-    if r.status_code == 401:
-        # Web auth is on — use a session
-        s = _admin_session()
-        s.post(
-            f"{BASE_URL}/api/auth/credentials",
-            json={"username": USERNAME, "password": PASSWORD},
-            timeout=5,
-        )
+    for attempt in range(3):
+        try:
+            # Try API-key first (works when web auth is off)
+            r = requests.post(
+                f"{BASE_URL}/api/auth/credentials",
+                json={"username": USERNAME, "password": PASSWORD},
+                headers=_api_headers(),
+                timeout=5,
+            )
+            if r.status_code == 401:
+                # Web auth is on — use a session
+                s = _admin_session()
+                s.post(
+                    f"{BASE_URL}/api/auth/credentials",
+                    json={"username": USERNAME, "password": PASSWORD},
+                    timeout=5,
+                )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
@@ -122,11 +143,17 @@ def _check_prerequisites():
         pytest.skip("ARCTIC_API_KEY not set")
     if not USERNAME or not PASSWORD:
         pytest.skip("ARCTIC_USERNAME / ARCTIC_PASSWORD not set")
-    try:
-        r = requests.get(f"{BASE_URL}/api/health", timeout=5)
-        r.raise_for_status()
-    except Exception as e:
-        pytest.skip(f"Device not reachable at {BASE_URL}: {e}")
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{BASE_URL}/api/health", timeout=5)
+            r.raise_for_status()
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2)
+    pytest.skip(f"Device not reachable at {BASE_URL}: {last_err}")
 
 
 @pytest.fixture(autouse=True)

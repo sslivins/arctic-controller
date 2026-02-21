@@ -47,32 +47,52 @@ def _post(path, json=None, headers=None, **kwargs):
 
 
 def _enable_web_auth():
-    requests.post(
-        f"{BASE_URL}/api/auth/config",
-        json={"web_auth_enabled": True},
-        headers=_headers(),
-        timeout=5,
-    )
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/auth/config",
+                json={"web_auth_enabled": True},
+                headers=_headers(),
+                timeout=5,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _disable_web_auth():
-    requests.post(
-        f"{BASE_URL}/api/auth/config",
-        json={"web_auth_enabled": False},
-        headers=_headers(),
-        timeout=5,
-    )
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/auth/config",
+                json={"web_auth_enabled": False},
+                headers=_headers(),
+                timeout=5,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 @pytest.fixture(scope="module", autouse=True)
 def _check_prerequisites():
     if not API_KEY:
         pytest.skip("ARCTIC_API_KEY not set")
-    try:
-        r = requests.get(f"{BASE_URL}/api/health", timeout=5)
-        r.raise_for_status()
-    except Exception as e:
-        pytest.skip(f"Device not reachable at {BASE_URL}: {e}")
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{BASE_URL}/api/health", timeout=5)
+            r.raise_for_status()
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2)
+    pytest.skip(f"Device not reachable at {BASE_URL}: {last_err}")
 
 
 # ── Auth Config ───────────────────────────────────────────────────────────

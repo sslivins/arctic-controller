@@ -9,6 +9,8 @@ Wraps the /api/test/* instrumentation endpoints so tests read like plain English
 
 import os
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -49,6 +51,17 @@ class DeviceClient:
         self.timeout = timeout
         self.session = requests.Session()
         self._session_id: Optional[str] = None
+
+        # Retry transient connection errors automatically (ESP32 can be flaky)
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,        # sleeps 0 s, 1 s, 2 s between retries
+            allowed_methods=None,    # retry on all HTTP methods
+            status_forcelist=[502, 503, 504],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
 
         # Authenticate against production endpoints if an API key is available
         api_key = os.environ.get("ARCTIC_API_KEY", "")

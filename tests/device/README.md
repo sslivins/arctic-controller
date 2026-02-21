@@ -138,13 +138,14 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (243 UI tests + 9 screenshot API tests + 286 REST API tests + 55 web tests + API contract tests)
+### Test Files (267 UI tests + 9 screenshot API tests + 286 REST API tests + 55 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
 | [`test_main_screen.py`](test_main_screen.py) | 20 | Hero card states, tank temp, component dots, performance strip, error card |
 | [`test_error_mapping.py`](test_error_mapping.py) | 36 | All 32 error1/error2 bits → correct code + description on UI |
 | [`test_system_screen.py`](test_system_screen.py) | 31 | System sub-screen: temps, flows, component states, section headers |
+| [`test_fahrenheit.py`](test_fahrenheit.py) | 24 | °F/°C conversion: hero card, temps screen, API preference, math verification |
 | [`test_temps_screen.py`](test_temps_screen.py) | 22 | Temps sub-screen: all temperature rows, labels, values, navigation |
 | [`test_control_screen.py`](test_control_screen.py) | 19 | Control sub-screen: power button, mode buttons, setpoints, P-parameters |
 | [`test_localization.py`](test_localization.py) | 18 | French and Spanish translations on main screen |
