@@ -86,11 +86,18 @@ def _check_prerequisites():
     """Verify device is reachable, demo mode is on, and API key is set."""
     if not API_KEY:
         pytest.skip("ARCTIC_API_KEY not set")
-    try:
-        r = _get("/api/health")
-        r.raise_for_status()
-    except Exception as e:
-        pytest.skip(f"Device not reachable at {BASE_URL}: {e}")
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = _get("/api/health")
+            r.raise_for_status()
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2)
+    else:
+        pytest.skip(f"Device not reachable at {BASE_URL}: {last_err}")
 
     # Verify demo mode is enabled
     r = _get("/api/heatpump/status")

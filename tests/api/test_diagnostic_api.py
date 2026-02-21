@@ -63,12 +63,19 @@ def _get(path, **kwargs):
 
 def _inject_demo(fields: dict):
     """Inject demo-mode field values."""
-    requests.post(
-        f"{BASE_URL}/api/test/set-demo-field",
-        headers=_headers(),
-        json=fields,
-        timeout=10,
-    )
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/test/set-demo-field",
+                headers=_headers(),
+                json=fields,
+                timeout=10,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _parse_csv(text: str) -> list[dict]:
@@ -80,18 +87,27 @@ def _parse_csv(text: str) -> list[dict]:
 @pytest.fixture(autouse=True)
 def _check_prerequisites():
     """Skip if device is unreachable or not in demo mode."""
-    try:
-        r = requests.get(
-            f"{BASE_URL}/api/heatpump/status",
-            headers=_headers(),
-            timeout=5,
-        )
-        r.raise_for_status()
-        data = r.json()
-        if not data.get("demo_mode"):
-            pytest.skip("Device not in demo mode")
-    except requests.ConnectionError:
-        pytest.skip("Device not reachable")
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = requests.get(
+                f"{BASE_URL}/api/heatpump/status",
+                headers=_headers(),
+                timeout=5,
+            )
+            r.raise_for_status()
+            data = r.json()
+            if not data.get("demo_mode"):
+                pytest.skip("Device not in demo mode")
+            return
+        except requests.ConnectionError:
+            last_err = "Device not reachable"
+            if attempt < 2:
+                time.sleep(2)
+        except Exception as e:
+            last_err = str(e)
+            break
+    pytest.skip(f"{last_err}")
 
 
 # ── Response Headers & Format ─────────────────────────────────────────────
@@ -317,24 +333,38 @@ class TestDiagnosticErrors:
 
 def _enable_api_auth():
     """Enable API auth on the device."""
-    requests.post(
-        f"{BASE_URL}/api/auth/config",
-        headers=_headers(),
-        json={"web_auth_enabled": True},
-        timeout=5,
-    )
-    time.sleep(0.5)
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/auth/config",
+                headers=_headers(),
+                json={"web_auth_enabled": True},
+                timeout=5,
+            )
+            time.sleep(0.5)
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _disable_api_auth():
     """Disable API auth on the device."""
-    requests.post(
-        f"{BASE_URL}/api/auth/config",
-        headers=_headers(),
-        json={"web_auth_enabled": False},
-        timeout=5,
-    )
-    time.sleep(0.5)
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/auth/config",
+                headers=_headers(),
+                json={"web_auth_enabled": False},
+                timeout=5,
+            )
+            time.sleep(0.5)
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 class TestDiagnosticAuth:

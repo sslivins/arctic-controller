@@ -13,6 +13,7 @@ Prerequisites:
 """
 
 import os
+import time
 import pytest
 import requests
 from playwright.sync_api import Page, expect
@@ -34,63 +35,84 @@ def _api_headers():
 
 def _enable_web_auth():
     """Enable web auth via API (only works when web auth is currently OFF)."""
-    requests.post(
-        f"{BASE_URL}/api/auth/config",
-        json={"web_auth_enabled": True},
-        headers=_api_headers(),
-        timeout=5,
-    )
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/auth/config",
+                json={"web_auth_enabled": True},
+                headers=_api_headers(),
+                timeout=5,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _disable_web_auth():
     """Disable web auth, falling back to session if API key alone fails."""
-    r = requests.post(
-        f"{BASE_URL}/api/auth/config",
-        json={"web_auth_enabled": False},
-        headers=_api_headers(),
-        timeout=5,
-    )
-    if r.status_code == 401:
-        s = requests.Session()
-        for pw in (WEB_PASSWORD, NEW_PASSWORD):
-            login_r = s.post(
-                f"{BASE_URL}/login",
-                json={"username": WEB_USERNAME, "password": pw},
+    for attempt in range(3):
+        try:
+            r = requests.post(
+                f"{BASE_URL}/api/auth/config",
+                json={"web_auth_enabled": False},
+                headers=_api_headers(),
                 timeout=5,
             )
-            if login_r.status_code == 200:
-                s.post(
-                    f"{BASE_URL}/api/auth/config",
-                    json={"web_auth_enabled": False},
-                    timeout=5,
-                )
-                break
+            if r.status_code == 401:
+                s = requests.Session()
+                for pw in (WEB_PASSWORD, NEW_PASSWORD):
+                    login_r = s.post(
+                        f"{BASE_URL}/login",
+                        json={"username": WEB_USERNAME, "password": pw},
+                        timeout=5,
+                    )
+                    if login_r.status_code == 200:
+                        s.post(
+                            f"{BASE_URL}/api/auth/config",
+                            json={"web_auth_enabled": False},
+                            timeout=5,
+                        )
+                        break
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _restore_credentials():
     """Reset credentials back to the CI-known values."""
-    r = requests.post(
-        f"{BASE_URL}/api/auth/credentials",
-        json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
-        headers=_api_headers(),
-        timeout=5,
-    )
-    if r.status_code == 401:
-        # Web auth is on — log in with whatever password is active
-        for pw in (WEB_PASSWORD, NEW_PASSWORD):
-            s = requests.Session()
-            login_r = s.post(
-                f"{BASE_URL}/login",
-                json={"username": WEB_USERNAME, "password": pw},
+    for attempt in range(3):
+        try:
+            r = requests.post(
+                f"{BASE_URL}/api/auth/credentials",
+                json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
+                headers=_api_headers(),
                 timeout=5,
             )
-            if login_r.status_code == 200:
-                s.post(
-                    f"{BASE_URL}/api/auth/credentials",
-                    json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
-                    timeout=5,
-                )
-                break
+            if r.status_code == 401:
+                # Web auth is on — log in with whatever password is active
+                for pw in (WEB_PASSWORD, NEW_PASSWORD):
+                    s = requests.Session()
+                    login_r = s.post(
+                        f"{BASE_URL}/login",
+                        json={"username": WEB_USERNAME, "password": pw},
+                        timeout=5,
+                    )
+                    if login_r.status_code == 200:
+                        s.post(
+                            f"{BASE_URL}/api/auth/credentials",
+                            json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
+                            timeout=5,
+                        )
+                        break
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _browser_login(page: Page, username: str, password: str):
@@ -112,11 +134,17 @@ def _go_to_settings(page: Page):
 def _check_prerequisites():
     if not API_KEY:
         pytest.skip("ARCTIC_API_KEY not set")
-    try:
-        r = requests.get(f"{BASE_URL}/api/health", timeout=5)
-        r.raise_for_status()
-    except Exception as e:
-        pytest.skip(f"Device not reachable at {BASE_URL}: {e}")
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{BASE_URL}/api/health", timeout=5)
+            r.raise_for_status()
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2)
+    pytest.skip(f"Device not reachable at {BASE_URL}: {last_err}")
 
 
 @pytest.fixture(autouse=True)

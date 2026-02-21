@@ -116,18 +116,21 @@ def _setup_auth():
     """Log in if web auth is enabled, or set API key header."""
     if API_KEY:
         _auth_session.headers["X-API-Key"] = API_KEY
-    try:
-        auth_cfg = _auth_session.get(f"{BASE_URL}/api/auth/config", timeout=5).json()
-        if auth_cfg.get("web_auth_enabled") and not auth_cfg.get("authenticated"):
-            username = os.environ.get("ARCTIC_USERNAME", "arctic")
-            password = os.environ.get("ARCTIC_PASSWORD", "arctic")
-            _auth_session.post(
-                f"{BASE_URL}/login",
-                json={"username": username, "password": password},
-                timeout=5,
-            )
-    except Exception:
-        pass  # best effort — tests will fail with clear 401 errors
+    for attempt in range(3):
+        try:
+            auth_cfg = _auth_session.get(f"{BASE_URL}/api/auth/config", timeout=5).json()
+            if auth_cfg.get("web_auth_enabled") and not auth_cfg.get("authenticated"):
+                username = os.environ.get("ARCTIC_USERNAME", "arctic")
+                password = os.environ.get("ARCTIC_PASSWORD", "arctic")
+                _auth_session.post(
+                    f"{BASE_URL}/login",
+                    json={"username": username, "password": password},
+                    timeout=5,
+                )
+            return
+        except Exception:
+            if attempt < 2:
+                time.sleep(2)
 
 _setup_auth()
 
@@ -194,12 +197,17 @@ def test_production_api_schema(case):
 @pytest.fixture(scope="module")
 def api():
     """Authenticated requests session for manual API smoke tests."""
-    try:
-        r = _auth_session.get(f"{BASE_URL}/api/health", timeout=5)
-        r.raise_for_status()
-    except Exception as e:
-        pytest.skip(f"Device not reachable at {BASE_URL}: {e}")
-    return _auth_session
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = _auth_session.get(f"{BASE_URL}/api/health", timeout=5)
+            r.raise_for_status()
+            return _auth_session
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2)
+    pytest.skip(f"Device not reachable at {BASE_URL}: {last_err}")
 
 
 def test_health_returns_ok(api):

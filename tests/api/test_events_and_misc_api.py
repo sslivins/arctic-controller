@@ -56,11 +56,17 @@ def _delete(path):
 def _check_prerequisites():
     if not API_KEY:
         pytest.skip("ARCTIC_API_KEY not set")
-    try:
-        r = requests.get(f"{BASE_URL}/api/health", timeout=5)
-        r.raise_for_status()
-    except Exception as e:
-        pytest.skip(f"Device not reachable at {BASE_URL}: {e}")
+    last_err = None
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{BASE_URL}/api/health", timeout=5)
+            r.raise_for_status()
+            return
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                time.sleep(2)
+    pytest.skip(f"Device not reachable at {BASE_URL}: {last_err}")
 
 
 # ── Events API ────────────────────────────────────────────────────────────

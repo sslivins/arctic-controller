@@ -72,53 +72,61 @@ def _ensure_auth_disabled(base_url: str):
         return False
 
     import requests
+    import time
 
     headers = {}
     if API_KEY:
         headers["X-API-Key"] = API_KEY
 
-    try:
-        r = requests.get(f"{base_url}/api/auth/status", headers=headers, timeout=5)
-        r.raise_for_status()
-        status = r.json()
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{base_url}/api/auth/status", headers=headers, timeout=5)
+            r.raise_for_status()
+            status = r.json()
 
-        if not status.get("web_auth_enabled"):
-            _auth_disabled = True
-            return True
+            if not status.get("web_auth_enabled"):
+                _auth_disabled = True
+                return True
 
-        # If we have an API key, use it directly to disable auth
-        if API_KEY:
-            r = requests.post(
+            # If we have an API key, use it directly to disable auth
+            if API_KEY:
+                r = requests.post(
+                    f"{base_url}/api/auth/config",
+                    json={"web_auth_enabled": False},
+                    headers=headers,
+                    timeout=5,
+                )
+                if r.status_code == 200:
+                    _auth_disabled = True
+                    return True
+
+            # Fall back to login + disable
+            session = requests.Session()
+            login_r = session.post(
+                f"{base_url}/login",
+                json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
+                timeout=5,
+            )
+            if login_r.status_code != 200 or not login_r.json().get("success"):
+                _auth_needs_login = True
+                return False
+
+            r = session.post(
                 f"{base_url}/api/auth/config",
                 json={"web_auth_enabled": False},
-                headers=headers,
                 timeout=5,
             )
             if r.status_code == 200:
                 _auth_disabled = True
                 return True
 
-        # Fall back to login + disable
-        session = requests.Session()
-        login_r = session.post(
-            f"{base_url}/login",
-            json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
-            timeout=5,
-        )
-        if login_r.status_code != 200 or not login_r.json().get("success"):
-            _auth_needs_login = True
-            return False
-
-        r = session.post(
-            f"{base_url}/api/auth/config",
-            json={"web_auth_enabled": False},
-            timeout=5,
-        )
-        if r.status_code == 200:
-            _auth_disabled = True
-            return True
-    except Exception:
-        pass
+            break  # Non-transient failure, stop retrying
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt < 2:
+                time.sleep(2)
+                continue
+        except Exception:
+            break  # Non-transient error, stop retrying
 
     _auth_needs_login = True
     return False
@@ -128,34 +136,41 @@ def _enable_web_auth(base_url: str):
     """Re-enable web auth via API."""
     global _auth_disabled
     import requests
+    import time
 
     headers = {}
     if API_KEY:
         headers["X-API-Key"] = API_KEY
 
-    try:
-        if API_KEY:
-            requests.post(
-                f"{base_url}/api/auth/config",
-                json={"web_auth_enabled": True},
-                headers=headers,
-                timeout=5,
-            )
-        else:
-            session = requests.Session()
-            session.post(
-                f"{base_url}/login",
-                json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
-                timeout=5,
-            )
-            session.post(
-                f"{base_url}/api/auth/config",
-                json={"web_auth_enabled": True},
-                timeout=5,
-            )
-        _auth_disabled = False
-    except Exception:
-        pass
+    for attempt in range(3):
+        try:
+            if API_KEY:
+                requests.post(
+                    f"{base_url}/api/auth/config",
+                    json={"web_auth_enabled": True},
+                    headers=headers,
+                    timeout=5,
+                )
+            else:
+                session = requests.Session()
+                session.post(
+                    f"{base_url}/login",
+                    json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
+                    timeout=5,
+                )
+                session.post(
+                    f"{base_url}/api/auth/config",
+                    json={"web_auth_enabled": True},
+                    timeout=5,
+                )
+            _auth_disabled = False
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt < 2:
+                time.sleep(2)
+                continue
+        except Exception:
+            break
 
 
 def _browser_login(page: Page):

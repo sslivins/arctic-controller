@@ -48,22 +48,36 @@ def _get_screenshot(api_key: str = API_KEY) -> requests.Response:
 
 def _enable_web_auth():
     """Enable web auth so that API key enforcement kicks in."""
-    requests.post(
-        f"{ARCTIC_URL}/api/auth/config",
-        json={"web_auth_enabled": True},
-        headers=_api_headers(),
-        timeout=5,
-    )
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{ARCTIC_URL}/api/auth/config",
+                json={"web_auth_enabled": True},
+                headers=_api_headers(),
+                timeout=5,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _disable_web_auth():
     """Disable web auth (restore normal test state)."""
-    requests.post(
-        f"{ARCTIC_URL}/api/auth/config",
-        json={"web_auth_enabled": False},
-        headers=_api_headers(),
-        timeout=5,
-    )
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{ARCTIC_URL}/api/auth/config",
+                json={"web_auth_enabled": False},
+                headers=_api_headers(),
+                timeout=5,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
 
 
 def _parse_png_ihdr(data: bytes) -> dict:
