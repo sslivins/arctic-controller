@@ -291,3 +291,21 @@ jobs:
           label: Web Dashboard Tests
           message: ${{ steps.test_results.outputs.web_msg }}
           color: ${{ steps.test_results.outputs.web_color }}
+
+  # Gate job — always runs so branch protection has a status to check
+  # even when path filters skip the build/test jobs (e.g. docs-only PRs)
+  tests-status:
+    if: always()
+    needs: [build, device-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.device-tests.result }}" = "failure" ]; then
+            echo "Build or tests failed"
+            exit 1
+          fi
+          if [ "${{ needs.build.result }}" = "cancelled" ] || [ "${{ needs.device-tests.result }}" = "cancelled" ]; then
+            echo "Build or tests were cancelled"
+            exit 1
+          fi
