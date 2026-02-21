@@ -106,17 +106,3 @@ jobs:
           echo "- \`bootloader.bin\` - Bootloader" >> $GITHUB_STEP_SUMMARY
           echo "- \`partition-table.bin\` - Partition table" >> $GITHUB_STEP_SUMMARY
           echo "- \`ota_data_initial.bin\` - OTA data partition" >> $GITHUB_STEP_SUMMARY
-
-  # Gate job — always runs so branch protection has a status to check
-  # even when path filters skip the build job (e.g. docs-only PRs)
-  build-status:
-    if: always()
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check build result
-        run: |
-          if [ "${{ needs.build.result }}" = "failure" ] || [ "${{ needs.build.result }}" = "cancelled" ]; then
-            echo "Build failed or was cancelled"
-            exit 1
-          fi
