@@ -16,6 +16,8 @@ import time
 import pytest
 import requests
 from pathlib import Path
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Load .env from repo root if present (local dev)
 _env_file = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -28,6 +30,13 @@ API_KEY = os.environ.get("ARCTIC_API_KEY")
 USERNAME = os.environ.get("ARCTIC_USERNAME", "arctic")
 PASSWORD = os.environ.get("ARCTIC_PASSWORD", "arctic")
 
+# Retry-enabled session for all API calls
+_session = requests.Session()
+_retry = Retry(total=3, backoff_factor=1, allowed_methods=None,
+               status_forcelist=[502, 503, 504])
+_session.mount("http://", HTTPAdapter(max_retries=_retry))
+_session.mount("https://", HTTPAdapter(max_retries=_retry))
+
 
 def _headers(api_key=None):
     h = {}
@@ -38,12 +47,12 @@ def _headers(api_key=None):
 
 
 def _get(path, **kwargs):
-    return requests.get(f"{BASE_URL}{path}", headers=_headers(), timeout=10, **kwargs)
+    return _session.get(f"{BASE_URL}{path}", headers=_headers(), timeout=10, **kwargs)
 
 
 def _post(path, json=None, headers=None, **kwargs):
     h = headers if headers is not None else _headers()
-    return requests.post(f"{BASE_URL}{path}", headers=h, json=json, timeout=10, **kwargs)
+    return _session.post(f"{BASE_URL}{path}", headers=h, json=json, timeout=10, **kwargs)
 
 
 def _enable_web_auth():
