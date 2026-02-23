@@ -34,7 +34,7 @@ API_KEY = os.environ.get("ARCTIC_API_KEY")
 # Retry-enabled session for all API calls
 _session = requests.Session()
 _retry = Retry(total=3, backoff_factor=1, allowed_methods=None,
-               status_forcelist=[502, 503, 504])
+               status_forcelist=[503, 504])
 _session.mount("http://", HTTPAdapter(max_retries=_retry))
 _session.mount("https://", HTTPAdapter(max_retries=_retry))
 
