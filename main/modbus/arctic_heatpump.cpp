@@ -692,6 +692,14 @@ bool setDemoField(const char* field, int32_t value) {
     else return false;
     
     s_demo_regs[addr - DEMO_REG_BASE] = (uint16_t)value;
+    
+    // Mirror UNIT_ON_OFF to STATUS_1 bit 0 (same as writeSingleReg)
+    if (addr == reg::UNIT_ON_OFF) {
+        uint16_t& st1 = s_demo_regs[reg::STATUS_1 - DEMO_REG_BASE];
+        if (value) st1 |= status1::UNIT_ON;
+        else       st1 &= ~status1::UNIT_ON;
+    }
+    
     ESP_LOGI(TAG, "[DEMO] Field '%s' (reg %d) set to %ld", field, addr, (long)value);
     return true;
 }
