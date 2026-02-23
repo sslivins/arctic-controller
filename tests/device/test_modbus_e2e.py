@@ -169,35 +169,39 @@ class TestModbusPowerControl:
 
 @pytest.mark.modbus
 class TestModbusModeChange:
-    """Verify mode changes are reflected through the Modbus link."""
+    """Verify mode changes sent by the controller reach the simulator."""
 
     def test_mode_change_to_cooling(self, device: DeviceClient, simulator: SimulatorClient, modbus_mode):
-        """Load cooling preset on simulator → controller reads mode as 'cooling'."""
+        """Controller sets mode to cooling → simulator register 2001 updated."""
         # Heating preset is loaded by modbus_mode — verify starting state
         status = device.get_heatpump_status()
         assert status["mode"] == "floor_heating"
 
-        # Switch simulator to cooling
-        simulator.load_preset("cooling")
+        # Send mode change from controller
+        device.heatpump_control("mode", value="cooling")
         time.sleep(POLL_SETTLE_S)
 
+        # Verify simulator received the write (reg 2001: 0 = cooling)
         _wait_for(
-            lambda: device.get_heatpump_status()["mode"] == "cooling",
+            lambda: simulator.get_register(2001) == 0,
             timeout=5.0,
-            desc="controller to show 'cooling' mode",
+            desc="simulator reg 2001 to be 0 (cooling)",
         )
+
+        # Verify controller also reflects the new mode
         status = device.get_heatpump_status()
-        assert status["unit_on"], "Unit should still be ON in cooling preset"
+        assert status["mode"] == "cooling", f"Expected 'cooling', got '{status['mode']}'"
 
     def test_mode_change_to_hot_water(self, device: DeviceClient, simulator: SimulatorClient, modbus_mode):
-        """Load hot_water preset → controller reads mode as 'hot_water'."""
-        simulator.load_preset("hot_water")
+        """Controller sets mode to hot_water → simulator register 2001 updated."""
+        device.heatpump_control("mode", value="hot_water")
         time.sleep(POLL_SETTLE_S)
 
+        # Verify simulator received the write (reg 2001: 5 = hot water)
         _wait_for(
-            lambda: device.get_heatpump_status()["mode"] == "hot_water",
+            lambda: simulator.get_register(2001) == 5,
             timeout=5.0,
-            desc="controller to show 'hot_water' mode",
+            desc="simulator reg 2001 to be 5 (hot_water)",
         )
 
 
