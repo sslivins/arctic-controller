@@ -517,6 +517,18 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def get_heatpump_errors(self) -> dict:
+        """GET /api/heatpump/errors — returns active errors and error history.
+
+        Response includes: demo_mode, connected, has_errors, error_count,
+        highest_severity, active (array), history (array).
+        """
+        r = self.session.get(
+            f"{self.base_url}/api/heatpump/errors", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json()
+
     def screenshot(self, path: str = "screenshot.png") -> str:
         """GET /api/test/screenshot — capture display as PNG and save to path.
 
