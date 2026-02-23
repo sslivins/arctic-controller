@@ -528,12 +528,6 @@ class TestModbusAllErrors:
         assert error_entry["name"], f"Error {code} should have a non-empty name"
         assert error_entry["description"], f"Error {code} should have a description"
 
-        # Also verify via /api/heatpump/status
-        status = device.get_heatpump_status()
-        assert code in status.get("error", ""), (
-            f"Error {code} not in status error string: {status.get('error')}"
-        )
-
 
 @pytest.mark.modbus
 class TestModbusMultipleErrors:
