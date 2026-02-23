@@ -10,6 +10,7 @@ import time
 import pytest
 from pathlib import Path
 from device_client import DeviceClient
+from simulator_client import SimulatorClient
 
 # Directory for failure screenshots
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
@@ -202,3 +203,49 @@ def pytest_runtest_makereport(item, call):
             _consecutive_failures += 1
         elif rep.when == "call" and rep.passed:
             _consecutive_failures = 0
+
+
+# ==============================================================================
+# Modbus Simulator Fixture
+# ==============================================================================
+
+@pytest.fixture(scope="session")
+def simulator() -> SimulatorClient:
+    """Shared simulator client for end-to-end Modbus tests.
+
+    Set SIMULATOR_URL env var to override (default: http://arctic-sim.local).
+    Only created when a test requests it — demo-only tests never touch this.
+    """
+    url = os.environ.get("SIMULATOR_URL", "http://arctic-sim.local")
+    client = SimulatorClient(base_url=url)
+    if not client.is_reachable():
+        pytest.skip(f"Simulator not reachable at {url}")
+    return client
+
+
+@pytest.fixture()
+def modbus_mode(device: DeviceClient, simulator: SimulatorClient):
+    """Disable demo mode so the controller polls the real Modbus bus.
+
+    Loads the simulator's 'heating' preset first so the controller sees
+    valid data immediately on connect.  Re-enables demo mode on teardown.
+    """
+    # Prepare simulator with a known state before switching away from demo
+    simulator.load_preset("heating")
+
+    # Disable demo mode — controller will start polling real Modbus
+    device.set_preference(demo_mode=False)
+
+    # Wait for the controller to connect to the simulator
+    connected = device.wait_for_connected(timeout=15.0)
+    if not connected:
+        # Re-enable demo mode before failing
+        device.set_preference(demo_mode=True)
+        time.sleep(2)
+        pytest.fail("Controller did not connect to simulator within 15s")
+
+    yield
+
+    # Restore demo mode for subsequent tests
+    device.set_preference(demo_mode=True)
+    time.sleep(1)  # Let the controller switch back

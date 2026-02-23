@@ -400,6 +400,41 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def heatpump_control(self, command: str, **kwargs) -> dict:
+        """POST /api/heatpump/control — send a command to the heat pump.
+
+        Examples:
+            device.heatpump_control("power", value=True)
+            device.heatpump_control("mode", value="cooling")
+            device.heatpump_control("setpoint", type="heating", value=45)
+        """
+        payload = {"command": command, **kwargs}
+        r = self.session.post(
+            f"{self.base_url}/api/heatpump/control",
+            json=payload,
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Heatpump control failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def wait_for_connected(self, timeout: float = 10.0, poll: float = 0.5) -> bool:
+        """Poll /api/heatpump/status until connected=true, or timeout."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                status = self.get_heatpump_status()
+                if status.get("connected"):
+                    return True
+            except Exception:
+                pass
+            time.sleep(poll)
+        return False
+
     def wait_for_screen(self, name: str, timeout: float = 3.0, poll: float = 0.3) -> bool:
         """Poll until the screen name matches, or timeout."""
         deadline = time.time() + timeout
