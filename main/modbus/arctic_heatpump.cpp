@@ -73,6 +73,12 @@ static esp_err_t writeSingleReg(uint16_t address, uint16_t value) {
     if (s_demo_mode) {
         uint16_t offset = address - DEMO_REG_BASE;
         s_demo_regs[offset] = value;
+        // Simulate heat pump acking power command via STATUS_1 bit 0
+        if (address == reg::UNIT_ON_OFF) {
+            uint16_t& st1 = s_demo_regs[reg::STATUS_1 - DEMO_REG_BASE];
+            if (value) st1 |= status1::UNIT_ON;
+            else       st1 &= ~status1::UNIT_ON;
+        }
         return ESP_OK;
     }
     return modbus::writeSingleRegister(SLAVE_ADDRESS, address, value);
@@ -88,7 +94,7 @@ static bool pollHoldingRegisters() {
     }
     
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    s_state.unit_on = (data[0] != 0);
+    // unit_on is derived from STATUS_1 bit 0 in pollStatus(), not from the command register
     s_state.working_mode = static_cast<WorkingMode>(data[1]);
     s_state.cooling_setpoint = static_cast<int16_t>(data[2]);
     s_state.heating_setpoint = static_cast<int16_t>(data[3]);
@@ -166,6 +172,7 @@ static bool pollStatus() {
     s_state.status2 = data[1];  // 2136
     s_state.error1 = data[2];   // 2137
     s_state.error2 = data[3];   // 2138
+    s_state.unit_on = (s_state.status1 & status1::UNIT_ON) != 0;
     xSemaphoreGive(s_state_mutex);
     
     return true;
@@ -469,9 +476,7 @@ bool isConnected() {
 bool setUnitPower(bool on) {
     esp_err_t err = writeSingleReg(reg::UNIT_ON_OFF, on ? 1 : 0);
     if (err == ESP_OK) {
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_state.unit_on = on;
-        xSemaphoreGive(s_state_mutex);
+        // unit_on will update from STATUS_1 on next pollStatus() cycle
         ESP_LOGI(TAG, "Unit power set to %s", on ? "ON" : "OFF");
         return true;
     }
@@ -687,6 +692,14 @@ bool setDemoField(const char* field, int32_t value) {
     else return false;
     
     s_demo_regs[addr - DEMO_REG_BASE] = (uint16_t)value;
+    
+    // Mirror UNIT_ON_OFF to STATUS_1 bit 0 (same as writeSingleReg)
+    if (addr == reg::UNIT_ON_OFF) {
+        uint16_t& st1 = s_demo_regs[reg::STATUS_1 - DEMO_REG_BASE];
+        if (value) st1 |= status1::UNIT_ON;
+        else       st1 &= ~status1::UNIT_ON;
+    }
+    
     ESP_LOGI(TAG, "[DEMO] Field '%s' (reg %d) set to %ld", field, addr, (long)value);
     return true;
 }

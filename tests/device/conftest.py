@@ -120,8 +120,14 @@ def device() -> DeviceClient:
             client.toggle("demo_mode_switch")
             time.sleep(0.3)
             _return_to_main(client)
-    except Exception:
-        pass  # Best effort — tests will fail with clear errors if demo mode is off
+        # Verify demo mode is actually on
+        prefs = client.get_preferences()
+        if not prefs.get("demo_mode"):
+            pytest.exit("Demo mode could not be enabled — aborting session", returncode=1)
+    except SystemExit:
+        raise  # Let pytest.exit() propagate
+    except Exception as e:
+        pytest.exit(f"Failed to enable demo mode: {e}", returncode=1)
 
     yield client
 
