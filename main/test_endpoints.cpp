@@ -1283,8 +1283,13 @@ static esp_err_t set_preference_post_handler(httpd_req_t* req)
     // Apply supported preferences
     cJSON* demo = cJSON_GetObjectItem(root, "demo_mode");
     if (demo && cJSON_IsBool(demo)) {
-        app_prefs_set_demo_mode(cJSON_IsTrue(demo));
-        ESP_LOGI(TAG, "set-preference: demo_mode=%s", cJSON_IsTrue(demo) ? "true" : "false");
+        bool enable = cJSON_IsTrue(demo);
+        app_prefs_set_demo_mode(enable);
+        // Also set the runtime flag so isDemoMode() reflects the change immediately
+        if (enable && !arctic::isDemoMode()) {
+            arctic::initDemoState();
+        }
+        ESP_LOGI(TAG, "set-preference: demo_mode=%s", enable ? "true" : "false");
     }
 
     cJSON_Delete(root);
