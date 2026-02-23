@@ -79,6 +79,10 @@ REST API + WebSocket dashboard for monitoring and control.
 - Use widget **tags** over labels for language-independent targeting
 - Mock, don't connect: `wifi_mock()`, `firmware_mock()`, `notification_mock()`
 - Restore persistent settings (language, timezone, temp unit) at test end
+- **Demo mode toggle requires a reboot**: Changing `demo_mode` via
+  `set_preference(demo_mode=...)` only persists the setting. The controller must
+  be rebooted (`device.reboot()`) for the change to take effect. After rebooting,
+  call `device.wait_for_device(timeout=30.0)` to wait for it to come back online.
 - Test files follow pattern: `test_<feature>.py`
 
 ### API

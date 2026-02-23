@@ -156,10 +156,18 @@ jobs:
 
       - name: Run device UI tests
         id: ui_tests
-        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
+        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
         env:
           ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+
+      - name: Run Modbus E2E tests
+        id: modbus_tests
+        run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
+        env:
+          ARCTIC_URL: http://arctic.local
+          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+          SIMULATOR_URL: http://arctic-sim.local
 
       - name: Run API contract tests
         id: api_tests
@@ -200,6 +208,14 @@ jobs:
         with:
           name: API Contract Test Results
           path: api-test-results.xml
+          reporter: java-junit
+
+      - name: Publish Modbus E2E test results
+        uses: dorny/test-reporter@v1
+        if: always() && steps.modbus_tests.outcome != 'skipped'
+        with:
+          name: Modbus E2E Test Results
+          path: modbus-test-results.xml
           reporter: java-junit
 
       - name: Publish web test results
@@ -245,7 +261,7 @@ jobs:
 
           any_results = False
           with open(os.environ['GITHUB_OUTPUT'], 'a') as gh:
-              for name, path in [('ui', 'test-results.xml'), ('api', 'api-test-results.xml'), ('web', 'web-test-results.xml')]:
+              for name, path in [('ui', 'test-results.xml'), ('modbus', 'modbus-test-results.xml'), ('api', 'api-test-results.xml'), ('web', 'web-test-results.xml')]:
                   p, f, s = parse_junit(path)
                   total = p + f + s
                   if total > 0:
@@ -281,6 +297,18 @@ jobs:
           label: API Contract Tests
           message: ${{ steps.test_results.outputs.api_msg }}
           color: ${{ steps.test_results.outputs.api_color }}
+          forceUpdate: true
+
+      - name: Update Modbus E2E Tests badge
+        if: always() && steps.test_results.outputs.has_results == 'true'
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: b37c67c774075a8a90afd54b7c3a4592
+          filename: modbus_tests.json
+          label: Modbus E2E Tests
+          message: ${{ steps.test_results.outputs.modbus_msg }}
+          color: ${{ steps.test_results.outputs.modbus_color }}
           forceUpdate: true
 
       - name: Update Web Dashboard Tests badge

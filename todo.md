@@ -143,9 +143,9 @@ The simulator exposes an HTTP API so pytest scripts (running on the Pi runner or
 - [ ] `POST /api/playback` — load a recording file (JSON array of frames) and begin replaying register values on a schedule
 
 #### Python Client (`SimulatorClient`)
-- [ ] Add `tests/device/simulator_client.py` wrapping the above endpoints (mirrors `DeviceClient` pattern)
-- [ ] Add `simulator` pytest fixture in `conftest.py` (reads `SIMULATOR_URL` env var, defaults to `http://simulator.local`)
-- [ ] Integration tests import both `device` and `simulator` fixtures
+- [x] Add `tests/device/simulator_client.py` wrapping the above endpoints (mirrors `DeviceClient` pattern)
+- [x] Add `simulator` pytest fixture in `conftest.py` (reads `SIMULATOR_URL` env var, defaults to `http://arctic-sim.local`)
+- [x] Integration tests import both `device` and `simulator` fixtures
 
 ### Host-Side Scripts (VM / Pi)
 

@@ -273,10 +273,10 @@ These validate that a bad firmware gets reverted by the bootloader.
 Once the Modbus simulator hardware is set up (see main `todo.md`), add integration
 tests that drive both the simulator and the Tab5 to verify real RS485 communication:
 
-- [ ] Controller connects and reads valid data → verify dashboard populates correctly
-- [ ] Simulator injects error → verify Tab5 error card shows correct code
+- [x] Controller connects and reads valid data → verify dashboard populates correctly
+- [x] Simulator injects error → verify Tab5 error card shows correct code
 - [ ] Iterate all 32 error codes over real RS485 (parameterized, mirrors `test_error_mapping.py`)
-- [ ] Controller sends mode/setpoint/power changes → verify simulator register updated
+- [x] Controller sends mode/setpoint/power changes → verify simulator register updated
 - [ ] Simulate communication failure → verify controller shows DISCONNECTED after timeout
 - [ ] Restore communication → verify controller reconnects and resumes polling
 - [ ] Defrost cycle scenario → verify controller detects state transition
