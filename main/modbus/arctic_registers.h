@@ -19,7 +19,7 @@ constexpr int RS485_RX_PIN = 21;
 constexpr int RS485_DIR_PIN = 34;  // Direction control (RTS)
 
 // Timing constants (per protocol spec)
-constexpr int RESPONSE_TIMEOUT_MS = 200;
+// Response timeout is set via CONFIG_FMB_MASTER_TIMEOUT_MS_RESPOND in sdkconfig.defaults (200ms)
 constexpr int POLL_INTERVAL_NORMAL_MS = 500;
 constexpr int POLL_INTERVAL_DISCONNECTED_MS = 5000;
 constexpr int MIN_FRAME_GAP_MS = 4;  // 3.5 char times at 2400 baud ≈ 14.5ms, but 4ms is safe

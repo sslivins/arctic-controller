@@ -127,3 +127,7 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 # before the next reboot; otherwise the bootloader rolls back to the previous
 # working partition.  This prevents a bad OTA from bricking the device.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Modbus master response timeout (per Arctic Modbus protocol spec §Communication Timing)
+# Default is 3000ms which causes 60s disconnect detection; 200ms matches the spec.
+CONFIG_FMB_MASTER_TIMEOUT_MS_RESPOND=200
