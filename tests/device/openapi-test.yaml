@@ -853,14 +853,60 @@ paths:
         "423":
           $ref: "#/components/responses/Locked"
 
+  /api/test/set-preference:
+    post:
+      tags: [Mocking]
+      summary: Set app preferences directly
+      description: |
+        Set application preferences without triggering UI interactions.
+        This bypasses the settings menu — no reboot confirmation panel appears.
+        Useful for test setup/teardown when demo mode needs to be toggled
+        without going through the switch UI.
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                demo_mode:
+                  type: boolean
+                  description: Enable or disable demo mode preference.
+            example:
+              demo_mode: true
+      responses:
+        "200":
+          description: Preferences updated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  demo_mode:
+                    type: boolean
+                    description: Current demo mode preference value.
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "423":
+          $ref: "#/components/responses/Locked"
+
   /api/test/set-demo-field:
     post:
       tags: [Mocking]
       summary: Inject demo state field values
       description: |
         Set arbitrary demo state fields by name.  Requires demo mode to be
-        enabled on the device (toggle via the settings menu or the
-        `demo_mode_switch` widget).  Returns 403 if demo mode is off.
+        enabled on the device (set via `POST /api/test/set-preference` or
+        toggled via the settings UI).  Returns 403 if demo mode is off.
       parameters:
         - in: header
           name: X-Session-Id

@@ -19,6 +19,7 @@
 #include "fonts/fonts.h"
 #include "wifi_manager.h"
 #include <esp_log.h>
+#include <esp_system.h>
 #include <string.h>
 
 static const char* TAG = "settings_menu";
@@ -69,6 +70,9 @@ typedef struct {
     lv_obj_t* celsius_label;
     lv_obj_t* fahrenheit_label;
     
+    // Reboot confirmation overlay
+    lv_obj_t* reboot_overlay;
+    
     // Track which sub-screen is active
     settings_item_t active_sub_screen;
     bool sub_screen_active;
@@ -86,6 +90,9 @@ static void close_btn_event_cb(lv_event_t* e);
 static void row_click_cb(lv_event_t* e);
 static void demo_mode_switch_cb(lv_event_t* e);
 static void temp_unit_switch_cb(lv_event_t* e);
+static void show_reboot_confirmation(void);
+static void reboot_confirm_cb(lv_event_t* e);
+static void reboot_cancel_cb(lv_event_t* e);
 
 // ============================================================================
 // Helper Functions
@@ -199,7 +206,144 @@ static void demo_mode_switch_cb(lv_event_t* e)
     bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
     app_prefs_set_demo_mode(on);
     heatpump_screen_set_demo_banner(on);
-    ESP_LOGI(TAG, "Demo mode %s", on ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Demo mode %s — showing reboot confirmation", on ? "enabled" : "disabled");
+    show_reboot_confirmation();
+}
+
+// ============================================================================
+// Reboot Confirmation Panel
+// ============================================================================
+
+static void dismiss_reboot_overlay(void)
+{
+    if (state.reboot_overlay) {
+        lv_obj_delete(state.reboot_overlay);
+        state.reboot_overlay = NULL;
+    }
+}
+
+static void reboot_confirm_cb(lv_event_t* e)
+{
+    (void)e;
+    ESP_LOGI(TAG, "User confirmed restart");
+    esp_restart();
+}
+
+static void reboot_cancel_cb(lv_event_t* e)
+{
+    (void)e;
+    // Revert the preference and switch state
+    bool current = app_prefs_is_demo_mode();
+    bool reverted = !current;
+    app_prefs_set_demo_mode(reverted);
+    heatpump_screen_set_demo_banner(reverted);
+
+    if (state.demo_mode_switch) {
+        if (reverted) {
+            lv_obj_add_state(state.demo_mode_switch, LV_STATE_CHECKED);
+        } else {
+            lv_obj_clear_state(state.demo_mode_switch, LV_STATE_CHECKED);
+        }
+    }
+    ESP_LOGI(TAG, "Reboot cancelled — demo mode reverted to %s", reverted ? "on" : "off");
+    dismiss_reboot_overlay();
+}
+
+static void show_reboot_confirmation(void)
+{
+    if (!state.screen) return;
+
+    // Clean up previous overlay if any
+    dismiss_reboot_overlay();
+
+    // --- Semi-transparent overlay covering the entire screen ---
+    lv_obj_t* overlay = lv_obj_create(state.screen);
+    lv_obj_remove_style_all(overlay);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_50, LV_PART_MAIN);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);   // absorb taps
+    lv_obj_remove_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_user_data(overlay, (void*)"reboot_overlay");
+    state.reboot_overlay = overlay;
+
+    // --- Bottom panel ---
+    lv_obj_t* panel = lv_obj_create(overlay);
+    lv_obj_remove_style_all(panel);
+    lv_obj_set_size(panel, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(panel, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(panel, 24, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(panel, 32, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(panel, 48, LV_PART_MAIN);
+    lv_obj_remove_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(panel, 12, LV_PART_MAIN);
+    lv_obj_set_user_data(panel, (void*)"reboot_panel");
+
+    // "Demo mode changed."
+    lv_obj_t* line1 = lv_label_create(panel);
+    lv_label_set_text(line1, i18n_get(STR_DEMO_MODE_CHANGED));
+    lv_obj_set_style_text_font(line1, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_set_style_text_color(line1, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_set_style_text_align(line1, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+    // "Restart required to take effect."
+    lv_obj_t* line2 = lv_label_create(panel);
+    lv_label_set_text(line2, i18n_get(STR_RESTART_REQUIRED));
+    lv_obj_set_style_text_font(line2, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(line2, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_style_text_align(line2, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+    // Button row
+    lv_obj_t* btn_row = lv_obj_create(panel);
+    lv_obj_remove_style_all(btn_row);
+    lv_obj_set_size(btn_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(btn_row, 24, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(btn_row, 12, LV_PART_MAIN);
+    lv_obj_remove_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Cancel button
+    lv_obj_t* cancel_btn = lv_button_create(btn_row);
+    lv_obj_set_size(cancel_btn, 200, 64);
+    lv_obj_set_style_bg_color(cancel_btn, COLOR_ROW, LV_PART_MAIN);
+    lv_obj_set_style_radius(cancel_btn, 12, LV_PART_MAIN);
+    lv_obj_set_user_data(cancel_btn, (void*)"reboot_cancel");
+    lv_obj_add_event_cb(cancel_btn, reboot_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* cancel_lbl = lv_label_create(cancel_btn);
+    lv_label_set_text(cancel_lbl, i18n_get(STR_CANCEL));
+    lv_obj_set_style_text_font(cancel_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(cancel_lbl, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(cancel_lbl);
+
+    // Restart button
+    lv_obj_t* restart_btn = lv_button_create(btn_row);
+    lv_obj_set_size(restart_btn, 200, 64);
+    lv_obj_set_style_bg_color(restart_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_radius(restart_btn, 12, LV_PART_MAIN);
+    lv_obj_set_user_data(restart_btn, (void*)"reboot_confirm");
+    lv_obj_add_event_cb(restart_btn, reboot_confirm_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* restart_lbl = lv_label_create(restart_btn);
+    lv_label_set_text(restart_lbl, i18n_get(STR_RESTART));
+    lv_obj_set_style_text_font(restart_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(restart_lbl, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_center(restart_lbl);
+
+    // Position panel at the bottom and animate it sliding up
+    lv_obj_align(panel, LV_ALIGN_BOTTOM_MID, 0, 300);  // start off-screen
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, panel);
+    lv_anim_set_values(&anim, 300, 0);
+    lv_anim_set_duration(&anim, 300);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&anim, [](void* obj, int32_t v) {
+        lv_obj_align((lv_obj_t*)obj, LV_ALIGN_BOTTOM_MID, 0, v);
+    });
+    lv_anim_start(&anim);
 }
 
 static void temp_unit_switch_cb(lv_event_t* e)

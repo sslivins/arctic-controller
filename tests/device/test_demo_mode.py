@@ -1,104 +1,94 @@
 """
-Test: Demo Mode Toggle
+Test: Demo Mode Toggle & Reboot Confirmation
 
-Verifies that toggling the demo mode switch in the settings menu
-changes the preference and dynamically shows/hides the demo mode
-banner on the main screen without requiring a reboot.
+Verifies that toggling the demo mode switch in the settings menu:
+  1. Immediately sets the preference
+  2. Shows a reboot confirmation panel with Cancel and Restart buttons
+  3. Cancel reverts the preference, switch, and dismisses the panel
+  4. The demo mode preference can be restored via the test API
+
+Note: We cannot test the Restart button because it calls esp_restart(),
+which would reboot the device and disrupt the test session.
+
+Each test is self-contained — it navigates to settings and toggles the
+switch itself, because the ensure_main_screen fixture returns to the
+main screen (and dismisses the reboot overlay) between tests.
 """
 
 import time
 import pytest
 from device_client import DeviceClient
 
-# Module-level storage for the initial demo mode state
-_initial_demo_mode: bool | None = None
 
-
-def test_toggle_demo_mode(device: DeviceClient):
-    """Toggling demo mode switch should change the preference."""
-    global _initial_demo_mode
-
-    # Read and remember the initial state
+def test_toggle_shows_reboot_panel_with_buttons(device: DeviceClient):
+    """Toggling demo mode switch shows a reboot panel with Cancel and Restart."""
     prefs = device.get_preferences()
-    _initial_demo_mode = prefs["demo_mode"]
+    initial = prefs["demo_mode"]
 
-    # Open settings
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
     time.sleep(0.5)
 
-    # Toggle the switch
     result = device.toggle("demo_mode_switch")
     assert result["success"] is True
-    expected = not _initial_demo_mode
-    assert result["checked"] == expected, \
-        f"Expected checked={expected}, got {result['checked']}"
-    time.sleep(0.3)
+    expected = not initial
+    assert result["checked"] == expected
+    time.sleep(0.5)
 
-    # Verify via preferences API
+    # Reboot confirmation panel should appear with overlay and both buttons
+    assert device.has_widget(tag="reboot_overlay"), \
+        "Reboot overlay should be visible after toggling demo mode"
+    assert device.has_widget(tag="reboot_panel"), \
+        "Reboot panel should be visible after toggling demo mode"
+    assert device.has_widget(tag="reboot_cancel"), \
+        "Cancel button should be present in reboot panel"
+    assert device.has_widget(tag="reboot_confirm"), \
+        "Restart button should be present in reboot panel"
+
+    # Preference should be set immediately (before user confirms)
     prefs = device.get_preferences()
-    assert prefs["demo_mode"] == expected, \
-        f"Expected demo_mode={expected}, got {prefs['demo_mode']}"
+    assert prefs["demo_mode"] == expected
 
 
-def test_demo_banner_shown_when_enabled(device: DeviceClient):
-    """When demo mode is ON, the main screen should show the demo banner."""
-    # Ensure demo mode is ON
+def test_cancel_reverts_and_dismisses(device: DeviceClient):
+    """Clicking Cancel reverts the preference, switch, and dismisses the panel."""
     prefs = device.get_preferences()
-    if not prefs["demo_mode"]:
-        device.click(tag="settings")
-        assert device.wait_for_screen("settings", timeout=5.0)
-        time.sleep(0.5)
-        device.toggle("demo_mode_switch")
-        time.sleep(0.3)
+    initial = prefs["demo_mode"]
 
-    # Go to main screen (close settings if open)
-    if device.has_widget(tag="settings_close"):
-        device.click(tag="settings_close")
-        time.sleep(1.0)
+    device.click(tag="settings")
+    assert device.wait_for_screen("settings", timeout=5.0)
+    time.sleep(0.5)
 
-    # Verify the demo banner is visible
-    banner = device.wait_for_widget(tag="demo_banner", timeout=3.0)
-    assert banner is not None, "Demo banner should be visible when demo mode is ON"
+    # Toggle to bring up the reboot panel
+    device.toggle("demo_mode_switch")
+    time.sleep(0.5)
+    assert device.has_widget(tag="reboot_overlay")
 
+    # Click Cancel
+    device.click(tag="reboot_cancel")
+    time.sleep(0.5)
 
-def test_demo_banner_hidden_when_disabled(device: DeviceClient):
-    """When demo mode is OFF, the main screen should not show the demo banner."""
-    # Ensure demo mode is OFF
+    # Panel should be dismissed
+    assert not device.has_widget(tag="reboot_overlay"), \
+        "Reboot overlay should be dismissed after Cancel"
+    assert not device.has_widget(tag="reboot_panel"), \
+        "Reboot panel should be dismissed after Cancel"
+
+    # Preference should be reverted to initial value
     prefs = device.get_preferences()
-    if prefs["demo_mode"]:
-        device.click(tag="settings")
-        assert device.wait_for_screen("settings", timeout=5.0)
-        time.sleep(0.5)
-        device.toggle("demo_mode_switch")
-        time.sleep(0.3)
+    assert prefs["demo_mode"] == initial
 
-    # Go to main screen (close settings if open)
-    if device.has_widget(tag="settings_close"):
-        device.click(tag="settings_close")
-        time.sleep(1.0)
-
-    # Verify the demo banner is NOT visible
-    assert not device.has_widget(tag="demo_banner"), \
-        "Demo banner should NOT be visible when demo mode is OFF"
+    # Switch should be back to its original position
+    sw = device.find_widget(tag="demo_mode_switch")
+    assert sw is not None
+    assert sw.checked == initial
 
 
 def test_restore_demo_mode(device: DeviceClient):
-    """Restore demo mode to ON — other tests depend on demo mode being enabled."""
+    """Restore demo mode to ON via API — other tests depend on demo mode."""
     prefs = device.get_preferences()
-    current = prefs["demo_mode"]
-
-    # Ensure demo mode is ON (other tests require it for set_demo_fields)
-    if not current:
-        device.click(tag="settings")
-        assert device.wait_for_screen("settings", timeout=5.0)
-        time.sleep(0.5)
-
-        result = device.toggle("demo_mode_switch")
-        assert result["success"] is True
-        assert result["checked"] is True
-        time.sleep(0.3)
+    if not prefs["demo_mode"]:
+        device.set_preference(demo_mode=True)
 
     prefs = device.get_preferences()
-    assert prefs["demo_mode"] is True, \
-        f"Expected demo_mode=True, got {prefs['demo_mode']}"
+    assert prefs["demo_mode"] is True

@@ -208,6 +208,25 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def set_preference(self, **prefs) -> dict:
+        """POST /api/test/set-preference — set preferences directly (no UI).
+
+        Example: device.set_preference(demo_mode=True)
+        Bypasses the settings UI — no reboot confirmation panel.
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/set-preference",
+            json=prefs,
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Set preference failed ({r.status_code}): {msg}")
+        return r.json()
+
     # ------------------------------------------------------------------
     # WiFi mock
     # ------------------------------------------------------------------
