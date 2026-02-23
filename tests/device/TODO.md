@@ -239,7 +239,7 @@ These validate that a bad firmware gets reverted by the bootloader.
 - [ ] Verify component dots update in real-time when compressor/fan/pump status changes
 - [ ] Test expandable panel toggle (open/close) responsiveness
 - [ ] Verify frequency bar updates smoothly in compressor panel
-- [ ] Test demo mode toggle: all fields injectable, UI reflects changes immediately
+- [x] Test demo mode toggle: reboot confirmation panel appears, Cancel reverts preference
 - [ ] Confirm startup animation → dashboard transition works cleanly
 - [ ] Test memory usage: open/close screens repeatedly, check for LVGL object leaks
 - [ ] Verify touch targets are large enough (especially expandable panel headers, nav buttons)

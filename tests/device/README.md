@@ -138,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (267 UI tests + 9 screenshot API tests + 286 REST API tests + 55 web tests + API contract tests)
+### Test Files (268 UI tests + 9 screenshot API tests + 286 REST API tests + 55 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -159,7 +159,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_timezone.py`](test_timezone.py) | 5 | Timezone roller, time preview, preferences |
 | [`test_time_format.py`](test_time_format.py) | 5 | 12h/24h toggle, status bar display |
 | [`test_wifi.py`](test_wifi.py) | 4 | Password dialog, show/hide toggle, open network bypass |
-| [`test_demo_mode.py`](test_demo_mode.py) | 4 | Demo mode toggle, banner show/hide |
+| [`test_demo_mode.py`](test_demo_mode.py) | 5 | Demo mode toggle, reboot confirmation panel, cancel revert |
 | [`test_settings_menu.py`](test_settings_menu.py) | 3 | Open/close settings, close button |
 | [`test_display_brightness.py`](test_display_brightness.py) | 3 | Brightness slider control and label |
 | [`test_temperature_unit.py`](test_temperature_unit.py) | 2 | °C/°F toggle and preferences |
@@ -189,7 +189,7 @@ The `DeviceClient` class provides typed wrappers for all device communication:
 **UI interaction**: `click()`, `set_slider()`, `set_roller()`, `toggle()`, `type_text()`
 
 **Mocking**: `wifi_mock()`, `firmware_mock()`, `notification_mock()`, `set_demo_fields()`,
-`clear_error_history()`, and corresponding `*_reset()` methods
+`set_preference()`, `clear_error_history()`, and corresponding `*_reset()` methods
 
 **Polling**: `wait_for_screen()`, `wait_for_widget()` — poll with configurable timeout
 

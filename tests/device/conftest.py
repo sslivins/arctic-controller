@@ -46,6 +46,14 @@ def _return_to_main(device: DeviceClient):
         device.wait_for_widget(tag="settings", timeout=3.0)
         return
 
+    # Dismiss reboot confirmation overlay if present (absorbs all taps)
+    if device.has_widget(tag="reboot_overlay"):
+        try:
+            device.click(tag="reboot_cancel")
+            time.sleep(0.5)
+        except Exception:
+            pass
+
     # If on a heat pump sub-screen, close it to return to main
     if current in ("temps", "system", "control", "errors", "event_log"):
         try:
@@ -110,16 +118,13 @@ def device() -> DeviceClient:
     except Exception as e:
         pytest.exit(f"Cannot acquire device lock: {e}", returncode=1)
 
-    # Ensure demo mode is enabled (many tests depend on set_demo_fields)
+    # Ensure demo mode is enabled (many tests depend on set_demo_fields).
+    # Use the API endpoint directly — toggling the UI switch now triggers
+    # a reboot confirmation panel that can't be dismissed without side effects.
     try:
         prefs = client.get_preferences()
         if not prefs.get("demo_mode"):
-            client.click(tag="settings")
-            client.wait_for_screen("settings", timeout=5.0)
-            time.sleep(0.5)
-            client.toggle("demo_mode_switch")
-            time.sleep(0.3)
-            _return_to_main(client)
+            client.set_preference(demo_mode=True)
         # Verify demo mode is actually on
         prefs = client.get_preferences()
         if not prefs.get("demo_mode"):

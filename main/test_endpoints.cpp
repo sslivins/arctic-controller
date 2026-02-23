@@ -27,6 +27,7 @@
 #include "settings/settings_types.h"
 #include "i18n/i18n.h"
 #include "modbus/arctic_heatpump.h"
+#include "app_preferences.h"
 #include "heatpump_errors.h"
 #include "heatpump_temps_screen.h"
 #include "heatpump_system_screen.h"
@@ -1255,6 +1256,52 @@ static esp_err_t notification_mock_reset_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/set-preference — set app preferences directly (no UI)
+// ============================================================================
+// Body: {"demo_mode": true}
+// Sets the specified preference(s) without triggering any UI interaction.
+// Returns the updated preferences snapshot.
+
+static esp_err_t set_preference_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+
+    char body[256];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    // Apply supported preferences
+    cJSON* demo = cJSON_GetObjectItem(root, "demo_mode");
+    if (demo && cJSON_IsBool(demo)) {
+        app_prefs_set_demo_mode(cJSON_IsTrue(demo));
+        ESP_LOGI(TAG, "set-preference: demo_mode=%s", cJSON_IsTrue(demo) ? "true" : "false");
+    }
+
+    cJSON_Delete(root);
+
+    // Return updated preferences
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddBoolToObject(resp, "demo_mode", app_prefs_is_demo_mode());
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/set-demo-field — set demo state fields (no auth)
 // ============================================================================
 
@@ -1748,6 +1795,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &firmware_mock_reset_options_uri);
+
+    httpd_uri_t set_preference_uri = {
+        .uri = "/api/test/set-preference",
+        .method = HTTP_POST,
+        .handler = set_preference_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &set_preference_uri);
+
+    httpd_uri_t set_preference_options_uri = {
+        .uri = "/api/test/set-preference",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &set_preference_options_uri);
 
     httpd_uri_t set_demo_field_uri = {
         .uri = "/api/test/set-demo-field",
