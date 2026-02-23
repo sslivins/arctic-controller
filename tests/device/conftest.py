@@ -223,29 +223,41 @@ def simulator() -> SimulatorClient:
     return client
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def modbus_mode(device: DeviceClient, simulator: SimulatorClient):
-    """Disable demo mode so the controller polls the real Modbus bus.
+    """Disable demo mode once for the entire test session.
 
-    Loads the simulator's 'heating' preset first so the controller sees
-    valid data immediately on connect.  Re-enables demo mode on teardown.
+    Changing demo mode requires a device reboot to take effect.
+    This fixture reboots once at the start to disable demo mode,
+    and once at the end to re-enable it.
     """
     # Prepare simulator with a known state before switching away from demo
     simulator.load_preset("heating")
 
-    # Disable demo mode — controller will start polling real Modbus
-    device.set_preference(demo_mode=False)
+    # Disable demo mode if needed — requires reboot to take effect
+    prefs = device.get_preferences()
+    if prefs.get("demo_mode"):
+        device.set_preference(demo_mode=False)
+        device.reboot()
+        time.sleep(2)  # Give the device time to start rebooting
+
+        if not device.wait_for_device(timeout=30.0):
+            pytest.fail("Device did not come back after reboot (disabling demo mode)")
 
     # Wait for the controller to connect to the simulator
     connected = device.wait_for_connected(timeout=15.0)
     if not connected:
         # Re-enable demo mode before failing
         device.set_preference(demo_mode=True)
+        device.reboot()
         time.sleep(2)
+        device.wait_for_device(timeout=30.0)
         pytest.fail("Controller did not connect to simulator within 15s")
 
     yield
 
-    # Restore demo mode for subsequent tests
+    # Restore demo mode for subsequent (non-modbus) tests — requires reboot
     device.set_preference(demo_mode=True)
-    time.sleep(1)  # Let the controller switch back
+    device.reboot()
+    time.sleep(2)
+    device.wait_for_device(timeout=30.0)

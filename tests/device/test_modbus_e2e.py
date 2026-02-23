@@ -30,6 +30,18 @@ from simulator_client import SimulatorClient
 POLL_SETTLE_S = 3.0
 
 
+@pytest.fixture(autouse=True)
+def _reset_modbus_state(simulator: SimulatorClient, modbus_mode):
+    """Reload the heating preset before each test to ensure clean state.
+
+    This is cheap (single HTTP call to the simulator) compared to the
+    reboot cycle that modbus_mode uses for demo mode toggling.
+    """
+    simulator.load_preset("heating")
+    simulator.clear_errors()
+    time.sleep(POLL_SETTLE_S)
+
+
 def _wait_for(fn, *, timeout: float = 5.0, poll: float = 0.5, desc: str = "condition"):
     """Poll *fn* until it returns True, or raise after *timeout* seconds."""
     deadline = time.time() + timeout
@@ -483,14 +495,7 @@ class TestModbusAllErrors:
                               modbus_mode, register: int, bit: int, code: str,
                               severity: str):
         """Inject a single error bit → controller detects the error with correct code and severity."""
-        # Precondition: no errors
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-        _wait_for(
-            lambda: not device.get_heatpump_status()["has_error"],
-            timeout=5.0,
-            desc="controller to show no errors",
-        )
+        # _reset_modbus_state fixture already cleared errors and loaded heating preset
 
         # Inject the error
         simulator.set_error_bit(register, bit)
@@ -529,15 +534,6 @@ class TestModbusAllErrors:
             f"Error {code} not in status error string: {status.get('error')}"
         )
 
-        # Clean up for next test
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-        _wait_for(
-            lambda: not device.get_heatpump_status()["has_error"],
-            timeout=5.0,
-            desc=f"controller to clear error {code}",
-        )
-
 
 @pytest.mark.modbus
 class TestModbusMultipleErrors:
@@ -546,9 +542,6 @@ class TestModbusMultipleErrors:
     def test_two_errors_same_register(self, device: DeviceClient,
                                       simulator: SimulatorClient, modbus_mode):
         """Inject two errors in register 2137 simultaneously."""
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
         # Set E01 (bit 6) and E05 (bit 5) in register 2137
         simulator.set_register(2137, (1 << 6) | (1 << 5))
         time.sleep(POLL_SETTLE_S)
@@ -565,15 +558,9 @@ class TestModbusMultipleErrors:
         assert "E05" in active_codes, f"E05 not found in {active_codes}"
         assert errors["error_count"] >= 2
 
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
     def test_two_errors_different_registers(self, device: DeviceClient,
                                             simulator: SimulatorClient, modbus_mode):
         """Inject errors in both register 2137 and 2138 simultaneously."""
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
         # E01 in reg 2137 (bit 6) + P02 in reg 2138 (bit 6)
         simulator.set_error_bit(2137, 6)
         simulator.set_error_bit(2138, 6)
@@ -591,15 +578,9 @@ class TestModbusMultipleErrors:
         assert "P02" in active_codes, f"P02 not found in {active_codes}"
         assert errors["error_count"] >= 2
 
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
     def test_all_errors_register1(self, device: DeviceClient,
                                   simulator: SimulatorClient, modbus_mode):
         """Set all 16 error bits in register 2137 — verify all 16 codes are reported."""
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
         # Set all 16 bits
         simulator.set_register(2137, 0xFFFF)
         time.sleep(POLL_SETTLE_S)
@@ -619,15 +600,9 @@ class TestModbusMultipleErrors:
             f"Got: {active_codes}"
         )
 
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
     def test_all_errors_register2(self, device: DeviceClient,
                                   simulator: SimulatorClient, modbus_mode):
         """Set all 16 error bits in register 2138 — verify all 16 codes are reported."""
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
         # Set all 16 bits
         simulator.set_register(2138, 0xFFFF)
         time.sleep(POLL_SETTLE_S)
@@ -647,15 +622,9 @@ class TestModbusMultipleErrors:
             f"Got: {active_codes}"
         )
 
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
     def test_highest_severity_critical(self, device: DeviceClient,
                                        simulator: SimulatorClient, modbus_mode):
         """When a critical error is present, highest_severity should be 'critical'."""
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
         # r01 (bit 13, reg 2137) is critical
         simulator.set_error_bit(2137, 13)
         time.sleep(POLL_SETTLE_S)
@@ -669,15 +638,9 @@ class TestModbusMultipleErrors:
         errors = device.get_heatpump_errors()
         assert errors["highest_severity"] == "critical"
 
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
     def test_highest_severity_warning(self, device: DeviceClient,
                                       simulator: SimulatorClient, modbus_mode):
         """When only a warning error is active, highest_severity should be 'warning'."""
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
         # E21 (bit 10, reg 2137) is warning severity
         simulator.set_error_bit(2137, 10)
         time.sleep(POLL_SETTLE_S)
@@ -691,9 +654,6 @@ class TestModbusMultipleErrors:
         errors = device.get_heatpump_errors()
         assert errors["highest_severity"] == "warning"
 
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
 
 @pytest.mark.modbus
 class TestModbusErrorClearing:
@@ -702,9 +662,6 @@ class TestModbusErrorClearing:
     def test_error_inject_and_clear(self, device: DeviceClient,
                                     simulator: SimulatorClient, modbus_mode):
         """Inject error → clear it → controller shows no errors."""
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
         # Inject E01
         simulator.set_error_bit(2137, 6)
         time.sleep(POLL_SETTLE_S)
@@ -732,9 +689,6 @@ class TestModbusErrorClearing:
     def test_clear_single_bit(self, device: DeviceClient,
                               simulator: SimulatorClient, modbus_mode):
         """Set two error bits, clear one — only the remaining error should be active."""
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
         # Set E01 (bit 6) and E05 (bit 5) in register 2137
         simulator.set_register(2137, (1 << 6) | (1 << 5))
         time.sleep(POLL_SETTLE_S)
@@ -760,21 +714,10 @@ class TestModbusErrorClearing:
         assert "E05" in active_codes, f"E05 should still be active, got {active_codes}"
         assert "E01" not in active_codes, f"E01 should be cleared, got {active_codes}"
 
-        simulator.clear_errors()
-        time.sleep(POLL_SETTLE_S)
-
     def test_error_history_populated(self, device: DeviceClient,
                                      simulator: SimulatorClient, modbus_mode):
         """After injecting and clearing an error, it should appear in error history."""
-        simulator.clear_errors()
         device.clear_error_history()
-        time.sleep(POLL_SETTLE_S)
-
-        _wait_for(
-            lambda: not device.get_heatpump_status()["has_error"],
-            timeout=5.0,
-            desc="no errors before test",
-        )
 
         # Inject E01, wait for detection, then clear
         simulator.set_error_bit(2137, 6)
