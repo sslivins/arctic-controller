@@ -295,6 +295,11 @@ static const char* strings_en[STR_COUNT] = {
     [STR_EVENT_DISCONNECTED] = "Disconnected",
     [STR_EVENT_CLEAR] = "Clear Events",
     [STR_EVENT_NO_EVENTS] = "No events recorded",
+
+    // Reboot confirmation
+    [STR_DEMO_MODE_CHANGED] = "Demo mode changed.",
+    [STR_RESTART_REQUIRED] = "Restart required to take effect.",
+    [STR_RESTART] = "Restart",
 };
 
 // French strings
@@ -571,6 +576,11 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_EVENT_DISCONNECTED] = "Déconnecté",
     [STR_EVENT_CLEAR] = "Effacer événements",
     [STR_EVENT_NO_EVENTS] = "Aucun événement",
+
+    // Reboot confirmation
+    [STR_DEMO_MODE_CHANGED] = "Mode démo modifié.",
+    [STR_RESTART_REQUIRED] = "Redémarrage nécessaire.",
+    [STR_RESTART] = "Redémarrer",
 };
 
 // Spanish strings
@@ -847,6 +857,11 @@ static const char* strings_es[STR_COUNT] = {
     [STR_EVENT_DISCONNECTED] = "Desconectado",
     [STR_EVENT_CLEAR] = "Borrar eventos",
     [STR_EVENT_NO_EVENTS] = "Sin eventos registrados",
+
+    // Reboot confirmation
+    [STR_DEMO_MODE_CHANGED] = "Modo demo cambiado.",
+    [STR_RESTART_REQUIRED] = "Reinicio necesario.",
+    [STR_RESTART] = "Reiniciar",
 };
 
 // Language names in their own language (native names)
