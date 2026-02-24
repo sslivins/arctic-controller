@@ -275,50 +275,56 @@ jobs:
               gh.write(f'has_results={\"true\" if any_results else \"false\"}\n')
           "
 
-      - name: Update Device UI Tests badge
+      - name: Update all test badges
         if: always() && steps.test_results.outputs.has_results == 'true'
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: b37c67c774075a8a90afd54b7c3a4592
-          filename: ui_tests.json
-          label: Device UI Tests
-          message: ${{ steps.test_results.outputs.ui_msg }}
-          color: ${{ steps.test_results.outputs.ui_color }}
-          forceUpdate: true
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_SECRET }}
+          ui_msg: ${{ steps.test_results.outputs.ui_msg }}
+          ui_color: ${{ steps.test_results.outputs.ui_color }}
+          api_msg: ${{ steps.test_results.outputs.api_msg }}
+          api_color: ${{ steps.test_results.outputs.api_color }}
+          modbus_msg: ${{ steps.test_results.outputs.modbus_msg }}
+          modbus_color: ${{ steps.test_results.outputs.modbus_color }}
+          web_msg: ${{ steps.test_results.outputs.web_msg }}
+          web_color: ${{ steps.test_results.outputs.web_color }}
+        run: |
+          python3 -c "
+          import json, os, urllib.request
 
-      - name: Update API Contract Tests badge
-        if: always() && steps.test_results.outputs.has_results == 'true'
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: b37c67c774075a8a90afd54b7c3a4592
-          filename: api_tests.json
-          label: API Contract Tests
-          message: ${{ steps.test_results.outputs.api_msg }}
-          color: ${{ steps.test_results.outputs.api_color }}
-          forceUpdate: true
+          gist_id = 'b37c67c774075a8a90afd54b7c3a4592'
+          token = os.environ['GIST_TOKEN']
 
-      - name: Update Modbus E2E Tests badge
-        if: always() && steps.test_results.outputs.has_results == 'true'
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: b37c67c774075a8a90afd54b7c3a4592
-          filename: modbus_tests.json
-          label: Modbus E2E Tests
-          message: ${{ steps.test_results.outputs.modbus_msg }}
-          color: ${{ steps.test_results.outputs.modbus_color }}
-          forceUpdate: true
+          badges = {
+              'ui_tests.json':     ('Device UI Tests',     'ui'),
+              'api_tests.json':    ('API Contract Tests',  'api'),
+              'modbus_tests.json': ('Modbus E2E Tests',    'modbus'),
+              'web_tests.json':    ('Web Dashboard Tests', 'web'),
+          }
 
-      - name: Update Web Dashboard Tests badge
-        if: always() && steps.test_results.outputs.has_results == 'true'
-        uses: schneegans/dynamic-badges-action@v1.7.0
-        with:
-          auth: ${{ secrets.GIST_SECRET }}
-          gistID: b37c67c774075a8a90afd54b7c3a4592
-          filename: web_tests.json
-          label: Web Dashboard Tests
-          message: ${{ steps.test_results.outputs.web_msg }}
-          color: ${{ steps.test_results.outputs.web_color }}
-          forceUpdate: true
+          files = {}
+          for filename, (label, prefix) in badges.items():
+              msg = os.environ.get(f'{prefix}_msg', '0 passed')
+              color = os.environ.get(f'{prefix}_color', 'lightgrey')
+              files[filename] = {
+                  'content': json.dumps({
+                      'schemaVersion': 1,
+                      'label': label,
+                      'message': msg,
+                      'color': color,
+                  })
+              }
+
+          data = json.dumps({'files': files}).encode()
+          req = urllib.request.Request(
+              f'https://api.github.com/gists/{gist_id}',
+              data=data,
+              method='PATCH',
+              headers={
+                  'Authorization': f'token {token}',
+                  'Accept': 'application/vnd.github+json',
+                  'Content-Type': 'application/json',
+              },
+          )
+          resp = urllib.request.urlopen(req)
+          print(f'Gist updated: {resp.status}')
+          "
