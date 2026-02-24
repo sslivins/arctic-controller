@@ -180,26 +180,61 @@ class TestComponentDots:
         assert dot.bg_color == COLOR_INACTIVE, \
             f"Compressor dot should be inactive, got bg_color={dot.bg_color}"
 
-    def test_fan_dot_on(self, device: DeviceClient):
-        """Fan running should light the fan dot."""
+    def test_fan_speed_bars_medium(self, device: DeviceClient):
+        """Default demo has FAN_MED — bars 1 and 2 should be green, bar 3 gray."""
         device.set_demo_fields(error1=0, error2=0)
         _wait_for_update()
-        dot = device.find_widget(tag="fan_dot")
-        assert dot is not None, "fan_dot not found"
-        assert dot.bg_color != COLOR_INACTIVE, \
-            f"Fan dot should be active, got bg_color={dot.bg_color}"
+        bar1 = device.find_widget(tag="fan_bar_1")
+        bar2 = device.find_widget(tag="fan_bar_2")
+        bar3 = device.find_widget(tag="fan_bar_3")
+        assert bar1 is not None, "fan_bar_1 not found"
+        assert bar2 is not None, "fan_bar_2 not found"
+        assert bar3 is not None, "fan_bar_3 not found"
+        assert bar1.bg_color != COLOR_INACTIVE, "Bar 1 should be active (med)"
+        assert bar2.bg_color != COLOR_INACTIVE, "Bar 2 should be active (med)"
+        assert bar3.bg_color == COLOR_INACTIVE, "Bar 3 should be inactive (med)"
 
-    def test_fan_dot_off(self, device: DeviceClient):
-        """Fan stopped should grey out the fan dot."""
+    def test_fan_speed_bars_high(self, device: DeviceClient):
+        """FAN_HIGH — all 3 bars should be green."""
+        device.set_demo_fields(
+            error1=0, error2=0,
+            status1=UNIT_ON | COMPRESSOR | FAN_HIGH | WATER_PUMP,
+        )
+        _wait_for_update()
+        bar1 = device.find_widget(tag="fan_bar_1")
+        bar2 = device.find_widget(tag="fan_bar_2")
+        bar3 = device.find_widget(tag="fan_bar_3")
+        assert bar1.bg_color != COLOR_INACTIVE, "Bar 1 should be active (high)"
+        assert bar2.bg_color != COLOR_INACTIVE, "Bar 2 should be active (high)"
+        assert bar3.bg_color != COLOR_INACTIVE, "Bar 3 should be active (high)"
+
+    def test_fan_speed_bars_low(self, device: DeviceClient):
+        """FAN_LOW — only bar 1 should be green."""
+        device.set_demo_fields(
+            error1=0, error2=0,
+            status1=UNIT_ON | COMPRESSOR | FAN_LOW | WATER_PUMP,
+        )
+        _wait_for_update()
+        bar1 = device.find_widget(tag="fan_bar_1")
+        bar2 = device.find_widget(tag="fan_bar_2")
+        bar3 = device.find_widget(tag="fan_bar_3")
+        assert bar1.bg_color != COLOR_INACTIVE, "Bar 1 should be active (low)"
+        assert bar2.bg_color == COLOR_INACTIVE, "Bar 2 should be inactive (low)"
+        assert bar3.bg_color == COLOR_INACTIVE, "Bar 3 should be inactive (low)"
+
+    def test_fan_speed_bars_off(self, device: DeviceClient):
+        """No FAN bits — all 3 bars should be gray."""
         device.set_demo_fields(
             error1=0, error2=0,
             status1=UNIT_ON | COMPRESSOR | WATER_PUMP,  # no FAN bits
         )
         _wait_for_update()
-        dot = device.find_widget(tag="fan_dot")
-        assert dot is not None
-        assert dot.bg_color == COLOR_INACTIVE, \
-            f"Fan dot should be inactive, got bg_color={dot.bg_color}"
+        bar1 = device.find_widget(tag="fan_bar_1")
+        bar2 = device.find_widget(tag="fan_bar_2")
+        bar3 = device.find_widget(tag="fan_bar_3")
+        assert bar1.bg_color == COLOR_INACTIVE, "Bar 1 should be inactive (off)"
+        assert bar2.bg_color == COLOR_INACTIVE, "Bar 2 should be inactive (off)"
+        assert bar3.bg_color == COLOR_INACTIVE, "Bar 3 should be inactive (off)"
 
     def test_pump_dot_on(self, device: DeviceClient):
         """Water pump running should light the pump dot."""
