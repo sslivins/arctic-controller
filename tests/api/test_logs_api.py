@@ -139,10 +139,18 @@ class TestLogsGet:
                 f"Entry seq {entry['seq']} should be > {pivot_seq}"
 
     def test_logs_since_latest_returns_empty(self):
-        """?since=latest_seq should return 0 entries (no new logs)."""
+        """?since=latest_seq should return 0 entries (no new logs).
+
+        Background tasks (e.g. periodic firmware check) may produce a log
+        entry between the two requests, so re-fetch once if we get entries.
+        """
         all_data = _get("/api/logs").json()
         latest = all_data["latest_seq"]
         filtered = _get("/api/logs", params={"since": latest}).json()
+        if len(filtered["entries"]) > 0:
+            # Background log arrived — use the new latest_seq and retry once
+            latest = filtered["entries"][-1]["seq"]
+            filtered = _get("/api/logs", params={"since": latest}).json()
         assert len(filtered["entries"]) == 0
 
     def test_logs_level_error_filter(self):
