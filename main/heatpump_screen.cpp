@@ -120,7 +120,7 @@ static struct {
     // Component dots row (Comp | Fan | Pump | Aux)
     lv_obj_t* comp_dot = nullptr;
     lv_obj_t* comp_dot_label = nullptr;
-    lv_obj_t* fan_dot = nullptr;
+    lv_obj_t* fan_bars[3] = {nullptr, nullptr, nullptr};  // 3-bar speed indicator
     lv_obj_t* fan_dot_label = nullptr;
     lv_obj_t* pump_dot = nullptr;
     lv_obj_t* pump_dot_label = nullptr;
@@ -651,8 +651,47 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     make_dot(dots_row, i18n_get(STR_HP_COMPRESSOR), &state.comp_dot, &state.comp_dot_label);
     lv_obj_set_user_data(state.comp_dot, (void*)"comp_dot");
-    make_dot(dots_row, i18n_get(STR_HP_FAN), &state.fan_dot, &state.fan_dot_label);
-    lv_obj_set_user_data(state.fan_dot, (void*)"fan_dot");
+    // Fan speed bars (3 ascending bars like signal strength)
+    {
+        lv_obj_t* fan_col = lv_obj_create(dots_row);
+        lv_obj_set_size(fan_col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(fan_col, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(fan_col, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(fan_col, 4, LV_PART_MAIN);
+        lv_obj_clear_flag(fan_col, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(fan_col, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(fan_col, 6, LV_PART_MAIN);
+        lv_obj_set_flex_align(fan_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_user_data(fan_col, (void*)"fan_speed");
+
+        // Row of 3 bars, bottom-aligned, increasing height
+        lv_obj_t* bar_row = lv_obj_create(fan_col);
+        lv_obj_set_size(bar_row, 24, 18);
+        lv_obj_set_style_bg_opa(bar_row, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(bar_row, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(bar_row, 0, LV_PART_MAIN);
+        lv_obj_clear_flag(bar_row, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(bar_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(bar_row, 2, LV_PART_MAIN);
+        lv_obj_set_flex_align(bar_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+
+        static const int bar_heights[] = {8, 13, 18};
+        static const char* bar_tags[] = {"fan_bar_1", "fan_bar_2", "fan_bar_3"};
+        for (int i = 0; i < 3; i++) {
+            state.fan_bars[i] = lv_obj_create(bar_row);
+            lv_obj_set_size(state.fan_bars[i], 6, bar_heights[i]);
+            lv_obj_set_style_radius(state.fan_bars[i], 1, LV_PART_MAIN);
+            lv_obj_set_style_bg_color(state.fan_bars[i], COLOR_INACTIVE, LV_PART_MAIN);
+            lv_obj_set_style_border_width(state.fan_bars[i], 0, LV_PART_MAIN);
+            lv_obj_clear_flag(state.fan_bars[i], LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_user_data(state.fan_bars[i], (void*)bar_tags[i]);
+        }
+
+        state.fan_dot_label = lv_label_create(fan_col);
+        lv_label_set_text(state.fan_dot_label, i18n_get(STR_HP_FAN));
+        lv_obj_set_style_text_font(state.fan_dot_label, UI_FONT_BODY, LV_PART_MAIN);
+        lv_obj_set_style_text_color(state.fan_dot_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    }
     make_dot(dots_row, i18n_get(STR_HP_PUMP), &state.pump_dot, &state.pump_dot_label);
     lv_obj_set_user_data(state.pump_dot, (void*)"pump_dot");
     make_dot(dots_row, i18n_get(STR_HP_AUX_HEAT), &state.heater_dot, &state.heater_dot_label);
@@ -1002,7 +1041,14 @@ void heatpump_screen_update(void) {
     // COMPONENT DOTS ROW
     // =====================================================================
     set_indicator_active(state.comp_dot, hp.connected && hp.isCompressorRunning(), COLOR_SUCCESS);
-    set_indicator_active(state.fan_dot, hp.connected && hp.isFanRunning(), COLOR_SUCCESS);
+    // Fan speed bars: light up 1/2/3 bars based on speed level
+    {
+        int fan_level = (hp.connected) ? hp.getFanSpeedLevel() : 0;
+        for (int i = 0; i < 3; i++) {
+            lv_color_t c = (i < fan_level) ? COLOR_SUCCESS : COLOR_INACTIVE;
+            lv_obj_set_style_bg_color(state.fan_bars[i], c, LV_PART_MAIN);
+        }
+    }
     set_indicator_active(state.pump_dot, hp.connected && hp.isWaterPumpRunning(), COLOR_ACCENT);
     set_indicator_active(state.heater_dot, hp.connected && hp.isBackupHeaterOn(), COLOR_WARNING);
     
