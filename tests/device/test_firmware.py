@@ -40,7 +40,7 @@ def _wait_for_check_complete(device: DeviceClient, timeout: float = 15.0):
     We just need it to stop saying "Checking...".
 
     While the ESP32 is performing the outbound HTTPS request to GitHub,
-    it may be too busy to respond to our polling requests — catch
+    the TLS handshake can block the HTTP server for 10+ seconds.  Catch
     ReadTimeout and keep retrying instead of letting it crash the test.
     """
     deadline = time.time() + timeout
@@ -48,7 +48,7 @@ def _wait_for_check_complete(device: DeviceClient, timeout: float = 15.0):
         try:
             status = device.find_widget(tag="firmware_status")
         except requests.exceptions.ReadTimeout:
-            time.sleep(1.0)
+            time.sleep(0.5)
             continue
         if status and status.text and status.text.strip() != "":
             # Any non-empty text that isn't the checking string means done
@@ -80,8 +80,8 @@ def test_github_check_completes(device: DeviceClient):
     """
     _open_firmware_screen(device)
 
-    assert _wait_for_check_complete(device, timeout=30.0), \
-        "Firmware check did not complete within 30 seconds"
+    assert _wait_for_check_complete(device, timeout=60.0), \
+        "Firmware check did not complete within 60 seconds"
 
     # After the check, the latest-version label should have content
     latest = device.find_widget(tag="firmware_latest_version")
@@ -94,7 +94,7 @@ def test_mock_update_available(device: DeviceClient):
     _open_firmware_screen(device)
 
     # Wait for the real check to settle first, so it doesn't overwrite our mock
-    assert _wait_for_check_complete(device, timeout=30.0), \
+    assert _wait_for_check_complete(device, timeout=60.0), \
         "Firmware check must complete before injecting mock"
 
     device.firmware_mock(version="99.0.0", update_available=True)
@@ -123,7 +123,7 @@ def test_mock_update_available(device: DeviceClient):
 def test_mock_no_update(device: DeviceClient):
     """Injecting 'no update' with the same version should hide the Install button."""
     _open_firmware_screen(device)
-    assert _wait_for_check_complete(device, timeout=30.0), \
+    assert _wait_for_check_complete(device, timeout=60.0), \
         "Firmware check must complete before injecting mock"
 
     # Get current version from the label
@@ -156,7 +156,7 @@ def test_mock_update_button_not_clicked(device: DeviceClient):
     but never trigger a real OTA download.  See todo.md for future plans.
     """
     _open_firmware_screen(device)
-    assert _wait_for_check_complete(device, timeout=30.0), \
+    assert _wait_for_check_complete(device, timeout=60.0), \
         "Firmware check must complete before injecting mock"
 
     device.firmware_mock(version="99.0.0", update_available=True)
