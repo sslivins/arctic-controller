@@ -32,6 +32,9 @@ def _open_temps(device: DeviceClient):
     device.click(tag="nav_temps")
     assert device.wait_for_screen("temps", timeout=5.0), \
         f"Expected 'temps' screen, got '{device.screen}'"
+    # Wait for title widget to confirm screen is fully rendered
+    assert device.wait_for_widget(tag="temps_title", timeout=5.0), \
+        "Temps title widget not found after navigation"
     time.sleep(0.5)
 
 
@@ -119,9 +122,14 @@ class TestTempsReadings:
         _open_temps(device)
         time.sleep(UI_SETTLE)
 
+        # Fetch widget tree once instead of 9 separate HTTP calls
+        widgets = device.widgets
+        texts = [
+            (w.text_en or w.text or "").lower() for w in widgets
+        ]
         missing = []
         for label in DEMO_TEMPS:
-            if not _has_text_containing(device, label):
+            if not any(label.lower() in t for t in texts):
                 missing.append(label)
         assert not missing, \
             f"Missing temperature labels: {missing}"
