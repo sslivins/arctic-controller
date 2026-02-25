@@ -7,6 +7,7 @@
 #include <lvgl.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_system.h>
 #include <nvs_flash.h>
 #include <mooncake_log.h>
 #include "startup_anim.h"
@@ -63,6 +64,18 @@ static lv_timer_t* update_check_timer = NULL;
 static uint32_t wifi_disconnect_times[WIFI_UNSTABLE_THRESHOLD] = {0};
 static int wifi_disconnect_index = 0;
 
+// Periodic heap monitor callback (detects memory leaks leading to crashes)
+static void heap_monitor_cb(void* arg)
+{
+    size_t free_heap = esp_get_free_heap_size();
+    size_t min_heap = esp_get_minimum_free_heap_size();
+    ESP_LOGI(TAG, "HEAP: free=%lu min_ever=%lu",
+             (unsigned long)free_heap, (unsigned long)min_heap);
+    if (free_heap < 50000) {
+        ESP_LOGW(TAG, "*** LOW HEAP WARNING: %lu bytes free ***", (unsigned long)free_heap);
+    }
+}
+
 // Helper to show error message on current screen
 static void show_error_message(const char* message)
 {
@@ -80,6 +93,29 @@ extern "C" void app_main(void)
 {
     // Initialize log buffer first to capture boot logs
     log_buffer_init();
+
+    // Log reset reason (survives reboot - reads from hardware registers)
+    esp_reset_reason_t reset_reason = esp_reset_reason();
+    const char* reason_str = "UNKNOWN";
+    switch (reset_reason) {
+        case ESP_RST_POWERON:  reason_str = "POWER_ON"; break;
+        case ESP_RST_EXT:      reason_str = "EXTERNAL"; break;
+        case ESP_RST_SW:       reason_str = "SOFTWARE"; break;
+        case ESP_RST_PANIC:    reason_str = "PANIC (crash)"; break;
+        case ESP_RST_INT_WDT:  reason_str = "INTERRUPT_WDT"; break;
+        case ESP_RST_TASK_WDT: reason_str = "TASK_WDT"; break;
+        case ESP_RST_WDT:      reason_str = "OTHER_WDT"; break;
+        case ESP_RST_DEEPSLEEP:reason_str = "DEEP_SLEEP"; break;
+        case ESP_RST_BROWNOUT: reason_str = "BROWNOUT"; break;
+        case ESP_RST_SDIO:     reason_str = "SDIO"; break;
+        default: break;
+    }
+    ESP_LOGW(TAG, "========================================");
+    ESP_LOGW(TAG, "RESET REASON: %s (%d)", reason_str, (int)reset_reason);
+    ESP_LOGW(TAG, "Free heap: %lu bytes, min ever: %lu bytes",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)esp_get_minimum_free_heap_size());
+    ESP_LOGW(TAG, "========================================");
 
     mclog::tagInfo(TAG, "Arctic Heat Pump Controller Starting...");
 
@@ -193,6 +229,20 @@ extern "C" void app_main(void)
 
     // Start WiFi initialization in background task (runs parallel to animation)
     xTaskCreate(wifi_init_task, "wifi_init", 4096, NULL, 5, NULL);
+
+    // Start periodic heap monitor (every 60s) to detect memory leaks
+    {
+        esp_timer_handle_t heap_timer;
+        const esp_timer_create_args_t heap_timer_args = {
+            .callback = heap_monitor_cb,
+            .arg = NULL,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "heap_mon",
+            .skip_unhandled_events = true,
+        };
+        esp_timer_create(&heap_timer_args, &heap_timer);
+        esp_timer_start_periodic(heap_timer, 60 * 1000000ULL);  // 60 seconds
+    }
 
     // Main loop
     while (1) {
