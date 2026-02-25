@@ -1861,17 +1861,6 @@ paths:
                       $ref: '#/components/schemas/JsonRpcResponse'
         '202':
           description: Notification accepted (no response body)
-    get:
-      tags:
-        - MCP
-      summary: MCP SSE endpoint (not supported)
-      description: |
-        Server-Sent Events endpoint. Returns 405 Method Not Allowed.
-        This embedded MCP server uses request/response mode only.
-      operationId: mcpGet
-      responses:
-        '405':
-          description: SSE streaming not supported on this embedded device
     delete:
       tags:
         - MCP
