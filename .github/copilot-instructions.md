@@ -22,6 +22,9 @@
 - **Always work on a feature branch** — never commit directly to `main`. Create a
   branch (e.g. `feat/log-api`, `fix/modbus-timeout`) before making changes. The user
   will merge via PR.
+- **Batch related changes into a single PR** — device tests take ~20 minutes to run
+  in CI. Don't create separate PRs for small, related fixes (e.g. multiple test
+  tweaks). Group them on one branch and open one PR when the batch is ready.
 - When asked for a PR description, always output it in **Markdown** format.
 
 ## Project Overview
