@@ -85,7 +85,7 @@ Access the web interface at `http://arctic.local` after connecting to WiFi.
 
 ## REST API
 
-Full API documentation available in [docs/openapi.yaml](docs/openapi.yaml).
+Full API documentation available in [docs/openapi.yaml](docs/openapi.yaml) — [View in Swagger UI](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/sslivins/arctic-controller/main/docs/openapi.yaml).
 
 ### Public Endpoints (no auth required)
 | Endpoint | Method | Description |
