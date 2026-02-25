@@ -18,6 +18,7 @@
 #include "log_buffer.h"
 #include "app_preferences.h"
 #include "test_endpoints.h"
+#include "mcp_server.h"
 #include "png_uncompressed.h"
 #include <esp_http_server.h>
 #include <esp_log.h>
@@ -275,7 +276,7 @@ bool api_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 88;  // 44 api_server + 36 test_endpoints = 80 needed
+    config.max_uri_handlers = 92;  // 44 api_server + 4 mcp + 36 test_endpoints = 84 needed
     config.stack_size = 16384;     // Default task stack (tree walk is iterative, not recursive)
     config.max_resp_headers = 16;  // More response headers
     config.recv_wait_timeout = 10; // 10 second receive timeout
@@ -699,6 +700,9 @@ bool api_server_start(void)
     };
     REGISTER_URI(screenshot_uri);
 
+    // MCP (Model Context Protocol) server — always enabled
+    mcp_server_register(server);
+
 #ifdef CONFIG_TEST_ENDPOINTS
     test_endpoints_register(server);
     ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
@@ -708,6 +712,7 @@ bool api_server_start(void)
     
     ESP_LOGI(TAG, "HTTP server started successfully");
     ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
+    ESP_LOGI(TAG, "MCP endpoint: http://%s.local/mcp", hostname);
     
     return true;
 }

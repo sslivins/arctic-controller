@@ -25,6 +25,7 @@ Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based
 - **WiFi Management** - Connect to networks, credentials saved to NVS
 - **Time Synchronization** - NTP sync with configurable timezone (saved to NVS)
 - **REST API** - HTTP API for external control and monitoring
+- **MCP Server** - Embedded [Model Context Protocol](https://modelcontextprotocol.io/) server for LLM integration
 - **OTA Updates** - Over-the-air firmware updates via web UI or API
 - **Security** - Optional web authentication and API key protection
 - **Multi-Language** - Web interface in English, French, and Spanish
@@ -130,6 +131,56 @@ curl -X POST http://arctic.local/api/ota/upload \
      -H "X-API-Key: your-api-key" \
      -H "Content-Type: application/octet-stream" \
      --data-binary @arctic_controller.bin
+```
+
+## MCP Server (Model Context Protocol)
+
+The controller includes an embedded [MCP](https://modelcontextprotocol.io/) server, allowing LLM-based tools to discover and interact with the device natively. No external proxy or adapter required.
+
+- **Endpoint:** `POST http://arctic.local/mcp`
+- **Transport:** Streamable HTTP (JSON-RPC 2.0, no SSE)
+- **Protocol Version:** 2025-03-26
+
+### Available Tools (12)
+
+| Tool | Description |
+|------|-------------|
+| `get_device_info` | Firmware version, uptime, free memory |
+| `get_heatpump_status` | Operating state, temperatures, setpoints |
+| `get_heatpump_errors` | Active and historical error codes |
+| `set_heatpump_power` | Turn heat pump on or off |
+| `set_heatpump_mode` | Set mode (cool/heat/auto/fan) |
+| `set_temperature_setpoint` | Set target temperature |
+| `get_parameters` | Read Modbus configuration parameters |
+| `set_parameter` | Write a Modbus configuration parameter |
+| `get_wifi_status` | WiFi connection details |
+| `get_event_log` | Operational event history |
+| `get_system_logs` | Recent system debug logs |
+| `reboot_device` | Restart the controller |
+
+### Available Resources (2)
+
+| URI | Description |
+|-----|-------------|
+| `arctic://capabilities` | Static device capabilities description |
+| `arctic://status` | Live heat pump status snapshot |
+
+### Example
+```bash
+# Initialize MCP session
+curl -X POST http://arctic.local/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+
+# List available tools
+curl -X POST http://arctic.local/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+# Get heat pump status
+curl -X POST http://arctic.local/mcp \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_heatpump_status"}}'
 ```
 
 ## OTA Updates
