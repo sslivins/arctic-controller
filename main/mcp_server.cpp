@@ -1085,6 +1085,18 @@ static esp_err_t mcp_options_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// Well-known MCP discovery endpoint (RFC 8615)
+// ============================================================================
+
+static esp_err_t mcp_well_known_handler(httpd_req_t* req)
+{
+    httpd_resp_set_hdr(req, "Location", "/mcp");
+    httpd_resp_set_status(req, "307 Temporary Redirect");
+    httpd_resp_sendstr(req, "");
+    return ESP_OK;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -1146,7 +1158,21 @@ bool mcp_server_register(httpd_handle_t server)
         return false;
     }
     
-    ESP_LOGI(TAG, "MCP server registered: POST/GET/DELETE/OPTIONS /mcp (%d tools, %d resources)",
+    // Well-known MCP discovery endpoint (RFC 8615, MCP spec 2025-03-26)
+    httpd_uri_t well_known_uri = {
+        .uri = "/.well-known/mcp",
+        .method = HTTP_GET,
+        .handler = mcp_well_known_handler,
+        .user_ctx = NULL
+    };
+    
+    err = httpd_register_uri_handler(server, &well_known_uri);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register GET /.well-known/mcp: %s", esp_err_to_name(err));
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "MCP server registered: POST/GET/DELETE/OPTIONS /mcp, GET /.well-known/mcp (%d tools, %d resources)",
              NUM_TOOLS, NUM_RESOURCES);
     
     return true;

@@ -1763,6 +1763,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /.well-known/mcp:
+    get:
+      tags:
+        - MCP
+      summary: MCP discovery endpoint
+      description: |
+        Well-known URI for MCP server discovery (RFC 8615, MCP spec 2025-03-26).
+        Returns a 307 redirect to the MCP endpoint at `/mcp`.
+      operationId: mcpDiscovery
+      responses:
+        '307':
+          description: Redirect to MCP endpoint
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /mcp
+
   /mcp:
     post:
       tags:
