@@ -56,6 +56,30 @@ The following screens and features have **no automated test coverage** yet:
 - [x] `GET /api/ota/status` — verify idle state, progress, version, download fields
 - [x] `POST /api/time/sync` — verify NTP sync trigger returns success
 
+## OAuth 2.1 API Testing
+
+- [x] `GET /api/oauth/config` — verify response structure (enabled, issuer, audience, jwks_uri, etc.)
+- [x] `GET /api/oauth/config` — verify supported_scopes array contains all 6 scopes
+- [x] `GET /api/oauth/config` — verify jwks_status object (loaded, ttl_seconds)
+- [x] `PUT /api/oauth/config` — round-trip set/restore OAuth settings
+- [x] `PUT /api/oauth/config` — partial update preserves other fields
+- [x] `POST /api/oauth/jwks/refresh` — verify fails gracefully when disabled
+- [x] `POST /api/oauth/jwks/refresh` — verify fails gracefully with invalid JWKS URI
+- [ ] Test JWT validation with real IdP tokens (requires Zitadel/Keycloak setup)
+- [ ] Test scope enforcement on MCP tools with scoped JWT tokens
+
+## MCP Protocol Testing
+
+- [x] MCP `initialize` — verify response with capabilities, serverInfo, protocolVersion
+- [x] MCP `tools/list` — verify all 12 tools present with name, description, inputSchema
+- [x] MCP `tools/list` — verify requiredScopes annotations on tools
+- [x] MCP `tools/list` — verify scope annotations use valid scope names
+- [x] MCP `tools/list` — verify expected scopes (arctic:status, arctic:control, etc.)
+- [ ] MCP `tools/call` — test read-only tools (get_heatpump_status, get_device_info)
+- [ ] MCP `tools/call` — test scope rejection with insufficient permissions
+- [ ] MCP `resources/list` — test if implemented
+- [ ] MCP `prompts/list` — test if implemented
+
 ## Web Dashboard Testing
 
 - [x] Verify web dashboard loads and connects via WebSocket

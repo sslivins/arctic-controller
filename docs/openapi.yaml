@@ -13,12 +13,13 @@ info:
     - Over-the-Air (OTA) firmware updates (URL download or file upload)
     - Web interface authentication with session management
     - API key authentication for programmatic access
-    - Heat pump status monitoring
+    - OAuth 2.1 authentication with external identity providers
+    - Heat pump status monitoring and control
     - Model Context Protocol (MCP) server for LLM integration
     
     ## Authentication
     
-    The API supports two optional authentication mechanisms:
+    The API supports multiple authentication mechanisms:
     
     ### Web Authentication (Session-based)
     When enabled, users must log in via `/login` with username/password. 
@@ -28,8 +29,21 @@ info:
     When enabled, programmatic API access requires the `X-API-Key` header.
     The API key can be retrieved from the web interface settings.
     
-    Both authentication types can be independently enabled/disabled via `/api/auth/config`.
-  version: 2.2.0
+    ### OAuth 2.1 Bearer Token Authentication
+    When enabled, the device validates JWT tokens from an external identity provider
+    (e.g., Zitadel, Keycloak, Auth0). Use the `Authorization: Bearer <token>` header.
+    
+    **Supported Scopes**:
+    - `arctic:status` - Read-only access to status, temperatures, mode, errors
+    - `arctic:control` - Set temperature setpoints, mode, power on/off
+    - `arctic:config` - Modify system configuration (WiFi, timezone, etc.)
+    - `arctic:params` - Read/write Modbus P-parameters
+    - `arctic:admin` - Administrative operations (firmware, reboot, raw registers)
+    - `arctic:mcp` - Access MCP endpoint for LLM tool integration
+    
+    Configure OAuth via `/api/oauth/config`. Both auth types can be enabled simultaneously;
+    OAuth tokens are checked first, with optional API key fallback.
+  version: 2.3.0
   contact:
     name: Arctic Controller
   license:
@@ -60,6 +74,8 @@ tags:
     description: Over-the-Air firmware updates
   - name: Authentication
     description: Session and API key authentication
+  - name: OAuth
+    description: OAuth 2.1 configuration for external identity providers (Zitadel, Keycloak, etc.)
   - name: HeatPump
     description: Heat pump status and control
   - name: Events
@@ -871,6 +887,183 @@ paths:
                     type: string
                     description: New 32-character hex API key
                     example: fedcba9876543210fedcba9876543210
+        '401':
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/oauth/config:
+    get:
+      tags:
+        - OAuth
+      summary: Get OAuth 2.1 configuration
+      description: |
+        Returns current OAuth 2.1 configuration including identity provider settings
+        and JWKS status. Use this to check if OAuth is enabled and properly configured.
+      operationId: getOAuthConfig
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: OAuth configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                    description: Whether OAuth 2.1 validation is active
+                    example: true
+                  issuer:
+                    type: string
+                    description: Expected token issuer (iss claim)
+                    example: https://auth.example.com
+                  audience:
+                    type: string
+                    description: Expected token audience (aud claim)
+                    example: arctic-controller
+                  jwks_uri:
+                    type: string
+                    description: JWKS endpoint URL for signature verification
+                    example: https://auth.example.com/.well-known/jwks.json
+                  allow_api_key_fallback:
+                    type: boolean
+                    description: Allow API key authentication when OAuth token is missing
+                    example: true
+                  jwks_status:
+                    type: object
+                    properties:
+                      loaded:
+                        type: boolean
+                        description: Whether signing keys are loaded
+                        example: true
+                      ttl_seconds:
+                        type: integer
+                        description: Seconds until JWKS cache expires
+                        example: 86400
+                  supported_scopes:
+                    type: array
+                    items:
+                      type: string
+                    description: List of scopes this device recognizes
+                    example:
+                      - arctic:status
+                      - arctic:control
+                      - arctic:config
+                      - arctic:params
+                      - arctic:admin
+                      - arctic:mcp
+        '401':
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+        - OAuth
+      summary: Update OAuth 2.1 configuration
+      description: |
+        Updates OAuth 2.1 settings. Changing the issuer or JWKS URI will
+        clear the cached signing keys.
+        
+        **Scope Reference**:
+        - `arctic:status` - Read status, temperatures, mode, errors (safe for LLMs)
+        - `arctic:control` - Set temperature, mode, power on/off
+        - `arctic:config` - WiFi, timezone, system preferences
+        - `arctic:params` - Read/write Modbus P-parameters
+        - `arctic:admin` - Firmware update, reboot, raw register access
+        - `arctic:mcp` - Access MCP endpoint for LLM integration
+      operationId: setOAuthConfig
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled:
+                  type: boolean
+                  description: Enable/disable OAuth validation
+                issuer:
+                  type: string
+                  description: Expected token issuer (iss claim)
+                  example: https://auth.example.com
+                audience:
+                  type: string
+                  description: Expected token audience (aud claim)
+                  example: arctic-controller
+                jwks_uri:
+                  type: string
+                  description: JWKS endpoint URL
+                  example: https://auth.example.com/.well-known/jwks.json
+                allow_api_key_fallback:
+                  type: boolean
+                  description: Allow API key when OAuth token is missing
+      responses:
+        '200':
+          description: Configuration updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: OAuth configuration updated
+        '401':
+          description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/oauth/jwks/refresh:
+    post:
+      tags:
+        - OAuth
+      summary: Manually refresh JWKS
+      description: |
+        Forces a refresh of the JSON Web Key Set from the identity provider.
+        Useful when keys have been rotated or to diagnose connectivity issues.
+      operationId: refreshJWKS
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: JWKS refresh result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: JWKS refreshed successfully
+                  ttl_seconds:
+                    type: integer
+                    description: Seconds until new cache expires (if successful)
+                    example: 86400
+                  error:
+                    type: string
+                    description: Error message if refresh failed
+        '400':
+          description: OAuth not enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Login required
           content:
@@ -1879,6 +2072,12 @@ paths:
                       $ref: '#/components/schemas/JsonRpcResponse'
         '202':
           description: Notification accepted (no response body)
+        '401':
+          description: Authentication required (API key auth enabled but no valid credentials provided)
+      security:
+        - bearerAuth: []
+        - apiKey: []
+        - sessionCookie: []
     delete:
       tags:
         - MCP
@@ -1890,6 +2089,12 @@ paths:
       responses:
         '200':
           description: Session terminated (or no session existed)
+        '401':
+          description: Authentication required
+      security:
+        - bearerAuth: []
+        - apiKey: []
+        - sessionCookie: []
     options:
       tags:
         - MCP
@@ -1902,6 +2107,32 @@ paths:
 
 components:
   securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Bearer token authentication using API key.
+        Use `Authorization: Bearer <api-key>` header.
+        The API key is a 32-character hex string.
+        This is the recommended auth method for MCP clients when OAuth is not configured.
+    oauthBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        OAuth 2.1 JWT authentication from an external identity provider.
+        Use `Authorization: Bearer <jwt-token>` header.
+        
+        The JWT must be signed by the configured identity provider (issuer)
+        with claims for the correct audience. Scopes control access to tools
+        and endpoints:
+        
+        - `arctic:status` - Read status, temps, errors
+        - `arctic:control` - Control power, mode, setpoints
+        - `arctic:config` - System configuration
+        - `arctic:params` - Modbus parameters
+        - `arctic:admin` - Firmware, reboot
+        - `arctic:mcp` - MCP tools
     apiKey:
       type: apiKey
       in: header

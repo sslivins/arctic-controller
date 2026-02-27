@@ -37,6 +37,7 @@ Thumbs.db
 
 # Logs
 *.log
+crash_log.txt
 
 # Test failure screenshots
 tests/device/screenshots/

@@ -28,6 +28,7 @@
 #include "time_manager.h"
 #include "ota_manager.h"
 #include "auth_manager.h"
+#include "oauth_manager.h"
 #include "app_preferences.h"
 
 #include <esp_http_server.h>
@@ -52,92 +53,111 @@ static const char* MCP_SERVER_VERSION = "1.0.0";
 #define MCP_MAX_REQUEST_SIZE 8192
 
 // ============================================================================
-// Tool Definitions
+// Tool Definitions with OAuth Scopes
 // ============================================================================
 
 struct ToolDef {
     const char* name;
     const char* description;
     const char* input_schema_json;  // Pre-built JSON Schema string
+    uint32_t required_scopes;       // OAuth scopes required to use this tool
 };
 
 // All tool definitions — order matches the handler dispatch table
+// Scope requirements:
+//   STATUS  = read-only monitoring (safe for LLMs)
+//   CONTROL = change temps, power, mode (operational control)
+//   PARAMS  = modify Modbus P-parameters (advanced)
+//   CONFIG  = system configuration (WiFi, time, etc.)
+//   ADMIN   = firmware, reboot, raw access (privileged)
 static const ToolDef TOOLS[] = {
     {
         "get_device_info",
         "Get device information including firmware version, platform, uptime, and memory usage. "
         "Use this to check the controller's health and identity.",
-        R"json({"type":"object","properties":{},"additionalProperties":false})json"
+        R"json({"type":"object","properties":{},"additionalProperties":false})json",
+        OAUTH_SCOPE_STATUS
     },
     {
         "get_heatpump_status",
         "Get comprehensive heat pump status including operating mode, temperatures, setpoints, "
         "component states (compressor, fans, pump), electrical readings, and error status. "
         "This is the primary tool for understanding what the heat pump is currently doing.",
-        R"json({"type":"object","properties":{},"additionalProperties":false})json"
+        R"json({"type":"object","properties":{},"additionalProperties":false})json",
+        OAUTH_SCOPE_STATUS
     },
     {
         "get_heatpump_errors",
         "Get active heat pump error codes with severity, descriptions, and resolution steps. "
         "Also returns error history. Use this when diagnosing problems.",
-        R"json({"type":"object","properties":{},"additionalProperties":false})json"
+        R"json({"type":"object","properties":{},"additionalProperties":false})json",
+        OAUTH_SCOPE_STATUS
     },
     {
         "set_heatpump_power",
         "Turn the heat pump on or off. The heat pump is an ECO-600 air-source unit "
         "controlling heating, cooling, and domestic hot water for a residential system.",
-        R"json({"type":"object","properties":{"on":{"type":"boolean","description":"true to turn on, false to turn off"}},"required":["on"],"additionalProperties":false})json"
+        R"json({"type":"object","properties":{"on":{"type":"boolean","description":"true to turn on, false to turn off"}},"required":["on"],"additionalProperties":false})json",
+        OAUTH_SCOPE_CONTROL
     },
     {
         "set_heatpump_mode",
         "Set the heat pump operating mode. Available modes: cooling (space cooling via fan coils), "
         "floor_heating (radiant floor heating), fan_coil_heating (space heating via fan coils), "
         "hot_water (domestic hot water production only), auto (automatic mode selection).",
-        R"json({"type":"object","properties":{"mode":{"type":"string","enum":["cooling","floor_heating","fan_coil_heating","hot_water","auto"],"description":"Operating mode to set"}},"required":["mode"],"additionalProperties":false})json"
+        R"json({"type":"object","properties":{"mode":{"type":"string","enum":["cooling","floor_heating","fan_coil_heating","hot_water","auto"],"description":"Operating mode to set"}},"required":["mode"],"additionalProperties":false})json",
+        OAUTH_SCOPE_CONTROL
     },
     {
         "set_temperature_setpoint",
         "Set a temperature setpoint. Units are in degrees Celsius. Typical ranges: "
         "cooling 18-30C, heating 20-55C, hot_water 40-60C.",
-        R"json({"type":"object","properties":{"type":{"type":"string","enum":["cooling","heating","hot_water"],"description":"Which setpoint to change"},"temperature":{"type":"integer","description":"Target temperature in degrees Celsius"}},"required":["type","temperature"],"additionalProperties":false})json"
+        R"json({"type":"object","properties":{"type":{"type":"string","enum":["cooling","heating","hot_water"],"description":"Which setpoint to change"},"temperature":{"type":"integer","description":"Target temperature in degrees Celsius"}},"required":["type","temperature"],"additionalProperties":false})json",
+        OAUTH_SCOPE_CONTROL
     },
     {
         "get_parameters",
         "Get all configurable P-parameters of the heat pump with current values, ranges, "
         "and descriptions. P-parameters control advanced behavior like defrost timing, "
         "compressor limits, and safety thresholds.",
-        R"json({"type":"object","properties":{},"additionalProperties":false})json"
+        R"json({"type":"object","properties":{},"additionalProperties":false})json",
+        OAUTH_SCOPE_STATUS | OAUTH_SCOPE_PARAMS
     },
     {
         "set_parameter",
         "Set a heat pump P-parameter by its key name (e.g. defrost_interval) or P-code "
         "(e.g. P01). Use get_parameters first to see available parameters and valid ranges.",
-        R"json({"type":"object","properties":{"id":{"type":"string","description":"Parameter key name or P-code"},"value":{"type":"integer","description":"New value to set (must be within min/max range)"}},"required":["id","value"],"additionalProperties":false})json"
+        R"json({"type":"object","properties":{"id":{"type":"string","description":"Parameter key name or P-code"},"value":{"type":"integer","description":"New value to set (must be within min/max range)"}},"required":["id","value"],"additionalProperties":false})json",
+        OAUTH_SCOPE_PARAMS
     },
     {
         "get_wifi_status",
         "Get WiFi connection status including SSID, signal strength (RSSI), IP address, "
         "and mDNS hostname.",
-        R"json({"type":"object","properties":{},"additionalProperties":false})json"
+        R"json({"type":"object","properties":{},"additionalProperties":false})json",
+        OAUTH_SCOPE_STATUS
     },
     {
         "get_event_log",
         "Get the operational event log showing system events like startups, connections, "
         "errors, and mode changes. Returns newest events first.",
-        R"json({"type":"object","properties":{},"additionalProperties":false})json"
+        R"json({"type":"object","properties":{},"additionalProperties":false})json",
+        OAUTH_SCOPE_STATUS
     },
     {
         "get_system_logs",
         "Get recent ESP debug log entries. Useful for troubleshooting firmware issues. "
         "Optionally filter by log level.",
-        R"json({"type":"object","properties":{"level":{"type":"string","enum":["error","warn","info","debug","verbose"],"description":"Minimum log level to return (default: info)"}},"additionalProperties":false})json"
+        R"json({"type":"object","properties":{"level":{"type":"string","enum":["error","warn","info","debug","verbose"],"description":"Minimum log level to return (default: info)"}},"additionalProperties":false})json",
+        OAUTH_SCOPE_STATUS | OAUTH_SCOPE_ADMIN
     },
     {
         "reboot_device",
         "Reboot the controller. The device will disconnect and take about 10 seconds "
         "to come back online. Use only when necessary (e.g., after configuration changes "
         "that require a restart).",
-        R"json({"type":"object","properties":{},"additionalProperties":false})json"
+        R"json({"type":"object","properties":{},"additionalProperties":false})json",
+        OAUTH_SCOPE_ADMIN
     },
 };
 
@@ -775,6 +795,25 @@ static cJSON* handle_tools_list(cJSON* id, cJSON* /*params*/)
             cJSON_AddItemToObject(tool, "inputSchema", schema);
         }
         
+        // Add required scopes as annotations (MCP extension)
+        if (TOOLS[i].required_scopes != OAUTH_SCOPE_NONE) {
+            cJSON* annotations = cJSON_CreateObject();
+            cJSON* scopes = cJSON_CreateArray();
+            
+            for (int s = 0; s < 6; s++) {
+                uint32_t scope_bit = (1 << s);
+                if (TOOLS[i].required_scopes & scope_bit) {
+                    const char* scope_name = oauth_mgr_scope_name((oauth_scope_t)scope_bit);
+                    if (scope_name) {
+                        cJSON_AddItemToArray(scopes, cJSON_CreateString(scope_name));
+                    }
+                }
+            }
+            
+            cJSON_AddItemToObject(annotations, "requiredScopes", scopes);
+            cJSON_AddItemToObject(tool, "annotations", annotations);
+        }
+        
         cJSON_AddItemToArray(tools, tool);
     }
     
@@ -794,6 +833,33 @@ static cJSON* handle_tools_call(cJSON* id, cJSON* params)
     const char* tool_name = name->valuestring;
     for (int i = 0; i < NUM_TOOLS; i++) {
         if (strcmp(tool_name, TOOLS[i].name) == 0) {
+            // Check scope requirements
+            uint32_t required = TOOLS[i].required_scopes;
+            if (required != OAUTH_SCOPE_NONE && (g_request_scopes & required) != required) {
+                // Missing required scopes
+                char errmsg[256];
+                snprintf(errmsg, sizeof(errmsg), 
+                    "Insufficient permissions for tool '%s'. Required scopes: ", tool_name);
+                
+                // List missing scopes
+                bool first = true;
+                for (int s = 0; s < 6; s++) {
+                    uint32_t scope_bit = (1 << s);
+                    if ((required & scope_bit) && !(g_request_scopes & scope_bit)) {
+                        const char* scope_name = oauth_mgr_scope_name((oauth_scope_t)scope_bit);
+                        if (scope_name) {
+                            if (!first) strncat(errmsg, ", ", sizeof(errmsg) - strlen(errmsg) - 1);
+                            strncat(errmsg, scope_name, sizeof(errmsg) - strlen(errmsg) - 1);
+                            first = false;
+                        }
+                    }
+                }
+                
+                ESP_LOGW(TAG, "Tool '%s' denied: scopes=0x%x, required=0x%x", 
+                         tool_name, (unsigned)g_request_scopes, (unsigned)required);
+                return make_jsonrpc_error(id, -32603, errmsg);
+            }
+            
             ESP_LOGI(TAG, "Executing tool: %s", tool_name);
             cJSON* tool_result = TOOL_HANDLERS[i](args);
             return make_jsonrpc_response(id, tool_result);
@@ -938,11 +1004,142 @@ static cJSON* dispatch_jsonrpc(cJSON* request)
 }
 
 // ============================================================================
+// Authentication Helper with OAuth 2.1 Support
+// ============================================================================
+
+// Authentication result for MCP requests
+typedef struct {
+    bool authenticated;          // Request is authenticated
+    uint32_t scopes;             // Granted OAuth scopes (or FULL if legacy auth)
+    char subject[128];           // OAuth subject (client ID) or empty
+    bool is_oauth;               // true if OAuth token, false if legacy API key/session
+} mcp_auth_result_t;
+
+// Full scopes for legacy authentication (API key, session cookie)
+#define MCP_LEGACY_FULL_SCOPES  OAUTH_SCOPE_FULL
+
+static mcp_auth_result_t check_mcp_auth(httpd_req_t* req)
+{
+    mcp_auth_result_t result = {};
+    
+    // Check for OAuth 2.1 Bearer token first
+    if (oauth_mgr_is_enabled()) {
+        char auth_buf[OAUTH_MAX_TOKEN_LEN] = {0};
+        if (httpd_req_get_hdr_value_str(req, "Authorization", auth_buf, sizeof(auth_buf)) == ESP_OK) {
+            oauth_claims_t claims;
+            uint32_t scopes = oauth_mgr_validate_bearer(auth_buf, &claims);
+            if (scopes != OAUTH_SCOPE_NONE) {
+                // Valid OAuth token
+                result.authenticated = true;
+                result.scopes = scopes;
+                result.is_oauth = true;
+                strncpy(result.subject, claims.client_id[0] ? claims.client_id : claims.subject, 
+                        sizeof(result.subject) - 1);
+                ESP_LOGD(TAG, "OAuth auth: subject=%s, scopes=0x%x", result.subject, (unsigned)scopes);
+                return result;
+            }
+        }
+        
+        // OAuth enabled but token invalid/missing - check fallback
+        oauth_config_t oauth_cfg;
+        oauth_mgr_get_config(&oauth_cfg);
+        if (!oauth_cfg.allow_api_key_fallback) {
+            ESP_LOGD(TAG, "OAuth auth failed, fallback disabled");
+            return result;  // authenticated = false
+        }
+    }
+    
+    // Legacy authentication: API key or session
+    if (!auth_mgr_api_auth_enabled()) {
+        // API auth disabled — allow all with full scopes
+        result.authenticated = true;
+        result.scopes = MCP_LEGACY_FULL_SCOPES;
+        return result;
+    }
+    
+    // Check Authorization: Bearer <api-key> (legacy MCP style)
+    char auth_buf[128] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Authorization", auth_buf, sizeof(auth_buf)) == ESP_OK) {
+        if (strncmp(auth_buf, "Bearer ", 7) == 0) {
+            const char* key = auth_buf + 7;
+            if (auth_mgr_validate_api_key(key)) {
+                result.authenticated = true;
+                result.scopes = MCP_LEGACY_FULL_SCOPES;
+                return result;
+            }
+        }
+    }
+    
+    // Check X-API-Key header (backward compatibility with REST API)
+    char key_buf[64] = {0};
+    if (httpd_req_get_hdr_value_str(req, "X-API-Key", key_buf, sizeof(key_buf)) == ESP_OK) {
+        if (auth_mgr_validate_api_key(key_buf)) {
+            result.authenticated = true;
+            result.scopes = MCP_LEGACY_FULL_SCOPES;
+            return result;
+        }
+    }
+    
+    // Check session cookie (web UI access)
+    char cookie_buf[256] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, sizeof(cookie_buf)) == ESP_OK) {
+        char* session_start = strstr(cookie_buf, "arctic_session=");
+        if (session_start) {
+            session_start += strlen("arctic_session=");
+            char token[AUTH_SESSION_TOKEN_LEN + 1] = {0};
+            int i = 0;
+            while (session_start[i] != '\0' && session_start[i] != ';' && i < AUTH_SESSION_TOKEN_LEN) {
+                token[i] = session_start[i];
+                i++;
+            }
+            token[i] = '\0';
+            if (i > 0 && auth_mgr_validate_session(token)) {
+                result.authenticated = true;
+                result.scopes = MCP_LEGACY_FULL_SCOPES;
+                return result;
+            }
+        }
+    }
+    
+    return result;  // authenticated = false
+}
+
+static void send_mcp_unauthorized(httpd_req_t* req)
+{
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "WWW-Authenticate", "Bearer");
+    
+    // Indicate OAuth is available
+    if (oauth_mgr_is_enabled()) {
+        httpd_resp_sendstr(req, 
+            "{\"error\":\"Authentication required. Use OAuth 2.1 Bearer token or API key.\","
+            "\"oauth_enabled\":true}");
+    } else {
+        httpd_resp_sendstr(req, 
+            "{\"error\":\"Authentication required. Use Authorization: Bearer <api-key> header.\"}");
+    }
+}
+
+// Current request authentication context (set per-request)
+static uint32_t g_request_scopes = 0;
+
+// ============================================================================
 // HTTP Handlers
 // ============================================================================
 
 static esp_err_t mcp_post_handler(httpd_req_t* req)
 {
+    // Check authentication
+    mcp_auth_result_t auth = check_mcp_auth(req);
+    if (!auth.authenticated) {
+        send_mcp_unauthorized(req);
+        return ESP_OK;
+    }
+    
+    // Store scopes for this request (used by tool handlers)
+    g_request_scopes = auth.scopes;
+    
     // Validate Content-Type
     char content_type[64] = {0};
     if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, sizeof(content_type)) == ESP_OK) {
@@ -1046,18 +1243,17 @@ static esp_err_t mcp_post_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-// GET /mcp — return 405 (we don't support SSE streaming)
+// GET /mcp — return 405 with a helpful hint for discoverability
 static esp_err_t mcp_get_handler(httpd_req_t* req)
 {
     httpd_resp_set_status(req, "405 Method Not Allowed");
     httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Allow", "POST, DELETE, OPTIONS");
     
-    cJSON* error = make_jsonrpc_error(NULL, -32600, 
-        "SSE streaming not supported. Use POST for all MCP requests.");
-    char* error_str = cJSON_PrintUnformatted(error);
-    httpd_resp_sendstr(req, error_str);
-    free(error_str);
-    cJSON_Delete(error);
+    httpd_resp_sendstr(req, 
+        "{\"error\":\"MCP endpoint \\u2014 use POST with JSON-RPC 2.0\","
+        "\"spec\":\"https://modelcontextprotocol.io\","
+        "\"discovery\":\"/.well-known/mcp\"}");
     
     return ESP_OK;
 }
@@ -1065,6 +1261,11 @@ static esp_err_t mcp_get_handler(httpd_req_t* req)
 // DELETE /mcp — session termination (we're stateless, just acknowledge)
 static esp_err_t mcp_delete_handler(httpd_req_t* req)
 {
+    if (!check_mcp_auth(req)) {
+        send_mcp_unauthorized(req);
+        return ESP_OK;
+    }
+    
     httpd_resp_set_status(req, "200 OK");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"ok\":true}");
@@ -1077,7 +1278,7 @@ static esp_err_t mcp_options_handler(httpd_req_t* req)
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", 
-        "Content-Type, Accept, Mcp-Session-Id");
+        "Content-Type, Accept, Authorization, X-API-Key, Mcp-Session-Id");
     httpd_resp_set_hdr(req, "Access-Control-Max-Age", "86400");
     httpd_resp_set_status(req, "204 No Content");
     httpd_resp_sendstr(req, "");

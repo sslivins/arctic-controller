@@ -10,6 +10,7 @@
 #include "time_manager.h"
 #include "ota_manager.h"
 #include "auth_manager.h"
+#include "oauth_manager.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
 #include "heatpump_params.h"
@@ -97,6 +98,9 @@ static esp_err_t preferences_get_handler(httpd_req_t* req);
 static esp_err_t logs_get_handler(httpd_req_t* req);
 static esp_err_t logs_clear_handler(httpd_req_t* req);
 static esp_err_t screenshot_get_handler(httpd_req_t* req);
+static esp_err_t oauth_config_get_handler(httpd_req_t* req);
+static esp_err_t oauth_config_put_handler(httpd_req_t* req);
+static esp_err_t oauth_jwks_refresh_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -528,6 +532,33 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(auth_apikey_regen_uri);
+    
+    // GET /api/oauth/config - OAuth 2.1 configuration
+    httpd_uri_t oauth_config_get_uri = {
+        .uri = "/api/oauth/config",
+        .method = HTTP_GET,
+        .handler = oauth_config_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(oauth_config_get_uri);
+    
+    // PUT /api/oauth/config - Update OAuth configuration
+    httpd_uri_t oauth_config_put_uri = {
+        .uri = "/api/oauth/config",
+        .method = HTTP_PUT,
+        .handler = oauth_config_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(oauth_config_put_uri);
+    
+    // POST /api/oauth/jwks/refresh - Manually refresh JWKS
+    httpd_uri_t oauth_jwks_refresh_uri = {
+        .uri = "/api/oauth/jwks/refresh",
+        .method = HTTP_POST,
+        .handler = oauth_jwks_refresh_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(oauth_jwks_refresh_uri);
     
     // GET /api/heatpump/status
     httpd_uri_t heatpump_uri = {
@@ -1679,6 +1710,156 @@ static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req)
     
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "api_key", api_key);
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+// ============================================================================
+// OAuth 2.1 Configuration
+// ============================================================================
+
+static esp_err_t oauth_config_get_handler(httpd_req_t* req)
+{
+    // Must be authenticated to view OAuth config
+    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "Login required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    oauth_config_t config;
+    oauth_mgr_get_config(&config);
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "enabled", config.enabled);
+    cJSON_AddStringToObject(root, "issuer", config.issuer);
+    cJSON_AddStringToObject(root, "audience", config.audience);
+    cJSON_AddStringToObject(root, "jwks_uri", config.jwks_uri);
+    cJSON_AddBoolToObject(root, "allow_api_key_fallback", config.allow_api_key_fallback);
+    
+    // JWKS status
+    cJSON* jwks = cJSON_AddObjectToObject(root, "jwks_status");
+    cJSON_AddBoolToObject(jwks, "loaded", oauth_mgr_has_valid_jwks());
+    cJSON_AddNumberToObject(jwks, "ttl_seconds", oauth_mgr_jwks_ttl());
+    
+    // List available scopes
+    cJSON* scopes = cJSON_AddArrayToObject(root, "supported_scopes");
+    cJSON_AddItemToArray(scopes, cJSON_CreateString("arctic:status"));
+    cJSON_AddItemToArray(scopes, cJSON_CreateString("arctic:control"));
+    cJSON_AddItemToArray(scopes, cJSON_CreateString("arctic:config"));
+    cJSON_AddItemToArray(scopes, cJSON_CreateString("arctic:params"));
+    cJSON_AddItemToArray(scopes, cJSON_CreateString("arctic:admin"));
+    cJSON_AddItemToArray(scopes, cJSON_CreateString("arctic:mcp"));
+    
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    
+    return ESP_OK;
+}
+
+static esp_err_t oauth_config_put_handler(httpd_req_t* req)
+{
+    // Must be authenticated to modify OAuth config
+    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "Login required");
+        return ESP_OK;
+    }
+    
+    // Read request body
+    char buf[1024];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        send_json_error(req, "400 Bad Request", "Missing request body");
+        return ESP_OK;
+    }
+    buf[ret] = '\0';
+    
+    cJSON* body = cJSON_Parse(buf);
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    
+    // Get current config as base
+    oauth_config_t config;
+    oauth_mgr_get_config(&config);
+    
+    // Update fields if present
+    cJSON* enabled = cJSON_GetObjectItem(body, "enabled");
+    if (cJSON_IsBool(enabled)) {
+        config.enabled = cJSON_IsTrue(enabled);
+    }
+    
+    cJSON* issuer = cJSON_GetObjectItem(body, "issuer");
+    if (cJSON_IsString(issuer) && issuer->valuestring) {
+        strncpy(config.issuer, issuer->valuestring, sizeof(config.issuer) - 1);
+        config.issuer[sizeof(config.issuer) - 1] = '\0';
+    }
+    
+    cJSON* audience = cJSON_GetObjectItem(body, "audience");
+    if (cJSON_IsString(audience) && audience->valuestring) {
+        strncpy(config.audience, audience->valuestring, sizeof(config.audience) - 1);
+        config.audience[sizeof(config.audience) - 1] = '\0';
+    }
+    
+    cJSON* jwks_uri = cJSON_GetObjectItem(body, "jwks_uri");
+    if (cJSON_IsString(jwks_uri) && jwks_uri->valuestring) {
+        strncpy(config.jwks_uri, jwks_uri->valuestring, sizeof(config.jwks_uri) - 1);
+        config.jwks_uri[sizeof(config.jwks_uri) - 1] = '\0';
+    }
+    
+    cJSON* fallback = cJSON_GetObjectItem(body, "allow_api_key_fallback");
+    if (cJSON_IsBool(fallback)) {
+        config.allow_api_key_fallback = cJSON_IsTrue(fallback);
+    }
+    
+    cJSON_Delete(body);
+    
+    // Save config
+    if (!oauth_mgr_set_config(&config)) {
+        send_json_error(req, "500 Internal Server Error", "Failed to save OAuth config");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"OAuth configuration updated\"}");
+    
+    return ESP_OK;
+}
+
+static esp_err_t oauth_jwks_refresh_handler(httpd_req_t* req)
+{
+    // Must be authenticated
+    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "Login required");
+        return ESP_OK;
+    }
+    
+    set_json_content_type(req);
+    
+    if (!oauth_mgr_is_enabled()) {
+        send_json_error(req, "400 Bad Request", "OAuth is not enabled");
+        return ESP_OK;
+    }
+    
+    bool success = oauth_mgr_refresh_jwks();
+    
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "success", success);
+    if (success) {
+        cJSON_AddStringToObject(root, "message", "JWKS refreshed successfully");
+        cJSON_AddNumberToObject(root, "ttl_seconds", oauth_mgr_jwks_ttl());
+    } else {
+        cJSON_AddStringToObject(root, "error", "Failed to fetch JWKS from identity provider");
+    }
     
     char* json_str = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json_str);

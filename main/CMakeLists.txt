@@ -39,6 +39,7 @@ idf_component_register(
         "api_server.cpp"
         "ota_manager.cpp"
         "auth_manager.cpp"
+        "oauth_manager.cpp"
         "app_preferences.cpp"
         "heatpump_params.cpp"
         "heatpump_errors.cpp"

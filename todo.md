@@ -280,3 +280,39 @@ anomaly detection.
       direct API (useful for fleet management with multiple controllers)
 - [ ] **Remote diagnostics** — pull device logs, capture screenshots, check
       health status from cloud portal
+## MCP Server Enhancements
+
+### Authentication
+- [x] Bearer token auth (`Authorization: Bearer <api-key>`) on MCP endpoints
+- [x] Reuses existing API key system — same 32-char hex key as REST API
+- [x] Falls back to `X-API-Key` header and session cookies
+- [x] CORS preflight (`OPTIONS`) and discovery (`/.well-known/mcp`) remain unauthenticated
+- [ ] **OAuth 2.1 (future)** — full spec-compliant MCP auth if needed. Feasibility assessment:
+  - ~500-800 lines of C++ across 4-5 new endpoints
+  - Builds on existing `auth_manager` infrastructure (login → authorization grant,
+    session validation → token validation, API key generation → access token generation)
+  - Required endpoints: `/.well-known/oauth-authorization-server` (metadata, static JSON),
+    `/authorize` (browser redirect flow, similar to existing web login),
+    `/token` (code-for-token exchange, refresh tokens),
+    `/register` (dynamic client registration, store client IDs in NVS)
+  - PKCE verification via mbedtls SHA-256 (already in ESP-IDF)
+  - Token lifecycle (expiry, refresh, rotation) similar to existing session management
+  - **HTTPS requirement is the main friction point** — OAuth 2.1 mandates HTTPS for auth
+    endpoints. On a local `.local` device: no Let's Encrypt (can't validate `.local` domains),
+    self-signed certs cause browser warnings. Some implementations bend this for LAN devices.
+  - Estimated effort: 2-3 days
+  - Not needed now — Bearer token with API key is sufficient for local network use
+
+### Transport
+- [x] Streamable HTTP (POST /mcp) — stateless, ideal for ESP32
+- [ ] **SSE transport (future)** — would enable Home Assistant MCP client compatibility.
+      HA's built-in MCP client (since v2025.2) only supports SSE, not Streamable HTTP.
+      Requires persistent GET connection (server→client stream) + separate POSTs
+      (client→server). More resource-intensive on ESP32 (long-lived connections, session state).
+      Alternative: use `mcp-proxy` as a bridge between HA (SSE) and Arctic Controller
+      (Streamable HTTP) without firmware changes.
+
+### Tools & Resources
+- [ ] Consider adding `get_temperature_history` tool (if historical data is stored)
+- [ ] Consider adding `get_energy_stats` tool (once COP/energy monitoring is implemented)
+- [ ] Consider adding prompts capability (e.g., "diagnose heating issue" prompt template)

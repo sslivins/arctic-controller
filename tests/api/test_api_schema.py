@@ -103,6 +103,8 @@ SKIP_NON_GET = {
     "/api/heatpump/mode",           # PUT changes operating mode
     "/api/heatpump/setpoints",      # PUT changes temperature setpoints
     "/api/heatpump/params/{id}",    # PUT changes P-parameters
+    "/api/oauth/config",            # PUT changes OAuth settings
+    "/api/oauth/jwks/refresh",      # POST triggers JWKS fetch
 }
 
 
