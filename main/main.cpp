@@ -22,6 +22,7 @@
 #include "settings/settings_display_screen.h"
 #include "i18n/i18n.h"
 #include "auth_manager.h"
+#include "tls_manager.h"
 #include "modbus/modbus_manager.h"
 #include "modbus/arctic_heatpump.h"
 #include "heatpump_screen.h"
@@ -213,6 +214,9 @@ extern "C" void app_main(void)
 
     // Initialize authentication manager
     auth_mgr_init();
+
+    // Initialize TLS certificate manager (loads certs from NVS if available)
+    tls_mgr_init();
 
     // Initialize OTA manager
     ota_mgr_init();

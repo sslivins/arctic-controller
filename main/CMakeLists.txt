@@ -67,6 +67,7 @@ idf_component_register(
         "heatpump_params_screen.cpp"
         "heatpump_errors_screen.cpp"
         "test_endpoints.cpp"
+        "tls_manager.cpp"
         "png_encoder.c"
         "png_uncompressed.c"
     INCLUDE_DIRS
@@ -89,6 +90,7 @@ idf_component_register(
         esp_netif
         mdns
         esp_http_server
+        esp_https_server
         json
         esp_https_ota
         app_update

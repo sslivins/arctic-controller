@@ -1,6 +1,6 @@
 /*
  * Arctic Heat Pump Controller
- * REST API Server with mDNS
+ * REST API Server with mDNS and optional TLS
  */
 #pragma once
 
@@ -20,17 +20,18 @@ extern "C" {
 bool api_server_init_mdns(void);
 
 /**
- * @brief Start the HTTP REST API server
+ * @brief Start the REST API server
  * 
  * Should be called after WiFi is connected.
- * Server runs on port 80.
+ * Starts HTTPS (port 443) if TLS certs are provisioned,
+ * otherwise falls back to HTTP (port 80).
  * 
  * @return true on success
  */
 bool api_server_start(void);
 
 /**
- * @brief Stop the HTTP REST API server
+ * @brief Stop the REST API server
  */
 void api_server_stop(void);
 
