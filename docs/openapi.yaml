@@ -5,6 +5,7 @@ info:
     REST API for the Arctic Heat Pump Controller running on ESP32-P4 with ESP32-C6 WiFi.
     
     The device is discoverable via mDNS at `http://arctic.local` when connected to your local network.
+    HTTPS is available on port 443 when TLS certificates are provisioned via the `/api/tls/certificate` endpoint.
     
     ## Features
     - Device status and health monitoring
@@ -37,7 +38,7 @@ info:
 servers:
   - url: http://arctic.local
     description: Local mDNS hostname
-  - url: http://{ip_address}
+  - url: https://{ip_address}
     description: Direct IP address
     variables:
       ip_address:
@@ -870,6 +871,152 @@ paths:
                     example: fedcba9876543210fedcba9876543210
         '401':
           description: Login required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tls/status:
+    get:
+      tags:
+        - TLS
+      summary: Get TLS status
+      description: |
+        Returns whether TLS certificates are provisioned and whether the server
+        is currently running in HTTPS mode.
+      operationId: getTlsStatus
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: TLS status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  has_certs:
+                    type: boolean
+                    description: Whether TLS certificates are stored in NVS
+                    example: false
+                  https_active:
+                    type: boolean
+                    description: Whether the server is currently running HTTPS
+                    example: false
+                  auth_ready:
+                    type: boolean
+                    description: Whether both web and API key authentication are enabled (required before uploading certificates)
+                    example: false
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tls/certificate:
+    post:
+      tags:
+        - TLS
+      summary: Upload TLS certificate and private key
+      description: |
+        Store a PEM-encoded certificate chain and private key in NVS.
+        A reboot is required for the new certificates to take effect.
+
+        **Security rules:**
+        - Always requires API key authentication
+        - Both web authentication and API key authentication must be enabled before uploading certificates
+        - If HTTPS is already active, cert updates are only accepted over HTTPS
+        - When TLS certs are provisioned, authentication cannot be disabled
+      operationId: uploadTlsCertificate
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cert
+                - key
+              properties:
+                cert:
+                  type: string
+                  description: PEM-encoded certificate chain (fullchain.pem)
+                  example: "-----BEGIN CERTIFICATE-----\nMIIE...\n-----END CERTIFICATE-----\n"
+                key:
+                  type: string
+                  description: PEM-encoded private key (privkey.pem)
+                  example: "-----BEGIN EC PRIVATE KEY-----\nMHQ...\n-----END EC PRIVATE KEY-----\n"
+      responses:
+        '200':
+          description: Certificates stored successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Certificates stored. Reboot to activate HTTPS."
+        '400':
+          description: Invalid PEM format or missing fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: |
+            Forbidden. Either:
+            - Both web and API key authentication must be enabled before uploading certificates
+            - Certs exist but HTTPS is not active (reboot required first)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+        - TLS
+      summary: Remove TLS certificates
+      description: |
+        Clears stored certificates from NVS. After rebooting, the server will
+        fall back to HTTP on port 80.
+      operationId: deleteTlsCertificate
+      security:
+        - apiKey: []
+      responses:
+        '200':
+          description: Certificates cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "Certificates cleared. Reboot to revert to HTTP."
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No certificates provisioned
           content:
             application/json:
               schema:

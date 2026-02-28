@@ -16,7 +16,7 @@ info:
 servers:
   - url: http://arctic.local
     description: Device (mDNS)
-  - url: http://192.168.1.23
+  - url: https://192.168.1.23
     description: Device (static IP — example)
 
 tags:
