@@ -16,7 +16,10 @@ import os
 import time
 import pytest
 import requests
+import urllib3
 from playwright.sync_api import Page, expect
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from conftest import WEB_USERNAME, WEB_PASSWORD, API_KEY
 
@@ -42,6 +45,7 @@ def _enable_web_auth():
                 json={"web_auth_enabled": True},
                 headers=_api_headers(),
                 timeout=5,
+                verify=False,
             )
             return
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
@@ -59,9 +63,11 @@ def _disable_web_auth():
                 json={"web_auth_enabled": False},
                 headers=_api_headers(),
                 timeout=5,
+                verify=False,
             )
             if r.status_code == 401:
                 s = requests.Session()
+                s.verify = False
                 for pw in (WEB_PASSWORD, NEW_PASSWORD):
                     login_r = s.post(
                         f"{BASE_URL}/login",
@@ -91,11 +97,13 @@ def _restore_credentials():
                 json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
                 headers=_api_headers(),
                 timeout=5,
+                verify=False,
             )
             if r.status_code == 401:
                 # Web auth is on — log in with whatever password is active
                 for pw in (WEB_PASSWORD, NEW_PASSWORD):
                     s = requests.Session()
+                    s.verify = False
                     login_r = s.post(
                         f"{BASE_URL}/login",
                         json={"username": WEB_USERNAME, "password": pw},
@@ -122,8 +130,8 @@ def _browser_login(page: Page, username: str, password: str):
     page.locator(".login-box button[type='submit']").click()
 
 
-def _go_to_settings(page: Page):
-    """Click the Settings nav button (5th button, index 4)."""
+def _go_to_security(page: Page):
+    """Click the Security nav button (5th button, index 4)."""
     page.locator("nav button").nth(4).click()
     page.wait_for_timeout(500)
 
@@ -137,7 +145,7 @@ def _check_prerequisites():
     last_err = None
     for attempt in range(3):
         try:
-            r = requests.get(f"{BASE_URL}/api/health", timeout=5)
+            r = requests.get(f"{BASE_URL}/api/health", timeout=5, verify=False)
             r.raise_for_status()
             return
         except Exception as e:
@@ -163,8 +171,8 @@ class TestChangePasswordFromUI:
     """Change password through the web dashboard and verify it works."""
 
     def test_change_password_via_settings(self, page: Page, base_url: str):
-        """Full flow: login → settings → change password → logout → re-login."""
-        # ── Step 1: Enable web auth and log in ───────────────────────
+        """Full flow: login → security tab → change password → logout → re-login."""
+        # ── Step 1: Enable web auth and log in ───────────────────
         _enable_web_auth()
         page.goto(base_url, wait_until="networkidle")
         page.wait_for_selector(".login-box", timeout=10000)
@@ -173,8 +181,8 @@ class TestChangePasswordFromUI:
         page.wait_for_selector("nav", timeout=10000)
         expect(page.locator("nav")).to_be_visible()
 
-        # ── Step 2: Navigate to Settings ─────────────────────────────
-        _go_to_settings(page)
+        # ── Step 2: Navigate to Security ───────────────────────
+        _go_to_security(page)
 
         # ── Step 3: The credentials form should be visible ───────────
         # (web auth is ON, so the credentials section is rendered)
@@ -222,7 +230,7 @@ class TestChangePasswordFromUI:
         _disable_web_auth()
         page.goto(base_url, wait_until="networkidle")
         page.wait_for_selector("nav", timeout=10000)
-        _go_to_settings(page)
+        _go_to_security(page)
 
         # The "Save Credentials" button should not exist
         save_btn = page.get_by_text("Save Credentials")
@@ -235,7 +243,7 @@ class TestChangePasswordFromUI:
         _disable_web_auth()
         page.goto(base_url, wait_until="networkidle")
         page.wait_for_selector("nav", timeout=10000)
-        _go_to_settings(page)
+        _go_to_security(page)
 
         # Find the visible toggle label that wraps the hidden web auth checkbox
         web_auth_label = page.locator(

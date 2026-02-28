@@ -6,6 +6,12 @@ from playwright.sync_api import Page, expect
 
 def _go_to_settings(page: Page):
     """Navigate to the Settings page."""
+    page.locator("nav button").nth(5).click()
+    page.wait_for_timeout(500)
+
+
+def _go_to_security(page: Page):
+    """Navigate to the Security page."""
     page.locator("nav button").nth(4).click()
     page.wait_for_timeout(500)
 
@@ -14,10 +20,10 @@ class TestSettingsCards:
     """Settings page layout and card visibility."""
 
     def test_all_settings_cards_visible(self, dashboard_page: Page):
-        """All 6 settings cards are rendered."""
+        """All 5 settings cards are rendered (security cards moved to Security tab)."""
         _go_to_settings(dashboard_page)
         cards = dashboard_page.locator(".card")
-        assert cards.count() >= 7, f"Expected at least 7 settings cards, got {cards.count()}"
+        assert cards.count() >= 5, f"Expected at least 5 settings cards, got {cards.count()}"
 
     def test_device_info_card(self, dashboard_page: Page):
         """Device Info card shows version, platform, free heap, uptime."""
@@ -61,24 +67,24 @@ class TestTimeSettings:
 
 
 class TestSecuritySettings:
-    """Security card interactions."""
+    """Security card interactions (on Security tab)."""
 
     def test_web_auth_toggle_visible(self, dashboard_page: Page):
-        """Web Auth toggle is present in Security card."""
-        _go_to_settings(dashboard_page)
+        """Web Auth toggle is present in Authentication card."""
+        _go_to_security(dashboard_page)
         toggles = dashboard_page.locator(".toggle input[type='checkbox']")
-        # There are multiple toggles (24h, web auth, api auth)
+        # There are multiple toggles (web auth, api auth)
         assert toggles.count() >= 2, f"Expected at least 2 toggles, got {toggles.count()}"
 
     def test_api_key_display_visible(self, dashboard_page: Page):
         """API key display area is present."""
-        _go_to_settings(dashboard_page)
+        _go_to_security(dashboard_page)
         api_key = dashboard_page.locator(".api-key-display")
         expect(api_key).to_be_visible()
 
     def test_api_key_copy_button(self, dashboard_page: Page):
         """Copy API key button is clickable."""
-        _go_to_settings(dashboard_page)
+        _go_to_security(dashboard_page)
         copy_btn = dashboard_page.locator(".api-key-display .btn-group button").nth(1)
         expect(copy_btn).to_be_visible()
         expect(copy_btn).to_be_enabled()

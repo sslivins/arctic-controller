@@ -11,8 +11,11 @@ Credentials are read from environment variables or .env file:
 
 import os
 import pytest
+import urllib3
 from pathlib import Path
 from playwright.sync_api import Page, Browser, BrowserContext, expect
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Load .env file if present (for local development)
 _env_file = Path(__file__).parent.parent.parent / ".env"
@@ -80,7 +83,7 @@ def _ensure_auth_disabled(base_url: str):
 
     for attempt in range(3):
         try:
-            r = requests.get(f"{base_url}/api/auth/status", headers=headers, timeout=5)
+            r = requests.get(f"{base_url}/api/auth/status", headers=headers, timeout=5, verify=False)
             r.raise_for_status()
             status = r.json()
 
@@ -95,6 +98,7 @@ def _ensure_auth_disabled(base_url: str):
                     json={"web_auth_enabled": False},
                     headers=headers,
                     timeout=5,
+                    verify=False,
                 )
                 if r.status_code == 200:
                     _auth_disabled = True
@@ -102,6 +106,7 @@ def _ensure_auth_disabled(base_url: str):
 
             # Fall back to login + disable
             session = requests.Session()
+            session.verify = False
             login_r = session.post(
                 f"{base_url}/login",
                 json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
@@ -150,9 +155,11 @@ def _enable_web_auth(base_url: str):
                     json={"web_auth_enabled": True},
                     headers=headers,
                     timeout=5,
+                    verify=False,
                 )
             else:
                 session = requests.Session()
+                session.verify = False
                 session.post(
                     f"{base_url}/login",
                     json={"username": WEB_USERNAME, "password": WEB_PASSWORD},

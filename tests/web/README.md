@@ -34,11 +34,12 @@ pytest tests/web/ -v --headed
 |------|-------|----------|
 | `test_login.py` | 6 | Login form, success, failure, empty fields |
 | `test_dashboard.py` | 11 | Hero card, dots, perf strip, panels, polling |
-| `test_navigation.py` | 15 | 5-page nav, logs page, events page, params page |
-| `test_settings.py` | 11 | All 6 cards, toggles, buttons, file upload |
+| `test_navigation.py` | 16 | 6-page nav, logs page, events page, params page |
+| `test_settings.py` | 11 | Settings cards, toggles, buttons, file upload, security tab |
 | `test_i18n.py` | 5 | Language selector, EN→FR→ES switching, persistence |
+| `test_tls.py` | 9 | TLS auth prerequisite, cert install/delete, API 403, PEM validation |
 
-**Total: 48 tests**
+**Total: 58 tests**
 
 ## Architecture
 
