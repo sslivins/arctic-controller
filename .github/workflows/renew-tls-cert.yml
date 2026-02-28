@@ -1,0 +1,160 @@
+name: Renew TLS Certificate
+
+on:
+  schedule:
+    # Run on the 1st and 15th of each month at 03:00 UTC
+    - cron: '0 3 1,15 * *'
+  workflow_dispatch:
+    inputs:
+      force_renewal:
+        description: 'Force renewal even if cert is not near expiry'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: tls-cert-renewal
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    name: Renew wildcard cert and deploy to device
+    runs-on: vm-mi
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install certbot and Cloudflare plugin
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq certbot python3-certbot-dns-cloudflare
+
+      - name: Write Cloudflare credentials
+        run: |
+          mkdir -p ~/.secrets
+          echo "dns_cloudflare_api_token = ${{ secrets.CLOUDFLARE_API_TOKEN }}" > ~/.secrets/cloudflare.ini
+          chmod 600 ~/.secrets/cloudflare.ini
+
+      - name: Renew certificate
+        id: certbot
+        run: |
+          FORCE_FLAG=""
+          if [ "${{ inputs.force_renewal }}" = "true" ]; then
+            FORCE_FLAG="--force-renewal"
+          fi
+
+          sudo certbot certonly \
+            --dns-cloudflare \
+            --dns-cloudflare-credentials ~/.secrets/cloudflare.ini \
+            --dns-cloudflare-propagation-seconds 30 \
+            -d "*.mennlabs.com" \
+            --non-interactive \
+            --agree-tos \
+            --email "${{ secrets.CERTBOT_EMAIL }}" \
+            --cert-name mennlabs-wildcard \
+            $FORCE_FLAG \
+            2>&1 | tee certbot-output.txt
+
+          # Check if cert was actually renewed or skipped
+          if grep -q "Certificate not yet due for renewal" certbot-output.txt; then
+            echo "renewed=false" >> "$GITHUB_OUTPUT"
+            echo "Certificate not yet due for renewal — skipping deployment."
+          else
+            echo "renewed=true" >> "$GITHUB_OUTPUT"
+            echo "Certificate renewed successfully."
+          fi
+
+      - name: Read renewed certificate files
+        if: steps.certbot.outputs.renewed == 'true'
+        id: read_certs
+        run: |
+          CERT_DIR="/etc/letsencrypt/live/mennlabs-wildcard"
+
+          # Read fullchain and privkey
+          FULLCHAIN=$(sudo cat "$CERT_DIR/fullchain.pem")
+          PRIVKEY=$(sudo cat "$CERT_DIR/privkey.pem")
+
+          # Store as multiline outputs
+          {
+            echo "fullchain<<CERT_EOF"
+            echo "$FULLCHAIN"
+            echo "CERT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "privkey<<KEY_EOF"
+            echo "$PRIVKEY"
+            echo "KEY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Enable both auth methods on device
+        if: steps.certbot.outputs.renewed == 'true'
+        run: |
+          # Ensure both web auth and API auth are enabled (required for cert upload)
+          curl -sf --max-time 10 \
+            -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"web_auth_enabled": true, "api_auth_enabled": true}' \
+            "${{ vars.ARCTIC_URL || 'http://arctic.local' }}/api/auth/config" \
+            || echo "Warning: Could not configure auth (may already be set)"
+
+      - name: Upload certificate to device
+        if: steps.certbot.outputs.renewed == 'true'
+        run: |
+          # Upload new cert + key via the TLS provisioning API
+          PAYLOAD=$(jq -n \
+            --arg cert "${{ steps.read_certs.outputs.fullchain }}" \
+            --arg key "${{ steps.read_certs.outputs.privkey }}" \
+            '{cert: $cert, key: $key}')
+
+          RESPONSE=$(curl -sf --max-time 30 \
+            -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${{ vars.ARCTIC_URL || 'http://arctic.local' }}/api/tls/certificates")
+
+          echo "Device response: $RESPONSE"
+
+          if echo "$RESPONSE" | jq -e '.success == true' > /dev/null 2>&1; then
+            echo "Certificate uploaded successfully."
+          else
+            echo "::error::Certificate upload failed: $RESPONSE"
+            exit 1
+          fi
+
+      - name: Reboot device to activate new cert
+        if: steps.certbot.outputs.renewed == 'true'
+        run: |
+          curl -sf --max-time 10 \
+            -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
+            -X POST \
+            "${{ vars.ARCTIC_URL || 'http://arctic.local' }}/api/system/reboot" \
+            || true
+
+          echo "Reboot triggered. Waiting for device to come back..."
+          sleep 10
+
+          for i in $(seq 1 30); do
+            if curl -sk --connect-timeout 2 \
+              "${{ vars.ARCTIC_URL || 'http://arctic.local' }}/api/heatpump/status" > /dev/null 2>&1; then
+              echo "Device is back online after ${i}s."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::warning::Device did not respond within 40s after reboot"
+
+      - name: Update GitHub secrets with new certs
+        if: steps.certbot.outputs.renewed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.CERT_GITHUB_TOKEN }}
+        run: |
+          CERT_DIR="/etc/letsencrypt/live/mennlabs-wildcard"
+
+          sudo cat "$CERT_DIR/fullchain.pem" | gh secret set TLS_FULLCHAIN_PEM --repo "${{ github.repository }}"
+          sudo cat "$CERT_DIR/privkey.pem"   | gh secret set TLS_PRIVKEY_PEM   --repo "${{ github.repository }}"
+
+          echo "GitHub secrets updated with renewed certificates."
+
+      - name: Cleanup credentials
+        if: always()
+        run: rm -f ~/.secrets/cloudflare.ini
