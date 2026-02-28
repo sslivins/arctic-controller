@@ -15,9 +15,12 @@ import time
 
 import pytest
 import requests
+import urllib3
 from pathlib import Path
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Load .env from repo root if present (local dev)
 _env_file = Path(__file__).resolve().parent.parent.parent / ".env"
@@ -36,6 +39,7 @@ _retry = Retry(total=3, backoff_factor=1, allowed_methods=None,
                status_forcelist=[502, 503, 504])
 _session.mount("http://", HTTPAdapter(max_retries=_retry))
 _session.mount("https://", HTTPAdapter(max_retries=_retry))
+_session.verify = False
 
 
 def _headers(api_key=None):

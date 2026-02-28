@@ -43,7 +43,7 @@ pip install requests pytest schemathesis
 ### Environment Variable
 ```bash
 # Default: http://arctic.local (mDNS)
-export ARCTIC_URL=http://192.168.1.23    # use IP if mDNS is unreliable
+export ARCTIC_URL=https://192.168.1.23    # use IP if mDNS is unreliable
 ```
 
 ## Running Tests
@@ -51,7 +51,7 @@ export ARCTIC_URL=http://192.168.1.23    # use IP if mDNS is unreliable
 ### Locally
 ```bash
 cd tests/device
-ARCTIC_URL=http://192.168.1.23 python -m pytest . -v
+ARCTIC_URL=https://192.168.1.23 python -m pytest . -v
 ```
 
 ### Specific file or test

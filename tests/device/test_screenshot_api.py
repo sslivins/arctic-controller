@@ -16,8 +16,18 @@ import time
 
 import pytest
 import requests
+import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Disable TLS verification for self-signed device certificate
+_OrigSessionInit = requests.Session.__init__
+def _session_init_no_verify(self, *args, **kwargs):
+    _OrigSessionInit(self, *args, **kwargs)
+    self.verify = False
+requests.Session.__init__ = _session_init_no_verify
 
 # Device URL and API key from environment
 ARCTIC_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")

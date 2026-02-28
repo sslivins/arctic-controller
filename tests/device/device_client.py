@@ -11,9 +11,13 @@ import os
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import urllib3
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+
+# Suppress InsecureRequestWarning when verify=False (wildcard cert won't match .local)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 @dataclass
@@ -51,6 +55,9 @@ class DeviceClient:
         self.timeout = timeout
         self.session = requests.Session()
         self._session_id: Optional[str] = None
+
+        # Disable TLS certificate verification (wildcard cert won't match .local)
+        self.session.verify = False
 
         # Retry transient connection errors automatically (ESP32 can be flaky)
         retry_strategy = Retry(

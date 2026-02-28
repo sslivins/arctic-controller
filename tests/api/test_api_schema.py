@@ -25,6 +25,9 @@ import time
 import pytest
 import requests
 import schemathesis
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import yaml
 from hypothesis import HealthCheck, Phase, assume, settings
 from pathlib import Path
@@ -111,6 +114,7 @@ SKIP_NON_GET = {
 # can reuse the session cookie.
 
 _auth_session = requests.Session()
+_auth_session.verify = False
 
 def _setup_auth():
     """Log in if web auth is enabled, or set API key header."""
