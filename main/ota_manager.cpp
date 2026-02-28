@@ -463,7 +463,7 @@ static void ota_task(void* pvParameter)
 }
 
 // Compare semantic versions (returns: -1 if v1<v2, 0 if equal, 1 if v1>v2)
-static int compare_versions(const char* v1, const char* v2)
+int ota_mgr_compare_versions(const char* v1, const char* v2)
 {
     int major1 = 0, minor1 = 0, patch1 = 0;
     int major2 = 0, minor2 = 0, patch2 = 0;
@@ -613,7 +613,7 @@ bool ota_mgr_check_github_releases(ota_release_info_t* info)
     
     // Compare versions
     if (strlen(release_info.latest_version) > 0 && strlen(ota_status.current_version) > 0) {
-        int cmp = compare_versions(release_info.latest_version, ota_status.current_version);
+        int cmp = ota_mgr_compare_versions(release_info.latest_version, ota_status.current_version);
         release_info.update_available = (cmp > 0);
         ESP_LOGI(TAG, "Current: %s, Latest: %s, Update available: %s",
                  ota_status.current_version, release_info.latest_version,
