@@ -39,6 +39,29 @@ API_KEY = os.environ.get("ARCTIC_API_KEY")
 USERNAME = os.environ.get("ARCTIC_USERNAME", "arctic")
 PASSWORD = os.environ.get("ARCTIC_PASSWORD", "arctic")
 
+# Cached TLS status (checked once per module)
+_tls_has_certs = None
+
+def _device_has_tls_certs():
+    """Check if the device has TLS certificates provisioned.
+    Auth cannot be disabled when TLS certs are present (403 Forbidden)."""
+    global _tls_has_certs
+    if _tls_has_certs is not None:
+        return _tls_has_certs
+    try:
+        r = requests.get(
+            f"{BASE_URL}/api/tls/status",
+            headers=_api_headers(),
+            timeout=5,
+        )
+        if r.status_code == 200:
+            _tls_has_certs = r.json().get("has_certs", False)
+        else:
+            _tls_has_certs = False
+    except Exception:
+        _tls_has_certs = False
+    return _tls_has_certs
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -93,7 +116,8 @@ def _enable_web_auth():
 
 def _disable_web_auth():
     """Disable web auth.  When it is currently ON, admin endpoints require
-    a session cookie — so we log in first."""
+    a session cookie — so we log in first.
+    Returns False if blocked (e.g. TLS certs prevent disabling auth)."""
     for attempt in range(3):
         try:
             # Try API-key first (works when web auth is already off)
@@ -103,15 +127,20 @@ def _disable_web_auth():
                 headers=_api_headers(),
                 timeout=5,
             )
+            if r.status_code == 403:
+                # TLS certs provisioned — auth cannot be disabled
+                return False
             if r.status_code == 401:
                 # Web auth is on — use a session
                 s = _admin_session()
-                s.post(
+                r2 = s.post(
                     f"{BASE_URL}/api/auth/config",
                     json={"web_auth_enabled": False},
                     timeout=5,
                 )
-            return
+                if r2.status_code == 403:
+                    return False
+            return True
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             if attempt == 2:
                 raise
@@ -448,6 +477,9 @@ class TestAuthToggle:
 
     def test_disable_web_auth_grants_open_access(self):
         """With web_auth_enabled=false, endpoints are accessible without login."""
+        if _device_has_tls_certs():
+            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
+
         _enable_web_auth()
 
         # Confirm locked first (no API key, no session)
@@ -463,6 +495,9 @@ class TestAuthToggle:
 
     def test_enable_web_auth_locks_endpoints(self):
         """Enabling web auth should immediately require credentials."""
+        if _device_has_tls_certs():
+            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
+
         _disable_web_auth()
 
         # Open access (no credentials needed)
@@ -535,3 +570,57 @@ class TestApiKeyViaSession:
         _enable_web_auth()
         r = requests.get(f"{BASE_URL}/api/auth/apikey", timeout=5)
         assert r.status_code == 401
+
+
+# =========================================================================
+# TLS Auth Enforcement
+# =========================================================================
+
+class TestTLSAuthEnforcement:
+    """When TLS certs are provisioned, auth must remain enabled."""
+
+    @pytest.fixture(autouse=True)
+    def _require_tls(self):
+        if not _device_has_tls_certs():
+            pytest.skip("Device has no TLS certs — enforcement tests N/A")
+
+    def test_cannot_disable_web_auth_with_tls_certs(self):
+        """POST /api/auth/config with web_auth_enabled=false should return 403."""
+        s = _admin_session()
+        r = s.post(
+            f"{BASE_URL}/api/auth/config",
+            json={"web_auth_enabled": False},
+            timeout=5,
+        )
+        assert r.status_code == 403
+        assert "TLS" in r.json().get("error", "") or "cannot" in r.json().get("error", "").lower()
+
+    def test_cannot_disable_api_auth_with_tls_certs(self):
+        """POST /api/auth/config with api_auth_enabled=false should return 403."""
+        s = _admin_session()
+        r = s.post(
+            f"{BASE_URL}/api/auth/config",
+            json={"api_auth_enabled": False},
+            timeout=5,
+        )
+        assert r.status_code == 403
+
+    def test_cannot_disable_both_auth_with_tls_certs(self):
+        """Disabling both web and API auth simultaneously should return 403."""
+        s = _admin_session()
+        r = s.post(
+            f"{BASE_URL}/api/auth/config",
+            json={"web_auth_enabled": False, "api_auth_enabled": False},
+            timeout=5,
+        )
+        assert r.status_code == 403
+
+    def test_can_still_enable_auth_with_tls_certs(self):
+        """Enabling auth (already on) should succeed — not blocked by TLS check."""
+        s = _admin_session()
+        r = s.post(
+            f"{BASE_URL}/api/auth/config",
+            json={"web_auth_enabled": True},
+            timeout=5,
+        )
+        assert r.status_code == 200
