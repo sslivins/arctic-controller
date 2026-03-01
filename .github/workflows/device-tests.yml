@@ -164,18 +164,27 @@ jobs:
           echo "Device did not come back online within 45s"
           exit 1
 
+      - name: Detect HTTPS support
+        run: |
+          # If HTTPS is available, use it for all tests (avoids HTTP→HTTPS redirect issues with cookies/auth)
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          if curl -sk --connect-timeout 3 "$ARCTIC_URL_HTTPS/api/health" > /dev/null 2>&1; then
+            echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> $GITHUB_ENV
+            echo "Device supports HTTPS — using $ARCTIC_URL_HTTPS for tests"
+          else
+            echo "Device does not support HTTPS — keeping $ARCTIC_URL"
+          fi
+
       - name: Run device UI tests
         id: ui_tests
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
         env:
-          ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Run Modbus E2E tests
         id: modbus_tests
         run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
         env:
-          ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           SIMULATOR_URL: http://arctic-sim.local
 
@@ -183,7 +192,6 @@ jobs:
         id: api_tests
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
-          ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
@@ -199,7 +207,6 @@ jobs:
         id: web_tests
         run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
         env:
-          ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
