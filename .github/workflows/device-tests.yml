@@ -99,6 +99,23 @@ jobs:
         continue-on-error: true
         run: |
           echo "Uploading firmware to device via OTA..."
+
+          # Wait for mDNS name resolution (up to 30s)
+          HOSTNAME="${ARCTIC_URL#*://}"   # strip scheme → arctic.local
+          echo "Waiting for $HOSTNAME to resolve..."
+          for i in $(seq 1 15); do
+            if getent hosts "$HOSTNAME" > /dev/null 2>&1; then
+              RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
+              echo "$HOSTNAME resolved to $RESOLVED_IP after $((i*2))s"
+              break
+            fi
+            sleep 2
+          done
+          if ! getent hosts "$HOSTNAME" > /dev/null 2>&1; then
+            echo "ERROR: $HOSTNAME did not resolve within 30s"
+            exit 1
+          fi
+
           # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
