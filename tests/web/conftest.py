@@ -199,9 +199,23 @@ def dashboard_page(page: Page, base_url: str) -> Page:
 
     Tries to disable web auth first. If that fails (e.g. credentials changed),
     falls back to logging in via the browser.
+    Retries page.goto on transient network/DNS errors.
     """
     auth_disabled = _ensure_auth_disabled(base_url)
-    page.goto(base_url, wait_until="networkidle")
+
+    # Retry page.goto to handle transient mDNS resolution failures
+    last_err = None
+    for attempt in range(3):
+        try:
+            page.goto(base_url, wait_until="networkidle")
+            last_err = None
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < 2:
+                page.wait_for_timeout(2000)
+    if last_err:
+        raise last_err
 
     if not auth_disabled:
         # Auth is still on — log in via the browser

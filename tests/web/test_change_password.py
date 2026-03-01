@@ -260,6 +260,7 @@ class TestChangePasswordFromUI:
         web_auth_label.click()
         page.wait_for_timeout(500)
 
-        # Credentials form should now be visible
-        save_btn = page.get_by_text("Save Credentials")
+        # Credentials form should now be visible.
+        # When toggling ON, the button says "Enable & Save" (_needsEnable=true).
+        save_btn = page.get_by_text("Enable & Save")
         expect(save_btn).to_be_visible()
