@@ -176,14 +176,12 @@ jobs:
           fi
 
       - name: Run device UI tests
-        if: false  # TEMP: skip to speed up API test iteration
         id: ui_tests
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
         env:
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Run Modbus E2E tests
-        if: false  # TEMP: skip to speed up API test iteration
         id: modbus_tests
         run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
         env:
