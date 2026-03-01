@@ -40,7 +40,8 @@ static const char* HOSTNAME_BASE = "arctic";
 static char hostname[32] = "arctic";  // Actual hostname (may have suffix)
 
 // HTTP/HTTPS server handle (only one is active per boot)
-static httpd_handle_t server = NULL;
+static httpd_handle_t server = NULL;      // HTTP (port 80) — always running
+static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — when TLS certs present
 
 // Embedded web files (from EMBED_FILES) - gzip compressed
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -253,15 +254,22 @@ bool api_server_init_mdns(void)
         ESP_LOGW(TAG, "mDNS instance name set failed: %s", esp_err_to_name(err));
     }
     
-    // Advertise the correct service type based on TLS status
-    const char* svc_type = tls_mgr_has_certs() ? "_https" : "_http";
-    uint16_t svc_port = tls_mgr_has_certs() ? 443 : 80;
-    err = mdns_service_add(hostname, svc_type, "_tcp", svc_port, NULL, 0);
+    // Always advertise HTTP on port 80
+    err = mdns_service_add(hostname, "_http", "_tcp", 80, NULL, 0);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "mDNS %s service add failed: %s", svc_type, esp_err_to_name(err));
+        ESP_LOGW(TAG, "mDNS _http service add failed: %s", esp_err_to_name(err));
+    }
+    
+    // Also advertise HTTPS on port 443 when TLS certs are present
+    if (tls_mgr_has_certs()) {
+        err = mdns_service_add(hostname, "_https", "_tcp", 443, NULL, 0);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "mDNS _https service add failed: %s", esp_err_to_name(err));
+        }
     }
     
     // Add service TXT records
+    const char* svc_type = "_http";
     mdns_txt_item_t serviceTxtData[] = {
         {"version", "1.0"},
         {"device", "arctic-controller"}
@@ -299,8 +307,29 @@ bool api_server_start(void)
     
     esp_err_t ret;
     
+    // ---- Always start HTTP on port 80 ----
+    // This ensures CI, local development, and OTA always work regardless of TLS state.
+    {
+        ESP_LOGI(TAG, "Starting HTTP server on port 80...");
+        
+        httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
+        http_config.lru_purge_enable   = true;
+        http_config.uri_match_fn       = httpd_uri_match_wildcard;
+        http_config.max_uri_handlers   = uri_handlers;
+        http_config.stack_size         = stack_size;
+        http_config.max_resp_headers   = max_headers;
+        http_config.recv_wait_timeout  = recv_timeout;
+        http_config.max_open_sockets   = 4;
+        
+        ret = httpd_start(&server, &http_config);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
+            return false;
+        }
+    }
+    
+    // ---- Optionally start HTTPS on port 443 alongside HTTP ----
     if (tls_mgr_has_certs()) {
-        // ---- HTTPS mode (port 443) ----
         size_t cert_len = 0, key_len = 0;
         const uint8_t* cert = tls_mgr_get_cert(&cert_len);
         const uint8_t* key  = tls_mgr_get_key(&key_len);
@@ -320,37 +349,32 @@ bool api_server_start(void)
         ssl_config.prvtkey_pem   = key;
         ssl_config.prvtkey_len   = key_len;
         
-        ret = httpd_ssl_start(&server, &ssl_config);
+        ret = httpd_ssl_start(&server_ssl, &ssl_config);
         if (ret == ESP_OK) {
             tls_mgr_set_https_active(true);
+            ESP_LOGI(TAG, "HTTPS server started on port 443");
+        } else {
+            ESP_LOGE(TAG, "Failed to start HTTPS server: %s (HTTP still available on port 80)", esp_err_to_name(ret));
         }
     } else {
-        // ---- HTTP fallback (port 80) ----
-        ESP_LOGW(TAG, "No TLS certs provisioned — starting HTTP server on port 80");
-        
-        httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
-        http_config.lru_purge_enable   = true;
-        http_config.uri_match_fn       = httpd_uri_match_wildcard;
-        http_config.max_uri_handlers   = uri_handlers;
-        http_config.stack_size         = stack_size;
-        http_config.max_resp_headers   = max_headers;
-        http_config.recv_wait_timeout  = recv_timeout;
-        http_config.max_open_sockets   = 4;
-        
-        ret = httpd_start(&server, &http_config);
-    }
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start server: %s", esp_err_to_name(ret));
-        return false;
+        ESP_LOGW(TAG, "No TLS certs provisioned — HTTP only on port 80");
     }
     
     // Helper macro - abort if URI registration fails (catches max_uri_handlers issues)
+    // Registers on HTTP server, and also on HTTPS server when active.
     #define REGISTER_URI(uri_struct) do { \
         esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
         if (err != ESP_OK) { \
             ESP_LOGE(TAG, "FATAL: Failed to register URI '%s': %s", (uri_struct).uri, esp_err_to_name(err)); \
             ESP_LOGE(TAG, "Increase max_uri_handlers in httpd config!"); \
             abort(); \
+        } \
+        if (server_ssl != NULL) { \
+            err = httpd_register_uri_handler(server_ssl, &(uri_struct)); \
+            if (err != ESP_OK) { \
+                ESP_LOGE(TAG, "FATAL: Failed to register URI '%s' on HTTPS: %s", (uri_struct).uri, esp_err_to_name(err)); \
+                abort(); \
+            } \
         } \
     } while(0)
     
@@ -789,28 +813,36 @@ bool api_server_start(void)
 
 #ifdef CONFIG_TEST_ENDPOINTS
     test_endpoints_register(server);
+    if (server_ssl != NULL) {
+        test_endpoints_register(server_ssl);
+    }
     ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
 #endif
     
     #undef REGISTER_URI
     
-    const char* proto = tls_mgr_is_https_active() ? "https" : "http";
-    ESP_LOGI(TAG, "%s server started successfully", tls_mgr_is_https_active() ? "HTTPS" : "HTTP");
-    ESP_LOGI(TAG, "Web UI: %s://%s.local/", proto, hostname);
+    ESP_LOGI(TAG, "HTTP server started on port 80");
+    if (server_ssl != NULL) {
+        ESP_LOGI(TAG, "HTTPS server started on port 443");
+        ESP_LOGI(TAG, "Web UI: https://%s.local/", hostname);
+    } else {
+        ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
+    }
     
     return true;
 }
 
 void api_server_stop(void)
 {
+    if (server_ssl != NULL) {
+        ESP_LOGI(TAG, "Stopping HTTPS server...");
+        httpd_ssl_stop(server_ssl);
+        server_ssl = NULL;
+        tls_mgr_set_https_active(false);
+    }
     if (server != NULL) {
-        if (tls_mgr_is_https_active()) {
-            ESP_LOGI(TAG, "Stopping HTTPS server...");
-            httpd_ssl_stop(server);
-        } else {
-            ESP_LOGI(TAG, "Stopping HTTP server...");
-            httpd_stop(server);
-        }
+        ESP_LOGI(TAG, "Stopping HTTP server...");
+        httpd_stop(server);
         server = NULL;
     }
 }
