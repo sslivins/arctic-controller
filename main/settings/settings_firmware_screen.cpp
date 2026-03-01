@@ -509,7 +509,7 @@ static void check_for_updates_task(void* arg)
         strncpy(s_state.latest_version, latest_ver, sizeof(s_state.latest_version) - 1);
         strncpy(s_state.download_url, download_url, sizeof(s_state.download_url) - 1);
         
-        if (strcmp(latest_ver, s_state.current_version) > 0 && strlen(download_url) > 0) {
+        if (ota_mgr_compare_versions(latest_ver, s_state.current_version) > 0 && strlen(download_url) > 0) {
             update_available = true;
         }
     }
@@ -658,7 +658,7 @@ static void background_update_check_task(void* arg)
                             strncpy(latest_ver, version, sizeof(latest_ver) - 1);
                             
                             const esp_app_desc_t* app_desc = esp_app_get_description();
-                            if (app_desc && strcmp(latest_ver, app_desc->version) > 0) {
+                            if (app_desc && ota_mgr_compare_versions(latest_ver, app_desc->version) > 0) {
                                 update_available = true;
                             }
                         }

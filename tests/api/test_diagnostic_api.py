@@ -18,6 +18,7 @@ import time
 
 import pytest
 import requests
+import urllib3
 from pathlib import Path
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -27,6 +28,15 @@ _env_file = Path(__file__).resolve().parent.parent.parent / ".env"
 if _env_file.exists():
     from dotenv import load_dotenv
     load_dotenv(_env_file)
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Disable TLS verification for self-signed device certificate
+_OrigSessionInit = requests.Session.__init__
+def _session_init_no_verify(self, *args, **kwargs):
+    _OrigSessionInit(self, *args, **kwargs)
+    self.verify = False
+requests.Session.__init__ = _session_init_no_verify
 
 BASE_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 API_KEY = os.environ.get("ARCTIC_API_KEY")

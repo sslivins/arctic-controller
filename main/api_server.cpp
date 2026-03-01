@@ -18,8 +18,10 @@
 #include "log_buffer.h"
 #include "app_preferences.h"
 #include "test_endpoints.h"
+#include "tls_manager.h"
 #include "png_uncompressed.h"
 #include <esp_http_server.h>
+#include <esp_https_server.h>
 #include <esp_log.h>
 #include <mdns.h>
 #include <cJSON.h>
@@ -37,8 +39,9 @@ static const char* TAG = "api_server";
 static const char* HOSTNAME_BASE = "arctic";
 static char hostname[32] = "arctic";  // Actual hostname (may have suffix)
 
-// HTTP server handle
-static httpd_handle_t server = NULL;
+// HTTP/HTTPS server handle (only one is active per boot)
+static httpd_handle_t server = NULL;      // HTTP (port 80) — always running
+static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — when TLS certs present
 
 // Embedded web files (from EMBED_FILES) - gzip compressed
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -96,6 +99,14 @@ static esp_err_t preferences_get_handler(httpd_req_t* req);
 static esp_err_t logs_get_handler(httpd_req_t* req);
 static esp_err_t logs_clear_handler(httpd_req_t* req);
 static esp_err_t screenshot_get_handler(httpd_req_t* req);
+
+// TLS management handlers
+static esp_err_t tls_status_get_handler(httpd_req_t* req);
+static esp_err_t tls_cert_post_handler(httpd_req_t* req);
+static esp_err_t tls_cert_delete_handler(httpd_req_t* req);
+
+// HTTP→HTTPS redirect handler (catch-all when HTTPS is active)
+static esp_err_t http_to_https_redirect_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -188,19 +199,31 @@ static bool check_api_auth(httpd_req_t* req)
 
 static void set_session_cookie(httpd_req_t* req, const char* token)
 {
-    char cookie[128];
-    snprintf(cookie, sizeof(cookie), 
-             "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict",
-             SESSION_COOKIE_NAME, token, AUTH_SESSION_LIFETIME_SEC);
+    char cookie[160];
+    if (tls_mgr_is_https_active()) {
+        snprintf(cookie, sizeof(cookie),
+                 "%s=%s; Path=/; Max-Age=%d; HttpOnly; Secure; SameSite=Strict",
+                 SESSION_COOKIE_NAME, token, AUTH_SESSION_LIFETIME_SEC);
+    } else {
+        snprintf(cookie, sizeof(cookie),
+                 "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict",
+                 SESSION_COOKIE_NAME, token, AUTH_SESSION_LIFETIME_SEC);
+    }
     httpd_resp_set_hdr(req, "Set-Cookie", cookie);
 }
 
 static void clear_session_cookie(httpd_req_t* req)
 {
-    char cookie[128];
-    snprintf(cookie, sizeof(cookie),
-             "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
-             SESSION_COOKIE_NAME);
+    char cookie[160];
+    if (tls_mgr_is_https_active()) {
+        snprintf(cookie, sizeof(cookie),
+                 "%s=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict",
+                 SESSION_COOKIE_NAME);
+    } else {
+        snprintf(cookie, sizeof(cookie),
+                 "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
+                 SESSION_COOKIE_NAME);
+    }
     httpd_resp_set_hdr(req, "Set-Cookie", cookie);
 }
 
@@ -234,18 +257,27 @@ bool api_server_init_mdns(void)
         ESP_LOGW(TAG, "mDNS instance name set failed: %s", esp_err_to_name(err));
     }
     
-    // Add HTTP service
+    // Always advertise HTTP on port 80
     err = mdns_service_add(hostname, "_http", "_tcp", 80, NULL, 0);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "mDNS HTTP service add failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "mDNS _http service add failed: %s", esp_err_to_name(err));
+    }
+    
+    // Also advertise HTTPS on port 443 when TLS certs are present
+    if (tls_mgr_has_certs()) {
+        err = mdns_service_add(hostname, "_https", "_tcp", 443, NULL, 0);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "mDNS _https service add failed: %s", esp_err_to_name(err));
+        }
     }
     
     // Add service TXT records
+    const char* svc_type = "_http";
     mdns_txt_item_t serviceTxtData[] = {
         {"version", "1.0"},
         {"device", "arctic-controller"}
     };
-    err = mdns_service_txt_set("_http", "_tcp", serviceTxtData, 2);
+    err = mdns_service_txt_set(svc_type, "_tcp", serviceTxtData, 2);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "mDNS service TXT set failed: %s", esp_err_to_name(err));
     }
@@ -270,30 +302,94 @@ bool api_server_start(void)
         return true;
     }
     
-    ESP_LOGI(TAG, "Starting HTTP server on port 80...");
+    // Common httpd config values
+    const int uri_handlers = 92;     // 47 api_server + 36 test_endpoints = 83 needed
+    const int stack_size   = 16384;  // Default task stack
+    const int max_headers  = 16;
+    const int recv_timeout = 10;     // seconds
     
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.lru_purge_enable = true;
-    config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 88;  // 44 api_server + 36 test_endpoints = 80 needed
-    config.stack_size = 16384;     // Default task stack (tree walk is iterative, not recursive)
-    config.max_resp_headers = 16;  // More response headers
-    config.recv_wait_timeout = 10; // 10 second receive timeout
-    config.max_open_sockets = 4;   // Reduced to leave sockets for OTA/API calls
+    esp_err_t ret;
     
-    esp_err_t ret = httpd_start(&server, &config);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start server: %s", esp_err_to_name(ret));
-        return false;
+    // ---- Always start HTTP on port 80 ----
+    // This ensures CI, local development, and OTA always work regardless of TLS state.
+    {
+        ESP_LOGI(TAG, "Starting HTTP server on port 80...");
+        
+        httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
+        http_config.lru_purge_enable   = true;
+        http_config.uri_match_fn       = httpd_uri_match_wildcard;
+        http_config.max_uri_handlers   = uri_handlers;
+        http_config.stack_size         = stack_size;
+        http_config.max_resp_headers   = max_headers;
+        http_config.recv_wait_timeout  = recv_timeout;
+        http_config.max_open_sockets   = 4;
+        
+        ret = httpd_start(&server, &http_config);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
+            return false;
+        }
+    }
+    
+    // ---- Optionally start HTTPS on port 443 alongside HTTP ----
+    if (tls_mgr_has_certs()) {
+        size_t cert_len = 0, key_len = 0;
+        const uint8_t* cert = tls_mgr_get_cert(&cert_len);
+        const uint8_t* key  = tls_mgr_get_key(&key_len);
+        
+        ESP_LOGI(TAG, "Starting HTTPS server on port 443...");
+        
+        httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
+        ssl_config.httpd.lru_purge_enable   = true;
+        ssl_config.httpd.uri_match_fn       = httpd_uri_match_wildcard;
+        ssl_config.httpd.max_uri_handlers   = uri_handlers;
+        ssl_config.httpd.stack_size         = stack_size;
+        ssl_config.httpd.max_resp_headers   = max_headers;
+        ssl_config.httpd.recv_wait_timeout  = recv_timeout;
+        ssl_config.httpd.max_open_sockets   = 4;      // TLS buffers in PSRAM via EXTERNAL_MEM_ALLOC
+        ssl_config.servercert    = cert;
+        ssl_config.servercert_len = cert_len;
+        ssl_config.prvtkey_pem   = key;
+        ssl_config.prvtkey_len   = key_len;
+        
+        ret = httpd_ssl_start(&server_ssl, &ssl_config);
+        if (ret == ESP_OK) {
+            tls_mgr_set_https_active(true);
+            ESP_LOGI(TAG, "HTTPS server started on port 443");
+        } else {
+            ESP_LOGE(TAG, "Failed to start HTTPS server: %s (HTTP still available on port 80)", esp_err_to_name(ret));
+        }
+    } else {
+        ESP_LOGW(TAG, "No TLS certs provisioned — HTTP only on port 80");
     }
     
     // Helper macro - abort if URI registration fails (catches max_uri_handlers issues)
+    // When HTTPS is active, registers on HTTPS only.
+    // When no HTTPS, registers on HTTP.
     #define REGISTER_URI(uri_struct) do { \
-        esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
+        httpd_handle_t _target = server_ssl ? server_ssl : server; \
+        esp_err_t err = httpd_register_uri_handler(_target, &(uri_struct)); \
         if (err != ESP_OK) { \
             ESP_LOGE(TAG, "FATAL: Failed to register URI '%s': %s", (uri_struct).uri, esp_err_to_name(err)); \
             ESP_LOGE(TAG, "Increase max_uri_handlers in httpd config!"); \
             abort(); \
+        } \
+    } while(0)
+    
+    // Register on BOTH HTTP and HTTPS (essential endpoints that must work over HTTP
+    // even when HTTPS is active: health, OTA, TLS management)
+    #define REGISTER_URI_ESSENTIAL(uri_struct) do { \
+        esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
+        if (err != ESP_OK) { \
+            ESP_LOGE(TAG, "FATAL: Failed to register URI '%s': %s", (uri_struct).uri, esp_err_to_name(err)); \
+            abort(); \
+        } \
+        if (server_ssl != NULL) { \
+            err = httpd_register_uri_handler(server_ssl, &(uri_struct)); \
+            if (err != ESP_OK) { \
+                ESP_LOGE(TAG, "FATAL: Failed to register URI '%s' on HTTPS: %s", (uri_struct).uri, esp_err_to_name(err)); \
+                abort(); \
+            } \
         } \
     } while(0)
     
@@ -356,7 +452,7 @@ bool api_server_start(void)
         .handler = health_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(health_uri);
+    REGISTER_URI_ESSENTIAL(health_uri);
     
     // GET /api/status
     httpd_uri_t status_uri = {
@@ -418,7 +514,7 @@ bool api_server_start(void)
         .handler = info_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(info_uri);
+    REGISTER_URI_ESSENTIAL(info_uri);
     
     // GET /api/ota/status
     httpd_uri_t ota_status_uri = {
@@ -427,7 +523,7 @@ bool api_server_start(void)
         .handler = ota_status_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_status_uri);
+    REGISTER_URI_ESSENTIAL(ota_status_uri);
     
     // POST /api/ota/update
     httpd_uri_t ota_update_uri = {
@@ -436,7 +532,7 @@ bool api_server_start(void)
         .handler = ota_update_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_update_uri);
+    REGISTER_URI_ESSENTIAL(ota_update_uri);
     
     // POST /api/ota/upload
     httpd_uri_t ota_upload_uri = {
@@ -445,7 +541,7 @@ bool api_server_start(void)
         .handler = ota_upload_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_upload_uri);
+    REGISTER_URI_ESSENTIAL(ota_upload_uri);
     
     // POST /api/ota/reboot
     httpd_uri_t ota_reboot_uri = {
@@ -454,7 +550,7 @@ bool api_server_start(void)
         .handler = ota_reboot_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_reboot_uri);
+    REGISTER_URI_ESSENTIAL(ota_reboot_uri);
     
     // GET /api/ota/releases - Check GitHub for updates
     httpd_uri_t ota_releases_uri = {
@@ -463,7 +559,7 @@ bool api_server_start(void)
         .handler = ota_releases_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_releases_uri);
+    REGISTER_URI_ESSENTIAL(ota_releases_uri);
     
     // POST /api/ota/github - Start update from GitHub
     httpd_uri_t ota_github_uri = {
@@ -472,7 +568,7 @@ bool api_server_start(void)
         .handler = ota_github_update_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_github_uri);
+    REGISTER_URI_ESSENTIAL(ota_github_uri);
     
     // GET /api/auth/config
     httpd_uri_t auth_config_get_uri = {
@@ -699,21 +795,87 @@ bool api_server_start(void)
     };
     REGISTER_URI(screenshot_uri);
 
+    // ========================================================================
+    // TLS Certificate Management
+    // ========================================================================
+    
+    // GET /api/tls/status
+    httpd_uri_t tls_status_uri = {
+        .uri = "/api/tls/status",
+        .method = HTTP_GET,
+        .handler = tls_status_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI_ESSENTIAL(tls_status_uri);
+
+    // POST /api/tls/certificate
+    httpd_uri_t tls_cert_post_uri = {
+        .uri = "/api/tls/certificate",
+        .method = HTTP_POST,
+        .handler = tls_cert_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI_ESSENTIAL(tls_cert_post_uri);
+
+    // DELETE /api/tls/certificate
+    httpd_uri_t tls_cert_delete_uri = {
+        .uri = "/api/tls/certificate",
+        .method = HTTP_DELETE,
+        .handler = tls_cert_delete_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI_ESSENTIAL(tls_cert_delete_uri);
+
 #ifdef CONFIG_TEST_ENDPOINTS
+    // Test endpoints need HTTP for CI (no TLS on test runner)
     test_endpoints_register(server);
+    if (server_ssl != NULL) {
+        test_endpoints_register(server_ssl);
+    }
     ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
 #endif
     
-    #undef REGISTER_URI
+    // When HTTPS is active, add catch-all redirects on HTTP for non-essential endpoints.
+    // Essential endpoints (health, OTA, TLS, test) are already registered above and
+    // match before this wildcard.  Everything else gets a 307 → https://host/path.
+    if (server_ssl != NULL) {
+        static const httpd_method_t redirect_methods[] = {
+            HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE, HTTP_PATCH
+        };
+        for (auto method : redirect_methods) {
+            httpd_uri_t http_redirect_uri = {
+                .uri = "/*",
+                .method = method,
+                .handler = http_to_https_redirect_handler,
+                .user_ctx = NULL
+            };
+            httpd_register_uri_handler(server, &http_redirect_uri);
+        }
+        ESP_LOGI(TAG, "HTTP→HTTPS redirect active for non-essential endpoints");
+    }
     
-    ESP_LOGI(TAG, "HTTP server started successfully");
-    ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
+    #undef REGISTER_URI
+    #undef REGISTER_URI_ESSENTIAL
+    
+    ESP_LOGI(TAG, "HTTP server started on port 80");
+    if (server_ssl != NULL) {
+        ESP_LOGI(TAG, "HTTPS server started on port 443");
+        ESP_LOGI(TAG, "Web UI: https://%s.local/", hostname);
+    } else {
+        ESP_LOGI(TAG, "Web UI: http://%s.local/", hostname);
+    }
     
     return true;
 }
 
 void api_server_stop(void)
 {
+    if (server_ssl != NULL) {
+        ESP_LOGI(TAG, "Stopping HTTPS server...");
+        httpd_ssl_stop(server_ssl);
+        server_ssl = NULL;
+        tls_mgr_set_https_active(false);
+    }
     if (server != NULL) {
         ESP_LOGI(TAG, "Stopping HTTP server...");
         httpd_stop(server);
@@ -855,6 +1017,22 @@ static esp_err_t favicon_handler(httpd_req_t* req)
     // Return 204 No Content - no favicon available
     httpd_resp_set_status(req, "204 No Content");
     httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+// ============================================================================
+// HTTP → HTTPS Redirect (when TLS certs are installed)
+// ============================================================================
+
+static esp_err_t http_to_https_redirect_handler(httpd_req_t* req)
+{
+    // Build the HTTPS redirect URL: https://<hostname>.local<uri>
+    char location[640];
+    snprintf(location, sizeof(location), "https://%s.local%s", hostname, req->uri);
+    
+    httpd_resp_set_status(req, "307 Temporary Redirect");
+    httpd_resp_set_hdr(req, "Location", location);
+    httpd_resp_sendstr(req, "Redirecting to HTTPS");
     return ESP_OK;
 }
 
@@ -1095,7 +1273,8 @@ static esp_err_t wifi_get_handler(httpd_req_t* req)
         cJSON_AddStringToObject(root, "hostname", hostname);
         
         char url[64];
-        snprintf(url, sizeof(url), "http://%s.local", hostname);
+        snprintf(url, sizeof(url), "%s://%s.local",
+                 tls_mgr_is_https_active() ? "https" : "http", hostname);
         cJSON_AddStringToObject(root, "local_url", url);
         
         // Get MAC address
@@ -1543,6 +1722,22 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
     if (!root) {
         send_json_error(req, "400 Bad Request", "Invalid JSON");
         return ESP_OK;
+    }
+    
+    // Block disabling auth when TLS certs are provisioned
+    if (tls_mgr_has_certs()) {
+        cJSON* web_auth = cJSON_GetObjectItem(root, "web_auth_enabled");
+        cJSON* api_auth = cJSON_GetObjectItem(root, "api_auth_enabled");
+        
+        bool trying_to_disable_web = (web_auth && cJSON_IsBool(web_auth) && !cJSON_IsTrue(web_auth));
+        bool trying_to_disable_api = (api_auth && cJSON_IsBool(api_auth) && !cJSON_IsTrue(api_auth));
+        
+        if (trying_to_disable_web || trying_to_disable_api) {
+            cJSON_Delete(root);
+            send_json_error(req, "403 Forbidden",
+                            "Authentication cannot be disabled while TLS certificates are provisioned");
+            return ESP_OK;
+        }
     }
     
     cJSON* web_auth = cJSON_GetObjectItem(root, "web_auth_enabled");
@@ -2924,5 +3119,195 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "Screenshot streamed: %ldx%ld in %ld ms (uncompressed PNG)",
              (long)w, (long)h, (long)encode_ms);
+    return ESP_OK;
+}
+
+// ============================================================================
+// TLS Certificate Management Handlers
+// ============================================================================
+
+static esp_err_t tls_status_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "has_certs", tls_mgr_has_certs());
+    cJSON_AddBoolToObject(root, "https_active", tls_mgr_is_https_active());
+    cJSON_AddBoolToObject(root, "auth_ready",
+                          auth_mgr_web_auth_enabled() && auth_mgr_api_auth_enabled());
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+
+    return ESP_OK;
+}
+
+static esp_err_t tls_cert_post_handler(httpd_req_t* req)
+{
+    // Always require authentication for cert provisioning
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    // Require both auth methods enabled before allowing TLS provisioning
+    if (!auth_mgr_web_auth_enabled() || !auth_mgr_api_auth_enabled()) {
+        send_json_error(req, "403 Forbidden",
+                        "Both web authentication and API key authentication must be enabled before uploading TLS certificates");
+        return ESP_OK;
+    }
+
+    // If HTTPS is already active, cert changes are only accepted over HTTPS.
+    // Since the server runs in either HTTP or HTTPS mode (never both), if
+    // HTTPS is NOT active the request arrived over HTTP — block it.
+    if (tls_mgr_has_certs() && !tls_mgr_is_https_active()) {
+        // Edge case: certs in NVS but server is HTTP (shouldn't normally happen)
+        send_json_error(req, "403 Forbidden",
+                        "Certs exist but HTTPS is not active. Reboot first.");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    // Read the full POST body (cert + key as JSON)
+    int content_len = req->content_len;
+    if (content_len <= 0 || content_len > (TLS_MAX_CERT_LEN + TLS_MAX_KEY_LEN + 256)) {
+        send_json_error(req, "400 Bad Request",
+                        "Body too large or empty");
+        return ESP_OK;
+    }
+
+    char* body = (char*)malloc(content_len + 1);
+    if (!body) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+
+    int received = 0;
+    while (received < content_len) {
+        int ret = httpd_req_recv(req, body + received, content_len - received);
+        if (ret <= 0) {
+            free(body);
+            send_json_error(req, "400 Bad Request", "Failed to read body");
+            return ESP_OK;
+        }
+        received += ret;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    free(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* cert_json = cJSON_GetObjectItem(root, "cert");
+    cJSON* key_json  = cJSON_GetObjectItem(root, "key");
+
+    if (!cJSON_IsString(cert_json) || !cJSON_IsString(key_json)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request",
+                        "Missing 'cert' or 'key' string fields");
+        return ESP_OK;
+    }
+
+    const char* cert_pem = cert_json->valuestring;
+    const char* key_pem  = key_json->valuestring;
+
+    // Basic PEM validation
+    if (strstr(cert_pem, "-----BEGIN CERTIFICATE-----") == NULL) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request",
+                        "cert does not look like a PEM certificate");
+        return ESP_OK;
+    }
+    if (strstr(key_pem, "-----BEGIN") == NULL ||
+        strstr(key_pem, "PRIVATE KEY-----") == NULL) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request",
+                        "key does not look like a PEM private key");
+        return ESP_OK;
+    }
+
+    size_t cert_len = strlen(cert_pem) + 1;  // include null terminator
+    size_t key_len  = strlen(key_pem) + 1;
+
+    if (cert_len > TLS_MAX_CERT_LEN) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Certificate too large");
+        return ESP_OK;
+    }
+    if (key_len > TLS_MAX_KEY_LEN) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Private key too large");
+        return ESP_OK;
+    }
+
+    bool ok = tls_mgr_store_certs(cert_pem, cert_len, key_pem, key_len);
+    cJSON_Delete(root);
+
+    if (!ok) {
+        send_json_error(req, "500 Internal Server Error",
+                        "Failed to store certificates");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "TLS certificates stored (%d + %d bytes). Reboot to activate HTTPS.",
+             (int)cert_len, (int)key_len);
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddStringToObject(resp, "message",
+                            "Certificates stored. Reboot to activate HTTPS.");
+
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+
+    return ESP_OK;
+}
+
+static esp_err_t tls_cert_delete_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    if (!tls_mgr_has_certs()) {
+        send_json_error(req, "404 Not Found", "No certificates provisioned");
+        return ESP_OK;
+    }
+
+    bool ok = tls_mgr_clear_certs();
+    if (!ok) {
+        send_json_error(req, "500 Internal Server Error",
+                        "Failed to clear certificates");
+        return ESP_OK;
+    }
+
+    ESP_LOGI(TAG, "TLS certificates cleared. Reboot to revert to HTTP.");
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddStringToObject(resp, "message",
+                            "Certificates cleared. Reboot to revert to HTTP.");
+
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+
     return ESP_OK;
 }

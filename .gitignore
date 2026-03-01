@@ -49,3 +49,6 @@ tests/web/screenshots/
 *.bin
 *.map
 *.hex
+
+# TLS certificates (embedded at build time, stored in GitHub secrets for CI)
+main/certs/*.pem

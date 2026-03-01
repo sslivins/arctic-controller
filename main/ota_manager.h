@@ -132,6 +132,14 @@ bool ota_mgr_check_github_releases(ota_release_info_t* info);
 const ota_release_info_t* ota_mgr_get_release_info(void);
 
 /**
+ * @brief Compare two semantic version strings
+ * @param v1 First version (e.g. "2.10.0" or "v2.10.0")
+ * @param v2 Second version
+ * @return -1 if v1<v2, 0 if equal, 1 if v1>v2
+ */
+int ota_mgr_compare_versions(const char* v1, const char* v2);
+
+/**
  * @brief Start OTA update from GitHub release
  * Uses the URL from the last successful release check
  * @return true if update started

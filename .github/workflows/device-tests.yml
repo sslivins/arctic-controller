@@ -99,27 +99,52 @@ jobs:
         continue-on-error: true
         run: |
           echo "Uploading firmware to device via OTA..."
-          HTTP_CODE=$(curl -s -o /tmp/ota_response.txt -w "%{http_code}" \
-            -X POST \
-            -H "Content-Type: application/octet-stream" \
-            -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
-            --connect-timeout 10 \
-            --max-time 120 \
-            --data-binary @build/arctic_controller.bin \
-            $ARCTIC_URL/api/ota/upload)
-          echo "Response: $(cat /tmp/ota_response.txt)"
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "OTA upload failed with HTTP $HTTP_CODE"
+
+          # Wait for mDNS name resolution (up to 30s)
+          HOSTNAME="${ARCTIC_URL#*://}"   # strip scheme → arctic.local
+          echo "Waiting for $HOSTNAME to resolve..."
+          for i in $(seq 1 15); do
+            if getent hosts "$HOSTNAME" > /dev/null 2>&1; then
+              RESOLVED_IP=$(getent hosts "$HOSTNAME" | awk '{print $1}')
+              echo "$HOSTNAME resolved to $RESOLVED_IP after $((i*2))s"
+              break
+            fi
+            sleep 2
+          done
+          if ! getent hosts "$HOSTNAME" > /dev/null 2>&1; then
+            echo "ERROR: $HOSTNAME did not resolve within 30s"
             exit 1
           fi
-          echo "OTA upload successful, waiting for reboot..."
+
+          # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            echo "Trying $URL/api/ota/upload ..."
+            HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
+              -X POST \
+              -H "Content-Type: application/octet-stream" \
+              -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
+              --connect-timeout 10 \
+              --max-time 120 \
+              --data-binary @build/arctic_controller.bin \
+              "$URL/api/ota/upload") || true
+            echo "Response ($URL): HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "OTA upload successful, waiting for reboot..."
+              exit 0
+            fi
+          done
+          echo "OTA upload failed on both HTTP and HTTPS"
+          exit 1
 
       - name: Wait for device reboot (OTA)
         if: steps.ota_flash.outcome == 'success'
         run: |
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 10
           for i in $(seq 1 30); do
-            if curl -s --connect-timeout 2 $ARCTIC_URL/api/heatpump/status > /dev/null 2>&1; then
+            if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
+               curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
               echo "Device is back online after $((i + 10))s"
               exit 0
             fi
@@ -143,9 +168,11 @@ jobs:
       - name: Wait for device boot (USB)
         if: steps.ota_flash.outcome == 'failure'
         run: |
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 15
           for i in $(seq 1 30); do
-            if curl -s --connect-timeout 2 $ARCTIC_URL/api/heatpump/status > /dev/null 2>&1; then
+            if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
+               curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
               echo "Device is back online"
               exit 0
             fi
@@ -154,18 +181,27 @@ jobs:
           echo "Device did not come back online within 45s"
           exit 1
 
+      - name: Detect HTTPS support
+        run: |
+          # If HTTPS is available, use it for all tests (avoids HTTP→HTTPS redirect issues with cookies/auth)
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          if curl -sk --connect-timeout 3 "$ARCTIC_URL_HTTPS/api/health" > /dev/null 2>&1; then
+            echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> $GITHUB_ENV
+            echo "Device supports HTTPS — using $ARCTIC_URL_HTTPS for tests"
+          else
+            echo "Device does not support HTTPS — keeping $ARCTIC_URL"
+          fi
+
       - name: Run device UI tests
         id: ui_tests
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
         env:
-          ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Run Modbus E2E tests
         id: modbus_tests
         run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
         env:
-          ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           SIMULATOR_URL: http://arctic-sim.local
 
@@ -173,7 +209,6 @@ jobs:
         id: api_tests
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
-          ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
@@ -189,10 +224,11 @@ jobs:
         id: web_tests
         run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
         env:
-          ARCTIC_URL: http://arctic.local
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
+          TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
+          TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 
       - name: Publish UI test results
         uses: dorny/test-reporter@v1

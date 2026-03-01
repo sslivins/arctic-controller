@@ -24,9 +24,9 @@ Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based
 - **Web Interface** - Responsive web UI at `http://arctic.local` for remote management
 - **WiFi Management** - Connect to networks, credentials saved to NVS
 - **Time Synchronization** - NTP sync with configurable timezone (saved to NVS)
-- **REST API** - HTTP API for external control and monitoring
+- **REST API** - HTTP/HTTPS API for external control and monitoring
 - **OTA Updates** - Over-the-air firmware updates via web UI or API
-- **Security** - Optional web authentication and API key protection
+- **Security** - Optional web authentication, API key protection, and TLS/HTTPS support
 - **Multi-Language** - Web interface in English, French, and Spanish
 - **mDNS Discovery** - Access via `arctic.local` (auto-increments for multiple controllers)
 
@@ -56,6 +56,7 @@ The controller communicates with the Arctic heat pump via Modbus RTU over RS-485
 ## Web Interface
 
 Access the web interface at `http://arctic.local` after connecting to WiFi.
+When TLS certificates are provisioned via the API, the server runs HTTPS on port 443.
 
 ### Dashboard
 - Real-time heat pump status with mode indicator

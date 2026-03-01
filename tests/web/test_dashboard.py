@@ -14,9 +14,11 @@ class TestDashboardLoads:
     def test_hero_tank_temp(self, dashboard_page: Page):
         """Tank temperature value is shown in the hero card."""
         expect(dashboard_page.locator(".hero-tank-temp")).to_be_visible()
-        # Should contain a number (temperature)
+        # Should contain a number (temperature) or '--' when no data yet
         text = dashboard_page.locator(".hero-tank-temp").inner_text()
-        assert any(c.isdigit() for c in text), f"Expected digits in tank temp, got: {text}"
+        has_digits = any(c.isdigit() for c in text)
+        is_placeholder = text.strip() in ("--", "—")
+        assert has_digits or is_placeholder, f"Expected digits or '--' in tank temp, got: {text}"
 
     def test_hero_state_text(self, dashboard_page: Page):
         """State text (e.g. 'Heating', 'Idle') is displayed."""
@@ -33,9 +35,9 @@ class TestDashboardLoads:
         assert perf_items.count() >= 3, f"Expected at least 3 perf items, got {perf_items.count()}"
 
     def test_nav_bar_visible(self, dashboard_page: Page):
-        """Navigation bar with 5 page buttons is shown."""
+        """Navigation bar with 6 page buttons is shown."""
         nav_buttons = dashboard_page.locator("nav button")
-        assert nav_buttons.count() == 5, f"Expected 5 nav buttons, got {nav_buttons.count()}"
+        assert nav_buttons.count() == 6, f"Expected 6 nav buttons, got {nav_buttons.count()}"
 
     def test_header_shows_version(self, dashboard_page: Page):
         """Header displays firmware version."""

@@ -111,13 +111,15 @@
                 checkFailed: 'Failed to check for updates',
                 noDownloadUrl: 'No firmware binary found in release',
                 
-                // Settings - Security
+                // Security tab
                 security: 'Security',
+                authentication: 'Authentication',
                 webAuth: 'Web Interface Authentication',
                 webAuthDesc: 'Require login to access this interface',
                 newPassword: 'New Password',
                 passwordPlaceholder: 'Leave blank to keep current',
                 saveCredentials: 'Save Credentials',
+                enableAndSave: 'Enable & Save',
                 credentialsSaved: 'Credentials saved',
                 credentialsFailed: 'Failed to save credentials',
                 apiAuth: 'API Key Authentication',
@@ -130,6 +132,28 @@
                 copyFailed: 'Copy failed. Please select and copy manually.',
                 regenerate: 'Regenerate',
                 regenerateConfirm: 'Are you sure? Existing API integrations will stop working.',
+                
+                // Settings - TLS Certificates
+                tlsCertificates: 'TLS Certificates',
+                tlsDesc: 'Upload a TLS certificate and private key to enable HTTPS. A reboot is required after uploading or deleting certificates.',
+                tlsStatus: 'Status',
+                tlsNotProvisioned: 'No certificates installed',
+                tlsProvisioned: 'Certificates installed',
+                httpsActive: 'HTTPS active',
+                httpOnly: 'HTTP only',
+                uploadCertTitle: 'Upload Certificate',
+                certLabel: 'Certificate Chain (PEM)',
+                keyLabel: 'Private Key (PEM)',
+                certPlaceholder: 'Paste PEM certificate chain here...\n-----BEGIN CERTIFICATE-----\n...',
+                keyPlaceholder: 'Paste PEM private key here...\n-----BEGIN EC PRIVATE KEY-----\n...',
+                uploadCerts: 'Upload Certificates',
+                deleteCerts: 'Delete Certificates',
+                deleteCertsConfirm: 'Delete TLS certificates? HTTPS will be disabled after reboot.',
+                certsUploaded: 'Certificates uploaded. Reboot to activate HTTPS.',
+                certsDeleted: 'Certificates deleted. Reboot to switch to HTTP.',
+                certsUploadFailed: 'Failed to upload certificates',
+                tlsAuthRequired: 'Enable both Web Authentication and API Key Authentication above before uploading certificates.',
+                rebootToApply: 'Reboot required to apply changes',
                 
                 // Settings - System
                 system: 'System',
@@ -369,13 +393,15 @@
                 checkFailed: 'Échec de la vérification des mises à jour',
                 noDownloadUrl: 'Aucun fichier binaire trouvé dans la version',
                 
-                // Settings - Security
+                // Security tab
                 security: 'Sécurité',
+                authentication: 'Authentification',
                 webAuth: "Authentification de l'interface web",
                 webAuthDesc: 'Exiger une connexion pour accéder à cette interface',
                 newPassword: 'Nouveau mot de passe',
                 passwordPlaceholder: 'Laisser vide pour conserver le mot de passe actuel',
                 saveCredentials: 'Enregistrer',
+                enableAndSave: 'Activer et enregistrer',
                 credentialsSaved: 'Identifiants enregistrés',
                 credentialsFailed: "Échec de l'enregistrement des identifiants",
                 apiAuth: 'Authentification par clé API',
@@ -388,6 +414,28 @@
                 copyFailed: 'Échec de la copie. Veuillez sélectionner et copier manuellement.',
                 regenerate: 'Régénérer',
                 regenerateConfirm: 'Êtes-vous sûr? Les intégrations API existantes cesseront de fonctionner.',
+                
+                // Settings - TLS Certificates
+                tlsCertificates: 'Certificats TLS',
+                tlsDesc: "Téléversez un certificat TLS et une clé privée pour activer HTTPS. Un redémarrage est nécessaire après le téléversement ou la suppression des certificats.",
+                tlsStatus: 'État',
+                tlsNotProvisioned: 'Aucun certificat installé',
+                tlsProvisioned: 'Certificats installés',
+                httpsActive: 'HTTPS actif',
+                httpOnly: 'HTTP seulement',
+                uploadCertTitle: 'Téléverser un certificat',
+                certLabel: 'Chaîne de certificats (PEM)',
+                keyLabel: 'Clé privée (PEM)',
+                certPlaceholder: 'Collez la chaîne de certificats PEM ici...\n-----BEGIN CERTIFICATE-----\n...',
+                keyPlaceholder: 'Collez la clé privée PEM ici...\n-----BEGIN EC PRIVATE KEY-----\n...',
+                uploadCerts: 'Téléverser les certificats',
+                deleteCerts: 'Supprimer les certificats',
+                deleteCertsConfirm: 'Supprimer les certificats TLS? HTTPS sera désactivé après le redémarrage.',
+                certsUploaded: 'Certificats téléversés. Redémarrez pour activer HTTPS.',
+                certsDeleted: 'Certificats supprimés. Redémarrez pour passer en HTTP.',
+                certsUploadFailed: 'Échec du téléversement des certificats',
+                tlsAuthRequired: "Activez l'authentification web et l'authentification par clé API ci-dessus avant de téléverser des certificats.",
+                rebootToApply: 'Redémarrage nécessaire pour appliquer les modifications',
                 
                 // Settings - System
                 system: 'Système',
@@ -627,13 +675,15 @@
                 checkFailed: 'Error al buscar actualizaciones',
                 noDownloadUrl: 'No se encontró archivo binario en la versión',
                 
-                // Settings - Security
+                // Security tab
                 security: 'Seguridad',
+                authentication: 'Autenticación',
                 webAuth: 'Autenticación de interfaz web',
                 webAuthDesc: 'Requerir inicio de sesión para acceder a esta interfaz',
                 newPassword: 'Nueva contraseña',
                 passwordPlaceholder: 'Dejar en blanco para mantener la actual',
                 saveCredentials: 'Guardar credenciales',
+                enableAndSave: 'Activar y guardar',
                 credentialsSaved: 'Credenciales guardadas',
                 credentialsFailed: 'Error al guardar las credenciales',
                 apiAuth: 'Autenticación por clave API',
@@ -646,6 +696,28 @@
                 copyFailed: 'Error al copiar. Por favor seleccione y copie manualmente.',
                 regenerate: 'Regenerar',
                 regenerateConfirm: '¿Está seguro? Las integraciones API existentes dejarán de funcionar.',
+                
+                // Settings - TLS Certificates
+                tlsCertificates: 'Certificados TLS',
+                tlsDesc: 'Suba un certificado TLS y una clave privada para habilitar HTTPS. Se requiere un reinicio después de subir o eliminar certificados.',
+                tlsStatus: 'Estado',
+                tlsNotProvisioned: 'Sin certificados instalados',
+                tlsProvisioned: 'Certificados instalados',
+                httpsActive: 'HTTPS activo',
+                httpOnly: 'Solo HTTP',
+                uploadCertTitle: 'Subir certificado',
+                certLabel: 'Cadena de certificados (PEM)',
+                keyLabel: 'Clave privada (PEM)',
+                certPlaceholder: 'Pegue la cadena de certificados PEM aquí...\n-----BEGIN CERTIFICATE-----\n...',
+                keyPlaceholder: 'Pegue la clave privada PEM aquí...\n-----BEGIN EC PRIVATE KEY-----\n...',
+                uploadCerts: 'Subir certificados',
+                deleteCerts: 'Eliminar certificados',
+                deleteCertsConfirm: '¿Eliminar certificados TLS? HTTPS se desactivará después del reinicio.',
+                certsUploaded: 'Certificados subidos. Reinicie para activar HTTPS.',
+                certsDeleted: 'Certificados eliminados. Reinicie para cambiar a HTTP.',
+                certsUploadFailed: 'Error al subir los certificados',
+                tlsAuthRequired: 'Active la autenticación web y la autenticación por clave API arriba antes de subir certificados.',
+                rebootToApply: 'Reinicio necesario para aplicar los cambios',
                 
                 // Settings - System
                 system: 'Sistema',
@@ -2476,6 +2548,7 @@
                     <button :class="{ active: page === 'parameters' }" @click="page = 'parameters'; stopLogPolling(); loadParams()" x-text="t('parameters')"></button>
                     <button :class="{ active: page === 'events' }" @click="page = 'events'; stopLogPolling(); loadEvents()" x-text="t('events')"></button>
                     <button :class="{ active: page === 'logs' }" @click="page = 'logs'; startLogPolling()" x-text="t('logs')"></button>
+                    <button :class="{ active: page === 'security' }" @click="page = 'security'; stopLogPolling()" x-text="t('security')"></button>
                     <button :class="{ active: page === 'settings' }" @click="page = 'settings'; stopLogPolling()" x-text="t('settings')"></button>
                 </nav>
                 
@@ -2949,6 +3022,121 @@
                         </div>
                     </div>
 
+                    <!-- Security Page -->
+                    <div x-show="page === 'security'">
+                            <!-- Authentication -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('authentication')"></h2>
+                                </div>
+                                <div class="card-body">
+                                    <div class="toggle-row">
+                                        <div class="toggle-label">
+                                            <span class="title" x-text="t('webAuth')"></span>
+                                            <span class="desc" x-text="t('webAuthDesc')"></span>
+                                        </div>
+                                        <label class="toggle">
+                                            <input type="checkbox" x-model="security.webAuthEnabled" @change="if (!security.webAuthEnabled) { saveSecurityConfig(); loadTlsStatus(); } else { security._needsEnable = true; }">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    
+                                    <template x-if="security.webAuthEnabled">
+                                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                                            <div class="form-group">
+                                                <label x-text="t('username')"></label>
+                                                <input type="text" x-model="security.username" autocapitalize="off" autocorrect="off">
+                                            </div>
+                                            <div class="form-group">
+                                                <label x-text="t('newPassword')"></label>
+                                                <input type="password" x-model="security.newPassword" :placeholder="t('passwordPlaceholder')">
+                                            </div>
+                                            <button class="btn btn-secondary" @click="saveCredentials()" :disabled="loading" x-text="security._needsEnable ? t('enableAndSave') : t('saveCredentials')"></button>
+                                        </div>
+                                    </template>
+                                    
+                                    <div class="toggle-row" style="margin-top: 1rem;">
+                                        <div class="toggle-label">
+                                            <span class="title" x-text="t('apiAuth')"></span>
+                                            <span class="desc" x-text="t('apiAuthDesc')"></span>
+                                        </div>
+                                        <label class="toggle">
+                                            <input type="checkbox" x-model="security.apiAuthEnabled" @change="saveSecurityConfig()">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    
+                                    <template x-if="security.apiAuthEnabled">
+                                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                                            <div class="form-group">
+                                                <label x-text="t('apiKey')"></label>
+                                                <div class="api-key-display">
+                                                    <input :type="showApiKey ? 'text' : 'password'" :value="security.apiKey" readonly x-ref="apiKeyInput">
+                                                    <div class="btn-group">
+                                                        <button class="btn btn-secondary" @click="showApiKey = !showApiKey" x-text="showApiKey ? t('hide') : t('show')"></button>
+                                                        <button class="btn btn-secondary" @click="copyApiKey()" :title="t('copy')" x-text="t('copy')"></button>
+                                                        <button class="btn btn-secondary" @click="regenerateApiKey()" x-text="t('regenerate')"></button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            
+                            <!-- TLS Certificates -->
+                            <div class="card">
+                                <div class="card-header">
+                                    <h2 x-text="t('tlsCertificates')">🔒</h2>
+                                </div>
+                                <div class="card-body">
+                                    <p style="color: var(--text-secondary); margin-bottom: 1rem;" x-text="t('tlsDesc')"></p>
+                                    
+                                    <!-- Status -->
+                                    <div style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap;">
+                                        <span style="padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;"
+                                              :style="tls.hasCerts ? 'background: rgba(52,199,89,0.15); color: #34c759;' : 'background: rgba(142,142,147,0.15); color: #8e8e93;'"
+                                              x-text="tls.hasCerts ? t('tlsProvisioned') : t('tlsNotProvisioned')"></span>
+                                        <span style="padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500;"
+                                              :style="tls.httpsActive ? 'background: rgba(52,199,89,0.15); color: #34c759;' : 'background: rgba(142,142,147,0.15); color: #8e8e93;'"
+                                              x-text="tls.httpsActive ? t('httpsActive') : t('httpOnly')"></span>
+                                    </div>
+                                    
+                                    <!-- Auth prerequisite warning -->
+                                    <template x-if="!tls.authReady && !tls.hasCerts">
+                                        <div style="border-top: 1px solid var(--border); padding-top: 1rem;">
+                                            <p style="color: #ff9f0a; font-size: 0.9rem; margin: 0;">⚠️ <span x-text="t('tlsAuthRequired')"></span></p>
+                                        </div>
+                                    </template>
+                                    
+                                    <!-- Upload form (only when auth is ready or certs already exist) -->
+                                    <template x-if="tls.authReady || tls.hasCerts">
+                                        <div style="border-top: 1px solid var(--border); padding-top: 1rem;">
+                                            <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem;" x-text="t('uploadCertTitle')"></h3>
+                                            <div class="form-group">
+                                                <label x-text="t('certLabel')"></label>
+                                                <textarea x-model="tls.certText" :placeholder="t('certPlaceholder')" rows="4" style="width: 100%; font-family: monospace; font-size: 0.8rem; resize: vertical;"></textarea>
+                                            </div>
+                                            <div class="form-group">
+                                                <label x-text="t('keyLabel')"></label>
+                                                <textarea x-model="tls.keyText" :placeholder="t('keyPlaceholder')" rows="4" style="width: 100%; font-family: monospace; font-size: 0.8rem; resize: vertical;"></textarea>
+                                            </div>
+                                            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                                <button class="btn btn-secondary" @click="uploadCertificates()" :disabled="tls.uploading || !tls.certText.trim() || !tls.keyText.trim()" style="flex: 1;">
+                                                    🔒 <span x-text="t('uploadCerts')"></span>
+                                                </button>
+                                                <template x-if="tls.hasCerts">
+                                                    <button class="btn btn-secondary" @click="deleteCertificates()" :disabled="tls.uploading" style="flex: 1; color: #ff453a;">
+                                                        🗑️ <span x-text="t('deleteCerts')"></span>
+                                                    </button>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                    </div>
+
                     <!-- Settings Page -->
                     <div x-show="page === 'settings'">
                             <!-- Device Info -->
@@ -3200,66 +3388,6 @@
                                 </div>
                             </div>
                             
-                            <!-- Security -->
-                            <div class="card">
-                                <div class="card-header">
-                                    <h2 x-text="t('security')"></h2>
-                                </div>
-                                <div class="card-body">
-                                    <div class="toggle-row">
-                                        <div class="toggle-label">
-                                            <span class="title" x-text="t('webAuth')"></span>
-                                            <span class="desc" x-text="t('webAuthDesc')"></span>
-                                        </div>
-                                        <label class="toggle">
-                                            <input type="checkbox" x-model="security.webAuthEnabled" @change="saveSecurityConfig()">
-                                            <span class="toggle-slider"></span>
-                                        </label>
-                                    </div>
-                                    
-                                    <template x-if="security.webAuthEnabled">
-                                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
-                                            <div class="form-group">
-                                                <label x-text="t('username')"></label>
-                                                <input type="text" x-model="security.username" autocapitalize="off" autocorrect="off">
-                                            </div>
-                                            <div class="form-group">
-                                                <label x-text="t('newPassword')"></label>
-                                                <input type="password" x-model="security.newPassword" :placeholder="t('passwordPlaceholder')">
-                                            </div>
-                                            <button class="btn btn-secondary" @click="saveCredentials()" :disabled="loading" x-text="t('saveCredentials')"></button>
-                                        </div>
-                                    </template>
-                                    
-                                    <div class="toggle-row" style="margin-top: 1rem;">
-                                        <div class="toggle-label">
-                                            <span class="title" x-text="t('apiAuth')"></span>
-                                            <span class="desc" x-text="t('apiAuthDesc')"></span>
-                                        </div>
-                                        <label class="toggle">
-                                            <input type="checkbox" x-model="security.apiAuthEnabled" @change="saveSecurityConfig()">
-                                            <span class="toggle-slider"></span>
-                                        </label>
-                                    </div>
-                                    
-                                    <template x-if="security.apiAuthEnabled">
-                                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
-                                            <div class="form-group">
-                                                <label x-text="t('apiKey')"></label>
-                                                <div class="api-key-display">
-                                                    <input :type="showApiKey ? 'text' : 'password'" :value="security.apiKey" readonly x-ref="apiKeyInput">
-                                                    <div class="btn-group">
-                                                        <button class="btn btn-secondary" @click="showApiKey = !showApiKey" x-text="showApiKey ? t('hide') : t('show')"></button>
-                                                        <button class="btn btn-secondary" @click="copyApiKey()" :title="t('copy')" x-text="t('copy')"></button>
-                                                        <button class="btn btn-secondary" @click="regenerateApiKey()" x-text="t('regenerate')"></button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-                            
                             <!-- Diagnostics -->
                             <div class="card">
                                 <div class="card-header">
@@ -3385,7 +3513,8 @@
                 },
                 
                 timeConfig: { timezone: 'EST5EDT,M3.2.0,M11.1.0', format24h: true, synced: false },
-                security: { webAuthEnabled: false, apiAuthEnabled: false, username: '', newPassword: '', apiKey: '' },
+                security: { webAuthEnabled: false, apiAuthEnabled: false, username: '', newPassword: '', apiKey: '', _needsEnable: false },
+                tls: { hasCerts: false, httpsActive: false, authReady: false, certText: '', keyText: '', uploading: false },
                 
                 dataLoaded: false, // Prevents saving during initial load
                 selectedFile: null,
@@ -3445,16 +3574,55 @@
                     localStorage.setItem('arctic_lang', lang);
                 },
                 
-                // Central fetch wrapper - reloads page on 401 (session expired after device reboot)
-                async apiFetch(url, options) {
-                    const res = await fetch(url, options);
-                    if (res.status === 401) {
-                        console.warn('Session expired (401), reloading page...');
-                        location.reload();
-                        // Return a never-resolving promise to stop further processing
-                        return new Promise(() => {});
+                // Concurrency-limited fetch — prevents TLS socket exhaustion on the ESP32.
+                // The HTTPS server has max_open_sockets=4; browsers open parallel TCP
+                // connections, each needing a TLS session.  This semaphore serialises
+                // excess requests so they queue instead of failing at handshake.
+                _fetchQueue: [],
+                _fetchActive: 0,
+                _fetchMax: 3,   // keep below server's max_open_sockets (4)
+
+                _runQueue() {
+                    while (this._fetchQueue.length && this._fetchActive < this._fetchMax) {
+                        const { run } = this._fetchQueue.shift();
+                        run();
                     }
-                    return res;
+                },
+
+                apiFetch(url, options = {}) {
+                    return new Promise((resolve, reject) => {
+                        const run = async () => {
+                            this._fetchActive++;
+                            try {
+                                let res = await fetch(url, options);
+                                // Retry once on network error (TLS session may have been purged)
+                                if (!res.ok && res.status === 0) {
+                                    res = await fetch(url, options);
+                                }
+                                if (res.status === 401) {
+                                    console.warn(`Session expired (401 on ${url}), reloading…`);
+                                    location.reload();
+                                    return; // page is reloading
+                                }
+                                resolve(res);
+                            } catch (err) {
+                                // Retry once on network failure (connection reset, TLS error)
+                                try {
+                                    const retry = await fetch(url, options);
+                                    if (retry.status === 401) { location.reload(); return; }
+                                    resolve(retry);
+                                } catch (retryErr) {
+                                    console.error(`apiFetch ${url} failed after retry:`, retryErr);
+                                    reject(retryErr);
+                                }
+                            } finally {
+                                this._fetchActive--;
+                                this._runQueue();
+                            }
+                        };
+                        this._fetchQueue.push({ run });
+                        this._runQueue();
+                    });
                 },
                 
                 async checkAuth() {
@@ -3492,16 +3660,24 @@
                 },
                 
                 async loadAll() {
-                    await Promise.all([
+                    // All requests go through apiFetch which limits concurrency
+                    // to _fetchMax simultaneous connections — safe for TLS.
+                    const results = await Promise.allSettled([
                         this.loadInfo(),
                         this.loadStatus(),
                         this.loadWifi(),
                         this.loadOta(),
                         this.loadTimeConfig(),
                         this.loadSecurity(),
+                        this.loadTlsStatus(),
                         this.loadHeatpump(),
                         this.loadErrors()
                     ]);
+                    const failed = results.filter(r => r.status === 'rejected');
+                    if (failed.length) {
+                        console.warn(`loadAll: ${failed.length}/${results.length} requests failed:`,
+                            failed.map(r => r.reason?.message || r.reason));
+                    }
                     this.dataLoaded = true;
                     this.lastUpdate = Date.now();
                 },
@@ -3584,6 +3760,58 @@
                         this.timeConfig.format24h = newFormat;
                         this.timeConfig.synced = data.synced || false;
                     } catch (e) { console.error(e); }
+                },
+                
+                async loadTlsStatus() {
+                    try {
+                        const res = await this.apiFetch('/api/tls/status');
+                        if (res.ok) {
+                            const data = await res.json();
+                            this.tls.hasCerts = data.has_certs || false;
+                            this.tls.httpsActive = data.https_active || false;
+                            this.tls.authReady = data.auth_ready || false;
+                        }
+                    } catch (e) { console.error(e); }
+                },
+                
+                async uploadCertificates() {
+                    this.tls.uploading = true;
+                    try {
+                        const res = await this.apiFetch('/api/tls/certificate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ cert: this.tls.certText, key: this.tls.keyText })
+                        });
+                        if (res.ok) {
+                            this.showToast(this.t('certsUploaded'), 'success', 5000);
+                            this.tls.certText = '';
+                            this.tls.keyText = '';
+                            await this.loadTlsStatus();
+                        } else {
+                            const err = await res.json().catch(() => ({}));
+                            this.showToast(err.error || this.t('certsUploadFailed'), 'error');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast(this.t('certsUploadFailed'), 'error');
+                    }
+                    this.tls.uploading = false;
+                },
+                
+                async deleteCertificates() {
+                    if (!confirm(this.t('deleteCertsConfirm'))) return;
+                    this.tls.uploading = true;
+                    try {
+                        const res = await this.apiFetch('/api/tls/certificate', { method: 'DELETE' });
+                        if (res.ok) {
+                            this.showToast(this.t('certsDeleted'), 'success', 5000);
+                            await this.loadTlsStatus();
+                        } else {
+                            const err = await res.json().catch(() => ({}));
+                            this.showToast(err.error || 'Failed to delete certificates', 'error');
+                        }
+                    } catch (e) { console.error(e); }
+                    this.tls.uploading = false;
                 },
                 
                 async loadSecurity() {
@@ -3766,6 +3994,12 @@
                                 password: this.security.newPassword
                             })
                         });
+                        // If web auth was just toggled on, enable it now that credentials are set
+                        if (this.security._needsEnable) {
+                            await this.saveSecurityConfig();
+                            this.security._needsEnable = false;
+                            await this.loadTlsStatus(); // auth_ready may have changed
+                        }
                         this.security.newPassword = '';
                         this.showToast(this.t('credentialsSaved'), 'success');
                     } catch (e) { 

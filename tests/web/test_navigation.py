@@ -5,7 +5,7 @@ from playwright.sync_api import Page, expect
 
 
 class TestNavigation:
-    """Navigate between the 5 pages via nav buttons."""
+    """Navigate between the 6 pages via nav buttons."""
 
     def test_starts_on_dashboard(self, dashboard_page: Page):
         """Dashboard is the default page after load."""
@@ -33,9 +33,17 @@ class TestNavigation:
         # Log level filter buttons should appear
         expect(dashboard_page.locator(".log-level-filters")).to_be_visible()
 
+    def test_navigate_to_security(self, dashboard_page: Page):
+        """Clicking Security nav button shows the security page."""
+        dashboard_page.locator("nav button").nth(4).click()
+        dashboard_page.wait_for_timeout(500)
+        # Security page has Authentication and TLS Certificates cards
+        cards = dashboard_page.locator(".card")
+        assert cards.count() >= 2, f"Expected at least 2 security cards, got {cards.count()}"
+
     def test_navigate_to_settings(self, dashboard_page: Page):
         """Clicking Settings nav button shows the settings page."""
-        dashboard_page.locator("nav button").nth(4).click()
+        dashboard_page.locator("nav button").nth(5).click()
         dashboard_page.wait_for_timeout(500)
         # Settings page has multiple .card elements
         cards = dashboard_page.locator(".card")
@@ -44,7 +52,7 @@ class TestNavigation:
     def test_navigate_back_to_dashboard(self, dashboard_page: Page):
         """Can navigate away and back to Dashboard."""
         # Go to settings
-        dashboard_page.locator("nav button").nth(4).click()
+        dashboard_page.locator("nav button").nth(5).click()
         dashboard_page.wait_for_timeout(300)
         # Go back to dashboard
         dashboard_page.locator("nav button").nth(0).click()

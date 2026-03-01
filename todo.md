@@ -280,3 +280,13 @@ anomaly detection.
       direct API (useful for fleet management with multiple controllers)
 - [ ] **Remote diagnostics** — pull device logs, capture screenshots, check
       health status from cloud portal
+
+## Networking / DNS
+
+- [ ] **Dynamic DNS for device hostnames** — `arctic-0001.mennlabs.com` currently
+      has a static A record pointing to the device's LAN IP. If the IP changes
+      (DHCP lease expiry, router reset), the hostname goes stale. Options:
+  - DHCP reservation on the router (simplest, no code changes)
+  - Device-side DDNS updater: call Cloudflare API after WiFi connect to update
+    the A record automatically (~50 lines C++, needs `CLOUDFLARE_API_TOKEN` + zone ID)
+  - Could reuse the same Cloudflare token already stored for cert renewal
