@@ -835,17 +835,22 @@ bool api_server_start(void)
     ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
 #endif
     
-    // When HTTPS is active, add a catch-all redirect on HTTP for non-essential endpoints.
+    // When HTTPS is active, add catch-all redirects on HTTP for non-essential endpoints.
     // Essential endpoints (health, OTA, TLS, test) are already registered above and
-    // match before this wildcard.  Everything else gets a 301 → https://host/path.
+    // match before this wildcard.  Everything else gets a 307 → https://host/path.
     if (server_ssl != NULL) {
-        httpd_uri_t http_redirect_uri = {
-            .uri = "/*",
-            .method = HTTP_GET,
-            .handler = http_to_https_redirect_handler,
-            .user_ctx = NULL
+        static const httpd_method_t redirect_methods[] = {
+            HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE, HTTP_PATCH
         };
-        httpd_register_uri_handler(server, &http_redirect_uri);
+        for (auto method : redirect_methods) {
+            httpd_uri_t http_redirect_uri = {
+                .uri = "/*",
+                .method = method,
+                .handler = http_to_https_redirect_handler,
+                .user_ctx = NULL
+            };
+            httpd_register_uri_handler(server, &http_redirect_uri);
+        }
         ESP_LOGI(TAG, "HTTP→HTTPS redirect active for non-essential endpoints");
     }
     
