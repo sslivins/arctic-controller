@@ -110,7 +110,7 @@ jobs:
               --connect-timeout 10 \
               --max-time 120 \
               --data-binary @build/arctic_controller.bin \
-              "$URL/api/ota/upload")
+              "$URL/api/ota/upload") || true
             echo "Response ($URL): HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
             if [ "$HTTP_CODE" = "200" ]; then
               echo "OTA upload successful, waiting for reboot..."
