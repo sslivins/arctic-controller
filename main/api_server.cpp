@@ -105,6 +105,9 @@ static esp_err_t tls_status_get_handler(httpd_req_t* req);
 static esp_err_t tls_cert_post_handler(httpd_req_t* req);
 static esp_err_t tls_cert_delete_handler(httpd_req_t* req);
 
+// HTTP→HTTPS redirect handler (catch-all when HTTPS is active)
+static esp_err_t http_to_https_redirect_handler(httpd_req_t* req);
+
 // ============================================================================
 // Authentication Helpers
 // ============================================================================
@@ -361,12 +364,24 @@ bool api_server_start(void)
     }
     
     // Helper macro - abort if URI registration fails (catches max_uri_handlers issues)
-    // Registers on HTTP server, and also on HTTPS server when active.
+    // When HTTPS is active, registers on HTTPS only.
+    // When no HTTPS, registers on HTTP.
     #define REGISTER_URI(uri_struct) do { \
-        esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
+        httpd_handle_t _target = server_ssl ? server_ssl : server; \
+        esp_err_t err = httpd_register_uri_handler(_target, &(uri_struct)); \
         if (err != ESP_OK) { \
             ESP_LOGE(TAG, "FATAL: Failed to register URI '%s': %s", (uri_struct).uri, esp_err_to_name(err)); \
             ESP_LOGE(TAG, "Increase max_uri_handlers in httpd config!"); \
+            abort(); \
+        } \
+    } while(0)
+    
+    // Register on BOTH HTTP and HTTPS (essential endpoints that must work over HTTP
+    // even when HTTPS is active: health, OTA, TLS management)
+    #define REGISTER_URI_ESSENTIAL(uri_struct) do { \
+        esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
+        if (err != ESP_OK) { \
+            ESP_LOGE(TAG, "FATAL: Failed to register URI '%s': %s", (uri_struct).uri, esp_err_to_name(err)); \
             abort(); \
         } \
         if (server_ssl != NULL) { \
@@ -437,7 +452,7 @@ bool api_server_start(void)
         .handler = health_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(health_uri);
+    REGISTER_URI_ESSENTIAL(health_uri);
     
     // GET /api/status
     httpd_uri_t status_uri = {
@@ -499,7 +514,7 @@ bool api_server_start(void)
         .handler = info_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(info_uri);
+    REGISTER_URI_ESSENTIAL(info_uri);
     
     // GET /api/ota/status
     httpd_uri_t ota_status_uri = {
@@ -508,7 +523,7 @@ bool api_server_start(void)
         .handler = ota_status_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_status_uri);
+    REGISTER_URI_ESSENTIAL(ota_status_uri);
     
     // POST /api/ota/update
     httpd_uri_t ota_update_uri = {
@@ -517,7 +532,7 @@ bool api_server_start(void)
         .handler = ota_update_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_update_uri);
+    REGISTER_URI_ESSENTIAL(ota_update_uri);
     
     // POST /api/ota/upload
     httpd_uri_t ota_upload_uri = {
@@ -526,7 +541,7 @@ bool api_server_start(void)
         .handler = ota_upload_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_upload_uri);
+    REGISTER_URI_ESSENTIAL(ota_upload_uri);
     
     // POST /api/ota/reboot
     httpd_uri_t ota_reboot_uri = {
@@ -535,7 +550,7 @@ bool api_server_start(void)
         .handler = ota_reboot_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_reboot_uri);
+    REGISTER_URI_ESSENTIAL(ota_reboot_uri);
     
     // GET /api/ota/releases - Check GitHub for updates
     httpd_uri_t ota_releases_uri = {
@@ -544,7 +559,7 @@ bool api_server_start(void)
         .handler = ota_releases_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_releases_uri);
+    REGISTER_URI_ESSENTIAL(ota_releases_uri);
     
     // POST /api/ota/github - Start update from GitHub
     httpd_uri_t ota_github_uri = {
@@ -553,7 +568,7 @@ bool api_server_start(void)
         .handler = ota_github_update_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(ota_github_uri);
+    REGISTER_URI_ESSENTIAL(ota_github_uri);
     
     // GET /api/auth/config
     httpd_uri_t auth_config_get_uri = {
@@ -791,7 +806,7 @@ bool api_server_start(void)
         .handler = tls_status_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(tls_status_uri);
+    REGISTER_URI_ESSENTIAL(tls_status_uri);
 
     // POST /api/tls/certificate
     httpd_uri_t tls_cert_post_uri = {
@@ -800,7 +815,7 @@ bool api_server_start(void)
         .handler = tls_cert_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(tls_cert_post_uri);
+    REGISTER_URI_ESSENTIAL(tls_cert_post_uri);
 
     // DELETE /api/tls/certificate
     httpd_uri_t tls_cert_delete_uri = {
@@ -809,9 +824,10 @@ bool api_server_start(void)
         .handler = tls_cert_delete_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(tls_cert_delete_uri);
+    REGISTER_URI_ESSENTIAL(tls_cert_delete_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
+    // Test endpoints need HTTP for CI (no TLS on test runner)
     test_endpoints_register(server);
     if (server_ssl != NULL) {
         test_endpoints_register(server_ssl);
@@ -819,7 +835,22 @@ bool api_server_start(void)
     ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
 #endif
     
+    // When HTTPS is active, add a catch-all redirect on HTTP for non-essential endpoints.
+    // Essential endpoints (health, OTA, TLS, test) are already registered above and
+    // match before this wildcard.  Everything else gets a 301 → https://host/path.
+    if (server_ssl != NULL) {
+        httpd_uri_t http_redirect_uri = {
+            .uri = "/*",
+            .method = HTTP_GET,
+            .handler = http_to_https_redirect_handler,
+            .user_ctx = NULL
+        };
+        httpd_register_uri_handler(server, &http_redirect_uri);
+        ESP_LOGI(TAG, "HTTP→HTTPS redirect active for non-essential endpoints");
+    }
+    
     #undef REGISTER_URI
+    #undef REGISTER_URI_ESSENTIAL
     
     ESP_LOGI(TAG, "HTTP server started on port 80");
     if (server_ssl != NULL) {
@@ -981,6 +1012,22 @@ static esp_err_t favicon_handler(httpd_req_t* req)
     // Return 204 No Content - no favicon available
     httpd_resp_set_status(req, "204 No Content");
     httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+// ============================================================================
+// HTTP → HTTPS Redirect (when TLS certs are installed)
+// ============================================================================
+
+static esp_err_t http_to_https_redirect_handler(httpd_req_t* req)
+{
+    // Build the HTTPS redirect URL: https://<hostname>.local<uri>
+    char location[640];
+    snprintf(location, sizeof(location), "https://%s.local%s", hostname, req->uri);
+    
+    httpd_resp_set_status(req, "301 Moved Permanently");
+    httpd_resp_set_hdr(req, "Location", location);
+    httpd_resp_sendstr(req, "Redirecting to HTTPS");
     return ESP_OK;
 }
 
