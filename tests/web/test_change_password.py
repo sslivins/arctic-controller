@@ -55,7 +55,8 @@ def _enable_web_auth():
 
 
 def _disable_web_auth():
-    """Disable web auth, falling back to session if API key alone fails."""
+    """Disable web auth, falling back to session if API key alone fails.
+    Returns False if blocked (e.g. TLS certs prevent disabling)."""
     for attempt in range(3):
         try:
             r = requests.post(
@@ -65,6 +66,8 @@ def _disable_web_auth():
                 timeout=5,
                 verify=False,
             )
+            if r.status_code == 403:
+                return False
             if r.status_code == 401:
                 s = requests.Session()
                 s.verify = False
@@ -75,13 +78,15 @@ def _disable_web_auth():
                         timeout=5,
                     )
                     if login_r.status_code == 200:
-                        s.post(
+                        r2 = s.post(
                             f"{BASE_URL}/api/auth/config",
                             json={"web_auth_enabled": False},
                             timeout=5,
                         )
+                        if r2.status_code == 403:
+                            return False
                         break
-            return
+            return True
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             if attempt == 2:
                 raise
@@ -227,7 +232,8 @@ class TestChangePasswordFromUI:
         self, page: Page, base_url: str
     ):
         """When web auth is OFF, the credentials form is not shown."""
-        _disable_web_auth()
+        if not _disable_web_auth():
+            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
         page.goto(base_url, wait_until="networkidle")
         page.wait_for_selector("nav", timeout=10000)
         _go_to_security(page)
@@ -240,7 +246,8 @@ class TestChangePasswordFromUI:
         self, page: Page, base_url: str
     ):
         """Enabling web auth via the toggle reveals the credentials form."""
-        _disable_web_auth()
+        if not _disable_web_auth():
+            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
         page.goto(base_url, wait_until="networkidle")
         page.wait_for_selector("nav", timeout=10000)
         _go_to_security(page)

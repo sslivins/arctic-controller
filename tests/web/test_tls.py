@@ -28,18 +28,35 @@ def _api_headers():
     return h
 
 
+def _device_has_tls_certs():
+    """Check whether the device has TLS certs provisioned."""
+    try:
+        r = requests.get(
+            f"{BASE_URL}/api/tls/status",
+            headers=_api_headers(),
+            timeout=5,
+            verify=False,
+        )
+        return r.status_code == 200 and r.json().get("has_certs", False)
+    except Exception:
+        return False
+
+
 def _set_auth(web: bool, api: bool):
-    """Set web_auth_enabled and api_auth_enabled via the REST API."""
+    """Set web_auth_enabled and api_auth_enabled via the REST API.
+    Returns False if blocked (e.g. TLS certs prevent disabling)."""
     for attempt in range(3):
         try:
-            requests.post(
+            r = requests.post(
                 f"{BASE_URL}/api/auth/config",
                 json={"web_auth_enabled": web, "api_auth_enabled": api},
                 headers=_api_headers(),
                 timeout=5,
                 verify=False,
             )
-            return
+            if r.status_code == 403:
+                return False
+            return True
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             if attempt == 2:
                 raise
@@ -79,7 +96,8 @@ class TestTlsAuthPrerequisite:
 
     def test_warning_shown_when_both_auth_disabled(self, dashboard_page: Page):
         """Warning is shown when neither auth method is enabled."""
-        _set_auth(web=False, api=False)
+        if not _set_auth(web=False, api=False):
+            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
         dashboard_page.reload(wait_until="networkidle")
         dashboard_page.wait_for_selector("nav", timeout=10000)
         _go_to_security(dashboard_page)
@@ -94,7 +112,8 @@ class TestTlsAuthPrerequisite:
 
     def test_warning_shown_when_only_web_auth_enabled(self, page: Page, base_url: str):
         """Warning persists when only web auth is on (API key still off)."""
-        _set_auth(web=True, api=False)
+        if not _set_auth(web=True, api=False):
+            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
         page.goto(base_url, wait_until="networkidle")
         _browser_login(page)
         page.wait_for_selector("nav", timeout=10000)
@@ -105,7 +124,8 @@ class TestTlsAuthPrerequisite:
 
     def test_warning_shown_when_only_api_auth_enabled(self, dashboard_page: Page):
         """Warning persists when only API key auth is on (web auth off)."""
-        _set_auth(web=False, api=True)
+        if not _set_auth(web=False, api=True):
+            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
         dashboard_page.reload(wait_until="networkidle")
         dashboard_page.wait_for_selector("nav", timeout=10000)
         _go_to_security(dashboard_page)
@@ -142,11 +162,12 @@ class TestTlsAuthPrerequisite:
 
     def test_cert_upload_rejected_by_api_without_auth(self):
         """Server returns 403 when uploading certs without both auth enabled."""
-        _set_auth(web=False, api=True)
+        if not _set_auth(web=False, api=True):
+            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
         time.sleep(0.3)
 
         r = requests.post(
-            f"{BASE_URL}/api/tls/certificates",
+            f"{BASE_URL}/api/tls/certificate",
             json={"cert": "fake-cert", "key": "fake-key"},
             headers=_api_headers(),
             timeout=5,
@@ -172,7 +193,7 @@ class TestTlsCertInstall:
 
         # Upload
         r = requests.post(
-            f"{BASE_URL}/api/tls/certificates",
+            f"{BASE_URL}/api/tls/certificate",
             json={"cert": TLS_FULLCHAIN, "key": TLS_PRIVKEY},
             headers=_api_headers(),
             timeout=10,
@@ -197,7 +218,7 @@ class TestTlsCertInstall:
 
         # Delete certs to prevent HTTPS activation on next reboot
         r = requests.delete(
-            f"{BASE_URL}/api/tls/certificates",
+            f"{BASE_URL}/api/tls/certificate",
             headers=_api_headers(),
             timeout=5,
             verify=False,
@@ -221,7 +242,7 @@ class TestTlsCertInstall:
         time.sleep(0.3)
 
         r = requests.post(
-            f"{BASE_URL}/api/tls/certificates",
+            f"{BASE_URL}/api/tls/certificate",
             json={"cert": "not-a-cert", "key": TLS_PRIVKEY},
             headers=_api_headers(),
             timeout=5,
@@ -235,7 +256,7 @@ class TestTlsCertInstall:
         time.sleep(0.3)
 
         r = requests.post(
-            f"{BASE_URL}/api/tls/certificates",
+            f"{BASE_URL}/api/tls/certificate",
             json={"cert": TLS_FULLCHAIN, "key": "not-a-key"},
             headers=_api_headers(),
             timeout=5,
