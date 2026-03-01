@@ -99,27 +99,35 @@ jobs:
         continue-on-error: true
         run: |
           echo "Uploading firmware to device via OTA..."
-          HTTP_CODE=$(curl -sk -o /tmp/ota_response.txt -w "%{http_code}" \
-            -X POST \
-            -H "Content-Type: application/octet-stream" \
-            -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
-            --connect-timeout 10 \
-            --max-time 120 \
-            --data-binary @build/arctic_controller.bin \
-            $ARCTIC_URL/api/ota/upload)
-          echo "Response: $(cat /tmp/ota_response.txt)"
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "OTA upload failed with HTTP $HTTP_CODE"
-            exit 1
-          fi
-          echo "OTA upload successful, waiting for reboot..."
+          # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            echo "Trying $URL/api/ota/upload ..."
+            HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
+              -X POST \
+              -H "Content-Type: application/octet-stream" \
+              -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
+              --connect-timeout 10 \
+              --max-time 120 \
+              --data-binary @build/arctic_controller.bin \
+              "$URL/api/ota/upload")
+            echo "Response ($URL): HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "OTA upload successful, waiting for reboot..."
+              exit 0
+            fi
+          done
+          echo "OTA upload failed on both HTTP and HTTPS"
+          exit 1
 
       - name: Wait for device reboot (OTA)
         if: steps.ota_flash.outcome == 'success'
         run: |
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 10
           for i in $(seq 1 30); do
-            if curl -skL --connect-timeout 2 $ARCTIC_URL/api/heatpump/status > /dev/null 2>&1; then
+            if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
+               curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
               echo "Device is back online after $((i + 10))s"
               exit 0
             fi
@@ -143,9 +151,11 @@ jobs:
       - name: Wait for device boot (USB)
         if: steps.ota_flash.outcome == 'failure'
         run: |
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 15
           for i in $(seq 1 30); do
-            if curl -skL --connect-timeout 2 $ARCTIC_URL/api/heatpump/status > /dev/null 2>&1; then
+            if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
+               curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
               echo "Device is back online"
               exit 0
             fi
