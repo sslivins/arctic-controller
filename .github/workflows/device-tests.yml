@@ -119,7 +119,7 @@ jobs:
         run: |
           sleep 10
           for i in $(seq 1 30); do
-            if curl -sk --connect-timeout 2 $ARCTIC_URL/api/heatpump/status > /dev/null 2>&1; then
+            if curl -skL --connect-timeout 2 $ARCTIC_URL/api/heatpump/status > /dev/null 2>&1; then
               echo "Device is back online after $((i + 10))s"
               exit 0
             fi
@@ -145,7 +145,7 @@ jobs:
         run: |
           sleep 15
           for i in $(seq 1 30); do
-            if curl -sk --connect-timeout 2 $ARCTIC_URL/api/heatpump/status > /dev/null 2>&1; then
+            if curl -skL --connect-timeout 2 $ARCTIC_URL/api/heatpump/status > /dev/null 2>&1; then
               echo "Device is back online"
               exit 0
             fi

@@ -1025,7 +1025,7 @@ static esp_err_t http_to_https_redirect_handler(httpd_req_t* req)
     char location[640];
     snprintf(location, sizeof(location), "https://%s.local%s", hostname, req->uri);
     
-    httpd_resp_set_status(req, "301 Moved Permanently");
+    httpd_resp_set_status(req, "307 Temporary Redirect");
     httpd_resp_set_hdr(req, "Location", location);
     httpd_resp_sendstr(req, "Redirecting to HTTPS");
     return ESP_OK;
