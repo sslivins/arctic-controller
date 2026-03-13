@@ -73,7 +73,7 @@ jobs:
     runs-on: [self-hosted, vm-mi]
     timeout-minutes: 120
     env:
-      ARCTIC_URL: http://arctic.local
+      ARCTIC_URL: http://arctic-controller-ghr.mi
 
     steps:
       - name: Checkout code
@@ -237,7 +237,7 @@ jobs:
         run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
         env:
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
-          SIMULATOR_URL: http://arctic-simulator.mi
+          SIMULATOR_URL: http://arctic-simulator-ghr.mi
 
       - name: Run API contract tests
         id: api_tests
