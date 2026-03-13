@@ -116,16 +116,30 @@ jobs:
             exit 1
           fi
 
-          # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
+          # Quick connectivity check — bail fast if device isn't actually responding
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          DEVICE_REACHABLE=false
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            if curl -sk --connect-timeout 3 --max-time 5 "$URL/api/health" > /dev/null 2>&1; then
+              DEVICE_REACHABLE=true
+              echo "Device responding at $URL"
+              break
+            fi
+          done
+          if [ "$DEVICE_REACHABLE" = "false" ]; then
+            echo "ERROR: Device resolved but not responding on HTTP or HTTPS"
+            exit 1
+          fi
+
+          # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
           for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
             echo "Trying $URL/api/ota/upload ..."
             HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
               -X POST \
               -H "Content-Type: application/octet-stream" \
               -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
-              --connect-timeout 10 \
-              --max-time 120 \
+              --connect-timeout 5 \
+              --max-time 30 \
               --data-binary @build/arctic_controller.bin \
               "$URL/api/ota/upload") || true
             echo "Response ($URL): HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
