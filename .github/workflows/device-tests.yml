@@ -237,7 +237,7 @@ jobs:
         run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
         env:
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
-          SIMULATOR_URL: http://arctic-sim.local
+          SIMULATOR_URL: http://arctic-simulator.mi
 
       - name: Run API contract tests
         id: api_tests
