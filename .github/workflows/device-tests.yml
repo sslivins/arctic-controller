@@ -157,28 +157,48 @@ jobs:
         if: steps.ota_flash.outcome == 'failure'
         run: |
           echo "OTA failed, falling back to USB serial flash..."
-          esptool.py --port /dev/ttyUSB0 --baud 921600 --chip esp32p4 \
+
+          # Generate NVS partition with WiFi credentials so the device can auto-connect
+          echo "Generating NVS partition with WiFi credentials..."
+          cat > /tmp/nvs_wifi.csv << 'CSVHEADER'
+          key,type,encoding,value
+          wifi_creds,namespace,,
+          ssid,data,string,${WIFI_SSID}
+          password,data,string,${WIFI_PASSWORD}
+          CSVHEADER
+          # Strip leading whitespace from heredoc
+          sed -i 's/^[[:space:]]*//' /tmp/nvs_wifi.csv
+          # Substitute env vars
+          envsubst < /tmp/nvs_wifi.csv > /tmp/nvs_wifi_resolved.csv
+          python3 -m esp_idf_nvs_partition_gen generate \
+            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x6000
+
+          esptool.py --port /dev/ttyACM0 --baud 921600 --chip esp32p4 \
             --before default_reset --after hard_reset \
             write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
             0x2000  build/bootloader/bootloader.bin \
             0x8000  build/partition_table/partition-table.bin \
+            0x9000  /tmp/nvs_wifi.bin \
             0xf000  build/ota_data_initial.bin \
             0x20000 build/arctic_controller.bin
+        env:
+          WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
+          WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
 
       - name: Wait for device boot (USB)
         if: steps.ota_flash.outcome == 'failure'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 15
-          for i in $(seq 1 30); do
+          for i in $(seq 1 45); do
             if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
                curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
-              echo "Device is back online"
+              echo "Device is back online after $((i + 15))s"
               exit 0
             fi
             sleep 1
           done
-          echo "Device did not come back online within 45s"
+          echo "Device did not come back online within 60s"
           exit 1
 
       - name: Detect HTTPS support
