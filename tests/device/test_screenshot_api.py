@@ -66,12 +66,18 @@ def _get_screenshot(api_key: str = API_KEY) -> requests.Response:
 
 
 def _enable_web_auth():
-    """Enable web auth so that API key enforcement kicks in."""
+    """Enable web + API auth so that API key enforcement kicks in.
+
+    Both flags must be true for ``check_api_auth`` to reject requests:
+    ``api_auth_enabled`` gates the entire check (short-circuits to *allow*
+    when false), and ``web_auth_enabled`` prevents the "allow local web UI"
+    fallback.  On a fresh device both default to false, so we must set both.
+    """
     for attempt in range(3):
         try:
             requests.post(
                 f"{ARCTIC_URL}/api/auth/config",
-                json={"web_auth_enabled": True},
+                json={"web_auth_enabled": True, "api_auth_enabled": True},
                 headers=_api_headers(),
                 timeout=5,
             )
@@ -83,12 +89,12 @@ def _enable_web_auth():
 
 
 def _disable_web_auth():
-    """Disable web auth (restore normal test state)."""
+    """Disable web + API auth (restore normal test state)."""
     for attempt in range(3):
         try:
             requests.post(
                 f"{ARCTIC_URL}/api/auth/config",
-                json={"web_auth_enabled": False},
+                json={"web_auth_enabled": False, "api_auth_enabled": False},
                 headers=_api_headers(),
                 timeout=5,
             )
