@@ -282,21 +282,18 @@ jobs:
       # - name: Run device UI tests
       #   id: ui_tests
       #   run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
-      #   env:
-      #     ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       # - name: Run Modbus E2E tests
       #   id: modbus_tests
       #   run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
       #   env:
-      #     ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
       #     SIMULATOR_URL: http://arctic-simulator-ghr.mi
 
       - name: Run API contract tests
         id: api_tests
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
-          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+          # ARCTIC_API_KEY is set via $GITHUB_ENV by the "Sync API key" step
           ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           HYPOTHESIS_PROFILE: ci
@@ -312,7 +309,6 @@ jobs:
       #   id: web_tests
       #   run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
       #   env:
-      #     ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
       #     ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
       #     ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
       #     TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
