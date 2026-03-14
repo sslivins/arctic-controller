@@ -350,40 +350,38 @@ class TestDiagnosticErrors:
 # ── Authentication ────────────────────────────────────────────────────────
 
 
-def _enable_api_auth():
-    """Enable API auth on the device."""
+def _auth_config_post(payload: dict):
+    """POST /api/auth/config, falling back to a session login on 401."""
     for attempt in range(3):
         try:
-            requests.post(
+            r = requests.post(
                 f"{BASE_URL}/api/auth/config",
                 headers=_headers(),
-                json={"web_auth_enabled": True},
+                json=payload,
                 timeout=5,
             )
+            if r.status_code == 401:
+                s = requests.Session()
+                s.post(f"{BASE_URL}/login",
+                       json={"username": "arctic", "password": "arctic"},
+                       timeout=5)
+                s.post(f"{BASE_URL}/api/auth/config", json=payload, timeout=5)
             time.sleep(0.5)
             return
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             if attempt == 2:
                 raise
             time.sleep(2)
+
+
+def _enable_api_auth():
+    """Enable API auth on the device."""
+    _auth_config_post({"web_auth_enabled": True, "api_auth_enabled": True})
 
 
 def _disable_api_auth():
     """Disable API auth on the device."""
-    for attempt in range(3):
-        try:
-            requests.post(
-                f"{BASE_URL}/api/auth/config",
-                headers=_headers(),
-                json={"web_auth_enabled": False},
-                timeout=5,
-            )
-            time.sleep(0.5)
-            return
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            if attempt == 2:
-                raise
-            time.sleep(2)
+    _auth_config_post({"web_auth_enabled": False, "api_auth_enabled": False})
 
 
 class TestDiagnosticAuth:

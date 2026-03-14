@@ -91,6 +91,29 @@ def _post_raw_no_auth(path, data=None, content_type="application/octet-stream", 
     return requests.post(f"{BASE_URL}{path}", headers=h, data=data, timeout=30, **kwargs)
 
 
+def _auth_config_post(payload: dict):
+    """POST /api/auth/config, falling back to a session login on 401."""
+    for attempt in range(3):
+        try:
+            r = requests.post(
+                f"{BASE_URL}/api/auth/config",
+                json=payload,
+                headers=_headers(),
+                timeout=5,
+            )
+            if r.status_code == 401:
+                s = requests.Session()
+                s.post(f"{BASE_URL}/login",
+                       json={"username": "arctic", "password": "arctic"},
+                       timeout=5)
+                s.post(f"{BASE_URL}/api/auth/config", json=payload, timeout=5)
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
+
+
 def _get_with_bad_key(path, **kwargs):
     """GET with an invalid API key."""
     h = {"X-API-Key": "invalid_key_000000000000000000"}
@@ -466,15 +489,18 @@ class TestOtaGithubUpdate:
 class TestOtaAuthEnforcement:
     """Verify OTA endpoints reject invalid API keys.
 
-    Note: check_api_auth allows unauthenticated requests through when
-    web_auth is disabled (local web UI fallback). To reliably test auth
-    enforcement, we send requests with an INVALID API key, which forces
-    the key-validation path regardless of web_auth state.
-
-    The reboot endpoint is tested with extra caution: we verify the
-    invalid-key request is rejected BEFORE asserting the device is
-    still responding.
+    Both ``api_auth_enabled`` and ``web_auth_enabled`` must be true for
+    ``check_api_auth`` to validate API keys.  On a fresh device both
+    default to false, so the setup fixture enables them and teardown
+    restores them.
     """
+
+    @pytest.fixture(autouse=True)
+    def _ensure_api_auth(self):
+        """Enable API + web auth before each test, restore after."""
+        _auth_config_post({"web_auth_enabled": True, "api_auth_enabled": True})
+        yield
+        _auth_config_post({"web_auth_enabled": False, "api_auth_enabled": False})
 
     def test_status_rejects_bad_key(self):
         """GET /api/ota/status with invalid API key → 401."""

@@ -59,36 +59,36 @@ def _post(path, json=None, headers=None, **kwargs):
     return _session.post(f"{BASE_URL}{path}", headers=h, json=json, timeout=10, **kwargs)
 
 
-def _enable_web_auth():
+def _auth_config_post(payload: dict):
+    """POST /api/auth/config, falling back to a session login on 401."""
     for attempt in range(3):
         try:
-            requests.post(
+            r = requests.post(
                 f"{BASE_URL}/api/auth/config",
-                json={"web_auth_enabled": True},
+                json=payload,
                 headers=_headers(),
                 timeout=5,
             )
+            if r.status_code == 401:
+                s = requests.Session()
+                s.verify = False
+                s.post(f"{BASE_URL}/login",
+                       json={"username": USERNAME, "password": PASSWORD},
+                       timeout=5)
+                s.post(f"{BASE_URL}/api/auth/config", json=payload, timeout=5)
             return
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             if attempt == 2:
                 raise
             time.sleep(2)
+
+
+def _enable_web_auth():
+    _auth_config_post({"web_auth_enabled": True, "api_auth_enabled": True})
 
 
 def _disable_web_auth():
-    for attempt in range(3):
-        try:
-            requests.post(
-                f"{BASE_URL}/api/auth/config",
-                json={"web_auth_enabled": False},
-                headers=_headers(),
-                timeout=5,
-            )
-            return
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            if attempt == 2:
-                raise
-            time.sleep(2)
+    _auth_config_post({"web_auth_enabled": False, "api_auth_enabled": False})
 
 
 @pytest.fixture(scope="module", autouse=True)
