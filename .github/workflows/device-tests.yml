@@ -94,6 +94,42 @@ jobs:
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
 
+      - name: Sync API key from device (pre-OTA)
+        run: |
+          # Read the device's current API key before OTA so the upload can authenticate.
+          # The device may have a randomly-generated key or one from a previous NVS flash.
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          DEVICE_KEY=""
+
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+            DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+
+            if [ -z "$DEVICE_KEY" ]; then
+              JAR=$(mktemp)
+              curl -sk -c "$JAR" -X POST "$URL/login" \
+                -H "Content-Type: application/json" \
+                -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
+              RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+              DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+              rm -f "$JAR"
+            fi
+
+            if [ -n "$DEVICE_KEY" ]; then
+              break
+            fi
+          done
+
+          if [ -n "$DEVICE_KEY" ]; then
+            echo "ARCTIC_API_KEY=$DEVICE_KEY" >> $GITHUB_ENV
+            echo "Synced API key from device"
+          else
+            echo "Could not read device API key — OTA will use secret"
+          fi
+        env:
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
+
       - name: Flash device via OTA
         id: ota_flash
         continue-on-error: true
@@ -137,7 +173,7 @@ jobs:
             HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
               -X POST \
               -H "Content-Type: application/octet-stream" \
-              -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
+              -H "X-API-Key: ${ARCTIC_API_KEY}" \
               --connect-timeout 5 \
               --max-time 30 \
               --data-binary @build/arctic_controller.bin \
@@ -275,16 +311,19 @@ jobs:
 
       - name: Run device UI tests
         id: ui_tests
+        continue-on-error: true
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
 
       - name: Run Modbus E2E tests
         id: modbus_tests
+        continue-on-error: true
         run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
         env:
           SIMULATOR_URL: http://arctic-simulator-ghr.mi
 
       - name: Run API contract tests
         id: api_tests
+        continue-on-error: true
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
           # ARCTIC_API_KEY is set via $GITHUB_ENV by the "Sync API key" step
@@ -300,6 +339,7 @@ jobs:
 
       - name: Run web dashboard tests
         id: web_tests
+        continue-on-error: true
         run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
         env:
           ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
@@ -441,3 +481,19 @@ jobs:
           resp = urllib.request.urlopen(req)
           print(f'Gist updated: {resp.status}')
           "
+
+      - name: Fail job if any tests failed
+        if: always()
+        run: |
+          # With continue-on-error on test steps, we need to explicitly fail the job
+          FAILED=false
+          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.modbus_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}"; do
+            if [ "$step_outcome" = "failure" ]; then
+              FAILED=true
+            fi
+          done
+          if [ "$FAILED" = "true" ]; then
+            echo "One or more test suites failed — see individual results above"
+            exit 1
+          fi
+          echo "All test suites passed"

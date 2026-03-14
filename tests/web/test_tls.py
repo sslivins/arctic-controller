@@ -125,9 +125,9 @@ def _browser_login(page: Page):
 def _restore_auth():
     """Ensure auth toggles are restored after each test."""
     yield
-    # Disable web auth, keep API auth enabled (test suite default).
-    # Ignore failure — the conftest dashboard_page fixture handles login fallback.
-    _set_auth(web=False, api=True)
+    # Disable both auth methods so subsequent CI runs aren't affected.
+    # This prevents OTA uploads from failing with 401 on the next run.
+    _set_auth(web=False, api=False)
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────

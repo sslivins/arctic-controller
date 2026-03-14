@@ -1,7 +1,14 @@
 """Tests for the web dashboard Settings page."""
 
+import os
 import pytest
+import requests
 from playwright.sync_api import Page, expect
+
+# Credentials from env
+_USERNAME = os.environ.get("ARCTIC_USERNAME", "arctic")
+_PASSWORD = os.environ.get("ARCTIC_PASSWORD", "arctic")
+_API_KEY = os.environ.get("ARCTIC_API_KEY")
 
 
 def _go_to_settings(page: Page):
@@ -24,6 +31,39 @@ def _ensure_api_auth_enabled(page: Page):
     if not api_toggle.is_checked():
         api_toggle.click()
         page.wait_for_timeout(500)
+
+
+def _disable_api_auth(base_url: str):
+    """Disable API auth via the REST API so it doesn't affect subsequent runs."""
+    headers = {}
+    if _API_KEY:
+        headers["X-API-Key"] = _API_KEY
+    try:
+        # Try with API key first
+        r = requests.post(
+            f"{base_url}/api/auth/config",
+            json={"api_auth_enabled": False, "web_auth_enabled": False},
+            headers=headers,
+            timeout=5,
+            verify=False,
+        )
+        if r.status_code == 200:
+            return
+        # Fall back to session login
+        session = requests.Session()
+        session.verify = False
+        session.post(
+            f"{base_url}/login",
+            json={"username": _USERNAME, "password": _PASSWORD},
+            timeout=5,
+        )
+        session.post(
+            f"{base_url}/api/auth/config",
+            json={"api_auth_enabled": False, "web_auth_enabled": False},
+            timeout=5,
+        )
+    except Exception:
+        pass
 
 
 class TestSettingsCards:
@@ -78,6 +118,12 @@ class TestTimeSettings:
 
 class TestSecuritySettings:
     """Security card interactions (on Security tab)."""
+
+    @pytest.fixture(autouse=True)
+    def _cleanup_api_auth(self, base_url: str):
+        """Disable API auth after each test so it doesn't persist across runs."""
+        yield
+        _disable_api_auth(base_url)
 
     def test_web_auth_toggle_visible(self, dashboard_page: Page):
         """Web Auth toggle is present in Authentication card."""
