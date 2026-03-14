@@ -1,7 +1,14 @@
 """Tests for the web dashboard Settings page."""
 
+import os
 import pytest
+import requests
 from playwright.sync_api import Page, expect
+
+# Credentials from env
+_USERNAME = os.environ.get("ARCTIC_USERNAME", "arctic")
+_PASSWORD = os.environ.get("ARCTIC_PASSWORD", "arctic")
+_API_KEY = os.environ.get("ARCTIC_API_KEY")
 
 
 def _go_to_settings(page: Page):
@@ -14,6 +21,50 @@ def _go_to_security(page: Page):
     """Navigate to the Security page."""
     page.locator("nav button").nth(4).click()
     page.wait_for_timeout(500)
+
+
+def _ensure_api_auth_enabled(page: Page):
+    """Enable the API Auth toggle if it's not already on, so the API key section renders."""
+    toggles = page.locator(".toggle input[type='checkbox']")
+    # The API Auth toggle is the second one on the Security page
+    api_toggle = toggles.nth(1)
+    if not api_toggle.is_checked():
+        # Click the parent label (styled switch) — the checkbox itself has zero size
+        page.locator(".toggle").nth(1).click()
+        page.wait_for_timeout(500)
+
+
+def _disable_api_auth(base_url: str):
+    """Disable API auth via the REST API so it doesn't affect subsequent runs."""
+    headers = {}
+    if _API_KEY:
+        headers["X-API-Key"] = _API_KEY
+    try:
+        # Try with API key first
+        r = requests.post(
+            f"{base_url}/api/auth/config",
+            json={"api_auth_enabled": False, "web_auth_enabled": False},
+            headers=headers,
+            timeout=5,
+            verify=False,
+        )
+        if r.status_code == 200:
+            return
+        # Fall back to session login
+        session = requests.Session()
+        session.verify = False
+        session.post(
+            f"{base_url}/login",
+            json={"username": _USERNAME, "password": _PASSWORD},
+            timeout=5,
+        )
+        session.post(
+            f"{base_url}/api/auth/config",
+            json={"api_auth_enabled": False, "web_auth_enabled": False},
+            timeout=5,
+        )
+    except Exception:
+        pass
 
 
 class TestSettingsCards:
@@ -69,6 +120,12 @@ class TestTimeSettings:
 class TestSecuritySettings:
     """Security card interactions (on Security tab)."""
 
+    @pytest.fixture(autouse=True)
+    def _cleanup_api_auth(self, base_url: str):
+        """Disable API auth after each test so it doesn't persist across runs."""
+        yield
+        _disable_api_auth(base_url)
+
     def test_web_auth_toggle_visible(self, dashboard_page: Page):
         """Web Auth toggle is present in Authentication card."""
         _go_to_security(dashboard_page)
@@ -77,14 +134,16 @@ class TestSecuritySettings:
         assert toggles.count() >= 2, f"Expected at least 2 toggles, got {toggles.count()}"
 
     def test_api_key_display_visible(self, dashboard_page: Page):
-        """API key display area is present."""
+        """API key display area is present when API auth is enabled."""
         _go_to_security(dashboard_page)
+        _ensure_api_auth_enabled(dashboard_page)
         api_key = dashboard_page.locator(".api-key-display")
         expect(api_key).to_be_visible()
 
     def test_api_key_copy_button(self, dashboard_page: Page):
         """Copy API key button is clickable."""
         _go_to_security(dashboard_page)
+        _ensure_api_auth_enabled(dashboard_page)
         copy_btn = dashboard_page.locator(".api-key-display .btn-group button").nth(1)
         expect(copy_btn).to_be_visible()
         expect(copy_btn).to_be_enabled()

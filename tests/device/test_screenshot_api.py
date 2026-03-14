@@ -65,38 +65,55 @@ def _get_screenshot(api_key: str = API_KEY) -> requests.Response:
     )
 
 
-def _enable_web_auth():
-    """Enable web auth so that API key enforcement kicks in."""
+def _auth_config_post(payload: dict):
+    """POST /api/auth/config, handling the case where web auth is already on.
+
+    When ``web_auth_enabled`` is already true, the endpoint requires a
+    session cookie (``check_web_auth``), not just an API key.  We try
+    with the API key first; on 401 we log in with default creds and retry.
+    """
     for attempt in range(3):
         try:
-            requests.post(
+            r = requests.post(
                 f"{ARCTIC_URL}/api/auth/config",
-                json={"web_auth_enabled": True},
+                json=payload,
                 headers=_api_headers(),
                 timeout=5,
             )
+            if r.status_code == 401:
+                # Web auth is on — need a session cookie
+                s = requests.Session()
+                s.post(
+                    f"{ARCTIC_URL}/login",
+                    json={"username": "arctic", "password": "arctic"},
+                    timeout=5,
+                )
+                s.post(
+                    f"{ARCTIC_URL}/api/auth/config",
+                    json=payload,
+                    timeout=5,
+                )
             return
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             if attempt == 2:
                 raise
             time.sleep(2)
+
+
+def _enable_web_auth():
+    """Enable web + API auth so that API key enforcement kicks in.
+
+    Both flags must be true for ``check_api_auth`` to reject requests:
+    ``api_auth_enabled`` gates the entire check (short-circuits to *allow*
+    when false), and ``web_auth_enabled`` prevents the "allow local web UI"
+    fallback.  On a fresh device both default to false, so we must set both.
+    """
+    _auth_config_post({"web_auth_enabled": True, "api_auth_enabled": True})
 
 
 def _disable_web_auth():
-    """Disable web auth (restore normal test state)."""
-    for attempt in range(3):
-        try:
-            requests.post(
-                f"{ARCTIC_URL}/api/auth/config",
-                json={"web_auth_enabled": False},
-                headers=_api_headers(),
-                timeout=5,
-            )
-            return
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            if attempt == 2:
-                raise
-            time.sleep(2)
+    """Disable web + API auth (restore normal test state)."""
+    _auth_config_post({"web_auth_enabled": False, "api_auth_enabled": False})
 
 
 def _parse_png_ihdr(data: bytes) -> dict:

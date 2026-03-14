@@ -96,48 +96,21 @@ def _admin_session(username=None, password=None):
     return s
 
 
-def _enable_web_auth():
-    """Enable web auth.  Only called when web auth is currently OFF,
-    so API-key auth (check_api_auth bypass) is sufficient."""
+def _auth_config_post(payload: dict):
+    """POST /api/auth/config, falling back to a session login on 401."""
     for attempt in range(3):
         try:
-            requests.post(
-                f"{BASE_URL}/api/auth/config",
-                json={"web_auth_enabled": True},
-                headers=_api_headers(),
-                timeout=5,
-            )
-            return
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            if attempt == 2:
-                raise
-            time.sleep(2)
-
-
-def _disable_web_auth():
-    """Disable web auth.  When it is currently ON, admin endpoints require
-    a session cookie — so we log in first.
-    Returns False if blocked (e.g. TLS certs prevent disabling auth)."""
-    for attempt in range(3):
-        try:
-            # Try API-key first (works when web auth is already off)
             r = requests.post(
                 f"{BASE_URL}/api/auth/config",
-                json={"web_auth_enabled": False},
+                json=payload,
                 headers=_api_headers(),
                 timeout=5,
             )
             if r.status_code == 403:
-                # TLS certs provisioned — auth cannot be disabled
                 return False
             if r.status_code == 401:
-                # Web auth is on — use a session
                 s = _admin_session()
-                r2 = s.post(
-                    f"{BASE_URL}/api/auth/config",
-                    json={"web_auth_enabled": False},
-                    timeout=5,
-                )
+                r2 = s.post(f"{BASE_URL}/api/auth/config", json=payload, timeout=5)
                 if r2.status_code == 403:
                     return False
             return True
@@ -145,6 +118,16 @@ def _disable_web_auth():
             if attempt == 2:
                 raise
             time.sleep(2)
+
+
+def _enable_web_auth():
+    """Enable web + API auth so that check_api_auth enforces key validation."""
+    _auth_config_post({"web_auth_enabled": True, "api_auth_enabled": True})
+
+
+def _disable_web_auth():
+    """Disable web + API auth.  Returns False if blocked (e.g. TLS certs)."""
+    return _auth_config_post({"web_auth_enabled": False, "api_auth_enabled": False})
 
 
 def _restore_credentials():

@@ -73,7 +73,7 @@ jobs:
     runs-on: [self-hosted, vm-mi]
     timeout-minutes: 120
     env:
-      ARCTIC_URL: http://arctic.local
+      ARCTIC_URL: http://arctic-controller-ghr.mi
 
     steps:
       - name: Checkout code
@@ -93,6 +93,42 @@ jobs:
 
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
+
+      - name: Sync API key from device (pre-OTA)
+        run: |
+          # Read the device's current API key before OTA so the upload can authenticate.
+          # The device may have a randomly-generated key or one from a previous NVS flash.
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          DEVICE_KEY=""
+
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+            DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+
+            if [ -z "$DEVICE_KEY" ]; then
+              JAR=$(mktemp)
+              curl -sk -c "$JAR" -X POST "$URL/login" \
+                -H "Content-Type: application/json" \
+                -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
+              RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+              DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+              rm -f "$JAR"
+            fi
+
+            if [ -n "$DEVICE_KEY" ]; then
+              break
+            fi
+          done
+
+          if [ -n "$DEVICE_KEY" ]; then
+            echo "ARCTIC_API_KEY=$DEVICE_KEY" >> $GITHUB_ENV
+            echo "Synced API key from device"
+          else
+            echo "Could not read device API key — OTA will use secret"
+          fi
+        env:
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
 
       - name: Flash device via OTA
         id: ota_flash
@@ -116,16 +152,30 @@ jobs:
             exit 1
           fi
 
-          # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
+          # Quick connectivity check — bail fast if device isn't actually responding
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          DEVICE_REACHABLE=false
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            if curl -sk --connect-timeout 3 --max-time 5 "$URL/api/health" > /dev/null 2>&1; then
+              DEVICE_REACHABLE=true
+              echo "Device responding at $URL"
+              break
+            fi
+          done
+          if [ "$DEVICE_REACHABLE" = "false" ]; then
+            echo "ERROR: Device resolved but not responding on HTTP or HTTPS"
+            exit 1
+          fi
+
+          # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
           for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
             echo "Trying $URL/api/ota/upload ..."
             HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
               -X POST \
               -H "Content-Type: application/octet-stream" \
-              -H "X-API-Key: ${{ secrets.ARCTIC_API_KEY }}" \
-              --connect-timeout 10 \
-              --max-time 120 \
+              -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              --connect-timeout 5 \
+              --max-time 30 \
               --data-binary @build/arctic_controller.bin \
               "$URL/api/ota/upload") || true
             echo "Response ($URL): HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
@@ -157,29 +207,96 @@ jobs:
         if: steps.ota_flash.outcome == 'failure'
         run: |
           echo "OTA failed, falling back to USB serial flash..."
-          esptool.py --port /dev/ttyUSB0 --baud 921600 --chip esp32p4 \
+
+          # Generate NVS partition with WiFi credentials + API key so the device can auto-connect
+          # and tests can authenticate.  The "auth" namespace pre-seeds the API key so
+          # auth_mgr_init() uses it instead of generating a random one.
+          echo "Generating NVS partition with WiFi credentials and API key..."
+          cat > /tmp/nvs_wifi.csv << 'CSVHEADER'
+          key,type,encoding,value
+          wifi_creds,namespace,,
+          ssid,data,string,${WIFI_SSID}
+          password,data,string,${WIFI_PASSWORD}
+          auth,namespace,,
+          api_key,data,string,${ARCTIC_API_KEY}
+          CSVHEADER
+          # Strip leading whitespace from heredoc
+          sed -i 's/^[[:space:]]*//' /tmp/nvs_wifi.csv
+          # Substitute env vars
+          envsubst < /tmp/nvs_wifi.csv > /tmp/nvs_wifi_resolved.csv
+          python3 -m esp_idf_nvs_partition_gen generate \
+            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x6000
+
+          esptool.py --port /dev/ttyACM0 --baud 921600 --chip esp32p4 \
             --before default_reset --after hard_reset \
             write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
             0x2000  build/bootloader/bootloader.bin \
             0x8000  build/partition_table/partition-table.bin \
+            0x9000  /tmp/nvs_wifi.bin \
             0xf000  build/ota_data_initial.bin \
             0x20000 build/arctic_controller.bin
+        env:
+          WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
+          WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
+          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Wait for device boot (USB)
         if: steps.ota_flash.outcome == 'failure'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 15
-          for i in $(seq 1 30); do
+          for i in $(seq 1 45); do
             if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
                curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
-              echo "Device is back online"
+              echo "Device is back online after $((i + 15))s"
               exit 0
             fi
             sleep 1
           done
-          echo "Device did not come back online within 45s"
+          echo "Device did not come back online within 60s"
           exit 1
+
+      - name: Sync API key from device
+        run: |
+          # The device may have a randomly-generated API key (fresh flash without
+          # NVS provisioning, or pre-existing device).  Read the actual key from
+          # the device and override the env var so tests use the correct value.
+
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          DEVICE_KEY=""
+
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+            DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+
+            if [ -z "$DEVICE_KEY" ]; then
+              JAR=$(mktemp)
+              curl -sk -c "$JAR" -X POST "$URL/login" \
+                -H "Content-Type: application/json" \
+                -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
+              RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+              DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+              rm -f "$JAR"
+            fi
+
+            if [ -n "$DEVICE_KEY" ]; then
+              break
+            fi
+          done
+
+          if [ -n "$DEVICE_KEY" ]; then
+            echo "ARCTIC_API_KEY=$DEVICE_KEY" >> $GITHUB_ENV
+            if [ "$DEVICE_KEY" = "$ARCTIC_API_KEY" ]; then
+              echo "Device API key matches secret — no override needed"
+            else
+              echo "Device API key differs from secret — overriding ARCTIC_API_KEY"
+            fi
+          else
+            echo "WARNING: Could not read device API key — tests may fail"
+          fi
+        env:
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
 
       - name: Detect HTTPS support
         run: |
@@ -194,22 +311,22 @@ jobs:
 
       - name: Run device UI tests
         id: ui_tests
+        continue-on-error: true
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
-        env:
-          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Run Modbus E2E tests
         id: modbus_tests
+        continue-on-error: true
         run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
         env:
-          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
-          SIMULATOR_URL: http://arctic-sim.local
+          SIMULATOR_URL: http://arctic-simulator-ghr.mi
 
       - name: Run API contract tests
         id: api_tests
+        continue-on-error: true
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
-          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+          # ARCTIC_API_KEY is set via $GITHUB_ENV by the "Sync API key" step
           ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           HYPOTHESIS_PROFILE: ci
@@ -222,9 +339,9 @@ jobs:
 
       - name: Run web dashboard tests
         id: web_tests
+        continue-on-error: true
         run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
         env:
-          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
           ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
@@ -364,3 +481,19 @@ jobs:
           resp = urllib.request.urlopen(req)
           print(f'Gist updated: {resp.status}')
           "
+
+      - name: Fail job if any tests failed
+        if: always()
+        run: |
+          # With continue-on-error on test steps, we need to explicitly fail the job
+          FAILED=false
+          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.modbus_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}"; do
+            if [ "$step_outcome" = "failure" ]; then
+              FAILED=true
+            fi
+          done
+          if [ "$FAILED" = "true" ]; then
+            echo "One or more test suites failed — see individual results above"
+            exit 1
+          fi
+          echo "All test suites passed"
