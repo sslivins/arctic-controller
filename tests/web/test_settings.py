@@ -29,7 +29,8 @@ def _ensure_api_auth_enabled(page: Page):
     # The API Auth toggle is the second one on the Security page
     api_toggle = toggles.nth(1)
     if not api_toggle.is_checked():
-        api_toggle.click()
+        # Click the parent label (styled switch) — the checkbox itself has zero size
+        page.locator(".toggle").nth(1).click()
         page.wait_for_timeout(500)
 
 
