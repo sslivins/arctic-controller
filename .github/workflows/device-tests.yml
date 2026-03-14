@@ -230,8 +230,8 @@ jobs:
           DEVICE_KEY=""
 
           for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
-            echo "Trying $URL/api/auth/key (unauthenticated)..."
-            RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/key" 2>/dev/null) || true
+            echo "Trying $URL/api/auth/apikey (unauthenticated)..."
+            RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
             echo "  Response: $RESP"
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
 
@@ -242,7 +242,7 @@ jobs:
                 -H "Content-Type: application/json" \
                 -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" 2>/dev/null) || true
               echo "  Login response: $LOGIN_RESP"
-              RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/key" 2>/dev/null) || true
+              RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
               echo "  Key response (with session): $RESP"
               DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
               rm -f "$JAR"
