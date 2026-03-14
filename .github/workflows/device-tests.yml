@@ -230,20 +230,15 @@ jobs:
           DEVICE_KEY=""
 
           for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
-            echo "Trying $URL/api/auth/apikey (unauthenticated)..."
             RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
-            echo "  Response: $RESP"
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
 
             if [ -z "$DEVICE_KEY" ]; then
-              echo "  Unauthenticated attempt failed, trying session login..."
               JAR=$(mktemp)
-              LOGIN_RESP=$(curl -sk -c "$JAR" -X POST "$URL/login" \
+              curl -sk -c "$JAR" -X POST "$URL/login" \
                 -H "Content-Type: application/json" \
-                -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" 2>/dev/null) || true
-              echo "  Login response: $LOGIN_RESP"
+                -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
               RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
-              echo "  Key response (with session): $RESP"
               DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
               rm -f "$JAR"
             fi
@@ -278,16 +273,15 @@ jobs:
             echo "Device does not support HTTPS — keeping $ARCTIC_URL"
           fi
 
-      # TEMPORARILY DISABLED — UI tests pass (268/268), skip to speed up API fix iteration
-      # - name: Run device UI tests
-      #   id: ui_tests
-      #   run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
+      - name: Run device UI tests
+        id: ui_tests
+        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
 
-      # - name: Run Modbus E2E tests
-      #   id: modbus_tests
-      #   run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
-      #   env:
-      #     SIMULATOR_URL: http://arctic-simulator-ghr.mi
+      - name: Run Modbus E2E tests
+        id: modbus_tests
+        run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
+        env:
+          SIMULATOR_URL: http://arctic-simulator-ghr.mi
 
       - name: Run API contract tests
         id: api_tests
@@ -299,20 +293,19 @@ jobs:
           HYPOTHESIS_PROFILE: ci
           PYTHONDONTWRITEBYTECODE: '1'
 
-      # TEMPORARILY DISABLED — skip web tests to speed up API fix iteration
-      # - name: Install Playwright for web tests
-      #   run: |
-      #     pip install -r tests/web/requirements.txt
-      #     playwright install chromium
+      - name: Install Playwright for web tests
+        run: |
+          pip install -r tests/web/requirements.txt
+          playwright install chromium
 
-      # - name: Run web dashboard tests
-      #   id: web_tests
-      #   run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
-      #   env:
-      #     ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-      #     ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
-      #     TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
-      #     TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
+      - name: Run web dashboard tests
+        id: web_tests
+        run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
+        env:
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
+          TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
+          TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 
       - name: Publish UI test results
         uses: dorny/test-reporter@v1
