@@ -172,13 +172,17 @@ jobs:
         run: |
           echo "OTA failed, falling back to USB serial flash..."
 
-          # Generate NVS partition with WiFi credentials so the device can auto-connect
-          echo "Generating NVS partition with WiFi credentials..."
+          # Generate NVS partition with WiFi credentials + API key so the device can auto-connect
+          # and tests can authenticate.  The "auth" namespace pre-seeds the API key so
+          # auth_mgr_init() uses it instead of generating a random one.
+          echo "Generating NVS partition with WiFi credentials and API key..."
           cat > /tmp/nvs_wifi.csv << 'CSVHEADER'
           key,type,encoding,value
           wifi_creds,namespace,,
           ssid,data,string,${WIFI_SSID}
           password,data,string,${WIFI_PASSWORD}
+          auth,namespace,,
+          api_key,data,string,${ARCTIC_API_KEY}
           CSVHEADER
           # Strip leading whitespace from heredoc
           sed -i 's/^[[:space:]]*//' /tmp/nvs_wifi.csv
@@ -198,6 +202,7 @@ jobs:
         env:
           WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
           WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
+          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Wait for device boot (USB)
         if: steps.ota_flash.outcome == 'failure'
@@ -214,6 +219,53 @@ jobs:
           done
           echo "Device did not come back online within 60s"
           exit 1
+
+      - name: Sync API key from device
+        run: |
+          # The device may have a randomly-generated API key (fresh flash without
+          # NVS provisioning, or pre-existing device).  Read the actual key from
+          # the device and override the env var so tests use the correct value.
+          get_key() {
+            curl -sk --connect-timeout 3 --max-time 5 "$1/api/auth/key" 2>/dev/null \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null
+          }
+          get_key_via_session() {
+            local URL=$1
+            local JAR=$(mktemp)
+            curl -sk -c "$JAR" -X POST "$URL/login" \
+              -H "Content-Type: application/json" \
+              -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1
+            local KEY=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/key" 2>/dev/null \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null)
+            rm -f "$JAR"
+            echo "$KEY"
+          }
+
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          DEVICE_KEY=""
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            DEVICE_KEY=$(get_key "$URL")
+            if [ -z "$DEVICE_KEY" ]; then
+              DEVICE_KEY=$(get_key_via_session "$URL")
+            fi
+            if [ -n "$DEVICE_KEY" ]; then
+              break
+            fi
+          done
+
+          if [ -n "$DEVICE_KEY" ]; then
+            echo "ARCTIC_API_KEY=$DEVICE_KEY" >> $GITHUB_ENV
+            if [ "$DEVICE_KEY" = "$ARCTIC_API_KEY" ]; then
+              echo "Device API key matches secret — no override needed"
+            else
+              echo "Device API key differs from secret — overriding ARCTIC_API_KEY"
+            fi
+          else
+            echo "WARNING: Could not read device API key — tests may fail"
+          fi
+        env:
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
 
       - name: Detect HTTPS support
         run: |
