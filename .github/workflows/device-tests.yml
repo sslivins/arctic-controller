@@ -225,18 +225,25 @@ jobs:
           # The device may have a randomly-generated API key (fresh flash without
           # NVS provisioning, or pre-existing device).  Read the actual key from
           # the device and override the env var so tests use the correct value.
+          #
+          # We disable errexit inside the probe functions because curl/python
+          # will fail for unreachable URLs (e.g. HTTPS when TLS isn't active).
           get_key() {
-            curl -sk --connect-timeout 3 --max-time 5 "$1/api/auth/key" 2>/dev/null \
-              | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null
+            local RESULT
+            RESULT=$(curl -sk --connect-timeout 3 --max-time 5 "$1/api/auth/key" 2>/dev/null \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+            echo "$RESULT"
           }
           get_key_via_session() {
             local URL=$1
-            local JAR=$(mktemp)
+            local JAR
+            JAR=$(mktemp)
             curl -sk -c "$JAR" -X POST "$URL/login" \
               -H "Content-Type: application/json" \
-              -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1
-            local KEY=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/key" 2>/dev/null \
-              | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null)
+              -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
+            local KEY
+            KEY=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/key" 2>/dev/null \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
             rm -f "$JAR"
             echo "$KEY"
           }
@@ -244,9 +251,9 @@ jobs:
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           DEVICE_KEY=""
           for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
-            DEVICE_KEY=$(get_key "$URL")
+            DEVICE_KEY=$(get_key "$URL") || true
             if [ -z "$DEVICE_KEY" ]; then
-              DEVICE_KEY=$(get_key_via_session "$URL")
+              DEVICE_KEY=$(get_key_via_session "$URL") || true
             fi
             if [ -n "$DEVICE_KEY" ]; then
               break
