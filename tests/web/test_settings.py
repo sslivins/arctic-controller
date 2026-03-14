@@ -16,6 +16,16 @@ def _go_to_security(page: Page):
     page.wait_for_timeout(500)
 
 
+def _ensure_api_auth_enabled(page: Page):
+    """Enable the API Auth toggle if it's not already on, so the API key section renders."""
+    toggles = page.locator(".toggle input[type='checkbox']")
+    # The API Auth toggle is the second one on the Security page
+    api_toggle = toggles.nth(1)
+    if not api_toggle.is_checked():
+        api_toggle.click()
+        page.wait_for_timeout(500)
+
+
 class TestSettingsCards:
     """Settings page layout and card visibility."""
 
@@ -77,14 +87,16 @@ class TestSecuritySettings:
         assert toggles.count() >= 2, f"Expected at least 2 toggles, got {toggles.count()}"
 
     def test_api_key_display_visible(self, dashboard_page: Page):
-        """API key display area is present."""
+        """API key display area is present when API auth is enabled."""
         _go_to_security(dashboard_page)
+        _ensure_api_auth_enabled(dashboard_page)
         api_key = dashboard_page.locator(".api-key-display")
         expect(api_key).to_be_visible()
 
     def test_api_key_copy_button(self, dashboard_page: Page):
         """Copy API key button is clickable."""
         _go_to_security(dashboard_page)
+        _ensure_api_auth_enabled(dashboard_page)
         copy_btn = dashboard_page.locator(".api-key-display .btn-group button").nth(1)
         expect(copy_btn).to_be_visible()
         expect(copy_btn).to_be_enabled()
