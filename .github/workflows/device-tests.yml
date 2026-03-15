@@ -315,6 +315,8 @@ jobs:
         run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
 
       - name: Update simulator to latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           SIMULATOR_URL="http://arctic-simulator-ghr.mi"
 
@@ -326,8 +328,9 @@ jobs:
           fi
           echo "Simulator current version: ${CURRENT_VERSION:-unreachable}"
 
-          # 2. Get latest release tag from GitHub
-          RELEASE_JSON=$(curl -s "https://api.github.com/repos/sslivins/arctic-simulator/releases/latest") || true
+          # 2. Get latest release tag from GitHub (use token for private repo access)
+          RELEASE_JSON=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/sslivins/arctic-simulator/releases/latest") || true
           LATEST_TAG=$(echo "$RELEASE_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null) || true
           # Strip leading 'v' for comparison (release tag is "v0.8.0", firmware reports "0.8.0")
           LATEST_VERSION="${LATEST_TAG#v}"
@@ -335,6 +338,7 @@ jobs:
 
           if [ -z "$LATEST_VERSION" ]; then
             echo "WARNING: Could not determine latest simulator release — skipping update"
+            echo "API response: $RELEASE_JSON"
             exit 0
           fi
 
@@ -345,16 +349,34 @@ jobs:
           fi
           echo "Updating simulator from ${CURRENT_VERSION:-unknown} to $LATEST_VERSION..."
 
-          # 4. Download release binaries
-          DOWNLOAD_BASE="https://github.com/sslivins/arctic-simulator/releases/download/$LATEST_TAG"
+          # 4. Download release binaries (use token for private repo assets)
           mkdir -p /tmp/simulator
+          # Get asset download URLs from release JSON
+          python3 -c "
+          import json, sys
+          release = json.loads('''$RELEASE_JSON''')
+          for asset in release.get('assets', []):
+              print(f\"{asset['name']}|{asset['url']}\")
+          " > /tmp/simulator/assets.txt 2>/dev/null || true
+
           for BIN in bootloader.bin partition-table.bin arctic-simulator.bin; do
-            echo "Downloading $BIN..."
-            curl -sL -o "/tmp/simulator/$BIN" "$DOWNLOAD_BASE/$BIN"
+            ASSET_URL=$(grep "^${BIN}|" /tmp/simulator/assets.txt | cut -d'|' -f2) || true
+            if [ -n "$ASSET_URL" ]; then
+              echo "Downloading $BIN via API..."
+              curl -sL -H "Authorization: token $GH_TOKEN" \
+                -H "Accept: application/octet-stream" \
+                -o "/tmp/simulator/$BIN" "$ASSET_URL"
+            else
+              # Fallback to direct URL (public repos)
+              echo "Downloading $BIN via direct URL..."
+              curl -sL -o "/tmp/simulator/$BIN" \
+                "https://github.com/sslivins/arctic-simulator/releases/download/$LATEST_TAG/$BIN"
+            fi
             if [ ! -s "/tmp/simulator/$BIN" ]; then
               echo "ERROR: Failed to download $BIN"
               exit 1
             fi
+            echo "  $(wc -c < /tmp/simulator/$BIN) bytes"
           done
 
           # 5. Flash via USB serial
