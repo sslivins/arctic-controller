@@ -94,6 +94,74 @@ jobs:
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
 
+      - name: Update simulator to latest release
+        run: |
+          SIMULATOR_URL="http://arctic-simulator-ghr.mi"
+
+          # 1. Get current simulator version
+          CURRENT_VERSION=""
+          RESP=$(curl -s --connect-timeout 3 --max-time 5 "$SIMULATOR_URL/api/status" 2>/dev/null) || true
+          if [ -n "$RESP" ]; then
+            CURRENT_VERSION=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null) || true
+          fi
+          echo "Simulator current version: ${CURRENT_VERSION:-unreachable}"
+
+          # 2. Get latest release tag from GitHub
+          curl -s "https://api.github.com/repos/sslivins/arctic-simulator/releases/latest" \
+            -o /tmp/simulator_release.json
+          LATEST_TAG=$(python3 -c "import json; print(json.load(open('/tmp/simulator_release.json')).get('tag_name',''))" 2>/dev/null) || true
+          # Strip leading 'v' for comparison (release tag is "v0.8.0", firmware reports "0.8.0")
+          LATEST_VERSION="${LATEST_TAG#v}"
+          echo "Latest release: $LATEST_TAG (version $LATEST_VERSION)"
+
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "WARNING: Could not determine latest simulator release — skipping update"
+            echo "API response:"; cat /tmp/simulator_release.json; echo
+            exit 0
+          fi
+
+          # 3. Compare versions — skip if already up to date
+          if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
+            echo "Simulator is already up to date ($CURRENT_VERSION)"
+            exit 0
+          fi
+          echo "Updating simulator from ${CURRENT_VERSION:-unknown} to $LATEST_VERSION..."
+
+          # 4. Download release binaries
+          DOWNLOAD_BASE="https://github.com/sslivins/arctic-simulator/releases/download/$LATEST_TAG"
+          mkdir -p /tmp/simulator
+          for BIN in bootloader.bin partition-table.bin arctic-simulator.bin; do
+            echo "Downloading $BIN..."
+            curl -sL -o "/tmp/simulator/$BIN" "$DOWNLOAD_BASE/$BIN"
+            if [ ! -s "/tmp/simulator/$BIN" ]; then
+              echo "ERROR: Failed to download $BIN"
+              exit 1
+            fi
+            echo "  $(wc -c < /tmp/simulator/$BIN) bytes"
+          done
+
+          # 5. Flash via USB serial
+          echo "Flashing simulator on /dev/ttyACM1..."
+          esptool.py --port /dev/ttyACM1 --baud 921600 --chip esp32s3 \
+            --before default_reset --after hard_reset \
+            write_flash \
+            0x0     /tmp/simulator/bootloader.bin \
+            0x8000  /tmp/simulator/partition-table.bin \
+            0x10000 /tmp/simulator/arctic-simulator.bin
+
+          # 6. Wait for simulator to come back online
+          echo "Waiting for simulator to boot..."
+          sleep 10
+          for i in $(seq 1 30); do
+            if curl -s --connect-timeout 2 "$SIMULATOR_URL/api/status" > /dev/null 2>&1; then
+              NEW_VER=$(curl -s "$SIMULATOR_URL/api/status" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null) || true
+              echo "Simulator online — version $NEW_VER (after $((i + 10))s)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "WARNING: Simulator did not come back online within 40s"
+
       - name: Sync API key from device (pre-OTA)
         run: |
           # Read the device's current API key before OTA so the upload can authenticate.
