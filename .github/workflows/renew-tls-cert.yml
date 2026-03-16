@@ -21,7 +21,7 @@ jobs:
     name: Renew wildcard cert and deploy to device
     runs-on: vm-mi
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install certbot and Cloudflare plugin
         run: |
