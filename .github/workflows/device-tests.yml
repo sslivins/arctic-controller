@@ -416,7 +416,7 @@ jobs:
           TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 
       - name: Publish UI test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v2
         if: always() && steps.ui_tests.outcome != 'skipped'
         with:
           name: Device UI Test Results
@@ -424,7 +424,7 @@ jobs:
           reporter: java-junit
 
       - name: Publish API contract test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v2
         if: always() && steps.api_tests.outcome != 'skipped'
         with:
           name: API Contract Test Results
@@ -432,7 +432,7 @@ jobs:
           reporter: java-junit
 
       - name: Publish Modbus E2E test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v2
         if: always() && steps.modbus_tests.outcome != 'skipped'
         with:
           name: Modbus E2E Test Results
@@ -440,7 +440,7 @@ jobs:
           reporter: java-junit
 
       - name: Publish web test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v2
         if: always() && steps.web_tests.outcome != 'skipped'
         with:
           name: Web Dashboard Test Results
