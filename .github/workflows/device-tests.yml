@@ -422,6 +422,7 @@ jobs:
           name: Device UI Test Results
           path: test-results.xml
           reporter: java-junit
+          use-actions-summary: 'false'
 
       - name: Publish API contract test results
         uses: dorny/test-reporter@v2
@@ -430,6 +431,7 @@ jobs:
           name: API Contract Test Results
           path: api-test-results.xml
           reporter: java-junit
+          use-actions-summary: 'false'
 
       - name: Publish Modbus E2E test results
         uses: dorny/test-reporter@v2
@@ -438,6 +440,7 @@ jobs:
           name: Modbus E2E Test Results
           path: modbus-test-results.xml
           reporter: java-junit
+          use-actions-summary: 'false'
 
       - name: Publish web test results
         uses: dorny/test-reporter@v2
@@ -446,6 +449,7 @@ jobs:
           name: Web Dashboard Test Results
           path: web-test-results.xml
           reporter: java-junit
+          use-actions-summary: 'false'
 
       - name: Upload failure screenshots
         uses: actions/upload-artifact@v7
