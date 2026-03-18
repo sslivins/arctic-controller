@@ -4,10 +4,8 @@ import json
 
 
 def clone_or_update_repo(repo_url, path, branch):
-    command = []
-    command.append('git')
-    command.append('clone')
-    
+    command = ['git', 'clone', '--depth', '1']
+
     if branch:
         command.append('-b')
         command.append(branch)
