@@ -188,11 +188,11 @@ jobs:
           curl -skf --max-time 10 \
             -H "X-API-Key: ${ARCTIC_API_KEY}" \
             -X POST \
-            "$ARCTIC_URL/api/system/reboot" \
+            "$ARCTIC_URL/api/ota/reboot" \
             || curl -skf --max-time 10 \
               -H "X-API-Key: ${ARCTIC_API_KEY}" \
               -X POST \
-              "$ARCTIC_URL_HTTPS/api/system/reboot" \
+              "$ARCTIC_URL_HTTPS/api/ota/reboot" \
             || true
 
           echo "Reboot triggered. Waiting for device to come back..."
