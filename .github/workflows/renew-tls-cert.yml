@@ -21,7 +21,7 @@ jobs:
     name: Renew wildcard cert and deploy to device
     runs-on: vm-mi
     env:
-      ARCTIC_URL: http://arctic-controller-ghr.mi
+      ARCTIC_URL: http://arctic-01b0.mennlabs.com
     steps:
       - uses: actions/checkout@v6
 
@@ -140,6 +140,18 @@ jobs:
               "$ARCTIC_URL_HTTPS/api/auth/config" \
             || echo "Warning: Could not configure auth (may already be set)"
 
+      - name: Clear existing certs on device
+        if: steps.certbot.outputs.renewed == 'true'
+        run: |
+          # Delete any existing certs to avoid the deadlock where certs exist
+          # in NVS but HTTPS failed to start (blocks HTTP cert uploads).
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+            curl -sk --max-time 10 -X DELETE \
+              -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              "$URL/api/tls/certificate" 2>/dev/null && break || true
+          done
+
       - name: Upload certificate to device
         if: steps.certbot.outputs.renewed == 'true'
         run: |
@@ -187,8 +199,8 @@ jobs:
           sleep 10
 
           for i in $(seq 1 30); do
-            if curl -sk --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
-               curl -sk --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
+            if curl -sk --connect-timeout 2 "$ARCTIC_URL/api/health" > /dev/null 2>&1 || \
+               curl -sk --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/health" > /dev/null 2>&1; then
               echo "Device is back online after $((i + 10))s."
               exit 0
             fi
