@@ -155,7 +155,7 @@ jobs:
               -H "X-API-Key: ${ARCTIC_API_KEY}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
-              "$URL/api/tls/certificates") || true
+              "$URL/api/tls/certificate") || true
             HTTP_CODE=$(echo "$RESPONSE" | tail -1)
             BODY=$(echo "$RESPONSE" | sed '$d')
             echo "$URL → HTTP $HTTP_CODE"
