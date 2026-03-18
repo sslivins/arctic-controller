@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: 'recursive'
 
@@ -57,7 +57,7 @@ jobs:
           path: '.'
 
       - name: Upload firmware + flash metadata
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: |
@@ -77,10 +77,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download firmware
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: firmware
           path: build/
@@ -416,39 +416,43 @@ jobs:
           TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 
       - name: Publish UI test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v2
         if: always() && steps.ui_tests.outcome != 'skipped'
         with:
           name: Device UI Test Results
           path: test-results.xml
           reporter: java-junit
+          use-actions-summary: 'false'
 
       - name: Publish API contract test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v2
         if: always() && steps.api_tests.outcome != 'skipped'
         with:
           name: API Contract Test Results
           path: api-test-results.xml
           reporter: java-junit
+          use-actions-summary: 'false'
 
       - name: Publish Modbus E2E test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v2
         if: always() && steps.modbus_tests.outcome != 'skipped'
         with:
           name: Modbus E2E Test Results
           path: modbus-test-results.xml
           reporter: java-junit
+          use-actions-summary: 'false'
 
       - name: Publish web test results
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v2
         if: always() && steps.web_tests.outcome != 'skipped'
         with:
           name: Web Dashboard Test Results
           path: web-test-results.xml
           reporter: java-junit
+          use-actions-summary: 'false'
 
       - name: Upload failure screenshots
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: failure-screenshots
