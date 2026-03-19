@@ -79,7 +79,7 @@ static bool is_lock_held(void)
     if (s_lock_session_id[0] == '\0') return false;
     int64_t elapsed = esp_timer_get_time() - s_lock_acquired_us;
     if (elapsed > s_lock_ttl_us) {
-        ESP_LOGW(TAG, "Session lock expired (held by '%s' for %llds)", s_lock_session_id, elapsed / 1000000LL);
+        ESP_LOGW(TAG, "Session lock expired (held by '%s' for %lds)", s_lock_session_id, (long)(elapsed / 1000000LL));
         s_lock_session_id[0] = '\0';
         return false;
     }
@@ -1432,7 +1432,7 @@ static esp_err_t lock_post_handler(httpd_req_t* req)
         s_lock_ttl_us = 15 * 60 * 1000000LL;  // Default 15 min
     }
 
-    ESP_LOGI(TAG, "Session lock acquired: '%s' (TTL %llds)", s_lock_session_id, s_lock_ttl_us / 1000000LL);
+    ESP_LOGI(TAG, "Session lock acquired: '%s' (TTL %lds)", s_lock_session_id, (long)(s_lock_ttl_us / 1000000LL));
 
     set_json_content_type(req);
     cJSON* resp = cJSON_CreateObject();
