@@ -97,18 +97,27 @@ jobs:
       - name: Detect serial ports
         run: |
           # USB serial port assignments (/dev/ttyACM0, /dev/ttyACM1) can swap
-          # after a reboot. Probe each port to find the ESP32-P4 (controller)
-          # and ESP32-S3 (simulator) reliably.
+          # after a reboot. Match each port's USB serial number (burned into
+          # eFuse, globally unique per chip) to find the controller and simulator.
           CONTROLLER_PORT=""
           SIMULATOR_PORT=""
           for PORT in /dev/ttyACM*; do
             [ -e "$PORT" ] || continue
-            CHIP=$(esptool.py --port "$PORT" chip_id 2>&1 | grep -oP 'Chip is \K[^ ]+' || true)
-            echo "$PORT -> $CHIP"
-            case "$CHIP" in
-              ESP32-P4) CONTROLLER_PORT="$PORT" ;;
-              ESP32-S3*) SIMULATOR_PORT="$PORT" ;;
-            esac
+            # udevadm reliably finds the USB device attributes regardless of hub depth
+            SERIAL=$(udevadm info -q property --name="$PORT" | grep -oP '^ID_SERIAL_SHORT=\K.*' || echo "")
+            VID=$(udevadm info -q property --name="$PORT" | grep -oP '^ID_VENDOR_ID=\K.*' || echo "?")
+            PID=$(udevadm info -q property --name="$PORT" | grep -oP '^ID_MODEL_ID=\K.*' || echo "?")
+            MODEL=$(udevadm info -q property --name="$PORT" | grep -oP '^ID_MODEL=\K.*' || echo "?")
+            echo "$PORT: VID=$VID PID=$PID model=$MODEL serial=$SERIAL"
+            if [ -n "$SERIAL" ]; then
+              if [ "$SERIAL" = "$CONTROLLER_USB_SERIAL" ]; then
+                CONTROLLER_PORT="$PORT"
+                echo "  -> matched controller"
+              elif [ "$SERIAL" = "$SIMULATOR_USB_SERIAL" ]; then
+                SIMULATOR_PORT="$PORT"
+                echo "  -> matched simulator"
+              fi
+            fi
           done
           echo "Controller port: ${CONTROLLER_PORT:-not found}"
           echo "Simulator port: ${SIMULATOR_PORT:-not found}"
@@ -118,6 +127,9 @@ jobs:
           if [ -n "$SIMULATOR_PORT" ]; then
             echo "SIMULATOR_PORT=$SIMULATOR_PORT" >> $GITHUB_ENV
           fi
+        env:
+          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
+          SIMULATOR_USB_SERIAL: ${{ secrets.SIMULATOR_USB_SERIAL }}
 
       - name: Update simulator to latest release
         run: |
