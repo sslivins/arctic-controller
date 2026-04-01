@@ -98,17 +98,34 @@ jobs:
         run: |
           # USB serial port assignments (/dev/ttyACM0, /dev/ttyACM1) can swap
           # after a reboot. Probe each port to find the ESP32-P4 (controller)
-          # and ESP32-S3 (simulator) reliably.
+          # and ESP32-S3 (simulator) by reading USB device attributes from sysfs.
           CONTROLLER_PORT=""
           SIMULATOR_PORT=""
           for PORT in /dev/ttyACM*; do
             [ -e "$PORT" ] || continue
-            CHIP=$(esptool.py --port "$PORT" chip_id 2>&1 | grep -oP 'Chip is \K[^ ]+' || true)
-            echo "$PORT -> $CHIP"
-            case "$CHIP" in
-              ESP32-P4) CONTROLLER_PORT="$PORT" ;;
-              ESP32-S3*) SIMULATOR_PORT="$PORT" ;;
-            esac
+            BASENAME=$(basename "$PORT")
+            # Walk sysfs to find the USB device backing this tty
+            SYSDEV=$(readlink -f "/sys/class/tty/$BASENAME/device")
+            USB_INTF="$SYSDEV/.."
+            USB_DEV="$USB_INTF/.."
+            VID=$(cat "$USB_DEV/idVendor" 2>/dev/null || echo "?")
+            PID=$(cat "$USB_DEV/idProduct" 2>/dev/null || echo "?")
+            PRODUCT=$(cat "$USB_DEV/product" 2>/dev/null || echo "?")
+            SERIAL=$(cat "$USB_DEV/serial" 2>/dev/null || echo "?")
+            SPEED=$(cat "$USB_DEV/speed" 2>/dev/null || echo "?")
+            echo "$PORT: VID=$VID PID=$PID product='$PRODUCT' serial=$SERIAL speed=${SPEED}Mbps"
+
+            # ESP32-P4 uses USB 2.0 High-Speed (480 Mbps)
+            # ESP32-S3 uses USB 1.1 Full-Speed (12 Mbps)
+            if [ "$VID" = "303a" ]; then
+              if [ "$SPEED" = "480" ]; then
+                CONTROLLER_PORT="$PORT"
+                echo "  -> ESP32-P4 controller (high-speed USB)"
+              elif [ "$SPEED" = "12" ]; then
+                SIMULATOR_PORT="$PORT"
+                echo "  -> ESP32-S3 simulator (full-speed USB)"
+              fi
+            fi
           done
           echo "Controller port: ${CONTROLLER_PORT:-not found}"
           echo "Simulator port: ${SIMULATOR_PORT:-not found}"
