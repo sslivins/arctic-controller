@@ -94,6 +94,31 @@ jobs:
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
 
+      - name: Detect serial ports
+        run: |
+          # USB serial port assignments (/dev/ttyACM0, /dev/ttyACM1) can swap
+          # after a reboot. Probe each port to find the ESP32-P4 (controller)
+          # and ESP32-S3 (simulator) reliably.
+          CONTROLLER_PORT=""
+          SIMULATOR_PORT=""
+          for PORT in /dev/ttyACM*; do
+            [ -e "$PORT" ] || continue
+            CHIP=$(esptool.py --port "$PORT" chip_id 2>&1 | grep -oP 'Chip is \K[^ ]+' || true)
+            echo "$PORT -> $CHIP"
+            case "$CHIP" in
+              ESP32-P4) CONTROLLER_PORT="$PORT" ;;
+              ESP32-S3*) SIMULATOR_PORT="$PORT" ;;
+            esac
+          done
+          echo "Controller port: ${CONTROLLER_PORT:-not found}"
+          echo "Simulator port: ${SIMULATOR_PORT:-not found}"
+          if [ -n "$CONTROLLER_PORT" ]; then
+            echo "CONTROLLER_PORT=$CONTROLLER_PORT" >> $GITHUB_ENV
+          fi
+          if [ -n "$SIMULATOR_PORT" ]; then
+            echo "SIMULATOR_PORT=$SIMULATOR_PORT" >> $GITHUB_ENV
+          fi
+
       - name: Update simulator to latest release
         run: |
           SIMULATOR_URL="http://arctic-simulator-ghr.mi"
@@ -141,8 +166,12 @@ jobs:
           done
 
           # 5. Flash via USB serial
-          echo "Flashing simulator on /dev/ttyACM1..."
-          esptool.py --port /dev/ttyACM1 --baud 921600 --chip esp32s3 \
+          if [ -z "$SIMULATOR_PORT" ]; then
+            echo "ERROR: No ESP32-S3 simulator detected on any serial port"
+            exit 1
+          fi
+          echo "Flashing simulator on $SIMULATOR_PORT..."
+          esptool.py --port "$SIMULATOR_PORT" --baud 921600 --chip esp32s3 \
             --before default_reset --after hard_reset \
             write_flash \
             0x0     /tmp/simulator/bootloader.bin \
@@ -295,7 +324,11 @@ jobs:
           python3 -m esp_idf_nvs_partition_gen generate \
             /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x6000
 
-          esptool.py --port /dev/ttyACM0 --baud 921600 --chip esp32p4 \
+          if [ -z "$CONTROLLER_PORT" ]; then
+            echo "ERROR: No ESP32-P4 controller detected on any serial port"
+            exit 1
+          fi
+          esptool.py --port "$CONTROLLER_PORT" --baud 921600 --chip esp32p4 \
             --before default_reset --after hard_reset \
             write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
             0x2000  build/bootloader/bootloader.bin \
