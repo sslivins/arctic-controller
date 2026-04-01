@@ -103,19 +103,20 @@ jobs:
           SIMULATOR_PORT=""
           for PORT in /dev/ttyACM*; do
             [ -e "$PORT" ] || continue
-            BASENAME=$(basename "$PORT")
-            SYSDEV=$(readlink -f "/sys/class/tty/$BASENAME/device")
-            USB_DEV="$SYSDEV/../.."
-            SERIAL=$(cat "$USB_DEV/serial" 2>/dev/null || echo "")
-            VID=$(cat "$USB_DEV/idVendor" 2>/dev/null || echo "?")
-            PID=$(cat "$USB_DEV/idProduct" 2>/dev/null || echo "?")
-            echo "$PORT: VID=$VID PID=$PID serial=$SERIAL"
-            if [ "$SERIAL" = "$CONTROLLER_USB_SERIAL" ]; then
-              CONTROLLER_PORT="$PORT"
-              echo "  -> matched controller"
-            elif [ "$SERIAL" = "$SIMULATOR_USB_SERIAL" ]; then
-              SIMULATOR_PORT="$PORT"
-              echo "  -> matched simulator"
+            # udevadm reliably finds the USB device attributes regardless of hub depth
+            SERIAL=$(udevadm info -q property --name="$PORT" | grep -oP '^ID_SERIAL_SHORT=\K.*' || echo "")
+            VID=$(udevadm info -q property --name="$PORT" | grep -oP '^ID_VENDOR_ID=\K.*' || echo "?")
+            PID=$(udevadm info -q property --name="$PORT" | grep -oP '^ID_MODEL_ID=\K.*' || echo "?")
+            MODEL=$(udevadm info -q property --name="$PORT" | grep -oP '^ID_MODEL=\K.*' || echo "?")
+            echo "$PORT: VID=$VID PID=$PID model=$MODEL serial=$SERIAL"
+            if [ -n "$SERIAL" ]; then
+              if [ "$SERIAL" = "$CONTROLLER_USB_SERIAL" ]; then
+                CONTROLLER_PORT="$PORT"
+                echo "  -> matched controller"
+              elif [ "$SERIAL" = "$SIMULATOR_USB_SERIAL" ]; then
+                SIMULATOR_PORT="$PORT"
+                echo "  -> matched simulator"
+              fi
             fi
           done
           echo "Controller port: ${CONTROLLER_PORT:-not found}"
