@@ -425,14 +425,7 @@ jobs:
       - name: Run device UI tests
         id: ui_tests
         continue-on-error: true
-        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider -m "not modbus"
-
-      - name: Run Modbus E2E tests
-        id: modbus_tests
-        continue-on-error: true
-        run: python -m pytest tests/device/ -v --tb=short --junitxml=modbus-test-results.xml -p no:cacheprovider -m modbus
-        env:
-          SIMULATOR_URL: http://arctic-simulator-ghr.mi
+        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
 
       - name: Run API contract tests
         id: api_tests
@@ -475,15 +468,6 @@ jobs:
         with:
           name: API Contract Test Results
           path: api-test-results.xml
-          reporter: java-junit
-          use-actions-summary: 'false'
-
-      - name: Publish Modbus E2E test results
-        uses: dorny/test-reporter@v2
-        if: always() && steps.modbus_tests.outcome != 'skipped'
-        with:
-          name: Modbus E2E Test Results
-          path: modbus-test-results.xml
           reporter: java-junit
           use-actions-summary: 'false'
 
@@ -531,7 +515,7 @@ jobs:
 
           any_results = False
           with open(os.environ['GITHUB_OUTPUT'], 'a') as gh:
-              for name, path in [('ui', 'test-results.xml'), ('modbus', 'modbus-test-results.xml'), ('api', 'api-test-results.xml'), ('web', 'web-test-results.xml')]:
+              for name, path in [('ui', 'test-results.xml'), ('api', 'api-test-results.xml'), ('web', 'web-test-results.xml')]:
                   p, f, s = parse_junit(path)
                   total = p + f + s
                   if total > 0:
@@ -553,8 +537,6 @@ jobs:
           ui_color: ${{ steps.test_results.outputs.ui_color }}
           api_msg: ${{ steps.test_results.outputs.api_msg }}
           api_color: ${{ steps.test_results.outputs.api_color }}
-          modbus_msg: ${{ steps.test_results.outputs.modbus_msg }}
-          modbus_color: ${{ steps.test_results.outputs.modbus_color }}
           web_msg: ${{ steps.test_results.outputs.web_msg }}
           web_color: ${{ steps.test_results.outputs.web_color }}
         run: |
@@ -567,7 +549,6 @@ jobs:
           badges = {
               'ui_tests.json':     ('Device UI Tests',     'ui'),
               'api_tests.json':    ('API Contract Tests',  'api'),
-              'modbus_tests.json': ('Modbus E2E Tests',    'modbus'),
               'web_tests.json':    ('Web Dashboard Tests', 'web'),
           }
 
@@ -604,7 +585,7 @@ jobs:
         run: |
           # With continue-on-error on test steps, we need to explicitly fail the job
           FAILED=false
-          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.modbus_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}"; do
+          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}"; do
             if [ "$step_outcome" = "failure" ]; then
               FAILED=true
             fi
