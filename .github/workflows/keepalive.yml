@@ -1,8 +1,12 @@
 name: Keep-Alive
 
-# Resets GitHub's 60-day scheduled-workflow inactivity timer by pushing an
-# empty commit on the 1st of each month. Without this, Device Tests and
-# Renew TLS Certificate get auto-disabled and silently stop running.
+# Resets GitHub's 60-day scheduled-workflow inactivity timer by force-pushing
+# an empty commit to a dedicated `keepalive` branch on the 1st of each month.
+# Without this, Device Tests and Renew TLS Certificate get auto-disabled and
+# silently stop running.
+#
+# We don't push to main because branch protection requires status checks; any
+# branch push counts as repo activity for the inactivity timer.
 
 on:
   schedule:
@@ -17,9 +21,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Push empty commit
+        with:
+          fetch-depth: 0
+      - name: Force-push empty commit to keepalive branch
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "chore: keep-alive [skip ci]"
-          git push
+          git checkout --orphan keepalive
+          git reset --hard
+          git commit --allow-empty -m "chore: keep-alive $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          git push --force origin keepalive
+
