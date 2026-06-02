@@ -61,7 +61,6 @@ idf_component_register(
         "fonts/montserrat_32_misc.c"
         "modbus/modbus_manager.cpp"
         "modbus/arctic_heatpump.cpp"
-        "tuya_codec/tuya_codec.cpp"
         "heatpump_screen.cpp"
         "heatpump_temps_screen.cpp"
         "heatpump_system_screen.cpp"
@@ -77,7 +76,6 @@ idf_component_register(
         "i18n"
         "fonts"
         "modbus"
-        "tuya_codec"
     EMBED_FILES
         "web/index.html.gz"
     REQUIRES
