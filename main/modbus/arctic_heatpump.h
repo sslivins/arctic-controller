@@ -153,4 +153,51 @@ void forcePoll();
 // Allows testing read-only values (temps, readings, errors, status) via REST API.
 bool setDemoField(const char* field, int32_t value);
 
+// ============================================================================
+// External Feed (passive Tuya listen mode)
+// ============================================================================
+// Populates HeatPumpState from register windows decoded off the RS485 bus by
+// the passive Tuya listener, instead of actively polling via Modbus. The Tab5
+// never transmits in this mode. Registers are 1 byte each on the Tuya wire.
+
+// Initialize external-feed mode (creates the state mutex, clears state).
+// Call instead of init() + startPolling() when running the passive listener.
+void initExternalFeed();
+
+// Returns true if running in external-feed (passive listen) mode.
+bool isExternalFeed();
+
+// Feed a decoded register window (reg_base..reg_base+count-1, one byte per
+// register) into the state. Re-syncs HeatPumpState and marks it connected.
+// Safe to call from the listener task.
+void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count);
+
+// Debug/calibration: copy the raw fed register cache into `out` (up to
+// `max_count` entries). Returns the number of registers copied. `base_out`
+// receives the register number of index 0 (DEMO_REG_BASE).
+uint16_t getRawRegisters(uint16_t* out, uint16_t max_count, uint16_t* base_out);
+
+// Diagnostic: a distinct (field_a, field_b) response window observed on the
+// Tuya bus, with the FULL payload (including any window prefix bytes that
+// feedRegisterWindow() strips). Used to hunt for register blocks the codec
+// doesn't yet map (e.g. compressor frequency).
+struct ObservedWindow {
+    uint16_t field_a;       // wire addr field
+    uint16_t field_b;       // wire count field (payload byte length)
+    uint32_t hits;          // times this window has been seen
+    uint32_t last_ms;       // timestamp of most recent sighting
+    uint8_t  known;         // 1 if the codec maps it to a register base
+    uint8_t  payload_len;   // bytes captured (<= sizeof(payload))
+    uint8_t  payload[64];   // most-recent full payload (incl. prefix)
+};
+
+// Record a response window (known or unknown) into the diagnostic catalog.
+// Called by the listener for every parsed response frame.
+void recordObservedWindow(uint16_t field_a, uint16_t field_b, uint8_t known,
+                          const uint8_t* payload, size_t len);
+
+// Copy the observed-window catalog into `out` (up to `max_count`). Returns the
+// number of distinct windows recorded.
+uint16_t getObservedWindows(ObservedWindow* out, uint16_t max_count);
+
 }  // namespace arctic

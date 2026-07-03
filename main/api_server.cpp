@@ -81,6 +81,8 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_get_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req);
 static esp_err_t heatpump_status_handler(httpd_req_t* req);
+static esp_err_t heatpump_raw_handler(httpd_req_t* req);
+static esp_err_t heatpump_windows_handler(httpd_req_t* req);
 static esp_err_t heatpump_control_handler(httpd_req_t* req);
 static esp_err_t heatpump_params_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_param_get_handler(httpd_req_t* req);
@@ -632,6 +634,24 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_uri);
+    
+    // GET /api/heatpump/raw - debug raw register cache dump
+    httpd_uri_t heatpump_raw_uri = {
+        .uri = "/api/heatpump/raw",
+        .method = HTTP_GET,
+        .handler = heatpump_raw_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_raw_uri);
+
+    // GET /api/heatpump/windows - debug observed Tuya window catalog
+    httpd_uri_t heatpump_windows_uri = {
+        .uri = "/api/heatpump/windows",
+        .method = HTTP_GET,
+        .handler = heatpump_windows_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_windows_uri);
     
     // POST /api/heatpump/control
     httpd_uri_t heatpump_control_uri = {
@@ -1961,7 +1981,78 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     
     return ESP_OK;
 }
-// POST /api/heatpump/control
+
+// GET /api/heatpump/raw - Debug: dump the raw fed Tuya register cache as a
+// flat JSON array (index 0 == register `base`). Used for calibrating the
+// ECO-600 Tuya byte->field mapping against live idle/running snapshots.
+static esp_err_t heatpump_raw_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    static uint16_t regs[160];
+    uint16_t base = 0;
+    uint16_t n = arctic::getRawRegisters(regs, sizeof(regs) / sizeof(regs[0]), &base);
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "external_feed", arctic::isExternalFeed());
+    cJSON_AddNumberToObject(root, "base", base);
+    cJSON_AddNumberToObject(root, "count", n);
+    cJSON* arr = cJSON_AddArrayToObject(root, "regs");
+    for (uint16_t i = 0; i < n; ++i) {
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(regs[i]));
+    }
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+
+    return ESP_OK;
+}
+// Diagnostic: dump the catalog of Tuya response windows observed on the bus,
+// including full payloads (with prefix bytes the register feed strips) and any
+// windows the codec does not yet map. Used to locate un-decoded register blocks.
+static esp_err_t heatpump_windows_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    static arctic::ObservedWindow wins[64];
+    uint16_t n = arctic::getObservedWindows(wins, sizeof(wins) / sizeof(wins[0]));
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "count", n);
+    cJSON* arr = cJSON_AddArrayToObject(root, "windows");
+    for (uint16_t i = 0; i < n; ++i) {
+        cJSON* w = cJSON_CreateObject();
+        cJSON_AddNumberToObject(w, "addr", wins[i].field_a);
+        cJSON_AddNumberToObject(w, "len", wins[i].field_b);
+        cJSON_AddBoolToObject(w, "known", wins[i].known != 0);
+        cJSON_AddNumberToObject(w, "hits", wins[i].hits);
+        cJSON_AddNumberToObject(w, "last_ms", wins[i].last_ms);
+        cJSON* p = cJSON_AddArrayToObject(w, "payload");
+        for (uint8_t j = 0; j < wins[i].payload_len; ++j) {
+            cJSON_AddItemToArray(p, cJSON_CreateNumber(wins[i].payload[j]));
+        }
+        cJSON_AddItemToArray(arr, w);
+    }
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+
+    return ESP_OK;
+}
 // Body: {"command": "power", "value": true}
 //       {"command": "mode", "value": "heating"}
 //       {"command": "setpoint", "type": "cooling|heating|hot_water", "value": 25}

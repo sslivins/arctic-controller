@@ -25,6 +25,7 @@
 #include "tls_manager.h"
 #include "modbus/modbus_manager.h"
 #include "modbus/arctic_heatpump.h"
+#include "tuya/tuya_listener.h"
 #include "heatpump_screen.h"
 #include "app_preferences.h"
 #include "event_log.h"
@@ -202,6 +203,18 @@ extern "C" void app_main(void)
         arctic::initDemoState();
         arctic::startPolling();
     } else {
+#if CONFIG_ARCTIC_TUYA_LISTEN
+        // Passive Tuya listen mode: RX-only decode of the existing bus.
+        // Never starts the Modbus master, so the Tab5 stays silent on RS485.
+        arctic::initExternalFeed();
+        esp_err_t tuya_ret = tuya::listener_init();
+        if (tuya_ret == ESP_OK) {
+            tuya::listener_start();
+            mclog::tagInfo(TAG, "Tuya passive listen mode started (RX-only)");
+        } else {
+            mclog::tagError(TAG, "Failed to init Tuya listener: {}", (int)tuya_ret);
+        }
+#else
         esp_err_t modbus_ret = modbus::init();
         if (modbus_ret == ESP_OK) {
             arctic::init();
@@ -210,6 +223,7 @@ extern "C" void app_main(void)
         } else {
             mclog::tagError(TAG, "Failed to initialize Modbus: {}", (int)modbus_ret);
         }
+#endif
     }
 
     // Initialize authentication manager

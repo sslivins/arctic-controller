@@ -24,6 +24,7 @@ static SemaphoreHandle_t s_state_mutex = nullptr;
 static TaskHandle_t s_poll_task = nullptr;
 static bool s_polling_enabled = false;
 static bool s_demo_mode = false;
+static bool s_feed_mode = false;  // Passive Tuya external-feed mode
 
 // Connection state tracking
 static const uint8_t MAX_CONSECUTIVE_FAILURES = 5;
@@ -55,12 +56,12 @@ static uint32_t getTimeMs() {
 // In demo mode, poll functions read from this array instead of Modbus.
 // Setters write here instead of via Modbus. Covers addresses 2000-2138.
 static const uint16_t DEMO_REG_BASE = 2000;
-static const uint16_t DEMO_REG_COUNT = 139; // 2000..2138 inclusive
+static const uint16_t DEMO_REG_COUNT = 143; // 2000..2142 inclusive (telemetry window reaches reg2142)
 static uint16_t s_demo_regs[DEMO_REG_COUNT];
 
-// Read multiple registers - from demo array in demo mode, Modbus otherwise
+// Read multiple registers - from demo array in demo/feed mode, Modbus otherwise
 static esp_err_t readRegisters(uint16_t address, uint16_t count, uint16_t* data) {
-    if (s_demo_mode) {
+    if (s_demo_mode || s_feed_mode) {
         uint16_t offset = address - DEMO_REG_BASE;
         memcpy(data, &s_demo_regs[offset], count * sizeof(uint16_t));
         return ESP_OK;
@@ -406,6 +407,264 @@ bool isDemoMode() {
     return s_demo_mode;
 }
 
+// ============================================================================
+// External Feed (passive Tuya listen mode)
+// ============================================================================
+
+void initExternalFeed() {
+    if (s_state_mutex == nullptr) {
+        s_state_mutex = xSemaphoreCreateMutex();
+    }
+    s_feed_mode = true;
+
+    memset(s_demo_regs, 0, sizeof(s_demo_regs));
+
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_state = HeatPumpState();  // Reset to defaults (connected=false until first feed)
+    xSemaphoreGive(s_state_mutex);
+
+    s_was_connected = false;
+    ESP_LOGI(TAG, "External feed mode initialized (passive Tuya)");
+}
+
+bool isExternalFeed() {
+    return s_feed_mode;
+}
+
+// Interpret a raw Tuya register byte as a signed 8-bit °C temperature so that
+// sub-zero outdoor readings (e.g. the -3 °C the supplier reported) decode
+// correctly instead of wrapping to ~253.
+static inline int16_t s8(uint16_t v) {
+    return static_cast<int16_t>(static_cast<int8_t>(v & 0xFF));
+}
+
+// Empirically-derived Macon (OEM) Tuya register->field mapping (index = reg-2000).
+// Confirmed against the unit's official o/A parameter-code legend cross-checked
+// with live ground truth (idle + running pump->fan->compressor staged states):
+//   TEMPERATURES (signed int8, whole °C):
+//     reg2008 = o1 water tank
+//     reg2132 = o3 water outlet/supply    (idle 28 -> running 40)
+//     reg2133 = o2 water inlet/return     (idle 28 -> running 36)
+//     reg2134 = o4 ambient/outdoor
+//     reg2135 = A6 cool coil
+//     reg2136 = A3 suction
+//     reg2137 = A2 coil
+//     reg2138 = A1 discharge
+//     reg2113 = A8 IPM module
+//   SETPOINT: reg2012 = hot-water setpoint
+//   STATUS:   reg2130 bitfield  (0x08 = circ pump, 0x04 = compressor)
+//   ELECTRICAL (register value == A-code menu value, 1:1):
+//     reg2000 = A4 AC input current    reg2101 = A13 AC input voltage
+//     reg2001 = A7 DC bus voltage(*10) reg2104 = A5 main EEV degree
+//     reg2003 = A10 DC motor (fan) speed
+//     reg2141 = A14 compressor frequency (Hz)   [telemetry window reaches 2142]
+//   power_consumption (V*I/10) reproduces A9 real-time power.
+// High/low pressure (A11/A12) read static nonsense values (-6 / 3), i.e.
+// uninstalled sensors on this DHW unit, so left cleared. The fault/protection
+// register is reg2128 (located via a live P01 water-flow capture); its bit
+// ordering differs from the legacy Arctic error2 table, so only bits confirmed
+// against a real fault are decoded (bit7=0x80 => P01 water flow).
+static void applyMaconMapping() {
+    auto R = [](uint16_t regnum) -> uint16_t {
+        int32_t idx = static_cast<int32_t>(regnum) - static_cast<int32_t>(DEMO_REG_BASE);
+        if (idx < 0 || idx >= static_cast<int32_t>(DEMO_REG_COUNT)) return 0;
+        return s_demo_regs[idx];
+    };
+
+    const uint16_t status_byte  = R(2130);
+    const bool pump_on          = (status_byte & 0x08) != 0;
+    const bool compressor_on    = (status_byte & 0x04) != 0;
+    const uint16_t fan_raw      = R(2003);
+    const bool fan_on           = fan_raw > 0;
+    const bool running          = status_byte != 0;
+
+    // Synthesize the status1 bitfield the HeatPumpState helpers expect from the
+    // real Macon status byte so isCompressorRunning()/isWaterPumpRunning()/
+    // isFanRunning()/getFanSpeedLevel() keep working unchanged.
+    uint16_t st1 = 0;
+    if (running)       st1 |= status1::UNIT_ON;
+    if (compressor_on) st1 |= status1::COMPRESSOR;
+    if (pump_on)       st1 |= status1::WATER_PUMP;
+    if (fan_on) {
+        if (fan_raw >= 60)      st1 |= status1::FAN_HIGH;
+        else if (fan_raw >= 30) st1 |= status1::FAN_MED;
+        else                    st1 |= status1::FAN_LOW;
+    }
+
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+
+    // Confirmed temperatures (whole °C, signed byte so sub-zero outdoor decodes).
+    s_state.water_tank_temp      = s8(R(2008));  // o1
+    s_state.outlet_water_temp    = s8(R(2132));  // o3 (supply)
+    s_state.inlet_water_temp     = s8(R(2133));  // o2 (return)
+    s_state.outdoor_ambient_temp = s8(R(2134));  // o4
+    s_state.indoor_coil_temp     = s8(R(2135));  // A6 cool coil
+    s_state.ipm_temp             = s8(R(2113));  // A8 IPM module
+
+    // Refrigerant-cycle temps, confirmed against the A1/A2/A3 legend codes and
+    // their compressor-on/off thermal signature (running->idle diff) forming a
+    // consistent cycle: discharge(2138) > cool coil(2135) > suction(2136) >
+    // coil(2137).
+    s_state.discharge_temp    = s8(R(2138));  // A1 discharge (hot gas)
+    s_state.suction_temp      = s8(R(2136));  // A3 suction
+    s_state.outdoor_coil_temp = s8(R(2137));  // A2 coil
+
+    // Confirmed setpoint.
+    s_state.hot_water_setpoint = static_cast<int16_t>(R(2012));
+
+    // Running state + readings.
+    s_state.status1         = st1;
+    s_state.status2         = 0;
+    s_state.unit_on         = running;
+    // This is a heating unit whose heat/cool direction is set by a reversing
+    // valve, not a user-selectable mode. Report heating statically; mapping the
+    // reversing-valve status bit for true heat/cool needs a cooling sample.
+    s_state.working_mode    = WorkingMode::FLOOR_HEATING;
+    s_state.fan_speed       = fan_raw;              // A10 DC motor speed
+
+    // Electrical readings, confirmed by a synchronized register+menu capture
+    // while running (register value == the A-code menu value, 1:1):
+    //   reg2000 = A4 AC input current   (0 idle -> 12 running)
+    //   reg2101 = A13 AC input voltage  (~23 => 230 V)
+    //   reg2001 = A7 DC bus voltage     (menu 36 => 360 V; getDcVoltageV()/10)
+    //   reg2104 = A5 main EEV degree
+    // The pre-existing power_consumption = ac_voltage*ac_current/10 reproduces
+    // A9 real-time power (23*12/10 ≈ 28), validating both scalings.
+    s_state.ac_current         = R(2000);
+    s_state.ac_voltage         = R(2101);
+    s_state.dc_voltage         = static_cast<uint16_t>(R(2001) * 10);
+    s_state.primary_eev_opening = R(2104);
+
+    // Compressor operating frequency (A14). Lives at reg2141 in the telemetry
+    // window (2100..2142) — it was previously invisible because the register
+    // cache stopped at reg2138, so reg2139..2142 were decoded then dropped.
+    // Confirmed: reg2141 = 55 while running (matched a live A14=55 menu read)
+    // and 0 with the compressor off.
+    s_state.compressor_freq = R(2141);
+
+    // Macon fault/protection register = reg2128 (located via a live P01 capture:
+    // it flipped 0 -> 0x80 the instant the water-flow fault was triggered, while
+    // the compressor was already off, and latched there; it reads 0 when healthy).
+    // IMPORTANT: the Macon bit ordering does NOT match the legacy Arctic error2
+    // table. Live-confirmed: reg2128 bit7 (0x80) = water-flow protection = P01,
+    // whereas in the legacy table 0x80 was P06 (low pressure) and water-flow/P01
+    // was bit8 (0x100). So we translate the *confirmed* Macon bit to its semantic
+    // legacy error2 mask, letting the existing P-code/UI pipeline report P01
+    // correctly. Other Macon fault bits are not yet observed, so they are left
+    // unmapped rather than decoded through the (mismatched) legacy table, which
+    // would surface wrong P-codes.
+    const uint8_t macon_fault = static_cast<uint8_t>(R(2128));
+    uint16_t e2 = 0;
+    if (macon_fault & 0x80) e2 |= error2::WATER_FLOW; // reg2128 bit7 = P01 water flow (confirmed live)
+    s_state.error1 = 0;
+    s_state.error2 = e2;
+
+    xSemaphoreGive(s_state_mutex);
+}
+
+uint16_t getRawRegisters(uint16_t* out, uint16_t max_count, uint16_t* base_out) {
+    if (base_out) {
+        *base_out = DEMO_REG_BASE;
+    }
+    if (out == nullptr || max_count == 0) {
+        return 0;
+    }
+    uint16_t n = (max_count < DEMO_REG_COUNT) ? max_count : DEMO_REG_COUNT;
+    for (uint16_t i = 0; i < n; ++i) {
+        out[i] = s_demo_regs[i];
+    }
+    return n;
+}
+
+// ---------------------------------------------------------------------------
+// Observed-window diagnostic catalog
+// ---------------------------------------------------------------------------
+static constexpr uint16_t OBS_WIN_MAX = 64;
+static ObservedWindow s_obs_windows[OBS_WIN_MAX] = {};
+static uint16_t       s_obs_window_count = 0;
+static portMUX_TYPE   s_obs_mux = portMUX_INITIALIZER_UNLOCKED;
+
+void recordObservedWindow(uint16_t field_a, uint16_t field_b, uint8_t known,
+                          const uint8_t* payload, size_t len) {
+    const uint32_t now = getTimeMs();
+    const uint8_t cap = (uint8_t)sizeof(s_obs_windows[0].payload);
+    const uint8_t n = (uint8_t)((len < cap) ? len : cap);
+
+    portENTER_CRITICAL(&s_obs_mux);
+    ObservedWindow* slot = nullptr;
+    for (uint16_t i = 0; i < s_obs_window_count; ++i) {
+        if (s_obs_windows[i].field_a == field_a &&
+            s_obs_windows[i].field_b == field_b) {
+            slot = &s_obs_windows[i];
+            break;
+        }
+    }
+    if (slot == nullptr && s_obs_window_count < OBS_WIN_MAX) {
+        slot = &s_obs_windows[s_obs_window_count++];
+        slot->field_a = field_a;
+        slot->field_b = field_b;
+        slot->hits    = 0;
+    }
+    if (slot != nullptr) {
+        slot->known       = known;
+        slot->hits       += 1;
+        slot->last_ms     = now;
+        slot->payload_len = n;
+        for (uint8_t i = 0; i < n && payload != nullptr; ++i) {
+            slot->payload[i] = payload[i];
+        }
+    }
+    portEXIT_CRITICAL(&s_obs_mux);
+}
+
+uint16_t getObservedWindows(ObservedWindow* out, uint16_t max_count) {
+    if (out == nullptr || max_count == 0) return 0;
+    portENTER_CRITICAL(&s_obs_mux);
+    uint16_t n = (s_obs_window_count < max_count) ? s_obs_window_count : max_count;
+    for (uint16_t i = 0; i < n; ++i) {
+        out[i] = s_obs_windows[i];
+    }
+    portEXIT_CRITICAL(&s_obs_mux);
+    return n;
+}
+
+void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
+    if (!s_feed_mode || regs == nullptr || count == 0) {
+        return;
+    }
+
+    // Copy the window's 1-byte registers into the register cache (bounds-checked).
+    for (size_t i = 0; i < count; ++i) {
+        int32_t idx = (int32_t)reg_base + (int32_t)i - (int32_t)DEMO_REG_BASE;
+        if (idx >= 0 && idx < (int32_t)DEMO_REG_COUNT) {
+            s_demo_regs[idx] = regs[i];
+        }
+    }
+
+    // Map the cache into HeatPumpState using the empirically-derived ECO-600
+    // Tuya layout (see applyMaconMapping). The Arctic/ECO-600 doc-based poll parsers do
+    // NOT apply here: the real byte offsets differ and the doc's status/error
+    // registers (2135-2138) are actually live temperature bytes on this unit.
+    applyMaconMapping();
+
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_state.connected = true;
+    s_state.last_successful_read_ms = getTimeMs();
+    s_state.last_attempt_ms = s_state.last_successful_read_ms;
+    s_state.consecutive_failures = 0;
+    uint16_t err1 = s_state.error1;
+    uint16_t err2 = s_state.error2;
+    xSemaphoreGive(s_state_mutex);
+
+    updateErrorHistory(err1, err2);
+
+    if (!s_was_connected) {
+        ESP_LOGI(TAG, "Heat pump connected (passive feed)");
+        s_was_connected = true;
+        event_log_record(EVENT_CONNECTED, 0);
+    }
+}
+
 void startPolling() {
     if (s_poll_task != nullptr) {
         ESP_LOGW(TAG, "Polling already running");
@@ -705,3 +964,4 @@ bool setDemoField(const char* field, int32_t value) {
 }
 
 }  // namespace arctic
+

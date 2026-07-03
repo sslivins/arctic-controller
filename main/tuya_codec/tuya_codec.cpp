@@ -90,12 +90,9 @@ ParseResult parse_frame(const uint8_t *buf, size_t buf_len, ParsedFrame &out)
     if (!header_dir_ok(dir)) return ParseResult::BAD_DIR;
     if (!header_fc_ok(fc))   return ParseResult::BAD_FC;
 
-    const RegWindow *win = find_window(a, b);
-    if (!win) return ParseResult::UNKNOWN_WINDOW;
-
     const size_t flen = frame_total_len(dir, b);
     if (flen == 0 || flen > MAX_FRAME_LEN) {
-        return ParseResult::UNKNOWN_WINDOW;  // implausible header
+        return ParseResult::BAD_DIR;         // implausible length
     }
     if (buf_len < flen) {
         return ParseResult::TRUNCATED;
@@ -107,19 +104,27 @@ ParseResult parse_frame(const uint8_t *buf, size_t buf_len, ParsedFrame &out)
         return ParseResult::BAD_CHECKSUM;
     }
 
-    out.dir         = dir;
-    out.fc          = fc;
-    out.field_a     = a;
-    out.field_b     = b;
-    out.window      = win;
-    out.frame_len   = flen;
-    out.checksum    = chk_actual;
+    // Framing + checksum are valid. Populate common fields now so that even an
+    // unrecognised window is fully bounded and its payload can be inspected by
+    // the caller (used to discover register blocks not yet in KNOWN_WINDOWS).
+    out.dir       = dir;
+    out.fc        = fc;
+    out.field_a   = a;
+    out.field_b   = b;
+    out.frame_len = flen;
+    out.checksum  = chk_actual;
     if (dir == DIR_RESPONSE) {
         out.payload     = buf + HDR_LEN;
         out.payload_len = b;
     } else {
         out.payload     = nullptr;
         out.payload_len = 0;
+    }
+
+    const RegWindow *win = find_window(a, b);
+    out.window = win;
+    if (!win) {
+        return ParseResult::UNKNOWN_WINDOW;  // valid frame, unmapped window
     }
     return ParseResult::OK;
 }
@@ -193,12 +198,12 @@ size_t find_frame_start(const uint8_t *buf, size_t buf_len)
 
         const uint8_t  dir = buf[i + 2];
         const uint8_t  fc  = buf[i + 3];
-        const uint16_t a   = static_cast<uint16_t>((buf[i + 4] << 8) | buf[i + 5]);
-        const uint16_t b   = static_cast<uint16_t>((buf[i + 6] << 8) | buf[i + 7]);
 
         if (!header_dir_ok(dir)) continue;
         if (!header_fc_ok(fc))   continue;
-        if (!find_window(a, b))  continue;
+        // Accept any valid dir/fc header regardless of window. The checksum
+        // validation in parse_frame() rejects false 55 AA matches, and this lets
+        // us lock onto (and then catalog) windows not yet in KNOWN_WINDOWS.
 
         return i;
     }

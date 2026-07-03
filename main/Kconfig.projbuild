@@ -10,4 +10,16 @@ menu "Arctic Controller"
             These endpoints are intended for automated testing only
             and should be disabled in production builds.
 
+    config ARCTIC_TUYA_LISTEN
+        bool "Passive Tuya bus listen mode (RX-only, no bus TX)"
+        default y
+        help
+            Bench/validation mode. Instead of starting the Modbus RTU master,
+            the controller splices onto the existing controller<->heat pump
+            RS485 bus in RECEIVE-ONLY mode and decodes the Tuya MCU framing
+            (55 AA ...) using tuya_codec. The RS485 direction pin is held low
+            and the UART TX line is left unrouted, so the Tab5 never transmits
+            and is electrically invisible on the bus. Safe to run alongside the
+            real controller. Wire settings: 4800 baud 8-E-1.
+
 endmenu
