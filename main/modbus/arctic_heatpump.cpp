@@ -447,15 +447,17 @@ static inline int16_t s8(uint16_t v) {
 //     reg2133 = o2 water inlet/return     (idle 28 -> running 36)
 //     reg2134 = o4 ambient/outdoor
 //     reg2135 = A6 cool coil
-//     reg2136 = A3 suction
-//     reg2137 = A2 coil
+//     reg2136 = A2 coil
+//     reg2137 = A3 suction
 //     reg2138 = A1 discharge
 //     reg2113 = A8 IPM module
 //   SETPOINT: reg2012 = hot-water setpoint
-//   STATUS:   reg2130 bitfield  (0x08 = circ pump, 0x04 = compressor)
+//   STATUS:   reg2007 run-state (0x20 = hot-water ON; low/high = P-faults),
+//             reg2130 icon bits #1 (0x01 heating, 0x04 compressor, 0x08 pump, 0x20 hours),
+//             reg2129 icon bits #2 (0x02 defrost, 0x10 fan)
 //   ELECTRICAL (register value == A-code menu value, 1:1):
 //     reg2000 = A4 AC input current    reg2101 = A13 AC input voltage
-//     reg2001 = A7 DC bus voltage(*10) reg2104 = A5 main EEV degree
+//     reg2001 = A7 DC bus voltage(*10) reg2140 = A5 main EEV degree
 //     reg2003 = A10 DC motor (fan) speed
 //     reg2141 = A14 compressor frequency (Hz)   [telemetry window reaches 2142]
 //   power_consumption (V*I/10) reproduces A9 real-time power.
@@ -471,12 +473,22 @@ static void applyMaconMapping() {
         return s_demo_regs[idx];
     };
 
-    const uint16_t status_byte  = R(2130);
-    const bool pump_on          = (status_byte & 0x08) != 0;
-    const bool compressor_on    = (status_byte & 0x04) != 0;
-    const uint16_t fan_raw      = R(2003);
-    const bool fan_on           = fan_raw > 0;
-    const bool running          = status_byte != 0;
+    // OEM display registers (ground-truthed live 2026-07-04 against the real unit):
+    //   reg2007 = run-state/fault enum (0x20 = hot-water running; low/high = P-faults)
+    //   reg2130 = icon bitfield #1 (bit0 heating, bit2 compressor, bit3 pump, bit5 hours)
+    //   reg2129 = icon bitfield #2 (bit1 defrost, bit4 fan)
+    const uint16_t run_state    = R(2007);
+    const uint16_t icon_bits1   = R(2130);
+    const uint16_t icon_bits2   = R(2129);
+    const bool pump_on          = (icon_bits1 & 0x08) != 0;  // reg2130 bit3
+    const bool compressor_on    = (icon_bits1 & 0x04) != 0;  // reg2130 bit2
+    const bool defrost_on       = (icon_bits2 & 0x02) != 0;  // reg2129 bit1
+    const bool fan_on           = (icon_bits2 & 0x10) != 0;  // reg2129 bit4
+    const uint16_t fan_raw      = R(2003);                   // A10 DC motor speed (level)
+    // ON follows the mainboard run-state (reg2007), NOT reg2130 — the real unit runs
+    // with reg2130=0. 0x20 (hot-water running) is the only confirmed run code on this
+    // DHW controller; other modes' run codes are not yet ground-truthed.
+    const bool running          = (run_state == 0x20);
 
     // Synthesize the status1 bitfield the HeatPumpState helpers expect from the
     // real Macon status byte so isCompressorRunning()/isWaterPumpRunning()/
@@ -503,18 +515,18 @@ static void applyMaconMapping() {
 
     // Refrigerant-cycle temps, confirmed against the A1/A2/A3 legend codes and
     // their compressor-on/off thermal signature (running->idle diff) forming a
-    // consistent cycle: discharge(2138) > cool coil(2135) > suction(2136) >
-    // coil(2137).
+    // consistent cycle: discharge(2138) > cool coil(2135) > suction(2137) >
+    // coil(2136).
     s_state.discharge_temp    = s8(R(2138));  // A1 discharge (hot gas)
-    s_state.suction_temp      = s8(R(2136));  // A3 suction
-    s_state.outdoor_coil_temp = s8(R(2137));  // A2 coil
+    s_state.suction_temp      = s8(R(2137));  // A3 suction (reg2137; was wrongly 2136)
+    s_state.outdoor_coil_temp = s8(R(2136));  // A2 coil    (reg2136; was wrongly 2137)
 
     // Confirmed setpoint.
     s_state.hot_water_setpoint = static_cast<int16_t>(R(2012));
 
     // Running state + readings.
     s_state.status1         = st1;
-    s_state.status2         = 0;
+    s_state.status2         = defrost_on ? status2::DEFROSTING : 0;
     s_state.unit_on         = running;
     // This is a heating unit whose heat/cool direction is set by a reversing
     // valve, not a user-selectable mode. Report heating statically; mapping the
@@ -527,13 +539,13 @@ static void applyMaconMapping() {
     //   reg2000 = A4 AC input current   (0 idle -> 12 running)
     //   reg2101 = A13 AC input voltage  (~23 => 230 V)
     //   reg2001 = A7 DC bus voltage     (menu 36 => 360 V; getDcVoltageV()/10)
-    //   reg2104 = A5 main EEV degree
+    //   reg2140 = A5 main EEV degree
     // The pre-existing power_consumption = ac_voltage*ac_current/10 reproduces
     // A9 real-time power (23*12/10 ≈ 28), validating both scalings.
     s_state.ac_current         = R(2000);
     s_state.ac_voltage         = R(2101);
     s_state.dc_voltage         = static_cast<uint16_t>(R(2001) * 10);
-    s_state.primary_eev_opening = R(2104);
+    s_state.primary_eev_opening = R(2140);
 
     // Compressor operating frequency (A14). Lives at reg2141 in the telemetry
     // window (2100..2142) — it was previously invisible because the register
