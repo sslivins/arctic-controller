@@ -452,7 +452,7 @@ static inline int16_t s8(uint16_t v) {
 //     reg2138 = A1 discharge
 //     reg2113 = A8 IPM module
 //   SETPOINT: reg2012 = hot-water setpoint
-//   STATUS:   reg2007 run-state (0x20 = hot-water ON; low/high = P-faults),
+//   STATUS:   reg2007 run/fault bitfield (0x20 = hot-water ON; bits0-3 = ΔT/temp faults),
 //             reg2130 icon bits #1 (0x01 heating, 0x04 compressor, 0x08 pump, 0x20 hours),
 //             reg2129 icon bits #2 (0x02 defrost, 0x10 fan)
 //   ELECTRICAL (register value == A-code menu value, 1:1):
@@ -463,9 +463,9 @@ static inline int16_t s8(uint16_t v) {
 //   power_consumption (V*I/10) reproduces A9 real-time power.
 // High/low pressure (A11/A12) read static nonsense values (-6 / 3), i.e.
 // uninstalled sensors on this DHW unit, so left cleared. The fault/protection
-// register is reg2128 (located via a live P01 water-flow capture); its bit
-// ordering differs from the legacy Arctic error2 table, so only bits confirmed
-// against a real fault are decoded (bit7=0x80 => P01 water flow).
+// registers are reg2007 (holding) + the INPUT cluster reg2125-2128, all mapped
+// live 2026-07-05; their bit ordering differs from the legacy Arctic error
+// tables, so each confirmed bit is translated to its semantic legacy mask.
 static void applyMaconMapping() {
     auto R = [](uint16_t regnum) -> uint16_t {
         int32_t idx = static_cast<int32_t>(regnum) - static_cast<int32_t>(DEMO_REG_BASE);
@@ -474,7 +474,7 @@ static void applyMaconMapping() {
     };
 
     // OEM display registers (ground-truthed live 2026-07-04 against the real unit):
-    //   reg2007 = run-state/fault enum (0x20 = hot-water running; low/high = P-faults)
+    //   reg2007 = run/fault bitfield (0x20 = hot-water running; bits0-3 = ΔT/temp faults)
     //   reg2130 = icon bitfield #1 (bit0 heating, bit2 compressor, bit3 pump, bit5 hours)
     //   reg2129 = icon bitfield #2 (bit1 defrost, bit4 fan)
     const uint16_t run_state    = R(2007);
@@ -554,21 +554,67 @@ static void applyMaconMapping() {
     // and 0 with the compressor off.
     s_state.compressor_freq = R(2141);
 
-    // Macon fault/protection register = reg2128 (located via a live P01 capture:
-    // it flipped 0 -> 0x80 the instant the water-flow fault was triggered, while
-    // the compressor was already off, and latched there; it reads 0 when healthy).
-    // IMPORTANT: the Macon bit ordering does NOT match the legacy Arctic error2
-    // table. Live-confirmed: reg2128 bit7 (0x80) = water-flow protection = P01,
-    // whereas in the legacy table 0x80 was P06 (low pressure) and water-flow/P01
-    // was bit8 (0x100). So we translate the *confirmed* Macon bit to its semantic
-    // legacy error2 mask, letting the existing P-code/UI pipeline report P01
-    // correctly. Other Macon fault bits are not yet observed, so they are left
-    // unmapped rather than decoded through the (mismatched) legacy table, which
-    // would surface wrong P-codes.
-    const uint8_t macon_fault = static_cast<uint8_t>(R(2128));
+    // Macon fault/protection registers = reg2007 (holding run/fault bits) plus
+    // the INPUT fault cluster reg2125-2128, all mapped live 2026-07-05 one bit at
+    // a time against the OEM LCD + Smart Life app and cross-referenced to the
+    // official Arctic fault catalog. The Macon bit ordering does NOT match the
+    // legacy Arctic error1/error2 tables, so each confirmed Macon bit is
+    // translated to its *semantic* legacy mask, letting the existing P-code/UI
+    // pipeline report the correct fault. Device-only codes with no legacy slot
+    // (P10, P30, E03) are intentionally left undecoded.
+    const uint8_t f_run  = static_cast<uint8_t>(run_state);  // reg2007
+    const uint8_t f_ee   = static_cast<uint8_t>(R(2125));    // sensor/EE/comm
+    const uint8_t f_comp = static_cast<uint8_t>(R(2126));    // sensor/comm/compressor
+    const uint8_t f_elec = static_cast<uint8_t>(R(2127));    // electrical/power-stage
+    const uint8_t f_ref  = static_cast<uint8_t>(R(2128));    // refrigerant/protection
+    uint16_t e1 = 0;
     uint16_t e2 = 0;
-    if (macon_fault & 0x80) e2 |= error2::WATER_FLOW; // reg2128 bit7 = P01 water flow (confirmed live)
-    s_state.error1 = 0;
+
+    // reg2007 (holding) — differential/temp-diff faults (bit5=0x20 is the RUN
+    // indicator, decoded above as `running`, and is NOT a fault).
+    if (f_run & 0x01) e2 |= error2::WATER_TEMP_DIFF;   // P15 inlet/outlet ΔT large
+    if (f_run & 0x02) e2 |= error2::LOW_OUTLET_TEMP;   // P16 outlet water temp low
+    if (f_run & 0x04) e2 |= error2::COMP_PRESS_DIFF;   // FE start diff-pressure prot
+    if (f_run & 0x08) e2 |= error2::COMP_PRESS_DIFF;   // FF run diff-pressure prot
+
+    // reg2128 — refrigerant / P-codes.
+    if (f_ref & 0x01) e2 |= error2::LOW_PRESSURE;      // P06 low pressure
+    if (f_ref & 0x02) e2 |= error2::COOLING_HIGH_COIL; // P27 coil overheat
+    if (f_ref & 0x04) e2 |= error2::LOW_AMBIENT_TEMP;  // PC ambient protection
+    // bit3 (0x08) = P10 — device code, no legacy slot.
+    // bit4 (0x10) = P30 antifreeze — no clean legacy slot.
+    if (f_ref & 0x20) e1 |= error1::OUTDOOR_COIL_SENS; // E05 coil sensor
+    if (f_ref & 0x80) e2 |= error2::WATER_FLOW;        // P01 water flow (confirmed live)
+
+    // reg2127 — electrical / r-codes + P02/P11.
+    if (f_elec & 0x02) e2 |= error2::AC_CURRENT_PROT;    // P19 AC current
+    if (f_elec & 0x04) e2 |= error2::COMP_CURRENT_PROT;  // r06 comp phase current
+    if (f_elec & 0x08) e1 |= error1::AC_VOLTAGE_PROT;    // r10 AC voltage
+    if (f_elec & 0x10) e2 |= error2::BUS_VOLTAGE_PROT;   // r11 DC bus voltage
+    if (f_elec & 0x20) e2 |= error2::IPM_HIGH_TEMP;      // r05 IPM temp
+    if (f_elec & 0x40) e2 |= error2::HIGH_DISCHARGE_TEMP;// P11 high discharge temp
+    if (f_elec & 0x80) e2 |= error2::HIGH_PRESSURE;      // P02 high pressure
+
+    // reg2126 — sensor / comm / compressor.
+    if (f_comp & 0x01) e1 |= error1::COMP_START;         // r02 compressor start
+    if (f_comp & 0x02) e1 |= error1::INDOOR_OUTDOOR_COMM;// E26 in/out comm
+    if (f_comp & 0x04) e1 |= error1::IPM_ERROR;          // r01 IPM
+    if (f_comp & 0x10) e1 |= error1::DISCHARGE_SENS;     // E01 discharge sensor
+    if (f_comp & 0x20) e1 |= error1::SUCTION_SENS;       // E09 suction sensor
+    if (f_comp & 0x40) e1 |= error1::OUTDOOR_COIL_SENS;  // E05 coil sensor
+    if (f_comp & 0x80) e1 |= error1::OUTDOOR_TEMP_SENS;  // E22 ambient sensor
+
+    // reg2125 — sensor / EE / comm E-codes.
+    if (f_ee & 0x01) e1 |= error1::OUTDOOR_EE;           // E28 outdoor EE
+    if (f_ee & 0x02) e1 |= error1::INLET_TEMP_SENS;      // E19 inlet sensor
+    if (f_ee & 0x04) e1 |= error1::OUTLET_TEMP_SENS;     // E18 outlet sensor
+    if (f_ee & 0x08) e1 |= error1::INDOOR_COIL_SENS;     // E13 cool-coil sensor
+    // bit4 (0x10) = E03 — device code, no legacy slot.
+    if (f_ee & 0x20) e1 |= error1::INDOOR_EE;            // E28 indoor EE
+    if (f_ee & 0x40) e1 |= error1::COMP_DRIVE;           // E27 driver comm
+    if (f_ee & 0x80) e1 |= error1::WIRED_CTRL_COMM;      // E21 controller comm
+
+    s_state.error1 = e1;
     s_state.error2 = e2;
 
     xSemaphoreGive(s_state_mutex);
