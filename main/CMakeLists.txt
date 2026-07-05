@@ -61,7 +61,6 @@ idf_component_register(
         "fonts/montserrat_32_misc.c"
         "modbus/modbus_manager.cpp"
         "modbus/arctic_heatpump.cpp"
-        "tuya_codec/tuya_codec.cpp"
         "tuya/tuya_listener.cpp"
         "heatpump_screen.cpp"
         "heatpump_temps_screen.cpp"
@@ -78,7 +77,6 @@ idf_component_register(
         "i18n"
         "fonts"
         "modbus"
-        "tuya_codec"
         "tuya"
     EMBED_FILES
         "web/index.html.gz"
@@ -101,4 +99,5 @@ idf_component_register(
         esp_http_client
         esp-tls
         mbedtls
+        arctic-macon
 )
