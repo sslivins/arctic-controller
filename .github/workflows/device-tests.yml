@@ -531,6 +531,7 @@ jobs:
 
       - name: Update all test badges
         if: always() && steps.test_results.outputs.has_results == 'true'
+        continue-on-error: true  # cosmetic gist push; a bad/expired GIST_SECRET must never gate merges
         env:
           GIST_TOKEN: ${{ secrets.GIST_SECRET }}
           ui_msg: ${{ steps.test_results.outputs.ui_msg }}
