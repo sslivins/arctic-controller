@@ -6,6 +6,7 @@
 #include "modbus_manager.h"
 #include "heatpump_errors.h"
 #include "event_log.h"
+#include "macon_state.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -431,13 +432,6 @@ bool isExternalFeed() {
     return s_feed_mode;
 }
 
-// Interpret a raw Tuya register byte as a signed 8-bit °C temperature so that
-// sub-zero outdoor readings (e.g. the -3 °C the supplier reported) decode
-// correctly instead of wrapping to ~253.
-static inline int16_t s8(uint16_t v) {
-    return static_cast<int16_t>(static_cast<int8_t>(v & 0xFF));
-}
-
 // Empirically-derived Macon (OEM) Tuya register->field mapping (index = reg-2000).
 // Confirmed against the unit's official o/A parameter-code legend cross-checked
 // with live ground truth (idle + running pump->fan->compressor staged states):
@@ -466,93 +460,72 @@ static inline int16_t s8(uint16_t v) {
 // registers are reg2007 (holding) + the INPUT cluster reg2125-2128, all mapped
 // live 2026-07-05; their bit ordering differs from the legacy Arctic error
 // tables, so each confirmed bit is translated to its semantic legacy mask.
+// Adapt the library's native MaconMode to the controller's legacy WorkingMode
+// enum. NEVER cast: the raw wire values (0=heating, 4=cooling) differ from the
+// legacy enum values (COOLING=0, FLOOR_HEATING=1). Unknown falls back to
+// heating — this is a heating unit whose direction is set by a reversing valve,
+// so heating is the safe default when the reg2049 reading is not trusted.
+static WorkingMode to_working_mode(MaconMode m) {
+    switch (m) {
+        case MaconMode::Cooling: return WorkingMode::COOLING;
+        case MaconMode::Heating: return WorkingMode::FLOOR_HEATING;
+        default:                 return WorkingMode::FLOOR_HEATING;
+    }
+}
+
 static void applyMaconMapping() {
-    auto R = [](uint16_t regnum) -> uint16_t {
-        int32_t idx = static_cast<int32_t>(regnum) - static_cast<int32_t>(DEMO_REG_BASE);
-        if (idx < 0 || idx >= static_cast<int32_t>(DEMO_REG_COUNT)) return 0;
-        return s_demo_regs[idx];
-    };
+    // The arctic-macon library owns the register->field mapping: it knows which
+    // wire register carries which field and how to interpret it. This function
+    // now only (a) drives that decode over the fed register cache and (b) adapts
+    // the native MaconState into the controller's legacy HeatPumpState (status
+    // bitfields, WorkingMode enum, error masks).
+    MaconState ms;
+    decode_state(DEMO_REG_BASE, s_demo_regs, DEMO_REG_COUNT, &ms);
 
-    // OEM display registers (ground-truthed live 2026-07-04 against the real unit):
-    //   reg2007 = run/fault bitfield (0x20 = hot-water running; bits0-3 = ΔT/temp faults)
-    //   reg2130 = icon bitfield #1 (bit0 heating, bit2 compressor, bit3 pump, bit5 hours)
-    //   reg2129 = icon bitfield #2 (bit1 defrost, bit4 fan)
-    const uint16_t run_state    = R(2007);
-    const uint16_t icon_bits1   = R(2130);
-    const uint16_t icon_bits2   = R(2129);
-    const bool pump_on          = (icon_bits1 & 0x08) != 0;  // reg2130 bit3
-    const bool compressor_on    = (icon_bits1 & 0x04) != 0;  // reg2130 bit2
-    const bool defrost_on       = (icon_bits2 & 0x02) != 0;  // reg2129 bit1
-    const bool fan_on           = (icon_bits2 & 0x10) != 0;  // reg2129 bit4
-    const uint16_t fan_raw      = R(2003);                   // A10 DC motor speed (level)
-    // ON follows the mainboard run-state (reg2007), NOT reg2130 — the real unit runs
-    // with reg2130=0. 0x20 (hot-water running) is the only confirmed run code on this
-    // DHW controller; other modes' run codes are not yet ground-truthed.
-    const bool running          = (run_state == 0x20);
-
-    // Synthesize the status1 bitfield the HeatPumpState helpers expect from the
-    // real Macon status byte so isCompressorRunning()/isWaterPumpRunning()/
-    // isFanRunning()/getFanSpeedLevel() keep working unchanged.
+    // Synthesize the legacy status1 bitfield the HeatPumpState helpers expect
+    // (isCompressorRunning()/isWaterPumpRunning()/isFanRunning()/getFanSpeedLevel()).
     uint16_t st1 = 0;
-    if (running)       st1 |= status1::UNIT_ON;
-    if (compressor_on) st1 |= status1::COMPRESSOR;
-    if (pump_on)       st1 |= status1::WATER_PUMP;
-    if (fan_on) {
-        if (fan_raw >= 60)      st1 |= status1::FAN_HIGH;
-        else if (fan_raw >= 30) st1 |= status1::FAN_MED;
-        else                    st1 |= status1::FAN_LOW;
+    if (ms.running)       st1 |= status1::UNIT_ON;
+    if (ms.compressor_on) st1 |= status1::COMPRESSOR;
+    if (ms.pump_on)       st1 |= status1::WATER_PUMP;
+    if (ms.fan_on) {
+        if (ms.fan_level >= 60)      st1 |= status1::FAN_HIGH;
+        else if (ms.fan_level >= 30) st1 |= status1::FAN_MED;
+        else                         st1 |= status1::FAN_LOW;
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
 
-    // Confirmed temperatures (whole °C, signed byte so sub-zero outdoor decodes).
-    s_state.water_tank_temp      = s8(R(2008));  // o1
-    s_state.outlet_water_temp    = s8(R(2132));  // o3 (supply)
-    s_state.inlet_water_temp     = s8(R(2133));  // o2 (return)
-    s_state.outdoor_ambient_temp = s8(R(2134));  // o4
-    s_state.indoor_coil_temp     = s8(R(2135));  // A6 cool coil
-    s_state.ipm_temp             = s8(R(2113));  // A8 IPM module
+    // Temperatures (signed whole °C).
+    s_state.water_tank_temp      = ms.water_tank_c;
+    s_state.outlet_water_temp    = ms.outlet_c;
+    s_state.inlet_water_temp     = ms.inlet_c;
+    s_state.outdoor_ambient_temp = ms.outdoor_ambient_c;
+    s_state.indoor_coil_temp     = ms.indoor_coil_c;
+    s_state.ipm_temp             = ms.ipm_c;
+    s_state.discharge_temp       = ms.discharge_c;
+    s_state.suction_temp         = ms.suction_c;
+    s_state.outdoor_coil_temp    = ms.outdoor_coil_c;
 
-    // Refrigerant-cycle temps, confirmed against the A1/A2/A3 legend codes and
-    // their compressor-on/off thermal signature (running->idle diff) forming a
-    // consistent cycle: discharge(2138) > cool coil(2135) > suction(2137) >
-    // coil(2136).
-    s_state.discharge_temp    = s8(R(2138));  // A1 discharge (hot gas)
-    s_state.suction_temp      = s8(R(2137));  // A3 suction (reg2137; was wrongly 2136)
-    s_state.outdoor_coil_temp = s8(R(2136));  // A2 coil    (reg2136; was wrongly 2137)
-
-    // Confirmed setpoint.
-    s_state.hot_water_setpoint = static_cast<int16_t>(R(2012));
+    // Setpoint.
+    s_state.hot_water_setpoint   = ms.hot_water_setpoint;
 
     // Running state + readings.
     s_state.status1         = st1;
-    s_state.status2         = defrost_on ? status2::DEFROSTING : 0;
-    s_state.unit_on         = running;
-    // This is a heating unit whose heat/cool direction is set by a reversing
-    // valve, not a user-selectable mode. Report heating statically; mapping the
-    // reversing-valve status bit for true heat/cool needs a cooling sample.
-    s_state.working_mode    = WorkingMode::FLOOR_HEATING;
-    s_state.fan_speed       = fan_raw;              // A10 DC motor speed
+    s_state.status2         = ms.defrost_on ? status2::DEFROSTING : 0;
+    s_state.unit_on         = ms.running;
+    // Operating direction now derives from reg2049 via the library (previously a
+    // static FLOOR_HEATING). Translate — never cast — the native mode.
+    s_state.working_mode    = to_working_mode(ms.mode);
+    s_state.fan_speed       = ms.fan_level;
 
-    // Electrical readings, confirmed by a synchronized register+menu capture
-    // while running (register value == the A-code menu value, 1:1):
-    //   reg2000 = A4 AC input current   (0 idle -> 12 running)
-    //   reg2101 = A13 AC input voltage  (~23 => 230 V)
-    //   reg2001 = A7 DC bus voltage     (menu 36 => 360 V; getDcVoltageV()/10)
-    //   reg2140 = A5 main EEV degree
-    // The pre-existing power_consumption = ac_voltage*ac_current/10 reproduces
-    // A9 real-time power (23*12/10 ≈ 28), validating both scalings.
-    s_state.ac_current         = R(2000);
-    s_state.ac_voltage         = R(2101);
-    s_state.dc_voltage         = static_cast<uint16_t>(R(2001) * 10);
-    s_state.primary_eev_opening = R(2140);
+    // Electrical readings.
+    s_state.ac_current          = ms.ac_current;
+    s_state.ac_voltage          = ms.ac_voltage;
+    s_state.dc_voltage          = ms.dc_voltage;   // already x10 (volts)
+    s_state.primary_eev_opening = ms.primary_eev;
+    s_state.compressor_freq     = ms.compressor_freq;
 
-    // Compressor operating frequency (A14). Lives at reg2141 in the telemetry
-    // window (2100..2142) — it was previously invisible because the register
-    // cache stopped at reg2138, so reg2139..2142 were decoded then dropped.
-    // Confirmed: reg2141 = 55 while running (matched a live A14=55 menu read)
-    // and 0 with the compressor off.
-    s_state.compressor_freq = R(2141);
 
     // Macon fault/protection registers = reg2007 (holding run/fault bits) plus
     // the INPUT fault cluster reg2125-2128, all mapped live 2026-07-05 one bit at
@@ -561,12 +534,14 @@ static void applyMaconMapping() {
     // legacy Arctic error1/error2 tables, so each confirmed Macon bit is
     // translated to its *semantic* legacy mask, letting the existing P-code/UI
     // pipeline report the correct fault. Device-only codes with no legacy slot
-    // (P10, P30, E03) are intentionally left undecoded.
-    const uint8_t f_run  = static_cast<uint8_t>(run_state);  // reg2007
-    const uint8_t f_ee   = static_cast<uint8_t>(R(2125));    // sensor/EE/comm
-    const uint8_t f_comp = static_cast<uint8_t>(R(2126));    // sensor/comm/compressor
-    const uint8_t f_elec = static_cast<uint8_t>(R(2127));    // electrical/power-stage
-    const uint8_t f_ref  = static_cast<uint8_t>(R(2128));    // refrigerant/protection
+    // (P10, P30, E03) are intentionally left undecoded. The library
+    // address-encapsulates the five raw fault registers (MaconState.fault_*);
+    // the bit->mask translation below stays here (native fault decode = Phase 2).
+    const uint8_t f_run  = ms.fault_run;   // reg2007
+    const uint8_t f_ee   = ms.fault_ee;    // reg2125 sensor/EE/comm
+    const uint8_t f_comp = ms.fault_comp;  // reg2126 sensor/comm/compressor
+    const uint8_t f_elec = ms.fault_elec;  // reg2127 electrical/power-stage
+    const uint8_t f_ref  = ms.fault_ref;   // reg2128 refrigerant/protection
     uint16_t e1 = 0;
     uint16_t e2 = 0;
 
