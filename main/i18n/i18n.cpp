@@ -129,6 +129,7 @@ static const char* strings_en[STR_COUNT] = {
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "COOLING",
+    [STR_HP_MODE_HEATING] = "HEATING",
     [STR_HP_MODE_FLOOR_HEAT] = "FLOOR HEAT",
     [STR_HP_MODE_FAN_HEAT] = "FAN HEAT",
     [STR_HP_MODE_HOT_WATER] = "HOT WATER",
@@ -410,6 +411,7 @@ static const char* strings_fr[STR_COUNT] = {
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "REFROIDISSEMENT",
+    [STR_HP_MODE_HEATING] = "CHAUFFAGE",
     [STR_HP_MODE_FLOOR_HEAT] = "CHAUFF. SOL",
     [STR_HP_MODE_FAN_HEAT] = "VENTILO-CONV.",
     [STR_HP_MODE_HOT_WATER] = "EAU CHAUDE",
@@ -691,6 +693,7 @@ static const char* strings_es[STR_COUNT] = {
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "ENFRIAMIENTO",
+    [STR_HP_MODE_HEATING] = "CALEFACCIÓN",
     [STR_HP_MODE_FLOOR_HEAT] = "CALEF. SUELO",
     [STR_HP_MODE_FAN_HEAT] = "FAN COIL",
     [STR_HP_MODE_HOT_WATER] = "AGUA CALIENTE",

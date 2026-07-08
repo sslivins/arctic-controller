@@ -210,6 +210,7 @@ static const char* getModeText(arctic::WorkingMode mode, bool defrosting) {
     }
     switch (mode) {
         case arctic::WorkingMode::COOLING:           return i18n_get(STR_HP_MODE_COOLING);
+        case arctic::WorkingMode::HEATING:           return i18n_get(STR_HP_MODE_HEATING);
         case arctic::WorkingMode::FLOOR_HEATING:     return i18n_get(STR_HP_MODE_FLOOR_HEAT);
         case arctic::WorkingMode::FAN_COIL_HEATING:  return i18n_get(STR_HP_MODE_FAN_HEAT);
         case arctic::WorkingMode::HOT_WATER:         return i18n_get(STR_HP_MODE_HOT_WATER);
