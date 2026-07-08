@@ -122,7 +122,9 @@ enum class WorkingMode : uint16_t {
     COOLING = 0,
     FLOOR_HEATING = 1,
     FAN_COIL_HEATING = 2,
-    // Modes 3, 4 are unused
+    HEATING = 3,        // Generic heating (direction only); display fallback when
+                        // the specific heating application isn't known
+    // Mode 4 is unused
     HOT_WATER = 5,
     AUTO = 6
 };
@@ -227,6 +229,7 @@ inline const char* workingModeToString(WorkingMode mode) {
         case WorkingMode::COOLING:         return "cooling";
         case WorkingMode::FLOOR_HEATING:   return "floor_heating";
         case WorkingMode::FAN_COIL_HEATING: return "fan_coil_heating";
+        case WorkingMode::HEATING:         return "heating";
         case WorkingMode::HOT_WATER:       return "hot_water";
         case WorkingMode::AUTO:            return "auto";
         default:                           return "unknown";

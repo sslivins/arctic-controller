@@ -462,14 +462,16 @@ bool isExternalFeed() {
 // tables, so each confirmed bit is translated to its semantic legacy mask.
 // Adapt the library's native MaconMode to the controller's legacy WorkingMode
 // enum. NEVER cast: the raw wire values (0=heating, 4=cooling) differ from the
-// legacy enum values (COOLING=0, FLOOR_HEATING=1). Unknown falls back to
-// heating — this is a heating unit whose direction is set by a reversing valve,
-// so heating is the safe default when the reg2049 reading is not trusted.
+// legacy enum values (COOLING=0, FLOOR_HEATING=1). reg2049 only exposes the
+// operating direction, so a confirmed heating direction is reported as
+// FLOOR_HEATING (this unit's heating application). When the reg2049 reading is
+// absent or untrusted, fall back to the generic HEATING label rather than
+// falsely claiming FLOOR_HEATING.
 static WorkingMode to_working_mode(MaconMode m) {
     switch (m) {
         case MaconMode::Cooling: return WorkingMode::COOLING;
         case MaconMode::Heating: return WorkingMode::FLOOR_HEATING;
-        default:                 return WorkingMode::FLOOR_HEATING;
+        default:                 return WorkingMode::HEATING;
     }
 }
 

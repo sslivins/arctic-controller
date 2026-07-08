@@ -142,6 +142,7 @@ typedef enum {
     
     // Heat Pump - Mode Names
     STR_HP_MODE_COOLING,
+    STR_HP_MODE_HEATING,
     STR_HP_MODE_FLOOR_HEAT,
     STR_HP_MODE_FAN_HEAT,
     STR_HP_MODE_HOT_WATER,
