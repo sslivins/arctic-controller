@@ -150,7 +150,7 @@ static bool pollSystemReadings() {
     s_state.fan_speed = data[1];              // 2119
     s_state.ac_voltage = data[2];             // 2120
     s_state.ac_current = data[3];             // 2121
-    s_state.dc_voltage = data[4];             // 2122
+    s_state.dc_voltage = data[4] / 10;        // 2122 (raw tenths-of-volts -> volts; legacy path)
     s_state.dc_current = data[5];             // 2123
     s_state.primary_eev_opening = data[6];    // 2124
     s_state.secondary_eev_opening = data[7];  // 2125
@@ -510,8 +510,10 @@ static void applyMaconMapping() {
     s_state.suction_temp         = ms.suction_c;
     s_state.outdoor_coil_temp    = ms.outdoor_coil_c;
 
-    // Setpoint.
+    // Setpoints (whole °C). cooling_setpoint = reg2093 byte0, decoded by the
+    // macon library; previously left unmapped so the API reported 0.
     s_state.hot_water_setpoint   = ms.hot_water_setpoint;
+    s_state.cooling_setpoint     = ms.cooling_setpoint;
 
     // Running state + readings.
     s_state.status1         = st1;
@@ -525,7 +527,9 @@ static void applyMaconMapping() {
     // Electrical readings.
     s_state.ac_current          = ms.ac_current;
     s_state.ac_voltage          = ms.ac_voltage;
-    s_state.dc_voltage          = ms.dc_voltage;   // already x10 (volts)
+    // The macon library owns raw->unit conversion and reports dc_voltage in
+    // VOLTS. Store it as-is; no re-scaling in the consumer.
+    s_state.dc_voltage          = ms.dc_voltage;
     s_state.primary_eev_opening = ms.primary_eev;
     s_state.compressor_freq     = ms.compressor_freq;
 

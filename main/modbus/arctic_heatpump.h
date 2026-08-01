@@ -45,7 +45,7 @@ struct HeatPumpState {
     uint16_t fan_speed = 0;          // RPM
     uint16_t ac_voltage = 0;         // V
     uint16_t ac_current = 0;         // A (raw, may need conversion)
-    uint16_t dc_voltage = 0;         // V (raw ÷ 10 for actual)
+    uint16_t dc_voltage = 0;         // V (volts; unit conversion owned by macon lib)
     uint16_t dc_current = 0;         // A (raw)
     uint16_t primary_eev_opening = 0;   // steps
     uint16_t secondary_eev_opening = 0; // steps
@@ -66,8 +66,8 @@ struct HeatPumpState {
     bool isBackupHeaterOn() const { return (status1 & status1::BACKUP_HEATER) != 0; }
     bool hasAnyError() const { return (error1 != 0) || (error2 != 0); }
     
-    // Get actual DC voltage (register value ÷ 10)
-    float getDcVoltageV() const { return dc_voltage / 10.0f; }
+    // DC bus voltage in volts (already converted by the macon library).
+    float getDcVoltageV() const { return static_cast<float>(dc_voltage); }
     
     // Get actual pressures (register value ÷ 100)
     float getHighPressureMPa() const { return high_pressure / 100.0f; }

@@ -185,8 +185,8 @@ static void update_readings() {
     snprintf(buf, sizeof(buf), "%d A", hp.ac_current);
     lv_label_set_text(state.ac_current, buf);
     
-    // dc_voltage is in tenths of volts
-    snprintf(buf, sizeof(buf), "%d.%d V", hp.dc_voltage / 10, hp.dc_voltage % 10);
+    // dc_voltage is in volts (conversion owned by the macon library)
+    snprintf(buf, sizeof(buf), "%.0f V", hp.getDcVoltageV());
     lv_label_set_text(state.dc_voltage, buf);
     
     snprintf(buf, sizeof(buf), "%d A", hp.dc_current);
