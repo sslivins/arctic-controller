@@ -10,16 +10,43 @@ menu "Arctic Controller"
             These endpoints are intended for automated testing only
             and should be disabled in production builds.
 
-    config ARCTIC_TUYA_LISTEN
-        bool "Passive Tuya bus listen mode (RX-only, no bus TX)"
-        default y
+    choice ARCTIC_BUS_MODE
+        prompt "Arctic RS485 bus mode"
+        default ARCTIC_TUYA_LISTEN
         help
-            Bench/validation mode. Instead of starting the Modbus RTU master,
-            the controller splices onto the existing controller<->heat pump
-            RS485 bus in RECEIVE-ONLY mode and decodes the Tuya MCU framing
-            (55 AA ...) using tuya_codec. The RS485 direction pin is held low
-            and the UART TX line is left unrouted, so the Tab5 never transmits
-            and is electrically invisible on the bus. Safe to run alongside the
-            real controller. Wire settings: 4800 baud 8-E-1.
+            Selects how the controller talks to the heat pump over RS485.
+
+        config ARCTIC_TUYA_LISTEN
+            bool "Passive Tuya listen (RX-only, no bus TX)"
+            help
+                Bench/validation mode. Instead of starting a bus master, the
+                controller splices onto the existing controller<->heat pump
+                RS485 bus in RECEIVE-ONLY mode and decodes the Tuya MCU framing
+                (55 AA ...) using tuya_codec. The RS485 direction pin is held
+                low and the UART TX line is left unrouted, so the Tab5 never
+                transmits and is electrically invisible on the bus. Safe to run
+                alongside the real controller. Wire settings: 4800 baud 8-E-1.
+
+        config ARCTIC_TUYA_MASTER
+            bool "Active Tuya master (drives the bus)"
+            help
+                Production control mode. The Tab5 becomes the SOLE bus master:
+                it polls the telemetry register windows over fc=0x03 reads and
+                issues fc=0x06 setpoint writes via the shared-library MaconLink
+                layer. Wire settings: 4800 baud 8-E-1, RS485 half-duplex.
+
+                SAFETY: two masters on one RS485 bus collide, so the OEM
+                controller MUST be physically disconnected before enabling this
+                mode. On boot the firmware listens for existing bus traffic and
+                refuses to transmit if another master is detected.
+
+        config ARCTIC_MODBUS_MASTER
+            bool "Legacy Modbus RTU master"
+            help
+                Legacy path: start the Modbus RTU master (arctic::init +
+                polling). Retained for the original Modbus-based unit; the real
+                Macon unit speaks Tuya, not Modbus, so prefer the Tuya modes.
+
+    endchoice
 
 endmenu

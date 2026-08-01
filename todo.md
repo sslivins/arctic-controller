@@ -11,6 +11,26 @@
 - [ ] Add COP/energy fields to REST API and demo mode injection
 - [ ] Add flow rate configuration to the Advanced/Params screen
 
+## Tuya Active-Master Mode (`CONFIG_ARCTIC_TUYA_MASTER`)
+
+Active bus-master control landed 2026-08 (poll loop + `MaconLink` setpoint
+writes over an RS485 half-duplex transport). Follow-ups:
+
+- [ ] **Hardware validation**: with the OEM controller disconnected, confirm
+      the bus-idle preflight passes, telemetry populates, and a cooling/hot-water
+      setpoint write is ACKed by the unit. Watch for RS485 turnaround/echo issues
+      on a logic analyzer.
+- [ ] **Move the streaming block-read into `arctic-macon`** (`MaconLink`): the
+      poll loop in `macon_master.cpp` duplicates the frame-accumulate/match logic
+      that already exists privately in `MaconLink::read_matching_frame`. Expose a
+      generic `read_registers(addr, count, out, …)` so the firmware transport
+      only owns UART/DIR behaviour.
+- [ ] Capture OEM traffic across cold-boot / steady-state / setpoint change /
+      fault / defrost to confirm periodic fc=0x03 polling fully replaces the OEM
+      controller (no missed handshake / keepalive / unsolicited frames).
+- [ ] Verify `reg2094` before adding `set_heating_setpoint` (currently
+      unsupported in master mode).
+
 ## Screen Render Performance
 
 Baseline numbers measured Feb 2026 (ESP32-P4, ESP-IDF 5.4.3, LVGL 9.2).

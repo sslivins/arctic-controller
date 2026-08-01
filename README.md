@@ -53,6 +53,25 @@ The controller communicates with the Arctic heat pump via Modbus RTU over RS-485
 | RX     | 21   |
 | DIR    | 34   |
 
+### RS-485 Bus Modes
+
+The bus behaviour is selected at build time via a Kconfig `choice`
+(`main/Kconfig.projbuild`, menu *Arctic Controller → Arctic RS485 bus mode*).
+The real Macon unit speaks a **Tuya 55AA** protocol (4800 baud 8-E-1), decoded
+by the shared `arctic-macon` library — not classic Modbus.
+
+| Mode (`CONFIG_…`) | Behaviour |
+|---|---|
+| `ARCTIC_TUYA_LISTEN` *(default)* | **Passive listen.** RX-only; DIR held low so the Tab5 never transmits. Decodes the OEM controller's bus traffic. Safe to splice in alongside the real controller. |
+| `ARCTIC_TUYA_MASTER` | **Active master.** The Tab5 is the *sole* bus master: it polls telemetry (fc=0x03) and writes setpoints (fc=0x06) via the `MaconLink` transaction layer. **The OEM controller must be physically disconnected** — two masters collide. On boot the firmware listens for existing bus traffic and refuses to transmit if another master is detected. |
+| `ARCTIC_MODBUS_MASTER` | Legacy Modbus RTU master (original protocol; retained for reference). |
+
+In active-master mode, setpoint changes from the UI/REST API
+(`setCoolingSetpoint` / `setHotWaterSetpoint`) are routed through
+`MaconLink`, which owns the wire/register mapping. Controls without a verified
+Tuya command (unit power, working mode, heating setpoint, raw register
+read/write) fail explicitly rather than fall back to the Modbus path.
+
 ## Web Interface
 
 Access the web interface at `http://arctic.local` after connecting to WiFi.

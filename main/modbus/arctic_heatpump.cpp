@@ -4,6 +4,7 @@
 
 #include "arctic_heatpump.h"
 #include "modbus_manager.h"
+#include "macon_master.h"
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "macon_state.h"
@@ -768,6 +769,10 @@ bool isConnected() {
 // ============================================================================
 
 bool setUnitPower(bool on) {
+    if (macon_master::is_active()) {
+        ESP_LOGW(TAG, "Unit power write unsupported in Tuya master mode (no verified fc06 mapping)");
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::UNIT_ON_OFF, on ? 1 : 0);
     if (err == ESP_OK) {
         // unit_on will update from STATUS_1 on next pollStatus() cycle
@@ -779,6 +784,10 @@ bool setUnitPower(bool on) {
 }
 
 bool setWorkingMode(WorkingMode mode) {
+    if (macon_master::is_active()) {
+        ESP_LOGW(TAG, "Working-mode write unsupported in Tuya master mode (no verified fc06 mapping)");
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::WORKING_MODE, static_cast<uint16_t>(mode));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -792,6 +801,16 @@ bool setWorkingMode(WorkingMode mode) {
 }
 
 bool setCoolingSetpoint(int16_t temp) {
+    if (macon_master::is_active()) {
+        // Route through the shared-library MaconLink (fc06 write + ACK).
+        if (macon_master::set_cooling_setpoint((int)temp)) {
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            s_state.cooling_setpoint = temp;
+            xSemaphoreGive(s_state_mutex);
+            return true;
+        }
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::COOLING_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -805,6 +824,12 @@ bool setCoolingSetpoint(int16_t temp) {
 }
 
 bool setHeatingSetpoint(int16_t temp) {
+    if (macon_master::is_active()) {
+        // MaconLink deliberately has no set_heating_setpoint: reg2094 is
+        // unverified on this unit. Fail explicitly rather than guess.
+        ESP_LOGW(TAG, "Heating setpoint write unsupported in Tuya master mode (reg2094 unverified)");
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::HEATING_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -818,6 +843,15 @@ bool setHeatingSetpoint(int16_t temp) {
 }
 
 bool setHotWaterSetpoint(int16_t temp) {
+    if (macon_master::is_active()) {
+        if (macon_master::set_hot_water_setpoint((int)temp)) {
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            s_state.hot_water_setpoint = temp;
+            xSemaphoreGive(s_state_mutex);
+            return true;
+        }
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::HOT_WATER_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -831,6 +865,10 @@ bool setHotWaterSetpoint(int16_t temp) {
 }
 
 bool writeRegister(uint16_t address, uint16_t value) {
+    if (macon_master::is_active()) {
+        ESP_LOGW(TAG, "Raw register write unsupported in Tuya master mode (no verified fc06 mapping)");
+        return false;
+    }
     // Validate address is in writable range (2000-2057)
     if (address < 2000 || address > 2057) {
         ESP_LOGE(TAG, "Invalid register address %d (must be 2000-2057)", address);
@@ -848,6 +886,12 @@ bool writeRegister(uint16_t address, uint16_t value) {
 
 bool readRegister(uint16_t address, uint16_t* value_out) {
     if (value_out == nullptr) {
+        return false;
+    }
+    if (macon_master::is_active()) {
+        // Live values come from the poll loop into HeatPumpState; there is no
+        // synchronous single-register read path on the Tuya bus.
+        ESP_LOGW(TAG, "Synchronous register read unsupported in Tuya master mode");
         return false;
     }
     
