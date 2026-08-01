@@ -51,6 +51,7 @@ struct HeatPumpState {
     uint16_t secondary_eev_opening = 0; // steps
     uint16_t high_pressure = 0;      // MPa (raw ÷ 100)
     uint16_t low_pressure = 0;       // MPa (raw ÷ 100)
+    uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
     
     // Status bitmaps
     uint16_t status1 = 0;  // Register 2135

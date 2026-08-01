@@ -990,7 +990,7 @@ void heatpump_screen_update(void) {
     uint32_t power_watts = 0;
     char power_buf[32];
     if (hp.connected) {
-        power_watts = (uint32_t)hp.ac_voltage * hp.ac_current / 10;
+        power_watts = hp.realtime_power_w;
         if (power_watts >= 1000) {
             uint32_t kw_int = power_watts / 1000;
             uint32_t kw_frac = (power_watts % 1000) / 100;

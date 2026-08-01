@@ -455,7 +455,7 @@ bool isExternalFeed() {
 //     reg2001 = A7 DC bus voltage(*10) reg2140 = A5 main EEV degree
 //     reg2003 = A10 DC motor (fan) speed
 //     reg2141 = A14 compressor frequency (Hz)   [telemetry window reaches 2142]
-//   power_consumption (V*I/10) reproduces A9 real-time power.
+//   real-time power comes from the macon library (reg2114/A9), in watts.
 // High/low pressure (A11/A12) read static nonsense values (-6 / 3), i.e.
 // uninstalled sensors on this DHW unit, so left cleared. The fault/protection
 // registers are reg2007 (holding) + the INPUT cluster reg2125-2128, all mapped
@@ -532,6 +532,10 @@ static void applyMaconMapping() {
     s_state.dc_voltage          = ms.dc_voltage;
     s_state.primary_eev_opening = ms.primary_eev;
     s_state.compressor_freq     = ms.compressor_freq;
+    // Real-time power in watts, decoded by the macon library (reg2114/A9).
+    // Preferred over the old V*I/10 estimate, which is now 10x low because the
+    // library normalises ac_current to whole amps.
+    s_state.realtime_power_w    = ms.realtime_power_w;
 
 
     // Macon fault/protection registers = reg2007 (holding run/fault bits) plus

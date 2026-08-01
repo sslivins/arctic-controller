@@ -1962,7 +1962,7 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(readings, "low_pressure", hp.getLowPressureMPa());
     cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
     cJSON_AddNumberToObject(readings, "secondary_eev", hp.secondary_eev_opening);
-    cJSON_AddNumberToObject(readings, "power_consumption", (hp.ac_voltage * hp.ac_current) / 10);
+    cJSON_AddNumberToObject(readings, "power_consumption", hp.realtime_power_w);
     
     // Errors
     cJSON_AddBoolToObject(root, "has_error", hp.hasAnyError());
@@ -2728,7 +2728,7 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "Reading,Low Pressure,,2127,%.2f,MPa\r\n", hp.getLowPressureMPa());
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Power Consumption,,,%.0f,W\r\n", (hp.ac_voltage * hp.ac_current) / 10.0f);
+    snprintf(line, sizeof(line), "Reading,Power Consumption,,2114,%lu,W\r\n", (unsigned long)hp.realtime_power_w);
     httpd_resp_sendstr_chunk(req, line);
 
     // --- Component Status (register 2135) ---
