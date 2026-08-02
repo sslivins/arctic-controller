@@ -292,12 +292,12 @@ class TestDiagnosticContent:
             assert val.startswith("0x"), f"Register value should be hex: {val}"
 
     def test_parameters_have_pcodes(self):
-        """Parameter rows should have P-codes (e.g. P29, P37)."""
+        """Parameter rows should have AP-codes (e.g. AP13, AP37)."""
         param_rows = self._rows_by_category("Parameter")
         assert len(param_rows) >= 10, "Expected at least 10 parameters"
         for row in param_rows:
-            assert row["P-Code"].startswith("P"), (
-                f"Parameter '{row['Name']}' missing P-code: {row['P-Code']}"
+            assert row["P-Code"].startswith("AP"), (
+                f"Parameter '{row['Name']}' missing AP-code: {row['P-Code']}"
             )
 
     def test_parameters_have_modbus_addresses(self):

@@ -2324,7 +2324,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     const char* id = uri + strlen("/api/heatpump/advanced/");
     
     if (!id || strlen(id) == 0) {
-        send_json_error(req, "400 Bad Request", "AP number required");
+        send_json_error(req, "404 Not Found", "AP number required");
         return ESP_OK;
     }
     if (id[0] == 'A' || id[0] == 'a') id++;  // tolerate "AP13" prefix
@@ -2333,7 +2333,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     char* endptr;
     long ap_long = strtol(id, &endptr, 10);
     if (endptr == id || ap_long < 0 || ap_long > 255) {
-        send_json_error(req, "400 Bad Request", "Invalid AP number");
+        send_json_error(req, "404 Not Found", "Invalid advanced parameter");
         return ESP_OK;
     }
     
