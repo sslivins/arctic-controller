@@ -210,7 +210,7 @@
                 
                 // Control Page
                 parameters: 'Control',
-                paramEditor: 'Heat Pump Parameters',
+                paramEditor: 'Advanced Parameters',
                 pCode: 'P-Code',
                 currentValue: 'Value',
                 range: 'Range',
@@ -491,7 +491,7 @@
                 
                 // Control Page
                 parameters: 'Contr\u00f4le',
-                paramEditor: 'Param\u00e8tres pompe \u00e0 chaleur',
+                paramEditor: 'Param\u00e8tres avanc\u00e9s',
                 pCode: 'Code P',
                 currentValue: 'Valeur',
                 range: 'Plage',
@@ -772,7 +772,7 @@
                 
                 // Control Page
                 parameters: 'Control',
-                paramEditor: 'Par\u00e1metros bomba de calor',
+                paramEditor: 'Par\u00e1metros avanzados',
                 pCode: 'Código P',
                 currentValue: 'Valor',
                 range: 'Rango',
@@ -2896,15 +2896,15 @@
                                 
                                 <template x-if="paramsConnected && Object.keys(params).length > 0">
                                     <div>
-                                        <template x-for="cat in paramCategories" :key="cat.key">
-                                            <div class="param-category" x-show="getParamsByCategory(cat.key).length > 0">
-                                                <h3 x-text="t(cat.label)"></h3>
-                                                <template x-for="[key, p] in getParamsByCategory(cat.key)" :key="key">
+                                        <template x-for="cat in paramCategoryList" :key="cat">
+                                            <div class="param-category" x-show="getParamsByCategory(cat).length > 0">
+                                                <h3 x-text="cat"></h3>
+                                                <template x-for="[key, p] in getParamsByCategory(cat)" :key="key">
                                                     <div class="param-item">
                                                         <div class="param-info">
                                                             <div class="param-name" x-text="p.name"></div>
                                                             <div class="param-meta">
-                                                                <span class="param-pcode" x-text="p.p_code"></span>
+                                                                <span class="param-pcode" x-text="'AP' + p.ap"></span>
                                                                 <span x-text="t('range') + ': ' + p.min + ' – ' + p.max + ' ' + p.unit"></span>
                                                             </div>
                                                         </div>
@@ -2912,7 +2912,7 @@
                                                             <template x-if="editingParam !== key">
                                                                 <div style="display: flex; align-items: center; gap: 0.75rem;">
                                                                     <span class="param-value" x-text="(p.value !== null ? p.value : '--') + ' ' + p.unit"></span>
-                                                                    <button class="param-edit-btn" @click="startEditParam(key, p)" x-text="t('editParam')"></button>
+                                                                    <button class="param-edit-btn" x-show="p.writable" @click="startEditParam(key, p)" x-text="t('editParam')"></button>
                                                                 </div>
                                                             </template>
                                                             <template x-if="editingParam === key">
@@ -3485,13 +3485,6 @@
                 paramsLoading: false,
                 editingParam: null,
                 editingParamValue: 0,
-                paramCategories: [
-                    { key: 'EEV', label: 'catEev' },
-                    { key: 'Defrost', label: 'catDefrost' },
-                    { key: 'Protection', label: 'catProtection' },
-                    { key: 'Auto Mode', label: 'catAutoMode' },
-                    { key: 'Pump & Valve', label: 'catPumpValve' }
-                ],
                 
                 // GitHub update state
                 github: {
@@ -4303,7 +4296,7 @@
                 async loadParams() {
                     this.paramsLoading = true;
                     try {
-                        const res = await this.apiFetch('/api/heatpump/params');
+                        const res = await this.apiFetch('/api/heatpump/advanced');
                         const data = await res.json();
                         this.paramsConnected = data.connected || false;
                         this.params = data.params || {};
@@ -4318,6 +4311,14 @@
                     return Object.entries(this.params).filter(([k, p]) => p.category === category);
                 },
                 
+                get paramCategoryList() {
+                    const seen = [];
+                    for (const p of Object.values(this.params)) {
+                        if (p && p.category && !seen.includes(p.category)) seen.push(p.category);
+                    }
+                    return seen;
+                },
+                
                 startEditParam(key, p) {
                     this.editingParam = key;
                     this.editingParamValue = p.value !== null ? p.value : 0;
@@ -4326,7 +4327,7 @@
                 async saveParam(key) {
                     this.controlLoading = true;
                     try {
-                        const res = await this.apiFetch('/api/heatpump/params/' + key, {
+                        const res = await this.apiFetch('/api/heatpump/advanced/' + key, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'text/plain' },
                             body: String(this.editingParamValue)

@@ -1393,7 +1393,7 @@ paths:
       description: |
         Returns a comprehensive system diagnostic as a downloadable CSV file.
         Includes all Modbus register values, sensor readings, component status,
-        active errors, and technician P-parameters with current values.
+        active errors, and advanced (AP) parameters with current values.
         Useful for remote troubleshooting with Arctic support.
         
         CSV columns: Category, Name, P-Code, Modbus Address, Value, Unit
@@ -1550,21 +1550,23 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /api/heatpump/params:
+  /api/heatpump/advanced:
     get:
       tags:
         - HeatPump
-      summary: Get all P-parameters
+      summary: Get all advanced (AP) parameters
       description: |
-        Returns all configurable P-parameters with their current values.
-        In demo mode, returns simulated values. When disconnected, values are null.
-      operationId: getHeatpumpParams
+        Returns all verified advanced ("AP") parameters with their current values,
+        grouped implicitly by category. In demo mode, returns simulated values.
+        When disconnected, values are null. Only parameters whose wire register has
+        been change-and-capture verified are included.
+      operationId: getHeatpumpAdvanced
       security:
         - apiKey: []
         - sessionCookie: []
       responses:
         '200':
-          description: All P-parameters
+          description: All advanced parameters
           content:
             application/json:
               schema:
@@ -1579,7 +1581,7 @@ paths:
                   params:
                     type: object
                     additionalProperties:
-                      $ref: '#/components/schemas/HeatPumpParam'
+                      $ref: '#/components/schemas/AdvancedParam'
         '401':
           description: API key required
           content:
@@ -1587,15 +1589,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
-  /api/heatpump/params/{id}:
+  /api/heatpump/advanced/{id}:
     get:
       tags:
         - HeatPump
-      summary: Get single P-parameter
+      summary: Get single advanced (AP) parameter
       description: |
-        Returns a single P-parameter by its key (e.g., `defrost_cycle`) or P-code (e.g., `P29`).
-        P-code lookup is case-insensitive.
-      operationId: getHeatpumpParam
+        Returns a single advanced parameter by its key (e.g., `AP13`) or bare AP
+        number (e.g., `13`).
+      operationId: getHeatpumpAdvancedParam
       security:
         - apiKey: []
         - sessionCookie: []
@@ -1603,16 +1605,16 @@ paths:
         - name: id
           in: path
           required: true
-          description: Parameter key (e.g., `defrost_cycle`) or P-code (e.g., `P29`)
+          description: AP key (e.g., `AP13`) or bare AP number (e.g., `13`)
           schema:
             type: string
           examples:
             by_key:
-              value: defrost_cycle
-              summary: By descriptive key
-            by_pcode:
-              value: P29
-              summary: By P-code
+              value: AP13
+              summary: By AP key
+            by_number:
+              value: '13'
+              summary: By bare AP number
       responses:
         '200':
           description: Parameter details
@@ -1620,9 +1622,11 @@ paths:
             application/json:
               schema:
                 allOf:
-                  - $ref: '#/components/schemas/HeatPumpParam'
+                  - $ref: '#/components/schemas/AdvancedParam'
                   - type: object
                     properties:
+                      key:
+                        type: string
                       connected:
                         type: boolean
                       demo_mode:
@@ -1643,11 +1647,13 @@ paths:
     put:
       tags:
         - HeatPump
-      summary: Set P-parameter value
+      summary: Set advanced (AP) parameter value
       description: |
-        Sets a P-parameter value. The request body is a plain integer (not JSON).
-        Values are validated against min/max range. Works in demo mode (updates in-memory values).
-      operationId: setHeatpumpParam
+        Sets an advanced parameter value. The request body is a plain integer (not JSON).
+        The write passes through the arctic-macon guardrail (range/enum validation,
+        confirmed-register check, and write-lock), so read-only, trigger, and
+        unverified parameters are refused. Works in demo mode (updates in-memory values).
+      operationId: setHeatpumpAdvancedParam
       security:
         - apiKey: []
         - sessionCookie: []
@@ -1655,7 +1661,7 @@ paths:
         - name: id
           in: path
           required: true
-          description: Parameter key or P-code
+          description: AP key or bare AP number
           schema:
             type: string
       requestBody:
@@ -1676,16 +1682,14 @@ paths:
                 properties:
                   success:
                     type: boolean
-                  key:
-                    type: string
-                  p_code:
-                    type: string
+                  ap:
+                    type: integer
                   value:
                     type: integer
                   demo_mode:
                     type: boolean
         '400':
-          description: Invalid value or out of range
+          description: Invalid value, out of range, or write refused by guardrail
           content:
             application/json:
               schema:
@@ -2000,30 +2004,21 @@ components:
             - All other events: 0
           example: 0
 
-    HeatPumpParam:
+    AdvancedParam:
       type: object
-      description: Heat pump P-parameter definition and value
+      description: Advanced ("AP") heat-pump parameter definition and value
       properties:
-        key:
-          type: string
-          description: Descriptive API key
-          example: defrost_cycle
-        p_code:
-          type: string
-          description: Arctic P-code identifier
-          example: P29
+        ap:
+          type: integer
+          description: AP parameter number
+          example: 13
         name:
           type: string
           description: Human-readable name
           example: Defrost Cycle
-        description:
-          type: string
-          description: Detailed description
-          example: Minimum time between defrost cycles during heating operation.
         unit:
           type: string
           description: Unit of measurement
-          enum: ['', steps, min, sec, °C]
           example: min
         min:
           type: integer
@@ -2037,6 +2032,15 @@ components:
           type: string
           description: Parameter category for grouping
           example: Defrost
+        read_only:
+          type: boolean
+          description: Register known but purpose unclear — displayed, not writable
+        is_trigger:
+          type: boolean
+          description: Momentary/self-clearing command register
+        writable:
+          type: boolean
+          description: Whether the parameter can be written via PUT
         value:
           type: integer
           nullable: true

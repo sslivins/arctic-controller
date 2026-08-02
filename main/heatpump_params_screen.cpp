@@ -12,7 +12,7 @@
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
 #include "macon_advanced_params.h"  // arctic::AdvancedParam, AP reg map
 #include "advanced_params.h"        // advanced_param_read/write (controller IO)
-#include "heatpump_params.h"
+
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "app_preferences.h"
@@ -37,26 +37,7 @@ static const char* TAG = "hp_params";
 #define COLOR_WARNING       lv_color_hex(0xfbbf24)
 #define COLOR_ERROR         lv_color_hex(0xef4444)
 
-// ============================================================================
-// Helper to get unit string for display (uses shared ParamUnit enum)
-// ============================================================================
-static const char* get_param_unit_str(ParamUnit unit_type) {
-    switch (unit_type) {
-        case ParamUnit::STEPS:         return "steps";
-        case ParamUnit::MINUTES:       return "min";
-        case ParamUnit::SECONDS:       return "sec";
-        case ParamUnit::TEMP_ABSOLUTE: return app_prefs_temp_unit_str();
-        case ParamUnit::TEMP_OFFSET:   return app_prefs_temp_diff_unit_str();
-        default:                       return "";
-    }
-}
-
-// Helper to format display name with P-code (e.g., "EEV Opening (P1)")
-static void format_param_display_name(char* buf, size_t buf_size, const HeatPumpParam* param) {
-    snprintf(buf, buf_size, "%s (%s)", i18n_get(param->name_id), param->p_code);
-}
-
-// Map category string from heatpump_params.h to i18n string ID
+// Map advanced-parameter category string (from arctic-macon) to i18n string ID
 static const char* get_category_i18n(const char* category) {
     if (strcmp(category, "EEV") == 0)          return i18n_get(STR_HP_CAT_EEV);
     if (strcmp(category, "Defrost") == 0)      return i18n_get(STR_HP_CAT_DEFROST);
@@ -95,8 +76,6 @@ static struct {
     lv_obj_t* mode_labels[5] = {};
     int active_mode_idx = 0;
     
-    // Array of value labels for each parameter row
-    lv_obj_t* value_labels[32] = {};
 
     // Advanced ("AP") parameter rows (arctic-macon table, verified regs only).
     // Parallel arrays: ap number <-> its live-value label. Populated by
@@ -118,7 +97,6 @@ static struct {
     lv_obj_t* edit_value_label = nullptr;
     lv_obj_t* edit_minus_btn = nullptr;
     lv_obj_t* edit_plus_btn = nullptr;
-    int current_param_idx = -1;
     float edit_value = 0;       // Float for F mode precision
     int16_t edit_value_celsius = 0;  // Original value in Celsius (for non-temp params too)
     
@@ -159,12 +137,10 @@ static void sync_setpoint_limits(void) {
 // Forward Declarations
 // ============================================================================
 static void close_btn_cb(lv_event_t* e);
-static void param_row_cb(lv_event_t* e);
 static void edit_cancel_cb(lv_event_t* e);
 static void edit_save_cb(lv_event_t* e);
 static void edit_minus_cb(lv_event_t* e);
 static void edit_plus_cb(lv_event_t* e);
-static void show_edit_dialog(int param_idx);
 static void hide_edit_dialog(void);
 static void update_edit_value_display(void);
 static void load_timer_cb(lv_timer_t* timer);
@@ -187,7 +163,7 @@ static void ap_update_display(int slot);
 static const char* kratio_display_str(int reading);
 
 // ============================================================================
-// Demo Setpoints (screen-local; P-parameters use shared heatpump_params.cpp)
+// Demo Setpoints (screen-local)
 // ============================================================================
 static int16_t s_demo_setpoints[3] = {-1, -1, -1};  // Demo setpoints: cooling, heating, hot water (-1 = not set)
 static bool s_demo_setpoints_initialized = false;
@@ -458,41 +434,6 @@ static void mode_btn_event_cb(lv_event_t* e) {
 // Helper Functions
 // ============================================================================
 
-// Wrapper for UI that shows error dialog on write failure
-static bool write_param_value_with_ui(int param_idx, int16_t value) {
-    if (!heatpump_param_write_by_index(param_idx, value)) {
-        show_settings_write_error(i18n_get(STR_HP_CANNOT_SAVE));
-        return false;
-    }
-    return true;
-}
-
-static void update_param_display(int param_idx, int16_t value_celsius) {
-    if (param_idx < 0 || param_idx >= NUM_HEATPUMP_PARAMS || param_idx >= 32) return;
-    if (!state.value_labels[param_idx]) return;
-    
-    const HeatPumpParam& param = HEATPUMP_PARAMS[param_idx];
-    const char* unit_str = get_param_unit_str(param.unit_type);
-    char buf[32];
-    
-    // Convert temperature values based on unit type
-    int display_value;
-    if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
-        display_value = app_prefs_convert_temp(value_celsius);
-    } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
-        display_value = app_prefs_convert_temp_diff(value_celsius);
-    } else {
-        display_value = value_celsius;  // Non-temp values, no conversion
-    }
-    
-    if (unit_str[0]) {
-        snprintf(buf, sizeof(buf), "%d %s", display_value, unit_str);
-    } else {
-        snprintf(buf, sizeof(buf), "%d", display_value);
-    }
-    lv_label_set_text(state.value_labels[param_idx], buf);
-}
-
 static void load_timer_cb(lv_timer_t* timer) {
     (void)timer;
 
@@ -506,8 +447,7 @@ static void load_timer_cb(lv_timer_t* timer) {
     }
 
     // Don't load if an edit dialog is open
-    if (state.current_param_idx >= 0 || state.current_ap >= 0 ||
-        state.current_setpoint_type >= 0) return;
+    if (state.current_ap >= 0 || state.current_setpoint_type >= 0) return;
 
     // Read and display one advanced parameter.
     ap_update_display(state.load_index);
@@ -532,57 +472,6 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* title) {
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
     
     return header;
-}
-
-static lv_obj_t* create_param_row(lv_obj_t* parent, int param_idx) {
-    const HeatPumpParam& param = HEATPUMP_PARAMS[param_idx];
-    
-    lv_obj_t* row = lv_obj_create(parent);
-    lv_obj_set_size(row, LV_PCT(100), 70);
-    lv_obj_set_style_bg_color(row, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(row, COLOR_CARD_BORDER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
-    lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(row, 20, LV_PART_MAIN);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    
-    // Store param index in user data
-    lv_obj_set_user_data(row, (void*)(intptr_t)param_idx);
-    lv_obj_add_event_cb(row, param_row_cb, LV_EVENT_CLICKED, nullptr);
-    
-    // Parameter name with P-code (left)
-    char display_name[64];
-    format_param_display_name(display_name, sizeof(display_name), &param);
-    lv_obj_t* name_lbl = lv_label_create(row);
-    lv_label_set_text(name_lbl, display_name);
-    lv_obj_set_style_text_font(name_lbl, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(name_lbl, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_width(name_lbl, 400);
-    lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
-    
-    // Value (right)
-    lv_obj_t* val_lbl = lv_label_create(row);
-    lv_label_set_text(val_lbl, "---");
-    lv_obj_set_style_text_font(val_lbl, UI_FONT_TITLE, LV_PART_MAIN);
-    lv_obj_set_style_text_color(val_lbl, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_align(val_lbl, LV_ALIGN_RIGHT_MID, -30, 0);
-    
-    // Arrow indicator
-    lv_obj_t* arrow = lv_label_create(row);
-    lv_label_set_text(arrow, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_font(arrow, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(arrow, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_align(arrow, LV_ALIGN_RIGHT_MID, 0, 0);
-    
-    // Store value label reference
-    if (param_idx < 32) {
-        state.value_labels[param_idx] = val_lbl;
-    }
-    
-    return row;
 }
 
 static lv_obj_t* create_setpoint_row(lv_obj_t* parent, int setpoint_type, lv_obj_t** value_label_out) {
@@ -783,12 +672,6 @@ static void close_btn_cb(lv_event_t* e) {
     heatpump_control_hide();
 }
 
-static void param_row_cb(lv_event_t* e) {
-    lv_obj_t* row = (lv_obj_t*)lv_event_get_target(e);
-    int param_idx = (int)(intptr_t)lv_obj_get_user_data(row);
-    show_edit_dialog(param_idx);
-}
-
 static void setpoint_row_cb(lv_event_t* e) {
     lv_obj_t* row = (lv_obj_t*)lv_event_get_target(e);
     int user_data = (int)(intptr_t)lv_obj_get_user_data(row);
@@ -877,40 +760,6 @@ static void edit_save_cb(lv_event_t* e) {
         return;
     }
     
-    if (state.current_param_idx >= 0 && state.current_param_idx < NUM_HEATPUMP_PARAMS) {
-        const HeatPumpParam& param = HEATPUMP_PARAMS[state.current_param_idx];
-        
-        // Convert back to Celsius for temp parameters
-        int16_t save_val;
-        if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
-            save_val = app_prefs_temp_to_celsius_from_f(state.edit_value);
-        } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
-            save_val = app_prefs_temp_diff_to_celsius_from_f(state.edit_value);
-        } else {
-            save_val = (int16_t)roundf(state.edit_value);
-        }
-        
-        if (write_param_value_with_ui(state.current_param_idx, save_val)) {
-            ESP_LOGI(TAG, "Saved %s = %d (from %.0f display units)", 
-                     param.name, save_val, state.edit_value);
-            
-            // Update the displayed value in the list
-            if (state.current_param_idx < 32 && state.value_labels[state.current_param_idx]) {
-                char buf[32];
-                int display_val = (int)roundf(state.edit_value);
-                const char* unit_str = get_param_unit_str(param.unit_type);
-                if (unit_str[0]) {
-                    snprintf(buf, sizeof(buf), "%d %s", display_val, unit_str);
-                } else {
-                    snprintf(buf, sizeof(buf), "%d", display_val);
-                }
-                lv_label_set_text(state.value_labels[state.current_param_idx], buf);
-            }
-        } else {
-            ESP_LOGE(TAG, "Failed to save %s", param.name);
-        }
-    }
-    
     hide_edit_dialog();
 }
 
@@ -940,15 +789,6 @@ static void edit_minus_cb(lv_event_t* e) {
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
         // Setpoints are always TEMP_ABSOLUTE - convert limit to display units
         min_val = app_prefs_convert_temp_f(s_setpoints[state.current_setpoint_type].min_val);
-    } else if (state.current_param_idx >= 0 && state.current_param_idx < NUM_HEATPUMP_PARAMS) {
-        const HeatPumpParam& param = HEATPUMP_PARAMS[state.current_param_idx];
-        if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
-            min_val = app_prefs_convert_temp_f(param.min_val);
-        } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
-            min_val = app_prefs_convert_temp_diff_f(param.min_val);
-        } else {
-            min_val = (float)param.min_val;
-        }
     } else {
         return;
     }
@@ -987,15 +827,6 @@ static void edit_plus_cb(lv_event_t* e) {
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
         // Setpoints are always TEMP_ABSOLUTE - convert limit to display units
         max_val = app_prefs_convert_temp_f(s_setpoints[state.current_setpoint_type].max_val);
-    } else if (state.current_param_idx >= 0 && state.current_param_idx < NUM_HEATPUMP_PARAMS) {
-        const HeatPumpParam& param = HEATPUMP_PARAMS[state.current_param_idx];
-        if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
-            max_val = app_prefs_convert_temp_f(param.max_val);
-        } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
-            max_val = app_prefs_convert_temp_diff_f(param.max_val);
-        } else {
-            max_val = (float)param.max_val;
-        }
     } else {
         return;
     }
@@ -1006,67 +837,10 @@ static void edit_plus_cb(lv_event_t* e) {
     }
 }
 
-static void show_edit_dialog(int param_idx) {
-    if (param_idx < 0 || param_idx >= NUM_HEATPUMP_PARAMS) return;
-    
-    state.current_param_idx = param_idx;
-    state.current_setpoint_type = -1;  // Not editing a setpoint
-    const HeatPumpParam& param = HEATPUMP_PARAMS[param_idx];
-    
-    // Read current value in Celsius
-    state.edit_value_celsius = heatpump_param_read_by_index(param_idx);
-    
-    // Convert to display units (float for F mode precision)
-    if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
-        state.edit_value = app_prefs_convert_temp_f(state.edit_value_celsius);
-    } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
-        state.edit_value = app_prefs_convert_temp_diff_f(state.edit_value_celsius);
-    } else {
-        state.edit_value = (float)state.edit_value_celsius;
-    }
-    
-    // Update dialog content - format name with P-code
-    char title_buf[64];
-    format_param_display_name(title_buf, sizeof(title_buf), &param);
-    lv_label_set_text(state.edit_title, title_buf);
-    lv_label_set_text(state.edit_description, param.description);
-    
-    // Range label - convert limits for temp params
-    char range_buf[64];
-    const char* unit_str = get_param_unit_str(param.unit_type);
-    int display_min, display_max;
-    
-    if (param.unit_type == ParamUnit::TEMP_ABSOLUTE) {
-        display_min = app_prefs_convert_temp(param.min_val);
-        display_max = app_prefs_convert_temp(param.max_val);
-    } else if (param.unit_type == ParamUnit::TEMP_OFFSET) {
-        display_min = app_prefs_convert_temp_diff(param.min_val);
-        display_max = app_prefs_convert_temp_diff(param.max_val);
-    } else {
-        display_min = param.min_val;
-        display_max = param.max_val;
-    }
-    
-    if (unit_str[0]) {
-        snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s", 
-                 i18n_get(STR_HP_RANGE_FMT), display_min, display_max, unit_str);
-    } else {
-        snprintf(range_buf, sizeof(range_buf), "%s %d - %d", 
-                 i18n_get(STR_HP_RANGE_FMT), display_min, display_max);
-    }
-    lv_label_set_text(state.edit_range_label, range_buf);
-    
-    update_edit_value_display();
-    
-    // Show dialog with animation
-    lv_obj_remove_flag(state.edit_dialog, LV_OBJ_FLAG_HIDDEN);
-}
-
 static void show_setpoint_edit(int setpoint_type) {
     if (setpoint_type < 0 || setpoint_type > 2) return;
     sync_setpoint_limits();
     
-    state.current_param_idx = -1;  // Not editing a P-parameter
     state.current_setpoint_type = setpoint_type;
     const SetpointDef& sp = s_setpoints[setpoint_type];
     
@@ -1112,7 +886,6 @@ static void show_setpoint_edit(int setpoint_type) {
 
 static void hide_edit_dialog(void) {
     lv_obj_add_flag(state.edit_dialog, LV_OBJ_FLAG_HIDDEN);
-    state.current_param_idx = -1;
     state.current_setpoint_type = -1;
     state.current_ap = -1;
 }
@@ -1141,8 +914,6 @@ static void update_edit_value_display(void) {
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
         // Setpoints are always TEMP_ABSOLUTE
         unit = app_prefs_temp_unit_str();
-    } else if (state.current_param_idx >= 0 && state.current_param_idx < NUM_HEATPUMP_PARAMS) {
-        unit = get_param_unit_str(HEATPUMP_PARAMS[state.current_param_idx].unit_type);
     } else {
         return;
     }
@@ -1329,7 +1100,6 @@ static void show_ap_edit_dialog(uint8_t ap) {
     if (!p || p->reg == arctic::ADV_REG_UNKNOWN || p->needs_sim_confirm) return;
 
     state.current_ap = ap;
-    state.current_param_idx = -1;
     state.current_setpoint_type = -1;
 
     // Seed with the live value (fall back to the vendor default).
@@ -1719,10 +1489,8 @@ void heatpump_control_hide(void) {
     state.edit_value_label = nullptr;
     state.edit_minus_btn = nullptr;
     state.edit_plus_btn = nullptr;
-    state.current_param_idx = -1;
     state.current_setpoint_type = -1;
     state.current_ap = -1;
-    memset(state.value_labels, 0, sizeof(state.value_labels));
     memset(state.ap_value_labels, 0, sizeof(state.ap_value_labels));
     memset(state.ap_display_nums, 0, sizeof(state.ap_display_nums));
     state.ap_display_count = 0;
