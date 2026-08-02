@@ -2201,11 +2201,18 @@
             font-size: 0.9rem;
         }
         
-        .param-name-toggle {
-            cursor: pointer;
-            display: inline-flex;
+        .param-expander {
+            width: 1.1rem;
+            flex-shrink: 0;
+            margin-right: 0.6rem;
+            display: flex;
             align-items: center;
-            gap: 0.35rem;
+            justify-content: center;
+            align-self: stretch;
+        }
+        
+        .param-expander-active {
+            cursor: pointer;
         }
         
         .param-expand-icon {
@@ -2940,13 +2947,11 @@
                                                 <template x-for="[key, p] in getParamsByCategory(cat)" :key="key">
                                                     <div class="param-item">
                                                         <div class="param-row">
+                                                            <div class="param-expander" :class="{ 'param-expander-active': !!apDetails(p.ap) }" @click="apDetails(p.ap) && toggleParamDetail(key)">
+                                                                <span class="param-expand-icon" x-show="!!apDetails(p.ap)" x-text="expandedParam === key ? '\u25be' : '\u25b8'"></span>
+                                                            </div>
                                                             <div class="param-info">
-                                                                <div class="param-name">
-                                                                    <span :class="{ 'param-name-toggle': !!apDetails(p.ap) }" @click="apDetails(p.ap) && toggleParamDetail(key)">
-                                                                        <span x-text="p.name"></span>
-                                                                        <span class="param-expand-icon" x-show="!!apDetails(p.ap)" x-text="expandedParam === key ? '\u25be' : '\u25b8'"></span>
-                                                                    </span>
-                                                                </div>
+                                                                <div class="param-name" x-text="p.name"></div>
                                                                 <div class="param-meta">
                                                                     <span class="param-pcode" x-text="'AP' + p.ap"></span>
                                                                     <span x-text="t('range') + ': ' + p.min + ' \u2013 ' + p.max + ' ' + p.unit"></span>
