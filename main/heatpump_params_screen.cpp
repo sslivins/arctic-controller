@@ -9,6 +9,9 @@
 #include "heatpump_control_screen.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
+#include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
+#include "macon_advanced_params.h"  // arctic::AdvancedParam, AP reg map
+#include "advanced_params.h"        // advanced_param_read/write (controller IO)
 #include "heatpump_params.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
@@ -94,6 +97,14 @@ static struct {
     
     // Array of value labels for each parameter row
     lv_obj_t* value_labels[32] = {};
+
+    // Advanced ("AP") parameter rows (arctic-macon table, verified regs only).
+    // Parallel arrays: ap number <-> its live-value label. Populated by
+    // create_ap_section() in canonical category order.
+    lv_obj_t* ap_value_labels[64] = {};
+    uint8_t   ap_display_nums[64] = {};
+    int       ap_display_count = 0;
+    int       current_ap = -1;   // AP being edited (-1 = not editing a AP param)
     
     // Staggered loading
     lv_timer_t* load_timer = nullptr;
@@ -116,19 +127,33 @@ static struct {
     int current_setpoint_type = -1;
 } state;
 
-// Setpoint definitions are initialized lazily to pick up i18n language
+// Setpoint definitions are initialized lazily to pick up i18n language.
+// min_val/max_val are owned by the shared arctic-macon library (setpoint_limits)
+// and synced in via sync_setpoint_limits() — never hardcode ranges here.
 struct SetpointDef {
     string_id_t name_id;
     const char* description;  // Technical - not translated
-    int16_t min_val;    // In Celsius
-    int16_t max_val;    // In Celsius
+    arctic::SetpointKind kind;
+    int16_t min_val;    // In Celsius (synced from library; see sync_setpoint_limits)
+    int16_t max_val;    // In Celsius (synced from library; see sync_setpoint_limits)
 };
 
-static const SetpointDef s_setpoints[] = {
-    {STR_HP_COOLING_SETPOINT, "Target water temperature for cooling mode.", 5, 30},
-    {STR_HP_HEATING_SETPOINT, "Target water temperature for floor/fan heating mode.", 20, 60},
-    {STR_HP_HOT_WATER_SETPOINT, "Target temperature for hot water tank.", 30, 60},
+static SetpointDef s_setpoints[] = {
+    {STR_HP_COOLING_SETPOINT, "Target water temperature for cooling mode.", arctic::SetpointKind::Cooling, 0, 0},
+    {STR_HP_HEATING_SETPOINT, "Target water temperature for floor/fan heating mode.", arctic::SetpointKind::Heating, 0, 0},
+    {STR_HP_HOT_WATER_SETPOINT, "Target temperature for hot water tank.", arctic::SetpointKind::HotWater, 0, 0},
 };
+
+// Pull the current min/max for every setpoint from the shared library so the
+// Tab5 UI enforces/displays the exact same guardrails as the web UI and the
+// REST write path. Cheap; call before any read of s_setpoints[*].min/max_val.
+static void sync_setpoint_limits(void) {
+    for (auto& sp : s_setpoints) {
+        const arctic::SetpointLimits lim = arctic::setpoint_limits(sp.kind);
+        sp.min_val = static_cast<int16_t>(lim.min_c);
+        sp.max_val = static_cast<int16_t>(lim.max_c);
+    }
+}
 
 // ============================================================================
 // Forward Declarations
@@ -152,6 +177,14 @@ static void power_update_timer_cb(lv_timer_t* timer);
 static void update_power_btn_appearance(bool power_on);
 static void mode_btn_event_cb(lv_event_t* e);
 static void update_mode_btn_styles(int selected_idx);
+// Advanced ("AP") parameter section
+static void ap_row_cb(lv_event_t* e);
+static void show_ap_edit_dialog(uint8_t ap);
+static void show_ap_trigger_confirm(uint8_t ap);
+static void ap_trigger_run_cb(lv_event_t* e);
+static void create_ap_section(lv_obj_t* parent);
+static void ap_update_display(int slot);
+static const char* kratio_display_str(int reading);
 
 // ============================================================================
 // Demo Setpoints (screen-local; P-parameters use shared heatpump_params.cpp)
@@ -161,6 +194,7 @@ static bool s_demo_setpoints_initialized = false;
 
 static void init_demo_setpoints(void) {
     if (s_demo_setpoints_initialized) return;
+    sync_setpoint_limits();
     
     // Initialize setpoints to midpoint of range
     for (int i = 0; i < 3; i++) {
@@ -461,8 +495,8 @@ static void update_param_display(int param_idx, int16_t value_celsius) {
 
 static void load_timer_cb(lv_timer_t* timer) {
     (void)timer;
-    
-    if (!state.shown || state.load_index >= NUM_HEATPUMP_PARAMS) {
+
+    if (!state.shown || state.load_index >= state.ap_display_count) {
         // Done loading - delete timer
         if (state.load_timer) {
             lv_timer_del(state.load_timer);
@@ -470,14 +504,14 @@ static void load_timer_cb(lv_timer_t* timer) {
         }
         return;
     }
-    
-    // Don't load if edit dialog is open
-    if (state.current_param_idx >= 0) return;
-    
-    // Read and display one parameter
-    int16_t val = heatpump_param_read_by_index(state.load_index);
-    update_param_display(state.load_index, val);
-    
+
+    // Don't load if an edit dialog is open
+    if (state.current_param_idx >= 0 || state.current_ap >= 0 ||
+        state.current_setpoint_type >= 0) return;
+
+    // Read and display one advanced parameter.
+    ap_update_display(state.load_index);
+
     state.load_index++;
 }
 
@@ -771,7 +805,28 @@ static void edit_cancel_cb(lv_event_t* e) {
 
 static void edit_save_cb(lv_event_t* e) {
     (void)e;
-    
+
+    // Advanced ("AP") parameter save — routed through the arctic-macon guardrail.
+    if (state.current_ap >= 0) {
+        uint8_t ap = (uint8_t)state.current_ap;
+        int16_t save_val = (int16_t)roundf(state.edit_value);
+        bool bus_ok = false;
+        arctic::AdvWriteResult r = advanced_param_write(ap, save_val, &bus_ok);
+        if (r == arctic::AdvWriteResult::OK && bus_ok) {
+            ESP_LOGI(TAG, "Saved AP%u = %d", (unsigned)ap, save_val);
+            // Refresh the row label for this AP.
+            for (int i = 0; i < state.ap_display_count; i++) {
+                if (state.ap_display_nums[i] == ap) { ap_update_display(i); break; }
+            }
+        } else {
+            ESP_LOGE(TAG, "Failed to save AP%u: %s", (unsigned)ap,
+                     arctic::adv_write_result_name(r));
+            show_settings_write_error(i18n_get(STR_HP_CANNOT_SAVE));
+        }
+        hide_edit_dialog();
+        return;
+    }
+
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
         // Saving a setpoint - convert F back to C (setpoints are always TEMP_ABSOLUTE)
         int16_t celsius_val = app_prefs_temp_to_celsius_from_f(state.edit_value);
@@ -861,7 +916,25 @@ static void edit_save_cb(lv_event_t* e) {
 
 static void edit_minus_cb(lv_event_t* e) {
     (void)e;
-    
+
+    // Advanced ("AP") param: enum-aware / integer stepping.
+    if (state.current_ap >= 0) {
+        const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
+        if (!p) return;
+        int cur = (int)roundf(state.edit_value);
+        if (p->enum_vals) {
+            int idx = -1;
+            for (uint8_t i = 0; i < p->enum_count; i++) {
+                if ((int)p->enum_vals[i] == cur) { idx = i; break; }
+            }
+            if (idx > 0) state.edit_value = (float)p->enum_vals[idx - 1];
+        } else if (cur > p->min_val) {
+            state.edit_value -= 1.0f;
+        }
+        update_edit_value_display();
+        return;
+    }
+
     float min_val = 0;
     
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
@@ -888,7 +961,27 @@ static void edit_minus_cb(lv_event_t* e) {
 
 static void edit_plus_cb(lv_event_t* e) {
     (void)e;
-    
+
+    // Advanced ("AP") param: enum-aware / integer stepping.
+    if (state.current_ap >= 0) {
+        const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
+        if (!p) return;
+        int cur = (int)roundf(state.edit_value);
+        if (p->enum_vals) {
+            int idx = -1;
+            for (uint8_t i = 0; i < p->enum_count; i++) {
+                if ((int)p->enum_vals[i] == cur) { idx = i; break; }
+            }
+            if (idx >= 0 && idx < (int)p->enum_count - 1) {
+                state.edit_value = (float)p->enum_vals[idx + 1];
+            }
+        } else if (cur < p->max_val) {
+            state.edit_value += 1.0f;
+        }
+        update_edit_value_display();
+        return;
+    }
+
     float max_val = 0;
     
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
@@ -971,6 +1064,7 @@ static void show_edit_dialog(int param_idx) {
 
 static void show_setpoint_edit(int setpoint_type) {
     if (setpoint_type < 0 || setpoint_type > 2) return;
+    sync_setpoint_limits();
     
     state.current_param_idx = -1;  // Not editing a P-parameter
     state.current_setpoint_type = setpoint_type;
@@ -1020,12 +1114,30 @@ static void hide_edit_dialog(void) {
     lv_obj_add_flag(state.edit_dialog, LV_OBJ_FLAG_HIDDEN);
     state.current_param_idx = -1;
     state.current_setpoint_type = -1;
+    state.current_ap = -1;
 }
 
 static void update_edit_value_display(void) {
     const char* unit = "";
     int display_val = (int)roundf(state.edit_value);  // Round float to int for display
-    
+
+    // Advanced ("AP") param: K-ratio codes render as their display decimal.
+    if (state.current_ap >= 0) {
+        const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
+        char val_buf[32];
+        if (p && p->enum_vals) {
+            const char* s = kratio_display_str(display_val);
+            if (s) snprintf(val_buf, sizeof(val_buf), "%s", s);
+            else   snprintf(val_buf, sizeof(val_buf), "%d", display_val);
+        } else if (p && p->unit && p->unit[0]) {
+            snprintf(val_buf, sizeof(val_buf), "%d %s", display_val, p->unit);
+        } else {
+            snprintf(val_buf, sizeof(val_buf), "%d", display_val);
+        }
+        lv_label_set_text(state.edit_value_label, val_buf);
+        return;
+    }
+
     if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
         // Setpoints are always TEMP_ABSOLUTE
         unit = app_prefs_temp_unit_str();
@@ -1042,6 +1154,250 @@ static void update_edit_value_display(void) {
         snprintf(val_buf, sizeof(val_buf), "%d", display_val);
     }
     lv_label_set_text(state.edit_value_label, val_buf);
+}
+
+// ============================================================================
+// Advanced ("AP") Parameter Section
+// ============================================================================
+// Driven entirely by the shared arctic-macon advanced-param table. Only
+// change-and-capture verified registers are shown; the safe writable subset
+// (AP13-20) is click-to-edit, the manual-override block (AP48-51) is displayed
+// read-only. K-ratio codes render as their vendor display decimal.
+
+// Vendor K-ratio: RS485 reading code -> display decimal string.
+static const char* kratio_display_str(int reading) {
+    switch (reading) {
+        case 0:  return "0";
+        case 1:  return "0.25";
+        case 2:  return "0.5";
+        case 4:  return "1";
+        case 8:  return "2";
+        case 12: return "3";
+        case 16: return "4";
+        case 20: return "5";
+        default: return nullptr;  // unexpected raw register value
+    }
+}
+
+// Format a AP parameter's raw register value into a display string.
+static void format_ap_value(const arctic::AdvancedParam* p, int16_t raw,
+                            char* buf, size_t n) {
+    if (p->enum_vals) {
+        const char* s = kratio_display_str(raw);
+        if (s) snprintf(buf, n, "%s", s);
+        else   snprintf(buf, n, "%d", raw);
+    } else if (p->unit && p->unit[0]) {
+        snprintf(buf, n, "%d %s", raw, p->unit);
+    } else {
+        snprintf(buf, n, "%d", raw);
+    }
+}
+
+// Refresh the live value label for the AP row at display slot `slot`.
+static void ap_update_display(int slot) {
+    if (slot < 0 || slot >= state.ap_display_count) return;
+    if (!state.ap_value_labels[slot]) return;
+    uint8_t ap = state.ap_display_nums[slot];
+    const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
+    if (!p) return;
+
+    // Momentary command registers do not latch a stored value — show a static
+    // "Ready" affordance instead of the (always-0) register read-back.
+    if (p->is_trigger) {
+        lv_label_set_text(state.ap_value_labels[slot], "Ready");
+        return;
+    }
+
+    int16_t val = 0;
+    if (advanced_param_read(ap, &val)) {
+        char buf[32];
+        format_ap_value(p, val, buf, sizeof(buf));
+        lv_label_set_text(state.ap_value_labels[slot], buf);
+    } else {
+        lv_label_set_text(state.ap_value_labels[slot], "--");
+    }
+}
+
+static void ap_row_cb(lv_event_t* e) {
+    lv_obj_t* row = (lv_obj_t*)lv_event_get_target(e);
+    uint8_t ap = (uint8_t)(intptr_t)lv_obj_get_user_data(row);
+    const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
+    if (p && p->is_trigger) {
+        show_ap_trigger_confirm(ap);
+    } else {
+        show_ap_edit_dialog(ap);
+    }
+}
+
+static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
+    if (state.ap_display_count >= 64) return;
+    const int slot = state.ap_display_count;
+    const bool reg_known = (p->reg != arctic::ADV_REG_UNKNOWN);
+    // Three interactive kinds + a passive locked kind:
+    //   trigger   -> tappable, fires a momentary command (confirm dialog)
+    //   read_only -> reg known but purpose unclear: displayed, not tappable
+    //   writable  -> tappable stepper edit
+    //   locked    -> manual block (needs_sim_confirm): displayed, not tappable
+    const bool is_trigger = reg_known && p->is_trigger;
+    const bool read_only  = reg_known && p->read_only;
+    const bool writable   = reg_known && !p->needs_sim_confirm && !read_only && !is_trigger;
+    const bool clickable  = writable || is_trigger;
+    const bool active_col = writable || is_trigger;  // accent vs dim text
+
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), 70);
+    lv_obj_set_style_bg_color(row, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, COLOR_CARD_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(row, 20, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    if (clickable) {
+        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_user_data(row, (void*)(intptr_t)p->ap);
+        lv_obj_add_event_cb(row, ap_row_cb, LV_EVENT_CLICKED, nullptr);
+    }
+
+    // Name with AP number (left)
+    char name_buf[80];
+    snprintf(name_buf, sizeof(name_buf), "%s (AP%u)", p->name, (unsigned)p->ap);
+    lv_obj_t* name_lbl = lv_label_create(row);
+    lv_label_set_text(name_lbl, name_buf);
+    lv_obj_set_style_text_font(name_lbl, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(name_lbl, active_col ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_width(name_lbl, 400);
+    lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+
+    // Value (right)
+    lv_obj_t* val_lbl = lv_label_create(row);
+    lv_label_set_text(val_lbl, "---");
+    lv_obj_set_style_text_font(val_lbl, UI_FONT_TITLE, LV_PART_MAIN);
+    lv_obj_set_style_text_color(val_lbl, active_col ? COLOR_ACCENT : COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_align(val_lbl, LV_ALIGN_RIGHT_MID, -30, 0);
+
+    // Indicator glyph, per kind:
+    //   trigger   -> play (action), accent
+    //   writable  -> right arrow (edit), dim
+    //   read_only -> eye (view-only), dim
+    //   locked    -> warning, warning color
+    const char* glyph;
+    lv_color_t  glyph_col;
+    if (is_trigger)      { glyph = LV_SYMBOL_PLAY;    glyph_col = COLOR_ACCENT; }
+    else if (writable)   { glyph = LV_SYMBOL_RIGHT;   glyph_col = COLOR_TEXT_DIM; }
+    else if (read_only)  { glyph = LV_SYMBOL_EYE_OPEN;glyph_col = COLOR_TEXT_DIM; }
+    else                 { glyph = LV_SYMBOL_WARNING; glyph_col = COLOR_WARNING; }
+    lv_obj_t* ind = lv_label_create(row);
+    lv_label_set_text(ind, glyph);
+    lv_obj_set_style_text_font(ind, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(ind, glyph_col, LV_PART_MAIN);
+    lv_obj_align(ind, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    state.ap_value_labels[slot] = val_lbl;
+    state.ap_display_nums[slot] = p->ap;
+    state.ap_display_count++;
+}
+
+static void create_ap_section(lv_obj_t* parent) {
+    state.ap_display_count = 0;
+
+    // One top-level header, then rows grouped in canonical category order.
+    create_section_header(parent, "Advanced Parameters");
+
+    const size_t ncat = arctic::advanced_category_count();
+    const size_t nparam = arctic::advanced_param_count();
+    for (size_t c = 0; c < ncat; c++) {
+        const char* cat = arctic::advanced_category_at(c);
+        bool header_done = false;
+        for (size_t i = 0; i < nparam; i++) {
+            const arctic::AdvancedParam* p = arctic::advanced_param_at(i);
+            if (!p || !cat) continue;
+            if (strcmp(p->category, cat) != 0) continue;
+            if (p->reg == arctic::ADV_REG_UNKNOWN) continue;  // hide unverified
+            if (!header_done) {
+                create_section_header(parent, cat);
+                header_done = true;
+            }
+            create_ap_row(parent, p);
+        }
+    }
+}
+
+static void show_ap_edit_dialog(uint8_t ap) {
+    const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
+    if (!p || p->reg == arctic::ADV_REG_UNKNOWN || p->needs_sim_confirm) return;
+
+    state.current_ap = ap;
+    state.current_param_idx = -1;
+    state.current_setpoint_type = -1;
+
+    // Seed with the live value (fall back to the vendor default).
+    int16_t v = 0;
+    if (!advanced_param_read(ap, &v)) v = p->default_val;
+    state.edit_value = (float)v;
+    state.edit_value_celsius = v;
+
+    char title_buf[80];
+    snprintf(title_buf, sizeof(title_buf), "%s (AP%u)", p->name, (unsigned)ap);
+    lv_label_set_text(state.edit_title, title_buf);
+    lv_label_set_text(state.edit_description, "");
+
+    // Range hint.
+    char range_buf[64];
+    if (p->enum_vals) {
+        // K-ratio: display decimals span 0 - 5.
+        snprintf(range_buf, sizeof(range_buf), "%s 0 - 5", i18n_get(STR_HP_RANGE_FMT));
+    } else if (p->unit && p->unit[0]) {
+        snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s",
+                 i18n_get(STR_HP_RANGE_FMT), p->min_val, p->max_val, p->unit);
+    } else {
+        snprintf(range_buf, sizeof(range_buf), "%s %d - %d",
+                 i18n_get(STR_HP_RANGE_FMT), p->min_val, p->max_val);
+    }
+    lv_label_set_text(state.edit_range_label, range_buf);
+
+    update_edit_value_display();
+    lv_obj_remove_flag(state.edit_dialog, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Momentary "trigger" AP params (e.g. AP47 water-system cleaning) do not store
+// a value — they are self-clearing command registers.  Tapping the row opens a
+// confirmation before firing the command (writes the trigger value 1).
+static uint8_t s_trigger_ap = 0;
+
+static void ap_trigger_run_cb(lv_event_t* e) {
+    lv_obj_t* mbox = (lv_obj_t*)lv_event_get_user_data(e);
+    uint8_t ap = s_trigger_ap;
+    bool bus_ok = false;
+    arctic::AdvWriteResult r = advanced_param_write(ap, 1, &bus_ok);
+    if (r != arctic::AdvWriteResult::OK || !bus_ok) {
+        ESP_LOGE(TAG, "Trigger AP%u failed: %s", (unsigned)ap,
+                 arctic::adv_write_result_name(r));
+        show_settings_write_error(i18n_get(STR_HP_CANNOT_SAVE));
+    } else {
+        ESP_LOGI(TAG, "Triggered AP%u (momentary command)", (unsigned)ap);
+    }
+    if (mbox) lv_msgbox_close(mbox);
+}
+
+static void show_ap_trigger_confirm(uint8_t ap) {
+    const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
+    if (!p || !p->is_trigger || p->reg == arctic::ADV_REG_UNKNOWN) return;
+    s_trigger_ap = ap;
+
+    lv_obj_t* mbox = lv_msgbox_create(lv_layer_top());
+    char title[80];
+    snprintf(title, sizeof(title), "%s (AP%u)", p->name, (unsigned)ap);
+    lv_msgbox_add_title(mbox, title);
+    lv_msgbox_add_text(mbox,
+        "Run this momentary command now? It starts immediately and does not "
+        "store a value.");
+    lv_obj_t* run_btn = lv_msgbox_add_footer_button(mbox, "Run");
+    lv_obj_add_event_cb(run_btn, ap_trigger_run_cb, LV_EVENT_CLICKED, mbox);
+    lv_msgbox_add_close_button(mbox);  // X acts as Cancel
+    lv_obj_center(mbox);
+    lv_obj_set_width(mbox, 460);
 }
 
 // ============================================================================
@@ -1224,21 +1580,12 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     create_setpoint_row(state.scroll_container, 2, &state.hotwater_value_label);
     
     // =========================================================================
-    // TECHNICIAN PARAMETERS - P-parameters grouped by category
+    // ADVANCED PARAMETERS - arctic-macon table, write-verified registers only.
+    // (The old "P-parameter" list was an unverified mapping with wrong register
+    //  addresses and no sign-decode; it has been retired in favour of this.)
     // =========================================================================
-    
-    // Create parameter rows grouped by category
-    const char* current_category = nullptr;
-    for (int i = 0; i < NUM_HEATPUMP_PARAMS; i++) {
-        // Add section header if category changed
-        if (current_category == nullptr || strcmp(current_category, HEATPUMP_PARAMS[i].category) != 0) {
-            current_category = HEATPUMP_PARAMS[i].category;
-            create_section_header(state.scroll_container, get_category_i18n(current_category));
-        }
-        
-        create_param_row(state.scroll_container, i);
-    }
-    
+    create_ap_section(state.scroll_container);
+
     // Create edit dialog (hidden initially)
     create_edit_dialog();
     
@@ -1303,20 +1650,19 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     if (demo_mode) {
         // Demo mode: load all simulated values immediately
         ESP_LOGI(TAG, "Using demo values");
-        for (int i = 0; i < NUM_HEATPUMP_PARAMS; i++) {
-            int16_t val = heatpump_param_read_by_index(i);
-            update_param_display(i, val);
+        for (int i = 0; i < state.ap_display_count; i++) {
+            ap_update_display(i);  // advanced_param_read returns the vendor default in demo
         }
     } else if (!hp.connected) {
         // Disconnected: show placeholder values
         ESP_LOGI(TAG, "Disconnected - showing placeholders");
-        for (int i = 0; i < NUM_HEATPUMP_PARAMS; i++) {
-            if (state.value_labels[i]) {
-                lv_label_set_text(state.value_labels[i], "--");
+        for (int i = 0; i < state.ap_display_count; i++) {
+            if (state.ap_value_labels[i]) {
+                lv_label_set_text(state.ap_value_labels[i], "--");
             }
         }
     } else {
-        // Connected: stagger reads to avoid blocking
+        // Connected: stagger reads to avoid blocking the UI.
         state.load_timer = lv_timer_create(load_timer_cb, 100, nullptr);
     }
     
@@ -1375,7 +1721,11 @@ void heatpump_control_hide(void) {
     state.edit_plus_btn = nullptr;
     state.current_param_idx = -1;
     state.current_setpoint_type = -1;
+    state.current_ap = -1;
     memset(state.value_labels, 0, sizeof(state.value_labels));
+    memset(state.ap_value_labels, 0, sizeof(state.ap_value_labels));
+    memset(state.ap_display_nums, 0, sizeof(state.ap_display_nums));
+    state.ap_display_count = 0;
     
     // Call callback to load the previous screen (animation will delete this screen)
     if (cb) {

@@ -26,6 +26,7 @@
 #include "modbus/modbus_manager.h"
 #include "modbus/arctic_heatpump.h"
 #include "tuya/tuya_listener.h"
+#include "tuya/macon_master.h"
 #include "heatpump_screen.h"
 #include "app_preferences.h"
 #include "event_log.h"
@@ -213,6 +214,25 @@ extern "C" void app_main(void)
             mclog::tagInfo(TAG, "Tuya passive listen mode started (RX-only)");
         } else {
             mclog::tagError(TAG, "Failed to init Tuya listener: {}", (int)tuya_ret);
+        }
+#elif CONFIG_ARCTIC_TUYA_MASTER
+        // Active Tuya master mode: the Tab5 drives the bus (poll + setpoint
+        // writes). Decoded telemetry feeds the same HeatPumpState the passive
+        // listener uses. Requires the OEM controller to be disconnected;
+        // macon_master::start() runs a bus-idle preflight and refuses to
+        // transmit if another master is detected.
+        arctic::initExternalFeed();
+        esp_err_t master_init = macon_master::init();
+        if (master_init == ESP_OK) {
+            esp_err_t master_start = macon_master::start();
+            if (master_start == ESP_OK) {
+                mclog::tagInfo(TAG, "Tuya ACTIVE MASTER mode started");
+            } else {
+                mclog::tagError(TAG,
+                    "Tuya master NOT activated (bus not idle?) - staying passive, no telemetry");
+            }
+        } else {
+            mclog::tagError(TAG, "Failed to init Tuya master: {}", (int)master_init);
         }
 #else
         esp_err_t modbus_ret = modbus::init();

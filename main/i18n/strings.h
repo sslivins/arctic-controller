@@ -296,6 +296,7 @@ typedef enum {
     STR_HP_LABEL_LO_PRESS,
     STR_HP_LABEL_POWER_IN,
     STR_HP_LABEL_HEAT_OUT,
+    STR_HP_LABEL_COOLING_OUT,
 
     // ========================================================================
     // Event Log

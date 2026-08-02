@@ -4,6 +4,7 @@
 
 #include "arctic_heatpump.h"
 #include "modbus_manager.h"
+#include "macon_master.h"
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "macon_state.h"
@@ -149,7 +150,7 @@ static bool pollSystemReadings() {
     s_state.fan_speed = data[1];              // 2119
     s_state.ac_voltage = data[2];             // 2120
     s_state.ac_current = data[3];             // 2121
-    s_state.dc_voltage = data[4];             // 2122
+    s_state.dc_voltage = data[4] / 10;        // 2122 (raw tenths-of-volts -> volts; legacy path)
     s_state.dc_current = data[5];             // 2123
     s_state.primary_eev_opening = data[6];    // 2124
     s_state.secondary_eev_opening = data[7];  // 2125
@@ -454,7 +455,7 @@ bool isExternalFeed() {
 //     reg2001 = A7 DC bus voltage(*10) reg2140 = A5 main EEV degree
 //     reg2003 = A10 DC motor (fan) speed
 //     reg2141 = A14 compressor frequency (Hz)   [telemetry window reaches 2142]
-//   power_consumption (V*I/10) reproduces A9 real-time power.
+//   real-time power comes from the macon library (reg2114/A9), in watts.
 // High/low pressure (A11/A12) read static nonsense values (-6 / 3), i.e.
 // uninstalled sensors on this DHW unit, so left cleared. The fault/protection
 // registers are reg2007 (holding) + the INPUT cluster reg2125-2128, all mapped
@@ -509,8 +510,10 @@ static void applyMaconMapping() {
     s_state.suction_temp         = ms.suction_c;
     s_state.outdoor_coil_temp    = ms.outdoor_coil_c;
 
-    // Setpoint.
+    // Setpoints (whole °C). cooling_setpoint = reg2093 byte0, decoded by the
+    // macon library; previously left unmapped so the API reported 0.
     s_state.hot_water_setpoint   = ms.hot_water_setpoint;
+    s_state.cooling_setpoint     = ms.cooling_setpoint;
 
     // Running state + readings.
     s_state.status1         = st1;
@@ -524,9 +527,27 @@ static void applyMaconMapping() {
     // Electrical readings.
     s_state.ac_current          = ms.ac_current;
     s_state.ac_voltage          = ms.ac_voltage;
-    s_state.dc_voltage          = ms.dc_voltage;   // already x10 (volts)
+    // The macon library owns raw->unit conversion and reports dc_voltage in
+    // VOLTS. Store it as-is; no re-scaling in the consumer.
+    s_state.dc_voltage          = ms.dc_voltage;
     s_state.primary_eev_opening = ms.primary_eev;
     s_state.compressor_freq     = ms.compressor_freq;
+    // Real-time power in watts, decoded by the macon library (reg2114/A9).
+    // Preferred over the old V*I/10 estimate, which is now 10x low because the
+    // library normalises ac_current to whole amps.
+    s_state.realtime_power_w    = ms.realtime_power_w;
+
+    // Estimated performance (thermal output + COP). Water flow is NOT reported
+    // by the mainboard (only a flow switch), so it is an outside estimate: 40
+    // L/min of water matches the arctic-sniffer's assumption so both agree. The
+    // macon library owns the physics; we only supply the estimated inputs.
+    static constexpr arctic::PerformanceInputs kPerfInputs = {
+        /*water_flow_lpm=*/40.0f, /*fluid_cp_j_per_kgK=*/4186.0f,
+        /*fluid_density_kg_per_l=*/1.00f };
+    const arctic::PerformanceEstimate perf = arctic::estimate_performance(ms, kPerfInputs);
+    s_state.thermal_w = perf.thermal_w;
+    s_state.cop_x100  = perf.cop_x100;
+    s_state.cop_valid = perf.valid;
 
 
     // Macon fault/protection registers = reg2007 (holding run/fault bits) plus
@@ -768,6 +789,10 @@ bool isConnected() {
 // ============================================================================
 
 bool setUnitPower(bool on) {
+    if (macon_master::is_active()) {
+        ESP_LOGW(TAG, "Unit power write unsupported in Tuya master mode (no verified fc06 mapping)");
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::UNIT_ON_OFF, on ? 1 : 0);
     if (err == ESP_OK) {
         // unit_on will update from STATUS_1 on next pollStatus() cycle
@@ -779,6 +804,10 @@ bool setUnitPower(bool on) {
 }
 
 bool setWorkingMode(WorkingMode mode) {
+    if (macon_master::is_active()) {
+        ESP_LOGW(TAG, "Working-mode write unsupported in Tuya master mode (no verified fc06 mapping)");
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::WORKING_MODE, static_cast<uint16_t>(mode));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -792,6 +821,18 @@ bool setWorkingMode(WorkingMode mode) {
 }
 
 bool setCoolingSetpoint(int16_t temp) {
+    // Enforce the library-owned range (the mainboard enforces none of its own).
+    temp = static_cast<int16_t>(clamp_setpoint(SetpointKind::Cooling, temp));
+    if (macon_master::is_active()) {
+        // Route through the shared-library MaconLink (fc06 write + ACK).
+        if (macon_master::set_cooling_setpoint((int)temp)) {
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            s_state.cooling_setpoint = temp;
+            xSemaphoreGive(s_state_mutex);
+            return true;
+        }
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::COOLING_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -805,6 +846,13 @@ bool setCoolingSetpoint(int16_t temp) {
 }
 
 bool setHeatingSetpoint(int16_t temp) {
+    temp = static_cast<int16_t>(clamp_setpoint(SetpointKind::Heating, temp));
+    if (macon_master::is_active()) {
+        // MaconLink deliberately has no set_heating_setpoint: reg2094 is
+        // unverified on this unit. Fail explicitly rather than guess.
+        ESP_LOGW(TAG, "Heating setpoint write unsupported in Tuya master mode (reg2094 unverified)");
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::HEATING_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -818,6 +866,16 @@ bool setHeatingSetpoint(int16_t temp) {
 }
 
 bool setHotWaterSetpoint(int16_t temp) {
+    temp = static_cast<int16_t>(clamp_setpoint(SetpointKind::HotWater, temp));
+    if (macon_master::is_active()) {
+        if (macon_master::set_hot_water_setpoint((int)temp)) {
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            s_state.hot_water_setpoint = temp;
+            xSemaphoreGive(s_state_mutex);
+            return true;
+        }
+        return false;
+    }
     esp_err_t err = writeSingleReg(reg::HOT_WATER_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -831,6 +889,10 @@ bool setHotWaterSetpoint(int16_t temp) {
 }
 
 bool writeRegister(uint16_t address, uint16_t value) {
+    if (macon_master::is_active()) {
+        ESP_LOGW(TAG, "Raw register write unsupported in Tuya master mode (no verified fc06 mapping)");
+        return false;
+    }
     // Validate address is in writable range (2000-2057)
     if (address < 2000 || address > 2057) {
         ESP_LOGE(TAG, "Invalid register address %d (must be 2000-2057)", address);
@@ -848,6 +910,24 @@ bool writeRegister(uint16_t address, uint16_t value) {
 
 bool readRegister(uint16_t address, uint16_t* value_out) {
     if (value_out == nullptr) {
+        return false;
+    }
+    // In demo or passive external-feed mode the register value lives in the
+    // cached window (s_demo_regs), which stays valid even when we are the
+    // active Tuya master. Serve it from the cache rather than attempting a
+    // synchronous bus transaction (which is unsupported in master mode) so the
+    // Control-screen P-parameter and advanced (AP) rows can display values.
+    if (s_demo_mode || s_feed_mode) {
+        if (address < DEMO_REG_BASE ||
+            (uint16_t)(address - DEMO_REG_BASE) >= DEMO_REG_COUNT) {
+            return false;  // outside the cached register window
+        }
+        return readRegisters(address, 1, value_out) == ESP_OK;
+    }
+    if (macon_master::is_active()) {
+        // Live values come from the poll loop into HeatPumpState; there is no
+        // synchronous single-register read path on the Tuya bus.
+        ESP_LOGW(TAG, "Synchronous register read unsupported in Tuya master mode");
         return false;
     }
     

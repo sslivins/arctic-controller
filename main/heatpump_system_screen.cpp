@@ -47,10 +47,7 @@ static struct {
     lv_obj_t* dc_voltage = nullptr;
     lv_obj_t* dc_current = nullptr;
     
-    // Pressure readings
-    lv_obj_t* high_pressure = nullptr;
-    lv_obj_t* low_pressure = nullptr;
-    
+
     // Expansion valve readings
     lv_obj_t* primary_eev = nullptr;
     lv_obj_t* secondary_eev = nullptr;
@@ -131,9 +128,6 @@ static void update_readings() {
         lv_label_set_text(state.dc_voltage, "380.0 V");
         lv_label_set_text(state.dc_current, "4 A");
         
-        lv_label_set_text(state.high_pressure, "2.50 MPa");
-        lv_label_set_text(state.low_pressure, "0.85 MPa");
-        
         lv_label_set_text(state.primary_eev, "350 steps");
         lv_label_set_text(state.secondary_eev, "200 steps");
         
@@ -157,8 +151,6 @@ static void update_readings() {
         lv_label_set_text(state.ac_current, na);
         lv_label_set_text(state.dc_voltage, na);
         lv_label_set_text(state.dc_current, na);
-        lv_label_set_text(state.high_pressure, na);
-        lv_label_set_text(state.low_pressure, na);
         lv_label_set_text(state.primary_eev, na);
         lv_label_set_text(state.secondary_eev, na);
         lv_label_set_text(state.cooling_setpoint, na);
@@ -185,21 +177,12 @@ static void update_readings() {
     snprintf(buf, sizeof(buf), "%d A", hp.ac_current);
     lv_label_set_text(state.ac_current, buf);
     
-    // dc_voltage is in tenths of volts
-    snprintf(buf, sizeof(buf), "%d.%d V", hp.dc_voltage / 10, hp.dc_voltage % 10);
+    // dc_voltage is in volts (conversion owned by the macon library)
+    snprintf(buf, sizeof(buf), "%.0f V", hp.getDcVoltageV());
     lv_label_set_text(state.dc_voltage, buf);
     
     snprintf(buf, sizeof(buf), "%d A", hp.dc_current);
     lv_label_set_text(state.dc_current, buf);
-    
-    // Pressures
-    // high_pressure is in hundredths of MPa
-    snprintf(buf, sizeof(buf), "%d.%02d MPa", hp.high_pressure / 100, hp.high_pressure % 100);
-    lv_label_set_text(state.high_pressure, buf);
-    
-    // low_pressure is in hundredths of MPa
-    snprintf(buf, sizeof(buf), "%d.%02d MPa", hp.low_pressure / 100, hp.low_pressure % 100);
-    lv_label_set_text(state.low_pressure, buf);
     
     // EEV
     snprintf(buf, sizeof(buf), "%d steps", hp.primary_eev_opening);
@@ -324,10 +307,8 @@ void heatpump_system_show(heatpump_system_close_cb_t on_close) {
     create_reading_row(content, i18n_get(STR_HP_DC_VOLTAGE), &state.dc_voltage);
     create_reading_row(content, i18n_get(STR_HP_DC_CURRENT), &state.dc_current);
     
-    // Pressure section
-    create_section_header(content, i18n_get(STR_HP_PRESSURES));
-    create_reading_row(content, i18n_get(STR_HP_HIGH_PRESSURE), &state.high_pressure);
-    create_reading_row(content, i18n_get(STR_HP_LOW_PRESSURE), &state.low_pressure);
+    // Pressure section intentionally removed: this DHW unit uses pressure
+    // switches (P02/P06 faults), not sensors, so A11/A12 carry no live reading.
     
     // EEV section
     create_section_header(content, i18n_get(STR_HP_EXPANSION_VALVES));
@@ -375,8 +356,6 @@ void heatpump_system_hide(void) {
     state.ac_current = nullptr;
     state.dc_voltage = nullptr;
     state.dc_current = nullptr;
-    state.high_pressure = nullptr;
-    state.low_pressure = nullptr;
     state.primary_eev = nullptr;
     state.secondary_eev = nullptr;
     state.cooling_setpoint = nullptr;

@@ -272,6 +272,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_LABEL_LO_PRESS] = "LOW PRESS",
     [STR_HP_LABEL_POWER_IN] = "POWER IN",
     [STR_HP_LABEL_HEAT_OUT] = "HEAT OUT",
+    [STR_HP_LABEL_COOLING_OUT] = "COOLING OUT",
 
     // Event Log
     [STR_EVENT_LOG] = "Events",
@@ -554,6 +555,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_LABEL_LO_PRESS] = "BASSE PR.",
     [STR_HP_LABEL_POWER_IN] = "PUISS. IN",
     [STR_HP_LABEL_HEAT_OUT] = "CHALEUR",
+    [STR_HP_LABEL_COOLING_OUT] = "FROID",
 
     // Event Log
     [STR_EVENT_LOG] = "Événements",
@@ -836,6 +838,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_LABEL_LO_PRESS] = "PRES. BAJA",
     [STR_HP_LABEL_POWER_IN] = "POT. ENTR.",
     [STR_HP_LABEL_HEAT_OUT] = "CALOR",
+    [STR_HP_LABEL_COOLING_OUT] = "FRÍO",
 
     // Event Log
     [STR_EVENT_LOG] = "Eventos",

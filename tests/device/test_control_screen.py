@@ -8,7 +8,7 @@ The control screen shows:
 - Power ON/OFF button (single click to turn on, 3s hold to turn off)
 - 5 mode buttons (Cooling, Floor Heat, Fan Heat, Hot Water, Auto)
 - 3 setpoint rows (Cooling, Heating, Hot Water) with values
-- P-parameter rows (P1, P5, P13, etc.)
+- Advanced Parameter rows (AP13, AP24, AP38, etc.)
 """
 
 import time
@@ -199,11 +199,11 @@ class TestSetpoints:
 
 
 # =========================================================================
-# P-Parameters Section
+# Advanced Parameters Section
 # =========================================================================
 
-class TestPParameters:
-    """Verify P-parameter rows are visible."""
+class TestAdvancedParameters:
+    """Verify Advanced Parameter (AP##) rows are visible."""
 
     def test_setpoints_section_header(self, device: DeviceClient):
         """The Setpoints section header should be present."""
@@ -213,16 +213,16 @@ class TestPParameters:
         assert _has_text_containing(device, "Setpoints"), \
             "Setpoints section header not found"
 
-    def test_p_parameter_visible(self, device: DeviceClient):
-        """At least one P-parameter row should be visible (e.g. P1)."""
+    def test_advanced_parameter_visible(self, device: DeviceClient):
+        """At least one Advanced Parameter row should be visible (e.g. AP13)."""
         _open_control(device)
         time.sleep(UI_SETTLE)
 
-        # Look for any P-parameter label containing "(P"
+        # Look for any Advanced Parameter label containing "(AP"
         found = False
         for w in device.widgets:
             t = w.text_en or w.text
-            if t and "(P" in t:
+            if t and "(AP" in t:
                 found = True
                 break
-        assert found, "No P-parameter rows found on control screen"
+        assert found, "No Advanced Parameter rows found on control screen"
