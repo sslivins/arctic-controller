@@ -571,11 +571,11 @@ class TestHeatpumpErrors:
 
 
 class TestHeatpumpParams:
-    """GET/PUT /api/heatpump/params — P-parameter management."""
+    """GET/PUT /api/heatpump/advanced — AP (advanced) parameter management."""
 
     def test_get_all_params(self):
-        """GET /api/heatpump/params returns params object."""
-        r = _get("/api/heatpump/params")
+        """GET /api/heatpump/advanced returns params object."""
+        r = _get("/api/heatpump/advanced")
         assert r.status_code == 200
         data = r.json()
         assert "connected" in data
@@ -585,53 +585,59 @@ class TestHeatpumpParams:
         assert len(data["params"]) > 0
 
     def test_param_structure(self):
-        """Each parameter should have the expected metadata fields."""
-        data = _get("/api/heatpump/params").json()
-        # Check the first parameter
+        """Each AP parameter should have the expected metadata fields."""
+        data = _get("/api/heatpump/advanced").json()
         first_key = list(data["params"].keys())[0]
         param = data["params"][first_key]
-        for field in ["value", "p_code", "name", "description", "unit", "min", "max", "category"]:
+        for field in ["ap", "value", "name", "unit", "min", "max", "category",
+                      "read_only", "is_trigger", "writable"]:
             assert field in param, f"Missing param field: {field}"
 
+    def test_param_keys_are_ap_prefixed(self):
+        """Advanced-parameter keys are AP-prefixed (e.g. AP13)."""
+        data = _get("/api/heatpump/advanced").json()
+        for key in data["params"]:
+            assert key.startswith("AP"), f"Unexpected key: {key}"
+
     def test_get_single_param_by_key(self):
-        """GET /api/heatpump/params/:key returns a single parameter."""
-        # Get all params to find a valid key
-        all_data = _get("/api/heatpump/params").json()
+        """GET /api/heatpump/advanced/:key returns a single parameter."""
+        all_data = _get("/api/heatpump/advanced").json()
         key = list(all_data["params"].keys())[0]
 
-        r = _get(f"/api/heatpump/params/{key}")
+        r = _get(f"/api/heatpump/advanced/{key}")
         assert r.status_code == 200
         data = r.json()
         assert data["key"] == key
-        assert "p_code" in data
+        assert "ap" in data
         assert "value" in data
 
-    def test_get_single_param_by_pcode(self):
-        """Parameters can also be fetched by P-code (e.g., P29)."""
-        # Get a p_code from the first param
-        all_data = _get("/api/heatpump/params").json()
+    def test_get_single_param_by_number(self):
+        """Parameters can also be fetched by bare AP number (e.g. 13)."""
+        all_data = _get("/api/heatpump/advanced").json()
         first_key = list(all_data["params"].keys())[0]
-        p_code = all_data["params"][first_key]["p_code"]
+        ap = all_data["params"][first_key]["ap"]
 
-        r = _get(f"/api/heatpump/params/{p_code}")
+        r = _get(f"/api/heatpump/advanced/{ap}")
         assert r.status_code == 200
         data = r.json()
-        assert data["p_code"] == p_code
+        assert data["ap"] == ap
 
     def test_get_unknown_param_returns_404(self):
-        r = _get("/api/heatpump/params/nonexistent_param")
+        r = _get("/api/heatpump/advanced/AP250")
         assert r.status_code == 404
 
     def test_set_param_value(self):
-        """PUT /api/heatpump/params/:key sets the value (in demo mode)."""
-        # Get a param and its valid range
-        all_data = _get("/api/heatpump/params").json()
-        key = list(all_data["params"].keys())[0]
-        param = all_data["params"][key]
-        # Use a value in the valid range
+        """PUT /api/heatpump/advanced/:key sets the value (in demo mode)."""
+        all_data = _get("/api/heatpump/advanced").json()
+        # Pick a writable parameter (read-only/trigger params reject writes).
+        writable = [(k, p) for k, p in all_data["params"].items() if p.get("writable")]
+        if not writable:
+            import pytest
+            pytest.skip("No writable AP parameters available")
+        key, param = writable[0]
         test_val = param["min"]
 
-        r = _put(f"/api/heatpump/params/{key}", data=str(test_val))
+        r = _put(f"/api/heatpump/advanced/{key}", data=str(test_val))
         assert r.status_code == 200
         data = r.json()
         assert data["success"] is True
@@ -639,13 +645,15 @@ class TestHeatpumpParams:
 
     def test_set_param_out_of_range(self):
         """Setting a value outside min/max should return 400."""
-        all_data = _get("/api/heatpump/params").json()
-        key = list(all_data["params"].keys())[0]
-        param = all_data["params"][key]
-        # Use a value way above max
+        all_data = _get("/api/heatpump/advanced").json()
+        writable = [(k, p) for k, p in all_data["params"].items() if p.get("writable")]
+        if not writable:
+            import pytest
+            pytest.skip("No writable AP parameters available")
+        key, param = writable[0]
         bad_val = param["max"] + 1000
 
-        r = _put(f"/api/heatpump/params/{key}", data=str(bad_val))
+        r = _put(f"/api/heatpump/advanced/{key}", data=str(bad_val))
         assert r.status_code == 400
 
 

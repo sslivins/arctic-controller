@@ -210,11 +210,12 @@
                 
                 // Control Page
                 parameters: 'Control',
-                paramEditor: 'Heat Pump Parameters',
+                paramEditor: 'Advanced Parameters',
                 pCode: 'P-Code',
                 currentValue: 'Value',
                 range: 'Range',
                 editParam: 'Edit',
+                remarks: 'Remarks',
                 paramSaved: 'Parameter saved',
                 paramFailed: 'Failed to save parameter',
                 noParams: 'Heat pump not connected',
@@ -491,11 +492,12 @@
                 
                 // Control Page
                 parameters: 'Contr\u00f4le',
-                paramEditor: 'Param\u00e8tres pompe \u00e0 chaleur',
+                paramEditor: 'Param\u00e8tres avanc\u00e9s',
                 pCode: 'Code P',
                 currentValue: 'Valeur',
                 range: 'Plage',
                 editParam: 'Modifier',
+                remarks: 'Remarques',
                 paramSaved: 'Paramètre enregistré',
                 paramFailed: 'Échec de la sauvegarde du paramètre',
                 noParams: 'Pompe à chaleur non connectée',
@@ -772,11 +774,12 @@
                 
                 // Control Page
                 parameters: 'Control',
-                paramEditor: 'Par\u00e1metros bomba de calor',
+                paramEditor: 'Par\u00e1metros avanzados',
                 pCode: 'Código P',
                 currentValue: 'Valor',
                 range: 'Rango',
                 editParam: 'Editar',
+                remarks: 'Notas',
                 paramSaved: 'Parámetro guardado',
                 paramFailed: 'Error al guardar el parámetro',
                 noParams: 'Bomba de calor no conectada',
@@ -2176,12 +2179,17 @@
         
         .param-item {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column;
             padding: 0.75rem;
             background: var(--bg-tertiary);
             border-radius: 6px;
             margin-bottom: 0.5rem;
+        }
+        
+        .param-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
         
         .param-info {
@@ -2191,6 +2199,43 @@
         .param-name {
             font-weight: 500;
             font-size: 0.9rem;
+        }
+        
+        .param-expander {
+            width: 1.1rem;
+            flex-shrink: 0;
+            margin-right: 0.6rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            align-self: stretch;
+        }
+        
+        .param-expander-active {
+            cursor: pointer;
+        }
+        
+        .param-expand-icon {
+            color: var(--accent);
+            font-size: 0.7rem;
+        }
+        
+        .param-detail {
+            margin-top: 0.6rem;
+            padding-top: 0.6rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+        
+        .param-detail-full {
+            color: var(--text-primary);
+            margin-bottom: 0.35rem;
+        }
+        
+        .param-detail-remarks strong {
+            color: var(--accent);
         }
         
         .param-meta {
@@ -2896,37 +2941,50 @@
                                 
                                 <template x-if="paramsConnected && Object.keys(params).length > 0">
                                     <div>
-                                        <template x-for="cat in paramCategories" :key="cat.key">
-                                            <div class="param-category" x-show="getParamsByCategory(cat.key).length > 0">
-                                                <h3 x-text="t(cat.label)"></h3>
-                                                <template x-for="[key, p] in getParamsByCategory(cat.key)" :key="key">
+                                        <template x-for="cat in paramCategoryList" :key="cat">
+                                            <div class="param-category" x-show="getParamsByCategory(cat).length > 0">
+                                                <h3 x-text="cat"></h3>
+                                                <template x-for="[key, p] in getParamsByCategory(cat)" :key="key">
                                                     <div class="param-item">
-                                                        <div class="param-info">
-                                                            <div class="param-name" x-text="p.name"></div>
-                                                            <div class="param-meta">
-                                                                <span class="param-pcode" x-text="p.p_code"></span>
-                                                                <span x-text="t('range') + ': ' + p.min + ' – ' + p.max + ' ' + p.unit"></span>
+                                                        <div class="param-row">
+                                                            <div class="param-expander" :class="{ 'param-expander-active': !!apDetails(p.ap) }" @click="apDetails(p.ap) && toggleParamDetail(key)">
+                                                                <span class="param-expand-icon" x-show="!!apDetails(p.ap)" x-text="expandedParam === key ? '\u25be' : '\u25b8'"></span>
+                                                            </div>
+                                                            <div class="param-info">
+                                                                <div class="param-name" x-text="p.name"></div>
+                                                                <div class="param-meta">
+                                                                    <span class="param-pcode" x-text="'AP' + p.ap"></span>
+                                                                    <span x-text="t('range') + ': ' + p.min + ' \u2013 ' + p.max + ' ' + p.unit"></span>
+                                                                </div>
+                                                            </div>
+                                                            <div class="param-value-display">
+                                                                <template x-if="editingParam !== key">
+                                                                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                                                        <span class="param-value" x-text="(p.value !== null ? p.value : '--') + ' ' + p.unit"></span>
+                                                                        <button class="param-edit-btn" x-show="p.writable" @click="startEditParam(key, p)" x-text="t('editParam')"></button>
+                                                                    </div>
+                                                                </template>
+                                                                <template x-if="editingParam === key">
+                                                                    <div class="param-edit-inline">
+                                                                        <input type="number" 
+                                                                               x-model.number="editingParamValue" 
+                                                                               :min="p.min" :max="p.max"
+                                                                               @keydown.enter="saveParam(key)"
+                                                                               @keydown.escape="editingParam = null">
+                                                                        <button class="btn btn-primary btn-sm" @click="saveParam(key)" :disabled="controlLoading" x-text="t('save')"></button>
+                                                                        <button class="btn btn-secondary btn-sm" @click="editingParam = null" x-text="t('cancel')"></button>
+                                                                    </div>
+                                                                </template>
                                                             </div>
                                                         </div>
-                                                        <div class="param-value-display">
-                                                            <template x-if="editingParam !== key">
-                                                                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                                                    <span class="param-value" x-text="(p.value !== null ? p.value : '--') + ' ' + p.unit"></span>
-                                                                    <button class="param-edit-btn" @click="startEditParam(key, p)" x-text="t('editParam')"></button>
-                                                                </div>
-                                                            </template>
-                                                            <template x-if="editingParam === key">
-                                                                <div class="param-edit-inline">
-                                                                    <input type="number" 
-                                                                           x-model.number="editingParamValue" 
-                                                                           :min="p.min" :max="p.max"
-                                                                           @keydown.enter="saveParam(key)"
-                                                                           @keydown.escape="editingParam = null">
-                                                                    <button class="btn btn-primary btn-sm" @click="saveParam(key)" :disabled="controlLoading" x-text="t('save')"></button>
-                                                                    <button class="btn btn-secondary btn-sm" @click="editingParam = null" x-text="t('cancel')"></button>
-                                                                </div>
-                                                            </template>
-                                                        </div>
+                                                        <template x-if="expandedParam === key && apDetails(p.ap)">
+                                                            <div class="param-detail">
+                                                                <div class="param-detail-full" x-text="apDetails(p.ap).full"></div>
+                                                                <template x-if="apDetails(p.ap).remarks">
+                                                                    <div class="param-detail-remarks"><strong x-text="t('remarks') + ': '"></strong><span x-text="apDetails(p.ap).remarks"></span></div>
+                                                                </template>
+                                                            </div>
+                                                        </template>
                                                     </div>
                                                 </template>
                                             </div>
@@ -3485,13 +3543,46 @@
                 paramsLoading: false,
                 editingParam: null,
                 editingParamValue: 0,
-                paramCategories: [
-                    { key: 'EEV', label: 'catEev' },
-                    { key: 'Defrost', label: 'catDefrost' },
-                    { key: 'Protection', label: 'catProtection' },
-                    { key: 'Auto Mode', label: 'catAutoMode' },
-                    { key: 'Pump & Valve', label: 'catPumpValve' }
-                ],
+                expandedParam: null,
+                // Verbose AP descriptions (full vendor "Meaning" + "Remarks" columns from
+                // the Arctic Advanced Parameters PDF / Appendix C). Keyed by AP number.
+                // Web-only enrichment of the short names returned by /api/heatpump/advanced.
+                AP_DETAILS: {
+                    13: { full: 'Highest setting temperature of hot water, heating mode (20~55\u00b0C / 68~131\u00b0F).' },
+                    14: { full: 'In hot water/heating status, ambient \u2264 -9\u00b0C, inlet \u226443\u00b0C: modified ratio value K1 of running frequency, lower (higher) than the frequency table.', remarks: 'Value shown is 100\u00d7 on the display. 0: no modification (RS485 0); 0.25: reduce 2-step opening each 4Hz (RS485 1); 0.5: reduce 2-step each 2Hz (RS485 2); 1: reduce 2-step each 1Hz (RS485 4); 2: reduce 4-step each 1Hz (RS485 8); 3: reduce 6-step each 1Hz (RS485 12); 4: reduce 8-step each 1Hz (RS485 16); 5: reduce 10-step each 1Hz (RS485 20).' },
+                    15: { full: 'In hot water/heating status, -9\u00b0C < ambient \u2264 18\u00b0C, inlet \u226443\u00b0C: modified ratio value K2 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
+                    16: { full: 'In hot water/heating status, ambient > 18\u00b0C, inlet \u226443\u00b0C: modified ratio value K3 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
+                    17: { full: 'In hot water/heating status, ambient \u2264 -9\u00b0C, inlet > 43\u00b0C: modified ratio value K4 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
+                    18: { full: 'In hot water/heating status, -9\u00b0C < ambient \u2264 18\u00b0C, inlet > 43\u00b0C: modified ratio value K5 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
+                    19: { full: 'In hot water/heating status, ambient > 18\u00b0C, inlet > 43\u00b0C: modified ratio value K6 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
+                    20: { full: 'In cooling status: modified ratio value K7 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
+                    24: { full: 'Under heating status, when ambient \u2265 Parameter 24, the compressor stops working.', remarks: 'Vendor doc range is 10~80\u00b0C; the OEM maximum on this unit is 45\u00b0C.' },
+                    25: { full: 'Ambient temperature at which to start the backup electric heater (-45~45\u00b0C).' },
+                    26: { full: 'Frequency decrease value for quiet running mode (1~20Hz).' },
+                    27: { full: 'Frequency increase value for fast heating mode (1~20Hz).' },
+                    28: { full: 'Automatic mode \u2013 mode switch waiting time N (0~99, in units of 10 minutes).' },
+                    29: { full: 'Compressor cumulative running time (0~90min).' },
+                    30: { full: 'Outdoor coil temperature to enter defrost mode (-20~5\u00b0C / -4~41\u00b0F).' },
+                    31: { full: 'Defrost outdoor temperature setting (-20~5\u00b0C / -4~41\u00b0F).' },
+                    32: { full: 'Temperature difference between outdoor temp. and coil temp. to enter defrost (0~30\u00b0C / 0~54\u00b0F).' },
+                    33: { full: 'Extended defrost time (0~90min).' },
+                    34: { full: 'Maximum defrost time (condition to exit defrost mode).' },
+                    35: { full: 'External coil temperature to exit defrost mode (5~45\u00b0C / 41~113\u00b0F).' },
+                    38: { full: 'Low ambient temperature protection setting (-41~0\u00b0C).', remarks: 'The lowest temperature the sensor can detect is -30\u00b0C, so the lowest usable setting is -30\u00b0C. Setting it lower than -30 (e.g. -31) makes this protection invalid. Please set within -30~0\u00b0C.' },
+                    39: { full: 'Whether to reduce the working frequency when the setting temperature is reached (10~120min).', remarks: 'A value of 40 does not reduce frequency; any other value reduces frequency.' },
+                    40: { full: 'Under cooling status, when ambient \u2264 the absolute value of Parameter 40, the compressor stops working (-45~45).', remarks: 'If set to a negative number, the P16 low outlet water temperature protection is disabled (for glycol systems). For water systems, set a positive number. Example: to cool for ambient > 20\u00b0C, set 20 for a water system, or -20 for a glycol system.' },
+                    41: { full: 'Main expansion valve overheat degree control method (0~1).', remarks: '0: control according to overheat degree; 1: control according to a chart fixed by lab testing. Note: this unit reads back values outside 0~1, so it is shown read-only.' },
+                    42: { full: 'Target overheat degree of the main expansion valve (0~20\u00b0C / 0~36\u00b0F).' },
+                    43: { full: 'Switch time of three-way valve 2 (1~99min).', remarks: 'Controls the switching time of three-way valve 2 and cancels external mode control (Cn31). Set to any number other than 5 to cancel Cn31 control; set back to 5 to allow Cn31.' },
+                    44: { full: 'Water pump working mode in heating/cooling mode (0-2).', remarks: '0: run at intervals; 1: follow the compressor; 2: run all the time.' },
+                    45: { full: 'Water pump running time interval (0~30min).' },
+                    46: { full: 'Outdoor temperature set point to force the water pump to run under low temperature (-25~5\u00b0C / -13~41\u00b0F).' },
+                    47: { full: 'Water system cleaning function (closes water-flow protection during this function).', remarks: '0: off; 1: test water pump; 2: test water pump and 3-way valve 1; 3: test water pump and 3-way valve 1 (variant 2).' },
+                    48: { full: 'Whether to enable manual frequency / main-valve opening / auxiliary-valve opening function.', remarks: '0: No; 1: Yes.' },
+                    49: { full: 'Manual frequency (used when manual mode is enabled via AP48).' },
+                    50: { full: 'Main expansion valve opening (used when manual mode is enabled via AP48).' },
+                    51: { full: 'EVI auxiliary expansion valve opening (used when manual mode is enabled via AP48).' },
+                },
                 
                 // GitHub update state
                 github: {
@@ -4303,7 +4394,7 @@
                 async loadParams() {
                     this.paramsLoading = true;
                     try {
-                        const res = await this.apiFetch('/api/heatpump/params');
+                        const res = await this.apiFetch('/api/heatpump/advanced');
                         const data = await res.json();
                         this.paramsConnected = data.connected || false;
                         this.params = data.params || {};
@@ -4318,6 +4409,22 @@
                     return Object.entries(this.params).filter(([k, p]) => p.category === category);
                 },
                 
+                get paramCategoryList() {
+                    const seen = [];
+                    for (const p of Object.values(this.params)) {
+                        if (p && p.category && !seen.includes(p.category)) seen.push(p.category);
+                    }
+                    return seen;
+                },
+                
+                apDetails(ap) {
+                    return this.AP_DETAILS[ap] || null;
+                },
+                
+                toggleParamDetail(key) {
+                    this.expandedParam = this.expandedParam === key ? null : key;
+                },
+                
                 startEditParam(key, p) {
                     this.editingParam = key;
                     this.editingParamValue = p.value !== null ? p.value : 0;
@@ -4326,7 +4433,7 @@
                 async saveParam(key) {
                     this.controlLoading = true;
                     try {
-                        const res = await this.apiFetch('/api/heatpump/params/' + key, {
+                        const res = await this.apiFetch('/api/heatpump/advanced/' + key, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'text/plain' },
                             body: String(this.editingParamValue)

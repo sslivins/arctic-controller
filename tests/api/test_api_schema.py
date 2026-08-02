@@ -105,7 +105,7 @@ SKIP_NON_GET = {
     "/api/heatpump/power",          # PUT toggles power
     "/api/heatpump/mode",           # PUT changes operating mode
     "/api/heatpump/setpoints",      # PUT changes temperature setpoints
-    "/api/heatpump/params/{id}",    # PUT changes P-parameters
+    "/api/heatpump/advanced/{id}",  # PUT changes AP (advanced) parameters
 }
 
 

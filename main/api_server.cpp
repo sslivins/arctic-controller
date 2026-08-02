@@ -14,7 +14,6 @@
 #include "modbus/arctic_registers.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
-#include "heatpump_params.h"
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "log_buffer.h"
@@ -86,9 +85,9 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req);
 static esp_err_t heatpump_raw_handler(httpd_req_t* req);
 static esp_err_t heatpump_windows_handler(httpd_req_t* req);
 static esp_err_t heatpump_control_handler(httpd_req_t* req);
-static esp_err_t heatpump_params_get_handler(httpd_req_t* req);
-static esp_err_t heatpump_param_get_handler(httpd_req_t* req);
-static esp_err_t heatpump_param_put_handler(httpd_req_t* req);
+static esp_err_t heatpump_advanced_get_handler(httpd_req_t* req);
+static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req);
+static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_power_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
@@ -664,32 +663,32 @@ bool api_server_start(void)
     };
     REGISTER_URI(heatpump_control_uri);
     
-    // GET /api/heatpump/params - List all parameters
-    httpd_uri_t heatpump_params_uri = {
-        .uri = "/api/heatpump/params",
+    // GET /api/heatpump/advanced - List all advanced (AP) parameters
+    httpd_uri_t heatpump_advanced_uri = {
+        .uri = "/api/heatpump/advanced",
         .method = HTTP_GET,
-        .handler = heatpump_params_get_handler,
+        .handler = heatpump_advanced_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(heatpump_params_uri);
+    REGISTER_URI(heatpump_advanced_uri);
     
-    // GET /api/heatpump/params/* - Get single parameter (wildcard)
-    httpd_uri_t heatpump_param_get_uri = {
-        .uri = "/api/heatpump/params/*",
+    // GET /api/heatpump/advanced/* - Get single AP parameter (wildcard)
+    httpd_uri_t heatpump_advanced_get_uri = {
+        .uri = "/api/heatpump/advanced/*",
         .method = HTTP_GET,
-        .handler = heatpump_param_get_handler,
+        .handler = heatpump_advanced_single_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(heatpump_param_get_uri);
+    REGISTER_URI(heatpump_advanced_get_uri);
     
-    // PUT /api/heatpump/params/* - Set single parameter (wildcard)
-    httpd_uri_t heatpump_param_put_uri = {
-        .uri = "/api/heatpump/params/*",
+    // PUT /api/heatpump/advanced/* - Set single AP parameter (wildcard)
+    httpd_uri_t heatpump_advanced_put_uri = {
+        .uri = "/api/heatpump/advanced/*",
         .method = HTTP_PUT,
-        .handler = heatpump_param_put_handler,
+        .handler = heatpump_advanced_put_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI(heatpump_param_put_uri);
+    REGISTER_URI(heatpump_advanced_put_uri);
     
     // PUT /api/heatpump/power - Set power on/off
     httpd_uri_t heatpump_power_uri = {
@@ -2246,22 +2245,32 @@ static esp_err_t heatpump_control_handler(httpd_req_t* req)
 // Heat Pump Parameters API
 // ============================================================================
 
-// Helper to add a single parameter to a cJSON object
-static void add_param_to_json(cJSON* parent, const HeatPumpParam* param, int16_t value) {
+// Helper to add a single AP (advanced) parameter to a cJSON object, keyed "AP<n>".
+static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool read_ok, int16_t value) {
+    char key[8];
+    snprintf(key, sizeof(key), "AP%u", (unsigned)p->ap);
+    const bool reg_known = (p->reg != arctic::ADV_REG_UNKNOWN);
+    const bool writable  = reg_known && !p->needs_sim_confirm && !p->read_only && !p->is_trigger;
     cJSON* obj = cJSON_CreateObject();
-    cJSON_AddNumberToObject(obj, "value", value);
-    cJSON_AddStringToObject(obj, "p_code", param->p_code);
-    cJSON_AddStringToObject(obj, "name", param->name);
-    cJSON_AddStringToObject(obj, "description", param->description);
-    cJSON_AddStringToObject(obj, "unit", param_unit_to_string(param->unit_type));
-    cJSON_AddNumberToObject(obj, "min", param->min_val);
-    cJSON_AddNumberToObject(obj, "max", param->max_val);
-    cJSON_AddStringToObject(obj, "category", param->category);
-    cJSON_AddItemToObject(parent, param->key, obj);
+    cJSON_AddNumberToObject(obj, "ap", p->ap);
+    cJSON_AddStringToObject(obj, "name", p->name ? p->name : "");
+    if (read_ok) {
+        cJSON_AddNumberToObject(obj, "value", value);
+    } else {
+        cJSON_AddNullToObject(obj, "value");
+    }
+    cJSON_AddNumberToObject(obj, "min", p->min_val);
+    cJSON_AddNumberToObject(obj, "max", p->max_val);
+    cJSON_AddStringToObject(obj, "unit", p->unit ? p->unit : "");
+    cJSON_AddStringToObject(obj, "category", p->category ? p->category : "");
+    cJSON_AddBoolToObject(obj, "read_only", p->read_only);
+    cJSON_AddBoolToObject(obj, "is_trigger", p->is_trigger);
+    cJSON_AddBoolToObject(obj, "writable", writable);
+    cJSON_AddItemToObject(parent, key, obj);
 }
 
-// GET /api/heatpump/params - List all parameters
-static esp_err_t heatpump_params_get_handler(httpd_req_t* req)
+// GET /api/heatpump/advanced - List all advanced (AP) parameters (verified regs only)
+static esp_err_t heatpump_advanced_get_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
         send_json_error(req, "401 Unauthorized", "API key required");
@@ -2277,14 +2286,21 @@ static esp_err_t heatpump_params_get_handler(httpd_req_t* req)
     
     cJSON* params = cJSON_AddObjectToObject(root, "params");
     
-    for (int i = 0; i < NUM_HEATPUMP_PARAMS; i++) {
-        const HeatPumpParam* param = &HEATPUMP_PARAMS[i];
-        
-        // Read current value (handles demo mode)
-        bool read_ok = false;
-        int16_t value = heatpump_param_read_by_index(i, &read_ok);
-        
-        add_param_to_json(params, param, read_ok ? value : 0);
+    // Iterate by display category (mirrors the Tab5 Control screen ordering),
+    // skipping parameters whose register has not been change-and-capture verified.
+    const size_t ncat = arctic::advanced_category_count();
+    const size_t nparam = arctic::advanced_param_count();
+    for (size_t c = 0; c < ncat; c++) {
+        const char* cat = arctic::advanced_category_at(c);
+        for (size_t i = 0; i < nparam; i++) {
+            const arctic::AdvancedParam* p = arctic::advanced_param_at(i);
+            if (!p || !cat) continue;
+            if (strcmp(p->category, cat) != 0) continue;
+            if (p->reg == arctic::ADV_REG_UNKNOWN) continue;  // hide unverified
+            int16_t value = 0;
+            bool read_ok = advanced_param_read(p->ap, &value);
+            add_ap_to_json(params, p, read_ok, value);
+        }
     }
     
     char* json_str = cJSON_PrintUnformatted(root);
@@ -2295,54 +2311,64 @@ static esp_err_t heatpump_params_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-// GET /api/heatpump/params/:id - Get single parameter
-static esp_err_t heatpump_param_get_handler(httpd_req_t* req)
+// GET /api/heatpump/advanced/:ap - Get single AP parameter (accepts "AP13" or "13")
+static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
         send_json_error(req, "401 Unauthorized", "API key required");
         return ESP_OK;
     }
     
-    // Extract param ID from URI (after /api/heatpump/params/)
+    // Extract AP id from URI (after /api/heatpump/advanced/)
     const char* uri = req->uri;
-    const char* id = uri + strlen("/api/heatpump/params/");
+    const char* id = uri + strlen("/api/heatpump/advanced/");
     
     if (!id || strlen(id) == 0) {
-        send_json_error(req, "400 Bad Request", "Parameter ID required");
+        send_json_error(req, "404 Not Found", "AP number required");
+        return ESP_OK;
+    }
+    if (id[0] == 'A' || id[0] == 'a') id++;  // tolerate "AP13" prefix
+    if (id[0] == 'P' || id[0] == 'p') id++;
+    
+    char* endptr;
+    long ap_long = strtol(id, &endptr, 10);
+    if (endptr == id || ap_long < 0 || ap_long > 255) {
+        send_json_error(req, "404 Not Found", "Invalid advanced parameter");
         return ESP_OK;
     }
     
-    // Find parameter by key or p_code
-    const HeatPumpParam* param = heatpump_param_find(id);
-    if (!param) {
-        send_json_error(req, "404 Not Found", "Unknown parameter");
+    const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)ap_long);
+    if (!p || p->reg == arctic::ADV_REG_UNKNOWN) {
+        send_json_error(req, "404 Not Found", "Unknown advanced parameter");
         return ESP_OK;
     }
     
     set_json_content_type(req);
     
-    // Read current value (handles demo mode)
-    bool read_ok = false;
-    int16_t value = heatpump_param_read(param, &read_ok);
-    
-    bool connected = arctic::isConnected();
+    int16_t value = 0;
+    bool read_ok = advanced_param_read(p->ap, &value);
     
     cJSON* root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "key", param->key);
-    cJSON_AddStringToObject(root, "p_code", param->p_code);
-    cJSON_AddStringToObject(root, "name", param->name);
-    cJSON_AddStringToObject(root, "description", param->description);
-    cJSON_AddStringToObject(root, "unit", param_unit_to_string(param->unit_type));
-    cJSON_AddNumberToObject(root, "min", param->min_val);
-    cJSON_AddNumberToObject(root, "max", param->max_val);
-    cJSON_AddStringToObject(root, "category", param->category);
-    
+    char key[8];
+    snprintf(key, sizeof(key), "AP%u", (unsigned)p->ap);
+    const bool writable = (p->reg != arctic::ADV_REG_UNKNOWN) && !p->needs_sim_confirm &&
+                          !p->read_only && !p->is_trigger;
+    cJSON_AddNumberToObject(root, "ap", p->ap);
+    cJSON_AddStringToObject(root, "key", key);
+    cJSON_AddStringToObject(root, "name", p->name ? p->name : "");
+    cJSON_AddStringToObject(root, "unit", p->unit ? p->unit : "");
+    cJSON_AddStringToObject(root, "category", p->category ? p->category : "");
+    cJSON_AddNumberToObject(root, "min", p->min_val);
+    cJSON_AddNumberToObject(root, "max", p->max_val);
+    cJSON_AddBoolToObject(root, "read_only", p->read_only);
+    cJSON_AddBoolToObject(root, "is_trigger", p->is_trigger);
+    cJSON_AddBoolToObject(root, "writable", writable);
     if (read_ok) {
         cJSON_AddNumberToObject(root, "value", value);
     } else {
         cJSON_AddNullToObject(root, "value");
     }
-    cJSON_AddBoolToObject(root, "connected", connected);
+    cJSON_AddBoolToObject(root, "connected", arctic::isConnected());
     cJSON_AddBoolToObject(root, "demo_mode", arctic::isDemoMode());
     
     char* json_str = cJSON_PrintUnformatted(root);
@@ -2353,9 +2379,9 @@ static esp_err_t heatpump_param_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-// PUT /api/heatpump/params/:id - Set single parameter
+// PUT /api/heatpump/advanced/:ap - Set single AP parameter (accepts "AP13" or "13")
 // Body: just the integer value (e.g., "25" or "-5")
-static esp_err_t heatpump_param_put_handler(httpd_req_t* req)
+static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
         send_json_error(req, "401 Unauthorized", "API key required");
@@ -2368,19 +2394,28 @@ static esp_err_t heatpump_param_put_handler(httpd_req_t* req)
         return ESP_OK;
     }
     
-    // Extract param ID from URI
+    // Extract AP id from URI
     const char* uri = req->uri;
-    const char* id = uri + strlen("/api/heatpump/params/");
+    const char* id = uri + strlen("/api/heatpump/advanced/");
     
     if (!id || strlen(id) == 0) {
-        send_json_error(req, "400 Bad Request", "Parameter ID required");
+        send_json_error(req, "400 Bad Request", "AP number required");
         return ESP_OK;
     }
+    if (id[0] == 'A' || id[0] == 'a') id++;  // tolerate "AP13" prefix
+    if (id[0] == 'P' || id[0] == 'p') id++;
     
-    // Find parameter
-    const HeatPumpParam* param = heatpump_param_find(id);
-    if (!param) {
-        send_json_error(req, "404 Not Found", "Unknown parameter");
+    char* ap_endptr;
+    long ap_long = strtol(id, &ap_endptr, 10);
+    if (ap_endptr == id || ap_long < 0 || ap_long > 255) {
+        send_json_error(req, "400 Bad Request", "Invalid AP number");
+        return ESP_OK;
+    }
+    uint8_t ap = (uint8_t)ap_long;
+    
+    const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
+    if (!p || p->reg == arctic::ADV_REG_UNKNOWN) {
+        send_json_error(req, "404 Not Found", "Unknown advanced parameter");
         return ESP_OK;
     }
     
@@ -2396,8 +2431,6 @@ static esp_err_t heatpump_param_put_handler(httpd_req_t* req)
     // Parse integer value (trim whitespace)
     char* endptr;
     long val_long = strtol(body, &endptr, 10);
-    
-    // Check if parsing succeeded (endptr should point to end or whitespace)
     while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') endptr++;
     if (endptr == body || *endptr != '\0') {
         send_json_error(req, "400 Bad Request", "Invalid integer value");
@@ -2406,27 +2439,23 @@ static esp_err_t heatpump_param_put_handler(httpd_req_t* req)
     
     int16_t value = (int16_t)val_long;
     
-    // Validate range
-    if (value < param->min_val || value > param->max_val) {
-        char err_buf[128];
-        snprintf(err_buf, sizeof(err_buf), "Value out of range (%d to %d)", 
-                 param->min_val, param->max_val);
-        send_json_error(req, "400 Bad Request", err_buf);
+    // Write through the arctic-macon guardrail (validates range/enum, confirmed
+    // register, and write-lock) so we never blind-write an unverified/locked reg.
+    bool bus_ok = false;
+    arctic::AdvWriteResult r = advanced_param_write(ap, value, &bus_ok);
+    if (r != arctic::AdvWriteResult::OK) {
+        send_json_error(req, "400 Bad Request", arctic::adv_write_result_name(r));
         return ESP_OK;
     }
     
-    // Write value (handles demo mode)
-    bool success = heatpump_param_write(param, value);
-    
     set_json_content_type(req);
     cJSON* resp = cJSON_CreateObject();
-    cJSON_AddBoolToObject(resp, "success", success);
-    cJSON_AddStringToObject(resp, "key", param->key);
-    cJSON_AddStringToObject(resp, "p_code", param->p_code);
+    cJSON_AddBoolToObject(resp, "success", bus_ok);
+    cJSON_AddNumberToObject(resp, "ap", ap);
     cJSON_AddNumberToObject(resp, "value", value);
     cJSON_AddBoolToObject(resp, "demo_mode", arctic::isDemoMode());
     
-    if (!success) {
+    if (!bus_ok) {
         cJSON_AddStringToObject(resp, "error", "Write failed");
     }
     
@@ -2852,19 +2881,24 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
         }
     }
 
-    // --- P-Parameters (technician settings) ---
-    for (int i = 0; i < NUM_HEATPUMP_PARAMS; i++) {
-        const HeatPumpParam* p = &HEATPUMP_PARAMS[i];
-        bool read_ok = false;
-        int16_t value = heatpump_param_read_by_index(i, &read_ok);
-        if (read_ok) {
-            snprintf(line, sizeof(line), "Parameter,\"%s\",%s,%u,%d,%s\r\n",
-                     p->name, p->p_code, p->reg_addr, value, param_unit_to_string(p->unit_type));
-        } else {
-            snprintf(line, sizeof(line), "Parameter,\"%s\",%s,%u,READ_ERROR,%s\r\n",
-                     p->name, p->p_code, p->reg_addr, param_unit_to_string(p->unit_type));
+    // --- Advanced (AP) Parameters (technician settings) ---
+    {
+        const size_t nparam = arctic::advanced_param_count();
+        for (size_t i = 0; i < nparam; i++) {
+            const arctic::AdvancedParam* p = arctic::advanced_param_at(i);
+            if (!p || p->reg == arctic::ADV_REG_UNKNOWN) continue;
+            int16_t value = 0;
+            bool read_ok = advanced_param_read(p->ap, &value);
+            const char* unit = p->unit ? p->unit : "";
+            if (read_ok) {
+                snprintf(line, sizeof(line), "Parameter,\"%s\",AP%u,%u,%d,%s\r\n",
+                         p->name, (unsigned)p->ap, p->reg, value, unit);
+            } else {
+                snprintf(line, sizeof(line), "Parameter,\"%s\",AP%u,%u,READ_ERROR,%s\r\n",
+                         p->name, (unsigned)p->ap, p->reg, unit);
+            }
+            httpd_resp_sendstr_chunk(req, line);
         }
-        httpd_resp_sendstr_chunk(req, line);
     }
 
     // Terminate chunked response
