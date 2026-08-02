@@ -24,9 +24,6 @@ DEMO_READINGS = {
     "AC Current": "5 A",
     "DC Voltage": "380.0 V",
     "DC Current": "4 A",
-    # Pressures section
-    "High Pressure": "2.50 MPa",
-    "Low Pressure": "0.85 MPa",
     # Expansion valves section
     "Primary EEV": "350 steps",
     "Secondary EEV": "200 steps",
@@ -42,7 +39,6 @@ DEMO_SETPOINTS = {
 SECTION_HEADERS = [
     "Compressor",
     "Electrical",
-    "Pressures",
     "Expansion Valves",
     "Setpoints",
 ]
