@@ -537,6 +537,18 @@ static void applyMaconMapping() {
     // library normalises ac_current to whole amps.
     s_state.realtime_power_w    = ms.realtime_power_w;
 
+    // Estimated performance (thermal output + COP). Water flow is NOT reported
+    // by the mainboard (only a flow switch), so it is an outside estimate: 40
+    // L/min of water matches the arctic-sniffer's assumption so both agree. The
+    // macon library owns the physics; we only supply the estimated inputs.
+    static constexpr arctic::PerformanceInputs kPerfInputs = {
+        /*water_flow_lpm=*/40.0f, /*fluid_cp_j_per_kgK=*/4186.0f,
+        /*fluid_density_kg_per_l=*/1.00f };
+    const arctic::PerformanceEstimate perf = arctic::estimate_performance(ms, kPerfInputs);
+    s_state.thermal_w = perf.thermal_w;
+    s_state.cop_x100  = perf.cop_x100;
+    s_state.cop_valid = perf.valid;
+
 
     // Macon fault/protection registers = reg2007 (holding run/fault bits) plus
     // the INPUT fault cluster reg2125-2128, all mapped live 2026-07-05 one bit at
@@ -809,6 +821,8 @@ bool setWorkingMode(WorkingMode mode) {
 }
 
 bool setCoolingSetpoint(int16_t temp) {
+    // Enforce the library-owned range (the mainboard enforces none of its own).
+    temp = static_cast<int16_t>(clamp_setpoint(SetpointKind::Cooling, temp));
     if (macon_master::is_active()) {
         // Route through the shared-library MaconLink (fc06 write + ACK).
         if (macon_master::set_cooling_setpoint((int)temp)) {
@@ -832,6 +846,7 @@ bool setCoolingSetpoint(int16_t temp) {
 }
 
 bool setHeatingSetpoint(int16_t temp) {
+    temp = static_cast<int16_t>(clamp_setpoint(SetpointKind::Heating, temp));
     if (macon_master::is_active()) {
         // MaconLink deliberately has no set_heating_setpoint: reg2094 is
         // unverified on this unit. Fail explicitly rather than guess.
@@ -851,6 +866,7 @@ bool setHeatingSetpoint(int16_t temp) {
 }
 
 bool setHotWaterSetpoint(int16_t temp) {
+    temp = static_cast<int16_t>(clamp_setpoint(SetpointKind::HotWater, temp));
     if (macon_master::is_active()) {
         if (macon_master::set_hot_water_setpoint((int)temp)) {
             xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -895,6 +911,18 @@ bool writeRegister(uint16_t address, uint16_t value) {
 bool readRegister(uint16_t address, uint16_t* value_out) {
     if (value_out == nullptr) {
         return false;
+    }
+    // In demo or passive external-feed mode the register value lives in the
+    // cached window (s_demo_regs), which stays valid even when we are the
+    // active Tuya master. Serve it from the cache rather than attempting a
+    // synchronous bus transaction (which is unsupported in master mode) so the
+    // Control-screen P-parameter and advanced (AP) rows can display values.
+    if (s_demo_mode || s_feed_mode) {
+        if (address < DEMO_REG_BASE ||
+            (uint16_t)(address - DEMO_REG_BASE) >= DEMO_REG_COUNT) {
+            return false;  // outside the cached register window
+        }
+        return readRegisters(address, 1, value_out) == ESP_OK;
     }
     if (macon_master::is_active()) {
         // Live values come from the poll loop into HeatPumpState; there is no

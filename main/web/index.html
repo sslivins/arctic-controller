@@ -194,8 +194,6 @@
                 fanRpm: 'Fan Speed',
                 acVoltage: 'AC Voltage',
                 acCurrent: 'AC Current',
-                highPressure: 'High Pressure',
-                lowPressure: 'Low Pressure',
                 primaryEev: 'Primary EEV',
                 secondaryEev: 'Secondary EEV',
                 powerConsumption: 'Power',
@@ -247,6 +245,7 @@
                 energy: 'Energy',
                 powerIn: 'Power In',
                 heatOut: 'Heat Out',
+                coolingOut: 'Cooling Out',
 
                 // Events
                 events: 'Events',
@@ -476,8 +475,6 @@
                 fanRpm: 'Vitesse ventilateur',
                 acVoltage: 'Tension AC',
                 acCurrent: 'Courant AC',
-                highPressure: 'Haute pression',
-                lowPressure: 'Basse pression',
                 primaryEev: 'VEE primaire',
                 secondaryEev: 'VEE secondaire',
                 powerConsumption: 'Puissance',
@@ -529,6 +526,7 @@
                 energy: '\u00c9nergie',
                 powerIn: 'Puiss. entr\u00e9e',
                 heatOut: 'Chaleur sort.',
+                coolingOut: 'Froid sortie',
 
                 // Events
                 events: '\u00c9v\u00e9nements',
@@ -758,8 +756,6 @@
                 fanRpm: 'Velocidad ventilador',
                 acVoltage: 'Voltaje AC',
                 acCurrent: 'Corriente AC',
-                highPressure: 'Alta presión',
-                lowPressure: 'Baja presión',
                 primaryEev: 'VEE primaria',
                 secondaryEev: 'VEE secundaria',
                 powerConsumption: 'Potencia',
@@ -811,6 +807,7 @@
                 energy: 'Energ\u00eda',
                 powerIn: 'Pot. entrada',
                 heatOut: 'Calor salida',
+                coolingOut: 'Frío salida',
 
                 // Events
                 events: 'Eventos',
@@ -2722,14 +2719,6 @@
                                         <span class="detail-label" x-text="t('suctionTemp')"></span>
                                     </div>
                                     <div class="detail-item">
-                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.high_pressure || 0).toFixed(2) + ' MPa' : '--'"></span>
-                                        <span class="detail-label" x-text="t('highPressure')"></span>
-                                    </div>
-                                    <div class="detail-item">
-                                        <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.low_pressure || 0).toFixed(2) + ' MPa' : '--'"></span>
-                                        <span class="detail-label" x-text="t('lowPressure')"></span>
-                                    </div>
-                                    <div class="detail-item">
                                         <span class="detail-value" x-text="heatpump.connected ? (heatpump.readings?.primary_eev || 0) + ' steps' : '--'"></span>
                                         <span class="detail-label" x-text="t('primaryEev')"></span>
                                     </div>
@@ -2750,8 +2739,8 @@
                                         <span class="detail-label" x-text="t('powerIn') || 'Power In'"></span>
                                     </div>
                                     <div class="detail-item">
-                                        <span class="detail-value">--</span>
-                                        <span class="detail-label" x-text="t('heatOut') || 'Heat Out'"></span>
+                                        <span class="detail-value" x-text="getHeatOut()"></span>
+                                        <span class="detail-label" x-text="getThermalOutLabel()"></span>
                                     </div>
                                     <div class="detail-item">
                                         <span class="detail-value" x-text="getCOP()"></span>
@@ -2788,6 +2777,7 @@
                                             <button @click="adjustSetpoint('cooling', -1)" :disabled="controlLoading">−</button>
                                             <button @click="adjustSetpoint('cooling', 1)" :disabled="controlLoading">+</button>
                                         </div>
+                                        <div class="setpoint-range" x-show="heatpump.connected" style="font-size:0.75rem;opacity:0.6;margin-top:2px;" x-text="setpointRange('cooling')"></div>
                                     </div>
                                     <div class="setpoint-item">
                                         <div class="label" x-text="t('heatingSetpoint')"></div>
@@ -2796,6 +2786,7 @@
                                             <button @click="adjustSetpoint('heating', -1)" :disabled="controlLoading">−</button>
                                             <button @click="adjustSetpoint('heating', 1)" :disabled="controlLoading">+</button>
                                         </div>
+                                        <div class="setpoint-range" x-show="heatpump.connected" style="font-size:0.75rem;opacity:0.6;margin-top:2px;" x-text="setpointRange('heating')"></div>
                                     </div>
                                     <div class="setpoint-item">
                                         <div class="label" x-text="t('hotWaterSetpoint')"></div>
@@ -2804,6 +2795,7 @@
                                             <button @click="adjustSetpoint('hot_water', -1)" :disabled="controlLoading">−</button>
                                             <button @click="adjustSetpoint('hot_water', 1)" :disabled="controlLoading">+</button>
                                         </div>
+                                        <div class="setpoint-range" x-show="heatpump.connected" style="font-size:0.75rem;opacity:0.6;margin-top:2px;" x-text="setpointRange('hot_water')"></div>
                                     </div>
                                 </div>
                             </div>
@@ -3450,8 +3442,8 @@
                     aux_heater: false,
                     temperatures: { tank: 0, outlet: 0, inlet: 0, outdoor: 0, discharge: 0, suction: 0, outdoor_coil: 0, indoor_coil: 0, ipm: 0 },
                     setpoints: { cooling: 0, heating: 0, hot_water: 0 },
-                    readings: { compressor_freq: 0, fan_rpm: 0, ac_voltage: 0, ac_current: 0, high_pressure: 0, low_pressure: 0, primary_eev: 0, secondary_eev: 0, power_consumption: 0 },
-                    has_error: false,
+                    setpoint_limits: { cooling: { min: 10, max: 30 }, heating: { min: 20, max: 60 }, hot_water: { min: 30, max: 60 } },
+                    readings: { compressor_freq: 0, fan_rpm: 0, ac_voltage: 0, ac_current: 0, primary_eev: 0, secondary_eev: 0, power_consumption: 0 },
                     error: null 
                 },
                 ota: { state: 'idle', progress: 0, current_version: '--' },
@@ -3849,7 +3841,8 @@
                             aux_heater: data.aux_heater || false,
                             temperatures: data.temperatures || { tank: 0, outlet: 0, inlet: 0, outdoor: 0, discharge: 0, suction: 0, outdoor_coil: 0, indoor_coil: 0, ipm: 0 },
                             setpoints: data.setpoints || { cooling: 0, heating: 0, hot_water: 0 },
-                            readings: data.readings || { compressor_freq: 0, fan_rpm: 0, ac_voltage: 0, ac_current: 0, high_pressure: 0, low_pressure: 0, primary_eev: 0, secondary_eev: 0, power_consumption: 0 },
+                            setpoint_limits: data.setpoint_limits || { cooling: { min: 10, max: 30 }, heating: { min: 20, max: 60 }, hot_water: { min: 30, max: 60 } },
+                            readings: data.readings || { compressor_freq: 0, fan_rpm: 0, ac_voltage: 0, ac_current: 0, primary_eev: 0, secondary_eev: 0, power_consumption: 0 },
                             has_error: data.has_error || false,
                             error: data.error || null
                         };
@@ -4247,8 +4240,16 @@
                 async adjustSetpoint(type, delta) {
                     const current = this.heatpump.setpoints[type];
                     if (current === undefined) return;
-                    
-                    const newVal = current + delta;
+
+                    // Enforce the library-owned range (served in setpoint_limits).
+                    const lim = (this.heatpump.setpoint_limits || {})[type];
+                    let newVal = current + delta;
+                    if (lim) {
+                        if (newVal < lim.min) newVal = lim.min;
+                        if (newVal > lim.max) newVal = lim.max;
+                    }
+                    if (newVal === current) return;  // already at the bound
+
                     this.controlLoading = true;
                     try {
                         const body = {};
@@ -4669,8 +4670,22 @@
                 },
                 
                 getCOP() {
-                    // COP will be computed when energy monitoring is implemented
-                    return '--';
+                    const cop = this.heatpump.readings?.cop;
+                    if (!this.heatpump.connected || cop === null || cop === undefined) return '--';
+                    return Number(cop).toFixed(2);
+                },
+                
+                getHeatOut() {
+                    const w = this.heatpump.readings?.heat_out;
+                    if (!this.heatpump.connected || w === null || w === undefined) return '--';
+                    const mag = Math.abs(w);
+                    return mag >= 1000 ? (mag / 1000).toFixed(1) + ' kW' : Math.round(mag) + ' W';
+                },
+                
+                // Label for the thermal-output metric; "heat out" in heating, "cooling out" in cooling
+                getThermalOutLabel() {
+                    if (this.heatpump.mode === 'cooling') return this.t('coolingOut') || 'Cooling Out';
+                    return this.t('heatOut') || 'Heat Out';
                 },
                 
                 getErrorCardClass() {
@@ -4698,6 +4713,13 @@
                 getActiveSetpointValue() {
                     const key = this.getActiveSetpointKey();
                     return this.heatpump.setpoints[key] ?? '--';
+                },
+
+                // Library-owned allowed range for a setpoint, e.g. "10–30 °C".
+                setpointRange(type) {
+                    const lim = (this.heatpump.setpoint_limits || {})[type];
+                    if (!lim) return '';
+                    return lim.min + '–' + lim.max + ' °C';
                 },
                 
                 formatPower(watts) {

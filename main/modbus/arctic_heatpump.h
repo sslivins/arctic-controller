@@ -52,6 +52,12 @@ struct HeatPumpState {
     uint16_t high_pressure = 0;      // MPa (raw ÷ 100)
     uint16_t low_pressure = 0;       // MPa (raw ÷ 100)
     uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
+
+    // Estimated performance (owned by the macon library; flow is an outside
+    // estimate — see estimate_performance). thermal_w is signed: + heating, - cooling.
+    int32_t  thermal_w = 0;          // W water-side heat (estimated)
+    uint16_t cop_x100 = 0;           // COP x100 (e.g. 392 = 3.92); 0 when !cop_valid
+    bool     cop_valid = false;      // true when the estimate is meaningful
     
     // Status bitmaps
     uint16_t status1 = 0;  // Register 2135

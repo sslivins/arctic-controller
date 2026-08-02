@@ -41,6 +41,7 @@ idf_component_register(
         "auth_manager.cpp"
         "app_preferences.cpp"
         "heatpump_params.cpp"
+        "advanced_params.cpp"
         "heatpump_errors.cpp"
         "event_log.cpp"
         "event_log_screen.cpp"

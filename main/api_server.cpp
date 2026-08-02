@@ -12,6 +12,8 @@
 #include "auth_manager.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
+#include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
+#include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_params.h"
 #include "heatpump_errors.h"
 #include "event_log.h"
@@ -1949,6 +1951,24 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(setpoints, "cooling", hp.cooling_setpoint);
     cJSON_AddNumberToObject(setpoints, "heating", hp.heating_setpoint);
     cJSON_AddNumberToObject(setpoints, "hot_water", hp.hot_water_setpoint);
+
+    // Setpoint limits (library-owned guardrails; the mainboard enforces none).
+    // Consumers clamp/display against these instead of hardcoding their own.
+    cJSON* limits = cJSON_AddObjectToObject(root, "setpoint_limits");
+    const struct {
+        const char* key;
+        arctic::SetpointKind kind;
+    } kLimitKinds[] = {
+        {"cooling", arctic::SetpointKind::Cooling},
+        {"heating", arctic::SetpointKind::Heating},
+        {"hot_water", arctic::SetpointKind::HotWater},
+    };
+    for (const auto& lk : kLimitKinds) {
+        const arctic::SetpointLimits sl = arctic::setpoint_limits(lk.kind);
+        cJSON* o = cJSON_AddObjectToObject(limits, lk.key);
+        cJSON_AddNumberToObject(o, "min", sl.min_c);
+        cJSON_AddNumberToObject(o, "max", sl.max_c);
+    }
     
     // System readings
     cJSON* readings = cJSON_AddObjectToObject(root, "readings");
@@ -1958,11 +1978,17 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
     cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
     cJSON_AddNumberToObject(readings, "dc_current", hp.dc_current);
-    cJSON_AddNumberToObject(readings, "high_pressure", hp.getHighPressureMPa());
-    cJSON_AddNumberToObject(readings, "low_pressure", hp.getLowPressureMPa());
     cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
     cJSON_AddNumberToObject(readings, "secondary_eev", hp.secondary_eev_opening);
     cJSON_AddNumberToObject(readings, "power_consumption", hp.realtime_power_w);
+    // Estimated performance (macon lib; water flow is an assumed input).
+    if (hp.cop_valid) {
+        cJSON_AddNumberToObject(readings, "heat_out", hp.thermal_w);
+        cJSON_AddNumberToObject(readings, "cop", hp.cop_x100 / 100.0);
+    } else {
+        cJSON_AddNullToObject(readings, "heat_out");
+        cJSON_AddNullToObject(readings, "cop");
+    }
     
     // Errors
     cJSON_AddBoolToObject(root, "has_error", hp.hasAnyError());
@@ -2167,6 +2193,29 @@ static esp_err_t heatpump_control_handler(httpd_req_t* req)
         } else {
             cJSON_Delete(root);
             send_json_error(req, "400 Bad Request", "register requires 'address' and 'value'");
+            return ESP_OK;
+        }
+    }
+    else if (strcmp(command, "advanced") == 0) {
+        // Advanced ("AP") technician parameter: written by AP number through the
+        // arctic-macon guardrail (validates range/enum, confirmed register, and
+        // write-lock) so we never blind-write an unverified or locked register.
+        cJSON* ap_item = cJSON_GetObjectItem(root, "ap");
+        cJSON* value = cJSON_GetObjectItem(root, "value");
+        if (ap_item && cJSON_IsNumber(ap_item) && value && cJSON_IsNumber(value)) {
+            uint8_t ap = (uint8_t)ap_item->valueint;
+            int16_t val = (int16_t)value->valueint;
+            bool bus_ok = false;
+            arctic::AdvWriteResult r = advanced_param_write(ap, val, &bus_ok);
+            if (r != arctic::AdvWriteResult::OK) {
+                cJSON_Delete(root);
+                send_json_error(req, "400 Bad Request", arctic::adv_write_result_name(r));
+                return ESP_OK;
+            }
+            success = bus_ok;
+        } else {
+            cJSON_Delete(root);
+            send_json_error(req, "400 Bad Request", "advanced requires 'ap' and 'value'");
             return ESP_OK;
         }
     }
@@ -2724,12 +2773,14 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "Reading,Secondary EEV Opening,,2125,%u,steps\r\n", hp.secondary_eev_opening);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,High Pressure,,2126,%.2f,MPa\r\n", hp.getHighPressureMPa());
-    httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Low Pressure,,2127,%.2f,MPa\r\n", hp.getLowPressureMPa());
-    httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "Reading,Power Consumption,,2114,%lu,W\r\n", (unsigned long)hp.realtime_power_w);
     httpd_resp_sendstr_chunk(req, line);
+    if (hp.cop_valid) {
+        snprintf(line, sizeof(line), "Reading,Heat Output (est),,,%ld,W\r\n", (long)hp.thermal_w);
+        httpd_resp_sendstr_chunk(req, line);
+        snprintf(line, sizeof(line), "Reading,COP (est),,,%u.%02u,\r\n", hp.cop_x100 / 100, hp.cop_x100 % 100);
+        httpd_resp_sendstr_chunk(req, line);
+    }
 
     // --- Component Status (register 2135) ---
     #define DIAG_STATUS1(name_str, mask) \

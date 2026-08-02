@@ -151,8 +151,6 @@ static struct {
     lv_obj_t* comp_discharge_value = nullptr;
     lv_obj_t* comp_suction_value = nullptr;
     lv_obj_t* comp_eev_value = nullptr;
-    lv_obj_t* comp_hi_press_value = nullptr;
-    lv_obj_t* comp_lo_press_value = nullptr;
     lv_obj_t* comp_dt_value = nullptr;
     lv_obj_t* comp_dt_label = nullptr;
     
@@ -162,6 +160,7 @@ static struct {
     lv_obj_t* energy_content = nullptr;
     lv_obj_t* energy_in_value = nullptr;
     lv_obj_t* energy_out_value = nullptr;
+    lv_obj_t* energy_out_label = nullptr;
     lv_obj_t* energy_cop_value = nullptr;
     
     // Bottom button bar
@@ -822,7 +821,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     create_value_column(detail_row1, i18n_get(STR_HP_LABEL_SUCTION), &state.comp_suction_value);
     create_value_column(detail_row1, i18n_get(STR_HP_LABEL_EEV), &state.comp_eev_value);
     
-    // Detail row 2: High Press | Low Press | ΔT
+    // Detail row 2: ΔT
     lv_obj_t* detail_row2 = lv_obj_create(state.comp_content);
     lv_obj_set_size(detail_row2, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(detail_row2, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -832,8 +831,6 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_flow(detail_row2, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(detail_row2, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    create_value_column(detail_row2, i18n_get(STR_HP_LABEL_HI_PRESS), &state.comp_hi_press_value);
-    create_value_column(detail_row2, i18n_get(STR_HP_LABEL_LO_PRESS), &state.comp_lo_press_value);
     lv_obj_t* dt_col = create_value_column(detail_row2, "\xCE\x94T", &state.comp_dt_value);
     state.comp_dt_label = lv_obj_get_child(dt_col, 1);
     
@@ -854,7 +851,8 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_align(energy_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
     create_value_column(energy_row, i18n_get(STR_HP_LABEL_POWER_IN), &state.energy_in_value);
-    create_value_column(energy_row, i18n_get(STR_HP_LABEL_HEAT_OUT), &state.energy_out_value);
+    lv_obj_t* energy_out_col = create_value_column(energy_row, i18n_get(STR_HP_LABEL_HEAT_OUT), &state.energy_out_value);
+    state.energy_out_label = lv_obj_get_child(energy_out_col, 1);
     create_value_column(energy_row, i18n_get(STR_HP_LABEL_COP), &state.energy_cop_value);
     
     // =========================================================================
@@ -1005,19 +1003,17 @@ void heatpump_screen_update(void) {
     }
     lv_obj_set_style_text_color(state.perf_power_value, perf_dim, LV_PART_MAIN);
     
-    // COP (in performance strip)
-    int16_t water_dt_tenths = hp.outlet_water_temp - hp.inlet_water_temp;
-    uint32_t cop_x10 = 0;
-    if (compressor_on && water_dt_tenths > 0 && power_watts > 0) {
-        uint32_t heat_out = (uint32_t)(4186 * water_dt_tenths) / 30;
-        cop_x10 = heat_out * 10 / power_watts;
+    // COP (in performance strip) — estimated by the macon library (uses an
+    // assumed external water flow); valid in both heating and cooling.
+    uint16_t cop_x100 = hp.cop_x100;
+    if (hp.cop_valid) {
         char cop_buf[16];
-        snprintf(cop_buf, sizeof(cop_buf), "%lu.%lu", (unsigned long)(cop_x10 / 10), (unsigned long)(cop_x10 % 10));
+        snprintf(cop_buf, sizeof(cop_buf), "%u.%02u", cop_x100 / 100, cop_x100 % 100);
         lv_label_set_text(state.perf_cop_value, cop_buf);
         // Color-code: green >= 3.0, yellow >= 2.0, red < 2.0
-        if (cop_x10 >= 30) {
+        if (cop_x100 >= 300) {
             lv_obj_set_style_text_color(state.perf_cop_value, COLOR_SUCCESS, LV_PART_MAIN);
-        } else if (cop_x10 >= 20) {
+        } else if (cop_x100 >= 200) {
             lv_obj_set_style_text_color(state.perf_cop_value, COLOR_WARNING, LV_PART_MAIN);
         } else {
             lv_obj_set_style_text_color(state.perf_cop_value, COLOR_ERROR, LV_PART_MAIN);
@@ -1133,14 +1129,6 @@ void heatpump_screen_update(void) {
         snprintf(comp_buf, sizeof(comp_buf), "%u steps", hp.primary_eev_opening);
         lv_label_set_text(state.comp_eev_value, comp_buf);
         
-        snprintf(comp_buf, sizeof(comp_buf), "%u.%02u MPa",
-                 hp.high_pressure / 100, hp.high_pressure % 100);
-        lv_label_set_text(state.comp_hi_press_value, comp_buf);
-        
-        snprintf(comp_buf, sizeof(comp_buf), "%u.%02u MPa",
-                 hp.low_pressure / 100, hp.low_pressure % 100);
-        lv_label_set_text(state.comp_lo_press_value, comp_buf);
-        
         if (defrosting) {
             lv_label_set_text(state.comp_dt_label, "COIL");
             snprintf(comp_buf, sizeof(comp_buf), "%d%s",
@@ -1167,8 +1155,6 @@ void heatpump_screen_update(void) {
         lv_label_set_text(state.comp_discharge_value, "--");
         lv_label_set_text(state.comp_suction_value, "--");
         lv_label_set_text(state.comp_eev_value, "--");
-        lv_label_set_text(state.comp_hi_press_value, "--");
-        lv_label_set_text(state.comp_lo_press_value, "--");
         lv_label_set_text(state.comp_dt_value, "--");
     }
     
@@ -1177,8 +1163,9 @@ void heatpump_screen_update(void) {
     // =====================================================================
     lv_label_set_text(state.energy_in_value, hp.connected ? power_buf : "--");
     
-    if (compressor_on && water_dt_tenths > 0) {
-        uint32_t heat_out = (uint32_t)(4186 * water_dt_tenths) / 30;
+    if (hp.cop_valid) {
+        // Heat Out: magnitude of the estimated water-side thermal power.
+        uint32_t heat_out = (uint32_t)(hp.thermal_w < 0 ? -hp.thermal_w : hp.thermal_w);
         char heat_buf[32];
         if (heat_out >= 1000) {
             uint32_t kw_int = heat_out / 1000;
@@ -1188,24 +1175,27 @@ void heatpump_screen_update(void) {
             snprintf(heat_buf, sizeof(heat_buf), "%lu W", (unsigned long)heat_out);
         }
         lv_label_set_text(state.energy_out_value, heat_buf);
+        if (state.energy_out_label) {
+            lv_label_set_text(state.energy_out_label,
+                              i18n_get(hp.thermal_w < 0 ? STR_HP_LABEL_COOLING_OUT
+                                                        : STR_HP_LABEL_HEAT_OUT));
+        }
         
-        if (power_watts > 0) {
-            char cop_buf[16];
-            snprintf(cop_buf, sizeof(cop_buf), "%lu.%lu", (unsigned long)(cop_x10 / 10), (unsigned long)(cop_x10 % 10));
-            lv_label_set_text(state.energy_cop_value, cop_buf);
-            if (cop_x10 >= 30) {
-                lv_obj_set_style_text_color(state.energy_cop_value, COLOR_SUCCESS, LV_PART_MAIN);
-            } else if (cop_x10 >= 20) {
-                lv_obj_set_style_text_color(state.energy_cop_value, COLOR_WARNING, LV_PART_MAIN);
-            } else {
-                lv_obj_set_style_text_color(state.energy_cop_value, COLOR_ERROR, LV_PART_MAIN);
-            }
+        char cop_buf[16];
+        snprintf(cop_buf, sizeof(cop_buf), "%u.%02u", cop_x100 / 100, cop_x100 % 100);
+        lv_label_set_text(state.energy_cop_value, cop_buf);
+        if (cop_x100 >= 300) {
+            lv_obj_set_style_text_color(state.energy_cop_value, COLOR_SUCCESS, LV_PART_MAIN);
+        } else if (cop_x100 >= 200) {
+            lv_obj_set_style_text_color(state.energy_cop_value, COLOR_WARNING, LV_PART_MAIN);
         } else {
-            lv_label_set_text(state.energy_cop_value, "--");
-            lv_obj_set_style_text_color(state.energy_cop_value, COLOR_TEXT_DIM, LV_PART_MAIN);
+            lv_obj_set_style_text_color(state.energy_cop_value, COLOR_ERROR, LV_PART_MAIN);
         }
     } else {
         lv_label_set_text(state.energy_out_value, "--");
+        if (state.energy_out_label) {
+            lv_label_set_text(state.energy_out_label, i18n_get(STR_HP_LABEL_HEAT_OUT));
+        }
         lv_label_set_text(state.energy_cop_value, "--");
         lv_obj_set_style_text_color(state.energy_cop_value, COLOR_TEXT_DIM, LV_PART_MAIN);
     }
