@@ -181,6 +181,87 @@ static bool pollStatus() {
     return true;
 }
 
+// Compare the freshly-updated s_state against the previous snapshot and record
+// operational events (power/mode/setpoint/component/defrost/error transitions).
+// The caller MUST hold s_state_mutex. Used by both the Modbus polling task and
+// the passive/active Tuya external-feed path so events are logged regardless of
+// which data source is driving the controller.
+static void detectAndLogStateEvents() {
+    // ---- Event detection: compare current vs previous state ----
+    if (s_prev_state_valid) {
+        // Power on/off
+        if (s_state.unit_on != s_prev_unit_on) {
+            event_log_record(s_state.unit_on ? EVENT_POWER_ON : EVENT_POWER_OFF, 0);
+        }
+        // Mode changed
+        if (s_state.working_mode != s_prev_mode) {
+            uint32_t payload = ((uint32_t)s_prev_mode << 8) | (uint32_t)s_state.working_mode;
+            event_log_record(EVENT_MODE_CHANGED, payload);
+        }
+        // Setpoint changes
+        if (s_state.cooling_setpoint != s_prev_cooling_sp) {
+            uint32_t payload = (0 << 16) | ((uint16_t)s_prev_cooling_sp << 8) | (uint16_t)s_state.cooling_setpoint;
+            event_log_record(EVENT_SETPOINT_CHANGED, payload);
+        }
+        if (s_state.heating_setpoint != s_prev_heating_sp) {
+            uint32_t payload = (1 << 16) | ((uint16_t)s_prev_heating_sp << 8) | (uint16_t)s_state.heating_setpoint;
+            event_log_record(EVENT_SETPOINT_CHANGED, payload);
+        }
+        if (s_state.hot_water_setpoint != s_prev_hotwater_sp) {
+            uint32_t payload = (2 << 16) | ((uint16_t)s_prev_hotwater_sp << 8) | (uint16_t)s_state.hot_water_setpoint;
+            event_log_record(EVENT_SETPOINT_CHANGED, payload);
+        }
+        // Component state changes
+        bool cur_comp = s_state.isCompressorRunning();
+        if (cur_comp != s_prev_compressor) {
+            event_log_record(cur_comp ? EVENT_COMPRESSOR_ON : EVENT_COMPRESSOR_OFF, 0);
+        }
+        bool cur_fan = s_state.isFanRunning();
+        if (cur_fan != s_prev_fan) {
+            event_log_record(cur_fan ? EVENT_FAN_ON : EVENT_FAN_OFF, 0);
+        }
+        bool cur_pump = s_state.isWaterPumpRunning();
+        if (cur_pump != s_prev_pump) {
+            event_log_record(cur_pump ? EVENT_PUMP_ON : EVENT_PUMP_OFF, 0);
+        }
+        bool cur_aux = s_state.isBackupHeaterOn();
+        if (cur_aux != s_prev_aux_heater) {
+            event_log_record(cur_aux ? EVENT_AUX_HEATER_ON : EVENT_AUX_HEATER_OFF, 0);
+        }
+        // Defrost
+        bool cur_defrost = s_state.isDefrosting();
+        if (cur_defrost != s_prev_defrosting) {
+            event_log_record(cur_defrost ? EVENT_DEFROST_START : EVENT_DEFROST_END, 0);
+        }
+        // Error changes (check individual bits)
+        uint16_t new_err1 = s_state.error1 & ~s_prev_error1;
+        uint16_t clr_err1 = s_prev_error1 & ~s_state.error1;
+        uint16_t new_err2 = s_state.error2 & ~s_prev_error2;
+        uint16_t clr_err2 = s_prev_error2 & ~s_state.error2;
+        for (int b = 0; b < 16; b++) {
+            if (new_err1 & (1 << b)) event_log_record(EVENT_ERROR_APPEARED, (1 << 16) | (1 << b));
+            if (clr_err1 & (1 << b)) event_log_record(EVENT_ERROR_CLEARED, (1 << 16) | (1 << b));
+            if (new_err2 & (1 << b)) event_log_record(EVENT_ERROR_APPEARED, (2 << 16) | (1 << b));
+            if (clr_err2 & (1 << b)) event_log_record(EVENT_ERROR_CLEARED, (2 << 16) | (1 << b));
+        }
+    }
+
+    // Update previous state
+    s_prev_unit_on = s_state.unit_on;
+    s_prev_mode = s_state.working_mode;
+    s_prev_cooling_sp = s_state.cooling_setpoint;
+    s_prev_heating_sp = s_state.heating_setpoint;
+    s_prev_hotwater_sp = s_state.hot_water_setpoint;
+    s_prev_compressor = s_state.isCompressorRunning();
+    s_prev_fan = s_state.isFanRunning();
+    s_prev_pump = s_state.isWaterPumpRunning();
+    s_prev_aux_heater = s_state.isBackupHeaterOn();
+    s_prev_defrosting = s_state.isDefrosting();
+    s_prev_error1 = s_state.error1;
+    s_prev_error2 = s_state.error2;
+    s_prev_state_valid = true;
+}
+
 // Main polling task
 static void pollTask(void* param) {
     ESP_LOGI(TAG, "Polling task started");
@@ -222,78 +303,7 @@ static void pollTask(void* param) {
             }
             
             // ---- Event detection: compare current vs previous state ----
-            if (s_prev_state_valid) {
-                // Power on/off
-                if (s_state.unit_on != s_prev_unit_on) {
-                    event_log_record(s_state.unit_on ? EVENT_POWER_ON : EVENT_POWER_OFF, 0);
-                }
-                // Mode changed
-                if (s_state.working_mode != s_prev_mode) {
-                    uint32_t payload = ((uint32_t)s_prev_mode << 8) | (uint32_t)s_state.working_mode;
-                    event_log_record(EVENT_MODE_CHANGED, payload);
-                }
-                // Setpoint changes
-                if (s_state.cooling_setpoint != s_prev_cooling_sp) {
-                    uint32_t payload = (0 << 16) | ((uint16_t)s_prev_cooling_sp << 8) | (uint16_t)s_state.cooling_setpoint;
-                    event_log_record(EVENT_SETPOINT_CHANGED, payload);
-                }
-                if (s_state.heating_setpoint != s_prev_heating_sp) {
-                    uint32_t payload = (1 << 16) | ((uint16_t)s_prev_heating_sp << 8) | (uint16_t)s_state.heating_setpoint;
-                    event_log_record(EVENT_SETPOINT_CHANGED, payload);
-                }
-                if (s_state.hot_water_setpoint != s_prev_hotwater_sp) {
-                    uint32_t payload = (2 << 16) | ((uint16_t)s_prev_hotwater_sp << 8) | (uint16_t)s_state.hot_water_setpoint;
-                    event_log_record(EVENT_SETPOINT_CHANGED, payload);
-                }
-                // Component state changes
-                bool cur_comp = s_state.isCompressorRunning();
-                if (cur_comp != s_prev_compressor) {
-                    event_log_record(cur_comp ? EVENT_COMPRESSOR_ON : EVENT_COMPRESSOR_OFF, 0);
-                }
-                bool cur_fan = s_state.isFanRunning();
-                if (cur_fan != s_prev_fan) {
-                    event_log_record(cur_fan ? EVENT_FAN_ON : EVENT_FAN_OFF, 0);
-                }
-                bool cur_pump = s_state.isWaterPumpRunning();
-                if (cur_pump != s_prev_pump) {
-                    event_log_record(cur_pump ? EVENT_PUMP_ON : EVENT_PUMP_OFF, 0);
-                }
-                bool cur_aux = s_state.isBackupHeaterOn();
-                if (cur_aux != s_prev_aux_heater) {
-                    event_log_record(cur_aux ? EVENT_AUX_HEATER_ON : EVENT_AUX_HEATER_OFF, 0);
-                }
-                // Defrost
-                bool cur_defrost = s_state.isDefrosting();
-                if (cur_defrost != s_prev_defrosting) {
-                    event_log_record(cur_defrost ? EVENT_DEFROST_START : EVENT_DEFROST_END, 0);
-                }
-                // Error changes (check individual bits)
-                uint16_t new_err1 = s_state.error1 & ~s_prev_error1;
-                uint16_t clr_err1 = s_prev_error1 & ~s_state.error1;
-                uint16_t new_err2 = s_state.error2 & ~s_prev_error2;
-                uint16_t clr_err2 = s_prev_error2 & ~s_state.error2;
-                for (int b = 0; b < 16; b++) {
-                    if (new_err1 & (1 << b)) event_log_record(EVENT_ERROR_APPEARED, (1 << 16) | (1 << b));
-                    if (clr_err1 & (1 << b)) event_log_record(EVENT_ERROR_CLEARED, (1 << 16) | (1 << b));
-                    if (new_err2 & (1 << b)) event_log_record(EVENT_ERROR_APPEARED, (2 << 16) | (1 << b));
-                    if (clr_err2 & (1 << b)) event_log_record(EVENT_ERROR_CLEARED, (2 << 16) | (1 << b));
-                }
-            }
-            
-            // Update previous state
-            s_prev_unit_on = s_state.unit_on;
-            s_prev_mode = s_state.working_mode;
-            s_prev_cooling_sp = s_state.cooling_setpoint;
-            s_prev_heating_sp = s_state.heating_setpoint;
-            s_prev_hotwater_sp = s_state.hot_water_setpoint;
-            s_prev_compressor = s_state.isCompressorRunning();
-            s_prev_fan = s_state.isFanRunning();
-            s_prev_pump = s_state.isWaterPumpRunning();
-            s_prev_aux_heater = s_state.isBackupHeaterOn();
-            s_prev_defrosting = s_state.isDefrosting();
-            s_prev_error1 = s_state.error1;
-            s_prev_error2 = s_state.error2;
-            s_prev_state_valid = true;
+            detectAndLogStateEvents();
         } else {
             s_state.consecutive_failures++;
             
@@ -708,6 +718,9 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
     s_state.last_successful_read_ms = getTimeMs();
     s_state.last_attempt_ms = s_state.last_successful_read_ms;
     s_state.consecutive_failures = 0;
+    // Log operational events (compressor/pump/fan/defrost/mode/setpoint/error
+    // transitions) for the Tuya feed path, same as the Modbus poll loop.
+    detectAndLogStateEvents();
     uint16_t err1 = s_state.error1;
     uint16_t err2 = s_state.error2;
     xSemaphoreGive(s_state_mutex);
