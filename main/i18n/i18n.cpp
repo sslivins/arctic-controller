@@ -295,6 +295,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_EVENT_ERROR_CLEARED] = "Error Cleared",
     [STR_EVENT_CONNECTED] = "Connected",
     [STR_EVENT_DISCONNECTED] = "Disconnected",
+    [STR_EVENT_BROWNOUT_RESET] = "Brownout Reset",
     [STR_EVENT_CLEAR] = "Clear Events",
     [STR_EVENT_NO_EVENTS] = "No events recorded",
 
@@ -578,6 +579,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_EVENT_ERROR_CLEARED] = "Erreur effacée",
     [STR_EVENT_CONNECTED] = "Connecté",
     [STR_EVENT_DISCONNECTED] = "Déconnecté",
+    [STR_EVENT_BROWNOUT_RESET] = "Réinit. sous-tension",
     [STR_EVENT_CLEAR] = "Effacer événements",
     [STR_EVENT_NO_EVENTS] = "Aucun événement",
 
@@ -861,6 +863,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_EVENT_ERROR_CLEARED] = "Error eliminado",
     [STR_EVENT_CONNECTED] = "Conectado",
     [STR_EVENT_DISCONNECTED] = "Desconectado",
+    [STR_EVENT_BROWNOUT_RESET] = "Reinicio por baja tensión",
     [STR_EVENT_CLEAR] = "Borrar eventos",
     [STR_EVENT_NO_EVENTS] = "Sin eventos registrados",
 
