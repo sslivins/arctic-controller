@@ -63,6 +63,7 @@ static const char* s_event_names[] = {
     "error_cleared",
     "connected",
     "disconnected",
+    "brownout_reset",
 };
 
 _Static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,

@@ -68,6 +68,7 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_ERROR_CLEARED:   return STR_EVENT_ERROR_CLEARED;
         case EVENT_CONNECTED:       return STR_EVENT_CONNECTED;
         case EVENT_DISCONNECTED:    return STR_EVENT_DISCONNECTED;
+        case EVENT_BROWNOUT_RESET:  return STR_EVENT_BROWNOUT_RESET;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -93,6 +94,7 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_ERROR_CLEARED:   return LV_SYMBOL_OK;
         case EVENT_CONNECTED:       return LV_SYMBOL_WIFI;
         case EVENT_DISCONNECTED:    return LV_SYMBOL_WIFI;
+        case EVENT_BROWNOUT_RESET:  return LV_SYMBOL_WARNING;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -110,6 +112,9 @@ static lv_color_t event_type_color(event_type_t type) {
             return COLOR_SUCCESS;
         
         case EVENT_ERROR_APPEARED:
+            return COLOR_ERROR;
+        
+        case EVENT_BROWNOUT_RESET:
             return COLOR_ERROR;
         
         case EVENT_DEFROST_START:

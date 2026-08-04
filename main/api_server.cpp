@@ -16,6 +16,7 @@
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
 #include "event_log.h"
+#include "boot_stats.h"
 #include "log_buffer.h"
 #include "app_preferences.h"
 #include "test_endpoints.h"
@@ -97,6 +98,7 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
+static esp_err_t brownout_clear_handler(httpd_req_t* req);
 static esp_err_t display_brightness_get_handler(httpd_req_t* req);
 static esp_err_t preferences_get_handler(httpd_req_t* req);
 static esp_err_t logs_get_handler(httpd_req_t* req);
@@ -770,6 +772,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(events_clear_uri);
+
+    // POST /api/brownout/clear - Reset the persistent brownout counter
+    httpd_uri_t brownout_clear_uri = {
+        .uri = "/api/brownout/clear",
+        .method = HTTP_POST,
+        .handler = brownout_clear_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(brownout_clear_uri);
 
     // GET /api/display/brightness - Get current display brightness
     httpd_uri_t display_brightness_uri = {
@@ -3048,6 +3059,10 @@ static esp_err_t events_get_handler(httpd_req_t* req)
     
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "total", event_log_count());
+    // Durable brownout tracking (survives the reboot a brownout causes).
+    cJSON_AddNumberToObject(root, "brownout_count", boot_stats_brownout_count());
+    cJSON_AddStringToObject(root, "last_reset_reason",
+                            boot_stats_reset_reason_name(boot_stats_last_reset_reason()));
     cJSON* arr = cJSON_AddArrayToObject(root, "events");
     
     for (int i = 0; i < count; i++) {
@@ -3076,6 +3091,20 @@ static esp_err_t events_clear_handler(httpd_req_t* req)
     set_json_content_type(req);
     
     event_log_clear();
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// POST /api/brownout/clear - Reset the persistent brownout counter
+static esp_err_t brownout_clear_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+    
+    boot_stats_clear();
     httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;
 }

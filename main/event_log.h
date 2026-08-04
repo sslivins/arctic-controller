@@ -38,6 +38,7 @@ typedef enum {
     EVENT_ERROR_CLEARED,        // Error code cleared (payload: error code)
     EVENT_CONNECTED,            // Heat pump connected (Modbus OK)
     EVENT_DISCONNECTED,         // Heat pump disconnected (Modbus lost)
+    EVENT_BROWNOUT_RESET,       // Last boot was caused by a brownout (supply sag)
     EVENT_TYPE_COUNT
 } event_type_t;
 

@@ -30,6 +30,7 @@
 #include "heatpump_screen.h"
 #include "app_preferences.h"
 #include "event_log.h"
+#include "boot_stats.h"
 #include "log_buffer.h"
 
 static const char* TAG = "main";
@@ -197,6 +198,16 @@ extern "C" void app_main(void)
 
     // Initialize event log (RAM ring buffer for system events)
     event_log_init();
+
+    // Persistent boot/reset stats: count brownouts across reboots (NVS) and
+    // drop a durable event-log entry when THIS boot was caused by a brownout,
+    // so supply sags (e.g. the Tab5 running off the heat-pump RS485 rail) are
+    // visible after the fact instead of only on the serial console. Requires
+    // NVS, which was initialized above.
+    boot_stats_init(reset_reason);
+    if (reset_reason == ESP_RST_BROWNOUT) {
+        event_log_record(EVENT_BROWNOUT_RESET, 0);
+    }
 
     // Initialize Modbus and Arctic heat pump communication (skip in demo mode)
     if (app_prefs_is_demo_mode()) {
