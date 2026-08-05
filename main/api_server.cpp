@@ -2288,6 +2288,8 @@ static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool r
     cJSON_AddNumberToObject(obj, "ap", p->ap);
     cJSON_AddStringToObject(obj, "name", p->name ? p->name : "");
     cJSON_AddStringToObject(obj, "detail", p->detail ? p->detail : "");
+    cJSON_AddStringToObject(obj, "name_msg_id", p->name_msg_id ? p->name_msg_id : "");
+    cJSON_AddStringToObject(obj, "detail_msg_id", p->detail_msg_id ? p->detail_msg_id : "");
     if (read_ok) {
         cJSON_AddNumberToObject(obj, "value", value);
     } else {
@@ -2392,7 +2394,8 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON_AddStringToObject(root, "key", key);
     cJSON_AddStringToObject(root, "name", p->name ? p->name : "");
     cJSON_AddStringToObject(root, "detail", p->detail ? p->detail : "");
-    cJSON_AddStringToObject(root, "unit", p->unit ? p->unit : "");
+    cJSON_AddStringToObject(root, "name_msg_id", p->name_msg_id ? p->name_msg_id : "");
+    cJSON_AddStringToObject(root, "detail_msg_id", p->detail_msg_id ? p->detail_msg_id : "");
     cJSON_AddStringToObject(root, "category", p->category ? p->category : "");
     cJSON_AddNumberToObject(root, "min", p->min_val);
     cJSON_AddNumberToObject(root, "max", p->max_val);

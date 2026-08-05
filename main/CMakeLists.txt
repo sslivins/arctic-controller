@@ -1,31 +1,35 @@
 # Web UI gzip compression
-# Generate gzipped web file at configure time if source is newer
+# The embedded dashboard is stored gzipped in flash. Two rules keep the .gz in
+# sync with the source HTML:
+#   1. execute_process (configure time) guarantees the .gz exists so the initial
+#      EMBED_FILES resolution below succeeds on a clean tree.
+#   2. add_custom_command (build time) re-gzips whenever web/index.html or the
+#      gzip script changes, so a plain `idf.py build` always re-embeds the latest
+#      markup WITHOUT needing an explicit `idf.py reconfigure`.
 set(WEB_SRC "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html")
 set(WEB_GZ "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html.gz")
 set(GZIP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/web/gzip_html.py")
 
-# Check if we need to regenerate the gzip file
-if(EXISTS "${WEB_SRC}")
-    if(NOT EXISTS "${WEB_GZ}" OR "${WEB_SRC}" IS_NEWER_THAN "${WEB_GZ}")
-        message(STATUS "Compressing web/index.html -> index.html.gz")
-        # Find Python - prefer IDF's Python, then system Python
-        # Use Python3::Interpreter if available (set by ESP-IDF), otherwise find it
-        if(Python3_EXECUTABLE)
-            set(PYTHON_CMD "${Python3_EXECUTABLE}")
-        else()
-            find_program(PYTHON_CMD NAMES python3 python)
-        endif()
-        if(NOT PYTHON_CMD)
-            message(FATAL_ERROR "Python not found - required for gzip compression")
-        endif()
-        execute_process(
-            COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${WEB_SRC}" "${WEB_GZ}"
-            RESULT_VARIABLE GZIP_RESULT
-            ERROR_VARIABLE GZIP_ERROR
-        )
-        if(NOT GZIP_RESULT EQUAL 0)
-            message(FATAL_ERROR "Failed to gzip web/index.html (exit code: ${GZIP_RESULT}, error: ${GZIP_ERROR})")
-        endif()
+# Find Python once - prefer IDF's Python, then system Python.
+if(Python3_EXECUTABLE)
+    set(PYTHON_CMD "${Python3_EXECUTABLE}")
+else()
+    find_program(PYTHON_CMD NAMES python3 python)
+endif()
+if(NOT PYTHON_CMD)
+    message(FATAL_ERROR "Python not found - required for gzip compression")
+endif()
+
+# Configure-time: ensure the .gz exists for the initial EMBED_FILES resolution.
+if(EXISTS "${WEB_SRC}" AND (NOT EXISTS "${WEB_GZ}" OR "${WEB_SRC}" IS_NEWER_THAN "${WEB_GZ}"))
+    message(STATUS "Compressing web/index.html -> index.html.gz")
+    execute_process(
+        COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${WEB_SRC}" "${WEB_GZ}"
+        RESULT_VARIABLE GZIP_RESULT
+        ERROR_VARIABLE GZIP_ERROR
+    )
+    if(NOT GZIP_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to gzip web/index.html (exit code: ${GZIP_RESULT}, error: ${GZIP_ERROR})")
     endif()
 endif()
 
@@ -104,3 +108,15 @@ idf_component_register(
         mbedtls
         arctic-macon
 )
+
+# Build-time: re-gzip whenever the source HTML or the gzip script changes, so
+# `idf.py build` alone re-embeds the latest dashboard (no reconfigure needed).
+add_custom_command(
+    OUTPUT "${WEB_GZ}"
+    COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${WEB_SRC}" "${WEB_GZ}"
+    DEPENDS "${WEB_SRC}" "${GZIP_SCRIPT}"
+    COMMENT "Gzipping web/index.html"
+    VERBATIM
+)
+add_custom_target(web_assets DEPENDS "${WEB_GZ}")
+add_dependencies(${COMPONENT_LIB} web_assets)

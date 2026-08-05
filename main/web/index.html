@@ -4442,7 +4442,15 @@
                     let full = (p && p.detail) ? p.detail : (extra ? extra.full : null);
                     const remarks = extra ? extra.remarks : undefined;
                     if (!full && !remarks) return null;
-                    return { full: full || '', remarks };
+                    return { full: this.substTemps(full || ''), remarks };
+                },
+
+                // Substitute {T:<celsius>} tokens in a library detail string with a
+                // displayable temperature. The web always presents native °C
+                // (there is no C/F toggle), matching the firmware's no-space
+                // format (e.g. "-9°C"), so the token value is emitted verbatim.
+                substTemps(text) {
+                    return text.replace(/\{T:(-?\d+)\}/g, (_, c) => c + '\u00b0C');
                 },
 
                 // The enum option matching a param's current wire value, or null.

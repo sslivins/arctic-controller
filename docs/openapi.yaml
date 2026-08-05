@@ -2014,8 +2014,27 @@ components:
           example: 13
         name:
           type: string
-          description: Human-readable name
+          description: Human-readable English name (fallback when name_msg_id is untranslated)
           example: Defrost Cycle
+        detail:
+          type: string
+          description: >-
+            Human-readable English detail/help text (fallback when detail_msg_id
+            is untranslated). May contain `{T:<celsius>}` temperature tokens the
+            UI substitutes with a converted, unit-labelled value.
+          example: Time between defrost cycles.
+        name_msg_id:
+          type: string
+          description: >-
+            Stable translation key for `name` (e.g. `ap.max_hw_setpoint.name`).
+            UIs translate by this key and fall back to `name` when untranslated.
+          example: ap.max_hw_setpoint.name
+        detail_msg_id:
+          type: string
+          description: >-
+            Stable translation key for `detail` (e.g. `ap.max_hw_setpoint.detail`).
+            UIs translate by this key and fall back to `detail` when untranslated.
+          example: ap.max_hw_setpoint.detail
         unit:
           type: string
           description: Unit of measurement
