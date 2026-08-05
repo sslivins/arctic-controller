@@ -212,6 +212,8 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_DEMO_ADVANCED] = "DEMO MODE - Control",
     [STR_HP_EDIT_PARAMETER] = "Edit Parameter",
     [STR_HP_RANGE_FMT] = "Range:",
+    [STR_HP_KRATIO_REDUCE] = "Lowers running frequency by %d steps per %d Hz",
+    [STR_HP_KRATIO_NONE] = "No change to running frequency",
     [STR_HP_COOLING_SETPOINT] = "Cooling Setpoint",
     [STR_HP_HEATING_SETPOINT] = "Heating Setpoint",
     [STR_HP_HOT_WATER_SETPOINT] = "Hot Water Setpoint",
@@ -496,6 +498,8 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_DEMO_ADVANCED] = "D\xc3\x89MO - Contr\xc3\xb4le",
     [STR_HP_EDIT_PARAMETER] = "Modifier le paramètre",
     [STR_HP_RANGE_FMT] = "Plage :",
+    [STR_HP_KRATIO_REDUCE] = "Réduire l'ouverture de %d pas tous les %d Hz",
+    [STR_HP_KRATIO_NONE] = "Aucune modification de fréquence",
     [STR_HP_COOLING_SETPOINT] = "Consigne refroidissement",
     [STR_HP_HEATING_SETPOINT] = "Consigne chauffage",
     [STR_HP_HOT_WATER_SETPOINT] = "Consigne eau chaude",
@@ -780,6 +784,8 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_DEMO_ADVANCED] = "DEMO - Control",
     [STR_HP_EDIT_PARAMETER] = "Editar parámetro",
     [STR_HP_RANGE_FMT] = "Rango:",
+    [STR_HP_KRATIO_REDUCE] = "Reducir apertura %d pasos cada %d Hz",
+    [STR_HP_KRATIO_NONE] = "Sin modificación de frecuencia",
     [STR_HP_COOLING_SETPOINT] = "Consigna enfriamiento",
     [STR_HP_HEATING_SETPOINT] = "Consigna calefacción",
     [STR_HP_HOT_WATER_SETPOINT] = "Consigna agua caliente",
@@ -930,6 +936,49 @@ const char* i18n_get(string_id_t id)
     }
     
     return "???";
+}
+
+// ============================================================================
+// Keyed (library-sourced) translations
+// ============================================================================
+// The macon library owns the English source of truth for parameter names,
+// detail paragraphs and enum meanings; the controller stores ONLY the
+// non-English translations here, keyed by the stable msg_id the library emits.
+// English text is intentionally absent — i18n_get_key() returns the library's
+// English fallback for LANG_ENGLISH and for any key without a translation, so no
+// prose is ever duplicated in the controller.
+//
+// This table is NULL-terminated (sentinel row) so it stays valid while empty.
+// Add rows ABOVE the sentinel as translations are authored (e.g. Phase 2 adds
+// the AP14-20 "ap.freq_ratio_kN.name/.detail" entries).
+typedef struct {
+    const char* key;
+    const char* fr;
+    const char* es;
+} keyed_translation_t;
+
+static const keyed_translation_t s_keyed_translations[] = {
+    // { "ap.freq_ratio_k1.name",   "Rapport de fréquence K1", "Relación de frecuencia K1" },
+    // { "ap.freq_ratio_k1.detail", "...",                     "..." },
+    { NULL, NULL, NULL },  // sentinel — keep last
+};
+
+const char* i18n_get_key(const char* key, const char* english_fallback)
+{
+    // English (and any missing key) always resolves to the library source text.
+    if (!key || s_current_language == LANG_ENGLISH) {
+        return english_fallback;
+    }
+    for (const keyed_translation_t* e = s_keyed_translations; e->key != NULL; ++e) {
+        if (strcmp(e->key, key) == 0) {
+            const char* t = (s_current_language == LANG_FRENCH) ? e->fr : e->es;
+            if (t != NULL && t[0] != '\0') {
+                return t;
+            }
+            break;  // key known but untranslated -> fall back to English
+        }
+    }
+    return english_fallback;
 }
 
 string_id_t i18n_find_by_english(const char* english_text)

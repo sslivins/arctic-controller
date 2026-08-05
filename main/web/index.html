@@ -216,6 +216,8 @@
                 range: 'Range',
                 editParam: 'Edit',
                 remarks: 'Remarks',
+                kratioReduce: 'Lowers running frequency by %1 steps per %2 Hz',
+                kratioNone: 'No change to running frequency',
                 paramSaved: 'Parameter saved',
                 paramFailed: 'Failed to save parameter',
                 noParams: 'Heat pump not connected',
@@ -498,6 +500,8 @@
                 range: 'Plage',
                 editParam: 'Modifier',
                 remarks: 'Remarques',
+                kratioReduce: "Réduire l'ouverture de %1 pas tous les %2 Hz",
+                kratioNone: 'Aucune modification de fréquence',
                 paramSaved: 'Paramètre enregistré',
                 paramFailed: 'Échec de la sauvegarde du paramètre',
                 noParams: 'Pompe à chaleur non connectée',
@@ -780,6 +784,8 @@
                 range: 'Rango',
                 editParam: 'Editar',
                 remarks: 'Notas',
+                kratioReduce: 'Reducir apertura %1 pasos cada %2 Hz',
+                kratioNone: 'Sin modificación de frecuencia',
                 paramSaved: 'Parámetro guardado',
                 paramFailed: 'Error al guardar el parámetro',
                 noParams: 'Bomba de calor no conectada',
@@ -2960,17 +2966,26 @@
                                                             <div class="param-value-display">
                                                                 <template x-if="editingParam !== key">
                                                                     <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                                                        <span class="param-value" x-text="(p.value !== null ? p.value : '--') + ' ' + p.unit"></span>
+                                                                        <span class="param-value" x-text="paramOption(p) ? optionText(paramOption(p)) : ((p.value !== null ? p.value : '--') + ' ' + p.unit)"></span>
                                                                         <button class="param-edit-btn" x-show="p.writable" @click="startEditParam(key, p)" x-text="t('editParam')"></button>
                                                                     </div>
                                                                 </template>
                                                                 <template x-if="editingParam === key">
                                                                     <div class="param-edit-inline">
-                                                                        <input type="number" 
-                                                                               x-model.number="editingParamValue" 
-                                                                               :min="p.min" :max="p.max"
-                                                                               @keydown.enter="saveParam(key)"
-                                                                               @keydown.escape="editingParam = null">
+                                                                        <template x-if="p.options">
+                                                                            <select x-model.number="editingParamValue" @keydown.escape="editingParam = null">
+                                                                                <template x-for="o in p.options" :key="o.wire">
+                                                                                    <option :value="o.wire" x-text="optionText(o)"></option>
+                                                                                </template>
+                                                                            </select>
+                                                                        </template>
+                                                                        <template x-if="!p.options">
+                                                                            <input type="number" 
+                                                                                   x-model.number="editingParamValue" 
+                                                                                   :min="p.min" :max="p.max"
+                                                                                   @keydown.enter="saveParam(key)"
+                                                                                   @keydown.escape="editingParam = null">
+                                                                        </template>
                                                                         <button class="btn btn-primary btn-sm" @click="saveParam(key)" :disabled="controlLoading" x-text="t('save')"></button>
                                                                         <button class="btn btn-secondary btn-sm" @click="editingParam = null" x-text="t('cancel')"></button>
                                                                     </div>
@@ -3549,13 +3564,13 @@
                 // Web-only enrichment of the short names returned by /api/heatpump/advanced.
                 AP_DETAILS: {
                     13: { full: 'Highest setting temperature of hot water, heating mode (20~55\u00b0C / 68~131\u00b0F).' },
-                    14: { full: 'In hot water/heating status, ambient \u2264 -9\u00b0C, inlet \u226443\u00b0C: modified ratio value K1 of running frequency, lower (higher) than the frequency table.', remarks: 'Value shown is 100\u00d7 on the display. 0: no modification (RS485 0); 0.25: reduce 2-step opening each 4Hz (RS485 1); 0.5: reduce 2-step each 2Hz (RS485 2); 1: reduce 2-step each 1Hz (RS485 4); 2: reduce 4-step each 1Hz (RS485 8); 3: reduce 6-step each 1Hz (RS485 12); 4: reduce 8-step each 1Hz (RS485 16); 5: reduce 10-step each 1Hz (RS485 20).' },
-                    15: { full: 'In hot water/heating status, -9\u00b0C < ambient \u2264 18\u00b0C, inlet \u226443\u00b0C: modified ratio value K2 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
-                    16: { full: 'In hot water/heating status, ambient > 18\u00b0C, inlet \u226443\u00b0C: modified ratio value K3 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
-                    17: { full: 'In hot water/heating status, ambient \u2264 -9\u00b0C, inlet > 43\u00b0C: modified ratio value K4 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
-                    18: { full: 'In hot water/heating status, -9\u00b0C < ambient \u2264 18\u00b0C, inlet > 43\u00b0C: modified ratio value K5 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
-                    19: { full: 'In hot water/heating status, ambient > 18\u00b0C, inlet > 43\u00b0C: modified ratio value K6 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
-                    20: { full: 'In cooling status: modified ratio value K7 of running frequency, lower (higher) than the frequency table.', remarks: 'See AP14 for the K-ratio value legend (value shown is 100\u00d7 on the display).' },
+                    14: { full: 'In hot water/heating status, ambient \u2264 -9\u00b0C, inlet \u226443\u00b0C: modified ratio value K1 of running frequency, lower (higher) than the frequency table.' },
+                    15: { full: 'In hot water/heating status, -9\u00b0C < ambient \u2264 18\u00b0C, inlet \u226443\u00b0C: modified ratio value K2 of running frequency, lower (higher) than the frequency table.' },
+                    16: { full: 'In hot water/heating status, ambient > 18\u00b0C, inlet \u226443\u00b0C: modified ratio value K3 of running frequency, lower (higher) than the frequency table.' },
+                    17: { full: 'In hot water/heating status, ambient \u2264 -9\u00b0C, inlet > 43\u00b0C: modified ratio value K4 of running frequency, lower (higher) than the frequency table.' },
+                    18: { full: 'In hot water/heating status, -9\u00b0C < ambient \u2264 18\u00b0C, inlet > 43\u00b0C: modified ratio value K5 of running frequency, lower (higher) than the frequency table.' },
+                    19: { full: 'In hot water/heating status, ambient > 18\u00b0C, inlet > 43\u00b0C: modified ratio value K6 of running frequency, lower (higher) than the frequency table.' },
+                    20: { full: 'In cooling status: modified ratio value K7 of running frequency, lower (higher) than the frequency table.' },
                     24: { full: 'Under heating status, when ambient \u2265 Parameter 24, the compressor stops working.', remarks: 'Vendor doc range is 10~80\u00b0C; the OEM maximum on this unit is 45\u00b0C.' },
                     25: { full: 'Ambient temperature at which to start the backup electric heater (-45~45\u00b0C).' },
                     26: { full: 'Frequency decrease value for quiet running mode (1~20Hz).' },
@@ -4418,7 +4433,42 @@
                 },
                 
                 apDetails(ap) {
-                    return this.AP_DETAILS[ap] || null;
+                    // Prefer the library-sourced description delivered by the API
+                    // (p.detail) as the single source of truth; fall back to the
+                    // web-only AP_DETAILS text. Any web-only "remarks" enrichment
+                    // is preserved regardless.
+                    const extra = this.AP_DETAILS[ap] || null;
+                    const p = this.params ? this.params['AP' + ap] : null;
+                    let full = (p && p.detail) ? p.detail : (extra ? extra.full : null);
+                    const remarks = extra ? extra.remarks : undefined;
+                    if (!full && !remarks) return null;
+                    return { full: full || '', remarks };
+                },
+
+                // The enum option matching a param's current wire value, or null.
+                paramOption(p) {
+                    if (!p || !p.options || p.value === null) return null;
+                    return p.options.find(o => o.wire === p.value) || null;
+                },
+
+                // Localized description for an enum option, built from the
+                // library's structured args (arg_a/arg_b) + msg_id. Falls back
+                // to the library's canonical English (o.en) when untranslated.
+                optionDesc(o) {
+                    if (!o) return '';
+                    if (o.msg_id === 'kratio_none') return this.t('kratioNone');
+                    if (o.msg_id === 'kratio_reduce') {
+                        return this.t('kratioReduce')
+                            .replace('%1', o.arg_a).replace('%2', o.arg_b);
+                    }
+                    return o.en || '';
+                },
+
+                // "label — description" for an option (dropdown / display text).
+                optionText(o) {
+                    if (!o) return '';
+                    const d = this.optionDesc(o);
+                    return d ? (o.label + ' \u2014 ' + d) : o.label;
                 },
                 
                 toggleParamDetail(key) {
