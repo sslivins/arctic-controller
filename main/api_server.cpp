@@ -2256,6 +2256,28 @@ static esp_err_t heatpump_control_handler(httpd_req_t* req)
 // Heat Pump Parameters API
 // ============================================================================
 
+// Emit the locale-independent enum display options for `p` (if any) as an
+// "options" array: [{ wire, label, msg_id, arg_a, arg_b, en }]. The wire code
+// is the only value the UI ever PUTs back; label/msg_id/args/en drive display
+// and the UI's own localization (macon owns the code<->meaning mapping).
+static void add_ap_enum_options(cJSON* obj, const arctic::AdvancedParam* p) {
+    const size_t nopt = arctic::advanced_enum_option_count(p->ap);
+    if (nopt == 0) return;
+    cJSON* opts = cJSON_AddArrayToObject(obj, "options");
+    for (size_t i = 0; i < nopt; i++) {
+        const arctic::AdvEnumOption* o = arctic::advanced_enum_option_at(p->ap, i);
+        if (!o) continue;
+        cJSON* io = cJSON_CreateObject();
+        cJSON_AddNumberToObject(io, "wire", o->wire);
+        cJSON_AddStringToObject(io, "label", o->label ? o->label : "");
+        cJSON_AddStringToObject(io, "msg_id", o->msg_id ? o->msg_id : "");
+        cJSON_AddNumberToObject(io, "arg_a", o->arg_a);
+        cJSON_AddNumberToObject(io, "arg_b", o->arg_b);
+        cJSON_AddStringToObject(io, "en", o->en_default ? o->en_default : "");
+        cJSON_AddItemToArray(opts, io);
+    }
+}
+
 // Helper to add a single AP (advanced) parameter to a cJSON object, keyed "AP<n>".
 static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool read_ok, int16_t value) {
     char key[8];
@@ -2265,6 +2287,7 @@ static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool r
     cJSON* obj = cJSON_CreateObject();
     cJSON_AddNumberToObject(obj, "ap", p->ap);
     cJSON_AddStringToObject(obj, "name", p->name ? p->name : "");
+    cJSON_AddStringToObject(obj, "detail", p->detail ? p->detail : "");
     if (read_ok) {
         cJSON_AddNumberToObject(obj, "value", value);
     } else {
@@ -2277,6 +2300,7 @@ static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool r
     cJSON_AddBoolToObject(obj, "read_only", p->read_only);
     cJSON_AddBoolToObject(obj, "is_trigger", p->is_trigger);
     cJSON_AddBoolToObject(obj, "writable", writable);
+    add_ap_enum_options(obj, p);
     cJSON_AddItemToObject(parent, key, obj);
 }
 
@@ -2367,6 +2391,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(root, "ap", p->ap);
     cJSON_AddStringToObject(root, "key", key);
     cJSON_AddStringToObject(root, "name", p->name ? p->name : "");
+    cJSON_AddStringToObject(root, "detail", p->detail ? p->detail : "");
     cJSON_AddStringToObject(root, "unit", p->unit ? p->unit : "");
     cJSON_AddStringToObject(root, "category", p->category ? p->category : "");
     cJSON_AddNumberToObject(root, "min", p->min_val);
@@ -2374,6 +2399,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON_AddBoolToObject(root, "read_only", p->read_only);
     cJSON_AddBoolToObject(root, "is_trigger", p->is_trigger);
     cJSON_AddBoolToObject(root, "writable", writable);
+    add_ap_enum_options(root, p);
     if (read_ok) {
         cJSON_AddNumberToObject(root, "value", value);
     } else {

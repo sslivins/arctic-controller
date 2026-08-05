@@ -92,6 +92,7 @@ static struct {
     // Edit dialog
     lv_obj_t* edit_dialog = nullptr;
     lv_obj_t* edit_title = nullptr;
+    lv_obj_t* edit_detail = nullptr;
     lv_obj_t* edit_description = nullptr;
     lv_obj_t* edit_range_label = nullptr;
     lv_obj_t* edit_value_label = nullptr;
@@ -160,7 +161,8 @@ static void show_ap_trigger_confirm(uint8_t ap);
 static void ap_trigger_run_cb(lv_event_t* e);
 static void create_ap_section(lv_obj_t* parent);
 static void ap_update_display(int slot);
-static const char* kratio_display_str(int reading);
+static const char* kratio_label(uint8_t ap, int wire);
+static void kratio_desc(uint8_t ap, int wire, char* buf, size_t n);
 
 // ============================================================================
 // Demo Setpoints (screen-local)
@@ -564,16 +566,6 @@ static void create_edit_dialog(void) {
     lv_obj_set_style_text_color(cancel_icon, COLOR_ERROR, LV_PART_MAIN);
     lv_obj_center(cancel_icon);
     
-    // Title in center
-    state.edit_title = lv_label_create(header);
-    lv_label_set_text(state.edit_title, i18n_get(STR_HP_EDIT_PARAMETER));
-    lv_obj_set_style_text_font(state.edit_title, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.edit_title, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_align(state.edit_title, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_width(state.edit_title, 500);
-    lv_obj_set_style_text_align(state.edit_title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_label_set_long_mode(state.edit_title, LV_LABEL_LONG_DOT);
-    
     // Save button (checkmark) with circular background
     lv_obj_t* save_btn = lv_btn_create(header);
     lv_obj_set_size(save_btn, 60, 60);
@@ -593,36 +585,49 @@ static void create_edit_dialog(void) {
     lv_obj_set_style_text_color(save_icon, COLOR_SUCCESS, LV_PART_MAIN);
     lv_obj_center(save_icon);
     
-    // Content area
+    // Content card — a flex column that vertically centres its whole stack and
+    // auto-sizes to its content, so the dialog looks balanced no matter how
+    // much explanation text a given parameter carries (no fixed height => no
+    // dead space, no manual per-param tuning). Children, top→bottom:
+    //   (1) title  (2) detail paragraph  (3) +/- value control
+    //   (4) live value-meaning / (5) numeric range  (mutually exclusive)
     lv_obj_t* content = lv_obj_create(state.edit_dialog);
-    lv_obj_set_size(content, LV_PCT(90), 500);
+    lv_obj_set_width(content, LV_PCT(90));
+    lv_obj_set_height(content, LV_SIZE_CONTENT);
     lv_obj_align(content, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(content, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(content, 20, LV_PART_MAIN);
     lv_obj_set_style_pad_all(content, 30, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(content, 22, LV_PART_MAIN);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Description text
-    state.edit_description = lv_label_create(content);
-    lv_label_set_text(state.edit_description, "Parameter description...");
-    lv_obj_set_style_text_font(state.edit_description, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.edit_description, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_set_width(state.edit_description, LV_PCT(100));
-    lv_label_set_long_mode(state.edit_description, LV_LABEL_LONG_WRAP);
-    lv_obj_align(state.edit_description, LV_ALIGN_TOP_MID, 0, 0);
+    // (1) Title — the clean parameter name, e.g. "Frequency Ratio K1 (AP14)".
+    state.edit_title = lv_label_create(content);
+    lv_label_set_text(state.edit_title, i18n_get(STR_HP_EDIT_PARAMETER));
+    lv_obj_set_style_text_font(state.edit_title, UI_FONT_TITLE, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.edit_title, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_set_width(state.edit_title, LV_PCT(100));
+    lv_obj_set_style_text_align(state.edit_title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(state.edit_title, LV_LABEL_LONG_WRAP);
     
-    // Range label
-    state.edit_range_label = lv_label_create(content);
-    lv_label_set_text(state.edit_range_label, "Range: 0 - 100");
-    lv_obj_set_style_text_font(state.edit_range_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.edit_range_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_align(state.edit_range_label, LV_ALIGN_TOP_MID, 0, 120);
+    // (2) Detail — the full plain-language explanation of what the parameter
+    // does and when it applies (sourced from the shared macon library, so an
+    // installer can operate the control without the vendor manual). Hidden when
+    // a dialog has no detail text (e.g. plain setpoints).
+    state.edit_detail = lv_label_create(content);
+    lv_label_set_text(state.edit_detail, "");
+    lv_obj_set_style_text_font(state.edit_detail, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.edit_detail, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_width(state.edit_detail, LV_PCT(100));
+    lv_label_set_long_mode(state.edit_detail, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(state.edit_detail, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     
-    // Value display with +/- buttons
+    // (3) Value display with +/- buttons — the focal control.
     lv_obj_t* value_row = lv_obj_create(content);
     lv_obj_set_size(value_row, 400, 120);
-    lv_obj_align(value_row, LV_ALIGN_CENTER, 0, 50);
     lv_obj_set_style_bg_opa(value_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(value_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(value_row, 0, LV_PART_MAIN);
@@ -660,6 +665,25 @@ static void create_edit_dialog(void) {
     lv_label_set_text(plus_lbl, "+");
     lv_obj_set_style_text_font(plus_lbl, &montserrat_32_latin, LV_PART_MAIN);
     lv_obj_center(plus_lbl);
+    
+    // (4) Live value-meaning — helper text that updates with the +/- control
+    // (e.g. K-ratio "Reduce 2-step opening each 4 Hz"), or a plain setpoint
+    // description. Sits directly below the control. Hidden when empty.
+    state.edit_description = lv_label_create(content);
+    lv_label_set_text(state.edit_description, "");
+    lv_obj_set_style_text_font(state.edit_description, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.edit_description, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_width(state.edit_description, LV_PCT(100));
+    lv_label_set_long_mode(state.edit_description, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(state.edit_description, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    
+    // (5) Range label (numeric params only; hidden for enum/setpoint as needed).
+    state.edit_range_label = lv_label_create(content);
+    lv_label_set_text(state.edit_range_label, "");
+    lv_obj_set_style_text_font(state.edit_range_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.edit_range_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_width(state.edit_range_label, LV_PCT(100));
+    lv_obj_set_style_text_align(state.edit_range_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
 }
 
 // ============================================================================
@@ -837,6 +861,18 @@ static void edit_plus_cb(lv_event_t* e) {
     }
 }
 
+// Set a flex-child label's text, hiding it entirely when the text is empty so
+// the flex column doesn't reserve a blank row (keeps the card tight/centred).
+static void edit_label_set_or_hide(lv_obj_t* lbl, const char* text) {
+    if (!lbl) return;
+    if (text && text[0]) {
+        lv_label_set_text(lbl, text);
+        lv_obj_remove_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void show_setpoint_edit(int setpoint_type) {
     if (setpoint_type < 0 || setpoint_type > 2) return;
     sync_setpoint_limits();
@@ -868,7 +904,8 @@ static void show_setpoint_edit(int setpoint_type) {
     
     // Update dialog content
     lv_label_set_text(state.edit_title, i18n_get(sp.name_id));
-    lv_label_set_text(state.edit_description, sp.description);
+    edit_label_set_or_hide(state.edit_detail, "");  // setpoints have no detail paragraph
+    edit_label_set_or_hide(state.edit_description, sp.description);
     
     // Range label - convert limits to display units
     char range_buf[64];
@@ -877,6 +914,7 @@ static void show_setpoint_edit(int setpoint_type) {
     snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s", 
              i18n_get(STR_HP_RANGE_FMT), display_min, display_max, app_prefs_temp_unit_str());
     lv_label_set_text(state.edit_range_label, range_buf);
+    lv_obj_remove_flag(state.edit_range_label, LV_OBJ_FLAG_HIDDEN);  // shared w/ AP enum dialog which hides it
     
     update_edit_value_display();
     
@@ -894,14 +932,21 @@ static void update_edit_value_display(void) {
     const char* unit = "";
     int display_val = (int)roundf(state.edit_value);  // Round float to int for display
 
-    // Advanced ("AP") param: K-ratio codes render as their display decimal.
+    // Advanced ("AP") param: K-ratio codes render as their display decimal,
+    // with a live plain-language description below (both library-sourced).
     if (state.current_ap >= 0) {
         const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
         char val_buf[32];
         if (p && p->enum_vals) {
-            const char* s = kratio_display_str(display_val);
+            const char* s = kratio_label((uint8_t)state.current_ap, display_val);
             if (s) snprintf(val_buf, sizeof(val_buf), "%s", s);
             else   snprintf(val_buf, sizeof(val_buf), "%d", display_val);
+            // Update the description line to match the selected value.
+            if (state.edit_description) {
+                char desc_buf[96];
+                kratio_desc((uint8_t)state.current_ap, display_val, desc_buf, sizeof(desc_buf));
+                lv_label_set_text(state.edit_description, desc_buf);
+            }
         } else if (p && p->unit && p->unit[0]) {
             snprintf(val_buf, sizeof(val_buf), "%d %s", display_val, p->unit);
         } else {
@@ -933,20 +978,31 @@ static void update_edit_value_display(void) {
 // Driven entirely by the shared arctic-macon advanced-param table. Only
 // change-and-capture verified registers are shown; the safe writable subset
 // (AP13-20) is click-to-edit, the manual-override block (AP48-51) is displayed
-// read-only. K-ratio codes render as their vendor display decimal.
+// read-only. K-ratio codes render as their vendor display decimal + a live
+// plain-language description; both come from the shared macon library so the
+// controller never hardcodes the wire-code<->meaning mapping.
 
-// Vendor K-ratio: RS485 reading code -> display decimal string.
-static const char* kratio_display_str(int reading) {
-    switch (reading) {
-        case 0:  return "0";
-        case 1:  return "0.25";
-        case 2:  return "0.5";
-        case 4:  return "1";
-        case 8:  return "2";
-        case 12: return "3";
-        case 16: return "4";
-        case 20: return "5";
-        default: return nullptr;  // unexpected raw register value
+// K-ratio display label for a wire code (e.g. 12 -> "3"), sourced from the
+// macon library (single source of truth). Returns nullptr for a non-option.
+static const char* kratio_label(uint8_t ap, int wire) {
+    const arctic::AdvEnumOption* o =
+        arctic::advanced_enum_option_for_wire(ap, (int16_t)wire);
+    return o ? o->label : nullptr;
+}
+
+// Localized human description of a wire code ("Reduce 6-step opening each
+// 1 Hz"), built from the library's structured args (steps, Hz) + the device
+// i18n catalog. Falls back to the library's canonical English if untranslated.
+static void kratio_desc(uint8_t ap, int wire, char* buf, size_t n) {
+    const arctic::AdvEnumOption* o =
+        arctic::advanced_enum_option_for_wire(ap, (int16_t)wire);
+    if (!o) { if (n) buf[0] = '\0'; return; }
+    if (strcmp(o->msg_id, "kratio_none") == 0) {
+        snprintf(buf, n, "%s", i18n_get(STR_HP_KRATIO_NONE));
+    } else if (strcmp(o->msg_id, "kratio_reduce") == 0) {
+        snprintf(buf, n, i18n_get(STR_HP_KRATIO_REDUCE), (int)o->arg_a, (int)o->arg_b);
+    } else {
+        snprintf(buf, n, "%s", o->en_default ? o->en_default : "");
     }
 }
 
@@ -954,7 +1010,7 @@ static const char* kratio_display_str(int reading) {
 static void format_ap_value(const arctic::AdvancedParam* p, int16_t raw,
                             char* buf, size_t n) {
     if (p->enum_vals) {
-        const char* s = kratio_display_str(raw);
+        const char* s = kratio_label(p->ap, raw);
         if (s) snprintf(buf, n, "%s", s);
         else   snprintf(buf, n, "%d", raw);
     } else if (p->unit && p->unit[0]) {
@@ -1032,7 +1088,7 @@ static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
 
     // Name with AP number (left)
     char name_buf[80];
-    snprintf(name_buf, sizeof(name_buf), "%s (AP%u)", p->name, (unsigned)p->ap);
+    snprintf(name_buf, sizeof(name_buf), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)p->ap);
     lv_obj_t* name_lbl = lv_label_create(row);
     lv_label_set_text(name_lbl, name_buf);
     lv_obj_set_style_text_font(name_lbl, UI_FONT_BODY, LV_PART_MAIN);
@@ -1095,6 +1151,45 @@ static void create_ap_section(lv_obj_t* parent) {
     }
 }
 
+// Substitute {T:<celsius>} tokens in a library detail template with the value
+// converted to the user's chosen unit (°C/°F) plus the unit suffix. Canonical
+// temperatures live in the library as Celsius; unit conversion is a presentation
+// concern handled here so the library stays unit-agnostic. Non-token text is
+// copied verbatim, so any detail without tokens passes through unchanged.
+static void format_detail_temps(const char* tmpl, char* out, size_t out_sz) {
+    if (!out || out_sz == 0) return;
+    out[0] = '\0';
+    if (!tmpl) return;
+
+    size_t o = 0;
+    const char* s = tmpl;
+    while (*s && o < out_sz - 1) {
+        if (s[0] == '{' && s[1] == 'T' && s[2] == ':') {
+            const char* p = s + 3;
+            bool neg = false;
+            if (*p == '-') { neg = true; p++; }
+            if (*p >= '0' && *p <= '9') {
+                int val = 0;
+                while (*p >= '0' && *p <= '9') { val = val * 10 + (*p - '0'); p++; }
+                if (*p == '}') {
+                    int16_t c = (int16_t)(neg ? -val : val);
+                    int written = snprintf(out + o, out_sz - o, "%d%s",
+                                           (int)app_prefs_convert_temp(c),
+                                           app_prefs_temp_unit_str());
+                    if (written > 0) {
+                        o += ((size_t)written < out_sz - o) ? (size_t)written
+                                                            : (out_sz - o - 1);
+                    }
+                    s = p + 1;
+                    continue;
+                }
+            }
+        }
+        out[o++] = *s++;
+    }
+    out[o] = '\0';
+}
+
 static void show_ap_edit_dialog(uint8_t ap) {
     const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
     if (!p || p->reg == arctic::ADV_REG_UNKNOWN || p->needs_sim_confirm) return;
@@ -1109,23 +1204,42 @@ static void show_ap_edit_dialog(uint8_t ap) {
     state.edit_value_celsius = v;
 
     char title_buf[80];
-    snprintf(title_buf, sizeof(title_buf), "%s (AP%u)", p->name, (unsigned)ap);
+    snprintf(title_buf, sizeof(title_buf), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)ap);
     lv_label_set_text(state.edit_title, title_buf);
-    lv_label_set_text(state.edit_description, "");
 
-    // Range hint.
-    char range_buf[64];
+    // Full plain-language explanation of the parameter (library-sourced English,
+    // localized via detail_msg_id where a translation exists). {T:<c>} tokens are
+    // expanded to the user's chosen unit at render time.
+    char detail_buf[320];
+    format_detail_temps(i18n_get_key(p->detail_msg_id, p->detail), detail_buf, sizeof(detail_buf));
+    edit_label_set_or_hide(state.edit_detail, detail_buf);
+
+    // The value-meaning line is filled live by update_edit_value_display() for
+    // enum (K-ratio) params; ensure it's visible. Plain numeric params have no
+    // value-meaning, so hide it.
     if (p->enum_vals) {
-        // K-ratio: display decimals span 0 - 5.
-        snprintf(range_buf, sizeof(range_buf), "%s 0 - 5", i18n_get(STR_HP_RANGE_FMT));
-    } else if (p->unit && p->unit[0]) {
-        snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s",
-                 i18n_get(STR_HP_RANGE_FMT), p->min_val, p->max_val, p->unit);
+        lv_obj_remove_flag(state.edit_description, LV_OBJ_FLAG_HIDDEN);
     } else {
-        snprintf(range_buf, sizeof(range_buf), "%s %d - %d",
-                 i18n_get(STR_HP_RANGE_FMT), p->min_val, p->max_val);
+        edit_label_set_or_hide(state.edit_description, "");
     }
-    lv_label_set_text(state.edit_range_label, range_buf);
+
+    // Range hint. For enum (K-ratio) params a min-max range is meaningless —
+    // the value is one of a few discrete options, each explained by the live
+    // description line — so hide it. Numeric params keep the min-max hint.
+    if (p->enum_vals) {
+        lv_obj_add_flag(state.edit_range_label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        char range_buf[64];
+        if (p->unit && p->unit[0]) {
+            snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s",
+                     i18n_get(STR_HP_RANGE_FMT), p->min_val, p->max_val, p->unit);
+        } else {
+            snprintf(range_buf, sizeof(range_buf), "%s %d - %d",
+                     i18n_get(STR_HP_RANGE_FMT), p->min_val, p->max_val);
+        }
+        lv_label_set_text(state.edit_range_label, range_buf);
+        lv_obj_remove_flag(state.edit_range_label, LV_OBJ_FLAG_HIDDEN);
+    }
 
     update_edit_value_display();
     lv_obj_remove_flag(state.edit_dialog, LV_OBJ_FLAG_HIDDEN);
@@ -1158,7 +1272,7 @@ static void show_ap_trigger_confirm(uint8_t ap) {
 
     lv_obj_t* mbox = lv_msgbox_create(lv_layer_top());
     char title[80];
-    snprintf(title, sizeof(title), "%s (AP%u)", p->name, (unsigned)ap);
+    snprintf(title, sizeof(title), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)ap);
     lv_msgbox_add_title(mbox, title);
     lv_msgbox_add_text(mbox,
         "Run this momentary command now? It starts immediately and does not "
@@ -1484,6 +1598,7 @@ void heatpump_control_hide(void) {
     state.load_index = 0;
     state.edit_dialog = nullptr;
     state.edit_title = nullptr;
+    state.edit_detail = nullptr;
     state.edit_description = nullptr;
     state.edit_range_label = nullptr;
     state.edit_value_label = nullptr;

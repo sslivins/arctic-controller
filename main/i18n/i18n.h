@@ -34,6 +34,25 @@ void i18n_init(void);
 const char* i18n_get(string_id_t id);
 
 /**
+ * @brief Translate a keyed, library-sourced string to the current language.
+ *
+ * The macon library is the single source of truth for English text (parameter
+ * names, detail paragraphs, enum meanings). The controller holds ONLY the
+ * non-English translations, keyed by a stable msg_id supplied by the library.
+ * For English — or for any key without a translation — the library-provided
+ * English fallback is returned unchanged, so nothing prose ever has to be
+ * duplicated in the controller.
+ *
+ * @param key              Stable i18n key (e.g. "ap.freq_ratio_k1.name").
+ *                         May be NULL (English-only string) -> returns fallback.
+ * @param english_fallback The library's English source-of-truth string. Returned
+ *                         when the current language is English or no translation
+ *                         exists for `key`. May be NULL if the caller has none.
+ * @return Localized string, or `english_fallback` when untranslated.
+ */
+const char* i18n_get_key(const char* key, const char* english_fallback);
+
+/**
  * @brief Get current language
  * @return Current language setting
  */
