@@ -36,6 +36,8 @@ extern "C" {
 // ============================================================================
 #define UI_FONT_HEADER        (&montserrat_32_latin)  // Screen titles/headers
 #define UI_FONT_TITLE         (&montserrat_40_latin)
+#define UI_FONT_DIALOG_TITLE  (&montserrat_32_latin)  // Modal/edit dialog titles (smaller than screen TITLE)
+#define UI_FONT_SECTION       (&montserrat_32_latin)  // In-screen section headers (Status/Control/etc.)
 #define UI_FONT_SUBTITLE      (&montserrat_24_latin)
 #define UI_FONT_BODY          (&montserrat_32_latin)
 #define UI_FONT_SMALL         (&montserrat_24_latin)

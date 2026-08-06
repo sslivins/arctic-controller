@@ -35,26 +35,26 @@ DEMO_SETPOINTS = {
     "Hot Water": "50 °C",
 }
 
-# Section headers (i18n labels in English)
+# Section headers present on the merged Status screen (i18n English labels).
+# The old sub-section headers (Compressor / Electrical / Expansion Valves /
+# Setpoints) were removed when the System screen was merged into Status;
+# readings now live under a single "System" section header.
 SECTION_HEADERS = [
-    "Compressor",
-    "Electrical",
-    "Expansion Valves",
-    "Setpoints",
+    "System",
 ]
 
 
 def _open_system(device: DeviceClient):
-    """Navigate from main to the system readings screen."""
-    device.click(tag="nav_system")
-    assert device.wait_for_screen("system", timeout=5.0), \
-        f"Expected 'system' screen, got '{device.screen}'"
+    """Navigate from main to the Status screen (System section)."""
+    device.click(tag="nav_status")
+    assert device.wait_for_screen("status", timeout=5.0), \
+        f"Expected 'status' screen, got '{device.screen}'"
     time.sleep(0.5)
 
 
 def _close_system(device: DeviceClient):
-    """Close the system readings screen back to main."""
-    device.click(tag="system_close")
+    """Close the Status screen back to main."""
+    device.click(tag="temps_close")
     assert device.wait_for_screen("main", timeout=5.0), \
         f"Expected 'main' screen after close, got '{device.screen}'"
 
@@ -91,16 +91,16 @@ class TestSystemNavigation:
 # =========================================================================
 
 class TestSystemTitle:
-    """Verify the title shows 'System Readings'."""
+    """Verify the title shows 'Status' (the merged temps+system screen)."""
 
     def test_title_text(self, device: DeviceClient):
-        """The title should display the System Readings i18n string."""
+        """The title should display the Status i18n string."""
         _open_system(device)
-        title = device.find_widget(tag="system_title")
-        assert title is not None, "System title widget not found"
+        title = device.find_widget(tag="temps_title")
+        assert title is not None, "Status title widget not found"
         text = title.text_en or title.text
-        assert "system readings" in text.lower(), \
-            f"Expected 'System Readings' in title, got: {text!r}"
+        assert "status" in text.lower(), \
+            f"Expected 'Status' in title, got: {text!r}"
 
 
 # =========================================================================

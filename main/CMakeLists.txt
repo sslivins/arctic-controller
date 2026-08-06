@@ -73,7 +73,6 @@ idf_component_register(
         "tuya/macon_master.cpp"
         "heatpump_screen.cpp"
         "heatpump_temps_screen.cpp"
-        "heatpump_system_screen.cpp"
         "heatpump_params_screen.cpp"
         "heatpump_errors_screen.cpp"
         "test_endpoints.cpp"
