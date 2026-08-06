@@ -77,8 +77,9 @@ def _restore_celsius(device: DeviceClient):
     try:
         current = device.screen
         if current != "main":
-            if current in ("temps", "system", "control", "errors", "event_log"):
-                device.click(tag=f"{current}_close")
+            if current in ("status", "control", "errors", "event_log"):
+                close_tag = "temps_close" if current == "status" else f"{current}_close"
+                device.click(tag=close_tag)
                 device.wait_for_screen("main", timeout=5.0)
             elif current == "settings":
                 device.click(tag="settings_close")
@@ -209,9 +210,9 @@ class TestTempsScreenFahrenheit:
     def test_temp_value_in_fahrenheit(self, device: DeviceClient, label, celsius):
         """Each temperature should display the correct °F value."""
         _switch_to_fahrenheit(device)
-        device.wait_for_widget(tag="nav_temps", timeout=3.0)
-        device.click(tag="nav_temps")
-        assert device.wait_for_screen("temps", timeout=5.0)
+        device.wait_for_widget(tag="nav_status", timeout=3.0)
+        device.click(tag="nav_status")
+        assert device.wait_for_screen("status", timeout=5.0)
         time.sleep(UI_SETTLE)
 
         expected_f = _c_to_f(celsius)
@@ -222,9 +223,9 @@ class TestTempsScreenFahrenheit:
     def test_no_celsius_symbol_in_f_mode(self, device: DeviceClient):
         """When in °F mode, no widget should contain '°C'."""
         _switch_to_fahrenheit(device)
-        device.wait_for_widget(tag="nav_temps", timeout=3.0)
-        device.click(tag="nav_temps")
-        assert device.wait_for_screen("temps", timeout=5.0)
+        device.wait_for_widget(tag="nav_status", timeout=3.0)
+        device.click(tag="nav_status")
+        assert device.wait_for_screen("status", timeout=5.0)
         time.sleep(UI_SETTLE)
 
         for w in device.widgets:

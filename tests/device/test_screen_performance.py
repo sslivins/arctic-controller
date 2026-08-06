@@ -69,19 +69,12 @@ def _assert_under_budget(result: dict, label: str, budget_us: int = RENDER_BUDGE
 class TestNavScreenPerformance:
     """Render budget for each footer nav button → sub-screen."""
 
-    def test_temps_screen_render(self, device: DeviceClient):
-        """Temperatures screen opens within budget."""
-        result = device.click(tag="nav_temps")
-        _assert_under_budget(result, "temps")
-        device.wait_for_screen("temps", timeout=3.0)
+    def test_status_screen_render(self, device: DeviceClient):
+        """Status screen (merged temps+system) opens within budget."""
+        result = device.click(tag="nav_status")
+        _assert_under_budget(result, "status")
+        device.wait_for_screen("status", timeout=3.0)
         device.click(tag="temps_close")
-
-    def test_system_screen_render(self, device: DeviceClient):
-        """System screen opens within budget."""
-        result = device.click(tag="nav_system")
-        _assert_under_budget(result, "system")
-        device.wait_for_screen("system", timeout=3.0)
-        device.click(tag="system_close")
 
     def test_control_screen_render(self, device: DeviceClient):
         """Control screen opens within budget."""
@@ -223,21 +216,21 @@ class TestRepeatedTransitionPerformance:
             )
 
     def test_temps_repeated_open_close(self, device: DeviceClient):
-        """Open/close temps screen 5 times — check for degradation."""
+        """Open/close Status screen 5 times — check for degradation."""
         times_us = []
         for i in range(5):
-            device.wait_for_widget(tag="nav_temps", timeout=3.0)
-            result = device.click(tag="nav_temps")
+            device.wait_for_widget(tag="nav_status", timeout=3.0)
+            result = device.click(tag="nav_status")
             us = _render_us(result)
             times_us.append(us)
-            device.wait_for_screen("temps", timeout=3.0)
+            device.wait_for_screen("status", timeout=3.0)
             device.click(tag="temps_close")
             device.wait_for_screen("main", timeout=3.0)
 
         # Report all iteration times
         for i, us in enumerate(times_us):
             pct = us / RENDER_BUDGET_US * 100
-            print(f"  ⏱  temps #{i+1}: {us/1000:.1f} ms  ({pct:.0f}% of {RENDER_BUDGET_US/1000:.0f} ms budget)")
+            print(f"  ⏱  status #{i+1}: {us/1000:.1f} ms  ({pct:.0f}% of {RENDER_BUDGET_US/1000:.0f} ms budget)")
 
         for i, us in enumerate(times_us):
             assert us <= RENDER_BUDGET_US, (
