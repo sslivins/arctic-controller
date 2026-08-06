@@ -265,7 +265,7 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* text) {
     lv_obj_t* label = lv_label_create(parent);
     lv_label_set_text(label, text);
     lv_obj_set_width(label, LV_PCT(100));
-    lv_obj_set_style_text_font(label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, UI_FONT_SECTION, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(label, 5, LV_PART_MAIN);
     return label;

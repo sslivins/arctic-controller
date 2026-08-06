@@ -56,9 +56,11 @@ def _return_to_main(device: DeviceClient):
             pass
 
     # If on a heat pump sub-screen, close it to return to main
-    if current in ("temps", "system", "control", "errors", "event_log"):
+    if current in ("status", "control", "errors", "event_log"):
+        # The Status screen (merged temps+system) still uses the "temps_close" tag
+        close_tag = "temps_close" if current == "status" else f"{current}_close"
         try:
-            device.click(tag=f"{current}_close")
+            device.click(tag=close_tag)
         except Exception:
             try:
                 device.click(symbol="CLOSE")

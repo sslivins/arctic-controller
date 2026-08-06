@@ -29,12 +29,12 @@ DEMO_TEMPS = {
 
 def _open_temps(device: DeviceClient):
     """Navigate from main to the temperatures screen."""
-    device.click(tag="nav_temps")
-    assert device.wait_for_screen("temps", timeout=5.0), \
-        f"Expected 'temps' screen, got '{device.screen}'"
+    device.click(tag="nav_status")
+    assert device.wait_for_screen("status", timeout=5.0), \
+        f"Expected 'status' screen, got '{device.screen}'"
     # Wait for title widget to confirm screen is fully rendered
     assert device.wait_for_widget(tag="temps_title", timeout=5.0), \
-        "Temps title widget not found after navigation"
+        "Status title widget not found after navigation"
     time.sleep(0.5)
 
 
@@ -77,16 +77,16 @@ class TestTempsNavigation:
 # =========================================================================
 
 class TestTempsTitle:
-    """Verify the title shows 'Temperatures'."""
+    """Verify the title shows 'Status' (the merged temps+system screen)."""
 
     def test_title_text(self, device: DeviceClient):
-        """The title should display the Temperatures i18n string."""
+        """The title should display the Status i18n string."""
         _open_temps(device)
         title = device.find_widget(tag="temps_title")
-        assert title is not None, "Temps title widget not found"
+        assert title is not None, "Status title widget not found"
         text = title.text_en or title.text
-        assert "temperatures" in text.lower(), \
-            f"Expected 'Temperatures' in title, got: {text!r}"
+        assert "status" in text.lower(), \
+            f"Expected 'Status' in title, got: {text!r}"
 
 
 # =========================================================================

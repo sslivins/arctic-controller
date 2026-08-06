@@ -30,7 +30,6 @@
 #include "app_preferences.h"
 #include "heatpump_errors.h"
 #include "heatpump_temps_screen.h"
-#include "heatpump_system_screen.h"
 #include "heatpump_control_screen.h"
 #include "heatpump_errors_screen.h"
 #include "event_log_screen.h"
@@ -379,8 +378,7 @@ static const char* get_screen_name(void)
     if (time_screen_is_visible()) return "time";
     if (language_screen_is_visible()) return "language";
     if (settings_menu_is_visible()) return "settings";
-    if (heatpump_temps_is_shown()) return "temps";
-    if (heatpump_system_is_shown()) return "system";
+    if (heatpump_temps_is_shown()) return "status";
     if (heatpump_control_is_shown()) return "control";
     if (heatpump_errors_is_shown()) return "errors";
     if (event_log_screen_is_shown()) return "event_log";
