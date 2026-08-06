@@ -89,9 +89,9 @@ TANK_DESCRIPTION = {
 }
 
 FOOTER_NAV = {
-    "English":  ["System", "Control", "Events"],
-    "Français": ["Système", "Contrôle", "Événements"],
-    "Español":  ["Sistema", "Control", "Eventos"],
+    "English":  ["Status", "Control", "Events"],
+    "Français": ["État", "Contrôle", "Événements"],
+    "Español":  ["Estado", "Control", "Eventos"],
 }
 
 # Known issue: These labels are set at screen creation and do NOT
