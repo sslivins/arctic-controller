@@ -1,9 +1,10 @@
 /*
  * Arctic Heat Pump Controller
- * Event Log - Records significant system events in a RAM ring buffer
+ * Event Log - Records significant system events in a ring buffer
  * 
  * Events are operational records (power changes, mode switches, component
- * state changes, errors) — not debug logs. Lost on reboot by design.
+ * state changes, errors) — not debug logs. The buffer is persisted to NVS
+ * (throttled) so history (brownouts, errors, etc.) survives a reboot.
  */
 #pragma once
 
@@ -64,8 +65,8 @@ typedef struct {
 // ============================================================================
 
 /**
- * @brief Initialize the event log. Call once at startup.
- *        Automatically logs EVENT_SYSTEM_START.
+ * @brief Initialize the event log. Call once at startup (after nvs_flash_init).
+ *        Restores any persisted events from NVS, then logs EVENT_SYSTEM_START.
  */
 void event_log_init(void);
 
