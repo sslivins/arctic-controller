@@ -66,6 +66,46 @@ REST API + WebSocket dashboard for monitoring and control.
 - All user-facing strings go through the i18n translation layer (`i18n.h`)
 - Three languages: English, French, Spanish — update all three when adding strings
 
+### UI / UX Conventions (screens & dialogs)
+
+These are the **target** conventions for all LVGL screens and dialogs. Rollout is
+incremental — **start with the control screen** (`heatpump_params_screen.cpp`) and
+bring the other screens into line in later passes. When you touch a screen, migrate
+it toward these rules rather than matching the surrounding legacy layout.
+
+- **Modal action buttons go in a bottom action bar, not the top corners.** A
+  full-width row at the bottom of the dialog, close to the control the user just
+  interacted with (Fitts's Law + proximity). Do **not** put Save/confirm in a top
+  corner.
+- **Cancel on the left, Save/confirm on the right** (LTR reading order — the eye
+  lands on the primary action last).
+- **Primary action is visually dominant, dismiss is quiet.** Save = filled/accent
+  button; Cancel = ghost/outline. Space them apart so a mis-tap can't flip between
+  them.
+- **Label buttons with text, not bare icons.** A lone `✓`/`✕` is ambiguous. Use
+  worded actions (`Save` / `Cancel`) — especially for irreversible writes (e.g.
+  technician parameters). Text goes through i18n (EN/FR/ES).
+- **Never commit on dismiss.** Closing, backing out, or tapping outside always
+  **discards**. Committing must be an explicit, deliberate tap on Save.
+- **Large, well-spaced touch targets** (≥60 px tall).
+
+**Unavailable / disconnected state:**
+- **Signal it once at the screen level**, not on every widget/dialog. A single
+  screen-level banner (e.g. "Heat pump not connected") is preferred over repeating a
+  note in each dialog.
+- **Disconnected messaging is red text + a warning icon (`⚠`), used consistently
+  across screens.** The home error card and the control-screen banner both render
+  `⚠ Heat pump not connected` in the error color so the state reads the same
+  everywhere.
+- **Show `--` for unavailable live values — never fabricate a default.** Live values
+  (Modbus reads) are not cached; when disconnected we genuinely have no value, so
+  display `--`. Do not fall back to the vendor default and present it as if it were a
+  reading. Static reference text (parameter name, plain-language detail, range) may
+  still be shown since it isn't live state.
+- **Render controls view-only rather than erroring on action.** When an action can't
+  succeed (e.g. a write while disconnected), hide/disable the control (steppers,
+  Save) instead of letting the user act and then showing an error toast.
+
 ### Web Dashboard (`main/web/index.html`)
 - After editing `index.html`, run `idf.py reconfigure` before `idf.py build`.
   The gzip compression step only runs during CMake configure, not on every ninja

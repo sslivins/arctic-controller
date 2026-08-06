@@ -125,7 +125,8 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_NOT_CONNECTED] = "Heat pump not connected",
     [STR_HP_BTN_TEMPS] = "\xEF\x81\xA8 Temps",
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B System",
-    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Control",
+    [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Control",
+    [STR_HP_BTN_STATUS] = "\xEF\x80\x8B Status",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "COOLING",
@@ -175,6 +176,8 @@ static const char* strings_en[STR_COUNT] = {
     
     // Heat Pump - System Screen
     [STR_HP_SYSTEM_READINGS] = "System Readings",
+    [STR_HP_STATUS] = "Status",
+    [STR_HP_SYSTEM_SECTION] = "System",
     [STR_HP_DEMO_SYSTEM] = "DEMO MODE - System",
     [STR_HP_FREQUENCY] = "Frequency",
     [STR_HP_FAN_SPEED] = "Fan Speed",
@@ -411,7 +414,8 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_NOT_CONNECTED] = "Pompe à chaleur non connectée",
     [STR_HP_BTN_TEMPS] = "\xEF\x81\xA8 Temp.",
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B Système",
-    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Contr\xc3\xb4le",
+    [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Contr\xc3\xb4le",
+    [STR_HP_BTN_STATUS] = "\xEF\x80\x8B \xc3\x89tat",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "REFROIDISSEMENT",
@@ -461,6 +465,8 @@ static const char* strings_fr[STR_COUNT] = {
     
     // Heat Pump - System Screen
     [STR_HP_SYSTEM_READINGS] = "Lecture système",
+    [STR_HP_STATUS] = "\xc3\x89tat",
+    [STR_HP_SYSTEM_SECTION] = "Syst\xc3\xa8me",
     [STR_HP_DEMO_SYSTEM] = "DÉMO - Système",
     [STR_HP_FREQUENCY] = "Fréquence",
     [STR_HP_FAN_SPEED] = "Vitesse ventilateur",
@@ -697,7 +703,8 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_NOT_CONNECTED] = "Bomba de calor no conectada",
     [STR_HP_BTN_TEMPS] = "\xEF\x81\xA8 Temp.",
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B Sistema",
-    [STR_HP_BTN_ADVANCED] = "\xEF\x80\x93 Control",
+    [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Control",
+    [STR_HP_BTN_STATUS] = "\xEF\x80\x8B Estado",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "ENFRIAMIENTO",
@@ -747,6 +754,8 @@ static const char* strings_es[STR_COUNT] = {
     
     // Heat Pump - System Screen
     [STR_HP_SYSTEM_READINGS] = "Lecturas del sistema",
+    [STR_HP_STATUS] = "Estado",
+    [STR_HP_SYSTEM_SECTION] = "Sistema",
     [STR_HP_DEMO_SYSTEM] = "DEMO - Sistema",
     [STR_HP_FREQUENCY] = "Frecuencia",
     [STR_HP_FAN_SPEED] = "Velocidad ventilador",

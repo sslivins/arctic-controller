@@ -139,6 +139,7 @@ typedef enum {
     STR_HP_BTN_TEMPS,
     STR_HP_BTN_SYSTEM,
     STR_HP_BTN_ADVANCED,
+    STR_HP_BTN_STATUS,
     
     // Heat Pump - Mode Names
     STR_HP_MODE_COOLING,
@@ -192,6 +193,8 @@ typedef enum {
     // Heat Pump - System Screen
     // ========================================================================
     STR_HP_SYSTEM_READINGS,
+    STR_HP_STATUS,
+    STR_HP_SYSTEM_SECTION,
     STR_HP_DEMO_SYSTEM,
     STR_HP_FREQUENCY,
     STR_HP_FAN_SPEED,

@@ -5,7 +5,6 @@
 
 #include "heatpump_screen.h"
 #include "heatpump_temps_screen.h"
-#include "heatpump_system_screen.h"
 #include "heatpump_control_screen.h"
 #include "heatpump_errors_screen.h"
 #include "heatpump_errors.h"
@@ -165,11 +164,9 @@ static struct {
     
     // Bottom button bar
     lv_obj_t* temps_btn = nullptr;
-    lv_obj_t* system_btn = nullptr;
     lv_obj_t* controls_btn = nullptr;
     lv_obj_t* events_btn = nullptr;
     lv_obj_t* temps_btn_label = nullptr;
-    lv_obj_t* system_btn_label = nullptr;
     lv_obj_t* controls_btn_label = nullptr;
     lv_obj_t* events_btn_label = nullptr;
     
@@ -446,25 +443,8 @@ static void temps_btn_cb(lv_event_t* e) {
     // Save current screen
     state.saved_screen = lv_scr_act();
     
-    // Show temperatures screen
+    // Show status screen (merged temperatures + system)
     heatpump_temps_show(on_temps_close);
-}
-
-static void on_system_close(void) {
-    // Load saved screen back with fade animation
-    // auto_del=true - LVGL will delete the sub-screen after animation
-    if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
-        state.saved_screen = nullptr;
-    }
-}
-
-static void system_btn_cb(lv_event_t* e) {
-    // Save current screen
-    state.saved_screen = lv_scr_act();
-    
-    // Show system readings screen
-    heatpump_system_show(on_system_close);
 }
 
 static void on_errors_close(void) {
@@ -856,7 +836,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     create_value_column(energy_row, i18n_get(STR_HP_LABEL_COP), &state.energy_cop_value);
     
     // =========================================================================
-    // FIXED FOOTER: Four button bar - Temps | System | Control | Events
+    // FIXED FOOTER: Three button bar - Status | Control | Events
     // =========================================================================
     lv_obj_t* btn_row = lv_obj_create(parent);
     lv_obj_set_size(btn_row, LV_PCT(100), FOOTER_H);
@@ -870,8 +850,8 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_pad_all(btn_row, 10, LV_PART_MAIN);
 
     state.temps_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(state.temps_btn, 155, 60);
-    lv_obj_set_user_data(state.temps_btn, (void*)"nav_temps");
+    lv_obj_set_size(state.temps_btn, 218, 60);
+    lv_obj_set_user_data(state.temps_btn, (void*)"nav_status");
     lv_obj_set_style_bg_color(state.temps_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.temps_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(state.temps_btn, COLOR_ACCENT, LV_PART_MAIN);
@@ -880,29 +860,13 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_add_event_cb(state.temps_btn, temps_btn_cb, LV_EVENT_CLICKED, nullptr);
     
     state.temps_btn_label = lv_label_create(state.temps_btn);
-    lv_label_set_text(state.temps_btn_label, i18n_get(STR_HP_BTN_TEMPS));
+    lv_label_set_text(state.temps_btn_label, i18n_get(STR_HP_BTN_STATUS));
     lv_obj_set_style_text_font(state.temps_btn_label, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.temps_btn_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_center(state.temps_btn_label);
     
-    state.system_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(state.system_btn, 155, 60);
-    lv_obj_set_user_data(state.system_btn, (void*)"nav_system");
-    lv_obj_set_style_bg_color(state.system_btn, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(state.system_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(state.system_btn, COLOR_WARNING, LV_PART_MAIN);
-    lv_obj_set_style_border_width(state.system_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(state.system_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.system_btn, system_btn_cb, LV_EVENT_CLICKED, nullptr);
-    
-    state.system_btn_label = lv_label_create(state.system_btn);
-    lv_label_set_text(state.system_btn_label, i18n_get(STR_HP_BTN_SYSTEM));
-    lv_obj_set_style_text_font(state.system_btn_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.system_btn_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(state.system_btn_label);
-    
     state.controls_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(state.controls_btn, 155, 60);
+    lv_obj_set_size(state.controls_btn, 218, 60);
     lv_obj_set_user_data(state.controls_btn, (void*)"nav_control");
     lv_obj_set_style_bg_color(state.controls_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.controls_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
@@ -918,7 +882,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_center(state.controls_btn_label);
     
     state.events_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(state.events_btn, 155, 60);
+    lv_obj_set_size(state.events_btn, 218, 60);
     lv_obj_set_user_data(state.events_btn, (void*)"nav_events");
     lv_obj_set_style_bg_color(state.events_btn, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_color(state.events_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
@@ -928,7 +892,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_add_event_cb(state.events_btn, events_btn_cb, LV_EVENT_CLICKED, nullptr);
     
     state.events_btn_label = lv_label_create(state.events_btn);
-    lv_label_set_text(state.events_btn_label, i18n_get(STR_EVENT_LOG));
+    {
+        char events_lbl[48];
+        snprintf(events_lbl, sizeof(events_lbl), "\xEF\x83\xB3 %s", i18n_get(STR_EVENT_LOG));
+        lv_label_set_text(state.events_btn_label, events_lbl);
+    }
     lv_obj_set_style_text_font(state.events_btn_label, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.events_btn_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_center(state.events_btn_label);
@@ -950,10 +918,13 @@ void heatpump_screen_update(void) {
     arctic::HeatPumpState hp = arctic::getState();
     
     // Refresh i18n labels
-    if (state.temps_btn_label) lv_label_set_text(state.temps_btn_label, i18n_get(STR_HP_BTN_TEMPS));
-    if (state.system_btn_label) lv_label_set_text(state.system_btn_label, i18n_get(STR_HP_BTN_SYSTEM));
+    if (state.temps_btn_label) lv_label_set_text(state.temps_btn_label, i18n_get(STR_HP_BTN_STATUS));
     if (state.controls_btn_label) lv_label_set_text(state.controls_btn_label, i18n_get(STR_HP_BTN_ADVANCED));
-    if (state.events_btn_label) lv_label_set_text(state.events_btn_label, i18n_get(STR_EVENT_LOG));
+    if (state.events_btn_label) {
+        char events_lbl[48];
+        snprintf(events_lbl, sizeof(events_lbl), "\xEF\x83\xB3 %s", i18n_get(STR_EVENT_LOG));
+        lv_label_set_text(state.events_btn_label, events_lbl);
+    }
     if (state.hero_tank_desc) lv_label_set_text(state.hero_tank_desc, i18n_get(STR_HP_TANK_TEMPERATURE));
     
     // =====================================================================
@@ -1053,7 +1024,9 @@ void heatpump_screen_update(void) {
     // ERROR CARD
     // =====================================================================
     if (!hp.connected) {
-        lv_label_set_text(state.error_label, i18n_get(STR_HP_NOT_CONNECTED));
+        char disc_buf[96];
+        snprintf(disc_buf, sizeof(disc_buf), LV_SYMBOL_WARNING "  %s", i18n_get(STR_HP_NOT_CONNECTED));
+        lv_label_set_text(state.error_label, disc_buf);
         lv_obj_set_style_text_color(state.error_label, COLOR_ERROR, LV_PART_MAIN);
         lv_obj_set_style_border_color(state.error_card, COLOR_ERROR, LV_PART_MAIN);
         lv_obj_set_style_text_color(state.error_chevron, COLOR_ERROR, LV_PART_MAIN);

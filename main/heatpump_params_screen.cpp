@@ -54,6 +54,7 @@ static struct {
     bool shown = false;
     lv_obj_t* screen = nullptr;
     lv_obj_t* scroll_container = nullptr;
+    lv_obj_t* disconnected_banner = nullptr;
     heatpump_control_close_cb_t on_close = nullptr;
     
     // Setpoint rows (Basic Settings section)
@@ -98,8 +99,10 @@ static struct {
     lv_obj_t* edit_value_label = nullptr;
     lv_obj_t* edit_minus_btn = nullptr;
     lv_obj_t* edit_plus_btn = nullptr;
+    lv_obj_t* edit_save_btn = nullptr;
     float edit_value = 0;       // Float for F mode precision
     int16_t edit_value_celsius = 0;  // Original value in Celsius (for non-temp params too)
+    bool edit_value_unknown = false; // true when disconnected: show "--", no live value
     
     // Setpoint editing (uses same dialog, different handling)
     // -1 = editing P-parameter, 0/1/2 = editing cooling/heating/hotwater
@@ -344,6 +347,14 @@ static void power_update_timer_cb(lv_timer_t* timer) {
     if (!state.power_btn || state.power_holding) return;  // Don't overwrite hold animation
     arctic::HeatPumpState hp = arctic::getState();
     update_power_btn_appearance(hp.connected ? hp.unit_on : false);
+
+    // Show the single disconnected banner whenever the pump is offline (demo
+    // mode counts as connected for editing purposes).
+    if (state.disconnected_banner) {
+        bool disconnected = !hp.connected && !app_prefs_is_demo_mode();
+        if (disconnected) lv_obj_remove_flag(state.disconnected_banner, LV_OBJ_FLAG_HIDDEN);
+        else              lv_obj_add_flag(state.disconnected_banner, LV_OBJ_FLAG_HIDDEN);
+    }
     
     // Also keep mode buttons in sync
     int mode_idx = 0;
@@ -469,7 +480,7 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* title) {
     
     lv_obj_t* lbl = lv_label_create(header);
     lv_label_set_text(lbl, title);
-    lv_obj_set_style_text_font(lbl, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl, UI_FONT_SECTION, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl, COLOR_ACCENT, LV_PART_MAIN);
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
     
@@ -503,7 +514,7 @@ static lv_obj_t* create_setpoint_row(lv_obj_t* parent, int setpoint_type, lv_obj
     // Setpoint name (left)
     lv_obj_t* name_lbl = lv_label_create(row);
     lv_label_set_text(name_lbl, i18n_get(sp.name_id));
-    lv_obj_set_style_text_font(name_lbl, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_font(name_lbl, UI_FONT_SMALL, LV_PART_MAIN);
     lv_obj_set_style_text_color(name_lbl, row_color, LV_PART_MAIN);
     lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_width(name_lbl, 400);
@@ -513,7 +524,7 @@ static lv_obj_t* create_setpoint_row(lv_obj_t* parent, int setpoint_type, lv_obj
     lv_label_set_text(val_lbl, "---");
     lv_obj_set_style_text_font(val_lbl, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(val_lbl, row_color, LV_PART_MAIN);
-    lv_obj_align(val_lbl, LV_ALIGN_RIGHT_MID, -30, 0);
+    lv_obj_align(val_lbl, LV_ALIGN_RIGHT_MID, -58, 0);
     
     // Arrow indicator
     lv_obj_t* arrow = lv_label_create(row);
@@ -537,54 +548,6 @@ static void create_edit_dialog(void) {
     lv_obj_clear_flag(state.edit_dialog, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(state.edit_dialog, LV_OBJ_FLAG_HIDDEN);
     
-    // Header bar with X and checkmark
-    lv_obj_t* header = lv_obj_create(state.edit_dialog);
-    lv_obj_set_size(header, LV_PCT(100), 100);
-    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(header, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(header, 20, LV_PART_MAIN);
-    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Cancel button (X) with circular background
-    lv_obj_t* cancel_btn = lv_btn_create(header);
-    lv_obj_set_size(cancel_btn, 60, 60);
-    lv_obj_align(cancel_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_color(cancel_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(cancel_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(cancel_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(cancel_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(cancel_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(cancel_btn, COLOR_ERROR, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(cancel_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(cancel_btn, edit_cancel_cb, LV_EVENT_CLICKED, nullptr);
-    
-    lv_obj_t* cancel_icon = lv_label_create(cancel_btn);
-    lv_label_set_text(cancel_icon, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(cancel_icon, UI_FONT_ICON, LV_PART_MAIN);
-    lv_obj_set_style_text_color(cancel_icon, COLOR_ERROR, LV_PART_MAIN);
-    lv_obj_center(cancel_icon);
-    
-    // Save button (checkmark) with circular background
-    lv_obj_t* save_btn = lv_btn_create(header);
-    lv_obj_set_size(save_btn, 60, 60);
-    lv_obj_align(save_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(save_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(save_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(save_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(save_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(save_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(save_btn, COLOR_SUCCESS, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(save_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(save_btn, edit_save_cb, LV_EVENT_CLICKED, nullptr);
-    
-    lv_obj_t* save_icon = lv_label_create(save_btn);
-    lv_label_set_text(save_icon, LV_SYMBOL_OK);
-    lv_obj_set_style_text_font(save_icon, UI_FONT_ICON, LV_PART_MAIN);
-    lv_obj_set_style_text_color(save_icon, COLOR_SUCCESS, LV_PART_MAIN);
-    lv_obj_center(save_icon);
-    
     // Content card — a flex column that vertically centres its whole stack and
     // auto-sizes to its content, so the dialog looks balanced no matter how
     // much explanation text a given parameter carries (no fixed height => no
@@ -592,9 +555,9 @@ static void create_edit_dialog(void) {
     //   (1) title  (2) detail paragraph  (3) +/- value control
     //   (4) live value-meaning / (5) numeric range  (mutually exclusive)
     lv_obj_t* content = lv_obj_create(state.edit_dialog);
-    lv_obj_set_width(content, LV_PCT(90));
+    lv_obj_set_width(content, LV_PCT(95));
     lv_obj_set_height(content, LV_SIZE_CONTENT);
-    lv_obj_align(content, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_align(content, LV_ALIGN_CENTER, 0, -60);
     lv_obj_set_style_bg_color(content, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(content, 20, LV_PART_MAIN);
@@ -607,7 +570,7 @@ static void create_edit_dialog(void) {
     // (1) Title — the clean parameter name, e.g. "Frequency Ratio K1 (AP14)".
     state.edit_title = lv_label_create(content);
     lv_label_set_text(state.edit_title, i18n_get(STR_HP_EDIT_PARAMETER));
-    lv_obj_set_style_text_font(state.edit_title, UI_FONT_TITLE, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state.edit_title, UI_FONT_DIALOG_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.edit_title, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_width(state.edit_title, LV_PCT(100));
     lv_obj_set_style_text_align(state.edit_title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
@@ -684,11 +647,75 @@ static void create_edit_dialog(void) {
     lv_obj_set_style_text_color(state.edit_range_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_set_width(state.edit_range_label, LV_PCT(100));
     lv_obj_set_style_text_align(state.edit_range_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+    // Bottom action bar — worded Cancel (left, ghost) + Save (right, accent).
+    // UX convention: primary action bottom-right and visually dominant, dismiss
+    // bottom-left and quiet. Committing is always an explicit Save tap; closing
+    // via Cancel never writes. In view-only (disconnected) mode the Save button
+    // is hidden (see set_edit_dialog_readonly) so only Cancel remains.
+    lv_obj_t* action_bar = lv_obj_create(state.edit_dialog);
+    lv_obj_set_size(action_bar, LV_PCT(100), 120);
+    lv_obj_align(action_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(action_bar, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(action_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(action_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(action_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(action_bar, 30, LV_PART_MAIN);
+    lv_obj_clear_flag(action_bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Cancel — ghost/outline, left, quiet.
+    lv_obj_t* cancel_btn = lv_btn_create(action_bar);
+    lv_obj_set_size(cancel_btn, 300, 80);
+    lv_obj_align(cancel_btn, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_opa(cancel_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_radius(cancel_btn, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(cancel_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(cancel_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(cancel_btn, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_add_event_cb(cancel_btn, edit_cancel_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_user_data(cancel_btn, (void*)"edit_cancel");
+
+    lv_obj_t* cancel_lbl = lv_label_create(cancel_btn);
+    lv_label_set_text(cancel_lbl, i18n_get(STR_CANCEL));
+    lv_obj_set_style_text_font(cancel_lbl, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(cancel_lbl, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(cancel_lbl);
+
+    // Save — filled accent, right, primary/dominant.
+    lv_obj_t* save_btn = lv_btn_create(action_bar);
+    state.edit_save_btn = save_btn;
+    lv_obj_set_size(save_btn, 300, 80);
+    lv_obj_align(save_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(save_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(save_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(save_btn, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(save_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(save_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(save_btn, edit_save_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_user_data(save_btn, (void*)"edit_save");
+
+    lv_obj_t* save_lbl = lv_label_create(save_btn);
+    lv_label_set_text(save_lbl, i18n_get(STR_SAVE));
+    lv_obj_set_style_text_font(save_lbl, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(save_lbl, COLOR_BG, LV_PART_MAIN);
+    lv_obj_center(save_lbl);
 }
 
-// ============================================================================
-// Event Handlers
-// ============================================================================
+// Toggle the edit dialog between interactive and view-only (read-only) modes.
+// View-only hides the +/- steppers and the Save button (leaving only Cancel), so
+// the user never triggers a doomed write while disconnected. The reason is shown
+// once by the control-screen disconnected banner, not repeated per dialog.
+static void set_edit_dialog_readonly(bool readonly) {
+    if (readonly) {
+        if (state.edit_minus_btn) lv_obj_add_flag(state.edit_minus_btn, LV_OBJ_FLAG_HIDDEN);
+        if (state.edit_plus_btn)  lv_obj_add_flag(state.edit_plus_btn, LV_OBJ_FLAG_HIDDEN);
+        if (state.edit_save_btn)  lv_obj_add_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        if (state.edit_minus_btn) lv_obj_remove_flag(state.edit_minus_btn, LV_OBJ_FLAG_HIDDEN);
+        if (state.edit_plus_btn)  lv_obj_remove_flag(state.edit_plus_btn, LV_OBJ_FLAG_HIDDEN);
+        if (state.edit_save_btn)  lv_obj_remove_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+}
 
 static void close_btn_cb(lv_event_t* e) {
     (void)e;
@@ -883,12 +910,15 @@ static void show_setpoint_edit(int setpoint_type) {
     // Read current value in Celsius
     int16_t celsius_val;
     arctic::HeatPumpState hp = arctic::getState();
+    state.edit_value_unknown = false;
     if (app_prefs_is_demo_mode()) {
         // Demo mode - use in-memory value
         celsius_val = get_demo_setpoint(setpoint_type);
     } else if (!hp.connected) {
-        // Disconnected - use midpoint as placeholder
+        // Disconnected - no live value; seed midpoint but flag as unknown so the
+        // display shows "--" rather than a placeholder that looks like a reading.
         celsius_val = (sp.min_val + sp.max_val) / 2;
+        state.edit_value_unknown = true;
     } else {
         switch (setpoint_type) {
             case 0: celsius_val = hp.cooling_setpoint; break;
@@ -918,6 +948,13 @@ static void show_setpoint_edit(int setpoint_type) {
     
     update_edit_value_display();
     
+    // Disconnected heat pump: present the setpoint as view-only rather than
+    // letting the user adjust it and hit a write error on Save.
+    {
+        arctic::HeatPumpState hp = arctic::getState();
+        set_edit_dialog_readonly(!hp.connected && !app_prefs_is_demo_mode());
+    }
+
     // Show dialog
     lv_obj_remove_flag(state.edit_dialog, LV_OBJ_FLAG_HIDDEN);
 }
@@ -931,6 +968,18 @@ static void hide_edit_dialog(void) {
 static void update_edit_value_display(void) {
     const char* unit = "";
     int display_val = (int)roundf(state.edit_value);  // Round float to int for display
+
+    // Disconnected/unavailable: live values are never cached, so there is nothing
+    // real to show — display "--" rather than a fabricated default, and clear any
+    // enum meaning line.
+    if (state.edit_value_unknown) {
+        lv_label_set_text(state.edit_value_label, "--");
+        if (state.current_ap >= 0 && state.edit_description) {
+            const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
+            if (p && p->enum_vals) lv_label_set_text(state.edit_description, "");
+        }
+        return;
+    }
 
     // Advanced ("AP") param: K-ratio codes render as their display decimal,
     // with a live plain-language description below (both library-sourced).
@@ -1091,10 +1140,10 @@ static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
     snprintf(name_buf, sizeof(name_buf), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)p->ap);
     lv_obj_t* name_lbl = lv_label_create(row);
     lv_label_set_text(name_lbl, name_buf);
-    lv_obj_set_style_text_font(name_lbl, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_font(name_lbl, UI_FONT_SMALL, LV_PART_MAIN);
     lv_obj_set_style_text_color(name_lbl, active_col ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_width(name_lbl, 400);
+    lv_obj_set_width(name_lbl, 430);
     lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
 
     // Value (right)
@@ -1102,7 +1151,7 @@ static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
     lv_label_set_text(val_lbl, "---");
     lv_obj_set_style_text_font(val_lbl, UI_FONT_TITLE, LV_PART_MAIN);
     lv_obj_set_style_text_color(val_lbl, active_col ? COLOR_ACCENT : COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_align(val_lbl, LV_ALIGN_RIGHT_MID, -30, 0);
+    lv_obj_align(val_lbl, LV_ALIGN_RIGHT_MID, -58, 0);
 
     // Indicator glyph, per kind:
     //   trigger   -> play (action), accent
@@ -1197,11 +1246,15 @@ static void show_ap_edit_dialog(uint8_t ap) {
     state.current_ap = ap;
     state.current_setpoint_type = -1;
 
-    // Seed with the live value (fall back to the vendor default).
+    // Seed with the live value. When the read fails (disconnected) fall back to
+    // the vendor default for range/stepping math, but flag the value as unknown
+    // so the display shows "--" instead of presenting the default as a reading.
     int16_t v = 0;
-    if (!advanced_param_read(ap, &v)) v = p->default_val;
+    bool read_ok = advanced_param_read(ap, &v);
+    if (!read_ok) v = p->default_val;
     state.edit_value = (float)v;
     state.edit_value_celsius = v;
+    state.edit_value_unknown = !read_ok;
 
     char title_buf[80];
     snprintf(title_buf, sizeof(title_buf), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)ap);
@@ -1242,6 +1295,14 @@ static void show_ap_edit_dialog(uint8_t ap) {
     }
 
     update_edit_value_display();
+
+    // Disconnected heat pump: view-only so the user can read the parameter and
+    // its explanation but can't trigger a doomed write that only errors out.
+    {
+        arctic::HeatPumpState hp = arctic::getState();
+        set_edit_dialog_readonly(!hp.connected && !app_prefs_is_demo_mode());
+    }
+
     lv_obj_remove_flag(state.edit_dialog, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -1354,6 +1415,35 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     lv_obj_set_scrollbar_mode(state.scroll_container, LV_SCROLLBAR_MODE_AUTO);
     
     // =========================================================================
+    // DISCONNECTED BANNER — a single screen-level notice (first child) shown
+    // when the heat pump isn't connected, so we don't repeat the message inside
+    // every parameter/setpoint dialog. Toggled by power_update_timer_cb. Hidden
+    // by default; visibility is reconciled on show + every 2 s.
+    // =========================================================================
+    state.disconnected_banner = lv_obj_create(state.scroll_container);
+    lv_obj_set_size(state.disconnected_banner, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(state.disconnected_banner, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(state.disconnected_banner, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.disconnected_banner, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(state.disconnected_banner, COLOR_ERROR, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.disconnected_banner, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(state.disconnected_banner, 16, LV_PART_MAIN);
+    lv_obj_clear_flag(state.disconnected_banner, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_user_data(state.disconnected_banner, (void*)"disconnected_banner");
+    lv_obj_add_flag(state.disconnected_banner, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t* banner_lbl = lv_label_create(state.disconnected_banner);
+    char banner_buf[96];
+    snprintf(banner_buf, sizeof(banner_buf), LV_SYMBOL_WARNING "  %s", i18n_get(STR_HP_NOT_CONNECTED));
+    lv_label_set_text(banner_lbl, banner_buf);
+    lv_obj_set_style_text_font(banner_lbl, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(banner_lbl, COLOR_ERROR, LV_PART_MAIN);
+    lv_obj_set_width(banner_lbl, LV_PCT(100));
+    lv_label_set_long_mode(banner_lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(banner_lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_center(banner_lbl);
+
+    // =========================================================================
     // POWER BUTTON (prominent at top of advanced screen)
     // =========================================================================
     state.power_btn = lv_btn_create(state.scroll_container);
@@ -1389,6 +1479,11 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
     {
         arctic::HeatPumpState hp_state = arctic::getState();
         update_power_btn_appearance(hp_state.connected ? hp_state.unit_on : false);
+        if (state.disconnected_banner) {
+            bool disconnected = !hp_state.connected && !app_prefs_is_demo_mode();
+            if (disconnected) lv_obj_remove_flag(state.disconnected_banner, LV_OBJ_FLAG_HIDDEN);
+            else              lv_obj_add_flag(state.disconnected_banner, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     
     // Timer to keep power button in sync (2s interval)
@@ -1440,7 +1535,7 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
         
         lv_obj_t* lbl = lv_label_create(btn);
         lv_label_set_text(lbl, i18n_get(s_mode_labels[i]));
-        lv_obj_set_style_text_font(lbl, UI_FONT_BODY, LV_PART_MAIN);
+        lv_obj_set_style_text_font(lbl, UI_FONT_SMALL, LV_PART_MAIN);
         lv_obj_center(lbl);
         
         state.mode_btns[i] = btn;
@@ -1584,6 +1679,7 @@ void heatpump_control_hide(void) {
     state.on_close = nullptr;
     state.screen = nullptr;
     state.scroll_container = nullptr;
+    state.disconnected_banner = nullptr;
     state.power_btn = nullptr;
     state.power_btn_label = nullptr;
     state.power_hold_bar = nullptr;
@@ -1604,6 +1700,7 @@ void heatpump_control_hide(void) {
     state.edit_value_label = nullptr;
     state.edit_minus_btn = nullptr;
     state.edit_plus_btn = nullptr;
+    state.edit_save_btn = nullptr;
     state.current_setpoint_type = -1;
     state.current_ap = -1;
     memset(state.ap_value_labels, 0, sizeof(state.ap_value_labels));
