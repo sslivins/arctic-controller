@@ -35,10 +35,10 @@ extern "C" {
 // Common Fonts (using custom Latin-extended fonts for i18n support)
 // ============================================================================
 #define UI_FONT_HEADER        (&montserrat_32_latin)  // Screen titles/headers
-#define UI_FONT_TITLE         (&montserrat_32_latin)
+#define UI_FONT_TITLE         (&montserrat_40_latin)
 #define UI_FONT_SUBTITLE      (&montserrat_24_latin)
-#define UI_FONT_BODY          (&montserrat_24_latin)
-#define UI_FONT_SMALL         (&montserrat_16_latin)
+#define UI_FONT_BODY          (&montserrat_32_latin)
+#define UI_FONT_SMALL         (&montserrat_24_latin)
 #define UI_FONT_ICON          (&montserrat_32_latin)  // Match status bar icons
 #define UI_FONT_ICON_LARGE    (&montserrat_32_latin)
 

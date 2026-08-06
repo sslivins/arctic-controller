@@ -18,12 +18,14 @@ extern "C" {
 LV_FONT_DECLARE(montserrat_16_latin);
 LV_FONT_DECLARE(montserrat_24_latin);
 LV_FONT_DECLARE(montserrat_32_latin);
+LV_FONT_DECLARE(montserrat_40_latin);
 
 // Misc glyph fonts: geometric shapes (U+25CB ○, U+25CF ●) etc.
 // These are set as fallback fonts on the latin fonts at compile time.
 LV_FONT_DECLARE(montserrat_16_misc);
 LV_FONT_DECLARE(montserrat_24_misc);
 LV_FONT_DECLARE(montserrat_32_misc);
+LV_FONT_DECLARE(montserrat_40_misc);
 
 // FontAwesome symbols included in the fonts above
 // Lock icon (U+F023 = 61475)
