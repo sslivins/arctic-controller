@@ -986,6 +986,142 @@ static const keyed_translation_t s_keyed_translations[] = {
     { "ap.freq_ratio_k7.detail",
       "Ajuste la vitesse du compresseur en mode refroidissement.",
       "Ajusta la velocidad del compresor en modo refrigeración." },
+
+    { "ap.max_hw_setpoint.name",  "Consigne d'eau chaude maximale", "Consigna máxima de agua caliente" },
+    { "ap.max_hw_setpoint.detail",
+      "Température d'eau la plus élevée que l'appareil atteindra en mode chauffage ou eau chaude.",
+      "Temperatura de agua más alta que la unidad alcanzará en modo calefacción o agua caliente." },
+
+    { "ap.heating_comp_stop_ambient.name", "Arrêt compresseur (chauffage)", "Parada del compresor (calefacción)" },
+    { "ap.heating_comp_stop_ambient.detail",
+      "Mode chauffage : le compresseur s'arrête dès que la température ambiante extérieure atteint cette valeur ou plus.",
+      "Modo calefacción: el compresor se detiene cuando la temperatura ambiente exterior sube a este valor o más." },
+
+    { "ap.backup_eheater_start_ambient.name", "Démarrage chauffage d'appoint", "Arranque del calefactor de apoyo" },
+    { "ap.backup_eheater_start_ambient.detail",
+      "Le chauffage électrique d'appoint peut démarrer lorsque la température ambiante extérieure descend à cette valeur.",
+      "El calefactor eléctrico de apoyo puede arrancar cuando la temperatura ambiente exterior baja a este valor." },
+
+    { "ap.quiet_mode_freq_decrease.name", "Baisse de fréquence mode silencieux", "Reducción de frecuencia modo silencioso" },
+    { "ap.quiet_mode_freq_decrease.detail",
+      "Palier de fréquence dont le compresseur diminue lorsque le mode silencieux est actif.",
+      "Escalón de frecuencia que el compresor reduce mientras el modo silencioso está activo." },
+
+    { "ap.fast_heat_freq_increase.name", "Hausse de fréquence chauffage rapide", "Aumento de frecuencia calefacción rápida" },
+    { "ap.fast_heat_freq_increase.detail",
+      "Palier de fréquence dont le compresseur augmente lorsque le mode chauffage rapide est actif.",
+      "Escalón de frecuencia que el compresor aumenta mientras el modo calefacción rápida está activo." },
+
+    { "ap.auto_mode_switch_wait.name", "Délai de commutation mode auto", "Tiempo de espera de cambio modo auto" },
+    { "ap.auto_mode_switch_wait.detail",
+      "Mode automatique : temps d'attente avant de basculer entre chauffage et refroidissement (par tranches de 10 minutes).",
+      "Modo automático: tiempo de espera antes de cambiar entre calefacción y refrigeración (en tramos de 10 minutos)." },
+
+    { "ap.comp_runtime_before_defrost.name", "Temps de marche avant dégivrage", "Tiempo de marcha antes del desescarche" },
+    { "ap.comp_runtime_before_defrost.detail",
+      "Temps de fonctionnement cumulé du compresseur devant s'écouler avant qu'un cycle de dégivrage soit autorisé.",
+      "Tiempo de funcionamiento acumulado del compresor que debe transcurrir antes de permitir un ciclo de desescarche." },
+
+    { "ap.coil_temp_enter_defrost.name", "Temp. serpentin entrée dégivrage", "Temp. serpentín inicio desescarche" },
+    { "ap.coil_temp_enter_defrost.detail",
+      "Température du serpentin extérieur à laquelle, ou en dessous de laquelle, un cycle de dégivrage démarre.",
+      "Temperatura del serpentín exterior a la que, o por debajo de la cual, se inicia un ciclo de desescarche." },
+
+    { "ap.defrost_outdoor_temp.name", "Réglage temp. extérieure dégivrage", "Ajuste temp. exterior desescarche" },
+    { "ap.defrost_outdoor_temp.detail",
+      "Réglage de la température ambiante extérieure utilisé comme l'une des conditions de démarrage du dégivrage.",
+      "Ajuste de la temperatura ambiente exterior usado como una de las condiciones para iniciar el desescarche." },
+
+    { "ap.air_coil_diff_defrost.name", "Écart air/serpentin entrée dégivrage", "Diferencia aire/serpentín inicio desescarche" },
+    { "ap.air_coil_diff_defrost.detail",
+      "Écart de température entre l'air extérieur et le serpentin qui déclenche un cycle de dégivrage.",
+      "Diferencia de temperatura entre el aire exterior y el serpentín que activa un ciclo de desescarche." },
+
+    { "ap.extended_defrost_time.name", "Temps de dégivrage prolongé", "Tiempo de desescarche prolongado" },
+    { "ap.extended_defrost_time.detail",
+      "Temps supplémentaire ajouté à un cycle de dégivrage.",
+      "Tiempo adicional añadido a un ciclo de desescarche." },
+
+    { "ap.max_defrost_time.name", "Temps de dégivrage maximal", "Tiempo máximo de desescarche" },
+    { "ap.max_defrost_time.detail",
+      "Durée maximale de dégivrage ; l'appareil sort du dégivrage une fois ce temps atteint.",
+      "Duración máxima del desescarche; la unidad sale del desescarche al alcanzar este tiempo." },
+
+    { "ap.coil_temp_exit_defrost.name", "Temp. serpentin sortie dégivrage", "Temp. serpentín fin desescarche" },
+    { "ap.coil_temp_exit_defrost.detail",
+      "Température du serpentin à laquelle le dégivrage est considéré terminé et l'appareil en sort.",
+      "Temperatura del serpentín a la que el desescarche se considera completo y la unidad sale de él." },
+
+    { "ap.low_ambient_protection.name", "Protection basse température extérieure", "Protección de baja temperatura exterior" },
+    { "ap.low_ambient_protection.detail",
+      "L'appareil s'arrête lorsque la température ambiante extérieure descend sous cette valeur. Le plancher du capteur est -30 °C ; régler une valeur inférieure à -30 désactive cette protection, gardez-la donc entre -30 et 0 °C.",
+      "La unidad se detiene cuando la temperatura ambiente exterior baja por debajo de este valor. El límite del sensor es -30 °C; ajustar un valor inferior a -30 desactiva esta protección, así que manténgalo entre -30 y 0 °C." },
+
+    { "ap.freq_reduce_delay.name", "Délai de réduction de fréquence", "Retardo de reducción de frecuencia" },
+    { "ap.freq_reduce_delay.detail",
+      "Temps après l'atteinte de la consigne avant que la fréquence de fonctionnement soit réduite. Laisser la valeur par défaut (40) désactive la réduction ; toute autre valeur l'active.",
+      "Tiempo tras alcanzar la consigna antes de reducir la frecuencia de funcionamiento. Dejar el valor predeterminado (40) desactiva la reducción; cualquier otro valor la activa." },
+
+    { "ap.cooling_comp_stop_ambient.name", "Arrêt compresseur (refroidissement)", "Parada del compresor (refrigeración)" },
+    { "ap.cooling_comp_stop_ambient.detail",
+      "Mode refroidissement : le compresseur s'arrête lorsque la température ambiante extérieure descend à cette valeur. Utilisez une valeur négative pour les systèmes au glycol et positive pour les systèmes à eau ; la magnitude est le seuil ambiant.",
+      "Modo refrigeración: el compresor se detiene cuando la temperatura ambiente exterior baja a este valor. Use un valor negativo para sistemas con glicol y positivo para sistemas de agua; la magnitud es el umbral ambiente." },
+
+    { "ap.main_eev_superheat_method.name", "Méthode de surchauffe détendeur principal", "Método de sobrecalentamiento válvula principal" },
+    { "ap.main_eev_superheat_method.detail",
+      "Méthode de régulation de la surchauffe du détendeur principal (0 = par degré de surchauffe, 1 = par une courbe étalonnée en laboratoire). Lecture seule : la mise à l'échelle sur l'appareil n'est pas confirmée.",
+      "Método de control del sobrecalentamiento de la válvula de expansión principal (0 = por grado de sobrecalentamiento, 1 = por una curva calibrada en laboratorio). Solo lectura: la escala en la unidad no está confirmada." },
+
+    { "ap.target_superheat_main_eev.name", "Surchauffe cible, détendeur principal", "Sobrecalentamiento objetivo, válvula principal" },
+    { "ap.target_superheat_main_eev.detail",
+      "Surchauffe cible que le détendeur principal maintient.",
+      "Sobrecalentamiento objetivo que regula la válvula de expansión principal." },
+
+    { "ap.three_way_valve2_switch_time.name", "Temps de commutation vanne 3 voies 2", "Tiempo de conmutación válvula de 3 vías 2" },
+    { "ap.three_way_valve2_switch_time.detail",
+      "Temps de commutation de la vanne à trois voies 2. Toute valeur autre que 5 annule le contrôle externe Cn31 ; remettez 5 pour réactiver Cn31.",
+      "Tiempo de conmutación de la válvula de tres vías 2. Cualquier valor distinto de 5 cancela el control externo Cn31; vuelva a 5 para reactivar Cn31." },
+
+    { "ap.water_pump_mode.name", "Mode pompe à eau", "Modo de bomba de agua" },
+    { "ap.water_pump_mode.detail",
+      "Mode de fonctionnement de la pompe à eau (0 = par intervalles, 1 = suit le compresseur, 2 = en continu).",
+      "Modo de funcionamiento de la bomba de agua (0 = por intervalos, 1 = sigue al compresor, 2 = en continuo)." },
+
+    { "ap.water_pump_run_interval.name", "Intervalle de marche pompe à eau", "Intervalo de marcha bomba de agua" },
+    { "ap.water_pump_run_interval.detail",
+      "Intervalle entre les cycles de la pompe à eau lorsqu'elle est en mode par intervalles.",
+      "Intervalo entre ciclos de la bomba de agua cuando está en modo por intervalos." },
+
+    { "ap.force_pump_low_temp.name", "Consigne basse temp. pompe forcée", "Consigna baja temp. bomba forzada" },
+    { "ap.force_pump_low_temp.detail",
+      "Température extérieure à laquelle, ou en dessous de laquelle, la pompe à eau est forcée de fonctionner pour la protection antigel.",
+      "Temperatura exterior a la que, o por debajo de la cual, la bomba de agua se fuerza a funcionar para protección anticongelación." },
+
+    { "ap.water_system_cleaning.name", "Nettoyage du circuit d'eau", "Limpieza del circuito de agua" },
+    { "ap.water_system_cleaning.detail",
+      "Nettoyage / test du circuit d'eau (1 = test pompe, 2 = test pompe + vanne 3 voies 1, 3 = test pompe + vanne 3 voies 2). La protection de débit est désactivée pendant l'exécution.",
+      "Limpieza / prueba del circuito de agua (1 = prueba bomba, 2 = prueba bomba + válvula 3 vías 1, 3 = prueba bomba + válvula 3 vías 2). La protección de caudal se desactiva mientras se ejecuta." },
+
+    { "ap.enable_manual_freq_eev.name", "Activer fréquence/EEV manuelles", "Habilitar frecuencia/EEV manual" },
+    { "ap.enable_manual_freq_eev.detail",
+      "Active la commande manuelle de la fréquence du compresseur et de l'ouverture du détendeur (usage service / test uniquement).",
+      "Habilita el control manual de la frecuencia del compresor y la apertura de la válvula de expansión (solo uso de servicio / prueba)." },
+
+    { "ap.manual_frequency.name", "Fréquence manuelle", "Frecuencia manual" },
+    { "ap.manual_frequency.detail",
+      "Fréquence manuelle du compresseur ; utilisée uniquement lorsque le mode manuel (AP48) est activé.",
+      "Frecuencia manual del compresor; se usa solo cuando el modo manual (AP48) está habilitado." },
+
+    { "ap.manual_main_eev_opening.name", "Ouverture manuelle détendeur principal", "Apertura manual válvula principal" },
+    { "ap.manual_main_eev_opening.detail",
+      "Ouverture manuelle du détendeur principal ; utilisée uniquement lorsque le mode manuel (AP48) est activé.",
+      "Apertura manual de la válvula de expansión principal; se usa solo cuando el modo manual (AP48) está habilitado." },
+
+    { "ap.manual_evi_eev_opening.name", "Ouverture manuelle détendeur EVI", "Apertura manual válvula EVI" },
+    { "ap.manual_evi_eev_opening.detail",
+      "Ouverture manuelle du détendeur EVI / auxiliaire ; utilisée uniquement lorsque le mode manuel (AP48) est activé.",
+      "Apertura manual de la válvula de expansión EVI / auxiliar; se usa solo cuando el modo manual (AP48) está habilitado." },
+
     { NULL, NULL, NULL },  // sentinel — keep last
 };
 
