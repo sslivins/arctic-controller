@@ -19,10 +19,6 @@
 
 static const char* TAG = "hp_errors_scr";
 
-// Maximum number of error cards to display per section (active / history)
-// to keep render time within budget.  Additional errors are summarised in
-// a "+ N more" footer label.
-static constexpr int MAX_DISPLAYED_ERRORS = 16;
 static constexpr int ERROR_LOAD_BATCH_SIZE = 4;
 static constexpr int ERROR_LOAD_INTERVAL_MS = 50;
 
@@ -58,14 +54,10 @@ static struct {
     arctic::ActiveError active_errors[32] = {};
     int active_count = 0;
     int active_displayed = 0;
-    int active_omitted = 0;
-    bool active_summary_created = false;
     arctic::ErrorHistoryEntry cleared_history[arctic::ERROR_HISTORY_SIZE] = {};
     int history_count = 0;
     int history_displayed = 0;
-    int history_omitted = 0;
     bool history_header_created = false;
-    bool history_summary_created = false;
     
     // Track previous error state to detect changes
     uint16_t prev_error1 = 0;
@@ -371,16 +363,6 @@ static void create_history_card(const arctic::ErrorHistoryEntry* entry) {
     create_error_card(state.error_list, &hist_err);
 }
 
-static void create_summary_label(const char* text) {
-    lv_obj_t* label = lv_label_create(state.error_list);
-    lv_label_set_text(label, text);
-    lv_obj_set_width(label, LV_PCT(100));
-    lv_obj_set_style_text_font(label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_set_style_pad_top(label, 10, LV_PART_MAIN);
-}
-
 static bool append_error_batch() {
     if (!state.error_list) return false;
 
@@ -392,15 +374,6 @@ static bool append_error_batch() {
         added++;
     }
 
-    if (state.active_displayed >= state.active_count &&
-        state.active_omitted > 0 && !state.active_summary_created) {
-        char more_buf[64];
-        snprintf(more_buf, sizeof(more_buf), "… +%d more active errors",
-                 state.active_omitted);
-        create_summary_label(more_buf);
-        state.active_summary_created = true;
-    }
-
     if (state.active_displayed >= state.active_count && state.history_count > 0) {
         create_history_header();
     }
@@ -409,15 +382,6 @@ static bool append_error_batch() {
            state.history_displayed < state.history_count) {
         create_history_card(&state.cleared_history[state.history_displayed++]);
         added++;
-    }
-
-    if (state.history_displayed >= state.history_count &&
-        state.history_omitted > 0 && !state.history_summary_created) {
-        char more_buf[64];
-        snprintf(more_buf, sizeof(more_buf), "… +%d older cleared errors",
-                 state.history_omitted);
-        create_summary_label(more_buf);
-        state.history_summary_created = true;
     }
 
     return state.active_displayed < state.active_count ||
@@ -455,17 +419,11 @@ static void update_error_list() {
     lv_obj_clean(state.error_list);
     
     // Get active errors and connection state
-    int total_active = arctic::getActiveErrors(state.active_errors, 32);
-    state.active_count = total_active < MAX_DISPLAYED_ERRORS
-        ? total_active : MAX_DISPLAYED_ERRORS;
+    state.active_count = arctic::getActiveErrors(state.active_errors, 32);
     state.active_displayed = 0;
-    state.active_omitted = total_active - state.active_count;
-    state.active_summary_created = false;
     state.history_count = 0;
     state.history_displayed = 0;
-    state.history_omitted = 0;
     state.history_header_created = false;
-    state.history_summary_created = false;
     arctic::HeatPumpState hp = arctic::getState();
     
     // Check demo mode
@@ -523,16 +481,11 @@ static void update_error_list() {
     
     arctic::ErrorHistoryEntry history[arctic::ERROR_HISTORY_SIZE];
     int hist_count = arctic::getErrorHistory(history, arctic::ERROR_HISTORY_SIZE);
-    int total_cleared = 0;
     for (int i = 0; i < hist_count; i++) {
         if (!history[i].is_active) {
-            if (state.history_count < MAX_DISPLAYED_ERRORS) {
-                state.cleared_history[state.history_count++] = history[i];
-            }
-            total_cleared++;
+            state.cleared_history[state.history_count++] = history[i];
         }
     }
-    state.history_omitted = total_cleared - state.history_count;
 
     bool more = append_error_batch();
     
