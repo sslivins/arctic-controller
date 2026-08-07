@@ -3,6 +3,7 @@
  * Time Manager Implementation - NTP time synchronization
  */
 #include "time_manager.h"
+#include "event_log.h"
 #include <string.h>
 #include <sys/time.h>
 #include <esp_log.h>
@@ -49,6 +50,7 @@ static void time_sync_notification_cb(struct timeval* tv)
 {
     ESP_LOGI(TAG, "NTP time synchronized!");
     time_state.synced = true;
+    event_log_time_synced(tv);
     
     // Log the current time
     char time_str[64];

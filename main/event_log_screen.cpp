@@ -44,6 +44,7 @@ static struct {
     lv_obj_t* content = nullptr;
     lv_obj_t* count_label = nullptr;
     int last_count = -1;    // Force rebuild on first update
+    uint32_t last_revision = 0;
     int displayed = 0;      // Rows currently rendered (for lazy "load more")
     lv_obj_t* footer = nullptr;    // Dim "loading older events" footer / scroll anchor
     bool loading = false;   // Re-entrancy guard while appending a batch
@@ -214,9 +215,9 @@ static void format_event_time(char* buf, size_t buf_size, const event_entry_t* e
         strftime(buf, buf_size, fmt, &tm);
     } else {
         // Use uptime
-        uint32_t sec = evt->uptime_ms / 1000;
-        uint32_t min = sec / 60;
-        uint32_t hr = min / 60;
+        uint64_t sec = evt->uptime_ms / 1000;
+        uint64_t min = sec / 60;
+        uint64_t hr = min / 60;
         snprintf(buf, buf_size, "+%luh%02lum%02lus", (unsigned long)hr, (unsigned long)(min % 60), (unsigned long)(sec % 60));
     }
 }
@@ -517,6 +518,7 @@ static void rebuild_event_list() {
 
         lv_obj_clear_flag(state.content, LV_OBJ_FLAG_HIDDEN);
         state.last_count = count;
+        state.last_revision = event_log_revision();
         return;
     }
     
@@ -561,8 +563,9 @@ static void rebuild_event_list() {
 static void update_timer_cb(lv_timer_t* timer) {
     if (!state.shown) return;
     int count = event_log_count();
+    uint32_t revision = event_log_revision();
     int today_key = local_date_key(time(nullptr));
-    if (count != state.last_count || today_key != state.today_key) {
+    if (count != state.last_count || revision != state.last_revision || today_key != state.today_key) {
         rebuild_event_list();
     }
 }

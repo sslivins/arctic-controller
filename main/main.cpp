@@ -198,7 +198,7 @@ extern "C" void app_main(void)
     // Initialize app preferences (demo mode, temp units, etc.)
     app_prefs_init();
 
-    // Initialize event log (RAM ring buffer for system events)
+    // Initialize the persistent event log.
     event_log_init();
 
     // Persistent boot/reset stats: count brownouts across reboots (NVS) and

@@ -4,8 +4,8 @@
  */
 
 #include "event_log.h"
-#include "time_manager.h"
 #include <esp_log.h>
+#include <esp_random.h>
 #include <esp_timer.h>
 #include <nvs.h>
 #include <freertos/FreeRTOS.h>
@@ -22,6 +22,8 @@ static const char* TAG = "event_log";
 static event_entry_t s_buffer[EVENT_LOG_MAX_ENTRIES];
 static int s_head = 0;       // Next write position
 static int s_count = 0;      // Number of valid entries
+static uint32_t s_boot_id = 0;
+static uint32_t s_revision = 0;
 static SemaphoreHandle_t s_mutex = nullptr;
 
 // ============================================================================
@@ -36,7 +38,7 @@ static SemaphoreHandle_t s_mutex = nullptr;
 #define EVENT_LOG_NVS_NS       "event_log"
 #define EVENT_LOG_NVS_KEY      "buffer"
 #define EVENT_LOG_BLOB_MAGIC   0x41454C31u   // 'A''E''L''1'
-#define EVENT_LOG_BLOB_VERSION 1u
+#define EVENT_LOG_BLOB_VERSION 2u
 #define EVENT_LOG_FLUSH_DELAY_US (5ULL * 1000000ULL)  // 5s debounce for normal events
 
 typedef struct {
@@ -48,6 +50,22 @@ typedef struct {
     event_entry_t entries[EVENT_LOG_MAX_ENTRIES];
 } event_log_blob_t;
 
+typedef struct {
+    uint32_t timestamp;
+    uint32_t uptime_ms;
+    event_type_t type;
+    uint32_t payload;
+} event_entry_v1_t;
+
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t capacity;
+    uint16_t head;
+    uint16_t count;
+    event_entry_v1_t entries[EVENT_LOG_MAX_ENTRIES];
+} event_log_blob_v1_t;
+
 static event_log_blob_t* s_persist_blob = nullptr;    // heap scratch for NVS writes
 static SemaphoreHandle_t s_persist_mutex = nullptr;   // serializes persists
 static esp_timer_handle_t s_flush_timer = nullptr;    // debounce timer
@@ -57,8 +75,8 @@ static volatile bool s_flush_pending = false;
 // Internal helpers
 // ============================================================================
 
-static uint32_t get_uptime_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000ULL);
+static uint64_t get_uptime_ms(void) {
+    return (uint64_t)(esp_timer_get_time() / 1000ULL);
 }
 
 static uint32_t get_unix_timestamp(void) {
@@ -154,6 +172,26 @@ static void event_log_load(void) {
         } else {
             ESP_LOGW(TAG, "Persisted event log invalid/incompatible — starting fresh");
         }
+    } else if (err == ESP_OK && required == sizeof(event_log_blob_v1_t)) {
+        if (nvs_get_blob(nvs, EVENT_LOG_NVS_KEY, s_persist_blob, &required) == ESP_OK) {
+            const event_log_blob_v1_t* old = (const event_log_blob_v1_t*)s_persist_blob;
+            if (old->magic == EVENT_LOG_BLOB_MAGIC &&
+                old->version == 1 &&
+                old->capacity == EVENT_LOG_MAX_ENTRIES &&
+                old->head < EVENT_LOG_MAX_ENTRIES &&
+                old->count <= EVENT_LOG_MAX_ENTRIES) {
+                for (int i = 0; i < EVENT_LOG_MAX_ENTRIES; i++) {
+                    s_buffer[i].timestamp = old->entries[i].timestamp;
+                    s_buffer[i].boot_id = 0;
+                    s_buffer[i].uptime_ms = old->entries[i].uptime_ms;
+                    s_buffer[i].type = old->entries[i].type;
+                    s_buffer[i].payload = old->entries[i].payload;
+                }
+                s_head = old->head;
+                s_count = old->count;
+                ESP_LOGI(TAG, "Migrated %d event(s) from persisted v1 log", s_count);
+            }
+        }
     }
 
     nvs_close(nvs);
@@ -209,6 +247,10 @@ void event_log_init(void) {
 
     s_head = 0;
     s_count = 0;
+    s_revision = 0;
+    do {
+        s_boot_id = esp_random();
+    } while (s_boot_id == 0);
     memset(s_buffer, 0, sizeof(s_buffer));
 
     // Restore persisted history (if any) before recording this boot's events.
@@ -241,6 +283,7 @@ void event_log_record(event_type_t type, uint32_t payload) {
     
     event_entry_t* entry = &s_buffer[s_head];
     entry->timestamp = get_unix_timestamp();
+    entry->boot_id = s_boot_id;
     entry->uptime_ms = get_uptime_ms();
     entry->type = type;
     entry->payload = payload;
@@ -249,6 +292,7 @@ void event_log_record(event_type_t type, uint32_t payload) {
     if (s_count < EVENT_LOG_MAX_ENTRIES) {
         s_count++;
     }
+    s_revision++;
     
     xSemaphoreGive(s_mutex);
     
@@ -298,12 +342,52 @@ int event_log_get(event_entry_t* out, int max_out, int offset) {
     return to_copy;
 }
 
+uint32_t event_log_revision(void) {
+    if (s_mutex == nullptr) return 0;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    uint32_t revision = s_revision;
+    xSemaphoreGive(s_mutex);
+    return revision;
+}
+
+void event_log_time_synced(const struct timeval* synced_time) {
+    if (s_mutex == nullptr || synced_time == nullptr) return;
+
+    uint64_t uptime_ms = get_uptime_ms();
+    int64_t sync_ms = ((int64_t)synced_time->tv_sec * 1000) + (synced_time->tv_usec / 1000);
+    int64_t boot_epoch_ms = sync_ms - (int64_t)uptime_ms;
+    int updated = 0;
+
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    for (int i = 0; i < s_count; i++) {
+        int idx = (s_head - 1 - i + EVENT_LOG_MAX_ENTRIES * 2) % EVENT_LOG_MAX_ENTRIES;
+        event_entry_t* entry = &s_buffer[idx];
+        if (entry->boot_id != s_boot_id || entry->timestamp != 0) continue;
+
+        int64_t event_epoch_ms = boot_epoch_ms + (int64_t)entry->uptime_ms;
+        if (event_epoch_ms >= 1704067200000LL) {
+            entry->timestamp = (uint32_t)(event_epoch_ms / 1000);
+            updated++;
+        }
+    }
+    if (updated > 0) {
+        s_revision++;
+    }
+    xSemaphoreGive(s_mutex);
+
+    if (updated > 0) {
+        ESP_LOGI(TAG, "Backfilled timestamps for %d event(s) from this boot", updated);
+        event_log_schedule_flush(true);
+    }
+}
+
 void event_log_clear(void) {
     if (s_mutex == nullptr) return;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     s_head = 0;
     s_count = 0;
     memset(s_buffer, 0, sizeof(s_buffer));
+    s_revision++;
     xSemaphoreGive(s_mutex);
     // Persist the empty log immediately so a clear survives a reboot too.
     event_log_schedule_flush(true);
