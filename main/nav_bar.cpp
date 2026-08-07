@@ -61,6 +61,14 @@ static void nav_btn_cb(lv_event_t* e) {
     tab_shell_select(target);
 }
 
+static void nav_gesture_cb(lv_event_t* e) {
+    (void)e;
+    lv_indev_t* indev = lv_indev_active();
+    if (indev && lv_indev_get_gesture_dir(indev) == LV_DIR_TOP) {
+        tab_shell_select(NAV_TAB_HOME);
+    }
+}
+
 lv_obj_t* nav_bar_create(lv_obj_t* screen, nav_tab_t active) {
     lv_obj_t* bar = lv_obj_create(screen);
     lv_obj_set_size(bar, LV_PCT(100), NAV_BAR_H);
@@ -77,6 +85,8 @@ lv_obj_t* nav_bar_create(lv_obj_t* screen, nav_tab_t active) {
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_user_data(bar, (void*)"nav_bar");
+    lv_obj_remove_flag(bar, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(bar, nav_gesture_cb, LV_EVENT_GESTURE, nullptr);
 
     for (int i = 0; i < NAV_TAB_COUNT; i++) {
         const nav_tab_def_t* t = &s_tabs[i];

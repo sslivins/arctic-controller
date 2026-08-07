@@ -432,10 +432,9 @@ static lv_obj_t* create_expandable_panel(lv_obj_t* parent, const char* title,
 }
 
 static void on_errors_close(void) {
-    // Load saved screen back with fade animation
-    // auto_del=true - LVGL will delete the sub-screen after animation
+    // Match persistent tab navigation: return immediately.
     if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
+        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
         state.saved_screen = nullptr;
     }
 }

@@ -21,7 +21,7 @@ typedef struct {
     void (*on_wifi_connect)(const char* ssid, const char* password);
     void (*on_wifi_disconnect)(void);
     void (*on_back)(void);  // Called when back button is pressed
-    bool use_fade;          // Use fade animation instead of slide (for status bar entry)
+    bool use_instant_transition;  // Open immediately instead of sliding from the settings menu
 } wifi_screen_config_t;
 
 /**

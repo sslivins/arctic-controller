@@ -626,8 +626,8 @@ void heatpump_errors_show(heatpump_errors_close_cb_t on_close) {
     // Periodic check — only rebuilds when error registers or history actually change
     state.update_timer = lv_timer_create(error_screen_timer_cb, 2000, nullptr);
     
-    // Load screen with animation
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
+    // Match persistent tab navigation: switch screens immediately.
+    lv_screen_load(state.screen);
     
     ESP_LOGI(TAG, "Error details screen shown");
 }

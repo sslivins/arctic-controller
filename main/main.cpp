@@ -515,14 +515,14 @@ static void on_status_bar_wifi_click(void)
         }
     }
     
-    // Open WiFi screen directly (back button will fade back to main screen)
+    // Open WiFi screen directly from the status bar.
     bsp_display_lock(0);
     wifi_screen_config_t wifi_cfg = {
         .on_wifi_scan = on_wifi_scan,
         .on_wifi_connect = on_wifi_connect,
         .on_wifi_disconnect = on_wifi_disconnect,
-        .on_back = on_wifi_screen_close,  // Fade back to main screen
-        .use_fade = true,                  // Fade in from status bar
+        .on_back = on_wifi_screen_close,
+        .use_instant_transition = true,
     };
     wifi_screen_create(&wifi_cfg);
     bsp_display_unlock();
@@ -604,9 +604,9 @@ static void on_settings_close(void)
     
     bsp_display_lock(0);
     
-    // Load main screen with slide-up animation (auto_del=true will delete settings menu)
+    // Return immediately; auto_del deletes the settings menu screen.
     if (main_screen) {
-        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
+        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
     }
     
     // Mark settings as closed (screen will be auto-deleted by LVGL)
@@ -621,9 +621,9 @@ static void on_wifi_screen_close(void)
 {
     mclog::tagInfo(TAG, "WiFi screen closed (from status bar)");
     
-    // Load main screen with fade animation (auto_del=true deletes WiFi screen)
+    // Return immediately; auto_del deletes the WiFi screen.
     if (main_screen) {
-        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
+        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
     }
 }
 
@@ -640,14 +640,13 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
     // Handle specific actions based on type
     switch (type) {
         case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE: {
-            // Open firmware screen directly with fade animation
+            // Open firmware screen directly from the notification.
             bsp_display_lock(0);
             firmware_screen_config_t fw_cfg = {
                 .on_back = []() {
-                    // Fade back to main screen
                     extern lv_obj_t* main_screen;
                     if (main_screen) {
-                        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
+                        lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
                     }
                     firmware_screen_close();
                 },
