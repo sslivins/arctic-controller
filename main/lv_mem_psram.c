@@ -21,6 +21,10 @@
 
 #include "esp_heap_caps.h"
 
+#if LV_USE_STDLIB_MALLOC != LV_STDLIB_CUSTOM
+#error "LVGL must use the custom PSRAM allocator; check the tracked sdkconfig"
+#endif
+
 /* LVGL widget allocations are small and numerous; keep them 8-bit accessible
  * in PSRAM. They are not DMA targets, so internal RAM is not required. */
 #define LV_PSRAM_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
