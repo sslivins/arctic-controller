@@ -158,6 +158,7 @@ static void power_update_timer_cb(lv_timer_t* timer);
 static void update_power_btn_appearance(bool power_on);
 static void mode_btn_event_cb(lv_event_t* e);
 static void update_mode_btn_styles(int selected_idx);
+static void set_mode_controls_enabled(bool enabled);
 // Advanced ("AP") parameter section
 static void ap_row_cb(lv_event_t* e);
 static void show_ap_edit_dialog(uint8_t ap);
@@ -217,7 +218,28 @@ static void show_settings_write_error(const char* message) {
 
 static void update_power_btn_appearance(bool power_on) {
     if (!state.power_btn || !state.power_btn_label) return;
-    
+
+    // Disconnected (and not demo): the pump state is unknown, so avoid the
+    // misleading red "POWERED OFF". Show a neutral, disabled-looking button —
+    // the separate disconnected banner already explains why controls are off.
+    arctic::HeatPumpState hp = arctic::getState();
+    if (!hp.connected && !app_prefs_is_demo_mode()) {
+        lv_obj_set_style_bg_color(state.power_btn, COLOR_CARD_BG, LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(state.power_btn, LV_OPA_50, LV_PART_MAIN);
+        lv_obj_set_style_border_width(state.power_btn, 1, LV_PART_MAIN);
+        lv_obj_set_style_border_color(state.power_btn, COLOR_CARD_BORDER, LV_PART_MAIN);
+        lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_UNAVAILABLE));
+        lv_obj_set_style_text_color(state.power_btn_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+        if (state.power_hold_bar) {
+            lv_bar_set_value(state.power_hold_bar, 0, LV_ANIM_OFF);
+            lv_obj_add_flag(state.power_hold_bar, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+
+    // Connected (or demo): restore full-opacity coloured button.
+    lv_obj_set_style_bg_opa(state.power_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.power_btn, 0, LV_PART_MAIN);
     if (power_on) {
         lv_obj_set_style_bg_color(state.power_btn, COLOR_SUCCESS, LV_PART_MAIN);
         lv_label_set_text(state.power_btn_label, i18n_get(STR_HP_POWER_ON));
@@ -231,6 +253,22 @@ static void update_power_btn_appearance(bool power_on) {
     if (state.power_hold_bar) {
         lv_bar_set_value(state.power_hold_bar, 0, LV_ANIM_OFF);
         lv_obj_add_flag(state.power_hold_bar, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// Enable/disable the working-mode buttons together. When disabled (pump
+// disconnected) they are dimmed and non-interactive so the user cannot trigger
+// a doomed write that just pops a communication-error modal.
+static void set_mode_controls_enabled(bool enabled) {
+    for (int i = 0; i < 5; i++) {
+        if (!state.mode_btns[i]) continue;
+        if (enabled) {
+            lv_obj_add_flag(state.mode_btns[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_opa(state.mode_btns[i], LV_OPA_COVER, LV_PART_MAIN);
+        } else {
+            lv_obj_remove_flag(state.mode_btns[i], LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_opa(state.mode_btns[i], LV_OPA_40, LV_PART_MAIN);
+        }
     }
 }
 
@@ -333,8 +371,7 @@ static void power_btn_event_cb(lv_event_t* e) {
         
         arctic::HeatPumpState hp = arctic::getState();
         if (!hp.connected && !app_prefs_is_demo_mode()) {
-            show_settings_write_error("Cannot control power: Heat pump not connected");
-            return;
+            return;  // Button is shown disabled/neutral while disconnected — no-op.
         }
         
         if (!hp.unit_on) {
@@ -355,6 +392,9 @@ static void power_update_timer_cb(lv_timer_t* timer) {
         bool disconnected = !hp.connected && !app_prefs_is_demo_mode();
         if (disconnected) lv_obj_remove_flag(state.disconnected_banner, LV_OBJ_FLAG_HIDDEN);
         else              lv_obj_add_flag(state.disconnected_banner, LV_OBJ_FLAG_HIDDEN);
+        // Disable mode buttons while disconnected so taps can't trigger a
+        // communication-error modal.
+        set_mode_controls_enabled(!disconnected);
     }
     
     // Also keep mode buttons in sync
@@ -430,8 +470,7 @@ static void mode_btn_event_cb(lv_event_t* e) {
     
     arctic::HeatPumpState hp = arctic::getState();
     if (!hp.connected && !app_prefs_is_demo_mode()) {
-        show_settings_write_error("Cannot change mode: Heat pump not connected");
-        return;
+        return;  // Mode buttons are disabled while disconnected — no-op.
     }
     
     bool success = arctic::setWorkingMode(s_mode_values[idx]);
@@ -1503,10 +1542,13 @@ void heatpump_control_create_in(lv_obj_t* parent) {
     }
     
     update_mode_btn_styles(state.active_mode_idx);
-    
-    // =========================================================================
-    // BASIC SETTINGS SECTION - Setpoints
-    // =========================================================================
+
+    // Apply initial enabled/disabled state to the mode buttons based on connection.
+    {
+        arctic::HeatPumpState hp_conn = arctic::getState();
+        bool disconnected = !hp_conn.connected && !app_prefs_is_demo_mode();
+        set_mode_controls_enabled(!disconnected);
+    }
     create_section_header(state.scroll_container, i18n_get(STR_HP_SETPOINTS));
     
     // Cooling setpoint row
