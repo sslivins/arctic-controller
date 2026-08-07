@@ -333,6 +333,21 @@ typedef enum {
     STR_EVENT_CLEAR,
     STR_EVENT_NO_EVENTS,
     STR_EVENT_SHOW_OLDER,
+    STR_EVENT_TODAY,
+    STR_EVENT_YESTERDAY,
+    STR_EVENT_SINCE_RESTART,
+    STR_EVENT_MONTH_JAN,
+    STR_EVENT_MONTH_FEB,
+    STR_EVENT_MONTH_MAR,
+    STR_EVENT_MONTH_APR,
+    STR_EVENT_MONTH_MAY,
+    STR_EVENT_MONTH_JUN,
+    STR_EVENT_MONTH_JUL,
+    STR_EVENT_MONTH_AUG,
+    STR_EVENT_MONTH_SEP,
+    STR_EVENT_MONTH_OCT,
+    STR_EVENT_MONTH_NOV,
+    STR_EVENT_MONTH_DEC,
 
     // ========================================================================
     // Reboot confirmation

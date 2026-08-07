@@ -14,6 +14,7 @@
 #include "fonts/fonts.h"
 #include "i18n/i18n.h"
 #include <esp_log.h>
+#include <limits.h>
 #include <stdio.h>
 #include <time.h>
 
@@ -46,6 +47,8 @@ static struct {
     int displayed = 0;      // Rows currently rendered (for lazy "load more")
     lv_obj_t* footer = nullptr;    // Dim "loading older events" footer / scroll anchor
     bool loading = false;   // Re-entrancy guard while appending a batch
+    int last_date_key = INT_MIN;
+    int today_key = INT_MIN;
 } state;
 
 // ============================================================================
@@ -218,6 +221,59 @@ static void format_event_time(char* buf, size_t buf_size, const event_entry_t* e
     }
 }
 
+static int local_date_key(time_t timestamp) {
+    struct tm tm;
+    localtime_r(&timestamp, &tm);
+    return (tm.tm_year * 512) + tm.tm_yday;
+}
+
+static int event_date_key(const event_entry_t* evt) {
+    return evt->timestamp > 0 ? local_date_key((time_t)evt->timestamp) : -1;
+}
+
+static void format_event_date(char* buf, size_t buf_size, const event_entry_t* evt) {
+    if (evt->timestamp == 0) {
+        snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_SINCE_RESTART));
+        return;
+    }
+
+    time_t event_time = (time_t)evt->timestamp;
+    struct tm event_tm;
+    localtime_r(&event_time, &event_tm);
+
+    time_t now = time(nullptr);
+    struct tm today_tm;
+    localtime_r(&now, &today_tm);
+    if (event_tm.tm_year == today_tm.tm_year && event_tm.tm_yday == today_tm.tm_yday) {
+        snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_TODAY));
+        return;
+    }
+
+    struct tm yesterday_tm = today_tm;
+    yesterday_tm.tm_mday -= 1;
+    mktime(&yesterday_tm);
+    if (event_tm.tm_year == yesterday_tm.tm_year && event_tm.tm_yday == yesterday_tm.tm_yday) {
+        snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_YESTERDAY));
+        return;
+    }
+
+    const char* month = i18n_get((string_id_t)(STR_EVENT_MONTH_JAN + event_tm.tm_mon));
+    bool current_year = event_tm.tm_year == today_tm.tm_year;
+    if (i18n_get_language() == LANG_ENGLISH) {
+        if (current_year) {
+            snprintf(buf, buf_size, "%s %d", month, event_tm.tm_mday);
+        } else {
+            snprintf(buf, buf_size, "%s %d, %d", month, event_tm.tm_mday, event_tm.tm_year + 1900);
+        }
+    } else {
+        if (current_year) {
+            snprintf(buf, buf_size, "%d %s", event_tm.tm_mday, month);
+        } else {
+            snprintf(buf, buf_size, "%d %s %d", event_tm.tm_mday, month, event_tm.tm_year + 1900);
+        }
+    }
+}
+
 // Forward declarations
 static void clear_btn_cb(lv_event_t* e);
 
@@ -234,10 +290,36 @@ static const int EVENT_BATCH_SIZE = 10;  // rows per lazy-load batch (infinite s
 // Start loading the next batch when the user scrolls within this many px of the bottom.
 static const int32_t EVENT_SCROLL_THRESHOLD_PX = 300;
 
+static void create_date_separator(lv_obj_t* parent, const event_entry_t* evt) {
+    int date_key = event_date_key(evt);
+    if (date_key == state.last_date_key) return;
+    state.last_date_key = date_key;
+
+    char date_buf[48];
+    format_event_date(date_buf, sizeof(date_buf), evt);
+
+    lv_obj_t* separator = lv_obj_create(parent);
+    lv_obj_set_size(separator, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(separator, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(separator, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(separator, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(separator, 14, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(separator, 4, LV_PART_MAIN);
+    lv_obj_clear_flag(separator, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_user_data(separator, (void*)"event_date_separator");
+
+    lv_obj_t* label = lv_label_create(separator);
+    lv_label_set_text(label, date_buf);
+    lv_obj_set_style_text_font(label, &montserrat_24_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, COLOR_ACCENT, LV_PART_MAIN);
+}
+
 // Build a single event row (card) into the given flex-column parent.
 static void create_event_row(lv_obj_t* parent, const event_entry_t* evt) {
     char detail_buf[128];
     char time_buf[32];
+
+    create_date_separator(parent, evt);
 
     // Row container - flex column layout like error cards
     lv_obj_t* row = lv_obj_create(parent);
@@ -376,6 +458,8 @@ static void rebuild_event_list() {
     state.footer = nullptr;   // destroyed by lv_obj_clean above
     state.loading = false;
     state.displayed = 0;
+    state.last_date_key = INT_MIN;
+    state.today_key = local_date_key(time(nullptr));
 
     // Disable scrolling/layout during batch creation to avoid O(n²) recalc
     lv_obj_add_flag(state.content, LV_OBJ_FLAG_HIDDEN);
@@ -477,7 +561,8 @@ static void rebuild_event_list() {
 static void update_timer_cb(lv_timer_t* timer) {
     if (!state.shown) return;
     int count = event_log_count();
-    if (count != state.last_count) {
+    int today_key = local_date_key(time(nullptr));
+    if (count != state.last_count || today_key != state.today_key) {
         rebuild_event_list();
     }
 }
