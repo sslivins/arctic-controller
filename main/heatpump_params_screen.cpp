@@ -695,7 +695,7 @@ static void create_edit_dialog(void) {
     // is hidden (see set_edit_dialog_readonly) so only Cancel remains.
     lv_obj_t* action_bar = lv_obj_create(state.edit_dialog);
     lv_obj_set_size(action_bar, LV_PCT(100), 120);
-    lv_obj_align(action_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_align(action_bar, LV_ALIGN_BOTTOM_MID, 0, -NAV_BAR_H);
     lv_obj_set_style_bg_color(action_bar, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(action_bar, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(action_bar, 0, LV_PART_MAIN);

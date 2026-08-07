@@ -180,6 +180,26 @@ class TestSetpoints:
         assert _has_text_containing(device, expected_value), \
             f"Setpoint value '{expected_value}' for '{label}' not found"
 
+    def test_editor_actions_are_above_nav_bar(self, device: DeviceClient):
+        """Cancel and Save must remain fully visible above persistent navigation."""
+        _open_control(device)
+        device.click(label="Cooling Setpoint")
+
+        try:
+            nav = device.find_widget(tag="nav_bar")
+            cancel = device.find_widget(tag="edit_cancel")
+            save = device.find_widget(tag="edit_save")
+
+            assert nav is not None, "Persistent nav bar not found"
+            assert cancel is not None, "Editor Cancel button not found"
+            assert save is not None, "Editor Save button not found"
+            assert cancel.y + cancel.h <= nav.y, \
+                f"Cancel button bottom {cancel.y + cancel.h} overlaps nav top {nav.y}"
+            assert save.y + save.h <= nav.y, \
+                f"Save button bottom {save.y + save.h} overlaps nav top {nav.y}"
+        finally:
+            device.click(tag="edit_cancel")
+
 
 # =========================================================================
 # Advanced Parameters Section
