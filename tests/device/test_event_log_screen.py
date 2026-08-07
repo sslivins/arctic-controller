@@ -131,6 +131,9 @@ class TestEventLogDisplay:
         empty = device.find_widget(tag="event_log_empty")
         assert empty is None, \
             "Empty-state label present despite recent event activity"
+        separator = device.find_widget(tag="event_date_separator")
+        assert separator is not None, \
+            "Event rows should be grouped under a date separator"
 
     def test_events_via_api(self, device: DeviceClient):
         """The /api/events endpoint should return events matching the UI count."""

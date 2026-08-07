@@ -3098,7 +3098,7 @@ static esp_err_t events_get_handler(httpd_req_t* req)
         cJSON* evt = cJSON_CreateObject();
         cJSON_AddStringToObject(evt, "type", event_type_name(events[i].type));
         cJSON_AddNumberToObject(evt, "timestamp", events[i].timestamp);
-        cJSON_AddNumberToObject(evt, "uptime_ms", events[i].uptime_ms);
+        cJSON_AddNumberToObject(evt, "uptime_ms", (double)events[i].uptime_ms);
         cJSON_AddNumberToObject(evt, "payload", events[i].payload);
         cJSON_AddItemToArray(arr, evt);
     }

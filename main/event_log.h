@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -49,7 +50,8 @@ typedef enum {
 
 typedef struct {
     uint32_t timestamp;       // Unix timestamp (seconds since epoch), 0 if time not synced
-    uint32_t uptime_ms;       // Uptime in milliseconds (always valid)
+    uint32_t boot_id;         // Random ID shared by all events from the same boot
+    uint64_t uptime_ms;       // Uptime in milliseconds (always valid)
     event_type_t type;        // Event type
     uint32_t payload;         // Type-specific data (mode value, error code, etc.)
 } event_entry_t;
@@ -58,7 +60,7 @@ typedef struct {
 // Configuration
 // ============================================================================
 
-#define EVENT_LOG_MAX_ENTRIES  128   // Max events in ring buffer (~2.5 KB)
+#define EVENT_LOG_MAX_ENTRIES  128   // Max events in ring buffer (~3 KB)
 
 // ============================================================================
 // API
@@ -90,6 +92,17 @@ int event_log_count(void);
  * @return Number of entries actually copied
  */
 int event_log_get(event_entry_t* out, int max_out, int offset);
+
+/**
+ * @brief Get the event-log revision, incremented whenever entries change.
+ */
+uint32_t event_log_revision(void);
+
+/**
+ * @brief Backfill untimed events from this boot after NTP synchronization.
+ * @param synced_time Accurate wall-clock time at the synchronization callback.
+ */
+void event_log_time_synced(const struct timeval* synced_time);
 
 /**
  * @brief Clear all events from the log.

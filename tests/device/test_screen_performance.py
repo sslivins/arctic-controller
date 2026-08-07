@@ -31,12 +31,10 @@ from device_client import DeviceClient
 # ---------------------------------------------------------------------------
 RENDER_BUDGET_US = 300_000
 
-# Heavy-state scenarios create many complex widgets.  The errors screen
-# alone has ~298 ms base construction cost, so a 300 ms budget is too
-# tight when adding 16+ error cards.  500 ms still catches O(n²)
-# regressions (which would exceed 5 000 ms) while accepting the
-# inherent complexity of widget-heavy screens.
-HEAVY_BUDGET_US = 500_000
+# The error screen renders only its first card batch synchronously, then
+# progressively appends the rest on the LVGL task. Keep the initial response
+# comfortably below the 300 ms general screen budget even at maximum content.
+ERROR_INITIAL_BUDGET_US = 150_000
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +136,9 @@ class TestHeavyStatePerformance:
 
         try:
             result = device.click(tag="error_label")
-            us = _assert_under_budget(result, "errors_heavy", HEAVY_BUDGET_US)
+            us = _assert_under_budget(
+                result, "errors_heavy", ERROR_INITIAL_BUDGET_US
+            )
             device.wait_for_screen("errors", timeout=3.0)
         finally:
             # Close errors screen if open, then restore normal state
@@ -160,7 +160,9 @@ class TestHeavyStatePerformance:
             time.sleep(2)
 
             result = device.click(tag="error_label")
-            us = _assert_under_budget(result, "errors_with_history", HEAVY_BUDGET_US)
+            us = _assert_under_budget(
+                result, "errors_with_history", ERROR_INITIAL_BUDGET_US
+            )
             device.wait_for_screen("errors", timeout=3.0)
         finally:
             # Close errors screen if open, then restore
