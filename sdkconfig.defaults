@@ -99,7 +99,12 @@ CONFIG_LV_LOG_PRINTF=y
 CONFIG_LV_USE_PERF_MONITOR=y
 # Enable IRAM for LVGL fast memory - device is always-on, optimize for smooth UI
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
-# Increase LVGL memory pool for complex screens (language change needs 2 screens in memory)
+# LVGL uses a custom allocator (main/lv_mem_psram.c) that draws widget memory
+# from PSRAM instead of the ~180 KB internal RAM. Needed because the persistent
+# tab shell keeps all four tab trees resident, which overflowed the internal
+# builtin pool when a second full screen (Settings) was loaded on top.
+# CONFIG_LV_USE_BUILTIN_MALLOC is not set
+CONFIG_LV_USE_CUSTOM_MALLOC=y
 CONFIG_LV_MEM_SIZE_KILOBYTES=128
 
 # Display Configuration

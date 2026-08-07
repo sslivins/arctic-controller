@@ -6,6 +6,7 @@
  */
 
 #include "heatpump_temps_screen.h"
+#include "nav_bar.h"
 #include "modbus/arctic_heatpump.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
@@ -352,65 +353,26 @@ static void back_btn_cb(lv_event_t* e) {
 // Public Functions
 // ============================================================================
 
-void heatpump_temps_show(heatpump_temps_close_cb_t on_close) {
+void heatpump_temps_create_in(lv_obj_t* parent) {
     if (state.shown) {
         return;
     }
-    
-    ESP_LOGI(TAG, "Showing temperatures screen");
-    state.on_close = on_close;
-    
-    // Create screen
-    state.screen = lv_obj_create(NULL);
-    lv_obj_set_size(state.screen, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(state.screen, COLOR_BG, LV_PART_MAIN);
-    lv_obj_clear_flag(state.screen, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Header (8% height)
-    lv_obj_t* header = lv_obj_create(state.screen);
-    lv_obj_set_size(header, LV_PCT(100), LV_PCT(8));
-    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(header, COLOR_HEADER_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(header, 15, LV_PART_MAIN);
-    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Close button (X on right) with circular background
-    lv_obj_t* back_btn = lv_btn_create(header);
-    lv_obj_set_size(back_btn, 50, 50);
-    lv_obj_align(back_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(back_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_set_user_data(back_btn, (void*)"temps_close");
-    
-    lv_obj_t* back_icon = lv_label_create(back_btn);
-    lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(back_icon, &montserrat_32_latin, LV_PART_MAIN);
-    lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_center(back_icon);
-    
-    // Title
-    lv_obj_t* title = lv_label_create(header);
-    lv_label_set_text(title, i18n_get(STR_HP_STATUS));
-    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_user_data(title, (void*)"temps_title");
-    
-    // Scrollable content (remaining 92%)
+
+    ESP_LOGI(TAG, "Building temperatures tab");
+    state.on_close = nullptr;
+
+    // The panel provided by the tab shell is our root; build directly into it.
+    state.screen = parent;
+
+    // Scrollable content fills the panel; reserve room for the persistent nav
+    // bar (drawn by the tab shell) at the bottom.
     lv_obj_t* content = lv_obj_create(state.screen);
-    lv_obj_set_size(content, LV_PCT(100), LV_PCT(92));
-    lv_obj_align(content, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(content, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(content, 20, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(content, NAV_BAR_H + 20, LV_PART_MAIN);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(content, 12, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
@@ -456,9 +418,19 @@ void heatpump_temps_show(heatpump_temps_close_cb_t on_close) {
     
     // Initial update
     update_readings();
-    
-    // Load with slide animation (main screen moves up)
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
+}
+
+void heatpump_temps_set_active(bool active) {
+    if (state.update_timer) {
+        if (active) {
+            lv_timer_resume(state.update_timer);
+        } else {
+            lv_timer_pause(state.update_timer);
+        }
+    }
+    if (active) {
+        update_readings();
+    }
 }
 
 void heatpump_temps_hide(void) {

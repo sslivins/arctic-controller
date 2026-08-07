@@ -46,6 +46,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_WIFI_DISCONNECTED] = "Disconnected",
     [STR_WIFI_DISCONNECT] = "Disconnect",
     [STR_WIFI_CONNECT] = "Connect",
+    [STR_WIFI_CONNECTING] = "Connecting",
     [STR_WIFI_SCANNING] = "Scanning for networks...",
     [STR_WIFI_AVAILABLE_NETWORKS] = "Available Networks",
     [STR_WIFI_NO_NETWORKS] = "No networks found",
@@ -127,6 +128,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B System",
     [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Control",
     [STR_HP_BTN_STATUS] = "\xEF\x80\x8B Status",
+    [STR_NAV_HOME] = "Home",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "COOLING",
@@ -303,6 +305,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_EVENT_BROWNOUT_RESET] = "Brownout Reset",
     [STR_EVENT_CLEAR] = "Clear Events",
     [STR_EVENT_NO_EVENTS] = "No events recorded",
+    [STR_EVENT_SHOW_OLDER] = "Show older events",
 
     // Reboot confirmation
     [STR_DEMO_MODE_CHANGED] = "Demo mode changed.",
@@ -335,6 +338,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_WIFI_DISCONNECTED] = "Déconnecté",
     [STR_WIFI_DISCONNECT] = "Déconnecter",
     [STR_WIFI_CONNECT] = "Connecter",
+    [STR_WIFI_CONNECTING] = "Connexion",
     [STR_WIFI_SCANNING] = "Recherche de réseaux...",
     [STR_WIFI_AVAILABLE_NETWORKS] = "Réseaux disponibles",
     [STR_WIFI_NO_NETWORKS] = "Aucun réseau trouvé",
@@ -416,6 +420,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B Système",
     [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Contr\xc3\xb4le",
     [STR_HP_BTN_STATUS] = "\xEF\x80\x8B \xc3\x89tat",
+    [STR_NAV_HOME] = "Accueil",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "REFROIDISSEMENT",
@@ -592,6 +597,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_EVENT_BROWNOUT_RESET] = "Réinit. sous-tension",
     [STR_EVENT_CLEAR] = "Effacer événements",
     [STR_EVENT_NO_EVENTS] = "Aucun événement",
+    [STR_EVENT_SHOW_OLDER] = "Voir événements plus anciens",
 
     // Reboot confirmation
     [STR_DEMO_MODE_CHANGED] = "Mode démo modifié.",
@@ -624,6 +630,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_WIFI_DISCONNECTED] = "Desconectado",
     [STR_WIFI_DISCONNECT] = "Desconectar",
     [STR_WIFI_CONNECT] = "Conectar",
+    [STR_WIFI_CONNECTING] = "Conectando",
     [STR_WIFI_SCANNING] = "Buscando redes...",
     [STR_WIFI_AVAILABLE_NETWORKS] = "Redes disponibles",
     [STR_WIFI_NO_NETWORKS] = "No se encontraron redes",
@@ -705,6 +712,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_BTN_SYSTEM] = "\xEF\x80\x8B Sistema",
     [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Control",
     [STR_HP_BTN_STATUS] = "\xEF\x80\x8B Estado",
+    [STR_NAV_HOME] = "Inicio",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "ENFRIAMIENTO",
@@ -881,6 +889,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_EVENT_BROWNOUT_RESET] = "Reinicio por baja tensión",
     [STR_EVENT_CLEAR] = "Borrar eventos",
     [STR_EVENT_NO_EVENTS] = "Sin eventos registrados",
+    [STR_EVENT_SHOW_OLDER] = "Ver eventos anteriores",
 
     // Reboot confirmation
     [STR_DEMO_MODE_CHANGED] = "Modo demo cambiado.",

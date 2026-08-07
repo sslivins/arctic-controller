@@ -24,6 +24,12 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset);
 void heatpump_screen_update(void);
 
 /**
+ * @brief Pause/resume the Home update timer (used by the tab shell so only the
+ *        visible tab polls). Refreshes immediately when activated.
+ */
+void heatpump_screen_set_active(bool active);
+
+/**
  * @brief Delete the heat pump screen elements
  */
 void heatpump_screen_delete(void);

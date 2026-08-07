@@ -28,6 +28,8 @@
 #include "tuya/tuya_listener.h"
 #include "tuya/macon_master.h"
 #include "heatpump_screen.h"
+#include "nav_bar.h"
+#include "tab_shell.h"
 #include "app_preferences.h"
 #include "event_log.h"
 #include "boot_stats.h"
@@ -348,16 +350,10 @@ void create_ui(void)
     };
     status_bar_create(&bar_config);
     
-    // Create heat pump status display (main content area)
-    // Status bar is 80px, leave some margin
-    heatpump_screen_create(scr, 90);
-    
-    // Footer
-    lv_obj_t* footer = lv_label_create(scr);
-    lv_label_set_text(footer, "M5Stack Tab5 • ESP32-P4");
-    lv_obj_set_style_text_font(footer, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_style_text_color(footer, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -10);
+    // Build the single-screen tab shell (Home / Status / Control / Events) with
+    // the persistent top status bar already in place and the persistent bottom
+    // nav bar. Home is shown initially.
+    tab_shell_create(scr);
     
     // WiFi init happens in background task, just update status bar when ready
     if (wifi_init_complete && wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
@@ -406,6 +402,12 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
         case WIFI_MGR_STATE_CONNECTING:
             ESP_LOGI(TAG, "WiFi connecting...");
             status_bar_set_wifi_connecting(true);
+            // Immediate feedback on the WiFi screen (if open) that an attempt
+            // is underway. ssid isn't passed for CONNECTING, so use the target
+            // we just initiated the connection to.
+            if (wifi_screen_is_visible()) {
+                wifi_screen_show_connecting(pending_ssid[0] ? pending_ssid : NULL);
+            }
             break;
             
         case WIFI_MGR_STATE_CONNECTED: {
@@ -414,6 +416,14 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             wifi_mgr_get_ip_addr(ip, sizeof(ip));
             settings_menu_update_wifi_status(true, ssid);
             status_bar_set_wifi_state(true, ssid);
+            // The WiFi screen may be open directly from the status-bar icon
+            // (which bypasses settings_menu's sub-screen tracking), so refresh
+            // it directly whenever it's visible rather than relying solely on
+            // settings_menu forwarding. Fixes the connected card not appearing
+            // after a live connect until the screen is exited and reopened.
+            if (wifi_screen_is_visible()) {
+                wifi_screen_update_connection(true, ssid, ip);
+            }
             // Save credentials on successful connection
             if (pending_ssid[0] != '\0') {
                 wifi_mgr_save_credentials(pending_ssid, pending_password);
@@ -442,6 +452,9 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             ESP_LOGI(TAG, "WiFi disconnected");
             settings_menu_update_wifi_status(false, NULL);
             status_bar_set_wifi_state(false, NULL);
+            if (wifi_screen_is_visible()) {
+                wifi_screen_update_connection(false, NULL, NULL);
+            }
             
             // Track disconnect for instability detection
             uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);  // Current time in ms
@@ -473,6 +486,11 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             ESP_LOGE(TAG, "WiFi error");
             show_error_message("Connection failed.\nPlease check password and try again.");
             status_bar_set_wifi_state(false, NULL);
+            // Clear the "connecting" indicator on the WiFi screen so it doesn't
+            // hang after a failed attempt (e.g. wrong password).
+            if (wifi_screen_is_visible()) {
+                wifi_screen_update_connection(false, NULL, NULL);
+            }
             // Clear pending credentials on error
             pending_ssid[0] = '\0';
             pending_password[0] = '\0';

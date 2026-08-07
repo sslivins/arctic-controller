@@ -49,6 +49,13 @@ bool wifi_screen_is_visible(void);
 void wifi_screen_update_connection(bool is_connected, const char* ssid, const char* ip);
 
 /**
+ * @brief Show a transient "Connecting to <ssid>…" indicator with a spinner.
+ * Cleared automatically by the next wifi_screen_update_connection() call.
+ * @param ssid Target SSID (or NULL)
+ */
+void wifi_screen_show_connecting(const char* ssid);
+
+/**
  * @brief Update available networks list
  * @param networks Array of network info
  * @param count Number of networks

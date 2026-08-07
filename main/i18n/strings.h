@@ -47,6 +47,7 @@ typedef enum {
     STR_WIFI_DISCONNECTED,
     STR_WIFI_DISCONNECT,
     STR_WIFI_CONNECT,
+    STR_WIFI_CONNECTING,
     STR_WIFI_SCANNING,
     STR_WIFI_AVAILABLE_NETWORKS,
     STR_WIFI_NO_NETWORKS,
@@ -140,6 +141,7 @@ typedef enum {
     STR_HP_BTN_SYSTEM,
     STR_HP_BTN_ADVANCED,
     STR_HP_BTN_STATUS,
+    STR_NAV_HOME,
     
     // Heat Pump - Mode Names
     STR_HP_MODE_COOLING,
@@ -329,6 +331,7 @@ typedef enum {
     STR_EVENT_BROWNOUT_RESET,
     STR_EVENT_CLEAR,
     STR_EVENT_NO_EVENTS,
+    STR_EVENT_SHOW_OLDER,
 
     // ========================================================================
     // Reboot confirmation

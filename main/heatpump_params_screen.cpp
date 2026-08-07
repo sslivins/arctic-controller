@@ -7,6 +7,7 @@
  */
 
 #include "heatpump_control_screen.h"
+#include "nav_bar.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
@@ -1349,67 +1350,26 @@ static void show_ap_trigger_confirm(uint8_t ap) {
 // Public Functions
 // ============================================================================
 
-void heatpump_control_show(heatpump_control_close_cb_t on_close) {
+void heatpump_control_create_in(lv_obj_t* parent) {
     if (state.shown) {
         return;
     }
-    
-    ESP_LOGI(TAG, "Showing heat pump settings screen");
-    state.on_close = on_close;
-    
-    // Create full-screen
-    state.screen = lv_obj_create(NULL);
-    lv_obj_set_size(state.screen, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(state.screen, COLOR_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(state.screen, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(state.screen, 0, LV_PART_MAIN);
-    lv_obj_clear_flag(state.screen, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Header with title and close button
-    lv_obj_t* header = lv_obj_create(state.screen);
-    lv_obj_set_size(header, LV_PCT(100), 100);
-    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(header, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(header, 20, LV_PART_MAIN);
-    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Close button (X on right) with circular background
-    lv_obj_t* back_btn = lv_btn_create(header);
-    lv_obj_set_size(back_btn, 50, 50);
-    lv_obj_align(back_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(back_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(back_btn, close_btn_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_set_user_data(back_btn, (void*)"control_close");
-    
-    lv_obj_t* back_icon = lv_label_create(back_btn);
-    lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(back_icon, UI_FONT_ICON, LV_PART_MAIN);
-    lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_center(back_icon);
-    
-    // Title
-    lv_obj_t* title = lv_label_create(header);
-    lv_label_set_text(title, i18n_get(STR_HP_ADVANCED));
-    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_user_data(title, (void*)"control_title");
-    
-    // Scrollable content - 1280 - 100 header = 1180
+
+    ESP_LOGI(TAG, "Building control tab");
+    state.on_close = nullptr;
+
+    // The panel provided by the tab shell is our root; build directly into it.
+    state.screen = parent;
+
+    // Scrollable content fills the panel; reserve room for the persistent nav
+    // bar (drawn by the tab shell) at the bottom.
     state.scroll_container = lv_obj_create(state.screen);
-    lv_obj_set_size(state.scroll_container, LV_PCT(100), 1180);
-    lv_obj_align(state.scroll_container, LV_ALIGN_TOP_MID, 0, 100);
+    lv_obj_set_size(state.scroll_container, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(state.scroll_container, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(state.scroll_container, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.scroll_container, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(state.scroll_container, 15, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(state.scroll_container, NAV_BAR_H + 15, LV_PART_MAIN);
     lv_obj_set_flex_flow(state.scroll_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(state.scroll_container, 10, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(state.scroll_container, LV_SCROLLBAR_MODE_AUTO);
@@ -1645,8 +1605,17 @@ void heatpump_control_show(heatpump_control_close_cb_t on_close) {
         state.load_timer = lv_timer_create(load_timer_cb, 100, nullptr);
     }
     
-    // Load the screen with slide animation (main screen moves up)
-    lv_scr_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
+    // Persistent bottom navigation bar is created by the tab shell, not here.
+}
+
+void heatpump_control_set_active(bool active) {
+    if (state.power_update_timer) {
+        if (active) {
+            lv_timer_resume(state.power_update_timer);
+        } else {
+            lv_timer_pause(state.power_update_timer);
+        }
+    }
 }
 
 void heatpump_control_hide(void) {
