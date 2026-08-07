@@ -33,6 +33,7 @@
 #include "heatpump_control_screen.h"
 #include "heatpump_errors_screen.h"
 #include "event_log_screen.h"
+#include "tab_shell.h"
 #include "status_bar.h"
 #include <esp_timer.h>
 #include "png_encoder.h"
@@ -372,18 +373,26 @@ static lv_obj_t* find_clickable_parent(lv_obj_t* obj)
 // Determine what screen is currently showing
 static const char* get_screen_name(void)
 {
+    // Settings sub-screens and the errors screen are overlays drawn on top of
+    // the persistent tab shell, so they take precedence when visible.
     if (display_screen_is_visible()) return "display";
     if (wifi_screen_is_visible()) return "wifi";
     if (firmware_screen_is_visible()) return "firmware";
     if (time_screen_is_visible()) return "time";
     if (language_screen_is_visible()) return "language";
     if (settings_menu_is_visible()) return "settings";
-    if (heatpump_temps_is_shown()) return "status";
-    if (heatpump_control_is_shown()) return "control";
     if (heatpump_errors_is_shown()) return "errors";
-    if (event_log_screen_is_shown()) return "event_log";
 
-    return "main";
+    // Otherwise the tab shell is showing. All four tab panels are persistent
+    // (their individual _is_shown() flags are permanently true), so the visible
+    // screen is determined by the active tab, not by which panels exist.
+    switch (tab_shell_current()) {
+        case NAV_TAB_HOME:    return "main";
+        case NAV_TAB_STATUS:  return "status";
+        case NAV_TAB_CONTROL: return "control";
+        case NAV_TAB_EVENTS:  return "event_log";
+        default:              return "main";
+    }
 }
 
 // ============================================================================

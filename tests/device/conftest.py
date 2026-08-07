@@ -55,12 +55,21 @@ def _return_to_main(device: DeviceClient):
         except Exception:
             pass
 
-    # If on a heat pump sub-screen, close it to return to main
-    if current in ("status", "control", "errors", "event_log"):
-        # The Status screen (merged temps+system) still uses the "temps_close" tag
-        close_tag = "temps_close" if current == "status" else f"{current}_close"
+    # Status / Control / Events are persistent panels in the tab shell — return
+    # to the Home tab via the nav bar (there is no per-panel close button).
+    if current in ("status", "control", "event_log"):
         try:
-            device.click(tag=close_tag)
+            device.click(tag="nav_home")
+        except Exception:
+            pass
+        device.wait_for_screen("main", timeout=5.0)
+        device.wait_for_widget(tag="settings", timeout=3.0)
+        return
+
+    # The errors screen is still a standalone overlay opened from the Home tab.
+    if current == "errors":
+        try:
+            device.click(tag="errors_close")
         except Exception:
             try:
                 device.click(symbol="CLOSE")
