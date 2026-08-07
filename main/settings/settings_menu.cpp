@@ -390,7 +390,7 @@ static void row_click_cb(lv_event_t* e)
             .on_wifi_connect = state.config.on_wifi_connect,
             .on_wifi_disconnect = state.config.on_wifi_disconnect,
             .on_back = settings_menu_show,
-            .use_fade = false,
+            .use_instant_transition = false,
         };
         wifi_screen_create(&wifi_cfg);
         state.sub_screen_active = true;
@@ -609,8 +609,7 @@ void settings_menu_create(const settings_menu_config_t* config)
         settings_menu_update_wifi_status(true, wifi_mgr_get_connected_ssid());
     }
     
-    // Slide down from top when opening settings
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
+    lv_screen_load(state.screen);
 }
 
 void settings_menu_close(void)

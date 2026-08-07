@@ -171,10 +171,11 @@ void wifi_screen_create(const wifi_screen_config_t* config)
     create_networks_section();
     create_password_dialog();
     
-    // Load screen with appropriate animation
-    // Fade for status bar entry, slide-left for settings menu entry
-    lv_scr_load_anim_t anim = s_state.config.use_fade ? LV_SCR_LOAD_ANIM_FADE_IN : LV_SCR_LOAD_ANIM_MOVE_LEFT;
-    lv_screen_load_anim(s_state.screen, anim, 300, 0, false);
+    // Status-bar entry is instant; settings-menu navigation retains its slide.
+    lv_scr_load_anim_t anim = s_state.config.use_instant_transition
+        ? LV_SCR_LOAD_ANIM_NONE
+        : LV_SCR_LOAD_ANIM_MOVE_LEFT;
+    lv_screen_load_anim(s_state.screen, anim, s_state.config.use_instant_transition ? 0 : 300, 0, false);
     s_state.visible = true;
     
     // Check current connection status
