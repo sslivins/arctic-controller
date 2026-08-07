@@ -422,6 +422,22 @@ jobs:
             echo "Device does not support HTTPS — keeping $ARCTIC_URL"
           fi
 
+      - name: Start controller serial capture
+        run: |
+          python .github/scripts/capture_serial.py \
+            --usb-serial "$CONTROLLER_USB_SERIAL" \
+            --output controller-serial.log &
+          CAPTURE_PID=$!
+          echo "SERIAL_CAPTURE_PID=$CAPTURE_PID" >> "$GITHUB_ENV"
+          sleep 2
+          if ! kill -0 "$CAPTURE_PID" 2>/dev/null; then
+            echo "Serial capture process failed to start"
+            exit 1
+          fi
+          echo "Capturing controller serial output with PID $CAPTURE_PID"
+        env:
+          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
+
       - name: Run device UI tests
         id: ui_tests
         continue-on-error: true
@@ -452,6 +468,23 @@ jobs:
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
           TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
+
+      - name: Stop controller serial capture
+        if: always()
+        run: |
+          if [ -n "${SERIAL_CAPTURE_PID:-}" ] && kill -0 "$SERIAL_CAPTURE_PID" 2>/dev/null; then
+            kill "$SERIAL_CAPTURE_PID"
+            wait "$SERIAL_CAPTURE_PID" || true
+          fi
+
+      - name: Upload controller serial log
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: controller-serial-log
+          path: controller-serial.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Publish UI test results
         uses: dorny/test-reporter@v2
