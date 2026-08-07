@@ -8,6 +8,7 @@
 #include "settings_language_screen.h"
 #include "settings_menu.h"
 #include "settings_common.h"
+#include "nav_bar.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include <esp_log.h>
@@ -256,6 +257,7 @@ static void language_btn_cb(lv_event_t* e)
     if (lang < LANG_COUNT && lang != i18n_get_language()) {
         ESP_LOGI(TAG, "Language selected: %s", i18n_get_language_name(lang));
         i18n_set_language(lang);
+        nav_bar_refresh_labels();
         
         // Update UI in place - just update the visual selection
         update_selection_ui();

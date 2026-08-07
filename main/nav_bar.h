@@ -35,6 +35,9 @@ lv_obj_t* nav_bar_create(lv_obj_t* screen, nav_tab_t active);
 // the tab shell whenever the visible tab changes.
 void nav_bar_set_active(nav_tab_t active);
 
+// Refresh all persistent labels after the application language changes.
+void nav_bar_refresh_labels(void);
+
 #ifdef __cplusplus
 }
 #endif

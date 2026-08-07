@@ -46,6 +46,14 @@ void nav_bar_set_active(nav_tab_t active) {
     }
 }
 
+void nav_bar_refresh_labels(void) {
+    for (int i = 0; i < NAV_TAB_COUNT; i++) {
+        if (s_labels[i]) {
+            lv_label_set_text(s_labels[i], i18n_get(s_tabs[i].str_id));
+        }
+    }
+}
+
 static void nav_btn_cb(lv_event_t* e) {
     nav_tab_t target = (nav_tab_t)(intptr_t)lv_event_get_user_data(e);
     // No screen teardown happens on a tab switch (panels are persistent), so it
