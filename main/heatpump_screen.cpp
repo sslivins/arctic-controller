@@ -9,6 +9,7 @@
 #include "heatpump_errors_screen.h"
 #include "heatpump_errors.h"
 #include "event_log_screen.h"
+#include "nav_bar.h"
 #include "modbus/arctic_heatpump.h"
 #include "modbus/arctic_registers.h"
 #include "app_preferences.h"
@@ -430,23 +431,6 @@ static lv_obj_t* create_expandable_panel(lv_obj_t* parent, const char* title,
     return panel;
 }
 
-static void on_temps_close(void) {
-    // Load saved screen back with fade animation
-    // auto_del=true - LVGL will delete the sub-screen after animation
-    if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
-        state.saved_screen = nullptr;
-    }
-}
-
-static void temps_btn_cb(lv_event_t* e) {
-    // Save current screen
-    state.saved_screen = lv_scr_act();
-    
-    // Show status screen (merged temperatures + system)
-    heatpump_temps_show(on_temps_close);
-}
-
 static void on_errors_close(void) {
     // Load saved screen back with fade animation
     // auto_del=true - LVGL will delete the sub-screen after animation
@@ -463,36 +447,6 @@ static void error_card_cb(lv_event_t* e) {
     
     // Show error details screen
     heatpump_errors_show(on_errors_close);
-}
-
-static void on_control_close(void) {
-    // Load saved screen back with fade animation
-    // auto_del=true - LVGL will delete the sub-screen after animation
-    if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
-        state.saved_screen = nullptr;
-    }
-}
-
-static void controls_btn_cb(lv_event_t* e) {
-    // Save current screen
-    state.saved_screen = lv_scr_act();
-    
-    // Show control screen
-    heatpump_control_show(on_control_close);
-}
-
-static void on_events_close(void) {
-    if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, true);
-        state.saved_screen = nullptr;
-    }
-}
-
-static void events_btn_cb(lv_event_t* e) {
-    (void)e;
-    state.saved_screen = lv_scr_act();
-    event_log_screen_show(on_events_close);
 }
 
 // ============================================================================
@@ -518,13 +472,15 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // Fixed footer height for nav buttons
     static const int FOOTER_H = 84;
     
-    // Main container - scrollable flex column (leaves room for footer)
+    // Main container - scrollable flex column. Fills the tab panel and reserves
+    // room at the bottom for the persistent nav bar (drawn by the tab shell).
     state.container = lv_obj_create(parent);
-    lv_obj_set_size(state.container, 700, 1280 - y_offset - 40 - FOOTER_H);
+    lv_obj_set_size(state.container, 700, LV_PCT(100));
     lv_obj_align(state.container, LV_ALIGN_TOP_MID, 0, y_offset);
     lv_obj_set_style_bg_opa(state.container, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.container, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(state.container, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(state.container, FOOTER_H + 40, LV_PART_MAIN);
     lv_obj_set_flex_flow(state.container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(state.container, 12, LV_PART_MAIN);
     lv_obj_set_flex_align(state.container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -836,70 +792,8 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     create_value_column(energy_row, i18n_get(STR_HP_LABEL_COP), &state.energy_cop_value);
     
     // =========================================================================
-    // FIXED FOOTER: Three button bar - Status | Control | Events
+    // Nav bar is drawn once by the tab shell on the root screen — not here.
     // =========================================================================
-    lv_obj_t* btn_row = lv_obj_create(parent);
-    lv_obj_set_size(btn_row, LV_PCT(100), FOOTER_H);
-    lv_obj_align(btn_row, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_bg_color(btn_row, UI_COLOR_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(btn_row, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(btn_row, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(btn_row, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(btn_row, 10, LV_PART_MAIN);
-
-    state.temps_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(state.temps_btn, 218, 60);
-    lv_obj_set_user_data(state.temps_btn, (void*)"nav_status");
-    lv_obj_set_style_bg_color(state.temps_btn, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(state.temps_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(state.temps_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_border_width(state.temps_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(state.temps_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.temps_btn, temps_btn_cb, LV_EVENT_CLICKED, nullptr);
-    
-    state.temps_btn_label = lv_label_create(state.temps_btn);
-    lv_label_set_text(state.temps_btn_label, i18n_get(STR_HP_BTN_STATUS));
-    lv_obj_set_style_text_font(state.temps_btn_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.temps_btn_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(state.temps_btn_label);
-    
-    state.controls_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(state.controls_btn, 218, 60);
-    lv_obj_set_user_data(state.controls_btn, (void*)"nav_control");
-    lv_obj_set_style_bg_color(state.controls_btn, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(state.controls_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(state.controls_btn, COLOR_SUCCESS, LV_PART_MAIN);
-    lv_obj_set_style_border_width(state.controls_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(state.controls_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.controls_btn, controls_btn_cb, LV_EVENT_CLICKED, nullptr);
-    
-    state.controls_btn_label = lv_label_create(state.controls_btn);
-    lv_label_set_text(state.controls_btn_label, i18n_get(STR_HP_BTN_ADVANCED));
-    lv_obj_set_style_text_font(state.controls_btn_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.controls_btn_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(state.controls_btn_label);
-    
-    state.events_btn = lv_btn_create(btn_row);
-    lv_obj_set_size(state.events_btn, 218, 60);
-    lv_obj_set_user_data(state.events_btn, (void*)"nav_events");
-    lv_obj_set_style_bg_color(state.events_btn, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(state.events_btn, lv_color_hex(0x2a3a5e), LV_STATE_PRESSED);
-    lv_obj_set_style_border_color(state.events_btn, lv_color_hex(0xa78bfa), LV_PART_MAIN);
-    lv_obj_set_style_border_width(state.events_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_radius(state.events_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.events_btn, events_btn_cb, LV_EVENT_CLICKED, nullptr);
-    
-    state.events_btn_label = lv_label_create(state.events_btn);
-    {
-        char events_lbl[48];
-        snprintf(events_lbl, sizeof(events_lbl), "\xEF\x83\xB3 %s", i18n_get(STR_EVENT_LOG));
-        lv_label_set_text(state.events_btn_label, events_lbl);
-    }
-    lv_obj_set_style_text_font(state.events_btn_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.events_btn_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(state.events_btn_label);
 
     state.created = true;
     
@@ -908,6 +802,19 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     
     // Initial update
     heatpump_screen_update();
+}
+
+void heatpump_screen_set_active(bool active) {
+    if (state.update_timer) {
+        if (active) {
+            lv_timer_resume(state.update_timer);
+        } else {
+            lv_timer_pause(state.update_timer);
+        }
+    }
+    if (active) {
+        heatpump_screen_update();
+    }
 }
 
 void heatpump_screen_update(void) {

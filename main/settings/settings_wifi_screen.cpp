@@ -82,6 +82,10 @@ typedef struct {
     lv_obj_t* connected_ip_label;
     lv_obj_t* signal_label;
     lv_obj_t* disconnect_btn;
+
+    // Connecting section (shown briefly while a connection is in progress)
+    lv_obj_t* connecting_section;
+    lv_obj_t* connecting_label;
     
     // Networks section
     lv_obj_t* networks_section;
@@ -101,8 +105,10 @@ typedef struct {
     
     // State
     bool is_connected;
+    bool connecting;
     char connected_ssid[33];
     char connected_ip[16];
+    char connecting_ssid[33];
     char selected_ssid[33];
     bool selected_is_open;
     bool password_visible;
@@ -210,6 +216,7 @@ bool wifi_screen_is_visible(void)
 void wifi_screen_update_connection(bool is_connected, const char* ssid, const char* ip)
 {
     s_state.is_connected = is_connected;
+    s_state.connecting = false;  // A definitive result ends any "connecting" state
     
     if (ssid) {
         strncpy(s_state.connected_ssid, ssid, sizeof(s_state.connected_ssid) - 1);
@@ -226,6 +233,36 @@ void wifi_screen_update_connection(bool is_connected, const char* ssid, const ch
     if (s_state.visible) {
         update_connected_display();
     }
+}
+
+void wifi_screen_show_connecting(const char* ssid)
+{
+    s_state.connecting = true;
+    if (ssid && ssid[0]) {
+        strncpy(s_state.connecting_ssid, ssid, sizeof(s_state.connecting_ssid) - 1);
+        s_state.connecting_ssid[sizeof(s_state.connecting_ssid) - 1] = '\0';
+    } else {
+        s_state.connecting_ssid[0] = '\0';
+    }
+
+    if (!s_state.visible || !s_state.connecting_section) return;
+
+    // Hide the connected card while a new attempt is in progress; the flex
+    // layout then floats the connecting card to the top of the content.
+    if (s_state.connected_section) {
+        lv_obj_add_flag(s_state.connected_section, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    char buf[80];
+    if (s_state.connecting_ssid[0]) {
+        char disp[33];
+        sanitize_ssid_for_display(disp, s_state.connecting_ssid, sizeof(disp));
+        snprintf(buf, sizeof(buf), "%s %s...", i18n_get(STR_WIFI_CONNECTING), disp);
+    } else {
+        snprintf(buf, sizeof(buf), "%s...", i18n_get(STR_WIFI_CONNECTING));
+    }
+    lv_label_set_text(s_state.connecting_label, buf);
+    lv_obj_remove_flag(s_state.connecting_section, LV_OBJ_FLAG_HIDDEN);
 }
 
 void wifi_screen_update_networks(const settings_wifi_network_t* networks, uint8_t count)
@@ -465,6 +502,34 @@ static void create_connected_section(void)
     lv_label_set_text(disc_label, i18n_get(STR_WIFI_DISCONNECT));
     lv_obj_set_style_text_font(disc_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_center(disc_label);
+
+    // === Connecting section (hidden by default) ===
+    // Shown briefly between tapping Connect and the connected card appearing,
+    // so the user gets immediate feedback that something is happening.
+    s_state.connecting_section = lv_obj_create(s_state.content);
+    lv_obj_set_size(s_state.connecting_section, LV_PCT(100), 100);
+    lv_obj_set_style_bg_color(s_state.connecting_section, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_state.connecting_section, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_state.connecting_section, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_state.connecting_section, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(s_state.connecting_section, 20, LV_PART_MAIN);
+    disable_scrolling(s_state.connecting_section);
+    lv_obj_add_flag(s_state.connecting_section, LV_OBJ_FLAG_HIDDEN);
+
+    // Spinner on the left
+    lv_obj_t* spinner = lv_spinner_create(s_state.connecting_section);
+    lv_obj_set_size(spinner, 48, 48);
+    lv_obj_align(spinner, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_spinner_set_anim_params(spinner, 1000, 60);
+    lv_obj_set_style_arc_color(spinner, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(spinner, COLOR_ACCENT, LV_PART_INDICATOR);
+
+    // "Connecting to <ssid>…" label to the right of the spinner
+    s_state.connecting_label = lv_label_create(s_state.connecting_section);
+    lv_label_set_text(s_state.connecting_label, "");
+    lv_obj_set_style_text_font(s_state.connecting_label, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(s_state.connecting_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(s_state.connecting_label, LV_ALIGN_LEFT_MID, 68, 0);
 }
 
 static void create_networks_section(void)
@@ -517,61 +582,14 @@ static void create_password_dialog(void)
     disable_scrolling(s_state.password_dialog);
     lv_obj_add_flag(s_state.password_dialog, LV_OBJ_FLAG_HIDDEN);
     
-    // iOS-style header with X (left) and checkmark (right) - 8% height
-    lv_obj_t* header = lv_obj_create(s_state.password_dialog);
-    lv_obj_set_size(header, LV_PCT(100), LV_PCT(HEADER_HEIGHT_PCT));
-    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(header, COLOR_HEADER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(header, 15, LV_PART_MAIN);
-    disable_scrolling(header);
-    
-    // Cancel button (X) on left with circular background
-    s_state.cancel_btn = lv_btn_create(header);
-    lv_obj_set_size(s_state.cancel_btn, 60, 60);
-    lv_obj_align(s_state.cancel_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_color(s_state.cancel_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_state.cancel_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_state.cancel_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(s_state.cancel_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_state.cancel_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(s_state.cancel_btn, COLOR_ERROR, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(s_state.cancel_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(s_state.cancel_btn, cancel_btn_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_set_user_data(s_state.cancel_btn, (void*)"wifi_cancel_btn");
-    
-    lv_obj_t* cancel_icon = lv_label_create(s_state.cancel_btn);
-    lv_label_set_text(cancel_icon, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(cancel_icon, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(cancel_icon, COLOR_ERROR, LV_PART_MAIN);
-    lv_obj_center(cancel_icon);
-    
-    // Connect button (checkmark) on right with circular background
-    s_state.connect_btn = lv_btn_create(header);
-    lv_obj_set_size(s_state.connect_btn, 60, 60);
-    lv_obj_align(s_state.connect_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(s_state.connect_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(s_state.connect_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(s_state.connect_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(s_state.connect_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_state.connect_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(s_state.connect_btn, COLOR_SUCCESS, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(s_state.connect_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(s_state.connect_btn, connect_btn_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_set_user_data(s_state.connect_btn, (void*)"wifi_connect_btn");
-    
-    lv_obj_t* connect_icon = lv_label_create(s_state.connect_btn);
-    lv_label_set_text(connect_icon, LV_SYMBOL_OK);
-    lv_obj_set_style_text_font(connect_icon, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_style_text_color(connect_icon, COLOR_SUCCESS, LV_PART_MAIN);
-    lv_obj_center(connect_icon);
-    
-    // Content panel with rounded corners - positioned in middle area
-    // Header=8%, Keyboard=25%, gap=2% => middle area is ~65%, center content in that
+    // Cancel/Connect buttons live in a bottom action bar (built after the
+    // keyboard below), mirroring the Control edit dialog. No top header here.
+
+    // Content panel with rounded corners - positioned in the upper area,
+    // above the bottom action bar + keyboard.
     lv_obj_t* content = lv_obj_create(s_state.password_dialog);
     lv_obj_set_size(content, LV_PCT(90), LV_PCT(18));
-    lv_obj_align(content, LV_ALIGN_CENTER, 0, -130);  // Shift up from center
+    lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 40);  // Near the top now that the header is gone
     lv_obj_set_style_bg_color(content, COLOR_CARD, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(content, 20, LV_PART_MAIN);
@@ -632,6 +650,65 @@ static void create_password_dialog(void)
     lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lc, kb_ctrl_lc);
     lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_uc, kb_ctrl_uc);
     lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec);
+
+    // Fix #1: pop the pressed key up above the finger for visual confirmation.
+    // The custom ctrl maps already carry LV_BUTTONMATRIX_CTRL_POPOVER on the
+    // character keys (see KB_BTN in keyboard_maps.c); enabling popovers keeps
+    // those flags instead of stripping them.
+    lv_keyboard_set_popovers(s_state.keyboard, true);
+
+    // Fix #2: bottom action bar (Cancel left / Connect right), mirroring the
+    // Control edit dialog. Sits just above the keyboard.
+    lv_obj_t* action_bar = lv_obj_create(s_state.password_dialog);
+    lv_obj_set_size(action_bar, LV_PCT(100), 110);
+    lv_obj_align_to(action_bar, s_state.keyboard, LV_ALIGN_OUT_TOP_MID, 0, -8);
+    lv_obj_set_style_bg_color(action_bar, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(action_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(action_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(action_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(action_bar, 30, LV_PART_MAIN);
+    disable_scrolling(action_bar);
+
+    // Cancel — ghost/outline, left, quiet.
+    s_state.cancel_btn = lv_btn_create(action_bar);
+    lv_obj_set_size(s_state.cancel_btn, 300, 80);
+    lv_obj_align(s_state.cancel_btn, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_opa(s_state.cancel_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_state.cancel_btn, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(s_state.cancel_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_state.cancel_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(s_state.cancel_btn, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_add_event_cb(s_state.cancel_btn, cancel_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(s_state.cancel_btn, (void*)"wifi_cancel_btn");
+
+    lv_obj_t* cancel_lbl = lv_label_create(s_state.cancel_btn);
+    lv_label_set_text(cancel_lbl, i18n_get(STR_CANCEL));
+    lv_obj_set_style_text_font(cancel_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(cancel_lbl, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(cancel_lbl);
+
+    // Connect — filled accent, right, primary/dominant.
+    s_state.connect_btn = lv_btn_create(action_bar);
+    lv_obj_set_size(s_state.connect_btn, 300, 80);
+    lv_obj_align(s_state.connect_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(s_state.connect_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_state.connect_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_state.connect_btn, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(s_state.connect_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_state.connect_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(s_state.connect_btn, connect_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(s_state.connect_btn, (void*)"wifi_connect_btn");
+
+    lv_obj_t* connect_lbl = lv_label_create(s_state.connect_btn);
+    lv_label_set_text(connect_lbl, i18n_get(STR_WIFI_CONNECT));
+    lv_obj_set_style_text_font(connect_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(connect_lbl, COLOR_BG, LV_PART_MAIN);
+    lv_obj_center(connect_lbl);
+
+    // Keyboard must draw above the action bar so the top-row key popovers
+    // (which render one row above the keyboard, into the bar's space) paint
+    // on top of the bar instead of being clipped behind it.
+    lv_obj_move_foreground(s_state.keyboard);
 }
 
 // ============================================================================
@@ -641,7 +718,13 @@ static void create_password_dialog(void)
 static void update_connected_display(void)
 {
     if (!s_state.connected_section) return;
-    
+
+    // Any definitive connected/disconnected render clears the transient
+    // "connecting" indicator.
+    if (s_state.connecting_section) {
+        lv_obj_add_flag(s_state.connecting_section, LV_OBJ_FLAG_HIDDEN);
+    }
+
     if (s_state.is_connected) {
         // Show connected section
         lv_obj_remove_flag(s_state.connected_section, LV_OBJ_FLAG_HIDDEN);

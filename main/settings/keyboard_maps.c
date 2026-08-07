@@ -8,8 +8,11 @@
 
 #include "lvgl.h"
 
-// Helper macro for button width with popover
-#define KB_BTN(w) (LV_BUTTONMATRIX_CTRL_POPOVER | (w))
+// Helper macro for character keys: pop the key up on press (POPOVER) and don't
+// auto-repeat when held (NO_REPEAT), matching iOS. Control keys (shift, 1#/ABC,
+// backspace, space, arrows) are defined separately below and keep their own
+// behavior — e.g. backspace still repeats when held.
+#define KB_BTN(w) (LV_BUTTONMATRIX_CTRL_POPOVER | LV_BUTTONMATRIX_CTRL_NO_REPEAT | (w))
 
 // Lowercase keyboard - removed LV_SYMBOL_KEYBOARD and LV_SYMBOL_OK from bottom row
 const char* const kb_map_lc[] = {

@@ -44,8 +44,8 @@ def _open_control(device: DeviceClient):
 
 
 def _close_control(device: DeviceClient):
-    """Close the control screen back to main."""
-    device.click(tag="control_close")
+    """Return to the Home (main) tab via the persistent nav bar."""
+    device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0), \
         f"Expected 'main' screen after close, got '{device.screen}'"
 
@@ -86,26 +86,9 @@ class TestControlNavigation:
         _open_control(device)
 
     def test_close_control_screen(self, device: DeviceClient):
-        """Clicking close returns to the main screen."""
+        """Selecting the Home tab returns to the main screen."""
         _open_control(device)
         _close_control(device)
-
-
-# =========================================================================
-# Title
-# =========================================================================
-
-class TestControlTitle:
-    """Verify the title shows 'Control'."""
-
-    def test_title_text(self, device: DeviceClient):
-        """The title should display the Control i18n string."""
-        _open_control(device)
-        title = device.find_widget(tag="control_title")
-        assert title is not None, "Control title widget not found"
-        text = title.text_en or title.text
-        assert "control" in text.lower(), \
-            f"Expected 'Control' in title, got: {text!r}"
 
 
 # =========================================================================

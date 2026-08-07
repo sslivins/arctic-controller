@@ -53,8 +53,8 @@ def _open_system(device: DeviceClient):
 
 
 def _close_system(device: DeviceClient):
-    """Close the Status screen back to main."""
-    device.click(tag="temps_close")
+    """Return to the Home (main) tab via the persistent nav bar."""
+    device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0), \
         f"Expected 'main' screen after close, got '{device.screen}'"
 
@@ -91,16 +91,9 @@ class TestSystemNavigation:
 # =========================================================================
 
 class TestSystemTitle:
-    """Verify the title shows 'Status' (the merged temps+system screen)."""
-
-    def test_title_text(self, device: DeviceClient):
-        """The title should display the Status i18n string."""
-        _open_system(device)
-        title = device.find_widget(tag="temps_title")
-        assert title is not None, "Status title widget not found"
-        text = title.text_en or title.text
-        assert "status" in text.lower(), \
-            f"Expected 'Status' in title, got: {text!r}"
+    """The Status tab has no standalone title in the persistent-nav shell;
+    the nav bar labels the tab. Content is verified by the section-header and
+    reading tests below."""
 
 
 # =========================================================================

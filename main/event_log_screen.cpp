@@ -6,8 +6,10 @@
  */
 
 #include "event_log_screen.h"
+#include "nav_bar.h"
 #include "event_log.h"
 #include "heatpump_errors.h"
+#include "time_manager.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "i18n/i18n.h"
@@ -41,6 +43,9 @@ static struct {
     lv_obj_t* content = nullptr;
     lv_obj_t* count_label = nullptr;
     int last_count = -1;    // Force rebuild on first update
+    int displayed = 0;      // Rows currently rendered (for lazy "load more")
+    lv_obj_t* footer = nullptr;    // Dim "loading older events" footer / scroll anchor
+    bool loading = false;   // Re-entrancy guard while appending a batch
 } state;
 
 // ============================================================================
@@ -201,7 +206,9 @@ static void format_event_time(char* buf, size_t buf_size, const event_entry_t* e
         time_t t = (time_t)evt->timestamp;
         struct tm tm;
         localtime_r(&t, &tm);
-        snprintf(buf, buf_size, "%02d:%02d:%02d", tm.tm_hour, tm.tm_min, tm.tm_sec);
+        // Respect the user's 12/24-hour preference (Settings → Time).
+        const char* fmt = time_mgr_get_24h_format() ? "%H:%M:%S" : "%I:%M:%S %p";
+        strftime(buf, buf_size, fmt, &tm);
     } else {
         // Use uptime
         uint32_t sec = evt->uptime_ms / 1000;
@@ -218,16 +225,157 @@ static void clear_btn_cb(lv_event_t* e);
 // Build / Rebuild Event List
 // ============================================================================
 
-// Limit displayed events — rendering 128 rows (each ~6 widgets) inside a flex
-// container triggers O(n²) layout recalculation, which can take 10+ seconds and
-// cause HTTP timeouts when the click handler holds the display lock.
-static const int MAX_DISPLAYED_EVENTS = 50;
+// Rows are rendered lazily in batches. Rendering all 128 rows at once inside a
+// flex container triggers O(n²) layout recalculation (10+ seconds, HTTP
+// timeouts while the click handler holds the display lock). Instead we render
+// EVENT_BATCH_SIZE rows up front and append more as the user scrolls (infinite
+// scroll), keeping each layout pass small.
+static const int EVENT_BATCH_SIZE = 10;  // rows per lazy-load batch (infinite scroll)
+// Start loading the next batch when the user scrolls within this many px of the bottom.
+static const int32_t EVENT_SCROLL_THRESHOLD_PX = 300;
+
+// Build a single event row (card) into the given flex-column parent.
+static void create_event_row(lv_obj_t* parent, const event_entry_t* evt) {
+    char detail_buf[128];
+    char time_buf[32];
+
+    // Row container - flex column layout like error cards
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(row, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(row, 15, LV_PART_MAIN);
+    lv_obj_set_layout(row, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(row, 6, LV_PART_MAIN);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Top row: event name + timestamp
+    lv_obj_t* top_row = lv_obj_create(row);
+    lv_obj_set_size(top_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(top_row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(top_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(top_row, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(top_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Color indicator bar on left
+    lv_color_t evt_color = event_type_color(evt->type);
+    lv_obj_t* indicator = lv_obj_create(top_row);
+    lv_obj_set_size(indicator, 4, LV_PCT(100));
+    lv_obj_align(indicator, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_color(indicator, evt_color, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(indicator, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(indicator, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(indicator, 2, LV_PART_MAIN);
+    lv_obj_clear_flag(indicator, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Event type icon + name
+    char name_buf[96];
+    snprintf(name_buf, sizeof(name_buf), "%s  %s", event_type_icon(evt->type), i18n_get(event_type_to_str_id(evt->type)));
+    lv_obj_t* name_lbl = lv_label_create(top_row);
+    lv_label_set_text(name_lbl, name_buf);
+    lv_obj_set_style_text_font(name_lbl, &montserrat_32_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_color(name_lbl, evt_color, LV_PART_MAIN);
+    lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 16, 0);
+
+    // Timestamp on the right
+    format_event_time(time_buf, sizeof(time_buf), evt);
+    lv_obj_t* time_lbl = lv_label_create(top_row);
+    lv_label_set_text(time_lbl, time_buf);
+    lv_obj_set_style_text_font(time_lbl, &montserrat_24_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_color(time_lbl, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_align(time_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    // Detail text (mode change, setpoint, error description)
+    format_event_detail(detail_buf, sizeof(detail_buf), evt);
+    if (detail_buf[0] != '\0') {
+        lv_obj_t* detail_lbl = lv_label_create(row);
+        lv_label_set_text(detail_lbl, detail_buf);
+        lv_label_set_long_mode(detail_lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(detail_lbl, LV_PCT(100));
+        lv_obj_set_style_text_font(detail_lbl, &montserrat_24_latin, LV_PART_MAIN);
+        lv_obj_set_style_text_color(detail_lbl, COLOR_TEXT_DIM, LV_PART_MAIN);
+    }
+}
+
+// Create / update / remove the dim footer that indicates more events will load.
+static void update_footer(int remaining) {
+    if (remaining <= 0) {
+        if (state.footer) {
+            lv_obj_del(state.footer);
+            state.footer = nullptr;
+        }
+        return;
+    }
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%s (%d)", i18n_get(STR_EVENT_SHOW_OLDER), remaining);
+
+    if (!state.footer) {
+        state.footer = lv_label_create(state.content);
+        lv_obj_set_width(state.footer, LV_PCT(100));
+        lv_obj_set_style_text_align(state.footer, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+        lv_obj_set_style_text_color(state.footer, COLOR_TEXT_DIM, LV_PART_MAIN);
+        lv_obj_set_style_text_font(state.footer, &montserrat_24_latin, LV_PART_MAIN);
+        lv_obj_set_style_pad_ver(state.footer, 12, LV_PART_MAIN);
+        lv_obj_set_user_data(state.footer, (void*)"event_log_more");
+    }
+    // Keep the footer as the last child so it stays at the bottom of the list.
+    lv_obj_move_to_index(state.footer, lv_obj_get_child_count(state.content) - 1);
+    lv_label_set_text(state.footer, buf);
+}
+
+// Append the next batch of older events (used by the infinite-scroll handler).
+static void append_next_batch() {
+    if (!state.content || state.loading) return;
+
+    int count = event_log_count();
+    int to_fetch = count - state.displayed;
+    if (to_fetch > EVENT_BATCH_SIZE) to_fetch = EVENT_BATCH_SIZE;
+    if (to_fetch <= 0) {
+        update_footer(0);
+        return;
+    }
+
+    state.loading = true;
+
+    event_entry_t events[EVENT_BATCH_SIZE];
+    int got = event_log_get(events, to_fetch, state.displayed);
+
+    // Batch-render with layout suspended to avoid O(n²) recalc thrash.
+    int32_t scroll_y = lv_obj_get_scroll_y(state.content);
+    lv_obj_add_flag(state.content, LV_OBJ_FLAG_HIDDEN);
+    for (int i = 0; i < got; i++) {
+        create_event_row(state.content, &events[i]);
+    }
+    state.displayed += got;
+    update_footer(count - state.displayed);
+    lv_obj_clear_flag(state.content, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(state.content);
+    lv_obj_scroll_to_y(state.content, scroll_y, LV_ANIM_OFF);
+
+    state.loading = false;
+}
+
+// Infinite scroll: load the next batch when the user nears the bottom.
+static void content_scroll_cb(lv_event_t* e) {
+    (void)e;
+    if (!state.content || state.loading) return;
+    if (state.displayed >= event_log_count()) return;
+    if (lv_obj_get_scroll_bottom(state.content) <= EVENT_SCROLL_THRESHOLD_PX) {
+        append_next_batch();
+    }
+}
 
 static void rebuild_event_list() {
     if (!state.content) return;
     
     // Remove all children from content
     lv_obj_clean(state.content);
+    state.footer = nullptr;   // destroyed by lv_obj_clean above
+    state.loading = false;
+    state.displayed = 0;
 
     // Disable scrolling/layout during batch creation to avoid O(n²) recalc
     lv_obj_add_flag(state.content, LV_OBJ_FLAG_HIDDEN);
@@ -288,94 +436,38 @@ static void rebuild_event_list() {
         return;
     }
     
-    // Get events (newest first), capped for display performance
-    event_entry_t events[MAX_DISPLAYED_EVENTS];
-    int got = event_log_get(events, MAX_DISPLAYED_EVENTS, 0);
-    
-    char detail_buf[128];
-    char time_buf[32];
-    
+    // Reset lazy-load state; the footer will be recreated below if needed.
+    state.footer = nullptr;
+    state.loading = false;
+    state.displayed = 0;
+
+    // Render the first batch only; older events load on scroll (infinite scroll).
+    int first_batch = count < EVENT_BATCH_SIZE ? count : EVENT_BATCH_SIZE;
+    event_entry_t events[EVENT_BATCH_SIZE];
+    int got = event_log_get(events, first_batch, 0);
+
     for (int i = 0; i < got; i++) {
-        const event_entry_t* evt = &events[i];
-        
-        // Row container - flex column layout like error cards
-        lv_obj_t* row = lv_obj_create(state.content);
-        lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-        lv_obj_set_style_bg_color(row, COLOR_CARD_BG, LV_PART_MAIN);
-        lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
-        lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(row, 15, LV_PART_MAIN);
-        lv_obj_set_layout(row, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_row(row, 6, LV_PART_MAIN);
-        lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-        
-        // Top row: event name + timestamp
-        lv_obj_t* top_row = lv_obj_create(row);
-        lv_obj_set_size(top_row, LV_PCT(100), LV_SIZE_CONTENT);
-        lv_obj_set_style_bg_opa(top_row, LV_OPA_TRANSP, LV_PART_MAIN);
-        lv_obj_set_style_border_width(top_row, 0, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(top_row, 0, LV_PART_MAIN);
-        lv_obj_clear_flag(top_row, LV_OBJ_FLAG_SCROLLABLE);
-        
-        // Color indicator bar on left
-        lv_color_t evt_color = event_type_color(evt->type);
-        lv_obj_t* indicator = lv_obj_create(top_row);
-        lv_obj_set_size(indicator, 4, LV_PCT(100));
-        lv_obj_align(indicator, LV_ALIGN_LEFT_MID, 0, 0);
-        lv_obj_set_style_bg_color(indicator, evt_color, LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(indicator, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_border_width(indicator, 0, LV_PART_MAIN);
-        lv_obj_set_style_radius(indicator, 2, LV_PART_MAIN);
-        lv_obj_clear_flag(indicator, LV_OBJ_FLAG_SCROLLABLE);
-        
-        // Event type icon + name
-        char name_buf[96];
-        snprintf(name_buf, sizeof(name_buf), "%s  %s", event_type_icon(evt->type), i18n_get(event_type_to_str_id(evt->type)));
-        lv_obj_t* name_lbl = lv_label_create(top_row);
-        lv_label_set_text(name_lbl, name_buf);
-        lv_obj_set_style_text_font(name_lbl, &montserrat_32_latin, LV_PART_MAIN);
-        lv_obj_set_style_text_color(name_lbl, evt_color, LV_PART_MAIN);
-        lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 16, 0);
-        
-        // Timestamp on the right
-        format_event_time(time_buf, sizeof(time_buf), evt);
-        lv_obj_t* time_lbl = lv_label_create(top_row);
-        lv_label_set_text(time_lbl, time_buf);
-        lv_obj_set_style_text_font(time_lbl, &montserrat_24_latin, LV_PART_MAIN);
-        lv_obj_set_style_text_color(time_lbl, COLOR_TEXT_DIM, LV_PART_MAIN);
-        lv_obj_align(time_lbl, LV_ALIGN_RIGHT_MID, 0, 0);
-        
-        // Detail text (mode change, setpoint, error description)
-        format_event_detail(detail_buf, sizeof(detail_buf), evt);
-        if (detail_buf[0] != '\0') {
-            lv_obj_t* detail_lbl = lv_label_create(row);
-            lv_label_set_text(detail_lbl, detail_buf);
-            lv_label_set_long_mode(detail_lbl, LV_LABEL_LONG_WRAP);
-            lv_obj_set_width(detail_lbl, LV_PCT(100));
-            lv_obj_set_style_text_font(detail_lbl, &montserrat_24_latin, LV_PART_MAIN);
-            lv_obj_set_style_text_color(detail_lbl, COLOR_TEXT_DIM, LV_PART_MAIN);
-        }
+        create_event_row(state.content, &events[i]);
     }
-    
-    // Show a "... and N more" footer if events were truncated
-    if (count > MAX_DISPLAYED_EVENTS) {
-        lv_obj_t* more_label = lv_label_create(state.content);
-        char more_buf[64];
-        snprintf(more_buf, sizeof(more_buf), "... +%d older events", count - MAX_DISPLAYED_EVENTS);
-        lv_label_set_text(more_label, more_buf);
-        lv_obj_set_style_text_color(more_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-        lv_obj_set_style_text_font(more_label, &montserrat_24_latin, LV_PART_MAIN);
-        lv_obj_set_width(more_label, LV_PCT(100));
-        lv_obj_set_style_text_align(more_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-        lv_obj_set_style_pad_top(more_label, 10, LV_PART_MAIN);
-    }
+    state.displayed = got;
+
+    // Dim footer hints at the remaining (up to 128) older events that load on scroll.
+    update_footer(count - state.displayed);
 
     // Re-enable visibility and force layout calculation once
     lv_obj_clear_flag(state.content, LV_OBJ_FLAG_HIDDEN);
     lv_obj_update_layout(state.content);
 
     state.last_count = count;
+
+    // Guarantee the list overflows the viewport; otherwise there is nothing to
+    // scroll and infinite scroll could never trigger. Append until scrollable.
+    int guard = 0;
+    while (state.displayed < count &&
+           lv_obj_get_scroll_bottom(state.content) <= 0 &&
+           guard++ < 20) {
+        append_next_batch();
+    }
 }
 
 // ============================================================================
@@ -412,6 +504,9 @@ static void back_btn_cb(lv_event_t* e) {
     state.content = nullptr;
     state.count_label = nullptr;
     state.last_count = -1;
+    state.footer = nullptr;
+    state.loading = false;
+    state.displayed = 0;
     
     // Call callback - it will load the previous screen with auto_del=true
     if (cb) {
@@ -430,70 +525,31 @@ static void clear_btn_cb(lv_event_t* e) {
 // Public Functions
 // ============================================================================
 
-void event_log_screen_show(event_log_screen_close_cb_t on_close) {
+void event_log_screen_create_in(lv_obj_t* parent) {
     if (state.shown) {
         return;
     }
-    
-    ESP_LOGI(TAG, "Showing event log screen");
-    state.on_close = on_close;
-    
-    // Create screen
-    state.screen = lv_obj_create(NULL);
-    lv_obj_set_size(state.screen, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(state.screen, COLOR_BG, LV_PART_MAIN);
-    lv_obj_clear_flag(state.screen, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Header (8% height)
-    lv_obj_t* header = lv_obj_create(state.screen);
-    lv_obj_set_size(header, LV_PCT(100), LV_PCT(8));
-    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(header, COLOR_HEADER_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(header, 15, LV_PART_MAIN);
-    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Close button (X on right) with circular background
-    lv_obj_t* back_btn = lv_btn_create(header);
-    lv_obj_set_size(back_btn, 50, 50);
-    lv_obj_align(back_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(back_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_set_user_data(back_btn, (void*)"event_log_close");
-    
-    lv_obj_t* back_icon = lv_label_create(back_btn);
-    lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(back_icon, &montserrat_32_latin, LV_PART_MAIN);
-    lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_center(back_icon);
-    
-    // Title
-    state.count_label = lv_label_create(header);
-    char title_buf[64];
-    snprintf(title_buf, sizeof(title_buf), "%s (%d)", i18n_get(STR_EVENT_LOG), event_log_count());
-    lv_label_set_text(state.count_label, title_buf);
-    lv_obj_set_style_text_color(state.count_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_set_style_text_font(state.count_label, UI_FONT_HEADER, LV_PART_MAIN);
-    lv_obj_align(state.count_label, LV_ALIGN_LEFT_MID, 10, 0);
-    lv_obj_set_user_data(state.count_label, (void*)"event_log_title");
-    
-    // Scrollable content
+
+    ESP_LOGI(TAG, "Building event log tab");
+    state.on_close = nullptr;
+
+    // The panel provided by the tab shell is our root; build directly into it.
+    state.screen = parent;
+    state.count_label = nullptr;  // no per-tab title header in the tab shell
+
+    // Scrollable content fills the panel; reserve room for the persistent nav
+    // bar (drawn by the tab shell) at the bottom.
     state.content = lv_obj_create(state.screen);
-    lv_obj_set_size(state.content, LV_PCT(100), LV_PCT(92));
-    lv_obj_align(state.content, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_size(state.content, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(state.content, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(state.content, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(state.content, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(state.content, 15, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(state.content, NAV_BAR_H + 15, LV_PART_MAIN);
     lv_obj_set_flex_flow(state.content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(state.content, 8, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(state.content, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_add_event_cb(state.content, content_scroll_cb, LV_EVENT_SCROLL, nullptr);
     
     state.shown = true;
     state.last_count = -1;  // Force initial build
@@ -503,9 +559,20 @@ void event_log_screen_show(event_log_screen_close_cb_t on_close) {
     
     // Update timer (check for new events every 2 seconds)
     state.update_timer = lv_timer_create(update_timer_cb, 2000, nullptr);
-    
-    // Load with fade animation
-    lv_screen_load_anim(state.screen, LV_SCR_LOAD_ANIM_FADE_IN, 300, 0, false);
+}
+
+void event_log_screen_set_active(bool active) {
+    if (state.update_timer) {
+        if (active) {
+            lv_timer_resume(state.update_timer);
+        } else {
+            lv_timer_pause(state.update_timer);
+        }
+    }
+    if (active) {
+        state.last_count = -1;   // force a fresh rebuild on activation
+        rebuild_event_list();
+    }
 }
 
 void event_log_screen_hide(void) {
@@ -528,6 +595,9 @@ void event_log_screen_hide(void) {
     state.content = nullptr;
     state.count_label = nullptr;
     state.last_count = -1;
+    state.footer = nullptr;
+    state.loading = false;
+    state.displayed = 0;
     
     // Call callback to restore previous screen
     if (cb) {

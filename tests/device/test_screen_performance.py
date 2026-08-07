@@ -74,21 +74,21 @@ class TestNavScreenPerformance:
         result = device.click(tag="nav_status")
         _assert_under_budget(result, "status")
         device.wait_for_screen("status", timeout=3.0)
-        device.click(tag="temps_close")
+        device.click(tag="nav_home")
 
     def test_control_screen_render(self, device: DeviceClient):
         """Control screen opens within budget."""
         result = device.click(tag="nav_control")
         _assert_under_budget(result, "control")
         device.wait_for_screen("control", timeout=3.0)
-        device.click(tag="control_close")
+        device.click(tag="nav_home")
 
     def test_event_log_screen_render(self, device: DeviceClient):
         """Event log screen opens within budget (minimal events)."""
         result = device.click(tag="nav_events")
         _assert_under_budget(result, "event_log")
         device.wait_for_screen("event_log", timeout=3.0)
-        device.click(tag="event_log_close")
+        device.click(tag="nav_home")
 
     def test_errors_screen_render(self, device: DeviceClient):
         """Errors screen opens within budget (no active errors)."""
@@ -129,7 +129,7 @@ class TestHeavyStatePerformance:
         result = device.click(tag="nav_events")
         us = _assert_under_budget(result, "event_log_full")
         device.wait_for_screen("event_log", timeout=3.0)
-        device.click(tag="event_log_close")
+        device.click(tag="nav_home")
 
     def test_errors_screen_many_errors(self, device: DeviceClient):
         """Errors screen with multiple active errors stays within budget."""
@@ -191,7 +191,7 @@ class TestRepeatedTransitionPerformance:
             us = _render_us(result)
             times_us.append(us)
             device.wait_for_screen("event_log", timeout=3.0)
-            device.click(tag="event_log_close")
+            device.click(tag="nav_home")
             device.wait_for_screen("main", timeout=3.0)
 
         # Report all iteration times
@@ -224,7 +224,7 @@ class TestRepeatedTransitionPerformance:
             us = _render_us(result)
             times_us.append(us)
             device.wait_for_screen("status", timeout=3.0)
-            device.click(tag="temps_close")
+            device.click(tag="nav_home")
             device.wait_for_screen("main", timeout=3.0)
 
         # Report all iteration times

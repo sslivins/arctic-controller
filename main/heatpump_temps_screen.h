@@ -18,15 +18,23 @@ extern "C" {
 typedef void (*heatpump_temps_close_cb_t)(void);
 
 /**
- * @brief Show the temperatures detail screen
- * @param on_close Callback when screen is closed
+ * @brief Build the temperatures (Status) tab content into the given panel.
+ *        Used by the tab shell; the panel is persistent (never torn down on
+ *        navigation).
+ * @param parent The tab panel to build into.
  */
-void heatpump_temps_show(heatpump_temps_close_cb_t on_close);
+void heatpump_temps_create_in(lv_obj_t* parent);
 
 /**
  * @brief Hide/close the temperatures screen
  */
 void heatpump_temps_hide(void);
+
+/**
+ * @brief Pause/resume the update timer (tab shell drives this so only the
+ *        visible tab polls). Refreshes immediately when activated.
+ */
+void heatpump_temps_set_active(bool active);
 
 /**
  * @brief Check if temperatures screen is visible

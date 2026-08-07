@@ -75,6 +75,9 @@ idf_component_register(
         "heatpump_temps_screen.cpp"
         "heatpump_params_screen.cpp"
         "heatpump_errors_screen.cpp"
+        "nav_bar.cpp"
+        "tab_shell.cpp"
+        "lv_mem_psram.c"
         "test_endpoints.cpp"
         "tls_manager.cpp"
         "png_encoder.c"
@@ -121,3 +124,12 @@ add_custom_command(
 )
 add_custom_target(web_assets DEPENDS "${WEB_GZ}")
 add_dependencies(${COMPONENT_LIB} web_assets)
+
+# LVGL (a separate archive, liblvgl.a) references lv_malloc_core / lv_free_core /
+# etc., which we provide from lv_mem_psram.c here in libmain.a. Because libmain
+# is placed before liblvgl on the link line, the linker discards our object
+# before it sees the references and fails with "undefined reference". Forcing
+# the linker to keep lv_malloc_core pulls the whole lv_mem_psram.c object in
+# early, so all of the lv_*_core symbols are defined for LVGL.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_malloc_core")
+

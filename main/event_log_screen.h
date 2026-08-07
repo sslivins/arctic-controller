@@ -18,15 +18,22 @@ extern "C" {
 typedef void (*event_log_screen_close_cb_t)(void);
 
 /**
- * @brief Show the event log screen
- * @param on_close Callback when screen is closed
+ * @brief Build the event log (Events) tab content into the given panel.
+ *        Used by the tab shell; the panel is persistent.
+ * @param parent The tab panel to build into.
  */
-void event_log_screen_show(event_log_screen_close_cb_t on_close);
+void event_log_screen_create_in(lv_obj_t* parent);
 
 /**
  * @brief Hide/close the event log screen
  */
 void event_log_screen_hide(void);
+
+/**
+ * @brief Pause/resume the update timer (tab shell drives this so only the
+ *        visible tab polls). Rebuilds the list when activated.
+ */
+void event_log_screen_set_active(bool active);
 
 /**
  * @brief Check if event log screen is visible
