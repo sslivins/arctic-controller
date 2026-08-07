@@ -23,6 +23,8 @@ static const char* TAG = "hp_errors_scr";
 // to keep render time within budget.  Additional errors are summarised in
 // a "+ N more" footer label.
 static constexpr int MAX_DISPLAYED_ERRORS = 16;
+static constexpr int ERROR_LOAD_BATCH_SIZE = 4;
+static constexpr int ERROR_LOAD_INTERVAL_MS = 50;
 
 // ============================================================================
 // Colors
@@ -50,6 +52,20 @@ static struct {
     // Error list container
     lv_obj_t* error_list = nullptr;
     lv_obj_t* no_errors_label = nullptr;
+    lv_timer_t* load_timer = nullptr;
+
+    // Stable snapshots used while progressively appending cards.
+    arctic::ActiveError active_errors[32] = {};
+    int active_count = 0;
+    int active_displayed = 0;
+    int active_omitted = 0;
+    bool active_summary_created = false;
+    arctic::ErrorHistoryEntry cleared_history[arctic::ERROR_HISTORY_SIZE] = {};
+    int history_count = 0;
+    int history_displayed = 0;
+    int history_omitted = 0;
+    bool history_header_created = false;
+    bool history_summary_created = false;
     
     // Track previous error state to detect changes
     uint16_t prev_error1 = 0;
@@ -271,8 +287,166 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* text) {
     return label;
 }
 
+static void stop_load_timer() {
+    if (state.load_timer) {
+        lv_timer_del(state.load_timer);
+        state.load_timer = nullptr;
+    }
+}
+
+static void create_history_header() {
+    if (state.history_header_created || state.history_count <= 0) return;
+
+    lv_obj_t* hist_row = lv_obj_create(state.error_list);
+    lv_obj_set_size(hist_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(hist_row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(hist_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(hist_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(hist_row, 10, LV_PART_MAIN);
+    lv_obj_clear_flag(hist_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* hist_label = lv_label_create(hist_row);
+    lv_label_set_text(hist_label, i18n_get(STR_HP_ERROR_HISTORY));
+    lv_obj_set_style_text_font(hist_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(hist_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_align(hist_label, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t* clear_btn = lv_btn_create(hist_row);
+    lv_obj_set_size(clear_btn, LV_SIZE_CONTENT, 55);
+    lv_obj_set_style_min_width(clear_btn, 100, LV_PART_MAIN);
+    lv_obj_align(clear_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(clear_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(clear_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(clear_btn, 8, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(clear_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(clear_btn, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(clear_btn, COLOR_WARNING, LV_PART_MAIN);
+    lv_obj_set_style_border_opa(clear_btn, LV_OPA_50, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(clear_btn, 25, LV_PART_MAIN);
+    lv_obj_add_event_cb(clear_btn, clear_history_btn_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_user_data(clear_btn, (void*)"errors_clear");
+
+    lv_obj_t* clear_lbl = lv_label_create(clear_btn);
+    lv_label_set_text(clear_lbl, i18n_get(STR_HP_CLEAR_HISTORY));
+    lv_obj_set_style_text_font(clear_lbl, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(clear_lbl, COLOR_WARNING, LV_PART_MAIN);
+    lv_obj_center(clear_lbl);
+
+    state.history_header_created = true;
+}
+
+static void create_history_card(const arctic::ErrorHistoryEntry* entry) {
+    arctic::ActiveError hist_err = {};
+    hist_err.code = entry->code;
+    hist_err.name = "";
+    hist_err.description = "";
+    hist_err.resolution = nullptr;
+    hist_err.severity = arctic::ErrorSeverity::INFO;
+    hist_err.active = false;
+    hist_err.first_seen = entry->occurred;
+    hist_err.last_seen = entry->cleared;
+
+    int def_count;
+    const arctic::ErrorDef* defs = arctic::getError1Definitions(&def_count);
+    for (int d = 0; d < def_count; d++) {
+        if (strcmp(defs[d].code, entry->code) == 0) {
+            hist_err.description = defs[d].description;
+            hist_err.resolution = defs[d].resolution;
+            hist_err.severity = defs[d].severity;
+            break;
+        }
+    }
+    if (hist_err.description[0] == '\0') {
+        defs = arctic::getError2Definitions(&def_count);
+        for (int d = 0; d < def_count; d++) {
+            if (strcmp(defs[d].code, entry->code) == 0) {
+                hist_err.description = defs[d].description;
+                hist_err.resolution = defs[d].resolution;
+                hist_err.severity = defs[d].severity;
+                break;
+            }
+        }
+    }
+
+    create_error_card(state.error_list, &hist_err);
+}
+
+static void create_summary_label(const char* text) {
+    lv_obj_t* label = lv_label_create(state.error_list);
+    lv_label_set_text(label, text);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_font(label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(label, 10, LV_PART_MAIN);
+}
+
+static bool append_error_batch() {
+    if (!state.error_list) return false;
+
+    int added = 0;
+    while (added < ERROR_LOAD_BATCH_SIZE &&
+           state.active_displayed < state.active_count) {
+        create_error_card(state.error_list,
+                          &state.active_errors[state.active_displayed++]);
+        added++;
+    }
+
+    if (state.active_displayed >= state.active_count &&
+        state.active_omitted > 0 && !state.active_summary_created) {
+        char more_buf[64];
+        snprintf(more_buf, sizeof(more_buf), "… +%d more active errors",
+                 state.active_omitted);
+        create_summary_label(more_buf);
+        state.active_summary_created = true;
+    }
+
+    if (state.active_displayed >= state.active_count && state.history_count > 0) {
+        create_history_header();
+    }
+
+    while (added < ERROR_LOAD_BATCH_SIZE &&
+           state.history_displayed < state.history_count) {
+        create_history_card(&state.cleared_history[state.history_displayed++]);
+        added++;
+    }
+
+    if (state.history_displayed >= state.history_count &&
+        state.history_omitted > 0 && !state.history_summary_created) {
+        char more_buf[64];
+        snprintf(more_buf, sizeof(more_buf), "… +%d older cleared errors",
+                 state.history_omitted);
+        create_summary_label(more_buf);
+        state.history_summary_created = true;
+    }
+
+    return state.active_displayed < state.active_count ||
+           state.history_displayed < state.history_count;
+}
+
+static void error_load_timer_cb(lv_timer_t* timer) {
+    (void)timer;
+    if (!state.error_list) {
+        stop_load_timer();
+        return;
+    }
+
+    int32_t scroll_y = lv_obj_get_scroll_y(state.error_list);
+    lv_obj_add_flag(state.error_list, LV_OBJ_FLAG_HIDDEN);
+    bool more = append_error_batch();
+    lv_obj_clear_flag(state.error_list, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(state.error_list);
+    lv_obj_scroll_to_y(state.error_list, scroll_y, LV_ANIM_OFF);
+
+    if (!more) {
+        stop_load_timer();
+    }
+}
+
 static void update_error_list() {
     if (!state.error_list) return;
+
+    stop_load_timer();
     
     // Hide during batch widget creation to avoid O(n²) flex layout recalculation
     lv_obj_add_flag(state.error_list, LV_OBJ_FLAG_HIDDEN);
@@ -281,8 +455,17 @@ static void update_error_list() {
     lv_obj_clean(state.error_list);
     
     // Get active errors and connection state
-    arctic::ActiveError errors[32];
-    int count = arctic::getActiveErrors(errors, 32);
+    int total_active = arctic::getActiveErrors(state.active_errors, 32);
+    state.active_count = total_active < MAX_DISPLAYED_ERRORS
+        ? total_active : MAX_DISPLAYED_ERRORS;
+    state.active_displayed = 0;
+    state.active_omitted = total_active - state.active_count;
+    state.active_summary_created = false;
+    state.history_count = 0;
+    state.history_displayed = 0;
+    state.history_omitted = 0;
+    state.history_header_created = false;
+    state.history_summary_created = false;
     arctic::HeatPumpState hp = arctic::getState();
     
     // Check demo mode
@@ -310,7 +493,7 @@ static void update_error_list() {
         return;
     }
     
-    if (count == 0) {
+    if (state.active_count == 0) {
         // Active errors section header
         create_section_header(state.error_list, i18n_get(STR_HP_ACTIVE_ERRORS));
         
@@ -336,134 +519,31 @@ static void update_error_list() {
     } else {
         // Active errors section header
         create_section_header(state.error_list, i18n_get(STR_HP_ACTIVE_ERRORS));
-        
-        // Create a card for each error (capped for render performance)
-        int display_count = count < MAX_DISPLAYED_ERRORS ? count : MAX_DISPLAYED_ERRORS;
-        for (int i = 0; i < display_count; i++) {
-            create_error_card(state.error_list, &errors[i]);
-        }
-        if (count > display_count) {
-            char more_buf[64];
-            snprintf(more_buf, sizeof(more_buf), "… +%d more active errors", count - display_count);
-            lv_obj_t* more_label = lv_label_create(state.error_list);
-            lv_label_set_text(more_label, more_buf);
-            lv_obj_set_width(more_label, LV_PCT(100));
-            lv_obj_set_style_text_font(more_label, UI_FONT_BODY, LV_PART_MAIN);
-            lv_obj_set_style_text_color(more_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-            lv_obj_set_style_text_align(more_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-            lv_obj_set_style_pad_top(more_label, 10, LV_PART_MAIN);
-        }
     }
     
-    // Show error history (cleared errors from ring buffer)
-    {
-        arctic::ErrorHistoryEntry history[arctic::ERROR_HISTORY_SIZE];
-        int hist_count = arctic::getErrorHistory(history, arctic::ERROR_HISTORY_SIZE);
-        
-        // Filter to only cleared (non-active) entries
-        int cleared_count = 0;
-        for (int i = 0; i < hist_count; i++) {
-            if (!history[i].is_active) cleared_count++;
-        }
-        
-        if (cleared_count > 0) {
-            // History section header row: label + clear button
-            lv_obj_t* hist_row = lv_obj_create(state.error_list);
-            lv_obj_set_size(hist_row, LV_PCT(100), LV_SIZE_CONTENT);
-            lv_obj_set_style_bg_opa(hist_row, LV_OPA_TRANSP, LV_PART_MAIN);
-            lv_obj_set_style_border_width(hist_row, 0, LV_PART_MAIN);
-            lv_obj_set_style_pad_all(hist_row, 0, LV_PART_MAIN);
-            lv_obj_set_style_pad_top(hist_row, 10, LV_PART_MAIN);
-            lv_obj_clear_flag(hist_row, LV_OBJ_FLAG_SCROLLABLE);
-            
-            lv_obj_t* hist_label = lv_label_create(hist_row);
-            lv_label_set_text(hist_label, i18n_get(STR_HP_ERROR_HISTORY));
-            lv_obj_set_style_text_font(hist_label, UI_FONT_BODY, LV_PART_MAIN);
-            lv_obj_set_style_text_color(hist_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-            lv_obj_align(hist_label, LV_ALIGN_LEFT_MID, 0, 0);
-            
-            // Clear button (right side of history header)
-            lv_obj_t* clear_btn = lv_btn_create(hist_row);
-            lv_obj_set_size(clear_btn, LV_SIZE_CONTENT, 55);
-            lv_obj_set_style_min_width(clear_btn, 100, LV_PART_MAIN);
-            lv_obj_align(clear_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-            lv_obj_set_style_bg_color(clear_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(clear_btn, LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_radius(clear_btn, 8, LV_PART_MAIN);
-            lv_obj_set_style_shadow_width(clear_btn, 0, LV_PART_MAIN);
-            lv_obj_set_style_border_width(clear_btn, 1, LV_PART_MAIN);
-            lv_obj_set_style_border_color(clear_btn, COLOR_WARNING, LV_PART_MAIN);
-            lv_obj_set_style_border_opa(clear_btn, LV_OPA_50, LV_PART_MAIN);
-            lv_obj_set_style_pad_hor(clear_btn, 25, LV_PART_MAIN);
-            lv_obj_add_event_cb(clear_btn, clear_history_btn_cb, LV_EVENT_CLICKED, nullptr);
-            lv_obj_set_user_data(clear_btn, (void*)"errors_clear");
-            
-            lv_obj_t* clear_lbl = lv_label_create(clear_btn);
-            lv_label_set_text(clear_lbl, i18n_get(STR_HP_CLEAR_HISTORY));
-            lv_obj_set_style_text_font(clear_lbl, UI_FONT_BODY, LV_PART_MAIN);
-            lv_obj_set_style_text_color(clear_lbl, COLOR_WARNING, LV_PART_MAIN);
-            lv_obj_center(clear_lbl);
-            
-            int hist_displayed = 0;
-            for (int i = 0; i < hist_count; i++) {
-                if (history[i].is_active) continue;  // Skip active entries
-                if (hist_displayed >= MAX_DISPLAYED_ERRORS) break;
-                
-                // Create a simple card for each cleared history entry
-                arctic::ActiveError hist_err = {};
-                hist_err.code = history[i].code;
-                hist_err.name = "";
-                hist_err.description = "";
-                hist_err.resolution = nullptr;
-                hist_err.severity = arctic::ErrorSeverity::INFO;
-                hist_err.active = false;
-                hist_err.first_seen = history[i].occurred;
-                hist_err.last_seen = history[i].cleared;
-                
-                // Find matching error definition for description
-                int def_count;
-                const arctic::ErrorDef* defs = arctic::getError1Definitions(&def_count);
-                for (int d = 0; d < def_count; d++) {
-                    if (strcmp(defs[d].code, history[i].code) == 0) {
-                        hist_err.description = defs[d].description;
-                        hist_err.resolution = defs[d].resolution;
-                        hist_err.severity = defs[d].severity;
-                        break;
-                    }
-                }
-                if (hist_err.description[0] == '\0') {
-                    defs = arctic::getError2Definitions(&def_count);
-                    for (int d = 0; d < def_count; d++) {
-                        if (strcmp(defs[d].code, history[i].code) == 0) {
-                            hist_err.description = defs[d].description;
-                            hist_err.resolution = defs[d].resolution;
-                            hist_err.severity = defs[d].severity;
-                            break;
-                        }
-                    }
-                }
-                
-                create_error_card(state.error_list, &hist_err);
-                hist_displayed++;
+    arctic::ErrorHistoryEntry history[arctic::ERROR_HISTORY_SIZE];
+    int hist_count = arctic::getErrorHistory(history, arctic::ERROR_HISTORY_SIZE);
+    int total_cleared = 0;
+    for (int i = 0; i < hist_count; i++) {
+        if (!history[i].is_active) {
+            if (state.history_count < MAX_DISPLAYED_ERRORS) {
+                state.cleared_history[state.history_count++] = history[i];
             }
-            if (cleared_count > hist_displayed) {
-                char more_buf[64];
-                snprintf(more_buf, sizeof(more_buf), "… +%d older cleared errors",
-                         cleared_count - hist_displayed);
-                lv_obj_t* more_label = lv_label_create(state.error_list);
-                lv_label_set_text(more_label, more_buf);
-                lv_obj_set_width(more_label, LV_PCT(100));
-                lv_obj_set_style_text_font(more_label, UI_FONT_BODY, LV_PART_MAIN);
-                lv_obj_set_style_text_color(more_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-                lv_obj_set_style_text_align(more_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-                lv_obj_set_style_pad_top(more_label, 10, LV_PART_MAIN);
-            }
+            total_cleared++;
         }
     }
+    state.history_omitted = total_cleared - state.history_count;
+
+    bool more = append_error_batch();
     
     // Re-enable visibility and force single layout calculation
     lv_obj_clear_flag(state.error_list, LV_OBJ_FLAG_HIDDEN);
     lv_obj_update_layout(state.error_list);
+
+    if (more) {
+        state.load_timer = lv_timer_create(error_load_timer_cb,
+                                           ERROR_LOAD_INTERVAL_MS, nullptr);
+    }
 }
 
 static void error_screen_timer_cb(lv_timer_t* timer) {
@@ -488,6 +568,8 @@ static void back_btn_cb(lv_event_t* e) {
     (void)e;
     ESP_LOGI(TAG, "Back button clicked");
     
+    stop_load_timer();
+
     // Stop timer first to prevent use-after-free
     if (state.update_timer) {
         lv_timer_del(state.update_timer);
@@ -600,6 +682,8 @@ void heatpump_errors_show(heatpump_errors_close_cb_t on_close) {
 void heatpump_errors_hide(void) {
     if (!state.shown) return;
     
+    stop_load_timer();
+
     if (state.update_timer) {
         lv_timer_del(state.update_timer);
         state.update_timer = nullptr;
