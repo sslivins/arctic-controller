@@ -10,6 +10,12 @@
 
 static const char* TAG = "nav_bar";
 
+#define NAV_COLOR_BAR       lv_color_hex(0x111318)
+#define NAV_COLOR_INACTIVE  lv_color_hex(0x1b1e26)
+#define NAV_COLOR_ACTIVE    lv_color_hex(0x292d38)
+#define NAV_COLOR_PRESSED   lv_color_hex(0x343946)
+#define NAV_COLOR_DIVIDER   lv_color_hex(0x4b5563)
+
 typedef struct {
     nav_tab_t     tab;
     string_id_t   str_id;    // i18n string id (label text, may embed an icon)
@@ -34,7 +40,7 @@ static void apply_tab_style(nav_tab_t tab, bool is_active) {
     lv_obj_t* lbl = s_labels[tab];
     if (!btn || !lbl) return;
     lv_color_t accent = s_tabs[tab].accent;
-    lv_obj_set_style_bg_color(btn, is_active ? lv_color_hex(0x24344f) : UI_COLOR_PANEL, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, is_active ? NAV_COLOR_ACTIVE : NAV_COLOR_INACTIVE, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn, is_active ? 2 : 0, LV_PART_MAIN);
     lv_obj_set_style_border_color(btn, accent, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl, is_active ? accent : UI_COLOR_TEXT_DIM, LV_PART_MAIN);
@@ -73,9 +79,9 @@ lv_obj_t* nav_bar_create(lv_obj_t* screen, nav_tab_t active) {
     lv_obj_t* bar = lv_obj_create(screen);
     lv_obj_set_size(bar, LV_PCT(100), NAV_BAR_H);
     lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(bar, UI_COLOR_PANEL, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar, NAV_COLOR_BAR, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_color(bar, lv_color_hex(0x0f3460), LV_PART_MAIN);
+    lv_obj_set_style_border_color(bar, NAV_COLOR_DIVIDER, LV_PART_MAIN);
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, LV_PART_MAIN);
     lv_obj_set_style_border_width(bar, 2, LV_PART_MAIN);
     lv_obj_set_style_radius(bar, 0, LV_PART_MAIN);
@@ -98,7 +104,7 @@ lv_obj_t* nav_bar_create(lv_obj_t* screen, nav_tab_t active) {
         lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
         lv_obj_set_style_pad_all(btn, 2, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(btn, UI_COLOR_BTN_PRESSED, LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(btn, NAV_COLOR_PRESSED, LV_STATE_PRESSED);
         lv_obj_set_user_data(btn, (void*)t->test_tag);
         lv_obj_add_event_cb(btn, nav_btn_cb, LV_EVENT_CLICKED, (void*)(intptr_t)t->tab);
 
