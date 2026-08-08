@@ -180,6 +180,76 @@ class TestSetpoints:
         assert _has_text_containing(device, expected_value), \
             f"Setpoint value '{expected_value}' for '{label}' not found"
 
+    def test_editor_actions_are_above_nav_bar(self, device: DeviceClient):
+        """Cancel and Save must remain fully visible above persistent navigation."""
+        _open_control(device)
+        device.click(label="Cooling Setpoint")
+
+        try:
+            nav = device.find_widget(tag="nav_bar")
+            cancel = device.find_widget(tag="edit_cancel")
+            save = device.find_widget(tag="edit_save")
+
+            assert nav is not None, "Persistent nav bar not found"
+            assert cancel is not None, "Editor Cancel button not found"
+            assert save is not None, "Editor Save button not found"
+            assert cancel.y + cancel.h <= nav.y, \
+                f"Cancel button bottom {cancel.y + cancel.h} overlaps nav top {nav.y}"
+            assert save.y + save.h <= nav.y, \
+                f"Save button bottom {save.y + save.h} overlaps nav top {nav.y}"
+        finally:
+            device.click(tag="edit_cancel")
+
+    def test_setpoint_editor_uses_slider_without_range_text(self, device: DeviceClient):
+        """Setpoints use a bounded slider instead of repetitive +/- taps."""
+        _open_control(device)
+        device.click(label="Cooling Setpoint")
+
+        try:
+            slider = device.find_widget(tag="edit_slider")
+            assert slider is not None, "Setpoint slider not found"
+            assert slider.min < slider.max
+            assert not _has_text_containing(device, "Range:"), \
+                "Slider editor should not repeat its enforced range as text"
+        finally:
+            device.click(tag="edit_cancel")
+
+    def test_wide_numeric_parameter_uses_full_range_slider(self, device: DeviceClient):
+        """AP29 compressor runtime exposes its complete 0-90 minute range."""
+        _open_control(device)
+        device.click(label_contains="(AP29)")
+
+        try:
+            slider = device.find_widget(tag="edit_slider")
+            assert slider is not None, "AP29 slider not found"
+            assert (slider.min, slider.max) == (0, 90)
+
+            device.set_slider("edit_slider", 90)
+            value = device.find_widget(tag="edit_value")
+            assert value is not None and value.text == "90 min"
+        finally:
+            device.click(tag="edit_cancel")
+
+    @pytest.mark.parametrize(
+        "label_fragment,option_count",
+        [("(AP14)", 8), ("(AP44)", 3)],
+    )
+    def test_discrete_parameter_uses_roller(
+        self, device: DeviceClient, label_fragment: str, option_count: int
+    ):
+        """Discrete AP choices use a named roller rather than a numeric slider."""
+        _open_control(device)
+        device.click(label_contains=label_fragment)
+
+        try:
+            roller = device.find_widget(tag="edit_roller")
+            assert roller is not None, f"{label_fragment} roller not found"
+            assert roller.option_count == option_count
+            assert device.find_widget(tag="edit_slider") is None
+            assert not _has_text_containing(device, "Range:")
+        finally:
+            device.click(tag="edit_cancel")
+
 
 # =========================================================================
 # Advanced Parameters Section
