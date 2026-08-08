@@ -295,6 +295,24 @@ def test_events_structure(api):
     assert "total" in data
     assert "events" in data
     assert isinstance(data["events"], list)
+    assert data["offset"] == 0
+    assert data["count"] == len(data["events"])
+
+
+def test_events_supports_pagination(api):
+    """GET /api/events — offset and limit bound the returned page."""
+    r = api.get(
+        f"{BASE_URL}/api/events",
+        params={"offset": 1, "limit": 2},
+        timeout=5,
+    )
+    if r.status_code == 401:
+        pytest.skip("API auth enabled — set ARCTIC_API_KEY")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["offset"] == 1
+    assert data["count"] == len(data["events"])
+    assert len(data["events"]) <= 2
 
 
 def test_logs_supports_filtering(api):

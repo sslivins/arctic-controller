@@ -97,6 +97,7 @@ static struct {
     lv_obj_t* edit_detail = nullptr;
     lv_obj_t* edit_description = nullptr;
     lv_obj_t* edit_value_label = nullptr;
+    lv_obj_t* edit_value_row = nullptr;
     lv_obj_t* edit_slider = nullptr;
     lv_obj_t* edit_roller = nullptr;
     lv_obj_t* edit_save_btn = nullptr;
@@ -104,6 +105,8 @@ static struct {
     int16_t edit_value_celsius = 0;  // Original value in Celsius (for non-temp params too)
     bool edit_value_unknown = false; // true when disconnected: show "--", no live value
     bool edit_uses_enum = false;
+    int edit_slider_min = 0;
+    int edit_slider_step = 1;
     
     // Setpoint editing (uses same dialog, different handling)
     // -1 = editing P-parameter, 0/1/2 = editing cooling/heating/hotwater
@@ -630,6 +633,7 @@ static void create_edit_dialog(void) {
     
     // (3) Value editor. Numeric spans use a slider; discrete enums use a roller.
     lv_obj_t* value_row = lv_obj_create(content);
+    state.edit_value_row = value_row;
     lv_obj_set_size(value_row, 600, 150);
     lv_obj_set_style_bg_opa(value_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(value_row, 0, LV_PART_MAIN);
@@ -655,8 +659,8 @@ static void create_edit_dialog(void) {
     lv_obj_add_event_cb(state.edit_slider, edit_slider_cb, LV_EVENT_VALUE_CHANGED, nullptr);
 
     state.edit_roller = lv_roller_create(value_row);
-    lv_obj_set_size(state.edit_roller, 560, 150);
-    lv_roller_set_visible_row_count(state.edit_roller, 3);
+    lv_obj_set_size(state.edit_roller, 560, 280);
+    lv_roller_set_visible_row_count(state.edit_roller, 7);
     lv_obj_center(state.edit_roller);
     lv_obj_set_style_text_font(state.edit_roller, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_font(state.edit_roller, UI_FONT_TITLE, LV_PART_SELECTED);
@@ -729,6 +733,9 @@ static void create_edit_dialog(void) {
 }
 
 static void show_configured_editor(void) {
+    if (state.edit_value_row) {
+        lv_obj_set_height(state.edit_value_row, state.edit_uses_enum ? 300 : 150);
+    }
     if (state.edit_value_unknown) {
         lv_obj_remove_flag(state.edit_value_label, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(state.edit_slider, LV_OBJ_FLAG_HIDDEN);
@@ -858,7 +865,20 @@ static void edit_save_cb(lv_event_t* e) {
 
 static void edit_slider_cb(lv_event_t* e) {
     (void)e;
-    state.edit_value = (float)lv_slider_get_value(state.edit_slider);
+    int value = lv_slider_get_value(state.edit_slider);
+    if (state.edit_slider_step > 1) {
+        int relative = value - state.edit_slider_min;
+        int snapped = state.edit_slider_min +
+                      ((relative + state.edit_slider_step / 2) /
+                       state.edit_slider_step) * state.edit_slider_step;
+        int max_value = lv_slider_get_max_value(state.edit_slider);
+        if (snapped > max_value) snapped = max_value;
+        if (snapped != value) {
+            lv_slider_set_value(state.edit_slider, snapped, LV_ANIM_OFF);
+        }
+        value = snapped;
+    }
+    state.edit_value = (float)value;
     update_edit_value_display();
 }
 
@@ -886,8 +906,11 @@ static void edit_label_set_or_hide(lv_obj_t* lbl, const char* text) {
     }
 }
 
-static void configure_slider_editor(int min_val, int max_val, int value) {
+static void configure_slider_editor(int min_val, int max_val, int value,
+                                    int step = 1) {
     state.edit_uses_enum = false;
+    state.edit_slider_min = min_val;
+    state.edit_slider_step = step > 0 ? step : 1;
     lv_slider_set_range(state.edit_slider, min_val, max_val);
     lv_slider_set_value(state.edit_slider, value, LV_ANIM_OFF);
     show_configured_editor();
@@ -1012,8 +1035,9 @@ static void update_edit_value_display(void) {
                 enum_option_desc((uint8_t)state.current_ap, display_val, desc_buf, sizeof(desc_buf));
                 lv_label_set_text(state.edit_description, desc_buf);
             }
-        } else if (p && p->unit && p->unit[0]) {
-            snprintf(val_buf, sizeof(val_buf), "%d %s", display_val, p->unit);
+        } else if (p && arctic::advanced_display_unit(p->ap)) {
+            snprintf(val_buf, sizeof(val_buf), "%d %s", display_val,
+                     arctic::advanced_display_unit(p->ap));
         } else {
             snprintf(val_buf, sizeof(val_buf), "%d", display_val);
         }
@@ -1076,8 +1100,8 @@ static void format_ap_value(const arctic::AdvancedParam* p, int16_t raw,
         const char* s = enum_option_label(p->ap, raw);
         if (s) snprintf(buf, n, "%s", s);
         else   snprintf(buf, n, "%d", raw);
-    } else if (p->unit && p->unit[0]) {
-        snprintf(buf, n, "%d %s", raw, p->unit);
+    } else if (arctic::advanced_display_unit(p->ap)) {
+        snprintf(buf, n, "%d %s", raw, arctic::advanced_display_unit(p->ap));
     } else {
         snprintf(buf, n, "%d", raw);
     }
@@ -1265,7 +1289,7 @@ static void show_ap_edit_dialog(uint8_t ap) {
     // so the display shows "--" instead of presenting the default as a reading.
     int16_t v = 0;
     bool read_ok = advanced_param_read(ap, &v);
-    if (!read_ok) v = p->default_val;
+    if (!read_ok) v = arctic::advanced_display_value(ap, p->default_val);
     state.edit_value = (float)v;
     state.edit_value_celsius = v;
     state.edit_value_unknown = !read_ok;
@@ -1287,7 +1311,10 @@ static void show_ap_edit_dialog(uint8_t ap) {
         configure_enum_editor(p, v);
     } else {
         edit_label_set_or_hide(state.edit_description, "");
-        configure_slider_editor(p->min_val, p->max_val, v);
+        configure_slider_editor(
+            arctic::advanced_display_value(ap, p->min_val),
+            arctic::advanced_display_value(ap, p->max_val),
+            v, arctic::advanced_display_step(ap));
     }
 
     update_edit_value_display();
@@ -1664,10 +1691,13 @@ void heatpump_control_hide(void) {
     state.edit_detail = nullptr;
     state.edit_description = nullptr;
     state.edit_value_label = nullptr;
+    state.edit_value_row = nullptr;
     state.edit_slider = nullptr;
     state.edit_roller = nullptr;
     state.edit_save_btn = nullptr;
     state.edit_uses_enum = false;
+    state.edit_slider_min = 0;
+    state.edit_slider_step = 1;
     state.current_setpoint_type = -1;
     state.current_ap = -1;
     memset(state.ap_value_labels, 0, sizeof(state.ap_value_labels));

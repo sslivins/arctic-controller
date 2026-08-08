@@ -162,6 +162,21 @@ class DeviceClient:
             raise DeviceError(f"Set slider failed ({r.status_code}): {msg}")
         return r.json()
 
+    def scroll_to(self, tag: str, y: int) -> dict:
+        """POST /api/test/scroll — scroll a tagged container vertically."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/scroll",
+            json={"tag": tag, "y": y},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Scroll failed ({r.status_code}): {msg}")
+        return r.json()
+
     def set_roller(self, tag: str, index: int) -> dict:
         """POST /api/test/set-roller — set a roller's selected index by tag.
 

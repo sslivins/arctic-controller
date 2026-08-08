@@ -14,12 +14,17 @@
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
+#include "../event_log.h"
 #include "../heatpump_screen.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include "wifi_manager.h"
 #include <esp_log.h>
+#include <esp_partition.h>
 #include <esp_system.h>
+#include <nvs_flash.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <string.h>
 
 static const char* TAG = "settings_menu";
@@ -72,6 +77,11 @@ typedef struct {
     
     // Reboot confirmation overlay
     lv_obj_t* reboot_overlay;
+
+    // Factory reset confirmation overlay
+    lv_obj_t* factory_reset_overlay;
+    lv_obj_t* factory_reset_confirm_btn;
+    lv_obj_t* factory_reset_confirm_label;
     
     // Track which sub-screen is active
     settings_item_t active_sub_screen;
@@ -93,6 +103,9 @@ static void temp_unit_switch_cb(lv_event_t* e);
 static void show_reboot_confirmation(void);
 static void reboot_confirm_cb(lv_event_t* e);
 static void reboot_cancel_cb(lv_event_t* e);
+static void show_factory_reset_confirmation(void);
+static void factory_reset_confirm_cb(lv_event_t* e);
+static void factory_reset_cancel_cb(lv_event_t* e);
 
 // ============================================================================
 // Helper Functions
@@ -427,7 +440,186 @@ static void row_click_cb(lv_event_t* e)
         display_screen_create(&disp_cfg);
         state.sub_screen_active = true;
         state.active_sub_screen = SETTINGS_DISPLAY;
+    } else if (strcmp(tag, "settings_factory_reset") == 0) {
+        show_factory_reset_confirmation();
     }
+}
+
+// ============================================================================
+// Factory Reset Confirmation
+// ============================================================================
+
+static void dismiss_factory_reset_overlay(void)
+{
+    if (state.factory_reset_overlay) {
+        lv_obj_delete(state.factory_reset_overlay);
+        state.factory_reset_overlay = NULL;
+        state.factory_reset_confirm_btn = NULL;
+        state.factory_reset_confirm_label = NULL;
+    }
+}
+
+static esp_err_t erase_data_partition(const char* label)
+{
+    const esp_partition_t* partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, label);
+    if (!partition) {
+        ESP_LOGE(TAG, "Factory reset partition '%s' not found", label);
+        return ESP_ERR_NOT_FOUND;
+    }
+    ESP_LOGI(TAG, "Erasing %s partition (%lu bytes)", label,
+             (unsigned long)partition->size);
+    return esp_partition_erase_range(partition, 0, partition->size);
+}
+
+static void factory_reset_task(void* arg)
+{
+    (void)arg;
+    event_log_prepare_factory_reset();
+
+    esp_err_t storage_err = erase_data_partition("storage");
+    esp_err_t history_err = erase_data_partition("history");
+    esp_err_t nvs_err = nvs_flash_erase();
+
+    if (storage_err != ESP_OK || history_err != ESP_OK || nvs_err != ESP_OK) {
+        ESP_LOGE(TAG, "Factory reset incomplete: storage=%s history=%s nvs=%s",
+                 esp_err_to_name(storage_err), esp_err_to_name(history_err),
+                 esp_err_to_name(nvs_err));
+    } else {
+        ESP_LOGI(TAG, "Factory reset complete");
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(250));
+    esp_restart();
+}
+
+static void factory_reset_confirm_cb(lv_event_t* e)
+{
+    (void)e;
+    if (!state.factory_reset_confirm_btn) return;
+
+    lv_obj_add_state(state.factory_reset_confirm_btn, LV_STATE_DISABLED);
+    if (state.factory_reset_confirm_label) {
+        lv_label_set_text(state.factory_reset_confirm_label,
+                          i18n_get(STR_FACTORY_RESET_ERASING));
+    }
+
+    BaseType_t created = xTaskCreate(factory_reset_task, "factory_reset",
+                                     4096, NULL, 5, NULL);
+    if (created != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create factory-reset task");
+        lv_obj_clear_state(state.factory_reset_confirm_btn, LV_STATE_DISABLED);
+        if (state.factory_reset_confirm_label) {
+            lv_label_set_text(state.factory_reset_confirm_label,
+                              i18n_get(STR_FACTORY_RESET_START_FAILED));
+        }
+    }
+}
+
+static void factory_reset_cancel_cb(lv_event_t* e)
+{
+    (void)e;
+    dismiss_factory_reset_overlay();
+}
+
+static void show_factory_reset_confirmation(void)
+{
+    if (!state.screen) return;
+    dismiss_factory_reset_overlay();
+
+    lv_obj_t* overlay = lv_obj_create(state.screen);
+    lv_obj_remove_style_all(overlay);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_70, LV_PART_MAIN);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_user_data(overlay, (void*)"factory_reset_overlay");
+    state.factory_reset_overlay = overlay;
+
+    lv_obj_t* panel = lv_obj_create(overlay);
+    lv_obj_remove_style_all(panel);
+    lv_obj_set_size(panel, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(panel, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(panel, 24, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(panel, 32, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(panel, 48, LV_PART_MAIN);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(panel, 14, LV_PART_MAIN);
+    lv_obj_remove_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_user_data(panel, (void*)"factory_reset_panel");
+
+    lv_obj_t* title = lv_label_create(panel);
+    lv_label_set_text(title, i18n_get(STR_FACTORY_RESET_TITLE));
+    lv_obj_set_style_text_font(title, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xff5a5f), LV_PART_MAIN);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+    lv_obj_t* description = lv_label_create(panel);
+    lv_obj_set_width(description, LV_PCT(100));
+    lv_label_set_long_mode(description, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(description, i18n_get(STR_FACTORY_RESET_DESCRIPTION));
+    lv_obj_set_style_text_font(description, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(description, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_set_style_text_align(description, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+    lv_obj_t* warning = lv_label_create(panel);
+    lv_label_set_text(warning, i18n_get(STR_FACTORY_RESET_WARNING));
+    lv_obj_set_style_text_font(warning, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(warning, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_style_text_align(warning, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+    lv_obj_t* btn_row = lv_obj_create(panel);
+    lv_obj_remove_style_all(btn_row);
+    lv_obj_set_size(btn_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(btn_row, 24, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(btn_row, 12, LV_PART_MAIN);
+    lv_obj_remove_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* cancel_btn = lv_button_create(btn_row);
+    lv_obj_set_size(cancel_btn, 200, 64);
+    lv_obj_set_style_bg_color(cancel_btn, COLOR_ROW, LV_PART_MAIN);
+    lv_obj_set_style_radius(cancel_btn, 12, LV_PART_MAIN);
+    lv_obj_set_user_data(cancel_btn, (void*)"factory_reset_cancel");
+    lv_obj_add_event_cb(cancel_btn, factory_reset_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* cancel_label = lv_label_create(cancel_btn);
+    lv_label_set_text(cancel_label, i18n_get(STR_CANCEL));
+    lv_obj_set_style_text_font(cancel_label, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(cancel_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(cancel_label);
+
+    lv_obj_t* confirm_btn = lv_button_create(btn_row);
+    lv_obj_set_size(confirm_btn, 260, 64);
+    lv_obj_set_style_bg_color(confirm_btn, lv_color_hex(0xd32f2f), LV_PART_MAIN);
+    lv_obj_set_style_radius(confirm_btn, 12, LV_PART_MAIN);
+    lv_obj_set_user_data(confirm_btn, (void*)"factory_reset_confirm");
+    lv_obj_add_event_cb(confirm_btn, factory_reset_confirm_cb, LV_EVENT_CLICKED, NULL);
+    state.factory_reset_confirm_btn = confirm_btn;
+
+    lv_obj_t* confirm_label = lv_label_create(confirm_btn);
+    lv_label_set_text(confirm_label, i18n_get(STR_FACTORY_RESET_CONFIRM));
+    lv_obj_set_style_text_font(confirm_label, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(confirm_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(confirm_label);
+    state.factory_reset_confirm_label = confirm_label;
+
+    lv_obj_align(panel, LV_ALIGN_BOTTOM_MID, 0, 300);
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, panel);
+    lv_anim_set_values(&anim, 300, 0);
+    lv_anim_set_duration(&anim, 300);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&anim, [](void* obj, int32_t v) {
+        lv_obj_align((lv_obj_t*)obj, LV_ALIGN_BOTTOM_MID, 0, v);
+    });
+    lv_anim_start(&anim);
 }
 
 // ============================================================================
@@ -574,6 +766,16 @@ static void create_menu_list(void)
         
         state.temp_unit_switch = sw;
     }
+
+    lv_obj_t* reset_row = create_settings_row(
+        state.list_container, LV_SYMBOL_WARNING,
+        i18n_get(STR_SETTINGS_FACTORY_RESET), "settings_factory_reset");
+    lv_obj_set_style_border_width(reset_row, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(reset_row, lv_color_hex(0x7f1d1d), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lv_obj_get_child(reset_row, 0),
+                                lv_color_hex(0xff5a5f), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lv_obj_get_child(reset_row, 1),
+                                lv_color_hex(0xff5a5f), LV_PART_MAIN);
 }
 
 // ============================================================================

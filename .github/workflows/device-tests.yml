@@ -334,7 +334,7 @@ jobs:
           # Substitute env vars
           envsubst < /tmp/nvs_wifi.csv > /tmp/nvs_wifi_resolved.csv
           python3 -m esp_idf_nvs_partition_gen generate \
-            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x6000
+            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x40000
 
           if [ -z "$CONTROLLER_PORT" ]; then
             echo "ERROR: No ESP32-P4 controller detected on any serial port"
@@ -346,8 +346,8 @@ jobs:
             0x2000  build/bootloader/bootloader.bin \
             0x8000  build/partition_table/partition-table.bin \
             0x9000  /tmp/nvs_wifi.bin \
-            0xf000  build/ota_data_initial.bin \
-            0x20000 build/arctic_controller.bin
+            0x49000 build/ota_data_initial.bin \
+            0x50000 build/arctic_controller.bin
         env:
           WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
           WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}

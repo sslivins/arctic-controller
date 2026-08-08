@@ -1,205 +1,47 @@
 /*
  * Arctic Heat Pump Controller
- * Event Log Implementation - RAM ring buffer for system events
+ * Event Log Implementation - RAM ring backed by a raw-flash journal
  */
 
 #include "event_log.h"
+#include "history_storage.h"
 #include <esp_log.h>
 #include <esp_random.h>
 #include <esp_timer.h>
-#include <nvs.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
-#include <stdlib.h>
 #include <string.h>
 
 static const char* TAG = "event_log";
 
-// ============================================================================
-// Ring Buffer State
-// ============================================================================
-
 static event_entry_t s_buffer[EVENT_LOG_MAX_ENTRIES];
-static int s_head = 0;       // Next write position
-static int s_count = 0;      // Number of valid entries
+static uint32_t s_event_ids[EVENT_LOG_MAX_ENTRIES];
+static int s_head = 0;
+static int s_count = 0;
+static uint32_t s_next_event_id = 1;
 static uint32_t s_boot_id = 0;
 static uint32_t s_revision = 0;
 static SemaphoreHandle_t s_mutex = nullptr;
-
-// ============================================================================
-// NVS Persistence
-// ============================================================================
-//
-// The ring buffer is mirrored to NVS as a single versioned blob so that
-// operational history (brownouts, errors, etc.) survives a reboot. Writes are
-// throttled to protect flash: most events schedule a debounced flush, while
-// critical events (brownout / error transitions) and clears flush immediately.
-
-#define EVENT_LOG_NVS_NS       "event_log"
-#define EVENT_LOG_NVS_KEY      "buffer"
-#define EVENT_LOG_BLOB_MAGIC   0x41454C31u   // 'A''E''L''1'
-#define EVENT_LOG_BLOB_VERSION 2u
-#define EVENT_LOG_FLUSH_DELAY_US (5ULL * 1000000ULL)  // 5s debounce for normal events
-
-typedef struct {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t capacity;   // guard against EVENT_LOG_MAX_ENTRIES changes
-    uint16_t head;
-    uint16_t count;
-    event_entry_t entries[EVENT_LOG_MAX_ENTRIES];
-} event_log_blob_t;
-
-typedef struct {
-    uint32_t timestamp;
-    uint32_t uptime_ms;
-    event_type_t type;
-    uint32_t payload;
-} event_entry_v1_t;
-
-typedef struct {
-    uint32_t magic;
-    uint16_t version;
-    uint16_t capacity;
-    uint16_t head;
-    uint16_t count;
-    event_entry_v1_t entries[EVENT_LOG_MAX_ENTRIES];
-} event_log_blob_v1_t;
-
-static event_log_blob_t* s_persist_blob = nullptr;    // heap scratch for NVS writes
-static SemaphoreHandle_t s_persist_mutex = nullptr;   // serializes persists
-static esp_timer_handle_t s_flush_timer = nullptr;    // debounce timer
-static volatile bool s_flush_pending = false;
-
-// ============================================================================
-// Internal helpers
-// ============================================================================
+static bool s_storage_ready = false;
 
 static uint64_t get_uptime_ms(void) {
     return (uint64_t)(esp_timer_get_time() / 1000ULL);
 }
 
 static uint32_t get_unix_timestamp(void) {
-    // Use time_manager if available
     time_t now;
     time(&now);
-    // If time is before 2024, it's probably not synced
-    if (now < 1704067200) return 0;
-    return (uint32_t)now;
+    return now < 1704067200 ? 0 : (uint32_t)now;
 }
 
-// Snapshot the ring buffer under the data mutex, then write it to NVS outside
-// of it (flash writes can take tens of ms — don't block recorders that long).
-static void event_log_persist(void) {
-    if (s_persist_blob == nullptr || s_persist_mutex == nullptr || s_mutex == nullptr) {
-        return;
-    }
-
-    xSemaphoreTake(s_persist_mutex, portMAX_DELAY);
-
-    xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_persist_blob->magic = EVENT_LOG_BLOB_MAGIC;
-    s_persist_blob->version = EVENT_LOG_BLOB_VERSION;
-    s_persist_blob->capacity = EVENT_LOG_MAX_ENTRIES;
-    s_persist_blob->head = (uint16_t)s_head;
-    s_persist_blob->count = (uint16_t)s_count;
-    memcpy(s_persist_blob->entries, s_buffer, sizeof(s_buffer));
-    xSemaphoreGive(s_mutex);
-
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open(EVENT_LOG_NVS_NS, NVS_READWRITE, &nvs);
-    if (err == ESP_OK) {
-        err = nvs_set_blob(nvs, EVENT_LOG_NVS_KEY, s_persist_blob, sizeof(*s_persist_blob));
-        if (err == ESP_OK) {
-            err = nvs_commit(nvs);
-        }
-        nvs_close(nvs);
-    }
+static void compact_locked(void) {
+    if (!s_storage_ready) return;
+    esp_err_t err = history_storage_replace_events(
+        s_buffer, s_event_ids, EVENT_LOG_MAX_ENTRIES, s_head, s_count);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to persist event log to NVS: %s", esp_err_to_name(err));
-    }
-
-    xSemaphoreGive(s_persist_mutex);
-}
-
-static void flush_timer_cb(void* arg) {
-    (void)arg;
-    s_flush_pending = false;
-    event_log_persist();
-}
-
-// Schedule a persist. immediate=true writes now (used for critical events and
-// clears); otherwise a debounce timer coalesces bursts into a single write.
-static void event_log_schedule_flush(bool immediate) {
-    if (s_flush_timer == nullptr) {
-        event_log_persist();
-        return;
-    }
-    if (immediate) {
-        esp_timer_stop(s_flush_timer);  // cancel any pending debounce
-        s_flush_pending = false;
-        event_log_persist();
-        return;
-    }
-    if (!s_flush_pending) {
-        s_flush_pending = true;
-        esp_timer_start_once(s_flush_timer, EVENT_LOG_FLUSH_DELAY_US);
+        ESP_LOGE(TAG, "Failed to compact event journal: %s", esp_err_to_name(err));
     }
 }
-
-// Restore the ring buffer from NVS. Silently starts empty on any mismatch.
-static void event_log_load(void) {
-    if (s_persist_blob == nullptr) return;
-
-    nvs_handle_t nvs;
-    if (nvs_open(EVENT_LOG_NVS_NS, NVS_READONLY, &nvs) != ESP_OK) {
-        return;  // namespace doesn't exist yet (first boot)
-    }
-
-    size_t required = 0;
-    esp_err_t err = nvs_get_blob(nvs, EVENT_LOG_NVS_KEY, nullptr, &required);
-    if (err == ESP_OK && required == sizeof(event_log_blob_t)) {
-        if (nvs_get_blob(nvs, EVENT_LOG_NVS_KEY, s_persist_blob, &required) == ESP_OK &&
-            s_persist_blob->magic == EVENT_LOG_BLOB_MAGIC &&
-            s_persist_blob->version == EVENT_LOG_BLOB_VERSION &&
-            s_persist_blob->capacity == EVENT_LOG_MAX_ENTRIES &&
-            s_persist_blob->head < EVENT_LOG_MAX_ENTRIES &&
-            s_persist_blob->count <= EVENT_LOG_MAX_ENTRIES) {
-            memcpy(s_buffer, s_persist_blob->entries, sizeof(s_buffer));
-            s_head = s_persist_blob->head;
-            s_count = s_persist_blob->count;
-            ESP_LOGI(TAG, "Restored %d event(s) from NVS", s_count);
-        } else {
-            ESP_LOGW(TAG, "Persisted event log invalid/incompatible — starting fresh");
-        }
-    } else if (err == ESP_OK && required == sizeof(event_log_blob_v1_t)) {
-        if (nvs_get_blob(nvs, EVENT_LOG_NVS_KEY, s_persist_blob, &required) == ESP_OK) {
-            const event_log_blob_v1_t* old = (const event_log_blob_v1_t*)s_persist_blob;
-            if (old->magic == EVENT_LOG_BLOB_MAGIC &&
-                old->version == 1 &&
-                old->capacity == EVENT_LOG_MAX_ENTRIES &&
-                old->head < EVENT_LOG_MAX_ENTRIES &&
-                old->count <= EVENT_LOG_MAX_ENTRIES) {
-                for (int i = 0; i < EVENT_LOG_MAX_ENTRIES; i++) {
-                    s_buffer[i].timestamp = old->entries[i].timestamp;
-                    s_buffer[i].boot_id = 0;
-                    s_buffer[i].uptime_ms = old->entries[i].uptime_ms;
-                    s_buffer[i].type = old->entries[i].type;
-                    s_buffer[i].payload = old->entries[i].payload;
-                }
-                s_head = old->head;
-                s_count = old->count;
-                ESP_LOGI(TAG, "Migrated %d event(s) from persisted v1 log", s_count);
-            }
-        }
-    }
-
-    nvs_close(nvs);
-}
-
-// ============================================================================
-// Event type names (for API/logging)
-// ============================================================================
 
 static const char* s_event_names[] = {
     "system_start",
@@ -222,93 +64,118 @@ static const char* s_event_names[] = {
     "connected",
     "disconnected",
     "brownout_reset",
+    "application_crash",
+    "watchdog_reset",
 };
 
 _Static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
                "s_event_names must match EVENT_TYPE_COUNT");
 
-// ============================================================================
-// Public API
-// ============================================================================
-
 void event_log_init(void) {
     if (s_mutex == nullptr) {
         s_mutex = xSemaphoreCreateMutex();
     }
-    if (s_persist_mutex == nullptr) {
-        s_persist_mutex = xSemaphoreCreateMutex();
-    }
-    if (s_persist_blob == nullptr) {
-        s_persist_blob = (event_log_blob_t*)malloc(sizeof(event_log_blob_t));
-        if (s_persist_blob == nullptr) {
-            ESP_LOGW(TAG, "No memory for persist buffer — event log will be RAM-only");
-        }
+    if (s_mutex == nullptr) {
+        ESP_LOGE(TAG, "Failed to create event-log mutex");
+        return;
     }
 
     s_head = 0;
     s_count = 0;
+    s_next_event_id = 1;
     s_revision = 0;
     do {
         s_boot_id = esp_random();
     } while (s_boot_id == 0);
     memset(s_buffer, 0, sizeof(s_buffer));
+    memset(s_event_ids, 0, sizeof(s_event_ids));
 
-    // Restore persisted history (if any) before recording this boot's events.
-    event_log_load();
-
-    // Debounced flush timer (coalesces bursts of non-critical events).
-    if (s_flush_timer == nullptr) {
-        const esp_timer_create_args_t args = {
-            .callback = flush_timer_cb,
-            .arg = nullptr,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "evlog_flush",
-            .skip_unhandled_events = false,
-        };
-        esp_timer_create(&args, &s_flush_timer);
+    esp_err_t err = history_storage_init();
+    if (err == ESP_OK) {
+        size_t restored = 0;
+        err = history_storage_load_events(
+            s_buffer, s_event_ids, EVENT_LOG_MAX_ENTRIES,
+            &restored, &s_next_event_id);
+        if (err == ESP_OK) {
+            s_count = (int)restored;
+            s_head = s_count % EVENT_LOG_MAX_ENTRIES;
+            s_storage_ready = true;
+        }
+    }
+    if (err != ESP_OK) {
+        s_storage_ready = false;
+        ESP_LOGE(TAG, "Event persistence unavailable: %s", esp_err_to_name(err));
     }
 
-    // Record the boot, then durably persist (restored history + this boot).
+    int restored_count = s_count;
     event_log_record(EVENT_SYSTEM_START, 0);
-    event_log_schedule_flush(true);
-
-    ESP_LOGI(TAG, "Event log initialized (%d entry capacity)", EVENT_LOG_MAX_ENTRIES);
+    ESP_LOGI(TAG, "Event log initialized (%d entry capacity, %d restored)",
+             EVENT_LOG_MAX_ENTRIES, restored_count);
 }
 
 void event_log_record(event_type_t type, uint32_t payload) {
-    if (s_mutex == nullptr) return;
-    if (type >= EVENT_TYPE_COUNT) return;
-    
+    if (s_mutex == nullptr) {
+        ESP_LOGE(TAG, "Cannot record event before initialization");
+        return;
+    }
+    if (type >= EVENT_TYPE_COUNT) {
+        ESP_LOGW(TAG, "Ignoring invalid event type %d", (int)type);
+        return;
+    }
+
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    
-    event_entry_t* entry = &s_buffer[s_head];
+
+    const int index = s_head;
+    event_entry_t* entry = &s_buffer[index];
     entry->timestamp = get_unix_timestamp();
     entry->boot_id = s_boot_id;
     entry->uptime_ms = get_uptime_ms();
     entry->type = type;
     entry->payload = payload;
-    
+
+    uint32_t event_id = s_next_event_id++;
+    if (s_next_event_id == 0) s_next_event_id = 1;
+    s_event_ids[index] = event_id;
+
     s_head = (s_head + 1) % EVENT_LOG_MAX_ENTRIES;
-    if (s_count < EVENT_LOG_MAX_ENTRIES) {
-        s_count++;
-    }
+    if (s_count < EVENT_LOG_MAX_ENTRIES) s_count++;
     s_revision++;
-    
+
+    if (s_storage_ready) {
+        esp_err_t err = history_storage_append_event(event_id, entry);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Journal append failed (%s); compacting",
+                     esp_err_to_name(err));
+            compact_locked();
+        }
+    }
+
     xSemaphoreGive(s_mutex);
-    
-    // Also log to serial for debugging
+
     if (payload != 0) {
-        ESP_LOGI(TAG, "Event: %s (payload: 0x%08lx)", event_type_name(type), (unsigned long)payload);
+        ESP_LOGI(TAG, "Event: %s (payload: 0x%08lx)",
+                 event_type_name(type), (unsigned long)payload);
     } else {
         ESP_LOGI(TAG, "Event: %s", event_type_name(type));
     }
+}
 
-    // Persist to NVS. Critical events (brownout / error transitions) can't wait
-    // for the debounce window — they're exactly what must survive a hard reboot.
-    bool critical = (type == EVENT_BROWNOUT_RESET ||
-                     type == EVENT_ERROR_APPEARED ||
-                     type == EVENT_ERROR_CLEARED);
-    event_log_schedule_flush(critical);
+void event_log_record_reset_reason(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_BROWNOUT:
+            event_log_record(EVENT_BROWNOUT_RESET, 0);
+            break;
+        case ESP_RST_PANIC:
+            event_log_record(EVENT_APPLICATION_CRASH, 0);
+            break;
+        case ESP_RST_INT_WDT:
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_WDT:
+            event_log_record(EVENT_WATCHDOG_RESET, (uint32_t)reason);
+            break;
+        default:
+            break;
+    }
 }
 
 int event_log_count(void) {
@@ -320,24 +187,21 @@ int event_log_count(void) {
 }
 
 int event_log_get(event_entry_t* out, int max_out, int offset) {
-    if (s_mutex == nullptr || out == nullptr || max_out <= 0) return 0;
-    
+    if (s_mutex == nullptr || out == nullptr || max_out <= 0 || offset < 0) return 0;
+
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    
     int available = s_count - offset;
     if (available <= 0) {
         xSemaphoreGive(s_mutex);
         return 0;
     }
-    
-    int to_copy = (available < max_out) ? available : max_out;
-    
-    // Read newest first: head-1 is the newest entry
+
+    int to_copy = available < max_out ? available : max_out;
     for (int i = 0; i < to_copy; i++) {
-        int idx = (s_head - 1 - offset - i + EVENT_LOG_MAX_ENTRIES * 2) % EVENT_LOG_MAX_ENTRIES;
+        int idx = (s_head - 1 - offset - i + EVENT_LOG_MAX_ENTRIES * 2) %
+                  EVENT_LOG_MAX_ENTRIES;
         out[i] = s_buffer[idx];
     }
-    
     xSemaphoreGive(s_mutex);
     return to_copy;
 }
@@ -350,34 +214,43 @@ uint32_t event_log_revision(void) {
     return revision;
 }
 
+uint32_t event_log_current_boot_id(void) {
+    return s_boot_id;
+}
+
 void event_log_time_synced(const struct timeval* synced_time) {
     if (s_mutex == nullptr || synced_time == nullptr) return;
 
     uint64_t uptime_ms = get_uptime_ms();
-    int64_t sync_ms = ((int64_t)synced_time->tv_sec * 1000) + (synced_time->tv_usec / 1000);
+    int64_t sync_ms = ((int64_t)synced_time->tv_sec * 1000) +
+                      (synced_time->tv_usec / 1000);
     int64_t boot_epoch_ms = sync_ms - (int64_t)uptime_ms;
     int updated = 0;
+    bool compact = false;
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     for (int i = 0; i < s_count; i++) {
-        int idx = (s_head - 1 - i + EVENT_LOG_MAX_ENTRIES * 2) % EVENT_LOG_MAX_ENTRIES;
+        int idx = (s_head - 1 - i + EVENT_LOG_MAX_ENTRIES * 2) %
+                  EVENT_LOG_MAX_ENTRIES;
         event_entry_t* entry = &s_buffer[idx];
         if (entry->boot_id != s_boot_id || entry->timestamp != 0) continue;
 
         int64_t event_epoch_ms = boot_epoch_ms + (int64_t)entry->uptime_ms;
-        if (event_epoch_ms >= 1704067200000LL) {
-            entry->timestamp = (uint32_t)(event_epoch_ms / 1000);
-            updated++;
+        if (event_epoch_ms < 1704067200000LL) continue;
+
+        entry->timestamp = (uint32_t)(event_epoch_ms / 1000);
+        updated++;
+        if (s_storage_ready && !compact) {
+            esp_err_t err = history_storage_append_event(s_event_ids[idx], entry);
+            if (err != ESP_OK) compact = true;
         }
     }
-    if (updated > 0) {
-        s_revision++;
-    }
+    if (compact) compact_locked();
+    if (updated > 0) s_revision++;
     xSemaphoreGive(s_mutex);
 
     if (updated > 0) {
-        ESP_LOGI(TAG, "Backfilled timestamps for %d event(s) from this boot", updated);
-        event_log_schedule_flush(true);
+        ESP_LOGI(TAG, "Backfilled and persisted timestamps for %d event(s)", updated);
     }
 }
 
@@ -387,11 +260,19 @@ void event_log_clear(void) {
     s_head = 0;
     s_count = 0;
     memset(s_buffer, 0, sizeof(s_buffer));
+    memset(s_event_ids, 0, sizeof(s_event_ids));
     s_revision++;
+    compact_locked();
     xSemaphoreGive(s_mutex);
-    // Persist the empty log immediately so a clear survives a reboot too.
-    event_log_schedule_flush(true);
     ESP_LOGI(TAG, "Event log cleared");
+}
+
+void event_log_prepare_factory_reset(void) {
+    if (s_mutex == nullptr) return;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_storage_ready = false;
+    xSemaphoreGive(s_mutex);
+    ESP_LOGI(TAG, "Event persistence disabled for factory reset");
 }
 
 const char* event_type_name(event_type_t type) {

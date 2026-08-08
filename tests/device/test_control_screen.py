@@ -230,6 +230,24 @@ class TestSetpoints:
         finally:
             device.click(tag="edit_cancel")
 
+    def test_ap28_uses_metadata_driven_ten_minute_steps(self, device: DeviceClient):
+        """AP28 shows minutes and snaps to Macon's declared display increment."""
+        _open_control(device)
+        device.click(label_contains="(AP28)")
+
+        try:
+            slider = device.find_widget(tag="edit_slider")
+            assert slider is not None, "AP28 slider not found"
+            assert (slider.min, slider.max) == (0, 990)
+
+            device.set_slider("edit_slider", 34)
+            slider = device.find_widget(tag="edit_slider")
+            value = device.find_widget(tag="edit_value")
+            assert slider is not None and slider.value == 30
+            assert value is not None and value.text == "30 min"
+        finally:
+            device.click(tag="edit_cancel")
+
     @pytest.mark.parametrize(
         "label_fragment,option_count",
         [("(AP14)", 8), ("(AP44)", 3)],
@@ -245,6 +263,7 @@ class TestSetpoints:
             roller = device.find_widget(tag="edit_roller")
             assert roller is not None, f"{label_fragment} roller not found"
             assert roller.option_count == option_count
+            assert roller.h >= 220
             assert device.find_widget(tag="edit_slider") is None
             assert not _has_text_containing(device, "Range:")
         finally:

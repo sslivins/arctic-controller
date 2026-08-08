@@ -2295,9 +2295,11 @@ static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool r
     } else {
         cJSON_AddNullToObject(obj, "value");
     }
-    cJSON_AddNumberToObject(obj, "min", p->min_val);
-    cJSON_AddNumberToObject(obj, "max", p->max_val);
-    cJSON_AddStringToObject(obj, "unit", p->unit ? p->unit : "");
+    cJSON_AddNumberToObject(obj, "min", arctic::advanced_display_value(p->ap, p->min_val));
+    cJSON_AddNumberToObject(obj, "max", arctic::advanced_display_value(p->ap, p->max_val));
+    cJSON_AddNumberToObject(obj, "step", arctic::advanced_display_step(p->ap));
+    const char* display_unit = arctic::advanced_display_unit(p->ap);
+    cJSON_AddStringToObject(obj, "unit", display_unit ? display_unit : "");
     cJSON_AddStringToObject(obj, "category", p->category ? p->category : "");
     cJSON_AddBoolToObject(obj, "read_only", p->read_only);
     cJSON_AddBoolToObject(obj, "is_trigger", p->is_trigger);
@@ -2397,8 +2399,11 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON_AddStringToObject(root, "name_msg_id", p->name_msg_id ? p->name_msg_id : "");
     cJSON_AddStringToObject(root, "detail_msg_id", p->detail_msg_id ? p->detail_msg_id : "");
     cJSON_AddStringToObject(root, "category", p->category ? p->category : "");
-    cJSON_AddNumberToObject(root, "min", p->min_val);
-    cJSON_AddNumberToObject(root, "max", p->max_val);
+    cJSON_AddNumberToObject(root, "min", arctic::advanced_display_value(p->ap, p->min_val));
+    cJSON_AddNumberToObject(root, "max", arctic::advanced_display_value(p->ap, p->max_val));
+    cJSON_AddNumberToObject(root, "step", arctic::advanced_display_step(p->ap));
+    const char* display_unit = arctic::advanced_display_unit(p->ap);
+    cJSON_AddStringToObject(root, "unit", display_unit ? display_unit : "");
     cJSON_AddBoolToObject(root, "read_only", p->read_only);
     cJSON_AddBoolToObject(root, "is_trigger", p->is_trigger);
     cJSON_AddBoolToObject(root, "writable", writable);
@@ -2929,7 +2934,8 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
             if (!p || p->reg == arctic::ADV_REG_UNKNOWN) continue;
             int16_t value = 0;
             bool read_ok = advanced_param_read(p->ap, &value);
-            const char* unit = p->unit ? p->unit : "";
+            const char* unit = arctic::advanced_display_unit(p->ap);
+            if (!unit) unit = "";
             if (read_ok) {
                 snprintf(line, sizeof(line), "Parameter,\"%s\",AP%u,%u,%d,%s\r\n",
                          p->name, (unsigned)p->ap, p->reg, value, unit);
@@ -3082,12 +3088,31 @@ static esp_err_t events_get_handler(httpd_req_t* req)
     }
     set_json_content_type(req);
     
-    // Get events (newest first, up to 128)
-    event_entry_t events[128];
-    int count = event_log_get(events, 128, 0);
+    constexpr int kDefaultLimit = 128;
+    constexpr int kMaxLimit = 128;
+    int offset = 0;
+    int limit = kDefaultLimit;
+    char query[128];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char param[16];
+        if (httpd_query_key_value(query, "offset", param, sizeof(param)) == ESP_OK) {
+            offset = atoi(param);
+            if (offset < 0) offset = 0;
+        }
+        if (httpd_query_key_value(query, "limit", param, sizeof(param)) == ESP_OK) {
+            limit = atoi(param);
+            if (limit < 1) limit = 1;
+            if (limit > kMaxLimit) limit = kMaxLimit;
+        }
+    }
+
+    event_entry_t events[kMaxLimit];
+    int count = event_log_get(events, limit, offset);
     
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "total", event_log_count());
+    cJSON_AddNumberToObject(root, "offset", offset);
+    cJSON_AddNumberToObject(root, "count", count);
     // Durable brownout tracking (survives the reboot a brownout causes).
     cJSON_AddNumberToObject(root, "brownout_count", boot_stats_brownout_count());
     cJSON_AddStringToObject(root, "last_reset_reason",
