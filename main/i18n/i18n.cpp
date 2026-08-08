@@ -1152,6 +1152,9 @@ static const keyed_translation_t s_keyed_translations[] = {
     { "ap.water_pump_mode.detail",
       "Mode de fonctionnement de la pompe à eau (0 = par intervalles, 1 = suit le compresseur, 2 = en continu).",
       "Modo de funcionamiento de la bomba de agua (0 = por intervalos, 1 = sigue al compresor, 2 = en continuo)." },
+    { "pump_mode_intervals", "Par intervalles", "Por intervalos" },
+    { "pump_mode_follow", "Suit le compresseur", "Sigue el compresor" },
+    { "pump_mode_continuous", "En continu", "Continuo" },
 
     { "ap.water_pump_run_interval.name", "Intervalle de marche pompe à eau", "Intervalo de marcha bomba de agua" },
     { "ap.water_pump_run_interval.detail",

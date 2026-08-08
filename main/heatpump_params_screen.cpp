@@ -96,14 +96,14 @@ static struct {
     lv_obj_t* edit_title = nullptr;
     lv_obj_t* edit_detail = nullptr;
     lv_obj_t* edit_description = nullptr;
-    lv_obj_t* edit_range_label = nullptr;
     lv_obj_t* edit_value_label = nullptr;
-    lv_obj_t* edit_minus_btn = nullptr;
-    lv_obj_t* edit_plus_btn = nullptr;
+    lv_obj_t* edit_slider = nullptr;
+    lv_obj_t* edit_roller = nullptr;
     lv_obj_t* edit_save_btn = nullptr;
     float edit_value = 0;       // Float for F mode precision
     int16_t edit_value_celsius = 0;  // Original value in Celsius (for non-temp params too)
     bool edit_value_unknown = false; // true when disconnected: show "--", no live value
+    bool edit_uses_enum = false;
     
     // Setpoint editing (uses same dialog, different handling)
     // -1 = editing P-parameter, 0/1/2 = editing cooling/heating/hotwater
@@ -144,8 +144,8 @@ static void sync_setpoint_limits(void) {
 static void close_btn_cb(lv_event_t* e);
 static void edit_cancel_cb(lv_event_t* e);
 static void edit_save_cb(lv_event_t* e);
-static void edit_minus_cb(lv_event_t* e);
-static void edit_plus_cb(lv_event_t* e);
+static void edit_slider_cb(lv_event_t* e);
+static void edit_roller_cb(lv_event_t* e);
 static void hide_edit_dialog(void);
 static void update_edit_value_display(void);
 static void load_timer_cb(lv_timer_t* timer);
@@ -166,8 +166,8 @@ static void show_ap_trigger_confirm(uint8_t ap);
 static void ap_trigger_run_cb(lv_event_t* e);
 static void create_ap_section(lv_obj_t* parent);
 static void ap_update_display(int slot);
-static const char* kratio_label(uint8_t ap, int wire);
-static void kratio_desc(uint8_t ap, int wire, char* buf, size_t n);
+static const char* enum_option_label(uint8_t ap, int wire);
+static void enum_option_desc(uint8_t ap, int wire, char* buf, size_t n);
 
 // ============================================================================
 // Demo Setpoints (screen-local)
@@ -628,46 +628,41 @@ static void create_edit_dialog(void) {
     lv_label_set_long_mode(state.edit_detail, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(state.edit_detail, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     
-    // (3) Value display with +/- buttons — the focal control.
+    // (3) Value editor. Numeric spans use a slider; discrete enums use a roller.
     lv_obj_t* value_row = lv_obj_create(content);
-    lv_obj_set_size(value_row, 400, 120);
+    lv_obj_set_size(value_row, 600, 150);
     lv_obj_set_style_bg_opa(value_row, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(value_row, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(value_row, 0, LV_PART_MAIN);
     lv_obj_clear_flag(value_row, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Minus button
-    state.edit_minus_btn = lv_btn_create(value_row);
-    lv_obj_set_size(state.edit_minus_btn, 100, 100);
-    lv_obj_align(state.edit_minus_btn, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_color(state.edit_minus_btn, lv_color_hex(0x1a2a4e), LV_PART_MAIN);
-    lv_obj_set_style_radius(state.edit_minus_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.edit_minus_btn, edit_minus_cb, LV_EVENT_CLICKED, nullptr);
-    
-    lv_obj_t* minus_lbl = lv_label_create(state.edit_minus_btn);
-    lv_label_set_text(minus_lbl, "-");
-    lv_obj_set_style_text_font(minus_lbl, &montserrat_32_latin, LV_PART_MAIN);
-    lv_obj_center(minus_lbl);
-    
-    // Value label
+    // Numeric value above the slider.
     state.edit_value_label = lv_label_create(value_row);
     lv_label_set_text(state.edit_value_label, "25");
     lv_obj_set_style_text_font(state.edit_value_label, &montserrat_32_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.edit_value_label, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_align(state.edit_value_label, LV_ALIGN_CENTER, 0, 0);
-    
-    // Plus button
-    state.edit_plus_btn = lv_btn_create(value_row);
-    lv_obj_set_size(state.edit_plus_btn, 100, 100);
-    lv_obj_align(state.edit_plus_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(state.edit_plus_btn, lv_color_hex(0x1a2a4e), LV_PART_MAIN);
-    lv_obj_set_style_radius(state.edit_plus_btn, 12, LV_PART_MAIN);
-    lv_obj_add_event_cb(state.edit_plus_btn, edit_plus_cb, LV_EVENT_CLICKED, nullptr);
-    
-    lv_obj_t* plus_lbl = lv_label_create(state.edit_plus_btn);
-    lv_label_set_text(plus_lbl, "+");
-    lv_obj_set_style_text_font(plus_lbl, &montserrat_32_latin, LV_PART_MAIN);
-    lv_obj_center(plus_lbl);
+    lv_obj_align(state.edit_value_label, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_user_data(state.edit_value_label, (void*)"edit_value");
+
+    state.edit_slider = lv_slider_create(value_row);
+    lv_obj_set_size(state.edit_slider, 540, 24);
+    lv_obj_align(state.edit_slider, LV_ALIGN_BOTTOM_MID, 0, -18);
+    lv_obj_set_style_bg_color(state.edit_slider, lv_color_hex(0x334155), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.edit_slider, COLOR_ACCENT, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(state.edit_slider, COLOR_ACCENT, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(state.edit_slider, 10, LV_PART_KNOB);
+    lv_obj_set_user_data(state.edit_slider, (void*)"edit_slider");
+    lv_obj_add_event_cb(state.edit_slider, edit_slider_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+    state.edit_roller = lv_roller_create(value_row);
+    lv_obj_set_size(state.edit_roller, 560, 150);
+    lv_roller_set_visible_row_count(state.edit_roller, 3);
+    lv_obj_center(state.edit_roller);
+    lv_obj_set_style_text_font(state.edit_roller, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state.edit_roller, UI_FONT_TITLE, LV_PART_SELECTED);
+    lv_obj_set_user_data(state.edit_roller, (void*)"edit_roller");
+    lv_obj_add_event_cb(state.edit_roller, edit_roller_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_flag(state.edit_roller, LV_OBJ_FLAG_HIDDEN);
     
     // (4) Live value-meaning — helper text that updates with the +/- control
     // (e.g. K-ratio "Reduce 2-step opening each 4 Hz"), or a plain setpoint
@@ -680,14 +675,6 @@ static void create_edit_dialog(void) {
     lv_label_set_long_mode(state.edit_description, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(state.edit_description, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
     
-    // (5) Range label (numeric params only; hidden for enum/setpoint as needed).
-    state.edit_range_label = lv_label_create(content);
-    lv_label_set_text(state.edit_range_label, "");
-    lv_obj_set_style_text_font(state.edit_range_label, UI_FONT_BODY, LV_PART_MAIN);
-    lv_obj_set_style_text_color(state.edit_range_label, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_set_width(state.edit_range_label, LV_PCT(100));
-    lv_obj_set_style_text_align(state.edit_range_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-
     // Bottom action bar — worded Cancel (left, ghost) + Save (right, accent).
     // UX convention: primary action bottom-right and visually dominant, dismiss
     // bottom-left and quiet. Committing is always an explicit Save tap; closing
@@ -741,20 +728,35 @@ static void create_edit_dialog(void) {
     lv_obj_center(save_lbl);
 }
 
-// Toggle the edit dialog between interactive and view-only (read-only) modes.
-// View-only hides the +/- steppers and the Save button (leaving only Cancel), so
-// the user never triggers a doomed write while disconnected. The reason is shown
-// once by the control-screen disconnected banner, not repeated per dialog.
+static void show_configured_editor(void) {
+    if (state.edit_value_unknown) {
+        lv_obj_remove_flag(state.edit_value_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(state.edit_slider, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(state.edit_roller, LV_OBJ_FLAG_HIDDEN);
+    } else if (state.edit_uses_enum) {
+        lv_obj_add_flag(state.edit_value_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(state.edit_slider, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(state.edit_roller, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(state.edit_value_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(state.edit_slider, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(state.edit_roller, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// Toggle the edit dialog between interactive and view-only modes. A missing live
+// value hides the editor rather than showing a fabricated slider/roller position.
 static void set_edit_dialog_readonly(bool readonly) {
     if (readonly) {
-        if (state.edit_minus_btn) lv_obj_add_flag(state.edit_minus_btn, LV_OBJ_FLAG_HIDDEN);
-        if (state.edit_plus_btn)  lv_obj_add_flag(state.edit_plus_btn, LV_OBJ_FLAG_HIDDEN);
-        if (state.edit_save_btn)  lv_obj_add_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_state(state.edit_slider, LV_STATE_DISABLED);
+        lv_obj_add_state(state.edit_roller, LV_STATE_DISABLED);
+        lv_obj_add_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
     } else {
-        if (state.edit_minus_btn) lv_obj_remove_flag(state.edit_minus_btn, LV_OBJ_FLAG_HIDDEN);
-        if (state.edit_plus_btn)  lv_obj_remove_flag(state.edit_plus_btn, LV_OBJ_FLAG_HIDDEN);
-        if (state.edit_save_btn)  lv_obj_remove_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_state(state.edit_slider, LV_STATE_DISABLED);
+        lv_obj_remove_state(state.edit_roller, LV_STATE_DISABLED);
+        lv_obj_remove_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
     }
+    show_configured_editor();
 }
 
 static void close_btn_cb(lv_event_t* e) {
@@ -854,78 +856,22 @@ static void edit_save_cb(lv_event_t* e) {
     hide_edit_dialog();
 }
 
-static void edit_minus_cb(lv_event_t* e) {
+static void edit_slider_cb(lv_event_t* e) {
     (void)e;
-
-    // Advanced ("AP") param: enum-aware / integer stepping.
-    if (state.current_ap >= 0) {
-        const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
-        if (!p) return;
-        int cur = (int)roundf(state.edit_value);
-        if (p->enum_vals) {
-            int idx = -1;
-            for (uint8_t i = 0; i < p->enum_count; i++) {
-                if ((int)p->enum_vals[i] == cur) { idx = i; break; }
-            }
-            if (idx > 0) state.edit_value = (float)p->enum_vals[idx - 1];
-        } else if (cur > p->min_val) {
-            state.edit_value -= 1.0f;
-        }
-        update_edit_value_display();
-        return;
-    }
-
-    float min_val = 0;
-    
-    if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
-        // Setpoints are always TEMP_ABSOLUTE - convert limit to display units
-        min_val = app_prefs_convert_temp_f(s_setpoints[state.current_setpoint_type].min_val);
-    } else {
-        return;
-    }
-    
-    if (state.edit_value > min_val) {
-        state.edit_value -= 1.0f;
-        update_edit_value_display();
-    }
+    state.edit_value = (float)lv_slider_get_value(state.edit_slider);
+    update_edit_value_display();
 }
 
-static void edit_plus_cb(lv_event_t* e) {
+static void edit_roller_cb(lv_event_t* e) {
     (void)e;
-
-    // Advanced ("AP") param: enum-aware / integer stepping.
-    if (state.current_ap >= 0) {
-        const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
-        if (!p) return;
-        int cur = (int)roundf(state.edit_value);
-        if (p->enum_vals) {
-            int idx = -1;
-            for (uint8_t i = 0; i < p->enum_count; i++) {
-                if ((int)p->enum_vals[i] == cur) { idx = i; break; }
-            }
-            if (idx >= 0 && idx < (int)p->enum_count - 1) {
-                state.edit_value = (float)p->enum_vals[idx + 1];
-            }
-        } else if (cur < p->max_val) {
-            state.edit_value += 1.0f;
-        }
-        update_edit_value_display();
-        return;
-    }
-
-    float max_val = 0;
-    
-    if (state.current_setpoint_type >= 0 && state.current_setpoint_type <= 2) {
-        // Setpoints are always TEMP_ABSOLUTE - convert limit to display units
-        max_val = app_prefs_convert_temp_f(s_setpoints[state.current_setpoint_type].max_val);
-    } else {
-        return;
-    }
-    
-    if (state.edit_value < max_val) {
-        state.edit_value += 1.0f;
-        update_edit_value_display();
-    }
+    if (state.current_ap < 0) return;
+    const arctic::AdvancedParam* p =
+        arctic::advanced_param_lookup((uint8_t)state.current_ap);
+    if (!p || !p->enum_vals) return;
+    uint32_t idx = lv_roller_get_selected(state.edit_roller);
+    if (idx >= p->enum_count) return;
+    state.edit_value = (float)p->enum_vals[idx];
+    update_edit_value_display();
 }
 
 // Set a flex-child label's text, hiding it entirely when the text is empty so
@@ -938,6 +884,42 @@ static void edit_label_set_or_hide(lv_obj_t* lbl, const char* text) {
     } else {
         lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+static void configure_slider_editor(int min_val, int max_val, int value) {
+    state.edit_uses_enum = false;
+    lv_slider_set_range(state.edit_slider, min_val, max_val);
+    lv_slider_set_value(state.edit_slider, value, LV_ANIM_OFF);
+    show_configured_editor();
+}
+
+static void configure_enum_editor(const arctic::AdvancedParam* p, int value) {
+    if (!p || !p->enum_vals || p->enum_count == 0) return;
+
+    char options[256] = {};
+    size_t used = 0;
+    uint32_t selected = 0;
+    for (uint8_t i = 0; i < p->enum_count; i++) {
+        const arctic::AdvEnumOption* option = arctic::advanced_enum_option_at(p->ap, i);
+        char numeric[16];
+        const char* label = nullptr;
+        if (option && option->label && option->label[0]) {
+            label = i18n_get_key(option->msg_id, option->label);
+        } else {
+            snprintf(numeric, sizeof(numeric), "%u", (unsigned)p->enum_vals[i]);
+            label = numeric;
+        }
+        int written = snprintf(options + used, sizeof(options) - used, "%s%s",
+                               i == 0 ? "" : "\n", label);
+        if (written < 0 || (size_t)written >= sizeof(options) - used) break;
+        used += (size_t)written;
+        if ((int)p->enum_vals[i] == value) selected = i;
+    }
+
+    state.edit_uses_enum = true;
+    lv_roller_set_options(state.edit_roller, options, LV_ROLLER_MODE_NORMAL);
+    lv_roller_set_selected(state.edit_roller, selected, LV_ANIM_OFF);
+    show_configured_editor();
 }
 
 static void show_setpoint_edit(int setpoint_type) {
@@ -976,16 +958,10 @@ static void show_setpoint_edit(int setpoint_type) {
     lv_label_set_text(state.edit_title, i18n_get(sp.name_id));
     edit_label_set_or_hide(state.edit_detail, "");  // setpoints have no detail paragraph
     edit_label_set_or_hide(state.edit_description, sp.description);
-    
-    // Range label - convert limits to display units
-    char range_buf[64];
+
     int display_min = app_prefs_convert_temp(sp.min_val);
     int display_max = app_prefs_convert_temp(sp.max_val);
-    snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s", 
-             i18n_get(STR_HP_RANGE_FMT), display_min, display_max, app_prefs_temp_unit_str());
-    lv_label_set_text(state.edit_range_label, range_buf);
-    lv_obj_remove_flag(state.edit_range_label, LV_OBJ_FLAG_HIDDEN);  // shared w/ AP enum dialog which hides it
-    
+    configure_slider_editor(display_min, display_max, (int)roundf(state.edit_value));
     update_edit_value_display();
     
     // Disconnected heat pump: present the setpoint as view-only rather than
@@ -1027,13 +1003,13 @@ static void update_edit_value_display(void) {
         const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
         char val_buf[32];
         if (p && p->enum_vals) {
-            const char* s = kratio_label((uint8_t)state.current_ap, display_val);
+            const char* s = enum_option_label((uint8_t)state.current_ap, display_val);
             if (s) snprintf(val_buf, sizeof(val_buf), "%s", s);
             else   snprintf(val_buf, sizeof(val_buf), "%d", display_val);
             // Update the description line to match the selected value.
             if (state.edit_description) {
                 char desc_buf[96];
-                kratio_desc((uint8_t)state.current_ap, display_val, desc_buf, sizeof(desc_buf));
+                enum_option_desc((uint8_t)state.current_ap, display_val, desc_buf, sizeof(desc_buf));
                 lv_label_set_text(state.edit_description, desc_buf);
             }
         } else if (p && p->unit && p->unit[0]) {
@@ -1071,18 +1047,16 @@ static void update_edit_value_display(void) {
 // plain-language description; both come from the shared macon library so the
 // controller never hardcodes the wire-code<->meaning mapping.
 
-// K-ratio display label for a wire code (e.g. 12 -> "3"), sourced from the
-// macon library (single source of truth). Returns nullptr for a non-option.
-static const char* kratio_label(uint8_t ap, int wire) {
+// Display label for an enum wire code, sourced from the macon library.
+static const char* enum_option_label(uint8_t ap, int wire) {
     const arctic::AdvEnumOption* o =
         arctic::advanced_enum_option_for_wire(ap, (int16_t)wire);
     return o ? o->label : nullptr;
 }
 
-// Localized human description of a wire code ("Reduce 6-step opening each
-// 1 Hz"), built from the library's structured args (steps, Hz) + the device
-// i18n catalog. Falls back to the library's canonical English if untranslated.
-static void kratio_desc(uint8_t ap, int wire, char* buf, size_t n) {
+// Localized human description of an enum choice. K-ratio options use structured
+// arguments; other enums use their keyed library fallback directly.
+static void enum_option_desc(uint8_t ap, int wire, char* buf, size_t n) {
     const arctic::AdvEnumOption* o =
         arctic::advanced_enum_option_for_wire(ap, (int16_t)wire);
     if (!o) { if (n) buf[0] = '\0'; return; }
@@ -1091,7 +1065,7 @@ static void kratio_desc(uint8_t ap, int wire, char* buf, size_t n) {
     } else if (strcmp(o->msg_id, "kratio_reduce") == 0) {
         snprintf(buf, n, i18n_get(STR_HP_KRATIO_REDUCE), (int)o->arg_a, (int)o->arg_b);
     } else {
-        snprintf(buf, n, "%s", o->en_default ? o->en_default : "");
+        snprintf(buf, n, "%s", i18n_get_key(o->msg_id, o->en_default));
     }
 }
 
@@ -1099,7 +1073,7 @@ static void kratio_desc(uint8_t ap, int wire, char* buf, size_t n) {
 static void format_ap_value(const arctic::AdvancedParam* p, int16_t raw,
                             char* buf, size_t n) {
     if (p->enum_vals) {
-        const char* s = kratio_label(p->ap, raw);
+        const char* s = enum_option_label(p->ap, raw);
         if (s) snprintf(buf, n, "%s", s);
         else   snprintf(buf, n, "%d", raw);
     } else if (p->unit && p->unit[0]) {
@@ -1307,31 +1281,13 @@ static void show_ap_edit_dialog(uint8_t ap) {
     format_detail_temps(i18n_get_key(p->detail_msg_id, p->detail), detail_buf, sizeof(detail_buf));
     edit_label_set_or_hide(state.edit_detail, detail_buf);
 
-    // The value-meaning line is filled live by update_edit_value_display() for
-    // enum (K-ratio) params; ensure it's visible. Plain numeric params have no
-    // value-meaning, so hide it.
+    // Enum choices have a live meaning line; numeric sliders do not.
     if (p->enum_vals) {
         lv_obj_remove_flag(state.edit_description, LV_OBJ_FLAG_HIDDEN);
+        configure_enum_editor(p, v);
     } else {
         edit_label_set_or_hide(state.edit_description, "");
-    }
-
-    // Range hint. For enum (K-ratio) params a min-max range is meaningless —
-    // the value is one of a few discrete options, each explained by the live
-    // description line — so hide it. Numeric params keep the min-max hint.
-    if (p->enum_vals) {
-        lv_obj_add_flag(state.edit_range_label, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        char range_buf[64];
-        if (p->unit && p->unit[0]) {
-            snprintf(range_buf, sizeof(range_buf), "%s %d - %d %s",
-                     i18n_get(STR_HP_RANGE_FMT), p->min_val, p->max_val, p->unit);
-        } else {
-            snprintf(range_buf, sizeof(range_buf), "%s %d - %d",
-                     i18n_get(STR_HP_RANGE_FMT), p->min_val, p->max_val);
-        }
-        lv_label_set_text(state.edit_range_label, range_buf);
-        lv_obj_remove_flag(state.edit_range_label, LV_OBJ_FLAG_HIDDEN);
+        configure_slider_editor(p->min_val, p->max_val, v);
     }
 
     update_edit_value_display();
@@ -1707,11 +1663,11 @@ void heatpump_control_hide(void) {
     state.edit_title = nullptr;
     state.edit_detail = nullptr;
     state.edit_description = nullptr;
-    state.edit_range_label = nullptr;
     state.edit_value_label = nullptr;
-    state.edit_minus_btn = nullptr;
-    state.edit_plus_btn = nullptr;
+    state.edit_slider = nullptr;
+    state.edit_roller = nullptr;
     state.edit_save_btn = nullptr;
+    state.edit_uses_enum = false;
     state.current_setpoint_type = -1;
     state.current_ap = -1;
     memset(state.ap_value_labels, 0, sizeof(state.ap_value_labels));
