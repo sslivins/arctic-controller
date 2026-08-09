@@ -83,6 +83,17 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: firmware
+
+      - name: Detect partition layout changes
+        id: partition_layout
+        run: |
+          git fetch origin main --depth=1
+          if git diff --quiet origin/main HEAD -- partitions.csv; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Partition layout changed; forcing a full USB flash."
+          fi
           path: build/
 
       - name: Set up Python environment
@@ -241,6 +252,7 @@ jobs:
 
       - name: Flash device via OTA
         id: ota_flash
+        if: steps.partition_layout.outputs.changed != 'true'
         continue-on-error: true
         run: |
           echo "Uploading firmware to device via OTA..."
@@ -297,7 +309,7 @@ jobs:
           exit 1
 
       - name: Wait for device reboot (OTA)
-        if: steps.ota_flash.outcome == 'success'
+        if: steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'success'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 10
@@ -313,7 +325,7 @@ jobs:
           exit 1
 
       - name: Fallback — flash via USB serial
-        if: steps.ota_flash.outcome == 'failure'
+        if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
         run: |
           echo "OTA failed, falling back to USB serial flash..."
 
@@ -354,7 +366,7 @@ jobs:
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Wait for device boot (USB)
-        if: steps.ota_flash.outcome == 'failure'
+        if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 15
