@@ -20,6 +20,7 @@
 #include "settings/settings_firmware_screen.h"
 #include "settings/settings_time_screen.h"
 #include "settings/settings_display_screen.h"
+#include "display_idle.h"
 #include "i18n/i18n.h"
 #include "auth_manager.h"
 #include "tls_manager.h"
@@ -187,6 +188,7 @@ extern "C" void app_main(void)
 
     // Start the startup animation
     bsp_display_lock(0);
+    display_idle_init();
     startup_anim_init(on_startup_complete);
     bsp_display_unlock();
 
