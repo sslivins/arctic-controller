@@ -30,7 +30,7 @@ bool advanced_param_read(uint8_t ap, int16_t* value_out) {
 
     // Demo mode - no live bus; report the vendor-doc default.
     if (app_prefs_is_demo_mode()) {
-        *value_out = p->default_val;
+        *value_out = arctic::advanced_display_value(ap, p->default_val);
         return true;
     }
 
@@ -46,7 +46,8 @@ bool advanced_param_read(uint8_t ap, int16_t* value_out) {
     }
     // Signed params are 8-bit two's-complement in the low byte; the library
     // decoder sign-extends them (e.g. raw 0x00F6 -> -10), others pass through.
-    *value_out = arctic::advanced_decode_raw(ap, raw);
+    *value_out = arctic::advanced_display_value(
+        ap, arctic::advanced_decode_raw(ap, raw));
     return true;
 }
 
@@ -55,7 +56,7 @@ arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus
 
     // Build a validated write plan (range/enum + register-known + unlocked).
     AdvWritePlan plan{};
-    AdvWriteResult r = arctic::advanced_prepare_write(ap, value, &plan);
+    AdvWriteResult r = arctic::advanced_prepare_display_write(ap, value, &plan);
     if (r != AdvWriteResult::OK) {
         ESP_LOGW(TAG, "write AP%u = %d refused: %s",
                  (unsigned)ap, value, arctic::adv_write_result_name(r));

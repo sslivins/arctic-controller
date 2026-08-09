@@ -32,6 +32,7 @@
 #include "heatpump_temps_screen.h"
 #include "heatpump_control_screen.h"
 #include "heatpump_errors_screen.h"
+#include "event_log.h"
 #include "event_log_screen.h"
 #include "tab_shell.h"
 #include "status_bar.h"
@@ -761,6 +762,66 @@ static esp_err_t set_slider_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/scroll
+// Body: {"tag": "event_log_content", "y": 300}
+// Scrolls a tagged container to an absolute vertical position.
+// ============================================================================
+
+static esp_err_t scroll_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    set_json_content_type(req);
+
+    char buf[256];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Invalid body");
+        return ESP_OK;
+    }
+    buf[received] = '\0';
+
+    cJSON* body = cJSON_Parse(buf);
+    cJSON* j_tag = body ? cJSON_GetObjectItem(body, "tag") : NULL;
+    cJSON* j_y = body ? cJSON_GetObjectItem(body, "y") : NULL;
+    if (!j_tag || !cJSON_IsString(j_tag) || !j_y || !cJSON_IsNumber(j_y)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Provide 'tag' and 'y'");
+        return ESP_OK;
+    }
+
+    char search_tag[64] = {0};
+    strncpy(search_tag, j_tag->valuestring, sizeof(search_tag) - 1);
+    int y = (int)j_y->valuedouble;
+    cJSON_Delete(body);
+
+    if (!bsp_display_lock(1000)) {
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
+
+    lv_obj_t* found = find_by_tag(lv_scr_act(), search_tag, 0);
+    if (!found) {
+        bsp_display_unlock();
+        send_json_error(req, "404 Not Found", search_tag);
+        return ESP_OK;
+    }
+
+    lv_obj_scroll_to_y(found, y, LV_ANIM_OFF);
+    lv_obj_send_event(found, LV_EVENT_SCROLL, NULL);
+    int actual = lv_obj_get_scroll_y(found);
+    bsp_display_unlock();
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddNumberToObject(resp, "y", actual);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/set-roller
 // Body: {"tag": "timezone_roller", "index": 3}
 // Sets a roller widget's selected index and fires LV_EVENT_VALUE_CHANGED
@@ -1374,6 +1435,32 @@ static esp_err_t set_demo_field_post_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+static esp_err_t record_reset_reason_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+
+    char body[128];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    cJSON* reason = root ? cJSON_GetObjectItem(root, "reason") : NULL;
+    if (!reason || !cJSON_IsNumber(reason)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Provide numeric 'reason'");
+        return ESP_OK;
+    }
+
+    event_log_record_reset_reason((esp_reset_reason_t)reason->valueint);
+    cJSON_Delete(root);
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
 // ============================================================================
 // POST /api/test/clear-error-history — clear the error history ring buffer
 // ============================================================================
@@ -1696,6 +1783,22 @@ void test_endpoints_register(httpd_handle_t server)
     };
     httpd_register_uri_handler(server, &set_slider_options_uri);
 
+    httpd_uri_t scroll_uri = {
+        .uri = "/api/test/scroll",
+        .method = HTTP_POST,
+        .handler = scroll_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &scroll_uri);
+
+    httpd_uri_t scroll_options_uri = {
+        .uri = "/api/test/scroll",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &scroll_options_uri);
+
     httpd_uri_t set_roller_uri = {
         .uri = "/api/test/set-roller",
         .method = HTTP_POST,
@@ -1839,6 +1942,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &set_demo_field_options_uri);
+
+    httpd_uri_t record_reset_reason_uri = {
+        .uri = "/api/test/record-reset-reason",
+        .method = HTTP_POST,
+        .handler = record_reset_reason_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &record_reset_reason_uri);
+
+    httpd_uri_t record_reset_reason_options_uri = {
+        .uri = "/api/test/record-reset-reason",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &record_reset_reason_options_uri);
 
     httpd_uri_t clear_error_history_uri = {
         .uri = "/api/test/clear-error-history",

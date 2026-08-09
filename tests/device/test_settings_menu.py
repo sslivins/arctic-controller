@@ -5,6 +5,8 @@ Verifies that pressing the settings button opens the settings menu
 and that the settings screen contains the expected UI elements.
 """
 
+import time
+
 from device_client import DeviceClient
 
 
@@ -48,3 +50,24 @@ def test_close_settings_menu(device: DeviceClient):
     # Should be back on main
     assert device.wait_for_screen("main", timeout=3.0), \
         f"Did not return to main screen — still on '{device.screen}'"
+
+
+def test_factory_reset_requires_confirmation_and_can_be_cancelled(
+    device: DeviceClient,
+):
+    """Factory reset is visibly destructive and never runs on the first tap."""
+    device.click(tag="settings")
+    assert device.wait_for_screen("settings", timeout=3.0)
+
+    device.click(tag="settings_factory_reset")
+    time.sleep(0.4)
+
+    assert device.has_widget(tag="factory_reset_overlay")
+    assert device.has_widget(tag="factory_reset_panel")
+    assert device.has_widget(tag="factory_reset_confirm")
+    assert device.has_widget(tag="factory_reset_cancel")
+
+    device.click(tag="factory_reset_cancel")
+    time.sleep(0.3)
+    assert not device.has_widget(tag="factory_reset_overlay")
+    assert device.screen == "settings"

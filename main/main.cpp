@@ -207,9 +207,7 @@ extern "C" void app_main(void)
     // visible after the fact instead of only on the serial console. Requires
     // NVS, which was initialized above.
     boot_stats_init(reset_reason);
-    if (reset_reason == ESP_RST_BROWNOUT) {
-        event_log_record(EVENT_BROWNOUT_RESET, 0);
-    }
+    event_log_record_reset_reason(reset_reason);
 
     // Initialize Modbus and Arctic heat pump communication (skip in demo mode)
     if (app_prefs_is_demo_mode()) {

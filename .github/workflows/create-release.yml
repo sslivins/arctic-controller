@@ -168,11 +168,12 @@ jobs:
             echo "esptool.py --chip esp32p4 write_flash \\"
             echo "  0x2000 bootloader.bin \\"
             echo "  0x8000 partition-table.bin \\"
-            echo "  0xf000 ota_data_initial.bin \\"
-            echo "  0x20000 arctic_controller.bin"
+            echo "  0x49000 ota_data_initial.bin \\"
+            echo "  0x50000 arctic_controller.bin"
             echo '```'
             echo ""
             echo "**For OTA update:**"
+            echo "OTA is supported only after the device has received this partition layout once via USB."
             echo "Use \`arctic_controller.bin\` with the device's OTA API:"
             echo '```bash'
             echo "curl -X POST http://arctic.local/api/ota/update \\"

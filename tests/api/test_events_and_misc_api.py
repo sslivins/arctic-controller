@@ -133,6 +133,12 @@ class TestEventsAPI:
         # total is the ring buffer count, events is what was returned
         assert data["total"] >= len(data["events"])
 
+    def test_events_pagination(self):
+        data = _get("/api/events?offset=1&limit=2").json()
+        assert data["offset"] == 1
+        assert data["count"] == len(data["events"])
+        assert len(data["events"]) <= 2
+
     def test_clear_events(self):
         """DELETE /api/events should clear the event log."""
         r = _delete("/api/events")

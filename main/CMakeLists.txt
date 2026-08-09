@@ -47,6 +47,7 @@ idf_component_register(
         "advanced_params.cpp"
         "heatpump_errors.cpp"
         "event_log.cpp"
+        "history_storage.cpp"
         "event_log_screen.cpp"
         "boot_stats.cpp"
         "log_buffer.cpp"
@@ -132,4 +133,3 @@ add_dependencies(${COMPONENT_LIB} web_assets)
 # the linker to keep lv_malloc_core pulls the whole lv_mem_psram.c object in
 # early, so all of the lv_*_core symbols are defined for LVGL.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_malloc_core")
-

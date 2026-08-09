@@ -2983,6 +2983,7 @@
                                                                             <input type="number" 
                                                                                    x-model.number="editingParamValue" 
                                                                                    :min="p.min" :max="p.max"
+                                                                                   :step="p.step || 1"
                                                                                    @keydown.enter="saveParam(key)"
                                                                                    @keydown.escape="editingParam = null">
                                                                         </template>
@@ -3575,7 +3576,7 @@
                     25: { full: 'Ambient temperature at which to start the backup electric heater (-45~45\u00b0C).' },
                     26: { full: 'Frequency decrease value for quiet running mode (1~20Hz).' },
                     27: { full: 'Frequency increase value for fast heating mode (1~20Hz).' },
-                    28: { full: 'Automatic mode \u2013 mode switch waiting time N (0~99, in units of 10 minutes).' },
+                    28: { full: 'Automatic mode \u2013 mode switch waiting time (0~990 minutes).' },
                     29: { full: 'Compressor cumulative running time (0~90min).' },
                     30: { full: 'Outdoor coil temperature to enter defrost mode (-20~5\u00b0C / -4~41\u00b0F).' },
                     31: { full: 'Defrost outdoor temperature setting (-20~5\u00b0C / -4~41\u00b0F).' },
@@ -4521,10 +4522,21 @@
                 async loadEvents() {
                     this.eventLogLoading = true;
                     try {
-                        const res = await this.apiFetch('/api/events');
-                        const data = await res.json();
-                        this.eventLog = data.events || [];
-                        this.eventLogTotal = data.total || 0;
+                        const pageSize = 128;
+                        let offset = 0;
+                        let events = [];
+                        let total = 0;
+                        do {
+                            const res = await this.apiFetch(`/api/events?offset=${offset}&limit=${pageSize}`);
+                            const data = await res.json();
+                            const page = data.events || [];
+                            total = data.total || 0;
+                            events = events.concat(page);
+                            offset += page.length;
+                            if (page.length === 0) break;
+                        } while (offset < total);
+                        this.eventLog = events;
+                        this.eventLogTotal = total;
                     } catch (e) {
                         console.error('Failed to load events:', e);
                     }

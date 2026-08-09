@@ -85,6 +85,17 @@ jobs:
           name: firmware
           path: build/
 
+      - name: Detect partition layout changes
+        id: partition_layout
+        run: |
+          git fetch origin main --depth=1
+          if git diff --quiet origin/main HEAD -- partitions.csv; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Partition layout changed; forcing a full USB flash."
+          fi
+
       - name: Set up Python environment
         run: |
           python3 -m venv $HOME/test-venv
@@ -241,6 +252,7 @@ jobs:
 
       - name: Flash device via OTA
         id: ota_flash
+        if: steps.partition_layout.outputs.changed != 'true'
         continue-on-error: true
         run: |
           echo "Uploading firmware to device via OTA..."
@@ -297,7 +309,7 @@ jobs:
           exit 1
 
       - name: Wait for device reboot (OTA)
-        if: steps.ota_flash.outcome == 'success'
+        if: steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'success'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 10
@@ -313,7 +325,7 @@ jobs:
           exit 1
 
       - name: Fallback — flash via USB serial
-        if: steps.ota_flash.outcome == 'failure'
+        if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
         run: |
           echo "OTA failed, falling back to USB serial flash..."
 
@@ -334,7 +346,7 @@ jobs:
           # Substitute env vars
           envsubst < /tmp/nvs_wifi.csv > /tmp/nvs_wifi_resolved.csv
           python3 -m esp_idf_nvs_partition_gen generate \
-            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x6000
+            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x40000
 
           if [ -z "$CONTROLLER_PORT" ]; then
             echo "ERROR: No ESP32-P4 controller detected on any serial port"
@@ -346,15 +358,15 @@ jobs:
             0x2000  build/bootloader/bootloader.bin \
             0x8000  build/partition_table/partition-table.bin \
             0x9000  /tmp/nvs_wifi.bin \
-            0xf000  build/ota_data_initial.bin \
-            0x20000 build/arctic_controller.bin
+            0x49000 build/ota_data_initial.bin \
+            0x50000 build/arctic_controller.bin
         env:
           WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
           WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Wait for device boot (USB)
-        if: steps.ota_flash.outcome == 'failure'
+        if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 15

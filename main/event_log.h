@@ -3,13 +3,14 @@
  * Event Log - Records significant system events in a ring buffer
  * 
  * Events are operational records (power changes, mode switches, component
- * state changes, errors) — not debug logs. The buffer is persisted to NVS
- * (throttled) so history (brownouts, errors, etc.) survives a reboot.
+ * state changes, errors) — not debug logs. The buffer is persisted in the
+ * dedicated history partition so it survives reboots without consuming NVS.
  */
 #pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <esp_system.h>
 #include <sys/time.h>
 
 #ifdef __cplusplus
@@ -41,6 +42,8 @@ typedef enum {
     EVENT_CONNECTED,            // Heat pump connected (Modbus OK)
     EVENT_DISCONNECTED,         // Heat pump disconnected (Modbus lost)
     EVENT_BROWNOUT_RESET,       // Last boot was caused by a brownout (supply sag)
+    EVENT_APPLICATION_CRASH,    // Previous boot ended in an unhandled panic
+    EVENT_WATCHDOG_RESET,       // Previous boot was reset by a watchdog
     EVENT_TYPE_COUNT
 } event_type_t;
 
@@ -60,15 +63,15 @@ typedef struct {
 // Configuration
 // ============================================================================
 
-#define EVENT_LOG_MAX_ENTRIES  128   // Max events in ring buffer (~3 KB)
+#define EVENT_LOG_MAX_ENTRIES  1000
 
 // ============================================================================
 // API
 // ============================================================================
 
 /**
- * @brief Initialize the event log. Call once at startup (after nvs_flash_init).
- *        Restores any persisted events from NVS, then logs EVENT_SYSTEM_START.
+ * @brief Initialize the event log. Call once at startup.
+ *        Restores persisted events, then logs EVENT_SYSTEM_START.
  */
 void event_log_init(void);
 
@@ -78,6 +81,12 @@ void event_log_init(void);
  * @param payload Optional data (0 if unused)
  */
 void event_log_record(event_type_t type, uint32_t payload);
+
+/**
+ * @brief Record an abnormal previous-boot reset reason, if applicable.
+ *        Normal software, power-on, external, and deep-sleep resets are ignored.
+ */
+void event_log_record_reset_reason(esp_reset_reason_t reason);
 
 /**
  * @brief Get count of events currently in the buffer.
@@ -99,6 +108,11 @@ int event_log_get(event_entry_t* out, int max_out, int offset);
 uint32_t event_log_revision(void);
 
 /**
+ * @brief Get the random identifier assigned to the current controller boot.
+ */
+uint32_t event_log_current_boot_id(void);
+
+/**
  * @brief Backfill untimed events from this boot after NTP synchronization.
  * @param synced_time Accurate wall-clock time at the synchronization callback.
  */
@@ -108,6 +122,12 @@ void event_log_time_synced(const struct timeval* synced_time);
  * @brief Clear all events from the log.
  */
 void event_log_clear(void);
+
+/**
+ * @brief Stop persistent writes before the history partition is erased.
+ *        Intended only for the factory-reset path immediately before reboot.
+ */
+void event_log_prepare_factory_reset(void);
 
 /**
  * @brief Get a short English description for an event type.
