@@ -92,7 +92,6 @@ static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req);
 static esp_err_t heatpump_status_handler(httpd_req_t* req);
 static esp_err_t heatpump_raw_handler(httpd_req_t* req);
 static esp_err_t heatpump_windows_handler(httpd_req_t* req);
-static esp_err_t heatpump_control_handler(httpd_req_t* req);
 static esp_err_t heatpump_advanced_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req);
@@ -697,15 +696,6 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_windows_uri);
-    
-    // POST /api/heatpump/control
-    httpd_uri_t heatpump_control_uri = {
-        .uri = "/api/heatpump/control",
-        .method = HTTP_POST,
-        .handler = heatpump_control_handler,
-        .user_ctx = NULL
-    };
-    REGISTER_URI(heatpump_control_uri);
     
     // GET /api/heatpump/advanced - List all advanced (AP) parameters
     httpd_uri_t heatpump_advanced_uri = {
@@ -2306,169 +2296,6 @@ static esp_err_t heatpump_windows_handler(httpd_req_t* req)
 
     return ESP_OK;
 }
-// Body: {"command": "power", "value": true}
-//       {"command": "mode", "value": "heating"}
-//       {"command": "setpoint", "type": "cooling|heating|hot_water", "value": 25}
-//       {"command": "register", "address": 2046, "value": -20}  // technician mode
-static esp_err_t heatpump_control_handler(httpd_req_t* req)
-{
-    if (!check_api_auth(req)) {
-        send_json_error(req, "401 Unauthorized", "API key required");
-        return ESP_OK;
-    }
-    
-    // Check connection
-    if (!arctic::isConnected()) {
-        send_json_error(req, "503 Service Unavailable", "Heat pump not connected");
-        return ESP_OK;
-    }
-    
-    // Read request body
-    char body[256];
-    int received = httpd_req_recv(req, body, sizeof(body) - 1);
-    if (received <= 0) {
-        send_json_error(req, "400 Bad Request", "Empty request body");
-        return ESP_OK;
-    }
-    body[received] = '\0';
-    
-    // Parse JSON
-    cJSON* root = cJSON_Parse(body);
-    if (!root) {
-        send_json_error(req, "400 Bad Request", "Invalid JSON");
-        return ESP_OK;
-    }
-    
-    cJSON* cmd = cJSON_GetObjectItem(root, "command");
-    if (!cmd || !cJSON_IsString(cmd)) {
-        cJSON_Delete(root);
-        send_json_error(req, "400 Bad Request", "Missing 'command' field");
-        return ESP_OK;
-    }
-    
-    bool success = false;
-    const char* command = cmd->valuestring;
-    
-    if (strcmp(command, "power") == 0) {
-        cJSON* value = cJSON_GetObjectItem(root, "value");
-        if (value && cJSON_IsBool(value)) {
-            success = arctic::setUnitPower(cJSON_IsTrue(value));
-        } else {
-            cJSON_Delete(root);
-            send_json_error(req, "400 Bad Request", "power requires boolean 'value'");
-            return ESP_OK;
-        }
-    }
-    else if (strcmp(command, "mode") == 0) {
-        cJSON* value = cJSON_GetObjectItem(root, "value");
-        if (value && cJSON_IsString(value)) {
-            const char* mode_str = value->valuestring;
-            arctic::WorkingMode mode;
-            if (strcmp(mode_str, "cooling") == 0) {
-                mode = arctic::WorkingMode::COOLING;
-            } else if (strcmp(mode_str, "floor_heating") == 0) {
-                mode = arctic::WorkingMode::FLOOR_HEATING;
-            } else if (strcmp(mode_str, "fan_coil_heating") == 0) {
-                mode = arctic::WorkingMode::FAN_COIL_HEATING;
-            } else if (strcmp(mode_str, "hot_water") == 0) {
-                mode = arctic::WorkingMode::HOT_WATER;
-            } else if (strcmp(mode_str, "auto") == 0) {
-                mode = arctic::WorkingMode::AUTO;
-            } else {
-                cJSON_Delete(root);
-                send_json_error(req, "400 Bad Request", "Invalid mode value");
-                return ESP_OK;
-            }
-            success = arctic::setWorkingMode(mode);
-        } else {
-            cJSON_Delete(root);
-            send_json_error(req, "400 Bad Request", "mode requires string 'value'");
-            return ESP_OK;
-        }
-    }
-    else if (strcmp(command, "setpoint") == 0) {
-        cJSON* type = cJSON_GetObjectItem(root, "type");
-        cJSON* value = cJSON_GetObjectItem(root, "value");
-        if (type && cJSON_IsString(type) && value && cJSON_IsNumber(value)) {
-            int16_t temp = (int16_t)value->valueint;
-            const char* type_str = type->valuestring;
-            if (strcmp(type_str, "cooling") == 0) {
-                success = arctic::setCoolingSetpoint(temp);
-            } else if (strcmp(type_str, "heating") == 0) {
-                success = arctic::setHeatingSetpoint(temp);
-            } else if (strcmp(type_str, "hot_water") == 0) {
-                success = arctic::setHotWaterSetpoint(temp);
-            } else {
-                cJSON_Delete(root);
-                send_json_error(req, "400 Bad Request", "Invalid setpoint type");
-                return ESP_OK;
-            }
-        } else {
-            cJSON_Delete(root);
-            send_json_error(req, "400 Bad Request", "setpoint requires 'type' and 'value'");
-            return ESP_OK;
-        }
-    }
-    else if (strcmp(command, "register") == 0) {
-        // Technician mode: direct register write
-        cJSON* addr = cJSON_GetObjectItem(root, "address");
-        cJSON* value = cJSON_GetObjectItem(root, "value");
-        if (addr && cJSON_IsNumber(addr) && value && cJSON_IsNumber(value)) {
-            uint16_t address = (uint16_t)addr->valueint;
-            uint16_t val = (uint16_t)value->valueint;
-            success = arctic::writeRegister(address, val);
-        } else {
-            cJSON_Delete(root);
-            send_json_error(req, "400 Bad Request", "register requires 'address' and 'value'");
-            return ESP_OK;
-        }
-    }
-    else if (strcmp(command, "advanced") == 0) {
-        // Advanced ("AP") technician parameter: written by AP number through the
-        // arctic-macon guardrail (validates range/enum, confirmed register, and
-        // write-lock) so we never blind-write an unverified or locked register.
-        cJSON* ap_item = cJSON_GetObjectItem(root, "ap");
-        cJSON* value = cJSON_GetObjectItem(root, "value");
-        if (ap_item && cJSON_IsNumber(ap_item) && value && cJSON_IsNumber(value)) {
-            uint8_t ap = (uint8_t)ap_item->valueint;
-            int16_t val = (int16_t)value->valueint;
-            bool bus_ok = false;
-            arctic::AdvWriteResult r = advanced_param_write(ap, val, &bus_ok);
-            if (r != arctic::AdvWriteResult::OK) {
-                cJSON_Delete(root);
-                send_json_error(req, "400 Bad Request", arctic::adv_write_result_name(r));
-                return ESP_OK;
-            }
-            success = bus_ok;
-        } else {
-            cJSON_Delete(root);
-            send_json_error(req, "400 Bad Request", "advanced requires 'ap' and 'value'");
-            return ESP_OK;
-        }
-    }
-    else {
-        cJSON_Delete(root);
-        send_json_error(req, "400 Bad Request", "Unknown command");
-        return ESP_OK;
-    }
-    
-    cJSON_Delete(root);
-    
-    // Send response
-    set_json_content_type(req);
-    cJSON* resp = cJSON_CreateObject();
-    cJSON_AddBoolToObject(resp, "success", success);
-    if (!success) {
-        cJSON_AddStringToObject(resp, "error", "Command failed - check connection");
-    }
-    char* json_str2 = cJSON_PrintUnformatted(resp);
-    httpd_resp_sendstr(req, json_str2);
-    free(json_str2);
-    cJSON_Delete(resp);
-    
-    return ESP_OK;
-}
-
 // ============================================================================
 // Heat Pump Parameters API
 // ============================================================================
@@ -3022,7 +2849,7 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     httpd_resp_send_chunk(req, "\xEF\xBB\xBF", 3);
 
     // CSV header
-    httpd_resp_sendstr_chunk(req, "Category,Name,P-Code,Modbus Address,Value,Unit\r\n");
+    httpd_resp_sendstr_chunk(req, "Category,Name,P-Code,Register Address,Value,Unit\r\n");
 
     arctic::HeatPumpState hp = arctic::getState();
     bool demo = arctic::isDemoMode();

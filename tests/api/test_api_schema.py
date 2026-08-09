@@ -96,7 +96,6 @@ SKIP_ENTIRELY = {
     "/api/factory-reset",           # erases all persistent state and reboots
     "/api/wifi/connect",            # changes the active network
     "/api/wifi/disconnect",         # drops the test connection
-    "/api/heatpump/control",        # legacy control command multiplexer
     "/api/heatpump/errors/history", # clears persisted error history
     "/api/heatpump/demo",           # mutates simulated sensor fields
     "/api/brownout/clear",          # clears persistent boot statistics

@@ -93,20 +93,14 @@ struct HeatPumpState {
 // API Functions
 // ============================================================================
 
-// Initialize the heat pump communication
-// Must call modbus::init() first (unless demo mode)
-void init();
-
 // Initialize demo mode - populates state with simulated values
-// No Modbus connection needed. Call instead of init() + startPolling().
 void initDemoState();
 
 // Check if running in demo mode
 bool isDemoMode();
 
-// Start/stop the polling task
-void startPolling();
-void stopPolling();
+// Start the demo-state synchronization task.
+void startDemoSync();
 
 // Get current state (thread-safe copy)
 HeatPumpState getState();
@@ -116,7 +110,8 @@ bool isConnected();
 
 // ============================================================================
 // Control Functions (write to heat pump)
-// In demo mode, these update s_state directly instead of Modbus writes.
+// In demo mode, these update the synthetic state. Live writes require the
+// active Macon master; passive-listen mode rejects writes.
 // ============================================================================
 
 // Turn unit on/off
@@ -149,9 +144,6 @@ int getErrorDescriptions(char* buffer, size_t buffer_size);
 // Get status description string
 void getStatusDescription(char* buffer, size_t buffer_size);
 
-// Force an immediate poll (for testing)
-void forcePoll();
-
 // ============================================================================
 // Demo State Injection (only works in demo mode)
 // ============================================================================
@@ -164,11 +156,10 @@ bool setDemoField(const char* field, int32_t value);
 // External Feed (passive Tuya listen mode)
 // ============================================================================
 // Populates HeatPumpState from register windows decoded off the RS485 bus by
-// the passive Tuya listener, instead of actively polling via Modbus. The Tab5
+// the passive Tuya listener. The Tab5
 // never transmits in this mode. Registers are 1 byte each on the Tuya wire.
 
 // Initialize external-feed mode (creates the state mutex, clears state).
-// Call instead of init() + startPolling() when running the passive listener.
 void initExternalFeed();
 
 // Returns true if running in external-feed (passive listen) mode.

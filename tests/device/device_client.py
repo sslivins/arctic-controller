@@ -432,28 +432,6 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
-    def heatpump_control(self, command: str, **kwargs) -> dict:
-        """POST /api/heatpump/control — send a command to the heat pump.
-
-        Examples:
-            device.heatpump_control("power", value=True)
-            device.heatpump_control("mode", value="cooling")
-            device.heatpump_control("setpoint", type="heating", value=45)
-        """
-        payload = {"command": command, **kwargs}
-        r = self.session.post(
-            f"{self.base_url}/api/heatpump/control",
-            json=payload,
-            timeout=self.timeout,
-        )
-        if r.status_code >= 400:
-            try:
-                msg = r.json().get("error", r.text)
-            except Exception:
-                msg = r.text
-            raise DeviceError(f"Heatpump control failed ({r.status_code}): {msg}")
-        return r.json()
-
     def reboot(self) -> dict:
         """POST /api/ota/reboot — immediately reboot the device.
 

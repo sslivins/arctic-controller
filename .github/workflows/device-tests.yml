@@ -108,10 +108,9 @@ jobs:
       - name: Detect serial ports
         run: |
           # USB serial port assignments (/dev/ttyACM0, /dev/ttyACM1) can swap
-          # after a reboot. Match each port's USB serial number (burned into
-          # eFuse, globally unique per chip) to find the controller and simulator.
+          # after a reboot. Match the controller's USB serial number (burned
+          # into eFuse and globally unique).
           CONTROLLER_PORT=""
-          SIMULATOR_PORT=""
           for PORT in /dev/ttyACM*; do
             [ -e "$PORT" ] || continue
             # udevadm reliably finds the USB device attributes regardless of hub depth
@@ -124,95 +123,15 @@ jobs:
               if [ "$SERIAL" = "$CONTROLLER_USB_SERIAL" ]; then
                 CONTROLLER_PORT="$PORT"
                 echo "  -> matched controller"
-              elif [ "$SERIAL" = "$SIMULATOR_USB_SERIAL" ]; then
-                SIMULATOR_PORT="$PORT"
-                echo "  -> matched simulator"
               fi
             fi
           done
           echo "Controller port: ${CONTROLLER_PORT:-not found}"
-          echo "Simulator port: ${SIMULATOR_PORT:-not found}"
           if [ -n "$CONTROLLER_PORT" ]; then
             echo "CONTROLLER_PORT=$CONTROLLER_PORT" >> $GITHUB_ENV
           fi
-          if [ -n "$SIMULATOR_PORT" ]; then
-            echo "SIMULATOR_PORT=$SIMULATOR_PORT" >> $GITHUB_ENV
-          fi
         env:
           CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
-          SIMULATOR_USB_SERIAL: ${{ secrets.SIMULATOR_USB_SERIAL }}
-
-      - name: Update simulator to latest release
-        run: |
-          SIMULATOR_URL="http://arctic-simulator-ghr.mi"
-
-          # 1. Get current simulator version
-          CURRENT_VERSION=""
-          RESP=$(curl -s --connect-timeout 3 --max-time 5 "$SIMULATOR_URL/api/status" 2>/dev/null) || true
-          if [ -n "$RESP" ]; then
-            CURRENT_VERSION=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null) || true
-          fi
-          echo "Simulator current version: ${CURRENT_VERSION:-unreachable}"
-
-          # 2. Get latest release tag from GitHub
-          curl -s "https://api.github.com/repos/sslivins/arctic-simulator/releases/latest" \
-            -o /tmp/simulator_release.json
-          LATEST_TAG=$(python3 -c "import json; print(json.load(open('/tmp/simulator_release.json')).get('tag_name',''))" 2>/dev/null) || true
-          # Strip leading 'v' for comparison (release tag is "v0.8.0", firmware reports "0.8.0")
-          LATEST_VERSION="${LATEST_TAG#v}"
-          echo "Latest release: $LATEST_TAG (version $LATEST_VERSION)"
-
-          if [ -z "$LATEST_VERSION" ]; then
-            echo "WARNING: Could not determine latest simulator release — skipping update"
-            echo "API response:"; cat /tmp/simulator_release.json; echo
-            exit 0
-          fi
-
-          # 3. Compare versions — skip if already up to date
-          if [ "$CURRENT_VERSION" = "$LATEST_VERSION" ]; then
-            echo "Simulator is already up to date ($CURRENT_VERSION)"
-            exit 0
-          fi
-          echo "Updating simulator from ${CURRENT_VERSION:-unknown} to $LATEST_VERSION..."
-
-          # 4. Download release binaries
-          DOWNLOAD_BASE="https://github.com/sslivins/arctic-simulator/releases/download/$LATEST_TAG"
-          mkdir -p /tmp/simulator
-          for BIN in bootloader.bin partition-table.bin arctic-simulator.bin; do
-            echo "Downloading $BIN..."
-            curl -sL -o "/tmp/simulator/$BIN" "$DOWNLOAD_BASE/$BIN"
-            if [ ! -s "/tmp/simulator/$BIN" ]; then
-              echo "ERROR: Failed to download $BIN"
-              exit 1
-            fi
-            echo "  $(wc -c < /tmp/simulator/$BIN) bytes"
-          done
-
-          # 5. Flash via USB serial
-          if [ -z "$SIMULATOR_PORT" ]; then
-            echo "ERROR: No ESP32-S3 simulator detected on any serial port"
-            exit 1
-          fi
-          echo "Flashing simulator on $SIMULATOR_PORT..."
-          esptool.py --port "$SIMULATOR_PORT" --baud 921600 --chip esp32s3 \
-            --before default_reset --after hard_reset \
-            write_flash \
-            0x0     /tmp/simulator/bootloader.bin \
-            0x8000  /tmp/simulator/partition-table.bin \
-            0x10000 /tmp/simulator/arctic-simulator.bin
-
-          # 6. Wait for simulator to come back online
-          echo "Waiting for simulator to boot..."
-          sleep 10
-          for i in $(seq 1 30); do
-            if curl -s --connect-timeout 2 "$SIMULATOR_URL/api/status" > /dev/null 2>&1; then
-              NEW_VER=$(curl -s "$SIMULATOR_URL/api/status" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null) || true
-              echo "Simulator online — version $NEW_VER (after $((i + 10))s)"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "WARNING: Simulator did not come back online within 40s"
 
       - name: Sync API key from device (pre-OTA)
         run: |

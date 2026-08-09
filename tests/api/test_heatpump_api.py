@@ -1,6 +1,5 @@
 """
 Functional tests for the Heat Pump REST API endpoints.
-
 Tests behavioral correctness of heat pump status, control, parameters,
 errors, and demo mode injection — not just schema compliance.
 
@@ -661,53 +660,4 @@ class TestHeatpumpParams:
         bad_val = param["max"] + 1000
 
         r = _put(f"/api/heatpump/advanced/{key}", data=str(bad_val))
-        assert r.status_code == 400
-
-
-# ── Heat Pump Control via POST /api/heatpump/control ─────────────────────
-
-
-class TestHeatpumpControlEndpoint:
-    """POST /api/heatpump/control — legacy control endpoint."""
-
-    def test_control_power_on(self):
-        r = _post("/api/heatpump/control", json={"command": "power", "value": True})
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-
-    def test_control_mode_change(self):
-        r = _post("/api/heatpump/control", json={"command": "mode", "value": "cooling"})
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-
-    def test_control_setpoint(self):
-        r = _post("/api/heatpump/control", json={
-            "command": "setpoint", "type": "heating", "value": 45
-        })
-        assert r.status_code == 200
-        data = r.json()
-        assert data["success"] is True
-
-    def test_control_unknown_command(self):
-        r = _post("/api/heatpump/control", json={"command": "explode"})
-        assert r.status_code == 400
-
-    def test_control_empty_body(self):
-        r = requests.post(
-            f"{BASE_URL}/api/heatpump/control",
-            headers=_headers(),
-            timeout=10,
-        )
-        assert r.status_code == 400
-
-    def test_control_invalid_mode(self):
-        r = _post("/api/heatpump/control", json={"command": "mode", "value": "warp_speed"})
-        assert r.status_code == 400
-
-    def test_control_invalid_setpoint_type(self):
-        r = _post("/api/heatpump/control", json={
-            "command": "setpoint", "type": "nuclear", "value": 100
-        })
         assert r.status_code == 400

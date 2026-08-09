@@ -5,7 +5,6 @@
 
 [![Device UI Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/sslivins/b37c67c774075a8a90afd54b7c3a4592/raw/ui_tests.json)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
 [![API Contract Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/sslivins/b37c67c774075a8a90afd54b7c3a4592/raw/api_tests.json)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
-[![Modbus E2E Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/sslivins/b37c67c774075a8a90afd54b7c3a4592/raw/modbus_tests.json)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
 [![Web Dashboard Tests](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/sslivins/b37c67c774075a8a90afd54b7c3a4592/raw/web_tests.json)](https://github.com/sslivins/arctic-controller/actions/workflows/device-tests.yml)
 
 Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based management interface.
@@ -15,11 +14,11 @@ Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based
 - **Platform:** M5Stack Tab5 (ESP32-P4 main processor, ESP32-C6 WiFi co-processor)
 - **Display:** 7" touch display with LVGL graphics library
 - **RTC:** Battery-backed real-time clock
-- **RS-485:** SIT3088 transceiver for Modbus RTU communication with heat pump
+- **RS-485:** SIT3088 transceiver for Macon/Tuya communication with the heat pump
 
 ## Features
 
-- **Heat Pump Communication** - Modbus RTU over RS-485 for real-time monitoring and control
+- **Heat Pump Communication** - Macon/Tuya 55AA over RS-485 for real-time monitoring and control
 - **LVGL-based Touch UI** - Status bar, heat pump dashboard, settings screens
 - **Web Interface** - Responsive web UI at `http://arctic.local` for remote management
 - **WiFi Management** - Connect to networks, credentials saved to NVS
@@ -32,11 +31,8 @@ Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based
 
 ## Heat Pump Communication
 
-The controller communicates with the Arctic heat pump via Modbus RTU over RS-485:
-
-- **Protocol:** Modbus RTU, 2400 baud, 8E1 (8 data bits, even parity, 1 stop bit)
-- **Slave Address:** 1
-- **Polling Interval:** 1 second (connected), 5 seconds (disconnected)
+The controller communicates with the Arctic heat pump through the shared
+`arctic-macon` library using the unit's Tuya 55AA protocol at 4800 baud, 8E1.
 
 ### Monitored Data
 - Operating mode (Cooling, Floor Heating, Fan Coil Heating, Hot Water, Auto)
@@ -57,20 +53,18 @@ The controller communicates with the Arctic heat pump via Modbus RTU over RS-485
 
 The bus behaviour is selected at build time via a Kconfig `choice`
 (`main/Kconfig.projbuild`, menu *Arctic Controller → Arctic RS485 bus mode*).
-The real Macon unit speaks a **Tuya 55AA** protocol (4800 baud 8-E-1), decoded
-by the shared `arctic-macon` library — not classic Modbus.
+The Macon unit speaks a **Tuya 55AA** protocol (4800 baud 8-E-1), decoded by
+the shared `arctic-macon` library.
 
 | Mode (`CONFIG_…`) | Behaviour |
 |---|---|
 | `ARCTIC_TUYA_LISTEN` *(default)* | **Passive listen.** RX-only; DIR held low so the Tab5 never transmits. Decodes the OEM controller's bus traffic. Safe to splice in alongside the real controller. |
 | `ARCTIC_TUYA_MASTER` | **Active master.** The Tab5 is the *sole* bus master: it polls telemetry (fc=0x03) and writes setpoints (fc=0x06) via the `MaconLink` transaction layer. **The OEM controller must be physically disconnected** — two masters collide. On boot the firmware listens for existing bus traffic and refuses to transmit if another master is detected. |
-| `ARCTIC_MODBUS_MASTER` | Legacy Modbus RTU master (original protocol; retained for reference). |
-
 In active-master mode, setpoint changes from the UI/REST API
 (`setCoolingSetpoint` / `setHotWaterSetpoint`) are routed through
-`MaconLink`, which owns the wire/register mapping. Controls without a verified
-Tuya command (unit power, working mode, heating setpoint, raw register
-read/write) fail explicitly rather than fall back to the Modbus path.
+`MaconLink`, which owns the wire/register mapping. Verified advanced-parameter
+writes use the same transaction layer. Controls without a verified command
+(unit power, working mode, and heating setpoint) fail explicitly.
 
 ## Web Interface
 

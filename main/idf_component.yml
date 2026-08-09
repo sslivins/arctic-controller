@@ -8,5 +8,3 @@ dependencies:
   espressif/esp_wifi_remote: "0.8.5"
   ## mDNS for local network discovery (arctic.local)
   espressif/mdns: "^1.4"
-  ## Modbus protocol for heat pump communication
-  espressif/esp-modbus: "^1.0"

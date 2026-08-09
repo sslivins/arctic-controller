@@ -3,7 +3,6 @@
  */
 
 #include "heatpump_controller.h"
-#include "modbus_manager.h"
 #include "macon_master.h"
 #include "heatpump_errors.h"
 #include "event_log.h"
@@ -20,16 +19,47 @@ static const char* TAG = "arctic";
 
 namespace arctic {
 
+// Synthetic register layout used only by the demo/test state adapter.
+namespace reg {
+constexpr uint16_t UNIT_ON_OFF = 2000;
+constexpr uint16_t WORKING_MODE = 2001;
+constexpr uint16_t COOLING_SETPOINT = 2002;
+constexpr uint16_t HEATING_SETPOINT = 2003;
+constexpr uint16_t HOT_WATER_SETPOINT = 2004;
+constexpr uint16_t WATER_TANK_TEMP = 2100;
+constexpr uint16_t OUTLET_WATER_TEMP = 2102;
+constexpr uint16_t INLET_WATER_TEMP = 2103;
+constexpr uint16_t DISCHARGE_TEMP = 2104;
+constexpr uint16_t SUCTION_TEMP = 2105;
+constexpr uint16_t OUTDOOR_COIL_TEMP = 2107;
+constexpr uint16_t INDOOR_COIL_TEMP = 2108;
+constexpr uint16_t OUTDOOR_AMBIENT_TEMP = 2110;
+constexpr uint16_t IPM_TEMP = 2114;
+constexpr uint16_t COMPRESSOR_FREQ = 2118;
+constexpr uint16_t FAN_SPEED = 2119;
+constexpr uint16_t AC_VOLTAGE = 2120;
+constexpr uint16_t AC_CURRENT = 2121;
+constexpr uint16_t DC_VOLTAGE = 2122;
+constexpr uint16_t DC_CURRENT = 2123;
+constexpr uint16_t PRIMARY_EEV_OPENING = 2124;
+constexpr uint16_t SECONDARY_EEV_OPENING = 2125;
+constexpr uint16_t HIGH_PRESSURE = 2126;
+constexpr uint16_t LOW_PRESSURE = 2127;
+constexpr uint16_t STATUS_1 = 2135;
+constexpr uint16_t STATUS_2 = 2136;
+constexpr uint16_t ERROR_1 = 2137;
+constexpr uint16_t ERROR_2 = 2138;
+}  // namespace reg
+
 // State protected by mutex
 static HeatPumpState s_state;
 static SemaphoreHandle_t s_state_mutex = nullptr;
-static TaskHandle_t s_poll_task = nullptr;
-static bool s_polling_enabled = false;
+static TaskHandle_t s_demo_sync_task = nullptr;
+static bool s_demo_sync_enabled = false;
 static bool s_demo_mode = false;
 static bool s_feed_mode = false;  // Passive Tuya external-feed mode
 
 // Connection state tracking
-static const uint8_t MAX_CONSECUTIVE_FAILURES = 5;
 static bool s_was_connected = false;  // For logging state changes
 
 // Previous state for event detection (compared each poll cycle)
@@ -55,36 +85,40 @@ static uint32_t getTimeMs() {
 // ============================================================================
 // Demo Register Array
 // ============================================================================
-// In demo mode, poll functions read from this array instead of Modbus.
-// Setters write here instead of via Modbus. Covers addresses 2000-2138.
+// Demo mode uses a synthetic register-shaped backing store so test endpoints
+// can update fields independently while reusing the state/event mapping.
 static const uint16_t DEMO_REG_BASE = 2000;
 static const uint16_t DEMO_REG_COUNT = 143; // 2000..2142 inclusive (telemetry window reaches reg2142)
 static uint16_t s_demo_regs[DEMO_REG_COUNT];
 
-// Read multiple registers - from demo array in demo/feed mode, Modbus otherwise
+// Read multiple registers from the demo/live-feed cache.
 static esp_err_t readRegisters(uint16_t address, uint16_t count, uint16_t* data) {
-    if (s_demo_mode || s_feed_mode) {
-        uint16_t offset = address - DEMO_REG_BASE;
-        memcpy(data, &s_demo_regs[offset], count * sizeof(uint16_t));
-        return ESP_OK;
+    if (data == nullptr || address < DEMO_REG_BASE) {
+        return ESP_ERR_INVALID_ARG;
     }
-    return modbus::readHoldingRegisters(SLAVE_ADDRESS, address, count, data);
+    uint16_t offset = address - DEMO_REG_BASE;
+    if (offset >= DEMO_REG_COUNT || count > DEMO_REG_COUNT - offset) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memcpy(data, &s_demo_regs[offset], count * sizeof(uint16_t));
+    return ESP_OK;
 }
 
-// Write a single register - to demo array in demo mode, Modbus otherwise
+// Write a synthetic demo register.
 static esp_err_t writeSingleReg(uint16_t address, uint16_t value) {
-    if (s_demo_mode) {
-        uint16_t offset = address - DEMO_REG_BASE;
-        s_demo_regs[offset] = value;
-        // Simulate heat pump acking power command via STATUS_1 bit 0
-        if (address == reg::UNIT_ON_OFF) {
-            uint16_t& st1 = s_demo_regs[reg::STATUS_1 - DEMO_REG_BASE];
-            if (value) st1 |= status1::UNIT_ON;
-            else       st1 &= ~status1::UNIT_ON;
-        }
-        return ESP_OK;
+    if (!s_demo_mode || address < DEMO_REG_BASE ||
+        address - DEMO_REG_BASE >= DEMO_REG_COUNT) {
+        return ESP_ERR_INVALID_STATE;
     }
-    return modbus::writeSingleRegister(SLAVE_ADDRESS, address, value);
+    uint16_t offset = address - DEMO_REG_BASE;
+    s_demo_regs[offset] = value;
+    // Simulate heat pump acking power command via STATUS_1 bit 0.
+    if (address == reg::UNIT_ON_OFF) {
+        uint16_t& st1 = s_demo_regs[reg::STATUS_1 - DEMO_REG_BASE];
+        if (value) st1 |= status1::UNIT_ON;
+        else       st1 &= ~status1::UNIT_ON;
+    }
+    return ESP_OK;
 }
 
 // Poll holding registers (settings)
@@ -183,9 +217,8 @@ static bool pollStatus() {
 
 // Compare the freshly-updated s_state against the previous snapshot and record
 // operational events (power/mode/setpoint/component/defrost/error transitions).
-// The caller MUST hold s_state_mutex. Used by both the Modbus polling task and
-// the passive/active Tuya external-feed path so events are logged regardless of
-// which data source is driving the controller.
+// The caller MUST hold s_state_mutex. Used by demo synchronization and the
+// passive/active Tuya feed path.
 static void detectAndLogStateEvents() {
     // ---- Event detection: compare current vs previous state ----
     if (s_prev_state_valid) {
@@ -262,23 +295,18 @@ static void detectAndLogStateEvents() {
     s_prev_state_valid = true;
 }
 
-// Main polling task
-static void pollTask(void* param) {
-    ESP_LOGI(TAG, "Polling task started");
-    
-    uint32_t poll_interval = POLL_INTERVAL_NORMAL_MS;
-    
-    while (s_polling_enabled) {
+// Periodically synchronize demo registers into HeatPumpState and emit events.
+static void demoSyncTask(void*) {
+    ESP_LOGI(TAG, "Demo synchronization task started");
+
+    while (s_demo_sync_enabled) {
         uint32_t now = getTimeMs();
         
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_state.last_attempt_ms = now;
         xSemaphoreGive(s_state_mutex);
         
-        // Try to poll all data
         bool success = true;
-        
-        // Poll in order, stop on first failure to avoid flooding a disconnected device
         if (success) success = pollStatus();          // Most important - status/errors
         if (success) success = pollTemperatures();    // Temperatures
         if (success) success = pollSystemReadings();  // Compressor, voltage, etc.
@@ -290,60 +318,26 @@ static void pollTask(void* param) {
             s_state.connected = true;
             s_state.last_successful_read_ms = now;
             s_state.consecutive_failures = 0;
-            poll_interval = POLL_INTERVAL_NORMAL_MS;
-            
-            // Update error history tracking
+
             updateErrorHistory(s_state.error1, s_state.error2);
-            
-            // Log connection state change
+
             if (!s_was_connected) {
-                ESP_LOGI(TAG, "Heat pump connected");
+                ESP_LOGI(TAG, "Demo heat pump connected");
                 s_was_connected = true;
                 event_log_record(EVENT_CONNECTED, 0);
             }
-            
-            // ---- Event detection: compare current vs previous state ----
-            detectAndLogStateEvents();
-        } else {
-            s_state.consecutive_failures++;
-            
-            if (s_state.consecutive_failures >= MAX_CONSECUTIVE_FAILURES) {
-                s_state.connected = false;
-                poll_interval = POLL_INTERVAL_DISCONNECTED_MS;
-                
-                // Log disconnection once
-                if (s_was_connected) {
-                    ESP_LOGW(TAG, "Heat pump disconnected: %s", modbus::getLastError());
-                    s_was_connected = false;
-                    event_log_record(EVENT_DISCONNECTED, 0);
-                }
-            }
-        }
-        
-        xSemaphoreGive(s_state_mutex);
-        
-        // Wait for next poll
-        vTaskDelay(pdMS_TO_TICKS(poll_interval));
-    }
-    
-    ESP_LOGI(TAG, "Polling task stopped");
-    s_poll_task = nullptr;
-    vTaskDelete(nullptr);
-}
 
-void init() {
-    if (s_state_mutex == nullptr) {
-        s_state_mutex = xSemaphoreCreateMutex();
+            detectAndLogStateEvents();
+        }
+
+        xSemaphoreGive(s_state_mutex);
+
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
-    
-    // Reset state
-    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    s_state = HeatPumpState();  // Reset to defaults
-    xSemaphoreGive(s_state_mutex);
-    
-    s_was_connected = false;
-    
-    ESP_LOGI(TAG, "Heat pump controller initialized");
+
+    ESP_LOGI(TAG, "Demo synchronization task stopped");
+    s_demo_sync_task = nullptr;
+    vTaskDelete(nullptr);
 }
 
 void initDemoState() {
@@ -436,7 +430,7 @@ void initExternalFeed() {
     xSemaphoreGive(s_state_mutex);
 
     s_was_connected = false;
-    ESP_LOGI(TAG, "External feed mode initialized (passive Tuya)");
+    ESP_LOGI(TAG, "Macon register feed initialized");
 }
 
 bool isExternalFeed() {
@@ -718,8 +712,7 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
     s_state.last_successful_read_ms = getTimeMs();
     s_state.last_attempt_ms = s_state.last_successful_read_ms;
     s_state.consecutive_failures = 0;
-    // Log operational events (compressor/pump/fan/defrost/mode/setpoint/error
-    // transitions) for the Tuya feed path, same as the Modbus poll loop.
+    // Log operational transitions for the Tuya feed path.
     detectAndLogStateEvents();
     uint16_t err1 = s_state.error1;
     uint16_t err2 = s_state.error2;
@@ -734,42 +727,30 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
     }
 }
 
-void startPolling() {
-    if (s_poll_task != nullptr) {
-        ESP_LOGW(TAG, "Polling already running");
+void startDemoSync() {
+    if (!s_demo_mode) {
+        ESP_LOGE(TAG, "Cannot start demo synchronization outside demo mode");
         return;
     }
-    
-    if (!s_demo_mode && !modbus::isInitialized()) {
-        ESP_LOGE(TAG, "Cannot start polling: Modbus not initialized");
+    if (s_demo_sync_task != nullptr) {
+        ESP_LOGW(TAG, "Demo synchronization already running");
         return;
     }
-    
-    s_polling_enabled = true;
-    
+
+    s_demo_sync_enabled = true;
+
     BaseType_t ret = xTaskCreate(
-        pollTask,
-        "arctic_poll",
+        demoSyncTask,
+        "arctic_demo_sync",
         4096,
         nullptr,
         5,  // Priority
-        &s_poll_task
+        &s_demo_sync_task
     );
-    
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create polling task");
-        s_polling_enabled = false;
-    }
-}
 
-void stopPolling() {
-    s_polling_enabled = false;
-    
-    // Wait for task to finish
-    int timeout = 50;  // 500ms max
-    while (s_poll_task != nullptr && timeout > 0) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-        timeout--;
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create demo synchronization task");
+        s_demo_sync_enabled = false;
     }
 }
 
@@ -812,7 +793,7 @@ bool setUnitPower(bool on) {
         ESP_LOGI(TAG, "Unit power set to %s", on ? "ON" : "OFF");
         return true;
     }
-    ESP_LOGE(TAG, "Failed to set unit power: %s", modbus::getLastError());
+    ESP_LOGW(TAG, "Unit power write rejected outside demo mode");
     return false;
 }
 
@@ -829,7 +810,7 @@ bool setWorkingMode(WorkingMode mode) {
         ESP_LOGI(TAG, "Working mode set to %s", workingModeToString(mode));
         return true;
     }
-    ESP_LOGE(TAG, "Failed to set working mode: %s", modbus::getLastError());
+    ESP_LOGW(TAG, "Working-mode write rejected outside demo mode");
     return false;
 }
 
@@ -854,7 +835,7 @@ bool setCoolingSetpoint(int16_t temp) {
         ESP_LOGI(TAG, "Cooling setpoint set to %d", temp);
         return true;
     }
-    ESP_LOGE(TAG, "Failed to set cooling setpoint: %s", modbus::getLastError());
+    ESP_LOGW(TAG, "Cooling setpoint write rejected in passive-listen mode");
     return false;
 }
 
@@ -874,7 +855,7 @@ bool setHeatingSetpoint(int16_t temp) {
         ESP_LOGI(TAG, "Heating setpoint set to %d", temp);
         return true;
     }
-    ESP_LOGE(TAG, "Failed to set heating setpoint: %s", modbus::getLastError());
+    ESP_LOGW(TAG, "Heating setpoint write rejected outside demo mode");
     return false;
 }
 
@@ -897,27 +878,31 @@ bool setHotWaterSetpoint(int16_t temp) {
         ESP_LOGI(TAG, "Hot water setpoint set to %d", temp);
         return true;
     }
-    ESP_LOGE(TAG, "Failed to set hot water setpoint: %s", modbus::getLastError());
+    ESP_LOGW(TAG, "Hot-water setpoint write rejected in passive-listen mode");
     return false;
 }
 
 bool writeRegister(uint16_t address, uint16_t value) {
+    const bool in_holding_window = address >= 2000 && address <= 2057;
+    const bool in_telemetry_window = address >= 2093 && address <= 2142;
+    if (!in_holding_window && !in_telemetry_window) {
+        ESP_LOGE(TAG, "Register %u is outside known Macon windows",
+                 (unsigned)address);
+        return false;
+    }
+    if (value > UINT8_MAX) {
+        ESP_LOGE(TAG, "Invalid register value %u (Macon registers are one byte)",
+                 (unsigned)value);
+        return false;
+    }
     if (macon_master::is_active()) {
-        ESP_LOGW(TAG, "Raw register write unsupported in Tuya master mode (no verified fc06 mapping)");
-        return false;
+        return macon_master::write_register(address, static_cast<uint8_t>(value));
     }
-    // Validate address is in writable range (2000-2057)
-    if (address < 2000 || address > 2057) {
-        ESP_LOGE(TAG, "Invalid register address %d (must be 2000-2057)", address);
-        return false;
-    }
-    
-    esp_err_t err = writeSingleReg(address, value);
-    if (err == ESP_OK) {
+    if (writeSingleReg(address, value) == ESP_OK) {
         ESP_LOGI(TAG, "Register %d set to %d", address, value);
         return true;
     }
-    ESP_LOGE(TAG, "Failed to write register %d: %s", address, modbus::getLastError());
+    ESP_LOGW(TAG, "Register write rejected in passive-listen mode");
     return false;
 }
 
@@ -925,11 +910,7 @@ bool readRegister(uint16_t address, uint16_t* value_out) {
     if (value_out == nullptr) {
         return false;
     }
-    // In demo or passive external-feed mode the register value lives in the
-    // cached window (s_demo_regs), which stays valid even when we are the
-    // active Tuya master. Serve it from the cache rather than attempting a
-    // synchronous bus transaction (which is unsupported in master mode) so the
-    // Control-screen P-parameter and advanced (AP) rows can display values.
+    // Demo, passive-listen, and active-master polling all populate this cache.
     if (s_demo_mode || s_feed_mode) {
         if (address < DEMO_REG_BASE ||
             (uint16_t)(address - DEMO_REG_BASE) >= DEMO_REG_COUNT) {
@@ -937,19 +918,7 @@ bool readRegister(uint16_t address, uint16_t* value_out) {
         }
         return readRegisters(address, 1, value_out) == ESP_OK;
     }
-    if (macon_master::is_active()) {
-        // Live values come from the poll loop into HeatPumpState; there is no
-        // synchronous single-register read path on the Tuya bus.
-        ESP_LOGW(TAG, "Synchronous register read unsupported in Tuya master mode");
-        return false;
-    }
-    
-    esp_err_t err = readRegisters(address, 1, value_out);
-    if (err == ESP_OK) {
-        ESP_LOGD(TAG, "Register %d = %d", address, *value_out);
-        return true;
-    }
-    ESP_LOGE(TAG, "Failed to read register %d: %s", address, modbus::getLastError());
+    ESP_LOGW(TAG, "Register cache is not initialized");
     return false;
 }
 
@@ -1030,12 +999,6 @@ void getStatusDescription(char* buffer, size_t buffer_size) {
              state.isCompressorRunning() ? "Y" : "N",
              state.isWaterPumpRunning() ? "Y" : "N",
              state.getFanSpeedLevel());
-}
-
-void forcePoll() {
-    // Could implement a flag to trigger immediate poll
-    // For now, just log
-    ESP_LOGI(TAG, "Force poll requested");
 }
 
 bool setDemoField(const char* field, int32_t value) {
