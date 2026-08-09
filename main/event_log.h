@@ -39,8 +39,8 @@ typedef enum {
     EVENT_DEFROST_END,          // Defrost cycle ended
     EVENT_ERROR_APPEARED,       // Error code appeared (payload: error code)
     EVENT_ERROR_CLEARED,        // Error code cleared (payload: error code)
-    EVENT_CONNECTED,            // Heat pump connected (Modbus OK)
-    EVENT_DISCONNECTED,         // Heat pump disconnected (Modbus lost)
+    EVENT_CONNECTED,            // Heat pump telemetry connected
+    EVENT_DISCONNECTED,         // Heat pump telemetry disconnected
     EVENT_BROWNOUT_RESET,       // Last boot was caused by a brownout (supply sag)
     EVENT_APPLICATION_CRASH,    // Previous boot ended in an unhandled panic
     EVENT_WATCHDOG_RESET,       // Previous boot was reset by a watchdog

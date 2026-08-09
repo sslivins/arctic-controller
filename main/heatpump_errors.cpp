@@ -3,8 +3,8 @@
  * Error Management Module - Implementation
  */
 #include "heatpump_errors.h"
-#include "modbus/arctic_heatpump.h"
-#include "modbus/arctic_registers.h"
+#include "heatpump_controller.h"
+#include "heatpump_types.h"
 #include <cJSON.h>
 #include <esp_log.h>
 #include <stdio.h>

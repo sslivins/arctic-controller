@@ -28,8 +28,7 @@ struct ListenerStats {
 };
 
 // Install the raw UART1 RX-only driver (4800 8E1) on the RS485 pins and
-// force the direction pin low. Does NOT start esp_modbus. Returns ESP_OK
-// on success.
+// force the direction pin low. Returns ESP_OK on success.
 esp_err_t listener_init();
 
 // Spawn the background receive/decode task. Call after listener_init().

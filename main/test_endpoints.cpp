@@ -26,7 +26,7 @@
 #include "settings/settings_language_screen.h"
 #include "settings/settings_types.h"
 #include "i18n/i18n.h"
-#include "modbus/arctic_heatpump.h"
+#include "heatpump_controller.h"
 #include "app_preferences.h"
 #include "heatpump_errors.h"
 #include "heatpump_temps_screen.h"

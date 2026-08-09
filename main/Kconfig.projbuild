@@ -40,13 +40,6 @@ menu "Arctic Controller"
                 mode. On boot the firmware listens for existing bus traffic and
                 refuses to transmit if another master is detected.
 
-        config ARCTIC_MODBUS_MASTER
-            bool "Legacy Modbus RTU master"
-            help
-                Legacy path: start the Modbus RTU master (arctic::init +
-                polling). Retained for the original Modbus-based unit; the real
-                Macon unit speaks Tuya, not Modbus, so prefer the Tuya modes.
-
     endchoice
 
 endmenu

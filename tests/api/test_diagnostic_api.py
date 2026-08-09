@@ -60,7 +60,7 @@ EXPECTED_CATEGORIES = [
     "Parameter",
 ]
 
-CSV_HEADER = ["Category", "Name", "P-Code", "Modbus Address", "Value", "Unit"]
+CSV_HEADER = ["Category", "Name", "P-Code", "Register Address", "Value", "Unit"]
 
 # UTF-8 BOM bytes
 UTF8_BOM = b"\xef\xbb\xbf"
@@ -253,11 +253,11 @@ class TestDiagnosticContent:
         for row in temp_rows:
             assert row["Unit"] == "°C", f"Temperature '{row['Name']}' missing °C unit"
 
-    def test_temperatures_have_modbus_addresses(self):
+    def test_temperatures_have_register_addresses(self):
         """Temperature rows should have register addresses."""
         temp_rows = self._rows_by_category("Temperature")
         for row in temp_rows:
-            addr = row["Modbus Address"]
+            addr = row["Register Address"]
             assert addr.isdigit(), f"Temperature '{row['Name']}' has non-numeric address: {addr}"
 
     def test_setpoints_present(self):
@@ -300,10 +300,10 @@ class TestDiagnosticContent:
                 f"Parameter '{row['Name']}' missing AP-code: {row['P-Code']}"
             )
 
-    def test_parameters_have_modbus_addresses(self):
+    def test_parameters_have_register_addresses(self):
         param_rows = self._rows_by_category("Parameter")
         for row in param_rows:
-            addr = row["Modbus Address"]
+            addr = row["Register Address"]
             assert addr.isdigit(), f"Parameter '{row['Name']}' has non-numeric address: {addr}"
 
 

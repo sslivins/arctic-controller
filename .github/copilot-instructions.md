@@ -18,9 +18,9 @@
   - `refactor:` — code restructuring (no behavior change)
   - `test:` — adding or updating tests
   - `chore:` — maintenance tasks (skipped in release notes)
-  - Scoped variants are fine: `fix(ci):`, `feat(modbus):`
+  - Scoped variants are fine: `fix(ci):`, `feat(api):`
 - **Always work on a feature branch** — never commit directly to `main`. Create a
-  branch (e.g. `feat/log-api`, `fix/modbus-timeout`) before making changes. The user
+  branch (e.g. `feat/log-api`, `fix/macon-timeout`) before making changes. The user
   will merge via PR.
 - **Batch related changes into a single PR** — device tests take ~20 minutes to run
   in CI. Don't create separate PRs for small, related fixes (e.g. multiple test
@@ -30,10 +30,10 @@
 ## Project Overview
 
 Arctic Controller is a heat pump controller running on an **ESP32-P4** (M5Stack Tab5).
-It communicates with an ECO-600 heat pump via Modbus RTU over RS485 and exposes a
+It communicates with an ECO-600 heat pump via Macon/Tuya 55AA over RS485 and exposes a
 REST API + WebSocket dashboard for monitoring and control.
 
-- **Framework**: ESP-IDF v5.4.3
+- **Framework**: ESP-IDF v5.5.2
 - **UI**: LVGL 9.2 with `esp_lvgl_port`
 - **Display**: 720×1280 IPS (Tab5 built-in)
 - **Languages**: C++ (firmware), Python (tests), HTML/JS (web dashboard)
@@ -43,7 +43,7 @@ REST API + WebSocket dashboard for monitoring and control.
 
 | Path | Purpose |
 |------|---------|
-| `main/` | Application source — screens, API server, Modbus, OTA, i18n |
+| `main/` | Application source — screens, API server, Macon/Tuya transport, OTA, i18n |
 | `components/` | Local ESP-IDF components (board support, custom libs) |
 | `managed_components/` | ESP-IDF component manager dependencies |
 | `dependencies/` | Git-fetched libraries (LVGL, mooncake, smooth_ui_toolkit) |
@@ -98,7 +98,7 @@ it toward these rules rather than matching the surrounding legacy layout.
   `⚠ Heat pump not connected` in the error color so the state reads the same
   everywhere.
 - **Show `--` for unavailable live values — never fabricate a default.** Live values
-  (Modbus reads) are not cached; when disconnected we genuinely have no value, so
+  from the Macon register cache are unavailable when disconnected, so
   display `--`. Do not fall back to the vendor default and present it as if it were a
   reading. Static reference text (parameter name, plain-language detail, range) may
   still be shown since it isn't live state.

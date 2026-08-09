@@ -7,7 +7,7 @@
 
 #include "heatpump_temps_screen.h"
 #include "nav_bar.h"
-#include "modbus/arctic_heatpump.h"
+#include "heatpump_controller.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "app_preferences.h"

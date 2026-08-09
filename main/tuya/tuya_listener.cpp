@@ -13,8 +13,8 @@
 #include "driver/gpio.h"
 
 #include "tuya_codec.h"
-#include "arctic_registers.h"   // RS485_TX_PIN / RS485_RX_PIN / RS485_DIR_PIN
-#include "arctic_heatpump.h"    // arctic::feedRegisterWindow
+#include "macon_bus_config.h"
+#include "heatpump_controller.h"  // arctic::feedRegisterWindow
 
 static const char *TAG = "tuya_listen";
 
@@ -24,10 +24,7 @@ namespace tuya {
 // Wire configuration
 // ---------------------------------------------------------------------------
 //
-// The real Arctic RS485 bus runs at 4800 baud 8-E-1 (NOT the 2400 that older
-// docs / arctic_registers.h::BAUD_RATE claim). Keep this local so the passive
-// listener is unaffected by the Modbus constant.
-//
+// The real Arctic RS485 bus runs at 4800 baud 8-E-1.
 static constexpr uart_port_t UART_PORT   = UART_NUM_1;
 static constexpr int         TUYA_BAUD   = 4800;
 static constexpr size_t      RX_BUF_SIZE = 2048;   // driver ring buffer

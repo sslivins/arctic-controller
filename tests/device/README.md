@@ -136,10 +136,9 @@ The `conftest.py` session fixture handles this automatically.
 |------|---------|
 | [`conftest.py`](conftest.py) | Session fixture (device client, lock, demo mode, auto-return to main screen, screenshot on failure) |
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
-| [`simulator_client.py`](simulator_client.py) | HTTP client for the [arctic-simulator](https://github.com/sslivins/arctic-simulator) REST API (register access, presets, error injection) |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (266 UI tests + 9 screenshot API tests + 10 HTTPS tests + 286 REST API tests + 55 web tests + 10 Modbus e2e tests + API contract tests)
+### Test Files (266 UI tests + 9 screenshot API tests + 10 HTTPS tests + 286 REST API tests + 55 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -165,7 +164,6 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_display_brightness.py`](test_display_brightness.py) | 3 | Brightness slider control and label |
 | [`test_temperature_unit.py`](test_temperature_unit.py) | 2 | °C/°F toggle and preferences |
 | [`test_error_history_duration.py`](test_error_history_duration.py) | 1 | Error history duration format ("3s") |
-| [`test_modbus_e2e.py`](test_modbus_e2e.py) | 10 | End-to-end Modbus: connection, power on/off, mode change, temps, errors, setpoints |
 | [`test_screenshot_api.py`](test_screenshot_api.py) | 9 | Production screenshot endpoint: PNG validity, dimensions, auth |
 | [`test_https.py`](test_https.py) | 10 | HTTPS lifecycle: self-signed cert upload, reboot, HTTPS verification, cleanup |
 | [`../api/test_api_schema.py`](../api/test_api_schema.py) | 8+ | API contract validation via Schemathesis + targeted smoke tests |

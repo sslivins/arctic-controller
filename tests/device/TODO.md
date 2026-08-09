@@ -85,7 +85,7 @@ The following screens and features have **no automated test coverage** yet:
 - [x] Verify dashboard hero card tank temp shows °F (test_fahrenheit.py::TestHeroTankFahrenheit)
 - [ ] Verify expandable temps panel (inlet/outlet/ambient/coil) shows °F (panels hidden when collapsed — needs expand API)
 - [ ] Verify compressor panel discharge/suction temps show °F (panels hidden when collapsed — needs expand API)
-- [ ] Verify setpoint editing works in °F (converts back to °C for Modbus write)
+- [ ] Verify setpoint editing works in °F (converts back to °C for Macon write)
 - [ ] Verify web dashboard respects unit preference (web dashboard hardcodes °C — feature gap)
 - [ ] Test switching units while on temperature screens — values should update immediately
 - [ ] Verify ΔT values use correct Fahrenheit differential conversion
@@ -268,18 +268,6 @@ These validate that a bad firmware gets reverted by the bootloader.
 - [x] `GET /api/test/screenshot` — Capture framebuffer via `lv_snapshot_take()` and return
       as PNG (useful for visual regression and CI artifacts)
 
-## End-to-End Tests with Modbus Simulator
-
-Once the Modbus simulator hardware is set up (see main `todo.md`), add integration
-tests that drive both the simulator and the Tab5 to verify real RS485 communication:
-
-- [x] Controller connects and reads valid data → verify dashboard populates correctly
-- [x] Simulator injects error → verify Tab5 error card shows correct code
-- [ ] Iterate all 32 error codes over real RS485 (parameterized, mirrors `test_error_mapping.py`)
-- [x] Controller sends mode/setpoint/power changes → verify simulator register updated
-- [ ] Simulate communication failure → verify controller shows DISCONNECTED after timeout
-- [ ] Restore communication → verify controller reconnects and resumes polling
-- [ ] Defrost cycle scenario → verify controller detects state transition
 - [ ] Temperature ramp scenario → verify dashboard temps update progressively
 
 ## Done

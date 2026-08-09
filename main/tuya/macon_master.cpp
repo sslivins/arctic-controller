@@ -15,7 +15,7 @@
 #include "macon_uart_transport.h"
 #include "tuya_codec.h"
 #include "macon_link.h"
-#include "arctic_heatpump.h"   // feedRegisterWindow / recordObservedWindow
+#include "heatpump_controller.h"   // feedRegisterWindow / recordObservedWindow
 
 static const char *TAG = "macon_master";
 
@@ -304,5 +304,28 @@ static bool write_setpoint(int celsius, bool cooling)
 
 bool set_cooling_setpoint(int celsius)   { return write_setpoint(celsius, true);  }
 bool set_hot_water_setpoint(int celsius) { return write_setpoint(celsius, false); }
+
+bool write_register(uint16_t address, uint8_t value)
+{
+    if (!s_active.load() || s_link == nullptr || s_bus_mutex == nullptr) {
+        return false;
+    }
+    xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
+    s_transport.flush_rx();
+    const arctic::MaconResult r = s_link->write_register(address, value);
+    if (r != arctic::MaconResult::Ok) {
+        s_transport.flush_rx();
+    }
+    xSemaphoreGive(s_bus_mutex);
+
+    if (r == arctic::MaconResult::Ok) {
+        ESP_LOGI(TAG, "register %u -> %u (ACKed)",
+                 (unsigned)address, (unsigned)value);
+        return true;
+    }
+    ESP_LOGW(TAG, "register %u write failed: %s",
+             (unsigned)address, arctic::macon_result_name(r));
+    return false;
+}
 
 }  // namespace macon_master

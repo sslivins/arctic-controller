@@ -4,7 +4,7 @@
  * In this mode the Tab5 is the SOLE bus master: it periodically polls the two
  * telemetry register windows over fc=0x03 reads (feeding the decoded values
  * into the same HeatPumpState the passive listener populates) and issues
- * fc=0x06 setpoint writes on demand via the shared-library MaconLink layer.
+ * fc=0x06 verified writes on demand via the shared-library MaconLink layer.
  *
  * SAFETY: two masters on one RS485 bus collide, so active mode is only safe
  * when the OEM controller is physically disconnected. start() enforces this by
@@ -12,7 +12,7 @@
  * listen window; on a quiet bus it becomes master, otherwise it stays inactive
  * (no bus TX) and reports the condition.
  *
- * All bus access (polls and setpoint writes) is serialised through a single
+ * All bus access (polls and writes) is serialised through a single
  * mutex so the half-duplex UART is only ever driven by one transaction at a
  * time. The mutex is held per transaction, not per poll cycle, so a UI/REST
  * setpoint write waits at most one in-flight transaction.
@@ -20,6 +20,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 namespace macon_master {
@@ -42,5 +43,8 @@ bool is_active();
 // active so the existing UI/REST callers work unchanged.
 bool set_cooling_setpoint(int celsius);
 bool set_hot_water_setpoint(int celsius);
+
+// Write a one-byte value to a register covered by a known Macon wire window.
+bool write_register(uint16_t address, uint8_t value);
 
 }  // namespace macon_master

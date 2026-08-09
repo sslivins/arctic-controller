@@ -24,8 +24,7 @@
 #include "i18n/i18n.h"
 #include "auth_manager.h"
 #include "tls_manager.h"
-#include "modbus/modbus_manager.h"
-#include "modbus/arctic_heatpump.h"
+#include "heatpump_controller.h"
 #include "tuya/tuya_listener.h"
 #include "tuya/macon_master.h"
 #include "heatpump_screen.h"
@@ -211,15 +210,15 @@ extern "C" void app_main(void)
     boot_stats_init(reset_reason);
     event_log_record_reset_reason(reset_reason);
 
-    // Initialize Modbus and Arctic heat pump communication (skip in demo mode)
+    // Initialize demo state or one of the two Macon/Tuya bus modes.
     if (app_prefs_is_demo_mode()) {
         mclog::tagInfo(TAG, "Demo mode enabled - initializing demo state");
         arctic::initDemoState();
-        arctic::startPolling();
+        arctic::startDemoSync();
     } else {
 #if CONFIG_ARCTIC_TUYA_LISTEN
         // Passive Tuya listen mode: RX-only decode of the existing bus.
-        // Never starts the Modbus master, so the Tab5 stays silent on RS485.
+        // The Tab5 stays silent on RS485.
         arctic::initExternalFeed();
         esp_err_t tuya_ret = tuya::listener_init();
         if (tuya_ret == ESP_OK) {
@@ -246,15 +245,6 @@ extern "C" void app_main(void)
             }
         } else {
             mclog::tagError(TAG, "Failed to init Tuya master: {}", (int)master_init);
-        }
-#else
-        esp_err_t modbus_ret = modbus::init();
-        if (modbus_ret == ESP_OK) {
-            arctic::init();
-            arctic::startPolling();
-            mclog::tagInfo(TAG, "Modbus initialized, heat pump polling started");
-        } else {
-            mclog::tagError(TAG, "Failed to initialize Modbus: {}", (int)modbus_ret);
         }
 #endif
     }
@@ -313,7 +303,7 @@ extern "C" void app_main(void)
             show_main_ui = false;  // Only create once
             
             // NOW mark firmware as valid — display init succeeded, LVGL is
-            // running, UI rendered, Modbus/demo started, event log is up.
+            // running, UI rendered, heat-pump integration started, event log is up.
             // If we got here, the firmware is functional.
             if (ota_mgr_is_pending_verify()) {
                 ESP_LOGI(TAG, "Post-OTA health check passed — marking firmware valid");

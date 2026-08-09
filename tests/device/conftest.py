@@ -1,6 +1,5 @@
 """
 Pytest fixtures for Arctic Controller device UI tests.
-
 Set ARCTIC_URL env var to override the default device address.
 Example: ARCTIC_URL=http://192.168.1.42 pytest
 """
@@ -10,7 +9,6 @@ import time
 import pytest
 from pathlib import Path
 from device_client import DeviceClient
-from simulator_client import SimulatorClient
 
 # Directory for failure screenshots
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
@@ -222,61 +220,3 @@ def pytest_runtest_makereport(item, call):
             _consecutive_failures += 1
         elif rep.when == "call" and rep.passed:
             _consecutive_failures = 0
-
-
-# ==============================================================================
-# Modbus Simulator Fixture
-# ==============================================================================
-
-@pytest.fixture(scope="session")
-def simulator() -> SimulatorClient:
-    """Shared simulator client for end-to-end Modbus tests.
-
-    Set SIMULATOR_URL env var to override (default: http://arctic-sim.local).
-    Only created when a test requests it — demo-only tests never touch this.
-    """
-    url = os.environ.get("SIMULATOR_URL", "http://arctic-sim.local")
-    client = SimulatorClient(base_url=url)
-    if not client.is_reachable():
-        pytest.skip(f"Simulator not reachable at {url}")
-    return client
-
-
-@pytest.fixture(scope="session")
-def modbus_mode(device: DeviceClient, simulator: SimulatorClient):
-    """Disable demo mode once for the entire test session.
-
-    Changing demo mode requires a device reboot to take effect.
-    This fixture reboots once at the start to disable demo mode,
-    and once at the end to re-enable it.
-    """
-    # Prepare simulator with a known state before switching away from demo
-    simulator.load_preset("heating")
-
-    # Disable demo mode if needed — requires reboot to take effect
-    prefs = device.get_preferences()
-    if prefs.get("demo_mode"):
-        device.set_preference(demo_mode=False)
-        device.reboot()
-        time.sleep(2)  # Give the device time to start rebooting
-
-        if not device.wait_for_device(timeout=30.0):
-            pytest.fail("Device did not come back after reboot (disabling demo mode)")
-
-    # Wait for the controller to connect to the simulator
-    connected = device.wait_for_connected(timeout=15.0)
-    if not connected:
-        # Re-enable demo mode before failing
-        device.set_preference(demo_mode=True)
-        device.reboot()
-        time.sleep(2)
-        device.wait_for_device(timeout=30.0)
-        pytest.fail("Controller did not connect to simulator within 15s")
-
-    yield
-
-    # Restore demo mode for subsequent (non-modbus) tests — requires reboot
-    device.set_preference(demo_mode=True)
-    device.reboot()
-    time.sleep(2)
-    device.wait_for_device(timeout=30.0)
