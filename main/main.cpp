@@ -62,7 +62,7 @@ static volatile bool wifi_init_complete = false;
 
 // Periodic update check timer
 static lv_timer_t* update_check_timer = NULL;
-#define UPDATE_CHECK_INTERVAL_MS (60 * 1000)  // 1 minute for testing (change to 60*60*1000 for hourly)
+#define UPDATE_CHECK_INTERVAL_MS (60 * 60 * 1000)  // 1 hour
 
 // WiFi stability tracking
 #define WIFI_UNSTABLE_THRESHOLD 3       // Number of disconnects to trigger "unstable" notification

@@ -890,7 +890,7 @@
     async function mutate(url, options, success) {
       state.busy = true;
       try { const data = await api(url, options); if (success) toast(success, "good"); return data; }
-      catch (error) { toast(error.message, "bad"); throw error; }
+      catch (error) { toast(error.message, "bad"); error.toastShown = true; throw error; }
       finally { state.busy = false; }
     }
     function jsonOptions(method, body) {
@@ -1024,14 +1024,18 @@
       if (settings) { event.preventDefault(); await navigate("settings", settings.dataset.settings); return; }
       const action = event.target.closest("[data-action]");
       if (action && action.dataset.action !== "power-hold") {
-        event.preventDefault(); handleAction(action.dataset.action, action).catch(error => toast(error.message, "bad"));
+        event.preventDefault(); handleAction(action.dataset.action, action).catch(error => {
+          if (!error.toastShown) toast(error.message, "bad");
+        });
       }
     });
     document.addEventListener("submit", event => {
       const form = event.target.closest("[data-form]");
       if (!form) return;
       event.preventDefault();
-      handleForm(form).catch(error => toast(error.message, "bad"));
+      handleForm(form).catch(error => {
+        if (!error.toastShown) toast(error.message, "bad");
+      });
     });
     document.addEventListener("pointerdown", event => {
       const button = event.target.closest('[data-action="power-hold"]');
