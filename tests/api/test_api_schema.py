@@ -86,6 +86,7 @@ schema = schemathesis.openapi.from_dict(raw_spec)
 # They are excluded from automatic fuzz testing.
 
 SKIP_ENTIRELY = {
+    "/api/ota/releases",            # depends on live GitHub connectivity; covered by targeted tests
     "/api/ota/update",              # triggers firmware download
     "/api/ota/upload",              # writes firmware to flash
     "/api/ota/reboot",              # reboots the device
