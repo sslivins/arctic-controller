@@ -34,6 +34,15 @@ class TestNavigation:
         expect(dashboard_page.locator(".power-btn")).to_be_visible()
         assert dashboard_page.locator(".mode-btn").count() == 5
         assert dashboard_page.locator('form[data-form="setpoint"]').count() == 3
+        assert dashboard_page.locator('form[data-form="setpoint"] input[type="range"]').count() == 3
+        expect(dashboard_page.locator('form[data-form="setpoint"] output').first).to_contain_text("°")
+
+    def test_advanced_controls_use_bounded_editors(self, dashboard_page: Page):
+        primary(dashboard_page, "Control").click()
+        dashboard_page.locator(".ap-row").first.wait_for(state="attached")
+        assert dashboard_page.locator('.ap-row input[type="number"]').count() == 0
+        assert dashboard_page.locator('.ap-row input[type="range"]').count() > 0
+        assert dashboard_page.locator(".ap-row .choice-picker").count() > 0
 
     def test_events_surface(self, dashboard_page: Page):
         primary(dashboard_page, "Events").click()

@@ -178,8 +178,38 @@
     }
     input:focus, select:focus, textarea:focus { border-color: var(--cp-accent); box-shadow: 0 0 0 3px var(--cp-accent-soft); }
     textarea { min-height: 120px; resize: vertical; }
-    .setpoint { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
-    .setpoint input { font-size: 24px; font-weight: 650; }
+    .setpoint { display: grid; gap: 14px; }
+    .range-editor { display: grid; gap: 8px; min-width: 0; }
+    .range-readout { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .range-readout output { color: var(--cp-accent); font-size: 24px; font-weight: 750; }
+    .range-limits { display: flex; justify-content: space-between; color: var(--cp-text-muted); font-size: 12px; }
+    input.control-range {
+      appearance: none; height: 28px; padding: 0; border: 0; background: transparent;
+      box-shadow: none;
+    }
+    input.control-range:focus { box-shadow: none; }
+    input.control-range::-webkit-slider-runnable-track {
+      height: 8px; border-radius: 10px; background: var(--cp-border);
+    }
+    input.control-range::-webkit-slider-thumb {
+      appearance: none; width: 26px; height: 26px; margin-top: -9px;
+      border: 3px solid var(--cp-surface); border-radius: 50%; background: var(--cp-accent);
+      box-shadow: 0 0 0 1px var(--cp-border-strong);
+    }
+    input.control-range::-moz-range-track {
+      height: 8px; border-radius: 10px; background: var(--cp-border);
+    }
+    input.control-range::-moz-range-thumb {
+      width: 20px; height: 20px; border: 3px solid var(--cp-surface);
+      border-radius: 50%; background: var(--cp-accent);
+      box-shadow: 0 0 0 1px var(--cp-border-strong);
+    }
+    .choice-picker {
+      min-height: 112px; padding: 4px; overflow-y: auto;
+      background: var(--cp-surface-soft);
+    }
+    .choice-picker option { padding: 10px; border-radius: 8px; }
+    .choice-picker option:checked { background: var(--cp-accent); color: var(--cp-accent-fg); }
     .mode-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
     .mode-btn {
       min-height: 66px; padding: 8px; border: 1px solid var(--cp-border);
@@ -197,9 +227,9 @@
     details { border-top: 1px solid var(--cp-border); }
     details:first-child { border-top: 0; }
     summary { padding: 15px 0; cursor: pointer; font-weight: 650; }
-    .ap-row { padding: 14px 0; border-top: 1px solid var(--cp-border); display: grid; grid-template-columns: 1fr minmax(180px, 260px); gap: 16px; }
+    .ap-row { padding: 14px 0; border-top: 1px solid var(--cp-border); display: grid; grid-template-columns: 1fr minmax(260px, 360px); gap: 16px; }
     .ap-row p { color: var(--cp-text-muted); margin: 5px 0 0; font-size: 13px; }
-    .ap-value { display: flex; gap: 8px; align-items: center; }
+    .ap-value { display: grid; gap: 10px; align-content: center; }
     .event-toolbar { display: grid; grid-template-columns: 1fr 170px 170px; gap: 10px; margin-bottom: 16px; }
     .event-list { display: grid; gap: 8px; }
     .event {
@@ -489,9 +519,17 @@
       const limits = state.hp.setpoint_limits[key] || {};
       const min = tempNumber(limits.min ?? 0), max = tempNumber(limits.max ?? 100);
       return `<section class="card"><h3>${label}</h3><form data-form="setpoint" data-key="${key}">
-        <div class="setpoint"><div class="field" style="margin:0"><label>${min}–${max} ${unit()}</label>
-          <input type="number" name="value" min="${min}" max="${max}" value="${tempNumber(state.hp.setpoints[key] ?? 0)}"></div>
-          <button class="btn primary" type="submit">Save</button></div></form></section>`;
+        <div class="setpoint">${rangeEditor(tempNumber(state.hp.setpoints[key] ?? 0), min, max, 1, unit())}
+          <button class="btn primary" type="submit">Save setpoint</button></div></form></section>`;
+    }
+    function rangeEditor(value, min, max, step, displayUnit) {
+      const suffix = displayUnit ? ` ${esc(displayUnit)}` : "";
+      return `<div class="range-editor">
+        <div class="range-readout"><span>Selected value</span><output data-range-output>${esc(value)}${suffix}</output></div>
+        <input class="control-range" type="range" name="value" min="${esc(min)}" max="${esc(max)}"
+          step="${esc(step || 1)}" value="${esc(value ?? min)}" data-unit="${esc(displayUnit || "")}">
+        <div class="range-limits"><span>${esc(min)}${suffix}</span><span>${esc(max)}${suffix}</span></div>
+      </div>`;
     }
     function apControl(key, p) {
       const kind = p.temperature_kind || "none";
@@ -502,9 +540,10 @@
       const displayUnit = isTemp ? unit(kind) : p.unit;
       let input;
       if (!p.writable) input = `<span class="badge">${p.value == null ? "--" : `${esc(value)} ${esc(displayUnit || "")}`}</span>`;
-      else if (p.options?.length) input = `<select name="value">${p.options.map(o =>
+      else if (p.options?.length) input = `<select class="choice-picker" name="value" size="${Math.min(p.options.length, 5)}"
+        aria-label="${esc(p.name)} options">${p.options.map(o =>
         `<option value="${o.wire}" ${o.wire === p.value ? "selected" : ""}>${esc(o.label)}${o.en ? ` — ${esc(o.en)}` : ""}</option>`).join("")}</select>`;
-      else input = `<input name="value" type="number" min="${min}" max="${max}" step="${isTemp ? 1 : (p.step || 1)}" value="${value ?? min}">`;
+      else input = rangeEditor(value ?? min, min, max, isTemp ? 1 : (p.step || 1), displayUnit);
       return `<form class="ap-row" data-form="ap" data-key="${esc(key)}" data-kind="${kind}">
         <div><strong>${esc(key)} · ${esc(p.name)}</strong><p>${esc((p.detail || "").replace(/\{T:(-?\d+)\}/g, (_, c) => temp(c)))}</p></div>
         <div class="ap-value">${input}${p.writable ? `<button class="btn" type="submit">Save</button>` : ""}</div></form>`;
@@ -927,6 +966,10 @@
       if (event.target.id === "event-search") { state.eventFilters.search = event.target.value; render(); }
       if (event.target.name === "brightness") {
         const value = $("#brightness-value"); if (value) value.textContent = `${event.target.value}%`;
+      }
+      if (event.target.matches(".control-range")) {
+        const output = event.target.closest(".range-editor")?.querySelector("[data-range-output]");
+        if (output) output.textContent = `${event.target.value}${event.target.dataset.unit ? ` ${event.target.dataset.unit}` : ""}`;
       }
     });
     document.addEventListener("change", event => {
