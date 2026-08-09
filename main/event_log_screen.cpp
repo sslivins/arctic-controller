@@ -748,21 +748,19 @@ static void update_timer_cb(lv_timer_t* timer) {
 
 static void clear_btn_cb(lv_event_t* e) {
     (void)e;
-    lv_obj_t* mbox = lv_msgbox_create(lv_scr_act());
-    lv_msgbox_add_title(mbox, i18n_get(STR_EVENT_CLEAR_CONFIRM_TITLE));
-    lv_msgbox_add_text(mbox, i18n_get(STR_EVENT_CLEAR_CONFIRM_TEXT));
-    lv_obj_t* clear_btn = lv_msgbox_add_footer_button(mbox, i18n_get(STR_EVENT_CLEAR));
-    lv_obj_set_user_data(clear_btn, (void*)"event_log_clear_confirm");
-    lv_obj_add_event_cb(clear_btn, [](lv_event_t* event) {
-        lv_obj_t* box = (lv_obj_t*)lv_event_get_user_data(event);
+    lv_obj_t* dialog = ui_dialog_create(
+        i18n_get(STR_EVENT_CLEAR_CONFIRM_TITLE),
+        i18n_get(STR_EVENT_CLEAR_CONFIRM_TEXT));
+    ui_dialog_add_action(dialog, i18n_get(STR_CANCEL), "event_log_clear_cancel",
+                         UI_DIALOG_ACTION_SECONDARY, ui_dialog_dismiss_cb);
+    ui_dialog_add_action(dialog, i18n_get(STR_EVENT_CLEAR), "event_log_clear_confirm",
+                         UI_DIALOG_ACTION_DANGER, [](lv_event_t* event) {
+        lv_obj_t* dialog = (lv_obj_t*)lv_event_get_user_data(event);
         ESP_LOGI(TAG, "Clear events");
         event_log_clear();
-        lv_msgbox_close(box);
+        lv_obj_delete(dialog);
         rebuild_event_list();
-    }, LV_EVENT_CLICKED, mbox);
-    lv_msgbox_add_close_button(mbox);
-    lv_obj_set_width(mbox, 520);
-    lv_obj_center(mbox);
+    });
 }
 
 static void new_events_btn_cb(lv_event_t* e) {

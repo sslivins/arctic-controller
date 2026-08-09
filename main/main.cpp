@@ -46,6 +46,7 @@
 #include "boot_stats.h"
 #include "wifi_supervisor.h"
 #include "telemetry_history.h"
+#include "ui_common.h"
 #include "log_buffer.h"
 #include "log_persist.h"
 #include "esp_task_wdt.h"
@@ -132,14 +133,9 @@ static void heap_monitor_cb(void* arg)
 // Helper to show error message on current screen
 static void show_error_message(const char* message)
 {
-    lv_obj_t* scr = lv_scr_act();
-    if (scr) {
-        lv_obj_t* msgbox = lv_msgbox_create(scr);
-        lv_msgbox_add_title(msgbox, "Error");
-        lv_msgbox_add_text(msgbox, message);
-        lv_msgbox_add_close_button(msgbox);
-        lv_obj_center(msgbox);
-    }
+    lv_obj_t* dialog = ui_dialog_create("Error", message);
+    ui_dialog_add_action(dialog, i18n_get(STR_CLOSE), "error_dialog_close",
+                         UI_DIALOG_ACTION_PRIMARY, ui_dialog_dismiss_cb);
 }
 
 extern "C" void app_main(void)
