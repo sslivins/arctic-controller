@@ -590,6 +590,98 @@ paths:
                         type: integer
                         example: 4194304
 
+  /api/ota/releases:
+    get:
+      tags:
+        - OTA
+      summary: Check GitHub for the latest firmware release
+      description: |
+        Queries the controller's configured GitHub releases feed and compares the
+        latest release with the currently running firmware.
+      operationId: getOtaReleases
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Latest release information
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  update_available:
+                    type: boolean
+                  current_version:
+                    type: string
+                  latest_version:
+                    type: string
+                  published_at:
+                    type: string
+                  download_ready:
+                    type: boolean
+                  release_notes:
+                    type: string
+                    description: Release notes, when provided by the release
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: GitHub release lookup failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/ota/github:
+    post:
+      tags:
+        - OTA
+      summary: Install the latest GitHub firmware release
+      description: |
+        Starts an OTA update using the release discovered by
+        `GET /api/ota/releases`. Poll `/api/ota/status` for progress.
+      operationId: startGithubOtaUpdate
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: GitHub OTA update started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [started]
+                  message:
+                    type: string
+                  version:
+                    type: string
+        '400':
+          description: No update is available or releases have not been checked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: An OTA update is already in progress or no download URL is available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/ota/update:
     post:
       tags:
@@ -1287,6 +1379,178 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/heatpump/raw:
+    get:
+      tags:
+        - HeatPump
+      summary: Get raw heat-pump register cache
+      description: |
+        Internal diagnostic endpoint that returns the raw register window used
+        while calibrating and troubleshooting the Tuya field mapping.
+      operationId: getHeatpumpRawRegisters
+      x-internal: true
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Raw register cache
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  external_feed:
+                    type: boolean
+                  base:
+                    type: integer
+                    minimum: 0
+                  count:
+                    type: integer
+                    minimum: 0
+                  regs:
+                    type: array
+                    items:
+                      type: integer
+                      minimum: 0
+                      maximum: 65535
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/windows:
+    get:
+      tags:
+        - HeatPump
+      summary: Get observed Tuya response windows
+      description: |
+        Internal diagnostic endpoint that returns the catalog of response
+        windows observed on the heat-pump bus, including unmapped payloads.
+      operationId: getHeatpumpObservedWindows
+      x-internal: true
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Observed response-window catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    minimum: 0
+                  windows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        addr:
+                          type: integer
+                          minimum: 0
+                        len:
+                          type: integer
+                          minimum: 0
+                        known:
+                          type: boolean
+                        hits:
+                          type: integer
+                          minimum: 0
+                        last_ms:
+                          type: integer
+                          minimum: 0
+                        payload:
+                          type: array
+                          items:
+                            type: integer
+                            minimum: 0
+                            maximum: 255
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/heatpump/control:
+    post:
+      tags:
+        - HeatPump
+      summary: Execute a legacy heat-pump control command
+      description: |
+        Legacy command multiplexer retained for compatibility. New clients
+        should use the dedicated power, mode, setpoint, and advanced-parameter
+        endpoints. Direct register writes are intended for technicians only.
+      operationId: controlHeatpump
+      deprecated: true
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command:
+                  type: string
+                  enum: [power, mode, setpoint, register, advanced]
+                value:
+                  oneOf:
+                    - type: boolean
+                    - type: integer
+                    - type: string
+                      enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+                type:
+                  type: string
+                  enum: [cooling, heating, hot_water]
+                address:
+                  type: integer
+                  minimum: 0
+                  maximum: 65535
+                ap:
+                  type: integer
+                  minimum: 0
+                  maximum: 255
+      responses:
+        '200':
+          description: Command was attempted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+                    description: Present when the command could not be applied
+        '400':
+          description: Invalid command or command arguments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Heat pump not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/heatpump/power:
     put:
       tags:
@@ -1632,6 +1896,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/heatpump/errors/history:
+    delete:
+      tags:
+        - HeatPump
+      summary: Clear heat-pump error history
+      description: Deletes cleared error-history entries while preserving active errors.
+      operationId: clearHeatpumpErrorHistory
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Error history cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Error history cleared
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/heatpump/advanced:
     get:
       tags:
@@ -1795,6 +2090,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/heatpump/demo:
+    patch:
+      tags:
+        - HeatPump
+      summary: Set simulated heat-pump fields
+      description: |
+        Internal testing endpoint that updates read-only simulated fields. It is
+        available only while demo mode is enabled. Each property name is a demo
+        field identifier and each value must be an integer.
+      operationId: updateHeatpumpDemoFields
+      x-internal: true
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: integer
+            example:
+              tank_temp: 45
+              compressor_freq: 60
+      responses:
+        '200':
+          description: Per-field update results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  success:
+                    type: boolean
+                  updated:
+                    type: integer
+                    minimum: 0
+                  failed:
+                    type: integer
+                    minimum: 0
+        '400':
+          description: Invalid or empty JSON request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Demo mode is not enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/events:
     get:
       tags:
@@ -1826,6 +2185,13 @@ paths:
                   current_boot_id:
                     type: integer
                     format: uint32
+                  brownout_count:
+                    type: integer
+                    minimum: 0
+                    description: Persistent brownout reset count
+                  last_reset_reason:
+                    type: string
+                    description: ESP reset reason recorded for the current boot
                   events:
                     type: array
                     items:
@@ -1849,6 +2215,34 @@ paths:
       responses:
         '200':
           description: Event log cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/brownout/clear:
+    post:
+      tags:
+        - Events
+      summary: Clear persistent brownout statistics
+      description: Resets the persistent brownout counter and stored reset statistics.
+      operationId: clearBrownoutStatistics
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Brownout statistics cleared
           content:
             application/json:
               schema:
