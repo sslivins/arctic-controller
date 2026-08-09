@@ -222,6 +222,16 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()["brightness"]
 
+    def set_display_idle(self, action: str) -> dict:
+        """Force or inspect display idle state through test instrumentation."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/display-idle",
+            json={"action": action},
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        return r.json()
+
     def get_preferences(self) -> dict:
         """GET /api/preferences — returns {demo_mode, temp_unit, brightness, language}."""
         r = self.session.get(

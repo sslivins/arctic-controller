@@ -36,6 +36,7 @@
 #include "event_log_screen.h"
 #include "tab_shell.h"
 #include "status_bar.h"
+#include "display_idle.h"
 #include <esp_timer.h>
 #include "png_encoder.h"
 
@@ -646,6 +647,20 @@ static esp_err_t click_post_handler(httpd_req_t* req)
         target = found;
     }
 
+    // Test clicks emulate physical touch activity, including wake-only behavior.
+    const bool consumed = display_idle_handle_activity();
+    if (consumed) {
+        bsp_display_unlock();
+        cJSON* resp = cJSON_CreateObject();
+        cJSON_AddBoolToObject(resp, "success", true);
+        cJSON_AddBoolToObject(resp, "consumed", true);
+        char* json = cJSON_PrintUnformatted(resp);
+        httpd_resp_sendstr(req, json);
+        free(json);
+        cJSON_Delete(resp);
+        return ESP_OK;
+    }
+
     // Fire the click event (measure render time for performance profiling)
     int64_t t0 = esp_timer_get_time();
     lv_obj_send_event(target, LV_EVENT_CLICKED, NULL);
@@ -660,6 +675,7 @@ static esp_err_t click_post_handler(httpd_req_t* req)
     // Send success response
     cJSON* resp = cJSON_CreateObject();
     cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddBoolToObject(resp, "consumed", false);
     cJSON_AddStringToObject(resp, "clicked_type", clicked_type);
     if (clicked_text) {
         cJSON_AddStringToObject(resp, "clicked_text", clicked_text);
@@ -758,6 +774,73 @@ static esp_err_t set_slider_post_handler(httpd_req_t* req)
     free(json);
     cJSON_Delete(resp);
 
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/display-idle
+// Body: {"action": "dim" | "wake" | "status"}
+// ============================================================================
+
+static esp_err_t display_idle_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    set_json_content_type(req);
+
+    if (req->content_len <= 0 || req->content_len >= 128) {
+        send_json_error(req, "400 Bad Request", "Invalid body");
+        return ESP_OK;
+    }
+
+    char buf[128];
+    int received = httpd_req_recv(req, buf, req->content_len);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Failed to read body");
+        return ESP_OK;
+    }
+    buf[received] = '\0';
+
+    cJSON* body = cJSON_Parse(buf);
+    cJSON* action = body ? cJSON_GetObjectItem(body, "action") : nullptr;
+    if (!cJSON_IsString(action)) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Action must be dim, wake, or status");
+        return ESP_OK;
+    }
+
+    const bool should_dim = strcmp(action->valuestring, "dim") == 0;
+    const bool should_wake = strcmp(action->valuestring, "wake") == 0;
+    const bool should_report = strcmp(action->valuestring, "status") == 0;
+    if (!should_dim && !should_wake && !should_report) {
+        cJSON_Delete(body);
+        send_json_error(req, "400 Bad Request", "Action must be dim, wake, or status");
+        return ESP_OK;
+    }
+    cJSON_Delete(body);
+
+    if (!bsp_display_lock(1000)) {
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
+    bool consumed = false;
+    if (should_dim) {
+        display_idle_force_dim();
+    } else if (should_wake) {
+        consumed = display_idle_handle_activity();
+    }
+    const bool dimmed = display_idle_is_dimmed();
+    const int saved_brightness = display_screen_get_brightness();
+    bsp_display_unlock();
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddBoolToObject(resp, "dimmed", dimmed);
+    cJSON_AddBoolToObject(resp, "consumed", consumed);
+    cJSON_AddNumberToObject(resp, "saved_brightness", saved_brightness);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
     return ESP_OK;
 }
 
@@ -1782,6 +1865,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &set_slider_options_uri);
+
+    httpd_uri_t display_idle_uri = {
+        .uri = "/api/test/display-idle",
+        .method = HTTP_POST,
+        .handler = display_idle_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &display_idle_uri);
+
+    httpd_uri_t display_idle_options_uri = {
+        .uri = "/api/test/display-idle",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &display_idle_options_uri);
 
     httpd_uri_t scroll_uri = {
         .uri = "/api/test/scroll",

@@ -44,6 +44,7 @@ idf_component_register(
         "ota_manager.cpp"
         "auth_manager.cpp"
         "app_preferences.cpp"
+        "display_idle.cpp"
         "advanced_params.cpp"
         "heatpump_errors.cpp"
         "event_log.cpp"
