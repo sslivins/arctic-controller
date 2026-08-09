@@ -3516,7 +3516,7 @@
                     aux_heater: false,
                     temperatures: { tank: 0, outlet: 0, inlet: 0, outdoor: 0, discharge: 0, suction: 0, outdoor_coil: 0, indoor_coil: 0, ipm: 0 },
                     setpoints: { cooling: 0, heating: 0, hot_water: 0 },
-                    setpoint_limits: { cooling: { min: 10, max: 30 }, heating: { min: 20, max: 60 }, hot_water: { min: 30, max: 60 } },
+                    setpoint_limits: { cooling: { min: 4, max: 30 }, heating: { min: 20, max: 60 }, hot_water: { min: 30, max: 60 } },
                     readings: { compressor_freq: 0, fan_rpm: 0, ac_voltage: 0, ac_current: 0, primary_eev: 0, secondary_eev: 0, power_consumption: 0 },
                     error: null 
                 },
@@ -3948,7 +3948,7 @@
                             aux_heater: data.aux_heater || false,
                             temperatures: data.temperatures || { tank: 0, outlet: 0, inlet: 0, outdoor: 0, discharge: 0, suction: 0, outdoor_coil: 0, indoor_coil: 0, ipm: 0 },
                             setpoints: data.setpoints || { cooling: 0, heating: 0, hot_water: 0 },
-                            setpoint_limits: data.setpoint_limits || { cooling: { min: 10, max: 30 }, heating: { min: 20, max: 60 }, hot_water: { min: 30, max: 60 } },
+                            setpoint_limits: data.setpoint_limits || { cooling: { min: 4, max: 30 }, heating: { min: 20, max: 60 }, hot_water: { min: 30, max: 60 } },
                             readings: data.readings || { compressor_freq: 0, fan_rpm: 0, ac_voltage: 0, ac_current: 0, primary_eev: 0, secondary_eev: 0, power_consumption: 0 },
                             has_error: data.has_error || false,
                             error: data.error || null
