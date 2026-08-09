@@ -137,6 +137,14 @@ def device() -> DeviceClient:
         prefs = client.get_preferences()
         if not prefs.get("demo_mode"):
             client.set_preference(demo_mode=True)
+            client.reboot()
+            if not client.wait_for_device(timeout=45.0):
+                pytest.exit(
+                    "Device did not return after enabling demo mode",
+                    returncode=1,
+                )
+            # A reboot clears the in-memory test lock.
+            client.lock(ttl_seconds=900)
         # Verify demo mode is actually on
         prefs = client.get_preferences()
         if not prefs.get("demo_mode"):
