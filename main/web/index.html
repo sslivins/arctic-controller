@@ -205,11 +205,21 @@
       box-shadow: 0 0 0 1px var(--cp-border-strong);
     }
     .choice-picker {
-      min-height: 112px; padding: 4px; overflow-y: auto;
-      background: var(--cp-surface-soft);
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px; min-width: 0;
     }
-    .choice-picker option { padding: 10px; border-radius: 8px; }
-    .choice-picker option:checked { background: var(--cp-accent); color: var(--cp-accent-fg); }
+    .choice-option {
+      display: flex; gap: 10px; align-items: flex-start; min-width: 0; padding: 11px 12px;
+      border: 1px solid var(--cp-border); border-radius: 10px;
+      background: var(--cp-surface-soft); cursor: pointer;
+    }
+    .choice-option:has(input:checked) {
+      border-color: var(--cp-accent); background: var(--cp-accent-soft);
+    }
+    .choice-option input { width: auto; flex: 0 0 auto; margin: 3px 0 0; accent-color: var(--cp-accent); }
+    .choice-option span { min-width: 0; overflow-wrap: anywhere; }
+    .choice-option strong, .choice-option small { display: block; white-space: normal; }
+    .choice-option small { margin-top: 2px; color: var(--cp-text-muted); line-height: 1.35; }
     .mode-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
     .mode-btn {
       min-height: 66px; padding: 8px; border: 1px solid var(--cp-border);
@@ -228,6 +238,7 @@
     details:first-child { border-top: 0; }
     summary { padding: 15px 0; cursor: pointer; font-weight: 650; }
     .ap-row { padding: 14px 0; border-top: 1px solid var(--cp-border); display: grid; grid-template-columns: 1fr minmax(260px, 360px); gap: 16px; }
+    .ap-row.choice-row { grid-template-columns: 1fr; }
     .ap-row p { color: var(--cp-text-muted); margin: 5px 0 0; font-size: 13px; }
     .ap-value { display: grid; gap: 10px; align-content: center; }
     .event-toolbar { display: grid; grid-template-columns: 1fr 170px 170px; gap: 10px; margin-bottom: 16px; }
@@ -315,6 +326,7 @@
       .event { grid-template-columns: 1fr auto; }
       .event-time { grid-column: 1 / -1; }
       .ap-row { grid-template-columns: 1fr; }
+      .choice-picker { grid-template-columns: 1fr; }
       .page-head { align-items: flex-start; }
     }
   </style>
@@ -548,13 +560,15 @@
       const min = isTemp ? tempNumber(p.min, kind) : p.min;
       const max = isTemp ? tempNumber(p.max, kind) : p.max;
       const displayUnit = isTemp ? unit(kind) : p.unit;
+      const hasChoices = p.writable && p.options?.length;
       let input;
       if (!p.writable) input = `<span class="badge">${p.value == null ? "--" : `${esc(value)} ${esc(displayUnit || "")}`}</span>`;
-      else if (p.options?.length) input = `<select class="choice-picker" name="value" size="${Math.min(p.options.length, 5)}"
-        aria-label="${esc(p.name)} options">${p.options.map(o =>
-        `<option value="${o.wire}" ${o.wire === p.value ? "selected" : ""}>${esc(o.label)}${o.en ? ` — ${esc(o.en)}` : ""}</option>`).join("")}</select>`;
+      else if (hasChoices) input = `<div class="choice-picker" role="radiogroup" aria-label="${esc(p.name)} options">
+        ${p.options.map(o => `<label class="choice-option"><input type="radio" name="value" value="${o.wire}"
+          ${o.wire === p.value ? "checked" : ""}><span><strong>${esc(o.label)}</strong>
+          ${o.en ? `<small>${esc(o.en)}</small>` : ""}</span></label>`).join("")}</div>`;
       else input = rangeEditor(value ?? min, min, max, isTemp ? 1 : (p.step || 1), displayUnit);
-      return `<form class="ap-row" data-form="ap" data-key="${esc(key)}" data-kind="${kind}">
+      return `<form class="ap-row ${hasChoices ? "choice-row" : ""}" data-form="ap" data-key="${esc(key)}" data-kind="${kind}">
         <div><strong>${esc(key)} · ${esc(p.name)}</strong><p>${esc((p.detail || "").replace(/\{T:(-?\d+)\}/g, (_, c) => temp(c)))}</p></div>
         <div class="ap-value">${input}${p.writable ? `<button class="btn" type="submit">Save</button>` : ""}</div></form>`;
     }

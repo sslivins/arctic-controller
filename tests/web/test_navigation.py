@@ -43,6 +43,18 @@ class TestNavigation:
         assert dashboard_page.locator('.ap-row input[type="number"]').count() == 0
         assert dashboard_page.locator('.ap-row input[type="range"]').count() > 0
         assert dashboard_page.locator(".ap-row .choice-picker").count() > 0
+        assert dashboard_page.locator('.ap-row .choice-picker input[type="radio"]').count() > 0
+
+    def test_discrete_control_labels_wrap_on_desktop(self, dashboard_page: Page):
+        primary(dashboard_page, "Control").click()
+        frequency = dashboard_page.locator("details", has_text="Frequency").first
+        frequency.locator("summary").click()
+        option = frequency.locator(".choice-option").nth(1)
+        expect(option).to_be_visible()
+        assert option.locator("small").evaluate(
+            "(element) => getComputedStyle(element).whiteSpace === 'normal'"
+        )
+        assert option.evaluate("(element) => element.scrollWidth <= element.clientWidth + 1")
 
     def test_events_surface(self, dashboard_page: Page):
         primary(dashboard_page, "Events").click()
