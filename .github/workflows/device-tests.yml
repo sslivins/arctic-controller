@@ -83,6 +83,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: firmware
+          path: build/
 
       - name: Detect partition layout changes
         id: partition_layout
@@ -94,7 +95,6 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Partition layout changed; forcing a full USB flash."
           fi
-          path: build/
 
       - name: Set up Python environment
         run: |
