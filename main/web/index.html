@@ -204,22 +204,12 @@
       border-radius: 50%; background: var(--cp-accent);
       box-shadow: 0 0 0 1px var(--cp-border-strong);
     }
-    .choice-picker {
-      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px; min-width: 0;
+    .choice-editor { display: grid; gap: 8px; min-width: 0; }
+    .choice-description {
+      min-height: 38px; padding: 8px 10px; border-radius: 10px;
+      background: var(--cp-surface-soft); color: var(--cp-text-muted);
+      font-size: 13px; line-height: 1.4; overflow-wrap: anywhere;
     }
-    .choice-option {
-      display: flex; gap: 10px; align-items: flex-start; min-width: 0; padding: 11px 12px;
-      border: 1px solid var(--cp-border); border-radius: 10px;
-      background: var(--cp-surface-soft); cursor: pointer;
-    }
-    .choice-option:has(input:checked) {
-      border-color: var(--cp-accent); background: var(--cp-accent-soft);
-    }
-    .choice-option input { width: auto; flex: 0 0 auto; margin: 3px 0 0; accent-color: var(--cp-accent); }
-    .choice-option span { min-width: 0; overflow-wrap: anywhere; }
-    .choice-option strong, .choice-option small { display: block; white-space: normal; }
-    .choice-option small { margin-top: 2px; color: var(--cp-text-muted); line-height: 1.35; }
     .mode-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
     .mode-btn {
       min-height: 66px; padding: 8px; border: 1px solid var(--cp-border);
@@ -238,7 +228,6 @@
     details:first-child { border-top: 0; }
     summary { padding: 15px 0; cursor: pointer; font-weight: 650; }
     .ap-row { padding: 14px 0; border-top: 1px solid var(--cp-border); display: grid; grid-template-columns: 1fr minmax(260px, 360px); gap: 16px; }
-    .ap-row.choice-row { grid-template-columns: 1fr; }
     .ap-row p { color: var(--cp-text-muted); margin: 5px 0 0; font-size: 13px; }
     .ap-value { display: grid; gap: 10px; align-content: center; }
     .event-toolbar { display: grid; grid-template-columns: 1fr 170px 170px; gap: 10px; margin-bottom: 16px; }
@@ -326,7 +315,6 @@
       .event { grid-template-columns: 1fr auto; }
       .event-time { grid-column: 1 / -1; }
       .ap-row { grid-template-columns: 1fr; }
-      .choice-picker { grid-template-columns: 1fr; }
       .page-head { align-items: flex-start; }
     }
   </style>
@@ -563,12 +551,15 @@
       const hasChoices = p.writable && p.options?.length;
       let input;
       if (!p.writable) input = `<span class="badge">${p.value == null ? "--" : `${esc(value)} ${esc(displayUnit || "")}`}</span>`;
-      else if (hasChoices) input = `<div class="choice-picker" role="radiogroup" aria-label="${esc(p.name)} options">
-        ${p.options.map(o => `<label class="choice-option"><input type="radio" name="value" value="${o.wire}"
-          ${o.wire === p.value ? "checked" : ""}><span><strong>${esc(o.label)}</strong>
-          ${o.en ? `<small>${esc(o.en)}</small>` : ""}</span></label>`).join("")}</div>`;
+      else if (hasChoices) {
+        const selected = p.options.find(o => o.wire === p.value) || p.options[0];
+        input = `<div class="choice-editor"><select name="value" class="choice-select"
+          aria-label="${esc(p.name)} options">${p.options.map(o =>
+          `<option value="${o.wire}" data-description="${esc(o.en || "")}" ${o.wire === p.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
+          <div class="choice-description" aria-live="polite">${esc(selected.en || "")}</div></div>`;
+      }
       else input = rangeEditor(value ?? min, min, max, isTemp ? 1 : (p.step || 1), displayUnit);
-      return `<form class="ap-row ${hasChoices ? "choice-row" : ""}" data-form="ap" data-key="${esc(key)}" data-kind="${kind}">
+      return `<form class="ap-row" data-form="ap" data-key="${esc(key)}" data-kind="${kind}">
         <div><strong>${esc(key)} · ${esc(p.name)}</strong><p>${esc((p.detail || "").replace(/\{T:(-?\d+)\}/g, (_, c) => temp(c)))}</p></div>
         <div class="ap-value">${input}${p.writable ? `<button class="btn" type="submit">Save</button>` : ""}</div></form>`;
     }
@@ -1020,6 +1011,11 @@
       }
     });
     document.addEventListener("change", event => {
+      if (event.target.matches("select.choice-select")) {
+        const description = event.target.closest(".choice-editor")?.querySelector(".choice-description");
+        const selected = event.target.selectedOptions[0];
+        if (description) description.textContent = selected?.dataset.description || "";
+      }
       if (event.target.id === "event-category") { state.eventFilters.category = event.target.value.toLowerCase(); render(); }
       if (event.target.id === "event-time") { state.eventFilters.time = event.target.value; render(); }
       if (event.target.id === "log-level") { state.logLevel = event.target.value; loadLogs(true).catch(() => {}); }

@@ -42,19 +42,23 @@ class TestNavigation:
         dashboard_page.locator(".ap-row").first.wait_for(state="attached")
         assert dashboard_page.locator('.ap-row input[type="number"]').count() == 0
         assert dashboard_page.locator('.ap-row input[type="range"]').count() > 0
-        assert dashboard_page.locator(".ap-row .choice-picker").count() > 0
-        assert dashboard_page.locator('.ap-row .choice-picker input[type="radio"]').count() > 0
+        assert dashboard_page.locator(".ap-row select.choice-select").count() > 0
 
     def test_discrete_control_labels_wrap_on_desktop(self, dashboard_page: Page):
         primary(dashboard_page, "Control").click()
         frequency = dashboard_page.locator("details", has_text="Frequency").first
-        frequency.locator("summary").click()
-        option = frequency.locator(".choice-option").nth(1)
-        expect(option).to_be_visible()
-        assert option.locator("small").evaluate(
-            "(element) => getComputedStyle(element).whiteSpace === 'normal'"
+        expect(frequency).to_be_visible()
+        dashboard_page.wait_for_timeout(1000)
+        frequency.locator(":scope > summary").click()
+        selector = frequency.locator("select.choice-select").first
+        description = selector.locator("xpath=following-sibling::*[contains(@class, 'choice-description')]")
+        expect(selector).to_be_visible()
+        expect(description).to_contain_text("Lowers running frequency")
+        selector.select_option(index=2)
+        expect(description).to_contain_text("2 steps per 2 Hz")
+        assert description.evaluate(
+            "(element) => getComputedStyle(element).overflowWrap === 'anywhere'"
         )
-        assert option.evaluate("(element) => element.scrollWidth <= element.clientWidth + 1")
 
     def test_events_surface(self, dashboard_page: Page):
         primary(dashboard_page, "Events").click()
