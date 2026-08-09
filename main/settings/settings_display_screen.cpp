@@ -58,8 +58,8 @@ static void create_content(void);
 static void back_btn_cb(lv_event_t* e);
 static void slider_cb(lv_event_t* e);
 static void load_settings(void);
-static void save_settings(void);
-static void apply_brightness(int brightness);
+static bool save_settings(void);
+static bool apply_brightness(int brightness);
 
 // ============================================================================
 // Settings Persistence
@@ -77,22 +77,29 @@ static void load_settings(void)
     } else {
         s_state.current_brightness = DEFAULT_BRIGHTNESS;
     }
+    if (s_state.current_brightness < 5) s_state.current_brightness = 5;
+    if (s_state.current_brightness > 100) s_state.current_brightness = 100;
     ESP_LOGI(TAG, "Loaded brightness: %d%%", s_state.current_brightness);
 }
 
-static void save_settings(void)
+static bool save_settings(void)
 {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
-        nvs_set_u8(nvs, NVS_KEY_BRIGHTNESS, (uint8_t)s_state.current_brightness);
-        nvs_commit(nvs);
+        err = nvs_set_u8(nvs, NVS_KEY_BRIGHTNESS, (uint8_t)s_state.current_brightness);
+        if (err == ESP_OK) err = nvs_commit(nvs);
         nvs_close(nvs);
-        ESP_LOGI(TAG, "Saved brightness: %d%%", s_state.current_brightness);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Saved brightness: %d%%", s_state.current_brightness);
+            return true;
+        }
     }
+    ESP_LOGE(TAG, "Failed to save brightness: %s", esp_err_to_name(err));
+    return false;
 }
 
-static void apply_brightness(int brightness)
+static bool apply_brightness(int brightness)
 {
     if (brightness < 5) brightness = 5;
     if (brightness > 100) brightness = 100;
@@ -100,7 +107,9 @@ static void apply_brightness(int brightness)
     esp_err_t err = bsp_display_brightness_set(brightness);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set brightness: %s", esp_err_to_name(err));
+        return false;
     }
+    return true;
 }
 
 // ============================================================================
@@ -387,5 +396,17 @@ int display_screen_get_brightness(void)
         brightness = val;
         nvs_close(nvs);
     }
+    if (brightness < 5) brightness = 5;
+    if (brightness > 100) brightness = 100;
     return brightness;
+}
+
+bool display_screen_set_brightness(int brightness)
+{
+    if (brightness < 5 || brightness > 100) return false;
+
+    s_state.current_brightness = brightness;
+    if (!apply_brightness(brightness) || !save_settings()) return false;
+
+    return true;
 }

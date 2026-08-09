@@ -91,6 +91,9 @@ SKIP_ENTIRELY = {
     "/api/ota/reboot",              # reboots the device
     "/api/auth/credentials",        # changes login credentials
     "/api/auth/apikey/regenerate",  # invalidates existing API key
+    "/api/factory-reset",           # erases all persistent state and reboots
+    "/api/wifi/connect",            # changes the active network
+    "/api/wifi/disconnect",         # drops the test connection
     "/login",                       # session management
     "/logout",                      # session management
 }
@@ -106,6 +109,9 @@ SKIP_NON_GET = {
     "/api/heatpump/mode",           # PUT changes operating mode
     "/api/heatpump/setpoints",      # PUT changes temperature setpoints
     "/api/heatpump/advanced/{id}",  # PUT changes AP (advanced) parameters
+    "/api/display/brightness",      # PUT changes persistent display settings
+    "/api/preferences",             # PATCH changes persistent preferences
+    "/api/wifi/scan",               # POST starts radio scan
 }
 
 
@@ -297,6 +303,10 @@ def test_events_structure(api):
     assert isinstance(data["events"], list)
     assert data["offset"] == 0
     assert data["count"] == len(data["events"])
+    assert "current_boot_id" in data
+    for event in data["events"]:
+        assert event["category"] in ("problems", "equipment", "changes", "system")
+        assert isinstance(event["boot_id"], int)
 
 
 def test_events_supports_pagination(api):

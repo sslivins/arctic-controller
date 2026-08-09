@@ -590,8 +590,15 @@ class TestHeatpumpParams:
         first_key = list(data["params"].keys())[0]
         param = data["params"][first_key]
         for field in ["ap", "value", "name", "unit", "min", "max", "category",
-                      "read_only", "is_trigger", "writable"]:
+                      "temperature_kind", "read_only", "is_trigger", "writable"]:
             assert field in param, f"Missing param field: {field}"
+        assert param["temperature_kind"] in ("none", "absolute", "differential")
+
+    def test_temperature_parameters_expose_conversion_kind(self):
+        data = _get("/api/heatpump/advanced").json()["params"]
+        assert data["AP24"]["temperature_kind"] == "absolute"
+        assert data["AP32"]["temperature_kind"] == "differential"
+        assert data["AP42"]["temperature_kind"] == "differential"
 
     def test_param_keys_are_ap_prefixed(self):
         """Advanced-parameter keys are AP-prefixed (e.g. AP13)."""

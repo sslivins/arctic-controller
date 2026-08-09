@@ -216,6 +216,14 @@ bool wifi_mgr_start_scan(wifi_mgr_scan_done_cb_t callback)
     return true;
 }
 
+uint16_t wifi_mgr_get_scan_results(wifi_mgr_ap_info_t* out, uint16_t max_out)
+{
+    if (!out || max_out == 0) return 0;
+    uint16_t count = wifi_state.scan_count < max_out ? wifi_state.scan_count : max_out;
+    memcpy(out, wifi_state.scan_results, count * sizeof(wifi_mgr_ap_info_t));
+    return count;
+}
+
 bool wifi_mgr_connect(const char* ssid, const char* password, wifi_mgr_state_cb_t state_callback)
 {
     if (!wifi_state.initialized) {

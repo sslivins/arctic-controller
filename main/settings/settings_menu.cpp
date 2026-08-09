@@ -14,15 +14,13 @@
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
-#include "../event_log.h"
+#include "../factory_reset.h"
 #include "../heatpump_screen.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include "wifi_manager.h"
 #include <esp_log.h>
-#include <esp_partition.h>
 #include <esp_system.h>
-#include <nvs_flash.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <string.h>
@@ -459,40 +457,6 @@ static void dismiss_factory_reset_overlay(void)
     }
 }
 
-static esp_err_t erase_data_partition(const char* label)
-{
-    const esp_partition_t* partition = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, label);
-    if (!partition) {
-        ESP_LOGE(TAG, "Factory reset partition '%s' not found", label);
-        return ESP_ERR_NOT_FOUND;
-    }
-    ESP_LOGI(TAG, "Erasing %s partition (%lu bytes)", label,
-             (unsigned long)partition->size);
-    return esp_partition_erase_range(partition, 0, partition->size);
-}
-
-static void factory_reset_task(void* arg)
-{
-    (void)arg;
-    event_log_prepare_factory_reset();
-
-    esp_err_t storage_err = erase_data_partition("storage");
-    esp_err_t history_err = erase_data_partition("history");
-    esp_err_t nvs_err = nvs_flash_erase();
-
-    if (storage_err != ESP_OK || history_err != ESP_OK || nvs_err != ESP_OK) {
-        ESP_LOGE(TAG, "Factory reset incomplete: storage=%s history=%s nvs=%s",
-                 esp_err_to_name(storage_err), esp_err_to_name(history_err),
-                 esp_err_to_name(nvs_err));
-    } else {
-        ESP_LOGI(TAG, "Factory reset complete");
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(250));
-    esp_restart();
-}
-
 static void factory_reset_confirm_cb(lv_event_t* e)
 {
     (void)e;
@@ -504,10 +468,7 @@ static void factory_reset_confirm_cb(lv_event_t* e)
                           i18n_get(STR_FACTORY_RESET_ERASING));
     }
 
-    BaseType_t created = xTaskCreate(factory_reset_task, "factory_reset",
-                                     4096, NULL, 5, NULL);
-    if (created != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create factory-reset task");
+    if (!factory_reset_start()) {
         lv_obj_clear_state(state.factory_reset_confirm_btn, LV_STATE_DISABLED);
         if (state.factory_reset_confirm_label) {
             lv_label_set_text(state.factory_reset_confirm_label,

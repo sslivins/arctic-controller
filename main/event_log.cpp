@@ -71,6 +71,16 @@ static const char* s_event_names[] = {
 _Static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
                "s_event_names must match EVENT_TYPE_COUNT");
 
+static const char* s_category_names[] = {
+    "problems",
+    "equipment",
+    "changes",
+    "system",
+};
+
+_Static_assert(sizeof(s_category_names) / sizeof(s_category_names[0]) == EVENT_CATEGORY_COUNT,
+               "s_category_names must match EVENT_CATEGORY_COUNT");
+
 void event_log_init(void) {
     if (s_mutex == nullptr) {
         s_mutex = xSemaphoreCreateMutex();
@@ -278,4 +288,44 @@ void event_log_prepare_factory_reset(void) {
 const char* event_type_name(event_type_t type) {
     if (type >= EVENT_TYPE_COUNT) return "unknown";
     return s_event_names[type];
+}
+
+event_category_t event_type_category(event_type_t type) {
+    switch (type) {
+        case EVENT_ERROR_APPEARED:
+        case EVENT_ERROR_CLEARED:
+        case EVENT_DISCONNECTED:
+        case EVENT_BROWNOUT_RESET:
+        case EVENT_APPLICATION_CRASH:
+        case EVENT_WATCHDOG_RESET:
+            return EVENT_CATEGORY_PROBLEMS;
+
+        case EVENT_COMPRESSOR_ON:
+        case EVENT_COMPRESSOR_OFF:
+        case EVENT_FAN_ON:
+        case EVENT_FAN_OFF:
+        case EVENT_PUMP_ON:
+        case EVENT_PUMP_OFF:
+        case EVENT_AUX_HEATER_ON:
+        case EVENT_AUX_HEATER_OFF:
+        case EVENT_DEFROST_START:
+        case EVENT_DEFROST_END:
+            return EVENT_CATEGORY_EQUIPMENT;
+
+        case EVENT_POWER_ON:
+        case EVENT_POWER_OFF:
+        case EVENT_MODE_CHANGED:
+        case EVENT_SETPOINT_CHANGED:
+            return EVENT_CATEGORY_CHANGES;
+
+        case EVENT_SYSTEM_START:
+        case EVENT_CONNECTED:
+        default:
+            return EVENT_CATEGORY_SYSTEM;
+    }
+}
+
+const char* event_category_name(event_category_t category) {
+    if (category >= EVENT_CATEGORY_COUNT) return "system";
+    return s_category_names[category];
 }

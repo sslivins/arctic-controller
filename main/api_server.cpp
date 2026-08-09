@@ -16,6 +16,7 @@
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
 #include "event_log.h"
+#include "factory_reset.h"
 #include "boot_stats.h"
 #include "log_buffer.h"
 #include "app_preferences.h"
@@ -34,6 +35,8 @@
 #include <bsp/m5stack_tab5.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 static const char* TAG = "api_server";
 
@@ -69,6 +72,10 @@ static esp_err_t time_get_handler(httpd_req_t* req);
 static esp_err_t time_config_handler(httpd_req_t* req);
 static esp_err_t time_sync_handler(httpd_req_t* req);
 static esp_err_t wifi_get_handler(httpd_req_t* req);
+static esp_err_t wifi_scan_post_handler(httpd_req_t* req);
+static esp_err_t wifi_networks_get_handler(httpd_req_t* req);
+static esp_err_t wifi_connect_post_handler(httpd_req_t* req);
+static esp_err_t wifi_disconnect_post_handler(httpd_req_t* req);
 static esp_err_t info_get_handler(httpd_req_t* req);
 static esp_err_t ota_status_get_handler(httpd_req_t* req);
 static esp_err_t ota_update_post_handler(httpd_req_t* req);
@@ -100,7 +107,10 @@ static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
 static esp_err_t brownout_clear_handler(httpd_req_t* req);
 static esp_err_t display_brightness_get_handler(httpd_req_t* req);
+static esp_err_t display_brightness_put_handler(httpd_req_t* req);
 static esp_err_t preferences_get_handler(httpd_req_t* req);
+static esp_err_t preferences_patch_handler(httpd_req_t* req);
+static esp_err_t factory_reset_post_handler(httpd_req_t* req);
 static esp_err_t logs_get_handler(httpd_req_t* req);
 static esp_err_t logs_clear_handler(httpd_req_t* req);
 static esp_err_t screenshot_get_handler(httpd_req_t* req);
@@ -308,7 +318,7 @@ bool api_server_start(void)
     }
     
     // Common httpd config values
-    const int uri_handlers = 92;     // 47 api_server + 36 test_endpoints = 83 needed
+    const int uri_handlers = 104;
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
@@ -511,6 +521,38 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(wifi_uri);
+
+    httpd_uri_t wifi_scan_uri = {
+        .uri = "/api/wifi/scan",
+        .method = HTTP_POST,
+        .handler = wifi_scan_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(wifi_scan_uri);
+
+    httpd_uri_t wifi_networks_uri = {
+        .uri = "/api/wifi/networks",
+        .method = HTTP_GET,
+        .handler = wifi_networks_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(wifi_networks_uri);
+
+    httpd_uri_t wifi_connect_uri = {
+        .uri = "/api/wifi/connect",
+        .method = HTTP_POST,
+        .handler = wifi_connect_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(wifi_connect_uri);
+
+    httpd_uri_t wifi_disconnect_uri = {
+        .uri = "/api/wifi/disconnect",
+        .method = HTTP_POST,
+        .handler = wifi_disconnect_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(wifi_disconnect_uri);
     
     // GET /api/info
     httpd_uri_t info_uri = {
@@ -791,6 +833,14 @@ bool api_server_start(void)
     };
     REGISTER_URI(display_brightness_uri);
 
+    httpd_uri_t display_brightness_put_uri = {
+        .uri = "/api/display/brightness",
+        .method = HTTP_PUT,
+        .handler = display_brightness_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(display_brightness_put_uri);
+
     // GET /api/preferences - Get current app preferences
     httpd_uri_t preferences_uri = {
         .uri = "/api/preferences",
@@ -799,6 +849,22 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(preferences_uri);
+
+    httpd_uri_t preferences_patch_uri = {
+        .uri = "/api/preferences",
+        .method = HTTP_PATCH,
+        .handler = preferences_patch_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(preferences_patch_uri);
+
+    httpd_uri_t factory_reset_uri = {
+        .uri = "/api/factory-reset",
+        .method = HTTP_POST,
+        .handler = factory_reset_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(factory_reset_uri);
 
     // GET /api/logs - Get log buffer entries
     httpd_uri_t logs_get_uri = {
@@ -1325,6 +1391,157 @@ static esp_err_t wifi_get_handler(httpd_req_t* req)
     free(json_str);
     cJSON_Delete(root);
     
+    return ESP_OK;
+}
+
+static volatile bool s_wifi_scan_in_progress = false;
+
+static void wifi_scan_done_callback(const wifi_mgr_ap_info_t* ap_list, uint16_t count)
+{
+    (void)ap_list;
+    ESP_LOGI(TAG, "WiFi API scan completed with %u network(s)", count);
+    s_wifi_scan_in_progress = false;
+}
+
+static esp_err_t wifi_scan_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    if (s_wifi_scan_in_progress) {
+        send_json_error(req, "409 Conflict", "WiFi scan already in progress");
+        return ESP_OK;
+    }
+
+    s_wifi_scan_in_progress = true;
+    if (!wifi_mgr_start_scan(wifi_scan_done_callback)) {
+        s_wifi_scan_in_progress = false;
+        send_json_error(req, "503 Service Unavailable", "Unable to start WiFi scan");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"success\":true,\"scanning\":true}");
+    return ESP_OK;
+}
+
+static esp_err_t wifi_networks_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    wifi_mgr_ap_info_t networks[32];
+    uint16_t count = wifi_mgr_get_scan_results(networks, 32);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "scanning", s_wifi_scan_in_progress);
+    cJSON* arr = cJSON_AddArrayToObject(root, "networks");
+    for (uint16_t i = 0; i < count; i++) {
+        cJSON* network = cJSON_CreateObject();
+        cJSON_AddStringToObject(network, "ssid", networks[i].ssid);
+        cJSON_AddNumberToObject(network, "rssi", networks[i].rssi);
+        cJSON_AddNumberToObject(network, "authmode", networks[i].authmode);
+        cJSON_AddItemToArray(arr, network);
+    }
+
+    set_json_content_type(req);
+    char* json = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+typedef struct {
+    char ssid[33];
+    char password[65];
+} wifi_connect_request_t;
+
+static void wifi_connect_task(void* arg)
+{
+    wifi_connect_request_t* request = (wifi_connect_request_t*)arg;
+    vTaskDelay(pdMS_TO_TICKS(250));
+    bool saved = wifi_mgr_save_credentials(request->ssid, request->password);
+    bool started = saved && wifi_mgr_connect(request->ssid, request->password, NULL);
+    if (!started) {
+        ESP_LOGE(TAG, "Deferred WiFi connection to '%s' failed to start", request->ssid);
+    }
+    free(request);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t wifi_connect_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    char body[256];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    cJSON* ssid = root ? cJSON_GetObjectItem(root, "ssid") : NULL;
+    cJSON* password = root ? cJSON_GetObjectItem(root, "password") : NULL;
+    if (!cJSON_IsString(ssid) || ssid->valuestring[0] == '\0' ||
+        strlen(ssid->valuestring) > 32 ||
+        (password && (!cJSON_IsString(password) || strlen(password->valuestring) > 64))) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Invalid SSID or password");
+        return ESP_OK;
+    }
+
+    wifi_connect_request_t* request =
+        (wifi_connect_request_t*)calloc(1, sizeof(wifi_connect_request_t));
+    if (!request) {
+        cJSON_Delete(root);
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    strncpy(request->ssid, ssid->valuestring, sizeof(request->ssid) - 1);
+    if (password) {
+        strncpy(request->password, password->valuestring, sizeof(request->password) - 1);
+    }
+    cJSON_Delete(root);
+
+    if (xTaskCreate(wifi_connect_task, "wifi_api_connect", 4096, request, 5, NULL) != pdPASS) {
+        free(request);
+        send_json_error(req, "500 Internal Server Error", "Unable to start WiFi connection");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"success\":true,\"state\":\"connecting\"}");
+    return ESP_OK;
+}
+
+static void wifi_disconnect_task(void* arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(250));
+    wifi_mgr_disconnect();
+    vTaskDelete(NULL);
+}
+
+static esp_err_t wifi_disconnect_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    if (xTaskCreate(wifi_disconnect_task, "wifi_api_disconnect", 3072, NULL, 5, NULL) != pdPASS) {
+        send_json_error(req, "500 Internal Server Error", "Unable to start WiFi disconnect");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"success\":true,\"state\":\"disconnecting\"}");
     return ESP_OK;
 }
 
@@ -2278,6 +2495,18 @@ static void add_ap_enum_options(cJSON* obj, const arctic::AdvancedParam* p) {
     }
 }
 
+static const char* ap_temperature_kind_name(uint8_t ap) {
+    switch (arctic::advanced_temperature_kind(ap)) {
+        case arctic::AdvancedTemperatureKind::Absolute:
+            return "absolute";
+        case arctic::AdvancedTemperatureKind::Differential:
+            return "differential";
+        case arctic::AdvancedTemperatureKind::None:
+        default:
+            return "none";
+    }
+}
+
 // Helper to add a single AP (advanced) parameter to a cJSON object, keyed "AP<n>".
 static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool read_ok, int16_t value) {
     char key[8];
@@ -2300,6 +2529,7 @@ static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool r
     cJSON_AddNumberToObject(obj, "step", arctic::advanced_display_step(p->ap));
     const char* display_unit = arctic::advanced_display_unit(p->ap);
     cJSON_AddStringToObject(obj, "unit", display_unit ? display_unit : "");
+    cJSON_AddStringToObject(obj, "temperature_kind", ap_temperature_kind_name(p->ap));
     cJSON_AddStringToObject(obj, "category", p->category ? p->category : "");
     cJSON_AddBoolToObject(obj, "read_only", p->read_only);
     cJSON_AddBoolToObject(obj, "is_trigger", p->is_trigger);
@@ -2404,6 +2634,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(root, "step", arctic::advanced_display_step(p->ap));
     const char* display_unit = arctic::advanced_display_unit(p->ap);
     cJSON_AddStringToObject(root, "unit", display_unit ? display_unit : "");
+    cJSON_AddStringToObject(root, "temperature_kind", ap_temperature_kind_name(p->ap));
     cJSON_AddBoolToObject(root, "read_only", p->read_only);
     cJSON_AddBoolToObject(root, "is_trigger", p->is_trigger);
     cJSON_AddBoolToObject(root, "writable", writable);
@@ -3113,6 +3344,7 @@ static esp_err_t events_get_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(root, "total", event_log_count());
     cJSON_AddNumberToObject(root, "offset", offset);
     cJSON_AddNumberToObject(root, "count", count);
+    cJSON_AddNumberToObject(root, "current_boot_id", event_log_current_boot_id());
     // Durable brownout tracking (survives the reboot a brownout causes).
     cJSON_AddNumberToObject(root, "brownout_count", boot_stats_brownout_count());
     cJSON_AddStringToObject(root, "last_reset_reason",
@@ -3122,7 +3354,10 @@ static esp_err_t events_get_handler(httpd_req_t* req)
     for (int i = 0; i < count; i++) {
         cJSON* evt = cJSON_CreateObject();
         cJSON_AddStringToObject(evt, "type", event_type_name(events[i].type));
+        cJSON_AddStringToObject(evt, "category",
+                                event_category_name(event_type_category(events[i].type)));
         cJSON_AddNumberToObject(evt, "timestamp", events[i].timestamp);
+        cJSON_AddNumberToObject(evt, "boot_id", events[i].boot_id);
         cJSON_AddNumberToObject(evt, "uptime_ms", (double)events[i].uptime_ms);
         cJSON_AddNumberToObject(evt, "payload", events[i].payload);
         cJSON_AddItemToArray(arr, evt);
@@ -3177,9 +3412,53 @@ static esp_err_t display_brightness_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-static esp_err_t preferences_get_handler(httpd_req_t* req)
+static esp_err_t display_brightness_put_handler(httpd_req_t* req)
 {
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    char body[96];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    cJSON* root = cJSON_Parse(body);
+    cJSON* brightness = root ? cJSON_GetObjectItem(root, "brightness") : NULL;
+    if (!cJSON_IsNumber(brightness) || brightness->valueint < 5 || brightness->valueint > 100) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "brightness must be between 5 and 100");
+        return ESP_OK;
+    }
+    int value = brightness->valueint;
+    cJSON_Delete(root);
+
+    if (!display_screen_set_brightness(value)) {
+        send_json_error(req, "500 Internal Server Error", "Unable to save brightness");
+        return ESP_OK;
+    }
     set_json_content_type(req);
+    char response[64];
+    snprintf(response, sizeof(response), "{\"success\":true,\"brightness\":%d}", value);
+    httpd_resp_sendstr(req, response);
+    return ESP_OK;
+}
+
+static const char* language_code(language_t language)
+{
+    switch (language) {
+        case LANG_FRENCH: return "fr";
+        case LANG_SPANISH: return "es";
+        case LANG_ENGLISH:
+        default: return "en";
+    }
+}
+
+static cJSON* create_preferences_json(void)
+{
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "demo_mode", app_prefs_is_demo_mode());
     cJSON_AddStringToObject(root, "temp_unit",
@@ -3187,13 +3466,125 @@ static esp_err_t preferences_get_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(root, "brightness", display_screen_get_brightness());
     cJSON_AddStringToObject(root, "language",
         i18n_get_language_name(i18n_get_language()));
+    cJSON_AddStringToObject(root, "language_code", language_code(i18n_get_language()));
     cJSON_AddBoolToObject(root, "format_24h", time_mgr_get_24h_format());
     cJSON_AddStringToObject(root, "timezone", time_mgr_get_timezone());
+    return root;
+}
 
+static esp_err_t preferences_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    cJSON* root = create_preferences_json();
     char* json = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json);
     free(json);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t preferences_patch_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    char body[256];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    cJSON* root = cJSON_Parse(body);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* demo_mode = cJSON_GetObjectItem(root, "demo_mode");
+    cJSON* temp_unit = cJSON_GetObjectItem(root, "temp_unit");
+    cJSON* language = cJSON_GetObjectItem(root, "language");
+    bool any = demo_mode || temp_unit || language;
+    if ((demo_mode && !cJSON_IsBool(demo_mode)) ||
+        (temp_unit && (!cJSON_IsString(temp_unit) ||
+            (strcmp(temp_unit->valuestring, "celsius") != 0 &&
+             strcmp(temp_unit->valuestring, "fahrenheit") != 0))) ||
+        (language && (!cJSON_IsString(language) ||
+            (strcmp(language->valuestring, "en") != 0 &&
+             strcmp(language->valuestring, "fr") != 0 &&
+             strcmp(language->valuestring, "es") != 0)))) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Invalid preference value");
+        return ESP_OK;
+    }
+    if (!any) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "No supported preferences supplied");
+        return ESP_OK;
+    }
+
+    bool reboot_required = false;
+    if (demo_mode) {
+        bool enabled = cJSON_IsTrue(demo_mode);
+        reboot_required = enabled != app_prefs_is_demo_mode();
+        app_prefs_set_demo_mode(enabled);
+    }
+    if (temp_unit) {
+        app_prefs_set_temp_unit(
+            strcmp(temp_unit->valuestring, "fahrenheit") == 0
+                ? TEMP_UNIT_FAHRENHEIT : TEMP_UNIT_CELSIUS);
+    }
+    if (language) {
+        language_t value = LANG_ENGLISH;
+        if (strcmp(language->valuestring, "fr") == 0) value = LANG_FRENCH;
+        if (strcmp(language->valuestring, "es") == 0) value = LANG_SPANISH;
+        i18n_set_language(value);
+    }
+    cJSON_Delete(root);
+
+    cJSON* response = create_preferences_json();
+    cJSON_AddBoolToObject(response, "success", true);
+    cJSON_AddBoolToObject(response, "reboot_required", reboot_required);
+    set_json_content_type(req);
+    char* json = cJSON_PrintUnformatted(response);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(response);
+    return ESP_OK;
+}
+
+static esp_err_t factory_reset_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    char body[96];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Confirmation required");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+    cJSON* root = cJSON_Parse(body);
+    cJSON* confirm = root ? cJSON_GetObjectItem(root, "confirm") : NULL;
+    bool confirmed = cJSON_IsString(confirm) &&
+                     strcmp(confirm->valuestring, "factory-reset") == 0;
+    cJSON_Delete(root);
+    if (!confirmed) {
+        send_json_error(req, "400 Bad Request", "Set confirm to factory-reset");
+        return ESP_OK;
+    }
+    if (!factory_reset_start()) {
+        send_json_error(req, "500 Internal Server Error", "Unable to start factory reset");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"success\":true,\"restarting\":true}");
     return ESP_OK;
 }
 

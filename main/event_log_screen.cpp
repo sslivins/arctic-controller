@@ -41,11 +41,11 @@ static const char* TAG = "evt_screen";
 // State
 // ============================================================================
 
-enum event_category_t : uint8_t {
-    EVENT_CATEGORY_PROBLEMS  = 1 << 0,
-    EVENT_CATEGORY_EQUIPMENT = 1 << 1,
-    EVENT_CATEGORY_CHANGES   = 1 << 2,
-    EVENT_CATEGORY_SYSTEM    = 1 << 3,
+enum event_category_mask_t : uint8_t {
+    EVENT_CATEGORY_MASK_PROBLEMS  = 1 << EVENT_CATEGORY_PROBLEMS,
+    EVENT_CATEGORY_MASK_EQUIPMENT = 1 << EVENT_CATEGORY_EQUIPMENT,
+    EVENT_CATEGORY_MASK_CHANGES   = 1 << EVENT_CATEGORY_CHANGES,
+    EVENT_CATEGORY_MASK_SYSTEM    = 1 << EVENT_CATEGORY_SYSTEM,
 };
 
 enum event_time_filter_t : uint8_t {
@@ -268,43 +268,6 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
 
 static int local_date_key(time_t timestamp);
 
-static uint8_t event_category(event_type_t type) {
-    switch (type) {
-        case EVENT_ERROR_APPEARED:
-        case EVENT_ERROR_CLEARED:
-        case EVENT_DISCONNECTED:
-        case EVENT_BROWNOUT_RESET:
-        case EVENT_APPLICATION_CRASH:
-        case EVENT_WATCHDOG_RESET:
-            return EVENT_CATEGORY_PROBLEMS;
-
-        case EVENT_COMPRESSOR_ON:
-        case EVENT_COMPRESSOR_OFF:
-        case EVENT_FAN_ON:
-        case EVENT_FAN_OFF:
-        case EVENT_PUMP_ON:
-        case EVENT_PUMP_OFF:
-        case EVENT_AUX_HEATER_ON:
-        case EVENT_AUX_HEATER_OFF:
-        case EVENT_DEFROST_START:
-        case EVENT_DEFROST_END:
-            return EVENT_CATEGORY_EQUIPMENT;
-
-        case EVENT_POWER_ON:
-        case EVENT_POWER_OFF:
-        case EVENT_MODE_CHANGED:
-        case EVENT_SETPOINT_CHANGED:
-            return EVENT_CATEGORY_CHANGES;
-
-        case EVENT_SYSTEM_START:
-        case EVENT_CONNECTED:
-            return EVENT_CATEGORY_SYSTEM;
-
-        default:
-            return 0;
-    }
-}
-
 static bool contains_case_insensitive(const char* haystack, const char* needle) {
     if (!needle || needle[0] == '\0') return true;
     if (!haystack) return false;
@@ -350,7 +313,7 @@ static bool event_matches_search(const event_entry_t* evt) {
 
 static bool event_matches_filters(const event_entry_t* evt, time_t now) {
     if (state.category_mask != 0 &&
-        (event_category(evt->type) & state.category_mask) == 0) {
+        ((1u << event_type_category(evt->type)) & state.category_mask) == 0) {
         return false;
     }
     return event_matches_time(evt, now) && event_matches_search(evt);
@@ -358,7 +321,7 @@ static bool event_matches_filters(const event_entry_t* evt, time_t now) {
 
 static int active_filter_count() {
     int count = state.time_filter == EVENT_TIME_ALL ? 0 : 1;
-    for (uint8_t bit = 1; bit <= EVENT_CATEGORY_SYSTEM; bit <<= 1) {
+    for (uint8_t bit = 1; bit <= EVENT_CATEGORY_MASK_SYSTEM; bit <<= 1) {
         if (state.category_mask & bit) count++;
     }
     return count;
@@ -873,8 +836,8 @@ static void sync_time_buttons() {
 
 static void sync_category_buttons() {
     const uint8_t categories[] = {
-        EVENT_CATEGORY_PROBLEMS, EVENT_CATEGORY_EQUIPMENT,
-        EVENT_CATEGORY_CHANGES, EVENT_CATEGORY_SYSTEM
+        EVENT_CATEGORY_MASK_PROBLEMS, EVENT_CATEGORY_MASK_EQUIPMENT,
+        EVENT_CATEGORY_MASK_CHANGES, EVENT_CATEGORY_MASK_SYSTEM
     };
     for (int i = 0; i < 4; i++) {
         if (!state.category_btn[i]) continue;
@@ -1009,8 +972,8 @@ static void create_filter_controls() {
         STR_EVENT_PROBLEMS, STR_EVENT_EQUIPMENT, STR_EVENT_CHANGES, STR_EVENT_SYSTEM
     };
     const uint8_t categories[] = {
-        EVENT_CATEGORY_PROBLEMS, EVENT_CATEGORY_EQUIPMENT,
-        EVENT_CATEGORY_CHANGES, EVENT_CATEGORY_SYSTEM
+        EVENT_CATEGORY_MASK_PROBLEMS, EVENT_CATEGORY_MASK_EQUIPMENT,
+        EVENT_CATEGORY_MASK_CHANGES, EVENT_CATEGORY_MASK_SYSTEM
     };
     const char* tags[] = {
         "event_filter_problems", "event_filter_equipment",
