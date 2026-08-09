@@ -4,7 +4,7 @@
  */
 #include "advanced_params.h"
 #include "app_preferences.h"
-#include "modbus/arctic_heatpump.h"
+#include "heatpump_controller.h"
 #include <esp_log.h>
 
 static const char* TAG = "adv_params";

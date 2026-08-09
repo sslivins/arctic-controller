@@ -9,7 +9,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 
-#include "arctic_registers.h"   // RS485_TX_PIN / RS485_RX_PIN / RS485_DIR_PIN
+#include "heatpump_types.h"   // RS485_TX_PIN / RS485_RX_PIN / RS485_DIR_PIN
 
 static const char *TAG = "macon_tx";
 

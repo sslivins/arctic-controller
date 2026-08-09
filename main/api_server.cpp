@@ -10,8 +10,8 @@
 #include "time_manager.h"
 #include "ota_manager.h"
 #include "auth_manager.h"
-#include "modbus/arctic_heatpump.h"
-#include "modbus/arctic_registers.h"
+#include "heatpump_controller.h"
+#include "heatpump_types.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"

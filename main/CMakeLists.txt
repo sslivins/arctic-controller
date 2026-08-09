@@ -70,7 +70,7 @@ idf_component_register(
         "fonts/montserrat_32_misc.c"
         "fonts/montserrat_40_misc.c"
         "modbus/modbus_manager.cpp"
-        "modbus/arctic_heatpump.cpp"
+        "heatpump_controller.cpp"
         "tuya/tuya_listener.cpp"
         "tuya/macon_uart_transport.cpp"
         "tuya/macon_master.cpp"

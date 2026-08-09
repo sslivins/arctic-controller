@@ -4,7 +4,7 @@
  */
 
 #include "modbus_manager.h"
-#include "arctic_registers.h"
+#include "heatpump_types.h"
 #include "esp_log.h"
 #include "driver/uart.h"
 #include "mbcontroller.h"

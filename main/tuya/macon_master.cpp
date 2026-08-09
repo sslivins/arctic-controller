@@ -15,7 +15,7 @@
 #include "macon_uart_transport.h"
 #include "tuya_codec.h"
 #include "macon_link.h"
-#include "arctic_heatpump.h"   // feedRegisterWindow / recordObservedWindow
+#include "heatpump_controller.h"   // feedRegisterWindow / recordObservedWindow
 
 static const char *TAG = "macon_master";
 

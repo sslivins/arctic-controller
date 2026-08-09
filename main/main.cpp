@@ -25,7 +25,7 @@
 #include "auth_manager.h"
 #include "tls_manager.h"
 #include "modbus/modbus_manager.h"
-#include "modbus/arctic_heatpump.h"
+#include "heatpump_controller.h"
 #include "tuya/tuya_listener.h"
 #include "tuya/macon_master.h"
 #include "heatpump_screen.h"
