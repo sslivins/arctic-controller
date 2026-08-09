@@ -86,14 +86,20 @@ schema = schemathesis.openapi.from_dict(raw_spec)
 # They are excluded from automatic fuzz testing.
 
 SKIP_ENTIRELY = {
+    "/api/ota/releases",            # depends on live GitHub connectivity; covered by targeted tests
     "/api/ota/update",              # triggers firmware download
     "/api/ota/upload",              # writes firmware to flash
     "/api/ota/reboot",              # reboots the device
+    "/api/ota/github",              # installs the latest GitHub release
     "/api/auth/credentials",        # changes login credentials
     "/api/auth/apikey/regenerate",  # invalidates existing API key
     "/api/factory-reset",           # erases all persistent state and reboots
     "/api/wifi/connect",            # changes the active network
     "/api/wifi/disconnect",         # drops the test connection
+    "/api/heatpump/control",        # legacy control command multiplexer
+    "/api/heatpump/errors/history", # clears persisted error history
+    "/api/heatpump/demo",           # mutates simulated sensor fields
+    "/api/brownout/clear",          # clears persistent boot statistics
     "/login",                       # session management
     "/logout",                      # session management
 }

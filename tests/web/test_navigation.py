@@ -34,9 +34,55 @@ class TestNavigation:
         expect(dashboard_page.locator(".power-btn")).to_be_visible()
         assert dashboard_page.locator(".mode-btn").count() == 5
         assert dashboard_page.locator('form[data-form="setpoint"]').count() == 3
+        assert dashboard_page.locator('form[data-form="setpoint"] input[type="range"]').count() == 3
+        expect(dashboard_page.locator('form[data-form="setpoint"] output').first).to_contain_text("°")
+
+    def test_advanced_controls_use_bounded_editors(self, dashboard_page: Page):
+        primary(dashboard_page, "Control").click()
+        dashboard_page.locator(".ap-row").first.wait_for(state="attached")
+        heading = dashboard_page.locator(".ap-group > summary").first
+        expect(heading).to_be_visible()
+        assert heading.evaluate(
+            "(element) => getComputedStyle(element).backgroundColor !== getComputedStyle(element.closest('.card')).backgroundColor"
+        )
+        assert dashboard_page.locator('.ap-row input[type="number"]').count() == 0
+        assert dashboard_page.locator('.ap-row input[type="range"]').count() > 0
+        assert dashboard_page.locator(".ap-row select.choice-select").count() > 0
+
+    def test_discrete_control_labels_wrap_on_desktop(self, dashboard_page: Page):
+        primary(dashboard_page, "Control").click()
+        frequency = dashboard_page.locator("details", has_text="Frequency").first
+        expect(frequency).to_be_visible()
+        dashboard_page.wait_for_timeout(1000)
+        frequency.locator(":scope > summary").click()
+        selector = frequency.locator("select.choice-select").first
+        description = selector.locator("xpath=following-sibling::*[contains(@class, 'choice-description')]")
+        expect(selector).to_be_visible()
+        expect(description).to_contain_text("Lowers running frequency")
+        selector.select_option(index=2)
+        expect(description).to_contain_text("2 steps per 2 Hz")
+        assert description.evaluate(
+            "(element) => getComputedStyle(element).overflowWrap === 'anywhere'"
+        )
 
     def test_events_surface(self, dashboard_page: Page):
         primary(dashboard_page, "Events").click()
         expect(dashboard_page.locator("#event-search")).to_be_visible()
         expect(dashboard_page.locator("#event-category")).to_be_visible()
         expect(dashboard_page.locator("#event-time")).to_be_visible()
+
+    def test_event_search_keeps_focus_and_clears(self, dashboard_page: Page):
+        primary(dashboard_page, "Events").click()
+        search = dashboard_page.locator("#event-search")
+        search.fill("heat")
+        expect(search).to_be_focused()
+        expect(search).to_have_value("heat")
+        clear = dashboard_page.get_by_role("button", name="Clear event search")
+        expect(clear).to_be_visible()
+        dashboard_page.wait_for_timeout(5500)
+        expect(search).to_be_focused()
+        expect(search).to_have_value("heat")
+        clear.click()
+        expect(search).to_be_focused()
+        expect(search).to_have_value("")
+        expect(clear).to_be_hidden()

@@ -32,6 +32,21 @@ class TestHome:
 
 
 class TestResponsiveShell:
+    def test_web_palette_matches_device_identity(self, dashboard_page: Page):
+        brand = dashboard_page.locator(".brand-mark")
+        assert brand.evaluate(
+            "(element) => getComputedStyle(element).backgroundColor"
+        ) == "rgb(0, 90, 158)"
+        dashboard_page.evaluate(
+            "() => document.documentElement.setAttribute('data-theme', 'dark')"
+        )
+        assert brand.evaluate(
+            "(element) => getComputedStyle(element).backgroundColor"
+        ) == "rgb(0, 212, 255)"
+        assert dashboard_page.locator("body").evaluate(
+            "(element) => getComputedStyle(element).backgroundColor"
+        ) == "rgb(26, 26, 46)"
+
     def test_desktop_rail_has_primary_pages(self, dashboard_page: Page):
         labels = dashboard_page.locator(".rail .nav-link").all_inner_texts()
         assert all(any(name in label for label in labels) for name in ("Home", "Status", "Control", "Events"))

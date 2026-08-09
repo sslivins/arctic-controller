@@ -24,6 +24,9 @@ jobs:
   build-and-release:
     needs: device-tests
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -217,3 +220,42 @@ jobs:
           echo "- \`bootloader.bin\` - Bootloader" >> $GITHUB_STEP_SUMMARY
           echo "- \`partition-table.bin\` - Partition table" >> $GITHUB_STEP_SUMMARY
           echo "- \`ota_data_initial.bin\` - OTA data partition" >> $GITHUB_STEP_SUMMARY
+
+  # Prepare main for the next release only after tests, build, tag, and
+  # publication all succeed. The release token is required so the push can
+  # update the protected main branch and trigger normal branch workflows.
+  bump-main:
+    needs: build-and-release
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          token: ${{ secrets.ARCTIC_RELEASE_TOKEN }}
+
+      - name: Bump patch version and push
+        env:
+          RELEASED_VERSION: ${{ needs.build-and-release.outputs.version }}
+          RELEASED_TAG: ${{ needs.build-and-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          current=$(grep -oP 'set\(PROJECT_VER\s*"\K[^"]+' CMakeLists.txt)
+          if [ "$current" != "$RELEASED_VERSION" ]; then
+            echo "::error::main version $current no longer matches released version $RELEASED_VERSION"
+            exit 1
+          fi
+
+          IFS=. read -r major minor patch <<< "$current"
+          next="${major}.${minor}.$((patch + 1))"
+          echo "Bumping: $current -> $next"
+          sed -i -E "s/set\(PROJECT_VER \"[^\"]+\"\)/set(PROJECT_VER \"$next\")/" CMakeLists.txt
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt
+          git commit -m "chore: bump version to $next [skip ci]" \
+                     -m "Auto-bumped by create-release.yml after $RELEASED_TAG." \
+                     -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
+          git push origin HEAD:main
