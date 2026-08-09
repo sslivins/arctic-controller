@@ -208,7 +208,7 @@ class TestSetpoints:
         try:
             slider = device.find_widget(tag="edit_slider")
             assert slider is not None, "Setpoint slider not found"
-            assert slider.min < slider.max
+            assert (slider.min, slider.max) == (4, 30)
             assert not _has_text_containing(device, "Range:"), \
                 "Slider editor should not repeat its enforced range as text"
         finally:
