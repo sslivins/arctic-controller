@@ -40,6 +40,11 @@ class TestNavigation:
     def test_advanced_controls_use_bounded_editors(self, dashboard_page: Page):
         primary(dashboard_page, "Control").click()
         dashboard_page.locator(".ap-row").first.wait_for(state="attached")
+        heading = dashboard_page.locator(".ap-group > summary").first
+        expect(heading).to_be_visible()
+        assert heading.evaluate(
+            "(element) => getComputedStyle(element).backgroundColor !== getComputedStyle(element.closest('.card')).backgroundColor"
+        )
         assert dashboard_page.locator('.ap-row input[type="number"]').count() == 0
         assert dashboard_page.locator('.ap-row input[type="range"]').count() > 0
         assert dashboard_page.locator(".ap-row select.choice-select").count() > 0
