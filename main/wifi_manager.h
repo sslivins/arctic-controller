@@ -71,6 +71,8 @@ bool wifi_mgr_is_initialized(void);
  */
 bool wifi_mgr_start_scan(wifi_mgr_scan_done_cb_t callback);
 
+uint16_t wifi_mgr_get_scan_results(wifi_mgr_ap_info_t* out, uint16_t max_out);
+
 /**
  * @brief Connect to a WiFi network
  * @param ssid Network SSID

@@ -47,6 +47,8 @@ void display_screen_init_brightness(void);
  */
 int display_screen_get_brightness(void);
 
+bool display_screen_set_brightness(int brightness);
+
 #ifdef __cplusplus
 }
 #endif

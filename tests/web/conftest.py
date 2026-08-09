@@ -182,12 +182,12 @@ def _enable_web_auth(base_url: str):
 
 def _browser_login(page: Page):
     """Log in via the browser login form."""
-    login_box = page.locator(".login-box")
+    login_box = page.locator(".login-card")
     if login_box.is_visible():
-        page.locator(".login-box input[type='text']").fill(WEB_USERNAME)
-        page.locator(".login-box input[type='password']").fill(WEB_PASSWORD)
-        page.locator(".login-box button[type='submit']").click()
-        page.wait_for_selector("nav", timeout=10000)
+        page.locator(".login-card input[name='username']").fill(WEB_USERNAME)
+        page.locator(".login-card input[name='password']").fill(WEB_PASSWORD)
+        page.locator(".login-card button[type='submit']").click()
+        page.wait_for_selector(".rail", timeout=10000)
 
 
 # ---------- Page fixtures ----------
@@ -207,7 +207,7 @@ def dashboard_page(page: Page, base_url: str) -> Page:
     last_err = None
     for attempt in range(3):
         try:
-            page.goto(base_url, wait_until="networkidle")
+            page.goto(base_url, wait_until="domcontentloaded")
             last_err = None
             break
         except Exception as e:
@@ -217,11 +217,11 @@ def dashboard_page(page: Page, base_url: str) -> Page:
     if last_err:
         raise last_err
 
-    if not auth_disabled:
-        # Auth is still on — log in via the browser
+    page.wait_for_selector(".rail, .login-card", timeout=10000)
+    if page.locator(".login-card").is_visible():
         _browser_login(page)
     else:
-        page.wait_for_selector("nav", timeout=10000)
+        page.wait_for_selector(".rail", timeout=10000)
 
     return page
 
@@ -234,9 +234,9 @@ def login_page(page: Page, base_url: str) -> Page:
     Cleans up by disabling web auth after the test.
     """
     _enable_web_auth(base_url)
-    page.goto(base_url, wait_until="networkidle")
+    page.goto(base_url, wait_until="domcontentloaded")
     # Wait for the login box to appear
-    page.wait_for_selector(".login-box", timeout=10000)
+    page.wait_for_selector(".login-card", timeout=10000)
     yield page
     # Cleanup: disable auth so dashboard tests work without login
     global _auth_disabled, _auth_needs_login

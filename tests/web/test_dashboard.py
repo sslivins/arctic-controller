@@ -1,116 +1,42 @@
-"""Tests for the web dashboard main page (dashboard view)."""
+"""Tests for the responsive Home dashboard."""
 
-import pytest
 from playwright.sync_api import Page, expect
 
 
-class TestDashboardLoads:
-    """Verify the dashboard page loads and shows key elements."""
+class TestHome:
+    def test_home_heading_and_hero(self, dashboard_page: Page):
+        expect(dashboard_page.get_by_role("heading", name="Home", exact=True)).to_be_visible()
+        expect(dashboard_page.locator(".hero")).to_be_visible()
 
-    def test_hero_card_visible(self, dashboard_page: Page):
-        """Hero card with tank temperature is displayed."""
-        expect(dashboard_page.locator(".hero-card")).to_be_visible()
+    def test_tank_temperature_is_present(self, dashboard_page: Page):
+        text = dashboard_page.locator(".temp-value").inner_text()
+        assert any(char.isdigit() for char in text) or "--" in text
 
-    def test_hero_tank_temp(self, dashboard_page: Page):
-        """Tank temperature value is shown in the hero card."""
-        expect(dashboard_page.locator(".hero-tank-temp")).to_be_visible()
-        # Should contain a number (temperature) or '--' when no data yet
-        text = dashboard_page.locator(".hero-tank-temp").inner_text()
-        has_digits = any(c.isdigit() for c in text)
-        is_placeholder = text.strip() in ("--", "—")
-        assert has_digits or is_placeholder, f"Expected digits or '--' in tank temp, got: {text}"
+    def test_equipment_parity(self, dashboard_page: Page):
+        components = dashboard_page.locator(".component")
+        assert components.count() == 4
+        for label in ("Compressor", "Fan", "Water pump", "Aux heater"):
+            expect(dashboard_page.locator(".component", has_text=label)).to_be_visible()
 
-    def test_hero_state_text(self, dashboard_page: Page):
-        """State text (e.g. 'Heating', 'Idle') is displayed."""
-        expect(dashboard_page.locator(".hero-state-text")).to_be_visible()
+    def test_performance_metrics(self, dashboard_page: Page):
+        for label in ("Outdoor", "Water flow", "Power", "Efficiency"):
+            expect(dashboard_page.locator(".metric", has_text=label)).to_be_visible()
 
-    def test_component_dots_visible(self, dashboard_page: Page):
-        """Component status dots (compressor, fan, pump, aux) are shown."""
-        dots = dashboard_page.locator(".dots-card .dot-item")
-        assert dots.count() >= 4, f"Expected at least 4 dot items, got {dots.count()}"
+    def test_problem_summary_and_error_history_link(self, dashboard_page: Page):
+        expect(dashboard_page.get_by_role("heading", name="Problems")).to_be_visible()
+        expect(dashboard_page.get_by_role("button", name="Error history")).to_be_visible()
 
-    def test_performance_strip_visible(self, dashboard_page: Page):
-        """Performance strip (COP, Power, Fan RPM) is displayed."""
-        perf_items = dashboard_page.locator(".perf-card .perf-item")
-        assert perf_items.count() >= 3, f"Expected at least 3 perf items, got {perf_items.count()}"
-
-    def test_nav_bar_visible(self, dashboard_page: Page):
-        """Navigation bar with 6 page buttons is shown."""
-        nav_buttons = dashboard_page.locator("nav button")
-        assert nav_buttons.count() == 6, f"Expected 6 nav buttons, got {nav_buttons.count()}"
-
-    def test_header_shows_version(self, dashboard_page: Page):
-        """Header displays firmware version."""
-        version = dashboard_page.locator(".header-right .version")
-        expect(version).to_be_visible()
-        text = version.inner_text()
-        assert text.startswith("v") or any(c.isdigit() for c in text), \
-            f"Expected version string, got: {text}"
+    def test_status_survives_poll(self, dashboard_page: Page):
+        dashboard_page.wait_for_timeout(5500)
+        expect(dashboard_page.locator(".hero")).to_be_visible()
 
 
-class TestDashboardPanels:
-    """Expandable panels on the dashboard page."""
+class TestResponsiveShell:
+    def test_desktop_rail_has_primary_pages(self, dashboard_page: Page):
+        labels = dashboard_page.locator(".rail .nav-link").all_inner_texts()
+        assert all(any(name in label for label in labels) for name in ("Home", "Status", "Control", "Events"))
 
-    def test_expand_temperatures_panel(self, dashboard_page: Page):
-        """Clicking the Temperatures panel header expands it."""
-        panels = dashboard_page.locator(".expand-panel")
-        # Temperatures is the 2nd panel (index 1): errors=0, temps=1
-        if panels.count() >= 2:
-            header = panels.nth(1).locator(".expand-header")
-            header.click()
-            dashboard_page.wait_for_timeout(300)
-            # Panel content should now be visible
-            content = panels.nth(1).locator(".expand-content, .panel-content")
-            # It was toggled — just verify no crash
-            assert True
-
-    def test_expand_compressor_panel(self, dashboard_page: Page):
-        """Clicking the Compressor panel header expands it."""
-        panels = dashboard_page.locator(".expand-panel")
-        if panels.count() >= 3:
-            header = panels.nth(2).locator(".expand-header")
-            header.click()
-            dashboard_page.wait_for_timeout(300)
-            assert True
-
-    def test_expand_energy_panel(self, dashboard_page: Page):
-        """Clicking the Energy panel header expands it."""
-        panels = dashboard_page.locator(".expand-panel")
-        if panels.count() >= 4:
-            header = panels.nth(3).locator(".expand-header")
-            header.click()
-            dashboard_page.wait_for_timeout(300)
-            assert True
-
-    def test_expand_setpoints_panel(self, dashboard_page: Page):
-        """Clicking the Setpoints panel header expands it."""
-        panels = dashboard_page.locator(".expand-panel")
-        if panels.count() >= 5:
-            header = panels.nth(4).locator(".expand-header")
-            header.click()
-            dashboard_page.wait_for_timeout(300)
-            assert True
-
-    def test_expand_system_panel(self, dashboard_page: Page):
-        """Clicking the System Overview panel header expands it."""
-        panels = dashboard_page.locator(".expand-panel")
-        if panels.count() >= 6:
-            header = panels.nth(5).locator(".expand-header")
-            header.click()
-            dashboard_page.wait_for_timeout(300)
-            assert True
-
-
-class TestDashboardPolling:
-    """Verify that dashboard data updates via polling."""
-
-    def test_data_updates_after_poll(self, dashboard_page: Page):
-        """Dashboard data refreshes after the 5s polling interval."""
-        # Capture initial tank temp text
-        initial = dashboard_page.locator(".hero-tank-temp").inner_text()
-        # Wait for a poll cycle (5s + buffer)
-        dashboard_page.wait_for_timeout(6000)
-        # Page should still be alive and showing data
-        current = dashboard_page.locator(".hero-tank-temp").inner_text()
-        # We can't guarantee values change, but they should still be valid
-        assert any(c.isdigit() for c in current), f"Expected digits after poll, got: {current}"
+    def test_mobile_bottom_navigation(self, dashboard_page: Page):
+        dashboard_page.set_viewport_size({"width": 390, "height": 844})
+        expect(dashboard_page.locator(".mobile-nav")).to_be_visible()
+        expect(dashboard_page.locator(".rail")).not_to_be_visible()

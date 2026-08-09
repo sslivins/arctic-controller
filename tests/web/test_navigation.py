@@ -1,149 +1,42 @@
-"""Tests for web dashboard page navigation."""
+"""Tests for centralized hash navigation and page-specific loading."""
 
-import pytest
+import re
 from playwright.sync_api import Page, expect
 
 
+def primary(page: Page, name: str):
+    return page.locator(".rail .nav-link", has_text=name)
+
+
 class TestNavigation:
-    """Navigate between the 6 pages via nav buttons."""
+    def test_default_route(self, dashboard_page: Page):
+        expect(dashboard_page.get_by_role("heading", name="Home", exact=True)).to_be_visible()
 
-    def test_starts_on_dashboard(self, dashboard_page: Page):
-        """Dashboard is the default page after load."""
-        expect(dashboard_page.locator(".hero-card")).to_be_visible()
+    def test_primary_routes(self, dashboard_page: Page):
+        for name in ("Status", "Control", "Events"):
+            primary(dashboard_page, name).click()
+            expect(dashboard_page.get_by_role("heading", name=name, exact=True)).to_be_visible()
+            assert dashboard_page.url.endswith(f"#/{name.lower()}")
 
-    def test_navigate_to_parameters(self, dashboard_page: Page):
-        """Clicking Parameters nav button shows the parameters page."""
-        dashboard_page.locator("nav button").nth(1).click()
-        dashboard_page.wait_for_timeout(500)
-        # Parameters page should show one of the two power buttons (ON or OFF)
-        visible_power = dashboard_page.locator(".power-hold-btn").locator("visible=true")
-        expect(visible_power).to_be_visible()
+    def test_active_route_highlight(self, dashboard_page: Page):
+        primary(dashboard_page, "Status").click()
+        expect(primary(dashboard_page, "Status")).to_have_class(re.compile(r"\bactive\b"))
 
-    def test_navigate_to_events(self, dashboard_page: Page):
-        """Clicking Events nav button shows the events page."""
-        dashboard_page.locator("nav button").nth(2).click()
-        dashboard_page.wait_for_timeout(500)
-        # Hero card should be hidden
-        expect(dashboard_page.locator(".hero-card")).not_to_be_visible()
+    def test_settings_deep_link(self, dashboard_page: Page):
+        dashboard_page.locator('button[aria-label="Settings"]').click()
+        expect(dashboard_page.get_by_role("heading", name="Settings", exact=True)).to_be_visible()
+        dashboard_page.locator(".settings-nav .nav-link", has_text="Diagnostics").click()
+        expect(dashboard_page.get_by_role("heading", name="Diagnostics")).to_be_visible()
+        assert dashboard_page.url.endswith("#/settings/diagnostics")
 
-    def test_navigate_to_logs(self, dashboard_page: Page):
-        """Clicking Logs nav button shows the logs page."""
-        dashboard_page.locator("nav button").nth(3).click()
-        dashboard_page.wait_for_timeout(500)
-        # Log level filter buttons should appear
-        expect(dashboard_page.locator(".log-level-filters")).to_be_visible()
+    def test_control_surface(self, dashboard_page: Page):
+        primary(dashboard_page, "Control").click()
+        expect(dashboard_page.locator(".power-btn")).to_be_visible()
+        assert dashboard_page.locator(".mode-btn").count() == 5
+        assert dashboard_page.locator('form[data-form="setpoint"]').count() == 3
 
-    def test_navigate_to_security(self, dashboard_page: Page):
-        """Clicking Security nav button shows the security page."""
-        dashboard_page.locator("nav button").nth(4).click()
-        dashboard_page.wait_for_timeout(500)
-        # Security page has Authentication and TLS Certificates cards
-        cards = dashboard_page.locator(".card")
-        assert cards.count() >= 2, f"Expected at least 2 security cards, got {cards.count()}"
-
-    def test_navigate_to_settings(self, dashboard_page: Page):
-        """Clicking Settings nav button shows the settings page."""
-        dashboard_page.locator("nav button").nth(5).click()
-        dashboard_page.wait_for_timeout(500)
-        # Settings page has multiple .card elements
-        cards = dashboard_page.locator(".card")
-        assert cards.count() >= 4, f"Expected at least 4 settings cards, got {cards.count()}"
-
-    def test_navigate_back_to_dashboard(self, dashboard_page: Page):
-        """Can navigate away and back to Dashboard."""
-        # Go to settings
-        dashboard_page.locator("nav button").nth(5).click()
-        dashboard_page.wait_for_timeout(300)
-        # Go back to dashboard
-        dashboard_page.locator("nav button").nth(0).click()
-        dashboard_page.wait_for_timeout(500)
-        expect(dashboard_page.locator(".hero-card")).to_be_visible()
-
-    def test_nav_button_highlight(self, dashboard_page: Page):
-        """Active nav button has a distinct style (active class)."""
-        # Dashboard button (first) should have active state
-        first_btn = dashboard_page.locator("nav button").nth(0)
-        # Click a different page
-        dashboard_page.locator("nav button").nth(2).click()
-        dashboard_page.wait_for_timeout(300)
-        # Third button should now be active
-        third_btn = dashboard_page.locator("nav button").nth(2)
-        # Both should be visible and clickable
-        expect(first_btn).to_be_visible()
-        expect(third_btn).to_be_visible()
-
-
-class TestLogsPage:
-    """Tests specific to the Logs page."""
-
-    def _go_to_logs(self, page: Page):
-        page.locator("nav button").nth(3).click()
-        page.wait_for_timeout(500)
-
-    def test_log_level_filters_visible(self, dashboard_page: Page):
-        """All 5 log level filter buttons are shown."""
-        self._go_to_logs(dashboard_page)
-        btns = dashboard_page.locator(".log-level-filters button")
-        assert btns.count() == 5, f"Expected 5 filter buttons, got {btns.count()}"
-
-    def test_log_auto_scroll_checkbox(self, dashboard_page: Page):
-        """Auto-scroll checkbox exists and is checked by default."""
-        self._go_to_logs(dashboard_page)
-        checkbox = dashboard_page.locator(".log-toolbar input[type='checkbox']")
-        expect(checkbox).to_be_visible()
-        expect(checkbox).to_be_checked()
-
-    def test_log_entries_appear(self, dashboard_page: Page):
-        """Log entries load after polling interval."""
-        self._go_to_logs(dashboard_page)
-        # Wait for log polling (2s interval + buffer)
-        dashboard_page.wait_for_timeout(3000)
-        entries = dashboard_page.locator(".log-entry")
-        assert entries.count() > 0, "Expected at least one log entry"
-
-    def test_log_entry_structure(self, dashboard_page: Page):
-        """Each log entry has sequence, level, tag, and message parts."""
-        self._go_to_logs(dashboard_page)
-        dashboard_page.wait_for_timeout(3000)
-        entries = dashboard_page.locator(".log-entry")
-        if entries.count() > 0:
-            first = entries.first
-            expect(first.locator(".log-seq")).to_be_visible()
-            expect(first.locator(".log-level")).to_be_visible()
-            expect(first.locator(".log-tag")).to_be_visible()
-            expect(first.locator(".log-msg")).to_be_visible()
-
-
-class TestEventsPage:
-    """Tests specific to the Events page."""
-
-    def _go_to_events(self, page: Page):
-        page.locator("nav button").nth(2).click()
-        page.wait_for_timeout(500)
-
-    def test_events_page_loads(self, dashboard_page: Page):
-        """Events page loads without error."""
-        self._go_to_events(dashboard_page)
-        # Hero card should be hidden on events page
-        expect(dashboard_page.locator(".hero-card")).not_to_be_visible()
-
-
-class TestParametersPage:
-    """Tests specific to the Parameters page."""
-
-    def _go_to_params(self, page: Page):
-        page.locator("nav button").nth(1).click()
-        page.wait_for_timeout(500)
-
-    def test_power_button_visible(self, dashboard_page: Page):
-        """Power ON/OFF button is shown on parameters page."""
-        self._go_to_params(dashboard_page)
-        visible_power = dashboard_page.locator(".power-hold-btn").locator("visible=true")
-        expect(visible_power).to_be_visible()
-
-    def test_mode_selector_visible(self, dashboard_page: Page):
-        """Mode dropdown (cooling/heating/etc) is shown."""
-        self._go_to_params(dashboard_page)
-        # The mode select is in a power-hold-card
-        select = dashboard_page.locator("select").first
-        expect(select).to_be_visible()
+    def test_events_surface(self, dashboard_page: Page):
+        primary(dashboard_page, "Events").click()
+        expect(dashboard_page.locator("#event-search")).to_be_visible()
+        expect(dashboard_page.locator("#event-category")).to_be_visible()
+        expect(dashboard_page.locator("#event-time")).to_be_visible()

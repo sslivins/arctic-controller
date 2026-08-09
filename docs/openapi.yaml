@@ -386,6 +386,88 @@ paths:
                     description: Full mDNS URL (only when connected)
                     example: http://arctic.local
 
+  /api/wifi/scan:
+    post:
+      tags: [WiFi]
+      summary: Start a WiFi network scan
+      operationId: scanWifi
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Scan started
+        '409':
+          description: A scan is already in progress
+
+  /api/wifi/networks:
+    get:
+      tags: [WiFi]
+      summary: Get the latest WiFi scan results
+      operationId: getWifiNetworks
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Latest scan state and results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scanning:
+                    type: boolean
+                  networks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ssid:
+                          type: string
+                        rssi:
+                          type: integer
+                        authmode:
+                          type: integer
+
+  /api/wifi/connect:
+    post:
+      tags: [WiFi]
+      summary: Save credentials and connect to a WiFi network
+      operationId: connectWifi
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ssid]
+              properties:
+                ssid:
+                  type: string
+                  maxLength: 32
+                password:
+                  type: string
+                  maxLength: 64
+      responses:
+        '200':
+          description: Connection scheduled
+
+  /api/wifi/disconnect:
+    post:
+      tags: [WiFi]
+      summary: Disconnect from the current WiFi network
+      operationId: disconnectWifi
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Disconnect scheduled
+
   /api/info:
     get:
       tags:
@@ -1719,9 +1801,8 @@ paths:
         - Events
       summary: Get event log
       description: |
-        Returns all recorded operational events, newest first.
-        Events are stored in a RAM ring buffer (max 128 entries) and are lost on reboot.
-        Each event has a type, optional payload, wall-clock timestamp, and uptime.
+        Returns durable operational events, newest first, with offset/limit pagination.
+        Up to 1,000 entries survive reboots. Each event includes its category and boot ID.
       operationId: getEvents
       security:
         - apiKey: []
@@ -1738,6 +1819,13 @@ paths:
                     type: integer
                     description: Total number of events in the log
                     example: 12
+                  offset:
+                    type: integer
+                  count:
+                    type: integer
+                  current_boot_id:
+                    type: integer
+                    format: uint32
                   events:
                     type: array
                     items:
@@ -1753,7 +1841,7 @@ paths:
       tags:
         - Events
       summary: Clear event log
-      description: Deletes all events from the ring buffer.
+      description: Deletes all persisted events.
       operationId: clearEvents
       security:
         - apiKey: []
@@ -1775,6 +1863,107 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+
+  /api/display/brightness:
+    get:
+      tags: [Status]
+      summary: Get saved display brightness
+      operationId: getDisplayBrightness
+      responses:
+        '200':
+          description: Saved brightness
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  brightness:
+                    type: integer
+                    minimum: 5
+                    maximum: 100
+    put:
+      tags: [Status]
+      summary: Save and apply display brightness
+      operationId: setDisplayBrightness
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [brightness]
+              properties:
+                brightness:
+                  type: integer
+                  minimum: 5
+                  maximum: 100
+      responses:
+        '200':
+          description: Brightness saved and applied
+
+  /api/preferences:
+    get:
+      tags: [Status]
+      summary: Get application preferences
+      operationId: getPreferences
+      responses:
+        '200':
+          description: Current preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preferences'
+    patch:
+      tags: [Status]
+      summary: Update application preferences
+      operationId: updatePreferences
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                demo_mode:
+                  type: boolean
+                temp_unit:
+                  type: string
+                  enum: [celsius, fahrenheit]
+                language:
+                  type: string
+                  enum: [en, fr, es]
+      responses:
+        '200':
+          description: Updated preferences
+
+  /api/factory-reset:
+    post:
+      tags: [Status]
+      summary: Erase controller data and restore factory defaults
+      operationId: factoryReset
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+                  enum: [factory-reset]
+      responses:
+        '200':
+          description: Reset started; controller will restart
 
   /api/logs:
     get:
@@ -1985,7 +2174,16 @@ components:
             - error_cleared
             - connected
             - disconnected
+            - brownout_reset
+            - application_crash
+            - watchdog_reset
           example: power_on
+        category:
+          type: string
+          enum: [problems, equipment, changes, system]
+        boot_id:
+          type: integer
+          format: uint32
         timestamp:
           type: integer
           description: Unix timestamp (seconds since epoch), 0 if NTP not synced
@@ -2039,6 +2237,10 @@ components:
           type: string
           description: Unit of measurement
           example: min
+        temperature_kind:
+          type: string
+          enum: [none, absolute, differential]
+          description: Conversion semantics for temperature-valued parameters
         min:
           type: integer
           description: Minimum allowed value
@@ -2065,3 +2267,29 @@ components:
           nullable: true
           description: Current value (null if disconnected and not in demo mode)
           example: 45
+
+    Preferences:
+      type: object
+      properties:
+        demo_mode:
+          type: boolean
+        temp_unit:
+          type: string
+          enum: [celsius, fahrenheit]
+        brightness:
+          type: integer
+          minimum: 5
+          maximum: 100
+        language:
+          type: string
+        language_code:
+          type: string
+          enum: [en, fr, es]
+        format_24h:
+          type: boolean
+        timezone:
+          type: string
+        success:
+          type: boolean
+        reboot_required:
+          type: boolean

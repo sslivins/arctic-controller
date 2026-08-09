@@ -47,6 +47,14 @@ typedef enum {
     EVENT_TYPE_COUNT
 } event_type_t;
 
+typedef enum {
+    EVENT_CATEGORY_PROBLEMS = 0,
+    EVENT_CATEGORY_EQUIPMENT,
+    EVENT_CATEGORY_CHANGES,
+    EVENT_CATEGORY_SYSTEM,
+    EVENT_CATEGORY_COUNT
+} event_category_t;
+
 // ============================================================================
 // Event Entry
 // ============================================================================
@@ -133,6 +141,16 @@ void event_log_prepare_factory_reset(void);
  * @brief Get a short English description for an event type.
  */
 const char* event_type_name(event_type_t type);
+
+/**
+ * @brief Get the display category for an event type.
+ */
+event_category_t event_type_category(event_type_t type);
+
+/**
+ * @brief Get the stable API name for an event category.
+ */
+const char* event_category_name(event_category_t category);
 
 #ifdef __cplusplus
 }

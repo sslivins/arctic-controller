@@ -106,13 +106,14 @@ class TestEventsAPI:
         assert isinstance(data["total"], int)
 
     def test_event_entry_structure(self):
-        """Each event should have type, timestamp, uptime_ms, payload."""
+        """Each event should include category and boot identity."""
         data = _get("/api/events").json()
         if len(data["events"]) == 0:
             pytest.skip("No events on device")
         evt = data["events"][0]
-        for field in ["type", "timestamp", "uptime_ms", "payload"]:
+        for field in ["type", "category", "timestamp", "boot_id", "uptime_ms", "payload"]:
             assert field in evt, f"Missing event field: {field}"
+        assert evt["category"] in ("problems", "equipment", "changes", "system")
 
     def test_event_type_is_string(self):
         """Event type should be a known string."""
@@ -122,6 +123,7 @@ class TestEventsAPI:
             "fan_on", "fan_off", "pump_on", "pump_off",
             "aux_heater_on", "aux_heater_off", "defrost_start", "defrost_end",
             "error_appeared", "error_cleared", "connected", "disconnected",
+            "brownout_reset", "application_crash", "watchdog_reset",
         }
         data = _get("/api/events").json()
         for evt in data["events"]:
@@ -343,7 +345,7 @@ class TestPreferences:
     def test_preferences_has_all_fields(self):
         data = _get("/api/preferences").json()
         for field in ["demo_mode", "temp_unit", "brightness", "language",
-                       "format_24h", "timezone"]:
+                       "language_code", "format_24h", "timezone"]:
             assert field in data, f"Missing preference: {field}"
 
     def test_preferences_demo_mode_is_bool(self):
@@ -358,6 +360,7 @@ class TestPreferences:
         data = _get("/api/preferences").json()
         assert isinstance(data["language"], str)
         assert len(data["language"]) > 0
+        assert data["language_code"] in ("en", "fr", "es")
 
     def test_preferences_format_24h_is_bool(self):
         data = _get("/api/preferences").json()
