@@ -8,6 +8,7 @@
 #include "settings_display_screen.h"
 #include "settings_menu.h"
 #include "settings_common.h"
+#include "display_idle.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include <bsp/display.h>
@@ -41,6 +42,8 @@ typedef struct {
     // Brightness controls
     lv_obj_t* brightness_slider;
     lv_obj_t* brightness_value_label;
+    lv_obj_t* dim_roller;
+    lv_obj_t* off_roller;
     
     // State
     int current_brightness;
@@ -57,9 +60,61 @@ static void create_header(void);
 static void create_content(void);
 static void back_btn_cb(lv_event_t* e);
 static void slider_cb(lv_event_t* e);
+static void idle_roller_cb(lv_event_t* e);
 static void load_settings(void);
 static bool save_settings(void);
 static bool apply_brightness(int brightness);
+
+static void build_timeout_options(char* options, size_t size)
+{
+    snprintf(options, size, "%s\n1 %s\n2 %s\n3 %s\n4 %s\n5 %s",
+             i18n_get(STR_DISPLAY_NEVER),
+             i18n_get(STR_DISPLAY_MINUTE),
+             i18n_get(STR_DISPLAY_MINUTES),
+             i18n_get(STR_DISPLAY_MINUTES),
+             i18n_get(STR_DISPLAY_MINUTES),
+             i18n_get(STR_DISPLAY_MINUTES));
+}
+
+static lv_obj_t* create_timeout_row(lv_obj_t* parent, const char* label_text,
+                                    const char* tag, uint8_t selected)
+{
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), 170);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    disable_scrolling(row);
+
+    lv_obj_t* label = lv_label_create(row);
+    lv_label_set_text(label, label_text);
+    lv_obj_set_width(label, 300);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(label, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, COLOR_TEXT, LV_PART_MAIN);
+
+    lv_obj_t* roller = lv_roller_create(row);
+    char options[160];
+    build_timeout_options(options, sizeof(options));
+    lv_roller_set_options(roller, options, LV_ROLLER_MODE_NORMAL);
+    lv_roller_set_selected(roller, selected, LV_ANIM_OFF);
+    lv_roller_set_visible_row_count(roller, 3);
+    lv_obj_set_size(roller, 300, 150);
+    lv_obj_set_style_bg_color(roller, lv_color_hex(0x1a1f26), LV_PART_MAIN);
+    lv_obj_set_style_text_color(roller, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_style_border_color(roller, lv_color_hex(0x30363d), LV_PART_MAIN);
+    lv_obj_set_style_border_width(roller, 1, LV_PART_MAIN);
+    lv_obj_set_style_text_font(roller, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_radius(roller, 12, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(roller, COLOR_ACCENT, LV_PART_SELECTED);
+    lv_obj_set_style_text_color(roller, lv_color_hex(0x0d1117), LV_PART_SELECTED);
+    lv_obj_set_user_data(roller, (void*)tag);
+    lv_obj_add_event_cb(roller, idle_roller_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    return roller;
+}
 
 // ============================================================================
 // Settings Persistence
@@ -308,6 +363,35 @@ static void create_content(void)
     lv_label_set_text(high_label, i18n_get(STR_DISPLAY_BRIGHTNESS_HIGH));
     lv_obj_set_style_text_font(high_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(high_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+
+    lv_obj_t* idle_card = lv_obj_create(s_state.content);
+    lv_obj_set_size(idle_card, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(idle_card, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_border_width(idle_card, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(idle_card, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(idle_card, 25, LV_PART_MAIN);
+    lv_obj_set_flex_flow(idle_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(idle_card, 10, LV_PART_MAIN);
+    disable_scrolling(idle_card);
+
+    lv_obj_t* idle_title = lv_label_create(idle_card);
+    lv_label_set_text(idle_title, i18n_get(STR_DISPLAY_IDLE_TITLE));
+    lv_obj_set_style_text_font(idle_title, FONT_LARGE, LV_PART_MAIN);
+    lv_obj_set_style_text_color(idle_title, COLOR_ACCENT, LV_PART_MAIN);
+
+    lv_obj_t* description = lv_label_create(idle_card);
+    lv_label_set_text(description, i18n_get(STR_DISPLAY_IDLE_DESCRIPTION));
+    lv_obj_set_width(description, LV_PCT(100));
+    lv_label_set_long_mode(description, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(description, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(description, COLOR_TEXT_DIM, LV_PART_MAIN);
+
+    s_state.dim_roller = create_timeout_row(
+        idle_card, i18n_get(STR_DISPLAY_DIM_AFTER), "display_dim_timeout",
+        display_idle_get_dim_minutes());
+    s_state.off_roller = create_timeout_row(
+        idle_card, i18n_get(STR_DISPLAY_OFF_AFTER_DIM), "display_off_timeout",
+        display_idle_get_off_minutes());
 }
 
 // ============================================================================
@@ -343,7 +427,7 @@ static void slider_cb(lv_event_t* e)
         snprintf(buf, sizeof(buf), "%d%%", value);
         lv_label_set_text(s_state.brightness_value_label, buf);
     }
-    
+
     // Apply brightness immediately for real-time feedback
     apply_brightness(value);
     
@@ -351,6 +435,18 @@ static void slider_cb(lv_event_t* e)
     if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
         save_settings();
         ESP_LOGI(TAG, "Brightness changed to: %d%%", value);
+    }
+}
+
+static void idle_roller_cb(lv_event_t* e)
+{
+    (void)e;
+    const uint8_t dim_minutes =
+        static_cast<uint8_t>(lv_roller_get_selected(s_state.dim_roller));
+    const uint8_t off_minutes =
+        static_cast<uint8_t>(lv_roller_get_selected(s_state.off_roller));
+    if (!display_idle_set_timeouts(dim_minutes, off_minutes)) {
+        ESP_LOGE(TAG, "Failed to save display idle timeouts");
     }
 }
 

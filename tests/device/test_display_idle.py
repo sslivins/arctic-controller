@@ -21,3 +21,20 @@ def test_dimmed_display_consumes_first_touch(device: DeviceClient):
     device.wait_for_screen("settings", timeout=5.0)
     device.click(tag="settings_close")
     device.wait_for_screen("main", timeout=5.0)
+
+
+def test_off_display_consumes_first_touch(device: DeviceClient):
+    """The first touch also wakes a fully off display without navigating."""
+    device.wait_for_screen("main", timeout=5.0)
+
+    off = device.set_display_idle("off")
+    assert off["off"] is True
+    assert off["dimmed"] is False
+
+    wake = device.click(tag="settings")
+    assert wake["consumed"] is True
+    assert device.get_ui_state()["screen"] == "main"
+
+    status = device.set_display_idle("status")
+    assert status["off"] is False
+    assert status["dimmed"] is False

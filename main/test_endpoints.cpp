@@ -781,7 +781,7 @@ static esp_err_t set_slider_post_handler(httpd_req_t* req)
 
 // ============================================================================
 // POST /api/test/display-idle
-// Body: {"action": "dim" | "wake" | "status"}
+// Body: {"action": "dim" | "off" | "wake" | "status"}
 // ============================================================================
 
 static esp_err_t display_idle_post_handler(httpd_req_t* req)
@@ -806,16 +806,17 @@ static esp_err_t display_idle_post_handler(httpd_req_t* req)
     cJSON* action = body ? cJSON_GetObjectItem(body, "action") : nullptr;
     if (!cJSON_IsString(action)) {
         cJSON_Delete(body);
-        send_json_error(req, "400 Bad Request", "Action must be dim, wake, or status");
+        send_json_error(req, "400 Bad Request", "Action must be dim, off, wake, or status");
         return ESP_OK;
     }
 
     const bool should_dim = strcmp(action->valuestring, "dim") == 0;
+    const bool should_off = strcmp(action->valuestring, "off") == 0;
     const bool should_wake = strcmp(action->valuestring, "wake") == 0;
     const bool should_report = strcmp(action->valuestring, "status") == 0;
-    if (!should_dim && !should_wake && !should_report) {
+    if (!should_dim && !should_off && !should_wake && !should_report) {
         cJSON_Delete(body);
-        send_json_error(req, "400 Bad Request", "Action must be dim, wake, or status");
+        send_json_error(req, "400 Bad Request", "Action must be dim, off, wake, or status");
         return ESP_OK;
     }
     cJSON_Delete(body);
@@ -827,18 +828,24 @@ static esp_err_t display_idle_post_handler(httpd_req_t* req)
     bool consumed = false;
     if (should_dim) {
         display_idle_force_dim();
+    } else if (should_off) {
+        display_idle_force_off();
     } else if (should_wake) {
         consumed = display_idle_handle_activity();
     }
     const bool dimmed = display_idle_is_dimmed();
+    const bool off = display_idle_is_off();
     const int saved_brightness = display_screen_get_brightness();
     bsp_display_unlock();
 
     cJSON* resp = cJSON_CreateObject();
     cJSON_AddBoolToObject(resp, "success", true);
     cJSON_AddBoolToObject(resp, "dimmed", dimmed);
+    cJSON_AddBoolToObject(resp, "off", off);
     cJSON_AddBoolToObject(resp, "consumed", consumed);
     cJSON_AddNumberToObject(resp, "saved_brightness", saved_brightness);
+    cJSON_AddNumberToObject(resp, "dim_minutes", display_idle_get_dim_minutes());
+    cJSON_AddNumberToObject(resp, "off_minutes", display_idle_get_off_minutes());
     char* json = cJSON_PrintUnformatted(resp);
     httpd_resp_sendstr(req, json);
     free(json);

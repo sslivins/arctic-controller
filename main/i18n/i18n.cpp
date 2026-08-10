@@ -110,6 +110,13 @@ static const char* strings_en[STR_COUNT] = {
     [STR_DISPLAY_BRIGHTNESS] = "Brightness",
     [STR_DISPLAY_BRIGHTNESS_LOW] = "Low",
     [STR_DISPLAY_BRIGHTNESS_HIGH] = "High",
+    [STR_DISPLAY_IDLE_TITLE] = "Screen Timeout",
+    [STR_DISPLAY_DIM_AFTER] = "Dim after",
+    [STR_DISPLAY_OFF_AFTER_DIM] = "Turn off after dimming",
+    [STR_DISPLAY_IDLE_DESCRIPTION] = "The turn-off timer starts after dimming. The first tap wakes the screen without activating a control.",
+    [STR_DISPLAY_NEVER] = "Never",
+    [STR_DISPLAY_MINUTE] = "minute",
+    [STR_DISPLAY_MINUTES] = "minutes",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Communication Error",
@@ -462,6 +469,13 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_DISPLAY_BRIGHTNESS] = "Luminosité",
     [STR_DISPLAY_BRIGHTNESS_LOW] = "Faible",
     [STR_DISPLAY_BRIGHTNESS_HIGH] = "Élevée",
+    [STR_DISPLAY_IDLE_TITLE] = "Délai de l'écran",
+    [STR_DISPLAY_DIM_AFTER] = "Atténuer après",
+    [STR_DISPLAY_OFF_AFTER_DIM] = "Éteindre après l'atténuation",
+    [STR_DISPLAY_IDLE_DESCRIPTION] = "Le délai d'arrêt commence après l'atténuation. Le premier toucher réveille l'écran sans activer de commande.",
+    [STR_DISPLAY_NEVER] = "Jamais",
+    [STR_DISPLAY_MINUTE] = "minute",
+    [STR_DISPLAY_MINUTES] = "minutes",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Erreur de communication",
@@ -814,6 +828,13 @@ static const char* strings_es[STR_COUNT] = {
     [STR_DISPLAY_BRIGHTNESS] = "Brillo",
     [STR_DISPLAY_BRIGHTNESS_LOW] = "Bajo",
     [STR_DISPLAY_BRIGHTNESS_HIGH] = "Alto",
+    [STR_DISPLAY_IDLE_TITLE] = "Tiempo de espera",
+    [STR_DISPLAY_DIM_AFTER] = "Atenuar después de",
+    [STR_DISPLAY_OFF_AFTER_DIM] = "Apagar después de atenuar",
+    [STR_DISPLAY_IDLE_DESCRIPTION] = "El temporizador de apagado comienza después de atenuar. El primer toque activa la pantalla sin accionar ningún control.",
+    [STR_DISPLAY_NEVER] = "Nunca",
+    [STR_DISPLAY_MINUTE] = "minuto",
+    [STR_DISPLAY_MINUTES] = "minutos",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Error de comunicación",
