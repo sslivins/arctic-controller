@@ -117,6 +117,23 @@ static const char* strings_en[STR_COUNT] = {
     [STR_DISPLAY_NEVER] = "Never",
     [STR_DISPLAY_MINUTE] = "minute",
     [STR_DISPLAY_MINUTES] = "minutes",
+
+    // Home Assistant Pairing Panel
+    [STR_SETTINGS_HOME_ASSISTANT] = "Home Assistant",
+    [STR_HA_TITLE] = "Home Assistant",
+    [STR_HA_PAIRED] = "Paired",
+    [STR_HA_NOT_PAIRED] = "Not paired",
+    [STR_HA_PAIRING_DESCRIPTION] = "Start pairing, then enter the code in Home Assistant and confirm that the certificate fingerprint matches.",
+    [STR_HA_PAIRING_ACTIVE] = "Enter this one-time code in Home Assistant. Pairing closes after one successful claim.",
+    [STR_HA_START_PAIRING] = "Start Pairing",
+    [STR_HA_CANCEL_PAIRING] = "Cancel Pairing",
+    [STR_HA_PAIRING_CODE] = "One-time pairing code",
+    [STR_HA_FINGERPRINT] = "Certificate fingerprint",
+    [STR_HA_EXPIRES_IN] = "Expires in %u:%02u",
+    [STR_HA_REVOKE] = "Revoke Home Assistant",
+    [STR_HA_REVOKE_CONFIRM] = "Revoke Home Assistant?",
+    [STR_HA_REVOKE_DESCRIPTION] = "Home Assistant will lose access until you pair it again.",
+    [STR_HA_PAIRING_FAILED] = "Unable to start pairing. Please try again.",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Communication Error",
@@ -476,6 +493,23 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_DISPLAY_NEVER] = "Jamais",
     [STR_DISPLAY_MINUTE] = "minute",
     [STR_DISPLAY_MINUTES] = "minutes",
+
+    // Home Assistant Pairing Panel
+    [STR_SETTINGS_HOME_ASSISTANT] = "Home Assistant",
+    [STR_HA_TITLE] = "Home Assistant",
+    [STR_HA_PAIRED] = "Associé",
+    [STR_HA_NOT_PAIRED] = "Non associé",
+    [STR_HA_PAIRING_DESCRIPTION] = "Démarrez l'association, saisissez le code dans Home Assistant et confirmez l'empreinte du certificat.",
+    [STR_HA_PAIRING_ACTIVE] = "Saisissez ce code à usage unique dans Home Assistant. L'association se ferme après une demande réussie.",
+    [STR_HA_START_PAIRING] = "Démarrer l'association",
+    [STR_HA_CANCEL_PAIRING] = "Annuler l'association",
+    [STR_HA_PAIRING_CODE] = "Code d'association à usage unique",
+    [STR_HA_FINGERPRINT] = "Empreinte du certificat",
+    [STR_HA_EXPIRES_IN] = "Expire dans %u:%02u",
+    [STR_HA_REVOKE] = "Révoquer Home Assistant",
+    [STR_HA_REVOKE_CONFIRM] = "Révoquer Home Assistant ?",
+    [STR_HA_REVOKE_DESCRIPTION] = "Home Assistant perdra l'accès jusqu'à une nouvelle association.",
+    [STR_HA_PAIRING_FAILED] = "Impossible de démarrer l'association. Réessayez.",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Erreur de communication",
@@ -835,6 +869,23 @@ static const char* strings_es[STR_COUNT] = {
     [STR_DISPLAY_NEVER] = "Nunca",
     [STR_DISPLAY_MINUTE] = "minuto",
     [STR_DISPLAY_MINUTES] = "minutos",
+
+    // Home Assistant Pairing Panel
+    [STR_SETTINGS_HOME_ASSISTANT] = "Home Assistant",
+    [STR_HA_TITLE] = "Home Assistant",
+    [STR_HA_PAIRED] = "Emparejado",
+    [STR_HA_NOT_PAIRED] = "Sin emparejar",
+    [STR_HA_PAIRING_DESCRIPTION] = "Inicia el emparejamiento, introduce el código en Home Assistant y confirma la huella del certificado.",
+    [STR_HA_PAIRING_ACTIVE] = "Introduce este código de un solo uso en Home Assistant. El emparejamiento se cierra después de una solicitud correcta.",
+    [STR_HA_START_PAIRING] = "Iniciar emparejamiento",
+    [STR_HA_CANCEL_PAIRING] = "Cancelar emparejamiento",
+    [STR_HA_PAIRING_CODE] = "Código de emparejamiento de un solo uso",
+    [STR_HA_FINGERPRINT] = "Huella del certificado",
+    [STR_HA_EXPIRES_IN] = "Caduca en %u:%02u",
+    [STR_HA_REVOKE] = "Revocar Home Assistant",
+    [STR_HA_REVOKE_CONFIRM] = "¿Revocar Home Assistant?",
+    [STR_HA_REVOKE_DESCRIPTION] = "Home Assistant perderá el acceso hasta que vuelvas a emparejarlo.",
+    [STR_HA_PAIRING_FAILED] = "No se pudo iniciar el emparejamiento. Inténtalo de nuevo.",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Error de comunicación",

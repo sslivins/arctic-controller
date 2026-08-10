@@ -11,6 +11,7 @@
 #include "settings_time_screen.h"
 #include "settings_language_screen.h"
 #include "settings_display_screen.h"
+#include "settings_home_assistant_screen.h"
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
@@ -53,6 +54,7 @@ typedef enum {
     SETTINGS_TIME,
     SETTINGS_LANGUAGE,
     SETTINGS_DISPLAY,
+    SETTINGS_HOME_ASSISTANT,
     SETTINGS_COUNT
 } settings_item_t;
 
@@ -438,6 +440,14 @@ static void row_click_cb(lv_event_t* e)
         display_screen_create(&disp_cfg);
         state.sub_screen_active = true;
         state.active_sub_screen = SETTINGS_DISPLAY;
+    } else if (strcmp(tag, "settings_home_assistant") == 0) {
+        ESP_LOGI(TAG, "Opening Home Assistant settings...");
+        home_assistant_screen_config_t ha_cfg = {
+            .on_back = settings_menu_show,
+        };
+        home_assistant_screen_create(&ha_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_HOME_ASSISTANT;
     } else if (strcmp(tag, "settings_factory_reset") == 0) {
         show_factory_reset_confirmation();
     }
@@ -658,6 +668,11 @@ static void create_menu_list(void)
     state.rows[SETTINGS_DISPLAY] = create_settings_row(
         state.list_container, LV_SYMBOL_IMAGE, 
         i18n_get(STR_SETTINGS_DISPLAY), "settings_display");
+
+    state.rows[SETTINGS_HOME_ASSISTANT] = create_settings_row(
+        state.list_container, LV_SYMBOL_HOME,
+        i18n_get(STR_SETTINGS_HOME_ASSISTANT),
+        "settings_home_assistant");
     
     // Demo Mode toggle
     lv_obj_t* demo_row = create_toggle_row(state.list_container, LV_SYMBOL_PLAY,
@@ -800,6 +815,9 @@ void settings_menu_force_close(lv_obj_t* return_screen)
             case SETTINGS_TIME: time_screen_close(); break;
             case SETTINGS_LANGUAGE: language_screen_close(); break;
             case SETTINGS_DISPLAY: display_screen_close(); break;
+            case SETTINGS_HOME_ASSISTANT:
+                home_assistant_screen_close();
+                break;
             default: break;
         }
     }

@@ -11,6 +11,7 @@
 #include "ota_manager.h"
 #include "auth_manager.h"
 #include "ha_integration.h"
+#include "ha_pairing.h"
 #include "heatpump_controller.h"
 #include "heatpump_types.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
@@ -29,6 +30,7 @@
 #include <esp_log.h>
 #include <mdns.h>
 #include <cJSON.h>
+#include <stdio.h>
 #include <string.h>
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
@@ -82,6 +84,7 @@ static esp_err_t wifi_networks_get_handler(httpd_req_t* req);
 static esp_err_t wifi_connect_post_handler(httpd_req_t* req);
 static esp_err_t wifi_disconnect_post_handler(httpd_req_t* req);
 static esp_err_t info_get_handler(httpd_req_t* req);
+static esp_err_t ha_pair_post_handler(httpd_req_t* req);
 static esp_err_t ha_capabilities_get_handler(httpd_req_t* req);
 static esp_err_t ha_state_get_handler(httpd_req_t* req);
 static esp_err_t ota_status_get_handler(httpd_req_t* req);
@@ -1014,6 +1017,20 @@ bool api_server_start(void)
 #endif
 
     if (server_integration != NULL) {
+        httpd_uri_t ha_pair_uri = {
+            .uri = "/api/v1/pair",
+            .method = HTTP_POST,
+            .handler = ha_pair_post_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(server_integration, &ha_pair_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA pairing: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
         httpd_uri_t ha_capabilities_uri = {
             .uri = "/api/v1/capabilities",
             .method = HTTP_GET,
@@ -1706,6 +1723,125 @@ static esp_err_t send_integration_document(
     httpd_resp_sendstr(req, json);
     cJSON_free(json);
     return ESP_OK;
+}
+
+static esp_err_t ha_pair_post_handler(httpd_req_t* req)
+{
+    if (req->content_len <= 0 || req->content_len >= 64) {
+        send_json_error(req, "400 Bad Request", "Pairing code required");
+        return ESP_OK;
+    }
+
+    char body[64];
+    int received = 0;
+    while (received < req->content_len) {
+        const int result = httpd_req_recv(
+            req, body + received, req->content_len - received);
+        if (result <= 0) {
+            send_json_error(req, "400 Bad Request", "Could not read body");
+            return ESP_OK;
+        }
+        received += result;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    memset(body, 0, sizeof(body));
+    if (root == NULL) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* code_json = cJSON_GetObjectItemCaseSensitive(root, "code");
+    if (!cJSON_IsString(code_json) || code_json->valuestring == NULL) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Pairing code required");
+        return ESP_OK;
+    }
+
+    char code[HA_PAIRING_CODE_LEN + 1] = {};
+    if (strlen(code_json->valuestring) != HA_PAIRING_CODE_LEN) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "400 Bad Request", "Pairing code must be six digits");
+        return ESP_OK;
+    }
+    memcpy(code, code_json->valuestring, HA_PAIRING_CODE_LEN);
+    memset(
+        code_json->valuestring, 0, strlen(code_json->valuestring));
+    cJSON_Delete(root);
+
+    char fingerprint[TLS_SHA256_FINGERPRINT_HEX_LEN + 1] = {};
+    if (!tls_mgr_get_identity_fingerprint(fingerprint)) {
+        memset(code, 0, sizeof(code));
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Integration TLS identity is unavailable");
+        return ESP_OK;
+    }
+
+    char token[AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
+    const ha_pairing_claim_result_t result =
+        ha_pairing_claim(code, token);
+    memset(code, 0, sizeof(code));
+
+    if (result != HA_PAIRING_CLAIM_OK) {
+        memset(token, 0, sizeof(token));
+        memset(fingerprint, 0, sizeof(fingerprint));
+        switch (result) {
+            case HA_PAIRING_CLAIM_NOT_OPEN:
+                send_json_error(
+                    req, "403 Forbidden", "Pairing window is not open");
+                break;
+            case HA_PAIRING_CLAIM_INVALID_CODE:
+                send_json_error(
+                    req, "401 Unauthorized", "Invalid pairing code");
+                break;
+            case HA_PAIRING_CLAIM_LOCKED:
+                send_json_error(
+                    req, "429 Too Many Requests",
+                    "Pairing window closed after too many attempts");
+                break;
+            default:
+                send_json_error(
+                    req, "500 Internal Server Error",
+                    "Could not persist integration token");
+                break;
+        }
+        return ESP_OK;
+    }
+
+    char response[320];
+    const int response_len = snprintf(
+        response,
+        sizeof(response),
+        "{\"protocol_version\":1,\"device_id\":\"%s\","
+        "\"sha256_fingerprint\":\"%s\",\"token\":\"%s\"}",
+        arctic::ha::deviceId(),
+        fingerprint,
+        token);
+    memset(token, 0, sizeof(token));
+    memset(fingerprint, 0, sizeof(fingerprint));
+    if (response_len <= 0 || response_len >= (int)sizeof(response)) {
+        memset(response, 0, sizeof(response));
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not serialize pairing response");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t send_result =
+        httpd_resp_send(req, response, response_len);
+    memset(response, 0, sizeof(response));
+    if (send_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Pairing token rotated but response delivery failed; "
+            "physical re-pairing is required");
+    }
+    return send_result;
 }
 
 static esp_err_t ha_capabilities_get_handler(httpd_req_t* req)

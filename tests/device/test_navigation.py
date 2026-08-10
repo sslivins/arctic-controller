@@ -16,6 +16,11 @@ SUB_SCREENS = [
     ("settings_time", "time", "time_back"),
     ("settings_language", "language", "language_back"),
     ("settings_display", "display", "display_back"),
+    (
+        "settings_home_assistant",
+        "home_assistant",
+        "home_assistant_back",
+    ),
 ]
 
 

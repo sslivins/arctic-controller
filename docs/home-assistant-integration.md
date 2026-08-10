@@ -257,8 +257,8 @@ The Home Assistant config flow supports:
 
 The Home Assistant API uses a dedicated random 256-bit token:
 
-- Generated only during a short pairing window initiated from the physical
-  controller UI.
+- Generated only after a six-digit one-time code from the physical controller
+  is claimed during a five-minute pairing window.
 - Returned once during pairing.
 - Stored as a cryptographic hash on the controller.
 - Compared in constant time.
@@ -268,6 +268,13 @@ The Home Assistant API uses a dedicated random 256-bit token:
 
 Integration endpoints use a strict authentication helper that always requires
 the dedicated token. Existing web/API authentication toggles cannot bypass it.
+The pairing endpoint is the sole exception: it is TLS-only, accepts only the
+controller-displayed one-time code, closes after one successful claim, and
+closes after five invalid attempts. Opening a new window does not revoke the
+current token; a successful claim atomically rotates it.
+If the client disconnects after a successful claim but before receiving the
+one-time token, the user reopens pairing on the controller and claims a new
+code.
 
 ### Transport identity
 
@@ -343,15 +350,18 @@ exposed outside test builds.
 - Add stable device identity, state revision, shared serializer, capabilities,
   state endpoint, and zeroconf metadata.
 
-Status: in progress. The dedicated 256-bit token is stored only as a SHA-256
+Status: complete. The dedicated 256-bit token is stored only as a SHA-256
 hash, strict Bearer validation is independent of legacy authentication
 toggles, token rotation invalidates the previous credential immediately, and
 the versioned capabilities/state endpoints now expose stable device identity,
 per-boot identity, and monotonic revisions. API startup also runs on a
 dedicated task rather than the system event stack. The automatic integration
 TLS identity, dedicated port 8443 server, certificate fingerprint, and
-zeroconf metadata are also implemented. Physical pairing and the Home
-Assistant-side pin confirmation remain before Phase 3 is complete.
+zeroconf metadata are also implemented. The physical settings flow opens a
+five-minute pairing window, displays a six-digit one-time code and certificate
+fingerprint, limits invalid claims, supports cancellation and revocation, and
+rotates the credential only after a successful TLS claim. Home Assistant-side
+pin confirmation is implemented later with the async client and config flow.
 
 ### Phase 4: Device push transport
 

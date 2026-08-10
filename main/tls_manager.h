@@ -19,6 +19,7 @@ extern "C" {
 /* Maximum PEM sizes — Let's Encrypt fullchain is ~3.2 KB, key ~250 B */
 #define TLS_MAX_CERT_LEN 4000
 #define TLS_MAX_KEY_LEN  2000
+#define TLS_SHA256_FINGERPRINT_HEX_LEN 64
 
 /**
  * @brief Initialise the TLS manager (loads certs from NVS if available)
@@ -96,7 +97,8 @@ const uint8_t* tls_mgr_get_identity_key(size_t* out_len);
  *
  * @param buffer Receives 64 lowercase hex characters plus null terminator.
  */
-bool tls_mgr_get_identity_fingerprint(char buffer[65]);
+bool tls_mgr_get_identity_fingerprint(
+    char buffer[TLS_SHA256_FINGERPRINT_HEX_LEN + 1]);
 
 #ifdef __cplusplus
 }

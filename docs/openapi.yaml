@@ -2460,6 +2460,87 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/pair:
+    post:
+      tags:
+        - HomeAssistant
+      summary: Claim a physically authorized pairing window
+      description: |
+        Exchanges the six-digit code displayed on the physical controller for
+        a one-time plaintext integration token. The window lasts five minutes,
+        closes after one successful claim, and closes after five invalid
+        attempts. A successful claim rotates any previous integration token.
+        This endpoint is available only over the dedicated TLS identity on
+        port 8443.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+              properties:
+                code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+                  example: '042731'
+      responses:
+        '200':
+          description: Pairing claimed and integration token issued once
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - protocol_version
+                  - device_id
+                  - sha256_fingerprint
+                  - token
+                properties:
+                  protocol_version:
+                    type: integer
+                    example: 1
+                  device_id:
+                    type: string
+                    example: arctic-dc1ed587e540
+                  sha256_fingerprint:
+                    type: string
+                    pattern: '^[0-9a-f]{64}$'
+                  token:
+                    type: string
+                    pattern: '^[0-9a-f]{64}$'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid pairing code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Physical pairing window is not open
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Pairing window closed after too many invalid attempts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/v1/state:
     get:
       tags:

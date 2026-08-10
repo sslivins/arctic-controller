@@ -47,6 +47,110 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _open_test_pairing_window() -> str:
+    response = _session.post(
+        f"{BASE_URL}/api/test/ha-pairing-window", timeout=10
+    )
+    if response.status_code == 404:
+        pytest.skip("Device firmware does not expose test instrumentation")
+    response.raise_for_status()
+    code = response.json()["code"]
+    assert len(code) == 6
+    assert code.isdigit()
+    return code
+
+
+def test_pairing_requires_a_physical_window():
+    response = _session.post(
+        f"{HA_URL}/api/v1/pair",
+        json={"code": "000000"},
+        timeout=10,
+    )
+    assert response.status_code == 403
+
+
+def test_pairing_code_claims_once_and_rotates_token():
+    previous = _issue_test_token()
+    code = _open_test_pairing_window()
+
+    rejected = _session.post(
+        f"{HA_URL}/api/v1/pair",
+        json={"code": "000000" if code != "000000" else "999999"},
+        timeout=10,
+    )
+    assert rejected.status_code == 401
+
+    claimed = _session.post(
+        f"{HA_URL}/api/v1/pair",
+        json={"code": code},
+        timeout=10,
+    )
+    claimed.raise_for_status()
+    data = claimed.json()
+    current = data["token"]
+    assert len(current) == 64
+    assert data["protocol_version"] == 1
+    assert data["device_id"].startswith("arctic-")
+    assert len(data["sha256_fingerprint"]) == 64
+    assert claimed.headers["Cache-Control"] == "no-store"
+
+    old_response = _session.get(
+        f"{HA_URL}/api/v1/state",
+        headers=_headers(previous),
+        timeout=10,
+    )
+    new_response = _session.get(
+        f"{HA_URL}/api/v1/state",
+        headers=_headers(current),
+        timeout=10,
+    )
+    assert old_response.status_code == 401
+    assert new_response.status_code == 200
+
+    duplicate = _session.post(
+        f"{HA_URL}/api/v1/pair",
+        json={"code": code},
+        timeout=10,
+    )
+    assert duplicate.status_code == 403
+
+
+def test_pairing_rejects_non_exact_code_without_truncation():
+    code = _open_test_pairing_window()
+    malformed = _session.post(
+        f"{HA_URL}/api/v1/pair",
+        json={"code": code + "0"},
+        timeout=10,
+    )
+    assert malformed.status_code == 400
+
+    claimed = _session.post(
+        f"{HA_URL}/api/v1/pair",
+        json={"code": code},
+        timeout=10,
+    )
+    assert claimed.status_code == 200
+
+
+def test_pairing_window_closes_after_five_bad_codes():
+    code = _open_test_pairing_window()
+    wrong_code = "000000" if code != "000000" else "999999"
+    for attempt in range(5):
+        response = _session.post(
+            f"{HA_URL}/api/v1/pair",
+            json={"code": wrong_code},
+            timeout=10,
+        )
+        assert response.status_code == (429 if attempt == 4 else 401)
+
+    closed = _session.post(
+        f"{HA_URL}/api/v1/pair",
+        json={"code": code},
+        timeout=10,
+    )
+    assert closed.status_code == 403
+
+
 def test_integration_routes_never_use_legacy_auth_bypass():
     response = _session.get(f"{HA_URL}/api/v1/capabilities", timeout=10)
     assert response.status_code == 401
