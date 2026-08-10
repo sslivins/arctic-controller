@@ -1643,6 +1643,12 @@ void heatpump_control_set_active(bool active) {
     }
 }
 
+void heatpump_control_dismiss_overlays(void) {
+    if (state.edit_dialog) {
+        hide_edit_dialog();
+    }
+}
+
 void heatpump_control_hide(void) {
     if (!state.shown) {
         return;

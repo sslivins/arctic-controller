@@ -121,6 +121,13 @@ typedef enum {
     STR_DISPLAY_BRIGHTNESS,
     STR_DISPLAY_BRIGHTNESS_LOW,
     STR_DISPLAY_BRIGHTNESS_HIGH,
+    STR_DISPLAY_IDLE_TITLE,
+    STR_DISPLAY_DIM_AFTER,
+    STR_DISPLAY_OFF_AFTER_DIM,
+    STR_DISPLAY_IDLE_DESCRIPTION,
+    STR_DISPLAY_NEVER,
+    STR_DISPLAY_MINUTE,
+    STR_DISPLAY_MINUTES,
     
     // ========================================================================
     // Heat Pump - Main Screen

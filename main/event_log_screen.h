@@ -35,6 +35,9 @@ void event_log_screen_hide(void);
  */
 void event_log_screen_set_active(bool active);
 
+// Close search/filter overlays without tearing down the persistent Events tab.
+void event_log_screen_dismiss_overlays(void);
+
 /**
  * @brief Check if event log screen is visible
  */

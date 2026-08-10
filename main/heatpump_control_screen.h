@@ -19,5 +19,8 @@ void heatpump_control_hide(void);
 // tab polls).
 void heatpump_control_set_active(bool active);
 
+// Close edit dialogs without tearing down the persistent Control tab.
+void heatpump_control_dismiss_overlays(void);
+
 // Check if currently shown
 bool heatpump_control_is_shown(void);

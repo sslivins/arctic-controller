@@ -33,6 +33,14 @@ def _device_alive(device: DeviceClient) -> bool:
 def _return_to_main(device: DeviceClient):
     """Navigate the device back to the main screen from wherever it is."""
     try:
+        # Long-running suites can legitimately cross the configured inactivity
+        # timeout. Start each test awake so its first automation click is not
+        # consumed as the physical wake-only tap.
+        device.set_display_idle("wake")
+    except Exception:
+        pass
+
+    try:
         current = device.screen
     except Exception:
         time.sleep(2)
