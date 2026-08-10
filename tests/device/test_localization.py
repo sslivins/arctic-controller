@@ -47,11 +47,14 @@ LANG_TAGS = {
 
 HERO_STATES = {
     "English":  {"IDLE": "IDLE",          "FAULT": "FAULT",    "STANDBY": "STANDBY",
-                 "DEFROST": "DEFROST",    "DISCONNECTED": "DISCONNECTED"},
+                 "DEFROST": "DEFROST",    "HEATING": "HEATING",
+                 "DISCONNECTED": "DISCONNECTED"},
     "Français": {"IDLE": "INACTIF",       "FAULT": "PANNE",   "STANDBY": "EN VEILLE",
-                 "DEFROST": "DÉGIVRAGE",  "DISCONNECTED": "DÉCONNECTÉ"},
+                 "DEFROST": "DÉGIVRAGE",  "HEATING": "CHAUFFAGE",
+                 "DISCONNECTED": "DÉCONNECTÉ"},
     "Español":  {"IDLE": "INACTIVO",      "FAULT": "FALLO",   "STANDBY": "EN ESPERA",
-                 "DEFROST": "DESCONGELACIÓN", "DISCONNECTED": "DESCONECTADO"},
+                 "DEFROST": "DESCONGELACIÓN", "HEATING": "CALEFACCIÓN",
+                 "DISCONNECTED": "DESCONECTADO"},
 }
 
 HERO_MODES = {
@@ -192,8 +195,8 @@ class TestFrenchHeroStates:
         assert w is not None
         assert w.text == HERO_STATES["Français"]["STANDBY"]
 
-    def test_floor_heat_french(self, device: DeviceClient):
-        """FLOOR HEAT → CHAUFF. SOL in French."""
+    def test_floor_heat_selection_shows_heating_french(self, device: DeviceClient):
+        """Floor-heat selection still reports the actual heating operation."""
         device.set_demo_fields(
             status1=DEMO_STATUS1,
             working_mode=MODE_FLOOR_HEATING,
@@ -202,7 +205,7 @@ class TestFrenchHeroStates:
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
-        assert w.text == HERO_MODES["Français"][MODE_FLOOR_HEATING]
+        assert w.text == HERO_STATES["Français"]["HEATING"]
 
     def test_cooling_french(self, device: DeviceClient):
         """COOLING → REFROIDISSEMENT in French."""
@@ -216,8 +219,8 @@ class TestFrenchHeroStates:
         assert w is not None
         assert w.text == HERO_MODES["Français"][MODE_COOLING]
 
-    def test_hot_water_french(self, device: DeviceClient):
-        """HOT WATER → EAU CHAUDE in French."""
+    def test_hot_water_selection_shows_heating_french(self, device: DeviceClient):
+        """Hot-water selection still reports the actual heating operation."""
         device.set_demo_fields(
             status1=DEMO_STATUS1,
             working_mode=MODE_HOT_WATER,
@@ -226,7 +229,7 @@ class TestFrenchHeroStates:
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
-        assert w.text == HERO_MODES["Français"][MODE_HOT_WATER]
+        assert w.text == HERO_STATES["Français"]["HEATING"]
 
 
 # =========================================================================
@@ -300,8 +303,8 @@ class TestSpanishHeroStates:
         assert w is not None
         assert w.text == HERO_STATES["Español"]["STANDBY"]
 
-    def test_floor_heat_spanish(self, device: DeviceClient):
-        """FLOOR HEAT → CALEF. SUELO in Spanish."""
+    def test_floor_heat_selection_shows_heating_spanish(self, device: DeviceClient):
+        """Floor-heat selection still reports the actual heating operation."""
         device.set_demo_fields(
             status1=DEMO_STATUS1,
             working_mode=MODE_FLOOR_HEATING,
@@ -310,7 +313,7 @@ class TestSpanishHeroStates:
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
-        assert w.text == HERO_MODES["Español"][MODE_FLOOR_HEATING]
+        assert w.text == HERO_STATES["Español"]["HEATING"]
 
     def test_cooling_spanish(self, device: DeviceClient):
         """COOLING → ENFRIAMIENTO in Spanish."""
@@ -324,8 +327,8 @@ class TestSpanishHeroStates:
         assert w is not None
         assert w.text == HERO_MODES["Español"][MODE_COOLING]
 
-    def test_hot_water_spanish(self, device: DeviceClient):
-        """HOT WATER → AGUA CALIENTE in Spanish."""
+    def test_hot_water_selection_shows_heating_spanish(self, device: DeviceClient):
+        """Hot-water selection still reports the actual heating operation."""
         device.set_demo_fields(
             status1=DEMO_STATUS1,
             working_mode=MODE_HOT_WATER,
@@ -334,7 +337,7 @@ class TestSpanishHeroStates:
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
-        assert w.text == HERO_MODES["Español"][MODE_HOT_WATER]
+        assert w.text == HERO_STATES["Español"]["HEATING"]
 
 
 # =========================================================================
