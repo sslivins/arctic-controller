@@ -8,6 +8,7 @@
 #include "heatpump_temps_screen.h"
 #include "nav_bar.h"
 #include "heatpump_controller.h"
+#include "heatpump_history_screen.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "app_preferences.h"
@@ -39,6 +40,8 @@ static struct {
     lv_obj_t* screen = nullptr;
     heatpump_temps_close_cb_t on_close = nullptr;
     lv_timer_t* update_timer = nullptr;
+    lv_obj_t* content = nullptr;
+    bool active = false;
     
     // Temperature value labels (right side of each row)
     lv_obj_t* tank_temp = nullptr;
@@ -71,6 +74,8 @@ static struct {
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+static void update_readings();
 
 static lv_obj_t* create_temp_row(lv_obj_t* parent, const char* label, lv_obj_t** value_label_out) {
     lv_obj_t* row = lv_obj_create(parent);
@@ -116,6 +121,47 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* title) {
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
     return header;
+}
+
+static void history_closed() {
+    if (state.content) {
+        lv_obj_remove_flag(state.content, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (state.active && state.update_timer) {
+        lv_timer_resume(state.update_timer);
+        update_readings();
+    }
+}
+
+static void history_btn_cb(lv_event_t*) {
+    if (state.update_timer) lv_timer_pause(state.update_timer);
+    if (state.content) lv_obj_add_flag(state.content, LV_OBJ_FLAG_HIDDEN);
+    heatpump_history_show(state.screen, history_closed);
+}
+
+static lv_obj_t* create_history_row(lv_obj_t* parent) {
+    lv_obj_t* button = lv_button_create(parent);
+    lv_obj_set_size(button, LV_PCT(100), 78);
+    lv_obj_set_style_bg_color(button, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_width(button, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(button, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_radius(button, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(button, 24, LV_PART_MAIN);
+    lv_obj_set_user_data(button, (void*)"temperature_history_open");
+    lv_obj_add_event_cb(button, history_btn_cb, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_t* label = lv_label_create(button);
+    lv_label_set_text(label, i18n_get(STR_HISTORY_OPEN));
+    lv_obj_set_style_text_font(label, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t* arrow = lv_label_create(button);
+    lv_label_set_text(arrow, LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_font(arrow, UI_FONT_ICON, LV_PART_MAIN);
+    lv_obj_set_style_text_color(arrow, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_align(arrow, LV_ALIGN_RIGHT_MID, 0, 0);
+    return button;
 }
 
 static lv_obj_t* create_reading_row(lv_obj_t* parent, const char* label, lv_obj_t** value_label_out) {
@@ -367,6 +413,7 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
     // Scrollable content fills the panel; reserve room for the persistent nav
     // bar (drawn by the tab shell) at the bottom.
     lv_obj_t* content = lv_obj_create(state.screen);
+    state.content = content;
     lv_obj_set_size(content, LV_PCT(100), LV_PCT(100));
     lv_obj_align(content, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -379,6 +426,7 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
     
     // ===== Temperatures section =====
     create_section_header(content, i18n_get(STR_HP_TEMPERATURES));
+    create_history_row(content);
 
     // Temperature rows - Water temperatures first
     create_temp_row(content, i18n_get(STR_HP_WATER_TANK), &state.tank_temp);
@@ -412,6 +460,7 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
     create_reading_row(content, i18n_get(STR_HP_HOT_WATER), &state.hotwater_setpoint);
     
     state.shown = true;
+    state.active = false;
     
     // Update timer
     state.update_timer = lv_timer_create(update_timer_cb, 1000, nullptr);
@@ -421,6 +470,13 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
 }
 
 void heatpump_temps_set_active(bool active) {
+    state.active = active;
+    if (!active && heatpump_history_is_shown()) {
+        heatpump_history_hide();
+        if (state.content) {
+            lv_obj_remove_flag(state.content, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     if (state.update_timer) {
         if (active) {
             lv_timer_resume(state.update_timer);
@@ -450,6 +506,8 @@ void heatpump_temps_hide(void) {
     state.shown = false;
     state.on_close = nullptr;
     state.screen = nullptr;
+    state.content = nullptr;
+    state.active = false;
     state.tank_temp = nullptr;
     state.outlet_temp = nullptr;
     state.inlet_temp = nullptr;

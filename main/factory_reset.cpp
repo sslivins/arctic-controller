@@ -1,6 +1,7 @@
 #include "factory_reset.h"
 
 #include "event_log.h"
+#include "telemetry_history.h"
 #include <esp_log.h>
 #include <esp_partition.h>
 #include <esp_system.h>
@@ -26,6 +27,7 @@ static esp_err_t erase_data_partition(const char* label)
 static void factory_reset_task(void* arg)
 {
     (void)arg;
+    telemetry_history_prepare_factory_reset();
     event_log_prepare_factory_reset();
 
     esp_err_t storage_err = erase_data_partition("storage");

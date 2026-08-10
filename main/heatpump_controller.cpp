@@ -58,6 +58,17 @@ static TaskHandle_t s_demo_sync_task = nullptr;
 static bool s_demo_sync_enabled = false;
 static bool s_demo_mode = false;
 static bool s_feed_mode = false;  // Passive Tuya external-feed mode
+static uint32_t s_holding_window_ms = 0;
+static uint32_t s_telemetry_window_ms = 0;
+static bool s_inlet_valid = false;
+static bool s_outlet_valid = false;
+static bool s_cooling_setpoint_valid = false;
+static bool s_heating_setpoint_valid = false;
+static bool s_hot_water_setpoint_valid = false;
+static bool s_mode_valid = false;
+static bool s_compressor_valid = false;
+
+static constexpr uint32_t TELEMETRY_FRESHNESS_MS = 90000;
 
 // Connection state tracking
 static bool s_was_connected = false;  // For logging state changes
@@ -80,6 +91,10 @@ static bool s_prev_state_valid = false;  // False until first successful poll
 // Get current time in milliseconds
 static uint32_t getTimeMs() {
     return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+static bool elapsed_within(uint32_t now, uint32_t then, uint32_t limit) {
+    return then != 0 && (uint32_t)(now - then) <= limit;
 }
 
 // ============================================================================
@@ -139,6 +154,16 @@ static bool pollHoldingRegisters() {
     xSemaphoreGive(s_state_mutex);
     
     return true;
+}
+
+static HeatPumpOperation demo_operation(const HeatPumpState& state) {
+    if (state.hasAnyError()) return HeatPumpOperation::FAULT;
+    if (!state.unit_on) return HeatPumpOperation::OFF;
+    if (state.isDefrosting()) return HeatPumpOperation::DEFROST;
+    if (!state.isCompressorRunning()) return HeatPumpOperation::IDLE;
+    return state.working_mode == WorkingMode::COOLING
+        ? HeatPumpOperation::COOLING
+        : HeatPumpOperation::HEATING;
 }
 
 // Poll temperature registers (2100-2117)
@@ -318,6 +343,7 @@ static void demoSyncTask(void*) {
             s_state.connected = true;
             s_state.last_successful_read_ms = now;
             s_state.consecutive_failures = 0;
+            s_state.operation = demo_operation(s_state);
 
             updateErrorHistory(s_state.error1, s_state.error2);
 
@@ -398,6 +424,7 @@ void initDemoState() {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_state.connected = true;
     s_state.last_successful_read_ms = getTimeMs();
+    s_state.operation = demo_operation(s_state);
     xSemaphoreGive(s_state_mutex);
     
     // Seed error history with the current error state
@@ -465,18 +492,34 @@ bool isExternalFeed() {
 // registers are reg2007 (holding) + the INPUT cluster reg2125-2128, all mapped
 // live 2026-07-05; their bit ordering differs from the legacy Arctic error
 // tables, so each confirmed bit is translated to its semantic legacy mask.
-// Adapt the library's native MaconMode to the controller's legacy WorkingMode
-// enum. NEVER cast: the raw wire values (0=heating, 4=cooling) differ from the
-// legacy enum values (COOLING=0, FLOOR_HEATING=1). reg2049 only exposes the
-// operating direction, so a confirmed heating direction is reported as
-// FLOOR_HEATING (this unit's heating application). When the reg2049 reading is
-// absent or untrusted, fall back to the generic HEATING label rather than
-// falsely claiming FLOOR_HEATING.
-static WorkingMode to_working_mode(MaconMode m) {
-    switch (m) {
-        case MaconMode::Cooling: return WorkingMode::COOLING;
-        case MaconMode::Heating: return WorkingMode::FLOOR_HEATING;
-        default:                 return WorkingMode::HEATING;
+// Adapt the confirmed reg2096 working-mode enum. In Auto, expose the actual
+// water-side direction while the compressor runs.
+static WorkingMode to_working_mode(const MaconState& state) {
+    switch (state.working_mode) {
+        case MaconWorkingMode::Cooling:
+            return WorkingMode::COOLING;
+        case MaconWorkingMode::FloorHeating:
+            return WorkingMode::FLOOR_HEATING;
+        case MaconWorkingMode::FanCoilHeating:
+            return WorkingMode::FAN_COIL_HEATING;
+        case MaconWorkingMode::HotWater:
+            return WorkingMode::HOT_WATER;
+        case MaconWorkingMode::Auto:
+            return WorkingMode::AUTO;
+        default:
+            return WorkingMode::AUTO;
+    }
+}
+
+static HeatPumpOperation to_operation(const MaconState& state) {
+    switch (decode_operation(state)) {
+        case MaconOperation::Off:      return HeatPumpOperation::OFF;
+        case MaconOperation::Idle:     return HeatPumpOperation::IDLE;
+        case MaconOperation::Heating:  return HeatPumpOperation::HEATING;
+        case MaconOperation::Cooling:  return HeatPumpOperation::COOLING;
+        case MaconOperation::Defrost:  return HeatPumpOperation::DEFROST;
+        case MaconOperation::Fault:    return HeatPumpOperation::FAULT;
+        default:                       return HeatPumpOperation::UNKNOWN;
     }
 }
 
@@ -493,7 +536,9 @@ static void applyMaconMapping() {
     // (isCompressorRunning()/isWaterPumpRunning()/isFanRunning()/getFanSpeedLevel()).
     uint16_t st1 = 0;
     if (ms.running)       st1 |= status1::UNIT_ON;
-    if (ms.compressor_on) st1 |= status1::COMPRESSOR;
+    if (ms.compressor_freq_valid && ms.compressor_freq > 0) {
+        st1 |= status1::COMPRESSOR;
+    }
     if (ms.pump_on)       st1 |= status1::WATER_PUMP;
     if (ms.fan_on) {
         if (ms.fan_level >= 60)      st1 |= status1::FAN_HIGH;
@@ -518,14 +563,26 @@ static void applyMaconMapping() {
     // macon library; previously left unmapped so the API reported 0.
     s_state.hot_water_setpoint   = ms.hot_water_setpoint;
     s_state.cooling_setpoint     = ms.cooling_setpoint;
+    if (ms.aux_heat_setpoint_valid) {
+        s_state.heating_setpoint = ms.aux_heat_setpoint;
+    }
+
+    s_inlet_valid = ms.inlet_valid;
+    s_outlet_valid = ms.outlet_valid;
+    s_cooling_setpoint_valid = ms.cooling_setpoint_valid;
+    // reg2094 is still not confirmed as the active heating target, so expose
+    // its value in the diagnostic UI but do not persist it as a valid target.
+    s_heating_setpoint_valid = false;
+    s_hot_water_setpoint_valid = ms.hot_water_setpoint_valid;
+    s_mode_valid = ms.working_mode_valid;
+    s_compressor_valid = ms.compressor_freq_valid;
 
     // Running state + readings.
     s_state.status1         = st1;
     s_state.status2         = ms.defrost_on ? status2::DEFROSTING : 0;
     s_state.unit_on         = ms.running;
-    // Operating direction now derives from reg2049 via the library (previously a
-    // static FLOOR_HEATING). Translate — never cast — the native mode.
-    s_state.working_mode    = to_working_mode(ms.mode);
+    s_state.working_mode    = to_working_mode(ms);
+    s_state.operation       = to_operation(ms);
     s_state.fan_speed       = ms.fan_level;
 
     // Electrical readings.
@@ -693,6 +750,11 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
         return;
     }
 
+    const uint32_t now = getTimeMs();
+    const uint32_t window_end = (uint32_t)reg_base + (uint32_t)count;
+    const bool has_holding_state = reg_base <= 2049 && window_end > 2049;
+    const bool has_telemetry_state = reg_base <= 2141 && window_end > 2141;
+
     // Copy the window's 1-byte registers into the register cache (bounds-checked).
     for (size_t i = 0; i < count; ++i) {
         int32_t idx = (int32_t)reg_base + (int32_t)i - (int32_t)DEMO_REG_BASE;
@@ -708,8 +770,10 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
     applyMaconMapping();
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (has_holding_state) s_holding_window_ms = now;
+    if (has_telemetry_state) s_telemetry_window_ms = now;
     s_state.connected = true;
-    s_state.last_successful_read_ms = getTimeMs();
+    s_state.last_successful_read_ms = now;
     s_state.last_attempt_ms = s_state.last_successful_read_ms;
     s_state.consecutive_failures = 0;
     // Log operational transitions for the Tuya feed path.
@@ -725,6 +789,101 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
         s_was_connected = true;
         event_log_record(EVENT_CONNECTED, 0);
     }
+}
+
+TelemetrySnapshot getTelemetrySnapshot() {
+        TelemetrySnapshot snapshot;
+        const uint32_t now = getTimeMs();
+
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        if (s_demo_mode) {
+            snapshot.connected = s_state.connected;
+            snapshot.inlet_valid = snapshot.connected;
+            snapshot.outlet_valid = snapshot.connected;
+            snapshot.compressor_valid = snapshot.connected;
+            snapshot.compressor_running = s_state.isCompressorRunning();
+            snapshot.inlet_c = s_state.inlet_water_temp;
+            snapshot.outlet_c = s_state.outlet_water_temp;
+            if (s_state.operation == HeatPumpOperation::COOLING) {
+                snapshot.operation = TelemetryOperation::COOLING;
+            } else if (s_state.operation == HeatPumpOperation::HEATING) {
+                snapshot.operation = TelemetryOperation::HEATING;
+            }
+            if (s_state.working_mode == WorkingMode::COOLING) {
+                snapshot.active_setpoint_c = s_state.cooling_setpoint;
+                snapshot.setpoint_valid = snapshot.connected;
+            } else if (s_state.working_mode == WorkingMode::AUTO &&
+                       s_state.operation == HeatPumpOperation::COOLING) {
+                snapshot.active_setpoint_c = s_state.cooling_setpoint;
+                snapshot.setpoint_valid = snapshot.connected;
+            } else if (s_state.working_mode == WorkingMode::HOT_WATER) {
+                snapshot.active_setpoint_c = s_state.hot_water_setpoint;
+                snapshot.setpoint_valid = snapshot.connected;
+            } else if (s_state.working_mode == WorkingMode::FLOOR_HEATING ||
+                       s_state.working_mode == WorkingMode::FAN_COIL_HEATING ||
+                       s_state.working_mode == WorkingMode::HEATING) {
+                snapshot.active_setpoint_c = s_state.heating_setpoint;
+                snapshot.setpoint_valid = snapshot.connected;
+            }
+            xSemaphoreGive(s_state_mutex);
+            return snapshot;
+        }
+
+        const bool telemetry_fresh =
+            elapsed_within(now, s_telemetry_window_ms, TELEMETRY_FRESHNESS_MS);
+        snapshot.connected = telemetry_fresh;
+        snapshot.inlet_valid = telemetry_fresh && s_inlet_valid &&
+            !(s_state.error1 & error1::INLET_TEMP_SENS) &&
+            s_state.inlet_water_temp >= -50 && s_state.inlet_water_temp <= 150;
+        snapshot.outlet_valid = telemetry_fresh && s_outlet_valid &&
+            !(s_state.error1 & error1::OUTLET_TEMP_SENS) &&
+            s_state.outlet_water_temp >= -50 && s_state.outlet_water_temp <= 150;
+        snapshot.compressor_valid = telemetry_fresh && s_compressor_valid;
+        snapshot.compressor_running =
+            snapshot.compressor_valid && s_state.compressor_freq > 0;
+        snapshot.inlet_c = s_state.inlet_water_temp;
+        snapshot.outlet_c = s_state.outlet_water_temp;
+
+        if (telemetry_fresh) {
+            if (s_state.operation == HeatPumpOperation::COOLING) {
+                snapshot.operation = TelemetryOperation::COOLING;
+            } else if (s_state.operation == HeatPumpOperation::HEATING) {
+                snapshot.operation = TelemetryOperation::HEATING;
+            }
+        }
+
+        if (telemetry_fresh && s_mode_valid) {
+            switch (s_state.working_mode) {
+                case WorkingMode::COOLING:
+                    snapshot.active_setpoint_c = s_state.cooling_setpoint;
+                    snapshot.setpoint_valid =
+                        telemetry_fresh && s_cooling_setpoint_valid;
+                    break;
+                case WorkingMode::AUTO:
+                    if (s_state.operation == HeatPumpOperation::COOLING) {
+                        snapshot.active_setpoint_c = s_state.cooling_setpoint;
+                        snapshot.setpoint_valid =
+                            telemetry_fresh && s_cooling_setpoint_valid;
+                    }
+                    break;
+                case WorkingMode::HOT_WATER:
+                    snapshot.active_setpoint_c = s_state.hot_water_setpoint;
+                    snapshot.setpoint_valid =
+                        telemetry_fresh && s_hot_water_setpoint_valid;
+                    break;
+                case WorkingMode::FLOOR_HEATING:
+                case WorkingMode::FAN_COIL_HEATING:
+                case WorkingMode::HEATING:
+                    snapshot.active_setpoint_c = s_state.heating_setpoint;
+                    snapshot.setpoint_valid =
+                        telemetry_fresh && s_heating_setpoint_valid;
+                    break;
+                default:
+                    break;
+            }
+        }
+        xSemaphoreGive(s_state_mutex);
+        return snapshot;
 }
 
 void startDemoSync() {
@@ -995,7 +1154,7 @@ void getStatusDescription(char* buffer, size_t buffer_size) {
     
     snprintf(buffer, buffer_size, "%s | %s | Comp:%s Pump:%s Fan:%d",
              state.unit_on ? "ON" : "OFF",
-             workingModeToString(state.working_mode),
+             heatPumpOperationToString(state.operation),
              state.isCompressorRunning() ? "Y" : "N",
              state.isWaterPumpRunning() ? "Y" : "N",
              state.getFanSpeedLevel());

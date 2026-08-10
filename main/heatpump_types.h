@@ -22,6 +22,16 @@ enum class WorkingMode : uint16_t {
     AUTO = 6
 };
 
+enum class HeatPumpOperation : uint8_t {
+    UNKNOWN = 0,
+    OFF,
+    IDLE,
+    HEATING,
+    COOLING,
+    DEFROST,
+    FAULT
+};
+
 // ============================================================================
 // Status Register 2135 Bit Definitions
 // ============================================================================
@@ -126,6 +136,18 @@ inline const char* workingModeToString(WorkingMode mode) {
         case WorkingMode::HOT_WATER:       return "hot_water";
         case WorkingMode::AUTO:            return "auto";
         default:                           return "unknown";
+    }
+}
+
+inline const char* heatPumpOperationToString(HeatPumpOperation operation) {
+    switch (operation) {
+        case HeatPumpOperation::OFF:      return "off";
+        case HeatPumpOperation::IDLE:     return "idle";
+        case HeatPumpOperation::HEATING:  return "heating";
+        case HeatPumpOperation::COOLING:  return "cooling";
+        case HeatPumpOperation::DEFROST:  return "defrost";
+        case HeatPumpOperation::FAULT:    return "fault";
+        default:                          return "unknown";
     }
 }
 

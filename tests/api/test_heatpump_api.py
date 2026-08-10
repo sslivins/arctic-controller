@@ -141,7 +141,7 @@ class TestHeatpumpStatus:
         r = _get("/api/heatpump/status")
         data = r.json()
         for field in [
-            "connected", "demo_mode", "unit_on", "mode", "defrosting",
+            "connected", "demo_mode", "unit_on", "mode", "operation", "defrosting",
             "compressor", "fans", "fan_speed", "pump", "aux_heater",
             "temperatures", "setpoints", "readings", "has_error", "error",
         ]:
@@ -160,6 +160,9 @@ class TestHeatpumpStatus:
     def test_status_mode_is_valid_string(self):
         data = _get("/api/heatpump/status").json()
         assert data["mode"] in VALID_MODES + ["unknown"]
+        assert data["operation"] in [
+            "off", "idle", "heating", "cooling", "defrost", "fault", "unknown"
+        ]
 
     def test_status_temperatures_structure(self):
         """temperatures object must have all 9 temp fields."""

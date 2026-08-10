@@ -201,21 +201,6 @@ static struct {
 // Helper Functions
 // ============================================================================
 
-static const char* getModeText(arctic::WorkingMode mode, bool defrosting) {
-    if (defrosting) {
-        return i18n_get(STR_HP_MODE_DEFROST);
-    }
-    switch (mode) {
-        case arctic::WorkingMode::COOLING:           return i18n_get(STR_HP_MODE_COOLING);
-        case arctic::WorkingMode::HEATING:           return i18n_get(STR_HP_MODE_HEATING);
-        case arctic::WorkingMode::FLOOR_HEATING:     return i18n_get(STR_HP_MODE_FLOOR_HEAT);
-        case arctic::WorkingMode::FAN_COIL_HEATING:  return i18n_get(STR_HP_MODE_FAN_HEAT);
-        case arctic::WorkingMode::HOT_WATER:         return i18n_get(STR_HP_MODE_HOT_WATER);
-        case arctic::WorkingMode::AUTO:              return i18n_get(STR_HP_MODE_AUTO);
-        default:                                      return i18n_get(STR_HP_MODE_UNKNOWN);
-    }
-}
-
 // Create a value column (number on top, label below) for dashboard cards
 static lv_obj_t* create_value_column(lv_obj_t* parent, const char* label_text,
                                       lv_obj_t** value_out, const lv_font_t* value_font = UI_FONT_TITLE) {
@@ -262,23 +247,22 @@ enum class HeroState {
     DEFROST,
     HEATING,
     COOLING,
-    HOT_WATER,
     IDLE
 };
 
 static HeroState getHeroState(const arctic::HeatPumpState& hp) {
     if (!hp.connected) return HeroState::DISCONNECTED;
-    if (hp.hasAnyError()) return HeroState::FAULT;
-    if (!hp.unit_on) return HeroState::STANDBY;
-    if (hp.isDefrosting()) return HeroState::DEFROST;
-    if (hp.isCompressorRunning()) {
-        switch (hp.working_mode) {
-            case arctic::WorkingMode::COOLING: return HeroState::COOLING;
-            case arctic::WorkingMode::HOT_WATER: return HeroState::HOT_WATER;
-            default: return HeroState::HEATING;
-        }
+    switch (hp.operation) {
+        case arctic::HeatPumpOperation::FAULT:   return HeroState::FAULT;
+        case arctic::HeatPumpOperation::OFF:     return HeroState::STANDBY;
+        case arctic::HeatPumpOperation::DEFROST: return HeroState::DEFROST;
+        case arctic::HeatPumpOperation::HEATING: return HeroState::HEATING;
+        case arctic::HeatPumpOperation::COOLING: return HeroState::COOLING;
+        case arctic::HeatPumpOperation::IDLE:    return HeroState::IDLE;
+        default:                                 break;
     }
-    return HeroState::IDLE;
+    if (hp.hasAnyError()) return HeroState::FAULT;
+    return hp.unit_on ? HeroState::IDLE : HeroState::STANDBY;
 }
 
 static lv_color_t getHeroBgColor(HeroState s) {
@@ -287,8 +271,6 @@ static lv_color_t getHeroBgColor(HeroState s) {
             return lv_color_mix(COLOR_HEATING, COLOR_CARD_BG, 64);   // 25% orange tint
         case HeroState::COOLING:
             return lv_color_mix(COLOR_COOLING, COLOR_CARD_BG, 64);   // 25% blue tint
-        case HeroState::HOT_WATER:
-            return lv_color_mix(COLOR_HOT_WATER, COLOR_CARD_BG, 50); // 20% red tint
         case HeroState::DEFROST:
             return lv_color_mix(COLOR_DEFROST, COLOR_CARD_BG, 64);   // 25% purple tint
         case HeroState::FAULT:
@@ -308,8 +290,6 @@ static lv_color_t getHeroBorderColor(HeroState s) {
             return COLOR_HEATING;
         case HeroState::COOLING:
             return COLOR_COOLING;
-        case HeroState::HOT_WATER:
-            return COLOR_HOT_WATER;
         case HeroState::DEFROST:
             return COLOR_DEFROST;
         default:
@@ -317,15 +297,14 @@ static lv_color_t getHeroBorderColor(HeroState s) {
     }
 }
 
-static const char* getHeroStateText(HeroState s, const arctic::HeatPumpState& hp) {
+static const char* getHeroStateText(HeroState s) {
     switch (s) {
         case HeroState::DISCONNECTED: return i18n_get(STR_HP_DISCONNECTED);
         case HeroState::FAULT:        return i18n_get(STR_HP_STATE_FAULT);
         case HeroState::STANDBY:      return i18n_get(STR_HP_STANDBY);
         case HeroState::DEFROST:      return i18n_get(STR_HP_MODE_DEFROST);
         case HeroState::COOLING:      return i18n_get(STR_HP_MODE_COOLING);
-        case HeroState::HOT_WATER:    return i18n_get(STR_HP_MODE_HOT_WATER);
-        case HeroState::HEATING:      return getModeText(hp.working_mode, false);
+        case HeroState::HEATING:      return i18n_get(STR_HP_MODE_HEATING);
         case HeroState::IDLE:         return i18n_get(STR_HP_COMP_IDLE);
     }
     return "---";
@@ -840,7 +819,7 @@ void heatpump_screen_update(void) {
     
     lv_obj_set_style_bg_color(state.hero_card, getHeroBgColor(hero), LV_PART_MAIN);
     lv_obj_set_style_border_color(state.hero_card, getHeroBorderColor(hero), LV_PART_MAIN);
-    lv_label_set_text(state.hero_state_label, getHeroStateText(hero, hp));
+    lv_label_set_text(state.hero_state_label, getHeroStateText(hero));
     lv_obj_set_style_text_color(state.hero_state_label, getHeroTextColor(hero), LV_PART_MAIN);
     
     // Tank temperature

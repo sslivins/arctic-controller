@@ -957,6 +957,32 @@ paths:
         "423":
           $ref: "#/components/responses/Locked"
 
+  /api/test/populate-temperature-history:
+    post:
+      tags: [Mocking]
+      summary: Replace telemetry history with an eight-hour graph fixture
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Temperature history populated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  samples:
+                    type: integer
+                required: [success, samples]
+        "423":
+          $ref: "#/components/responses/Locked"
+
   /api/test/lock:
     get:
       tags: [Session Lock]

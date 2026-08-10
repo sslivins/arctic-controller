@@ -25,6 +25,7 @@ struct HeatPumpState {
     // Settings (from holding registers 2000-2007)
     bool unit_on = false;
     WorkingMode working_mode = WorkingMode::COOLING;
+    HeatPumpOperation operation = HeatPumpOperation::UNKNOWN;
     int16_t cooling_setpoint = 0;    // °C (raw value, may need /10)
     int16_t heating_setpoint = 0;    // °C
     int16_t hot_water_setpoint = 0;  // °C
@@ -89,6 +90,26 @@ struct HeatPumpState {
     }
 };
 
+enum class TelemetryOperation : uint8_t {
+    UNKNOWN = 0,
+    HEATING = 1,
+    COOLING = 2,
+    HOT_WATER = 3,
+};
+
+struct TelemetrySnapshot {
+    bool connected = false;
+    bool inlet_valid = false;
+    bool outlet_valid = false;
+    bool setpoint_valid = false;
+    bool compressor_valid = false;
+    bool compressor_running = false;
+    int16_t inlet_c = 0;
+    int16_t outlet_c = 0;
+    int16_t active_setpoint_c = 0;
+    TelemetryOperation operation = TelemetryOperation::UNKNOWN;
+};
+
 // ============================================================================
 // API Functions
 // ============================================================================
@@ -104,6 +125,12 @@ void startDemoSync();
 
 // Get current state (thread-safe copy)
 HeatPumpState getState();
+
+/**
+ * Return an atomic, freshness-checked snapshot suitable for persistent
+ * telemetry. Invalid or stale fields remain explicitly marked invalid.
+ */
+TelemetrySnapshot getTelemetrySnapshot();
 
 // Check if connected (always true in demo mode)
 bool isConnected();

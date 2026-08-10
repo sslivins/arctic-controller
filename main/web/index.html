@@ -518,11 +518,12 @@
       const hp = state.hp;
       const target = hp.mode === "cooling" ? hp.setpoints.cooling :
         hp.mode === "hot_water" ? hp.setpoints.hot_water : hp.setpoints.heating;
+      const operation = hp.operation || (hp.unit_on ? "idle" : "off");
       return `<div class="page">
         ${pageHead("Home", "Live operating state and the information you need at a glance.")}
         <section class="card hero">
           <div><div class="eyebrow">${hp.demo_mode ? "Demo mode · " : ""}${hp.connected ? "Connected" : "Disconnected"}</div>
-            <div class="hero-title">${hp.unit_on ? titleCase(hp.mode) : "Standby"}</div>
+            <div class="hero-title">${hp.connected ? (operation === "off" ? "Standby" : titleCase(operation)) : "Disconnected"}</div>
             <div class="hero-sub">${hp.defrosting ? "Defrost cycle active" : hp.unit_on ? "System is responding normally" : "Heat pump is powered off"}</div></div>
           <div class="temp-hero"><div class="temp-value">${temp(hp.temperatures.tank)}</div><div class="temp-label">Tank · target ${temp(target)}</div></div>
         </section>
@@ -554,6 +555,10 @@
     function statusPage() {
       const h = state.hp, r = h.readings, t = h.temperatures;
       return `<div class="page">${pageHead("Status", "Complete temperature, electrical, and mechanical telemetry.")}
+        <h2>Operating state</h2><div class="grid grid-2">
+          ${metricCard("Selected mode", titleCase(h.mode || "unknown"), "Configured policy from register 2096")}
+          ${metricCard("Actual operation", titleCase(h.operation || "unknown"), "Live status from register 2129")}
+        </div>
         <h2>Temperatures</h2><div class="grid grid-3">
           ${metricCard("Water tank", temp(t.tank))}${metricCard("Outlet water", temp(t.outlet))}${metricCard("Inlet water", temp(t.inlet))}
           ${metricCard("Outdoor ambient", temp(t.outdoor))}${metricCard("Outdoor coil", temp(t.outdoor_coil))}${metricCard("Indoor coil", temp(t.indoor_coil))}
@@ -610,12 +615,12 @@
     function controlPage() {
       const groups = {};
       Object.entries(state.params).forEach(([key, p]) => (groups[p.category || "Other"] ||= []).push([key, p]));
-      return `<div class="page">${pageHead("Control", "Power, operating mode, setpoints, and technician parameters.")}
+      return `<div class="page">${pageHead("Control", "Power, mode selection, setpoints, and technician parameters.")}
         <div class="grid grid-2">
           <section class="card"><h2>Power</h2><button class="power-btn ${state.hp.unit_on ? "on" : ""}" data-action="power-hold">
             ${state.hp.unit_on ? "Hold for 3 seconds to power off" : "Power on"}
             ${state.powerHolding ? `<span class="power-progress" style="animation:hold 3s linear"></span>` : ""}</button></section>
-          <section class="card"><h2>Operating mode</h2><div class="mode-grid">${modes.map(mode =>
+          <section class="card"><h2>Mode selection</h2><div class="mode-grid">${modes.map(mode =>
             `<button class="mode-btn ${state.hp.mode === mode ? "active" : ""}" data-action="mode" data-value="${mode}">${titleCase(mode)}</button>`).join("")}</div></section>
         </div>
         <h2 style="margin-top:28px">Setpoints</h2><div class="grid grid-3">

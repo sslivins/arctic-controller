@@ -33,6 +33,7 @@
 #include "app_preferences.h"
 #include "event_log.h"
 #include "boot_stats.h"
+#include "telemetry_history.h"
 #include "log_buffer.h"
 
 static const char* TAG = "main";
@@ -247,6 +248,12 @@ extern "C" void app_main(void)
             mclog::tagError(TAG, "Failed to init Tuya master: {}", (int)master_init);
         }
 #endif
+    }
+
+    esp_err_t telemetry_ret = telemetry_history_init();
+    if (telemetry_ret != ESP_OK) {
+        mclog::tagError(TAG, "Failed to start telemetry history: {}",
+                        (int)telemetry_ret);
     }
 
     // Initialize authentication manager
