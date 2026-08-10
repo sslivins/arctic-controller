@@ -160,6 +160,21 @@ bool auth_mgr_revoke_integration_token(void);
  */
 bool auth_mgr_validate_integration_token(const char* token);
 
+/**
+ * @brief Validate a token and return the credential generation atomically.
+ *
+ * WebSocket sessions retain this generation and are disconnected immediately
+ * when pairing rotation or revocation advances it.
+ */
+bool auth_mgr_validate_integration_token_with_generation(
+    const char* token,
+    uint32_t* generation_out);
+
+/**
+ * @brief Current in-memory integration credential generation.
+ */
+uint32_t auth_mgr_get_integration_generation(void);
+
 #ifdef __cplusplus
 }
 #endif

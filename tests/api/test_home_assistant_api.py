@@ -175,7 +175,7 @@ def test_capabilities_exclude_advanced_and_raw_controls():
 
     assert data["protocol_version"] == 1
     assert data["device_id"].startswith("arctic-")
-    assert data["transports"] == {"rest": True, "websocket": False}
+    assert data["transports"] == {"rest": True, "websocket": True}
     assert data["capabilities"]["read_state"] is True
     assert data["capabilities"]["control_power"] is False
     assert data["capabilities"]["advanced_parameters"] is False

@@ -45,6 +45,7 @@ idf_component_register(
         "auth_manager.cpp"
         "ha_integration.cpp"
         "ha_pairing.cpp"
+        "ha_websocket.cpp"
         "app_preferences.cpp"
         "display_idle.cpp"
         "factory_reset.cpp"

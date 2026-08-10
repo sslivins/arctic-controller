@@ -12,6 +12,7 @@
 #include "auth_manager.h"
 #include "ha_integration.h"
 #include "ha_pairing.h"
+#include "ha_websocket.h"
 #include "heatpump_controller.h"
 #include "heatpump_types.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
@@ -429,7 +430,9 @@ bool api_server_start(void)
         integration_config.httpd.max_uri_handlers = 4;
         integration_config.httpd.max_open_sockets = 4;
         integration_config.httpd.stack_size = 12288;
-        integration_config.httpd.lru_purge_enable = true;
+        // Reject surplus connections instead of evicting established WSS
+        // clients. Three WSS slots leave one socket for REST reconciliation.
+        integration_config.httpd.lru_purge_enable = false;
         integration_config.httpd.recv_wait_timeout = 10;
         integration_config.httpd.send_wait_timeout = 1;
         integration_config.servercert = cert;
@@ -1059,6 +1062,33 @@ bool api_server_start(void)
             api_server_stop();
             return false;
         }
+
+        httpd_uri_t ha_events_uri = {
+            .uri = "/api/v1/events",
+            .method = HTTP_GET,
+            .handler = ha_websocket_handler,
+            .user_ctx = NULL,
+            .is_websocket = true,
+            .handle_ws_control_frames = true,
+            .supported_subprotocol = NULL,
+            .ws_pre_handshake_cb = ha_websocket_pre_handshake,
+        };
+        ret = httpd_register_uri_handler(
+            server_integration, &ha_events_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA WebSocket: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+        if (!ha_websocket_start(server_integration)) {
+            ESP_LOGE(TAG, "Home Assistant WebSocket push unavailable");
+            httpd_ssl_stop(server_integration);
+            server_integration = NULL;
+        }
+    }
+
+    if (server_integration != NULL) {
         ESP_LOGI(TAG, "Home Assistant REST foundation enabled");
 
         mdns_txt_item_t integration_txt[] = {
@@ -1066,7 +1096,7 @@ bool api_server_start(void)
             {"id", arctic::ha::deviceId()},
             {"version", "1"},
             {"tls", "1"},
-            {"push", "0"},
+            {"push", "1"},
         };
         ret = mdns_service_add(
             "Arctic Home Assistant", "_arctic", "_tcp", 8443,
@@ -1122,6 +1152,7 @@ void api_server_stop(void)
     }
 #endif
     if (server_integration != NULL) {
+        ha_websocket_stop();
         ESP_LOGI(TAG, "Stopping integration HTTPS server...");
         httpd_ssl_stop(server_integration);
         server_integration = NULL;

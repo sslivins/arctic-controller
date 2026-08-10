@@ -2567,6 +2567,37 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/events:
+    get:
+      tags:
+        - HomeAssistant
+      summary: Authenticated Home Assistant WebSocket event stream
+      description: |
+        Upgrades to WSS on port 8443. The server sends a hello message followed
+        by a complete versioned snapshot, then sends latest-value complete
+        snapshots when exposed state changes and at least every 30 seconds.
+        Native WebSocket ping/pong frames provide liveness. At most three event
+        clients are accepted so one integration-server socket remains
+        available for REST reconciliation.
+      operationId: streamHomeAssistantEvents
+      security:
+        - integrationBearer: []
+      responses:
+        '101':
+          description: WebSocket upgrade accepted
+        '401':
+          description: Missing or invalid integration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: WebSocket client limit reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     apiKey:

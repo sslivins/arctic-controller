@@ -229,7 +229,7 @@ cJSON* createCapabilities()
 
     cJSON* transports = cJSON_AddObjectToObject(root, "transports");
     cJSON_AddBoolToObject(transports, "rest", true);
-    cJSON_AddBoolToObject(transports, "websocket", false);
+    cJSON_AddBoolToObject(transports, "websocket", true);
 
     cJSON* capabilities = cJSON_AddObjectToObject(root, "capabilities");
     cJSON_AddBoolToObject(capabilities, "read_state", true);

@@ -43,6 +43,7 @@ static struct {
     char api_key[AUTH_API_KEY_LEN + 1];
     uint8_t integration_token_hash[32];
     bool integration_token_set;
+    uint32_t integration_generation;
     session_t sessions[AUTH_MAX_SESSIONS];
 } state = {};
 static portMUX_TYPE integration_token_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -134,6 +135,7 @@ static bool load_from_nvs(void)
                        state.integration_token_hash, &len);
     state.integration_token_set =
         err == ESP_OK && len == sizeof(state.integration_token_hash);
+    state.integration_generation = state.integration_token_set ? 1 : 0;
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGE(TAG, "Failed to load integration token hash: %s",
                  esp_err_to_name(err));
@@ -522,6 +524,7 @@ bool auth_mgr_issue_integration_token(char* buffer)
     portENTER_CRITICAL(&integration_token_lock);
     memcpy(state.integration_token_hash, token_hash, sizeof(token_hash));
     state.integration_token_set = true;
+    state.integration_generation++;
     portEXIT_CRITICAL(&integration_token_lock);
     memcpy(buffer, token, sizeof(token));
     mbedtls_platform_zeroize(token, sizeof(token));
@@ -556,12 +559,20 @@ bool auth_mgr_revoke_integration_token(void)
     mbedtls_platform_zeroize(state.integration_token_hash,
                              sizeof(state.integration_token_hash));
     state.integration_token_set = false;
+    state.integration_generation++;
     portEXIT_CRITICAL(&integration_token_lock);
     ESP_LOGI(TAG, "Integration token revoked");
     return true;
 }
 
 bool auth_mgr_validate_integration_token(const char* token)
+{
+    return auth_mgr_validate_integration_token_with_generation(token, NULL);
+}
+
+bool auth_mgr_validate_integration_token_with_generation(
+    const char* token,
+    uint32_t* generation_out)
 {
     if (token == NULL || strlen(token) != AUTH_INTEGRATION_TOKEN_LEN) {
         return false;
@@ -571,6 +582,7 @@ bool auth_mgr_validate_integration_token(const char* token)
     uint8_t expected_hash[sizeof(state.integration_token_hash)];
     portENTER_CRITICAL(&integration_token_lock);
     const bool configured = state.integration_token_set;
+    const uint32_t generation = state.integration_generation;
     memcpy(expected_hash, state.integration_token_hash, sizeof(expected_hash));
     portEXIT_CRITICAL(&integration_token_lock);
     if (!configured) {
@@ -583,5 +595,16 @@ bool auth_mgr_validate_integration_token(const char* token)
         token_hash, expected_hash, sizeof(token_hash));
     mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
     mbedtls_platform_zeroize(expected_hash, sizeof(expected_hash));
+    if (valid && generation_out != NULL) {
+        *generation_out = generation;
+    }
     return valid;
+}
+
+uint32_t auth_mgr_get_integration_generation(void)
+{
+    portENTER_CRITICAL(&integration_token_lock);
+    const uint32_t generation = state.integration_generation;
+    portEXIT_CRITICAL(&integration_token_lock);
+    return generation;
 }

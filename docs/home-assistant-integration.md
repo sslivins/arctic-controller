@@ -188,8 +188,9 @@ The integration server uses:
 
 - A four-socket pool independent of the Web UI and REST servers.
 - A 100 ms per-socket send deadline.
-- A small concurrent-client cap.
-- Latest-value-wins queues and disconnection after a stalled send.
+- A three-client cap that reserves one socket for REST reconciliation.
+- One in-flight send per client, revision coalescing, and disconnection after
+  a stalled send or missed heartbeat.
 
 The shared-server prototype failed because one non-reading client produced a
 2.26-second REST response and one REST timeout. With the isolated server and
@@ -369,6 +370,23 @@ pin confirmation is implemented later with the async client and config flow.
   backpressure, disconnect, and resynchronization.
 - Verify telemetry-only changes produce push updates.
 - Run physical reliability and resource tests.
+
+Status: complete. The production WSS endpoint shares the dedicated
+port-8443 TLS identity while retaining its own client cap and push task. It
+authenticates the HTTP upgrade, reserves one integration socket for REST,
+sends hello plus complete snapshots, detects state changes every 250 ms,
+refreshes snapshots every 30 seconds, uses native ping/pong heartbeats, applies
+a 100 ms socket send deadline, acknowledges clean close frames, rejects
+application frames, and disconnects sessions immediately after credential
+rotation or revocation.
+
+The physical gate passed with a non-reading TLS client, two healthy WSS
+clients, continuous telemetry changes, and concurrent port-80 health, complete
+Web UI, and port-8443 REST probes. A three-minute soak processed 833 telemetry
+changes with no client or HTTP failures; both healthy clients remained
+connected, the stalled client was removed, and free heap finished 4,396 bytes
+above baseline. Twenty repeated connect/close cycles and a 50-second heartbeat
+test also passed.
 
 ### Phase 5: Async Python client
 
