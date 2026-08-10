@@ -87,13 +87,13 @@ class TestHeroState:
         assert label == "FAULT", f"Expected 'FAULT', got '{label}'"
 
     def test_hero_shows_floor_heat(self, device: DeviceClient):
-        """Clearing errors with floor heating mode should show FLOOR HEAT."""
+        """A running heating cycle should show the actual HEATING operation."""
         device.set_demo_fields(error1=0, error2=0)
         _wait_for_update()
         hero = device.find_widget(tag="hero_state")
         assert hero is not None
         label = hero.text_en or hero.text
-        assert label == "FLOOR HEAT", f"Expected 'FLOOR HEAT', got '{label}'"
+        assert label == "HEATING", f"Expected 'HEATING', got '{label}'"
 
     def test_hero_shows_cooling(self, device: DeviceClient):
         """Switching to cooling mode with compressor on should show COOLING."""
@@ -105,13 +105,13 @@ class TestHeroState:
         assert label == "COOLING", f"Expected 'COOLING', got '{label}'"
 
     def test_hero_shows_hot_water(self, device: DeviceClient):
-        """Hot water mode with compressor on should show HOT WATER."""
+        """Hot-water selection still reports the actual heating operation."""
         device.set_demo_fields(error1=0, error2=0, working_mode=MODE_HOT_WATER)
         _wait_for_update()
         hero = device.find_widget(tag="hero_state")
         assert hero is not None
         label = hero.text_en or hero.text
-        assert label == "HOT WATER", f"Expected 'HOT WATER', got '{label}'"
+        assert label == "HEATING", f"Expected 'HEATING', got '{label}'"
 
     def test_hero_shows_idle(self, device: DeviceClient):
         """Unit on, no errors, compressor off should show IDLE."""

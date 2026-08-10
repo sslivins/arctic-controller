@@ -2142,6 +2142,7 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     // Unified path — demo mode populates hp state at the arctic:: level
     cJSON_AddBoolToObject(root, "unit_on", hp.unit_on);
     cJSON_AddStringToObject(root, "mode", arctic::workingModeToString(hp.working_mode));
+    cJSON_AddStringToObject(root, "operation", arctic::heatPumpOperationToString(hp.operation));
     cJSON_AddBoolToObject(root, "defrosting", hp.isDefrosting());
     
     // Components

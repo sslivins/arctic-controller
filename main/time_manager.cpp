@@ -10,8 +10,13 @@
 #include <esp_sntp.h>
 #include <nvs_flash.h>
 #include <nvs.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/event_groups.h>
 
 static const char* TAG = "time_mgr";
+static constexpr EventBits_t TIME_VALID_BIT = BIT0;
+static constexpr time_t MIN_VALID_EPOCH = 1704067200;  // 2024-01-01 UTC
+static EventGroupHandle_t s_time_events = nullptr;
 
 // NVS namespace and keys
 #define NVS_NAMESPACE "time_cfg"
@@ -34,13 +39,11 @@ static const char* TAG = "time_mgr";
 static struct {
     bool initialized;
     bool sntp_configured;
-    bool synced;
     bool format_24h;
     char timezone[64];
 } time_state = {
     .initialized = false,
     .sntp_configured = false,
-    .synced = false,
     .format_24h = true,  // Default to 24-hour format
     .timezone = DEFAULT_TIMEZONE,
 };
@@ -49,7 +52,9 @@ static struct {
 static void time_sync_notification_cb(struct timeval* tv)
 {
     ESP_LOGI(TAG, "NTP time synchronized!");
-    time_state.synced = true;
+    if (s_time_events != nullptr && tv != nullptr && tv->tv_sec >= MIN_VALID_EPOCH) {
+        xEventGroupSetBits(s_time_events, TIME_VALID_BIT);
+    }
     event_log_time_synced(tv);
     
     // Log the current time
@@ -132,6 +137,13 @@ void time_mgr_init(void)
     }
     
     ESP_LOGI(TAG, "Initializing time manager...");
+    if (s_time_events == nullptr) {
+        s_time_events = xEventGroupCreate();
+        if (s_time_events == nullptr) {
+            ESP_LOGE(TAG, "Failed to create time-valid event group");
+            return;
+        }
+    }
     
     // Load saved timezone from NVS (or use default)
     load_timezone_from_nvs();
@@ -194,7 +206,11 @@ void time_mgr_stop_sync(void)
 
 bool time_mgr_is_synced(void)
 {
-    return time_state.synced;
+    if (s_time_events == nullptr) return false;
+    time_t now;
+    time(&now);
+    return now >= MIN_VALID_EPOCH &&
+           (xEventGroupGetBits(s_time_events) & TIME_VALID_BIT) != 0;
 }
 
 bool time_mgr_get_time_str(char* buf, size_t buf_len, const char* format)

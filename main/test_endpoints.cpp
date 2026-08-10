@@ -34,11 +34,13 @@
 #include "heatpump_errors_screen.h"
 #include "event_log.h"
 #include "event_log_screen.h"
+#include "history_storage.h"
 #include "tab_shell.h"
 #include "status_bar.h"
 #include "display_idle.h"
 #include <esp_timer.h>
 #include "png_encoder.h"
+#include <time.h>
 
 static const char* TAG = "test_api";
 
@@ -1564,6 +1566,75 @@ static esp_err_t clear_error_history_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/populate-temperature-history
+// ============================================================================
+
+static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    constexpr size_t SAMPLE_COUNT =
+        8 * 60 * 60 / HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+    auto* samples = static_cast<history_telemetry_sample_t*>(
+        heap_caps_calloc(SAMPLE_COUNT, sizeof(history_telemetry_sample_t),
+                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (samples == nullptr) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    time_t now;
+    time(&now);
+    uint32_t end =
+        ((uint32_t)now / HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC) *
+        HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+    uint32_t start = end - (8 * 60 * 60);
+
+    for (size_t i = 0; i < SAMPLE_COUNT; i++) {
+        auto& sample = samples[i];
+        sample.timestamp =
+            start + (uint32_t)i * HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+        sample.flags = HISTORY_TELEMETRY_CONNECTED |
+                       HISTORY_TELEMETRY_COMPRESSOR_VALID |
+                       HISTORY_TELEMETRY_INLET_VALID |
+                       HISTORY_TELEMETRY_OUTLET_VALID |
+                       HISTORY_TELEMETRY_SETPOINT_VALID;
+        if ((i % 240) < 160) {
+            sample.flags |= HISTORY_TELEMETRY_COMPRESSOR_RUNNING;
+        }
+
+        int16_t wave = (int16_t)(i % 160);
+        if (wave > 80) wave = (int16_t)(160 - wave);
+        if (i < SAMPLE_COUNT / 3) {
+            sample.mode = HISTORY_TELEMETRY_MODE_HEATING;
+            sample.inlet_deci_c = (int16_t)(330 + wave / 2);
+            sample.outlet_deci_c = (int16_t)(390 + wave * 3 / 4);
+            sample.setpoint_deci_c = 450;
+        } else if (i < 2 * SAMPLE_COUNT / 3) {
+            sample.mode = HISTORY_TELEMETRY_MODE_COOLING;
+            sample.inlet_deci_c = (int16_t)(240 - wave / 3);
+            sample.outlet_deci_c = (int16_t)(180 - wave / 2);
+            sample.setpoint_deci_c = 180;
+        } else {
+            sample.mode = HISTORY_TELEMETRY_MODE_HOT_WATER;
+            sample.inlet_deci_c = (int16_t)(360 + wave / 2);
+            sample.outlet_deci_c = (int16_t)(430 + wave * 3 / 4);
+            sample.setpoint_deci_c = 500;
+        }
+    }
+
+    esp_err_t err =
+        history_storage_seed_telemetry_for_test(samples, SAMPLE_COUNT);
+    heap_caps_free(samples);
+    if (err != ESP_OK) {
+        send_json_error(req, "500 Internal Server Error",
+                        esp_err_to_name(err));
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"success\":true,\"samples\":960}");
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/lock — acquire session lock
 // Body: {"session_id": "uuid-here", "ttl_seconds": 900}
 // ============================================================================
@@ -2073,6 +2144,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &clear_error_history_options_uri);
+
+    httpd_uri_t populate_temperature_history_uri = {
+        .uri = "/api/test/populate-temperature-history",
+        .method = HTTP_POST,
+        .handler = populate_temperature_history_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &populate_temperature_history_uri);
+
+    httpd_uri_t populate_temperature_history_options_uri = {
+        .uri = "/api/test/populate-temperature-history",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &populate_temperature_history_options_uri);
 
     httpd_uri_t notification_mock_uri = {
         .uri = "/api/test/notification-mock",

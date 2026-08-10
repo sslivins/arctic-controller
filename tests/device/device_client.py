@@ -432,6 +432,15 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def populate_temperature_history(self) -> dict:
+        """Replace telemetry history with an eight-hour graph fixture."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/populate-temperature-history",
+            timeout=30,
+        )
+        r.raise_for_status()
+        return r.json()
+
     def reboot(self) -> dict:
         """POST /api/ota/reboot — immediately reboot the device.
 

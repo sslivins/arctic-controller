@@ -10,6 +10,35 @@
  * The rest is reserved for the future telemetry timeline.
  */
 #define HISTORY_EVENT_REGION_SIZE (256 * 1024)
+#define HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC 30
+#define HISTORY_TELEMETRY_RETENTION_DAYS 14
+#define HISTORY_TELEMETRY_PAGE_CAPACITY 1024
+
+typedef enum {
+    HISTORY_TELEMETRY_MODE_UNKNOWN = 0,
+    HISTORY_TELEMETRY_MODE_HEATING = 1,
+    HISTORY_TELEMETRY_MODE_COOLING = 2,
+    HISTORY_TELEMETRY_MODE_HOT_WATER = 3,
+} history_telemetry_mode_t;
+
+enum {
+    HISTORY_TELEMETRY_CONNECTED = 1 << 0,
+    HISTORY_TELEMETRY_COMPRESSOR_VALID = 1 << 1,
+    HISTORY_TELEMETRY_COMPRESSOR_RUNNING = 1 << 2,
+    HISTORY_TELEMETRY_INLET_VALID = 1 << 3,
+    HISTORY_TELEMETRY_OUTLET_VALID = 1 << 4,
+    HISTORY_TELEMETRY_SETPOINT_VALID = 1 << 5,
+};
+
+typedef struct {
+    uint32_t timestamp;
+    uint32_t sequence;
+    int16_t inlet_deci_c;
+    int16_t outlet_deci_c;
+    int16_t setpoint_deci_c;
+    uint8_t mode;
+    uint8_t flags;
+} history_telemetry_sample_t;
 
 esp_err_t history_storage_init(void);
 
@@ -37,3 +66,27 @@ esp_err_t history_storage_replace_events(const event_entry_t* entries,
                                          size_t capacity,
                                          size_t head,
                                          size_t count);
+
+esp_err_t history_storage_append_telemetry(
+    const history_telemetry_sample_t* sample);
+
+esp_err_t history_storage_query_telemetry(
+    uint32_t start_timestamp,
+    uint32_t end_timestamp,
+    history_telemetry_sample_t* samples,
+    size_t capacity,
+    size_t* count);
+
+esp_err_t history_storage_latest_telemetry_timestamp(uint32_t* timestamp);
+
+/**
+ * Block new telemetry operations and wait for an in-flight operation before
+ * the history partition is erased.
+ */
+void history_storage_prepare_factory_reset(void);
+
+#ifdef CONFIG_TEST_ENDPOINTS
+esp_err_t history_storage_seed_telemetry_for_test(
+    const history_telemetry_sample_t* samples,
+    size_t count);
+#endif
