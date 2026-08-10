@@ -47,6 +47,9 @@ static char hostname[32] = "arctic";  // Actual hostname (may have suffix)
 // HTTP/HTTPS server handle (only one is active per boot)
 static httpd_handle_t server = NULL;      // HTTP (port 80) — always running
 static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — when TLS certs present
+#ifdef CONFIG_TEST_ENDPOINTS
+static httpd_handle_t websocket_test_server = NULL;  // WS feasibility (port 81)
+#endif
 
 // Embedded web files (from EMBED_FILES) - gzip compressed
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -338,8 +341,6 @@ bool api_server_start(void)
         http_config.recv_wait_timeout  = recv_timeout;
         http_config.max_open_sockets   = 4;
 #ifdef CONFIG_TEST_ENDPOINTS
-        // Feasibility tests exercise two persistent WebSockets alongside REST.
-        http_config.max_open_sockets   = 8;
         http_config.send_wait_timeout  = 1;
 #endif
         
@@ -367,7 +368,6 @@ bool api_server_start(void)
         ssl_config.httpd.recv_wait_timeout  = recv_timeout;
         ssl_config.httpd.max_open_sockets   = 4;      // TLS buffers in PSRAM via EXTERNAL_MEM_ALLOC
 #ifdef CONFIG_TEST_ENDPOINTS
-        ssl_config.httpd.max_open_sockets   = 8;
         ssl_config.httpd.send_wait_timeout  = 1;
 #endif
         ssl_config.servercert    = cert;
@@ -930,6 +930,25 @@ bool api_server_start(void)
         test_endpoints_register(server_ssl);
     }
     ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
+
+    httpd_config_t websocket_config = HTTPD_DEFAULT_CONFIG();
+    websocket_config.server_port = 81;
+    websocket_config.ctrl_port = 32770;
+    websocket_config.max_uri_handlers = 1;
+    websocket_config.max_open_sockets = 4;
+    websocket_config.stack_size = 8192;
+    websocket_config.lru_purge_enable = true;
+    websocket_config.recv_wait_timeout = 10;
+    websocket_config.send_wait_timeout = 1;
+    ret = httpd_start(&websocket_test_server, &websocket_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start isolated WebSocket test server: %s",
+                 esp_err_to_name(ret));
+        api_server_stop();
+        return false;
+    }
+    test_endpoints_register_websocket(websocket_test_server);
+    ESP_LOGI(TAG, "WebSocket feasibility server started on port 81");
 #endif
     
     // When HTTPS is active, add catch-all redirects on HTTP for non-essential endpoints.
@@ -967,6 +986,13 @@ bool api_server_start(void)
 
 void api_server_stop(void)
 {
+#ifdef CONFIG_TEST_ENDPOINTS
+    if (websocket_test_server != NULL) {
+        ESP_LOGI(TAG, "Stopping WebSocket feasibility server...");
+        httpd_stop(websocket_test_server);
+        websocket_test_server = NULL;
+    }
+#endif
     if (server_ssl != NULL) {
         ESP_LOGI(TAG, "Stopping HTTPS server...");
         httpd_ssl_stop(server_ssl);

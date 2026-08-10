@@ -17,6 +17,7 @@
 #include <esp_heap_caps.h>
 #include <cJSON.h>
 #include <lvgl.h>
+#include <lwip/sockets.h>
 #include <bsp/m5stack_tab5.h>
 #include "settings/settings_menu.h"
 #include "settings/settings_display_screen.h"
@@ -50,9 +51,19 @@ static uint8_t s_ws_feasibility_payload[WS_FEASIBILITY_MAX_PAYLOAD];
 static esp_err_t websocket_feasibility_handler(httpd_req_t* req)
 {
     if (req->method == HTTP_GET) {
+        const int fd = httpd_req_to_sockfd(req);
+        const timeval send_timeout = {
+            .tv_sec = 0,
+            .tv_usec = 100000,
+        };
+        if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &send_timeout,
+                       sizeof(send_timeout)) != 0) {
+            ESP_LOGE(TAG, "Failed to set WebSocket send timeout (fd=%d)", fd);
+            return ESP_FAIL;
+        }
         memset(s_ws_feasibility_payload, 'x', sizeof(s_ws_feasibility_payload));
         ESP_LOGI(TAG, "WebSocket feasibility client connected (fd=%d)",
-                 httpd_req_to_sockfd(req));
+                 fd);
         return ESP_OK;
     }
 
@@ -1936,7 +1947,7 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
 // Registration
 // ============================================================================
 
-void test_endpoints_register(httpd_handle_t server)
+void test_endpoints_register_websocket(httpd_handle_t server)
 {
     httpd_uri_t websocket_feasibility_uri = {
         .uri = "/api/test/ws-feasibility",
@@ -1948,7 +1959,10 @@ void test_endpoints_register(httpd_handle_t server)
         .supported_subprotocol = NULL,
     };
     httpd_register_uri_handler(server, &websocket_feasibility_uri);
+}
 
+void test_endpoints_register(httpd_handle_t server)
+{
     httpd_uri_t ui_state_uri = {
         .uri = "/api/test/ui-state",
         .method = HTTP_GET,

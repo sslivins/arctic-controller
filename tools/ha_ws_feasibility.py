@@ -14,9 +14,18 @@ import websockets
 
 def fetch_json(url: str) -> tuple[dict, float]:
     started = time.perf_counter()
-    with urllib.request.urlopen(url, timeout=3) as response:
+    request = urllib.request.Request(url, headers={"Connection": "close"})
+    with urllib.request.urlopen(request, timeout=3) as response:
         payload = json.load(response)
     return payload, (time.perf_counter() - started) * 1000
+
+
+def fetch_bytes(url: str) -> float:
+    started = time.perf_counter()
+    request = urllib.request.Request(url, headers={"Connection": "close"})
+    with urllib.request.urlopen(request, timeout=3) as response:
+        response.read()
+    return (time.perf_counter() - started) * 1000
 
 
 async def probe_rest(url: str, duration: float) -> tuple[list[float], int]:
@@ -27,6 +36,36 @@ async def probe_rest(url: str, duration: float) -> tuple[list[float], int]:
         try:
             _, latency = await asyncio.to_thread(fetch_json, url)
             latencies.append(latency)
+        except Exception:
+            failures += 1
+        await asyncio.sleep(0.05)
+    return latencies, failures
+
+
+async def probe_web_ui(url: str, duration: float) -> tuple[list[float], int]:
+    latencies: list[float] = []
+    failures = 0
+    deadline = time.monotonic() + duration
+    while time.monotonic() < deadline:
+        try:
+            latencies.append(await asyncio.to_thread(fetch_bytes, url))
+        except Exception:
+            failures += 1
+        await asyncio.sleep(0.25)
+    return latencies, failures
+
+
+async def probe_websocket(
+    client: websockets.ClientConnection, duration: float
+) -> tuple[list[float], int]:
+    latencies: list[float] = []
+    failures = 0
+    deadline = time.monotonic() + duration
+    while time.monotonic() < deadline:
+        started = time.perf_counter()
+        try:
+            await verify_client(client, size=256)
+            latencies.append((time.perf_counter() - started) * 1000)
         except Exception:
             failures += 1
         await asyncio.sleep(0.05)
@@ -99,9 +138,18 @@ async def run(args: argparse.Namespace) -> dict:
             flood_task = asyncio.create_task(
                 flood_without_reading(slow_client, args.stress_seconds)
             )
-            stress_latencies, stress_failures = await probe_rest(
-                f"{args.http}/api/health", args.stress_seconds
+            rest_task = asyncio.create_task(
+                probe_rest(f"{args.http}/api/health", args.stress_seconds)
             )
+            web_ui_task = asyncio.create_task(
+                probe_web_ui(f"{args.http}/", args.stress_seconds)
+            )
+            websocket_task = asyncio.create_task(
+                probe_websocket(healthy_clients[0], args.stress_seconds)
+            )
+            stress_latencies, stress_failures = await rest_task
+            web_ui_latencies, web_ui_failures = await web_ui_task
+            healthy_ws_latencies, healthy_ws_failures = await websocket_task
             flood_sent = await flood_task
         finally:
             await slow_client.close()
@@ -120,6 +168,10 @@ async def run(args: argparse.Namespace) -> dict:
         "stalled_client_rest": summarize(stress_latencies),
         "stalled_client_failures": stress_failures,
         "stalled_client_commands_sent": flood_sent,
+        "web_ui_during_stall": summarize(web_ui_latencies),
+        "web_ui_failures": web_ui_failures,
+        "healthy_ws_during_stall": summarize(healthy_ws_latencies),
+        "healthy_ws_failures": healthy_ws_failures,
         "free_heap_before": info_before.get("free_heap"),
         "free_heap_after": info_after.get("free_heap"),
         "min_free_heap_after": info_after.get("min_free_heap"),
@@ -127,8 +179,14 @@ async def run(args: argparse.Namespace) -> dict:
     result["passed"] = (
         baseline_failures == 0
         and stress_failures == 0
+        and web_ui_failures == 0
+        and healthy_ws_failures == 0
         and result["stalled_client_rest"].get("max_ms", 9999) < 1500
         and result["stalled_client_rest"].get("p95_ms", 9999) < 500
+        and result["web_ui_during_stall"].get("max_ms", 9999) < 1500
+        and result["web_ui_during_stall"].get("p95_ms", 9999) < 750
+        and result["healthy_ws_during_stall"].get("max_ms", 9999) < 1500
+        and result["healthy_ws_during_stall"].get("p95_ms", 9999) < 750
     )
     return result
 
@@ -137,7 +195,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--http", default="http://192.168.1.21")
     parser.add_argument(
-        "--ws", default="ws://192.168.1.21/api/test/ws-feasibility"
+        "--ws", default="ws://192.168.1.21:81/api/test/ws-feasibility"
     )
     parser.add_argument("--baseline-seconds", type=float, default=5)
     parser.add_argument("--stress-seconds", type=float, default=15)

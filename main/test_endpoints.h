@@ -22,4 +22,9 @@
  */
 void test_endpoints_register(httpd_handle_t server);
 
+/**
+ * Register the WebSocket feasibility endpoint on its isolated test server.
+ */
+void test_endpoints_register_websocket(httpd_handle_t server);
+
 #endif // CONFIG_TEST_ENDPOINTS

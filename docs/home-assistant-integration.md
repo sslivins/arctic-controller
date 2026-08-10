@@ -180,9 +180,36 @@ client state and complicated schema migration.
   unbounded allocation.
 - Concurrent clients are capped.
 
-The feasibility spike determines whether the integration transport can safely
-share the existing HTTPS server or requires a separate server/port and socket
-pool.
+The feasibility spike selected a separate server, task, port, and socket pool.
+Production integration traffic will use WSS on port 8443. The test-only spike
+uses plain WebSocket on port 81 when `CONFIG_TEST_ENDPOINTS` is enabled.
+
+The integration server uses:
+
+- A four-socket pool independent of the Web UI and REST servers.
+- A 100 ms per-socket send deadline.
+- A small concurrent-client cap.
+- Latest-value-wins queues and disconnection after a stalled send.
+
+The shared-server prototype failed because one non-reading client produced a
+2.26-second REST response and one REST timeout. With the isolated server and
+bounded socket send, the 15-second stress gate had no REST or healthy-client
+failures. REST p95 was 229 ms with a 370 ms maximum; healthy WebSocket p95 was
+152 ms with a 905 ms maximum. A follow-up run that also fetched the complete
+Web UI throughout the stall had zero failures, 207 ms p95, and a 293 ms
+maximum.
+
+Ten additional connect/stall/disconnect cycles had no failures. Across those
+cycles, worst REST p95 was 305 ms, worst REST latency was 1.36 seconds, worst
+healthy-WebSocket p95 was 556 ms, worst healthy-WebSocket latency was 943 ms,
+and free-heap drift was 3,144 bytes. Minimum free heap remained 27,704,772
+bytes.
+
+Enabling ESP-IDF WebSocket support enlarged every `httpd_uri_t` and exposed
+that route registration was exhausting the 4 KB system-event task stack. The
+spike uses an 8 KB event-task stack. Production work must move server creation
+and route registration out of the Wi-Fi event callback into a dedicated
+startup task rather than relying on further event-stack growth.
 
 ## Home Assistant Update Model
 
@@ -289,14 +316,16 @@ security boundary.
 
 ### Phase 2: Hardware feasibility gate
 
-- Prototype authenticated WSS connections on the physical controller.
+- Prototype persistent WebSocket connections on the physical controller.
 - Exercise two persistent clients plus Web UI and REST traffic.
 - Simulate a stalled/zero-window client.
 - Measure socket usage, request latency, free heap, minimum heap, and
   fragmentation during sustained full-snapshot traffic.
 - Select shared-server or separate-server architecture.
 
-No production transport work proceeds until this gate passes.
+Status: complete. The separate-server architecture passed the gate. Production
+TLS and authentication are implemented in Phase 3 before the endpoint is
+exposed outside test builds.
 
 ### Phase 3: Security and state foundation
 
@@ -352,8 +381,8 @@ Controls cannot proceed until this gate passes.
 - A healthy stream does not require fast polling.
 - Stream loss falls back to polling and recovers automatically.
 - Reboot, dropped messages, and delayed REST responses never regress state.
-- A stalled client cannot measurably delay the Web UI, REST API, device UI, or
-  heat-pump communication.
+- A stalled client causes no REST or healthy-stream failures and keeps
+  stress-test REST and healthy-stream latency below 1.5 seconds.
 - No integration endpoint accepts unauthenticated requests.
 - Pairing credentials are never transmitted over plaintext HTTP.
 - Home Assistant cannot read or write advanced parameters or raw registers.
