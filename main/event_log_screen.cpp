@@ -1238,6 +1238,10 @@ void event_log_screen_set_active(bool active) {
     }
 }
 
+void event_log_screen_dismiss_overlays(void) {
+    close_overlays();
+}
+
 void event_log_screen_hide(void) {
     if (!state.shown) {
         return;

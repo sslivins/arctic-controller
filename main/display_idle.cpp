@@ -1,5 +1,5 @@
 #include "display_idle.h"
-
+#include "app_navigation.h"
 #include "settings/settings_display_screen.h"
 #include <bsp/display.h>
 #include <esp_log.h>
@@ -75,6 +75,7 @@ void display_idle_force_dim(void)
 
 void display_idle_force_off(void)
 {
+    app_navigation_return_home();
     esp_err_t err = bsp_display_brightness_set(0);
     if (err == ESP_OK) {
         s_dimmed = false;
@@ -145,7 +146,7 @@ bool display_idle_set_timeouts(uint8_t dim_minutes, uint8_t off_minutes)
     s_off_minutes = off_minutes;
     display_idle_handle_activity();
     s_last_activity_ms = lv_tick_get();
-    ESP_LOGI(TAG, "Idle timeouts updated: dim=%u min, off=%u min after dim",
+    ESP_LOGI(TAG, "Idle timeouts updated: dim=%u min, off=%u min",
              (unsigned)dim_minutes, (unsigned)off_minutes);
     return true;
 }
@@ -166,6 +167,10 @@ static void idle_timer_cb(lv_timer_t*)
     if (!s_dimmed && !s_off && s_dim_minutes > 0 &&
         lv_tick_elaps(s_last_activity_ms) >= minutes_to_ms(s_dim_minutes)) {
         display_idle_force_dim();
+    } else if (!s_dimmed && !s_off && s_dim_minutes == 0 &&
+               s_off_minutes > 0 &&
+               lv_tick_elaps(s_last_activity_ms) >= minutes_to_ms(s_off_minutes)) {
+        display_idle_force_off();
     } else if (s_dimmed && s_off_minutes > 0 &&
                lv_tick_elaps(s_dimmed_since_ms) >= minutes_to_ms(s_off_minutes)) {
         display_idle_force_off();
@@ -187,6 +192,6 @@ void display_idle_init(void)
     }
     lv_timer_create(idle_timer_cb, CHECK_INTERVAL_MS, nullptr);
     s_initialized = true;
-    ESP_LOGI(TAG, "Idle display stages: dim=%u min, off=%u min after dim",
+    ESP_LOGI(TAG, "Idle display stages: dim=%u min, off=%u min",
              (unsigned)s_dim_minutes, (unsigned)s_off_minutes);
 }

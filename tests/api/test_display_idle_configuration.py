@@ -12,6 +12,12 @@ def test_display_idle_has_additive_stages():
     assert "lv_tick_elaps(s_dimmed_since_ms)" in source
 
 
+def test_off_timeout_still_runs_when_dimming_is_never():
+    source = (ROOT / "main" / "display_idle.cpp").read_text(encoding="utf-8")
+    assert "s_dim_minutes == 0" in source
+    assert "lv_tick_elaps(s_last_activity_ms) >= minutes_to_ms(s_off_minutes)" in source
+
+
 def test_display_timeout_controls_are_device_only():
     device_ui = (
         ROOT / "main" / "settings" / "settings_display_screen.cpp"

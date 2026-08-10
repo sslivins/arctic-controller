@@ -43,3 +43,26 @@ def test_never_is_available_for_each_timeout(device: DeviceClient):
 
     device.set_roller("display_dim_timeout", 1)
     device.set_roller("display_off_timeout", 4)
+
+
+def test_off_timeout_runs_when_dimming_is_never(device: DeviceClient):
+    """Never dimming still allows the independent off timeout to run."""
+    _open_display(device)
+    device.set_roller("display_dim_timeout", 0)
+    device.set_roller("display_off_timeout", 1)
+    device.click(tag="display_back")
+    device.click(tag="settings_close")
+    assert device.wait_for_screen("main", timeout=5.0)
+
+    time.sleep(65)
+    status = device.set_display_idle("status")
+    assert status["dimmed"] is False
+    assert status["off"] is True
+
+    wake = device.click(tag="settings")
+    assert wake["consumed"] is True
+    assert device.screen == "main"
+
+    _open_display(device)
+    device.set_roller("display_dim_timeout", 1)
+    device.set_roller("display_off_timeout", 4)

@@ -19,8 +19,10 @@
 #include "settings/settings_wifi_screen.h"
 #include "settings/settings_firmware_screen.h"
 #include "settings/settings_time_screen.h"
+#include "settings/settings_language_screen.h"
 #include "settings/settings_display_screen.h"
 #include "display_idle.h"
+#include "app_navigation.h"
 #include "i18n/i18n.h"
 #include "auth_manager.h"
 #include "tls_manager.h"
@@ -28,6 +30,10 @@
 #include "tuya/tuya_listener.h"
 #include "tuya/macon_master.h"
 #include "heatpump_screen.h"
+#include "heatpump_control_screen.h"
+#include "heatpump_history_screen.h"
+#include "heatpump_errors_screen.h"
+#include "event_log_screen.h"
 #include "nav_bar.h"
 #include "tab_shell.h"
 #include "app_preferences.h"
@@ -40,6 +46,38 @@ static const char* TAG = "main";
 
 // Main screen reference (for returning from WiFi screen)
 static lv_obj_t* main_screen = NULL;
+
+void app_navigation_return_home(void)
+{
+    if (!main_screen) return;
+
+    event_log_screen_dismiss_overlays();
+    heatpump_control_dismiss_overlays();
+    if (heatpump_history_is_shown()) {
+        heatpump_history_hide();
+    }
+    if (heatpump_errors_is_shown()) {
+        heatpump_errors_hide();
+    }
+
+    // Message boxes use the top layer rather than the active screen.
+    lv_obj_clean(lv_layer_top());
+
+    if (settings_menu_is_visible()) {
+        settings_menu_force_close(main_screen);
+    } else {
+        if (wifi_screen_is_visible()) wifi_screen_close();
+        if (firmware_screen_is_visible()) firmware_screen_close();
+        if (time_screen_is_visible()) time_screen_close();
+        if (language_screen_is_visible()) language_screen_close();
+        if (display_screen_is_visible()) display_screen_close();
+        if (lv_screen_active() != main_screen) {
+            lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
+        }
+    }
+
+    tab_shell_select(NAV_TAB_HOME);
+}
 
 // Forward declarations
 void create_ui(void);

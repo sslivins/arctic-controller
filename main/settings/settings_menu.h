@@ -41,6 +41,11 @@ void settings_menu_create(const settings_menu_config_t* config);
 void settings_menu_close(void);
 
 /**
+ * @brief Abandon settings and any active sub-screen, returning to a root screen.
+ */
+void settings_menu_force_close(lv_obj_t* return_screen);
+
+/**
  * @brief Check if settings menu is currently visible
  */
 bool settings_menu_is_visible(void);

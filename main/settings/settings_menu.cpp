@@ -788,6 +788,40 @@ void settings_menu_close(void)
     state.screen = NULL;
 }
 
+void settings_menu_force_close(lv_obj_t* return_screen)
+{
+    if (!state.visible) return;
+
+    lv_obj_t* active_screen = lv_screen_active();
+    if (state.sub_screen_active) {
+        switch (state.active_sub_screen) {
+            case SETTINGS_WIFI: wifi_screen_close(); break;
+            case SETTINGS_FIRMWARE: firmware_screen_close(); break;
+            case SETTINGS_TIME: time_screen_close(); break;
+            case SETTINGS_LANGUAGE: language_screen_close(); break;
+            case SETTINGS_DISPLAY: display_screen_close(); break;
+            default: break;
+        }
+    }
+
+    // A settings sub-screen leaves the settings root allocated but hidden.
+    if (state.screen && state.screen != active_screen) {
+        lv_obj_delete(state.screen);
+    }
+
+    state.visible = false;
+    state.sub_screen_active = false;
+    state.screen = NULL;
+    state.reboot_overlay = NULL;
+    state.factory_reset_overlay = NULL;
+    state.factory_reset_confirm_btn = NULL;
+    state.factory_reset_confirm_label = NULL;
+
+    if (return_screen && active_screen != return_screen) {
+        lv_screen_load_anim(return_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
+    }
+}
+
 bool settings_menu_is_visible(void)
 {
     return state.visible;

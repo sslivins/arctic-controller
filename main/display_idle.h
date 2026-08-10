@@ -44,7 +44,7 @@ bool display_idle_is_off(void);
 /**
  * Get or update the persisted staged idle timers.
  * A value of 0 means Never; valid non-zero values are 1-5 minutes.
- * The off timer starts only after the display has dimmed.
+ * The off timer starts after dimming, or after activity when dimming is Never.
  */
 uint8_t display_idle_get_dim_minutes(void);
 uint8_t display_idle_get_off_minutes(void);
