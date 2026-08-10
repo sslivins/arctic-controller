@@ -9,6 +9,10 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # Main task stack - needs headroom for LVGL deep layout/font measurement chains
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
+# Home Assistant local-push transport and device feasibility tests
+CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
+
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
 # Enable XIP from PSRAM - allows PSRAM reads (display framebuffer) to continue

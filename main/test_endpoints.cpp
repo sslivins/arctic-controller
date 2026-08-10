@@ -44,6 +44,48 @@
 
 static const char* TAG = "test_api";
 
+static constexpr size_t WS_FEASIBILITY_MAX_PAYLOAD = 8192;
+static uint8_t s_ws_feasibility_payload[WS_FEASIBILITY_MAX_PAYLOAD];
+
+static esp_err_t websocket_feasibility_handler(httpd_req_t* req)
+{
+    if (req->method == HTTP_GET) {
+        memset(s_ws_feasibility_payload, 'x', sizeof(s_ws_feasibility_payload));
+        ESP_LOGI(TAG, "WebSocket feasibility client connected (fd=%d)",
+                 httpd_req_to_sockfd(req));
+        return ESP_OK;
+    }
+
+    httpd_ws_frame_t frame = {};
+    esp_err_t err = httpd_ws_recv_frame(req, &frame, 0);
+    if (err != ESP_OK) return err;
+    if (frame.len > 64) return ESP_ERR_INVALID_SIZE;
+
+    uint8_t request[65] = {};
+    frame.payload = request;
+    err = httpd_ws_recv_frame(req, &frame, frame.len);
+    if (err != ESP_OK) return err;
+
+    if (frame.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
+
+    unsigned int requested_len = 1024;
+    if (sscanf(reinterpret_cast<const char*>(request),
+               "payload:%u", &requested_len) != 1) {
+        requested_len = 1024;
+    }
+    size_t response_len = requested_len;
+    if (response_len < 1) response_len = 1;
+    if (response_len > WS_FEASIBILITY_MAX_PAYLOAD) {
+        response_len = WS_FEASIBILITY_MAX_PAYLOAD;
+    }
+
+    httpd_ws_frame_t response = {};
+    response.type = HTTPD_WS_TYPE_BINARY;
+    response.payload = s_ws_feasibility_payload;
+    response.len = response_len;
+    return httpd_ws_send_frame(req, &response);
+}
+
 // ============================================================================
 // Session Lock State — prevents concurrent test sessions on the device
 // ============================================================================
@@ -1896,6 +1938,17 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
 
 void test_endpoints_register(httpd_handle_t server)
 {
+    httpd_uri_t websocket_feasibility_uri = {
+        .uri = "/api/test/ws-feasibility",
+        .method = HTTP_GET,
+        .handler = websocket_feasibility_handler,
+        .user_ctx = NULL,
+        .is_websocket = true,
+        .handle_ws_control_frames = false,
+        .supported_subprotocol = NULL,
+    };
+    httpd_register_uri_handler(server, &websocket_feasibility_uri);
+
     httpd_uri_t ui_state_uri = {
         .uri = "/api/test/ui-state",
         .method = HTTP_GET,

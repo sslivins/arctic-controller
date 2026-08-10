@@ -337,6 +337,11 @@ bool api_server_start(void)
         http_config.max_resp_headers   = max_headers;
         http_config.recv_wait_timeout  = recv_timeout;
         http_config.max_open_sockets   = 4;
+#ifdef CONFIG_TEST_ENDPOINTS
+        // Feasibility tests exercise two persistent WebSockets alongside REST.
+        http_config.max_open_sockets   = 8;
+        http_config.send_wait_timeout  = 1;
+#endif
         
         ret = httpd_start(&server, &http_config);
         if (ret != ESP_OK) {
@@ -361,6 +366,10 @@ bool api_server_start(void)
         ssl_config.httpd.max_resp_headers   = max_headers;
         ssl_config.httpd.recv_wait_timeout  = recv_timeout;
         ssl_config.httpd.max_open_sockets   = 4;      // TLS buffers in PSRAM via EXTERNAL_MEM_ALLOC
+#ifdef CONFIG_TEST_ENDPOINTS
+        ssl_config.httpd.max_open_sockets   = 8;
+        ssl_config.httpd.send_wait_timeout  = 1;
+#endif
         ssl_config.servercert    = cert;
         ssl_config.servercert_len = cert_len;
         ssl_config.prvtkey_pem   = key;
