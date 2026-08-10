@@ -8,6 +8,8 @@
 #include <nvs_flash.h>
 #include <nvs.h>
 #include <mbedtls/sha256.h>
+#include <mbedtls/platform_util.h>
+#include <freertos/FreeRTOS.h>
 #include <string.h>
 #include <time.h>
 
@@ -20,6 +22,7 @@ static const char* NVS_KEY_API_ENABLED = "api_en";
 static const char* NVS_KEY_USERNAME = "username";
 static const char* NVS_KEY_PASS_HASH = "pass_hash";
 static const char* NVS_KEY_API_KEY = "api_key";
+static const char* NVS_KEY_INTEGRATION_HASH = "ha_hash";
 
 // Session structure
 typedef struct {
@@ -38,8 +41,11 @@ static struct {
     uint8_t password_hash[32];  // SHA-256
     bool password_set;
     char api_key[AUTH_API_KEY_LEN + 1];
+    uint8_t integration_token_hash[32];
+    bool integration_token_set;
     session_t sessions[AUTH_MAX_SESSIONS];
 } state = {};
+static portMUX_TYPE integration_token_lock = portMUX_INITIALIZER_UNLOCKED;
 
 // ============================================================================
 // Helper Functions
@@ -64,9 +70,18 @@ static void hash_password(const char* password, uint8_t* hash_out)
     mbedtls_sha256_free(&ctx);
 }
 
+static bool constant_time_equal(const uint8_t* lhs, const uint8_t* rhs, size_t len)
+{
+    uint8_t difference = 0;
+    for (size_t i = 0; i < len; ++i) {
+        difference |= lhs[i] ^ rhs[i];
+    }
+    return difference == 0;
+}
+
 static bool load_from_nvs(void)
 {
-    nvs_handle_t nvs;
+    nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
     if (err != ESP_OK) {
         ESP_LOGI(TAG, "No auth settings in NVS (err=%s), will use defaults", esp_err_to_name(err));
@@ -113,6 +128,16 @@ static bool load_from_nvs(void)
     if (nvs_get_str(nvs, NVS_KEY_API_KEY, state.api_key, &len) != ESP_OK) {
         state.api_key[0] = '\0';
     }
+
+    len = sizeof(state.integration_token_hash);
+    err = nvs_get_blob(nvs, NVS_KEY_INTEGRATION_HASH,
+                       state.integration_token_hash, &len);
+    state.integration_token_set =
+        err == ESP_OK && len == sizeof(state.integration_token_hash);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Failed to load integration token hash: %s",
+                 esp_err_to_name(err));
+    }
     
     nvs_close(nvs);
     return true;
@@ -120,7 +145,7 @@ static bool load_from_nvs(void)
 
 static bool save_to_nvs(void)
 {
-    nvs_handle_t nvs;
+    nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
@@ -448,4 +473,115 @@ bool auth_mgr_validate_api_key(const char* key)
     }
     
     return strcmp(key, state.api_key) == 0;
+}
+
+// ============================================================================
+// Home Assistant Integration Authentication
+// ============================================================================
+
+bool auth_mgr_has_integration_token(void)
+{
+    portENTER_CRITICAL(&integration_token_lock);
+    const bool configured = state.integration_token_set;
+    portEXIT_CRITICAL(&integration_token_lock);
+    return configured;
+}
+
+bool auth_mgr_issue_integration_token(char* buffer)
+{
+    if (buffer == NULL) {
+        return false;
+    }
+
+    char token[AUTH_INTEGRATION_TOKEN_LEN + 1];
+    uint8_t token_hash[sizeof(state.integration_token_hash)];
+    generate_random_hex(token, AUTH_INTEGRATION_TOKEN_LEN);
+    hash_password(token, token_hash);
+
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_blob(nvs, NVS_KEY_INTEGRATION_HASH,
+                           token_hash, sizeof(token_hash));
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    if (nvs != 0) {
+        nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to persist integration token hash: %s",
+                 esp_err_to_name(err));
+        buffer[0] = '\0';
+        mbedtls_platform_zeroize(token, sizeof(token));
+        mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+        return false;
+    }
+
+    portENTER_CRITICAL(&integration_token_lock);
+    memcpy(state.integration_token_hash, token_hash, sizeof(token_hash));
+    state.integration_token_set = true;
+    portEXIT_CRITICAL(&integration_token_lock);
+    memcpy(buffer, token, sizeof(token));
+    mbedtls_platform_zeroize(token, sizeof(token));
+    mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+    ESP_LOGI(TAG, "Integration token issued");
+    return true;
+}
+
+bool auth_mgr_revoke_integration_token(void)
+{
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_erase_key(nvs, NVS_KEY_INTEGRATION_HASH);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    if (nvs != 0) {
+        nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to revoke integration token: %s",
+                 esp_err_to_name(err));
+        return false;
+    }
+
+    portENTER_CRITICAL(&integration_token_lock);
+    mbedtls_platform_zeroize(state.integration_token_hash,
+                             sizeof(state.integration_token_hash));
+    state.integration_token_set = false;
+    portEXIT_CRITICAL(&integration_token_lock);
+    ESP_LOGI(TAG, "Integration token revoked");
+    return true;
+}
+
+bool auth_mgr_validate_integration_token(const char* token)
+{
+    if (token == NULL || strlen(token) != AUTH_INTEGRATION_TOKEN_LEN) {
+        return false;
+    }
+
+    uint8_t token_hash[sizeof(state.integration_token_hash)];
+    uint8_t expected_hash[sizeof(state.integration_token_hash)];
+    portENTER_CRITICAL(&integration_token_lock);
+    const bool configured = state.integration_token_set;
+    memcpy(expected_hash, state.integration_token_hash, sizeof(expected_hash));
+    portEXIT_CRITICAL(&integration_token_lock);
+    if (!configured) {
+        mbedtls_platform_zeroize(expected_hash, sizeof(expected_hash));
+        return false;
+    }
+
+    hash_password(token, token_hash);
+    const bool valid = constant_time_equal(
+        token_hash, expected_hash, sizeof(token_hash));
+    mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+    mbedtls_platform_zeroize(expected_hash, sizeof(expected_hash));
+    return valid;
 }

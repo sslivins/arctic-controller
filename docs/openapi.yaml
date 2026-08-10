@@ -66,6 +66,8 @@ tags:
     description: Operational event log
   - name: Logs
     description: System debug log buffer
+  - name: HomeAssistant
+    description: Strictly authenticated local Home Assistant integration
 
 paths:
   /login:
@@ -2420,6 +2422,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/capabilities:
+    get:
+      tags:
+        - HomeAssistant
+      summary: Home Assistant integration capabilities
+      description: |
+        Returns the stable device identity, protocol version, supported
+        transports, read/control capabilities, and setpoint limits. Production
+        firmware exposes this endpoint only over HTTPS.
+      operationId: getHomeAssistantCapabilities
+      security:
+        - integrationBearer: []
+      responses:
+        '200':
+          description: Integration capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCapabilities'
+        '401':
+          description: Missing or invalid integration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/state:
+    get:
+      tags:
+        - HomeAssistant
+      summary: Coherent Home Assistant state snapshot
+      description: |
+        Returns a complete versioned state snapshot. Revisions are monotonic
+        within one boot and change whenever an exposed state field changes.
+        Production firmware exposes this endpoint only over HTTPS.
+      operationId: getHomeAssistantState
+      security:
+        - integrationBearer: []
+      responses:
+        '200':
+          description: Versioned state snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantStateSnapshot'
+        '401':
+          description: Missing or invalid integration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     apiKey:
@@ -2432,6 +2486,13 @@ components:
       in: cookie
       name: arctic_session
       description: Session cookie obtained from /login endpoint
+    integrationBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: 256-bit integration token
+      description: |
+        Dedicated token issued only by the physical Home Assistant pairing
+        flow. Existing web/API authentication settings never bypass it.
 
   schemas:
     Error:
@@ -2440,6 +2501,102 @@ components:
         error:
           type: string
           description: Error message
+
+    HomeAssistantCapabilities:
+      type: object
+      required:
+        - protocol_version
+        - device_id
+        - model
+        - firmware_version
+        - transports
+        - capabilities
+        - setpoint_limits_c
+      properties:
+        protocol_version:
+          type: integer
+          example: 1
+        device_id:
+          type: string
+          pattern: '^arctic-[0-9a-f]{12}$'
+        model:
+          type: string
+        firmware_version:
+          type: string
+        transports:
+          type: object
+          required: [rest, websocket]
+          properties:
+            rest:
+              type: boolean
+            websocket:
+              type: boolean
+        capabilities:
+          type: object
+          required:
+            - read_state
+            - control_power
+            - control_mode
+            - control_setpoints
+            - advanced_parameters
+            - raw_registers
+          properties:
+            read_state:
+              type: boolean
+            control_power:
+              type: boolean
+            control_mode:
+              type: boolean
+            control_setpoints:
+              type: boolean
+            advanced_parameters:
+              type: boolean
+              enum: [false]
+            raw_registers:
+              type: boolean
+              enum: [false]
+        setpoint_limits_c:
+          type: object
+
+    HomeAssistantStateSnapshot:
+      type: object
+      required:
+        - protocol_version
+        - device_id
+        - boot_id
+        - revision
+        - captured_at_ms
+        - state
+      properties:
+        protocol_version:
+          type: integer
+          example: 1
+        device_id:
+          type: string
+          pattern: '^arctic-[0-9a-f]{12}$'
+        boot_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+        revision:
+          type: integer
+          minimum: 1
+        captured_at_ms:
+          type: integer
+          minimum: 0
+        state:
+          type: object
+          required:
+            - connected
+            - unit_on
+            - mode
+            - operation
+            - defrosting
+            - components
+            - temperatures_c
+            - setpoints_c
+            - readings
+            - error
+
 
     LogEntry:
       type: object

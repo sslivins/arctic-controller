@@ -28,6 +28,7 @@
 #include "settings/settings_types.h"
 #include "i18n/i18n.h"
 #include "heatpump_controller.h"
+#include "auth_manager.h"
 #include "app_preferences.h"
 #include "heatpump_errors.h"
 #include "heatpump_temps_screen.h"
@@ -48,6 +49,37 @@ static const char* TAG = "test_api";
 static constexpr size_t WS_FEASIBILITY_MAX_PAYLOAD = 8192;
 static uint8_t s_ws_feasibility_payload[WS_FEASIBILITY_MAX_PAYLOAD];
 
+static void set_json_content_type(httpd_req_t* req);
+static void send_json_error(
+    httpd_req_t* req, const char* status, const char* message);
+
+static esp_err_t integration_token_post_handler(httpd_req_t* req)
+{
+    char token[AUTH_INTEGRATION_TOKEN_LEN + 1];
+    if (!auth_mgr_issue_integration_token(token)) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not persist integration token");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "token", token);
+    char* json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    memset(token, 0, sizeof(token));
+    if (json == NULL) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not serialize integration token");
+        return ESP_OK;
+    }
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    return ESP_OK;
+}
+
 static esp_err_t websocket_feasibility_handler(httpd_req_t* req)
 {
     if (req->method == HTTP_GET) {
@@ -61,6 +93,7 @@ static esp_err_t websocket_feasibility_handler(httpd_req_t* req)
             ESP_LOGE(TAG, "Failed to set WebSocket send timeout (fd=%d)", fd);
             return ESP_FAIL;
         }
+
         memset(s_ws_feasibility_payload, 'x', sizeof(s_ws_feasibility_payload));
         ESP_LOGI(TAG, "WebSocket feasibility client connected (fd=%d)",
                  fd);
@@ -1963,6 +1996,14 @@ void test_endpoints_register_websocket(httpd_handle_t server)
 
 void test_endpoints_register(httpd_handle_t server)
 {
+    httpd_uri_t integration_token_uri = {
+        .uri = "/api/test/ha-token",
+        .method = HTTP_POST,
+        .handler = integration_token_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &integration_token_uri);
+
     httpd_uri_t ui_state_uri = {
         .uri = "/api/test/ui-state",
         .method = HTTP_GET,

@@ -15,6 +15,8 @@ extern "C" {
 #define AUTH_SESSION_TOKEN_LEN 32
 // API key length (32 hex chars)
 #define AUTH_API_KEY_LEN 32
+// Home Assistant integration token length (64 hex chars = 256 bits)
+#define AUTH_INTEGRATION_TOKEN_LEN 64
 // Maximum concurrent sessions
 #define AUTH_MAX_SESSIONS 4
 // Session lifetime in seconds (7 days)
@@ -123,6 +125,40 @@ bool auth_mgr_regenerate_api_key(char* buffer);
  * @return true if key matches
  */
 bool auth_mgr_validate_api_key(const char* key);
+
+// ============================================================================
+// Home Assistant Integration Authentication
+// ============================================================================
+
+/**
+ * @brief Check whether a dedicated integration credential has been paired.
+ */
+bool auth_mgr_has_integration_token(void);
+
+/**
+ * @brief Generate and persist a new integration credential.
+ *
+ * The plaintext token is returned once and only its SHA-256 hash is stored.
+ * This function must only be called from a physically authorized pairing flow.
+ *
+ * @param buffer Buffer to receive the token (AUTH_INTEGRATION_TOKEN_LEN+1).
+ * @return true when the hash was committed to NVS.
+ */
+bool auth_mgr_issue_integration_token(char* buffer);
+
+/**
+ * @brief Revoke the current integration credential.
+ * @return true when revocation was committed to NVS.
+ */
+bool auth_mgr_revoke_integration_token(void);
+
+/**
+ * @brief Strictly validate an integration credential.
+ *
+ * Unlike the legacy API key helper, this never bypasses authentication based
+ * on web/API authentication settings.
+ */
+bool auth_mgr_validate_integration_token(const char* token);
 
 #ifdef __cplusplus
 }

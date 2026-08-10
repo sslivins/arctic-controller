@@ -43,6 +43,7 @@ idf_component_register(
         "api_server.cpp"
         "ota_manager.cpp"
         "auth_manager.cpp"
+        "ha_integration.cpp"
         "app_preferences.cpp"
         "display_idle.cpp"
         "factory_reset.cpp"

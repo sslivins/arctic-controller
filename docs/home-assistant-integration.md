@@ -335,6 +335,14 @@ exposed outside test builds.
 - Add stable device identity, state revision, shared serializer, capabilities,
   state endpoint, and zeroconf metadata.
 
+Status: in progress. The dedicated 256-bit token is stored only as a SHA-256
+hash, strict Bearer validation is independent of legacy authentication
+toggles, token rotation invalidates the previous credential immediately, and
+the versioned capabilities/state endpoints now expose stable device identity,
+per-boot identity, and monotonic revisions. API startup also runs on a
+dedicated task rather than the system event stack. Physical pairing, TLS
+fingerprint behavior, and zeroconf metadata remain before Phase 3 is complete.
+
 ### Phase 4: Device push transport
 
 - Implement WebSocket hello, snapshot, heartbeat, ordering, coalescing,

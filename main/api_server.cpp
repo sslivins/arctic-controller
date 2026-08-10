@@ -10,6 +10,7 @@
 #include "time_manager.h"
 #include "ota_manager.h"
 #include "auth_manager.h"
+#include "ha_integration.h"
 #include "heatpump_controller.h"
 #include "heatpump_types.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
@@ -80,6 +81,8 @@ static esp_err_t wifi_networks_get_handler(httpd_req_t* req);
 static esp_err_t wifi_connect_post_handler(httpd_req_t* req);
 static esp_err_t wifi_disconnect_post_handler(httpd_req_t* req);
 static esp_err_t info_get_handler(httpd_req_t* req);
+static esp_err_t ha_capabilities_get_handler(httpd_req_t* req);
+static esp_err_t ha_state_get_handler(httpd_req_t* req);
 static esp_err_t ota_status_get_handler(httpd_req_t* req);
 static esp_err_t ota_update_post_handler(httpd_req_t* req);
 static esp_err_t ota_upload_post_handler(httpd_req_t* req);
@@ -214,6 +217,25 @@ static bool check_api_auth(httpd_req_t* req)
     return false;
 }
 
+static bool check_integration_auth(httpd_req_t* req)
+{
+    constexpr const char* BEARER_PREFIX = "Bearer ";
+    constexpr size_t BEARER_PREFIX_LEN = 7;
+    char authorization[BEARER_PREFIX_LEN + AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
+    const size_t header_len =
+        httpd_req_get_hdr_value_len(req, "Authorization");
+    if (header_len != sizeof(authorization) - 1 ||
+        httpd_req_get_hdr_value_str(
+            req, "Authorization", authorization,
+            sizeof(authorization)) != ESP_OK ||
+        strncmp(authorization, BEARER_PREFIX, BEARER_PREFIX_LEN) != 0) {
+        return false;
+    }
+
+    return auth_mgr_validate_integration_token(
+        authorization + BEARER_PREFIX_LEN);
+}
+
 static void set_session_cookie(httpd_req_t* req, const char* token)
 {
     char cookie[160];
@@ -320,7 +342,12 @@ bool api_server_start(void)
     }
     
     // Common httpd config values
-    const int uri_handlers = 104;
+    if (!arctic::ha::init()) {
+        ESP_LOGE(TAG, "Failed to initialize Home Assistant state foundation");
+        return false;
+    }
+
+    const int uri_handlers = 106;
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
@@ -950,6 +977,47 @@ bool api_server_start(void)
     test_endpoints_register_websocket(websocket_test_server);
     ESP_LOGI(TAG, "WebSocket feasibility server started on port 81");
 #endif
+
+    httpd_handle_t integration_rest_server = server_ssl;
+#ifdef CONFIG_TEST_ENDPOINTS
+    if (integration_rest_server == NULL) {
+        integration_rest_server = server;
+        ESP_LOGW(TAG, "TEST BUILD: integration REST is available over HTTP");
+    }
+#endif
+    if (integration_rest_server != NULL) {
+        httpd_uri_t ha_capabilities_uri = {
+            .uri = "/api/v1/capabilities",
+            .method = HTTP_GET,
+            .handler = ha_capabilities_get_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(
+            integration_rest_server, &ha_capabilities_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA capabilities: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
+        httpd_uri_t ha_state_uri = {
+            .uri = "/api/v1/state",
+            .method = HTTP_GET,
+            .handler = ha_state_get_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(integration_rest_server, &ha_state_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA state: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+        ESP_LOGI(TAG, "Home Assistant REST foundation enabled");
+    } else {
+        ESP_LOGI(TAG, "Home Assistant REST disabled until TLS is provisioned");
+    }
     
     // When HTTPS is active, add catch-all redirects on HTTP for non-essential endpoints.
     // Essential endpoints (health, OTA, TLS, test) are already registered above and
@@ -1568,6 +1636,49 @@ static esp_err_t wifi_disconnect_post_handler(httpd_req_t* req)
     set_json_content_type(req);
     httpd_resp_sendstr(req, "{\"success\":true,\"state\":\"disconnecting\"}");
     return ESP_OK;
+}
+
+static esp_err_t send_integration_document(
+    httpd_req_t* req, cJSON* document)
+{
+    if (document == NULL) {
+        send_json_error(
+            req, "500 Internal Server Error", "State serialization failed");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    char* json = cJSON_PrintUnformatted(document);
+    cJSON_Delete(document);
+    if (json == NULL) {
+        send_json_error(
+            req, "500 Internal Server Error", "State serialization failed");
+        return ESP_OK;
+    }
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    return ESP_OK;
+}
+
+static esp_err_t ha_capabilities_get_handler(httpd_req_t* req)
+{
+    if (!check_integration_auth(req)) {
+        send_json_error(
+            req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+    return send_integration_document(
+        req, arctic::ha::createCapabilities());
+}
+
+static esp_err_t ha_state_get_handler(httpd_req_t* req)
+{
+    if (!check_integration_auth(req)) {
+        send_json_error(
+            req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+    return send_integration_document(req, arctic::ha::createStateSnapshot());
 }
 
 static esp_err_t info_get_handler(httpd_req_t* req)
