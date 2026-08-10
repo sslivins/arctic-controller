@@ -29,6 +29,12 @@ info:
     The API key can be retrieved from the web interface settings.
     
     Both authentication types can be independently enabled/disabled via `/api/auth/config`.
+
+    ### Home Assistant Integration Authentication
+    Home Assistant uses a separate 256-bit Bearer token that cannot be disabled
+    or bypassed by the web/API authentication settings. Integration REST and
+    WebSocket traffic uses an automatically generated self-signed identity on
+    port 8443 and validates it by pinned SHA-256 certificate fingerprint.
   version: 2.1.0
   contact:
     name: Arctic Controller
@@ -40,6 +46,12 @@ servers:
     description: Local mDNS hostname
   - url: https://{ip_address}
     description: Direct IP address
+    variables:
+      ip_address:
+        default: 192.168.1.100
+        description: Device IP address
+  - url: https://{ip_address}:8443
+    description: Home Assistant integration identity endpoint
     variables:
       ip_address:
         default: 192.168.1.100

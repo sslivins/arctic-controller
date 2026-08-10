@@ -274,15 +274,23 @@ the dedicated token. Existing web/API authentication toggles cannot bypass it.
 Pairing and authenticated integration traffic require TLS. The supported local
 identity model is certificate/public-key fingerprint pinning:
 
+- The controller automatically generates a dedicated P-256 self-signed
+  integration certificate and private key on first boot.
+- The identity is stored in NVS and served only by the dedicated integration
+  HTTPS/WSS server on port 8443.
+- It is independent of the optional manually uploaded Web UI certificate on
+  port 443; changing or deleting that certificate does not disrupt Home
+  Assistant.
 - Home Assistant records the fingerprint during the physically authorized
   pairing flow.
 - Subsequent connections reject a changed fingerprint.
 - Fingerprint pinning does not depend on the controller having a correct clock.
 - Plain HTTP does not silently downgrade from a configured secure connection.
 
-Whether an explicitly enabled insecure development mode is retained will be
-decided during the threat-model and feasibility phase. It must be unavailable
-by default and visibly marked unsafe.
+There is no production insecure mode and no certificate renewal workflow.
+The integration identity changes only after factory reset or an explicit future
+identity-reset action. Test firmware may expose HTTP-only provisioning helpers,
+but production integration state and events remain HTTPS/WSS-only.
 
 ### Threats and mitigations
 
@@ -340,8 +348,10 @@ hash, strict Bearer validation is independent of legacy authentication
 toggles, token rotation invalidates the previous credential immediately, and
 the versioned capabilities/state endpoints now expose stable device identity,
 per-boot identity, and monotonic revisions. API startup also runs on a
-dedicated task rather than the system event stack. Physical pairing, TLS
-fingerprint behavior, and zeroconf metadata remain before Phase 3 is complete.
+dedicated task rather than the system event stack. The automatic integration
+TLS identity, dedicated port 8443 server, certificate fingerprint, and
+zeroconf metadata are also implemented. Physical pairing and the Home
+Assistant-side pin confirmation remain before Phase 3 is complete.
 
 ### Phase 4: Device push transport
 

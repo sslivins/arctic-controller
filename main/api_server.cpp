@@ -48,6 +48,7 @@ static char hostname[32] = "arctic";  // Actual hostname (may have suffix)
 // HTTP/HTTPS server handle (only one is active per boot)
 static httpd_handle_t server = NULL;      // HTTP (port 80) — always running
 static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — when TLS certs present
+static httpd_handle_t server_integration = NULL;  // HA HTTPS/WSS (port 8443)
 #ifdef CONFIG_TEST_ENDPOINTS
 static httpd_handle_t websocket_test_server = NULL;  // WS feasibility (port 81)
 #endif
@@ -411,6 +412,40 @@ bool api_server_start(void)
         }
     } else {
         ESP_LOGW(TAG, "No TLS certs provisioned — HTTP only on port 80");
+    }
+
+    if (tls_mgr_has_identity()) {
+        size_t cert_len = 0;
+        size_t key_len = 0;
+        const uint8_t* cert = tls_mgr_get_identity_cert(&cert_len);
+        const uint8_t* key = tls_mgr_get_identity_key(&key_len);
+
+        httpd_ssl_config_t integration_config = HTTPD_SSL_CONFIG_DEFAULT();
+        integration_config.port_secure = 8443;
+        integration_config.httpd.ctrl_port = 32771;
+        integration_config.httpd.max_uri_handlers = 4;
+        integration_config.httpd.max_open_sockets = 4;
+        integration_config.httpd.stack_size = 12288;
+        integration_config.httpd.lru_purge_enable = true;
+        integration_config.httpd.recv_wait_timeout = 10;
+        integration_config.httpd.send_wait_timeout = 1;
+        integration_config.servercert = cert;
+        integration_config.servercert_len = cert_len;
+        integration_config.prvtkey_pem = key;
+        integration_config.prvtkey_len = key_len;
+
+        ret = httpd_ssl_start(&server_integration, &integration_config);
+        if (ret != ESP_OK) {
+            server_integration = NULL;
+            ESP_LOGE(TAG,
+                     "Failed to start integration HTTPS server: %s "
+                     "(HTTP remains available on port 80)",
+                     esp_err_to_name(ret));
+        } else {
+            ESP_LOGI(TAG, "Integration HTTPS server started on port 8443");
+        }
+    } else {
+        ESP_LOGE(TAG, "Integration HTTPS identity is unavailable");
     }
     
     // Helper macro - abort if URI registration fails (catches max_uri_handlers issues)
@@ -978,14 +1013,7 @@ bool api_server_start(void)
     ESP_LOGI(TAG, "WebSocket feasibility server started on port 81");
 #endif
 
-    httpd_handle_t integration_rest_server = server_ssl;
-#ifdef CONFIG_TEST_ENDPOINTS
-    if (integration_rest_server == NULL) {
-        integration_rest_server = server;
-        ESP_LOGW(TAG, "TEST BUILD: integration REST is available over HTTP");
-    }
-#endif
-    if (integration_rest_server != NULL) {
+    if (server_integration != NULL) {
         httpd_uri_t ha_capabilities_uri = {
             .uri = "/api/v1/capabilities",
             .method = HTTP_GET,
@@ -993,7 +1021,7 @@ bool api_server_start(void)
             .user_ctx = NULL
         };
         ret = httpd_register_uri_handler(
-            integration_rest_server, &ha_capabilities_uri);
+            server_integration, &ha_capabilities_uri);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to register HA capabilities: %s",
                      esp_err_to_name(ret));
@@ -1007,7 +1035,7 @@ bool api_server_start(void)
             .handler = ha_state_get_handler,
             .user_ctx = NULL
         };
-        ret = httpd_register_uri_handler(integration_rest_server, &ha_state_uri);
+        ret = httpd_register_uri_handler(server_integration, &ha_state_uri);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to register HA state: %s",
                      esp_err_to_name(ret));
@@ -1015,8 +1043,23 @@ bool api_server_start(void)
             return false;
         }
         ESP_LOGI(TAG, "Home Assistant REST foundation enabled");
+
+        mdns_txt_item_t integration_txt[] = {
+            {"device", "arctic-controller"},
+            {"id", arctic::ha::deviceId()},
+            {"version", "1"},
+            {"tls", "1"},
+            {"push", "0"},
+        };
+        ret = mdns_service_add(
+            "Arctic Home Assistant", "_arctic", "_tcp", 8443,
+            integration_txt, sizeof(integration_txt) / sizeof(integration_txt[0]));
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "HA mDNS service add failed: %s",
+                     esp_err_to_name(ret));
+        }
     } else {
-        ESP_LOGI(TAG, "Home Assistant REST disabled until TLS is provisioned");
+        ESP_LOGE(TAG, "Home Assistant REST disabled: no identity server");
     }
     
     // When HTTPS is active, add catch-all redirects on HTTP for non-essential endpoints.
@@ -1061,6 +1104,11 @@ void api_server_stop(void)
         websocket_test_server = NULL;
     }
 #endif
+    if (server_integration != NULL) {
+        ESP_LOGI(TAG, "Stopping integration HTTPS server...");
+        httpd_ssl_stop(server_integration);
+        server_integration = NULL;
+    }
     if (server_ssl != NULL) {
         ESP_LOGI(TAG, "Stopping HTTPS server...");
         httpd_ssl_stop(server_ssl);
@@ -3764,6 +3812,8 @@ static esp_err_t tls_status_get_handler(httpd_req_t* req)
     cJSON_AddBoolToObject(root, "https_active", tls_mgr_is_https_active());
     cJSON_AddBoolToObject(root, "auth_ready",
                           auth_mgr_web_auth_enabled() && auth_mgr_api_auth_enabled());
+    cJSON_AddBoolToObject(
+        root, "integration_identity", tls_mgr_has_identity());
 
     char* json_str = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json_str);

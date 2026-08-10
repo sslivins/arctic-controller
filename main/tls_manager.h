@@ -80,6 +80,24 @@ bool tls_mgr_store_certs(const char* cert, size_t cert_len,
  */
 bool tls_mgr_clear_certs(void);
 
+/**
+ * @brief Check whether the automatic integration identity is available.
+ */
+bool tls_mgr_has_identity(void);
+
+/**
+ * @brief Get the automatic integration identity certificate and key.
+ */
+const uint8_t* tls_mgr_get_identity_cert(size_t* out_len);
+const uint8_t* tls_mgr_get_identity_key(size_t* out_len);
+
+/**
+ * @brief Get the SHA-256 fingerprint of the integration certificate DER.
+ *
+ * @param buffer Receives 64 lowercase hex characters plus null terminator.
+ */
+bool tls_mgr_get_identity_fingerprint(char buffer[65]);
+
 #ifdef __cplusplus
 }
 #endif

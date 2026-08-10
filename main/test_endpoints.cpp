@@ -29,6 +29,7 @@
 #include "i18n/i18n.h"
 #include "heatpump_controller.h"
 #include "auth_manager.h"
+#include "tls_manager.h"
 #include "app_preferences.h"
 #include "heatpump_errors.h"
 #include "heatpump_temps_screen.h"
@@ -52,6 +53,34 @@ static uint8_t s_ws_feasibility_payload[WS_FEASIBILITY_MAX_PAYLOAD];
 static void set_json_content_type(httpd_req_t* req);
 static void send_json_error(
     httpd_req_t* req, const char* status, const char* message);
+
+static esp_err_t integration_identity_get_handler(httpd_req_t* req)
+{
+    char fingerprint[65];
+    if (!tls_mgr_get_identity_fingerprint(fingerprint)) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Integration TLS identity is unavailable");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "sha256_fingerprint", fingerprint);
+    cJSON_AddNumberToObject(root, "port", 8443);
+    char* json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    memset(fingerprint, 0, sizeof(fingerprint));
+    if (json == NULL) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not serialize integration identity");
+        return ESP_OK;
+    }
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    return ESP_OK;
+}
 
 static esp_err_t integration_token_post_handler(httpd_req_t* req)
 {
@@ -1996,6 +2025,14 @@ void test_endpoints_register_websocket(httpd_handle_t server)
 
 void test_endpoints_register(httpd_handle_t server)
 {
+    httpd_uri_t integration_identity_uri = {
+        .uri = "/api/test/ha-identity",
+        .method = HTTP_GET,
+        .handler = integration_identity_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &integration_identity_uri);
+
     httpd_uri_t integration_token_uri = {
         .uri = "/api/test/ha-token",
         .method = HTTP_POST,
