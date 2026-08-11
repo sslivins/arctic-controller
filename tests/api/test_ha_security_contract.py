@@ -26,9 +26,12 @@ def test_production_configuration_disables_test_endpoints() -> None:
 def test_socket_budget_covers_all_three_http_servers() -> None:
     defaults = (ROOT / "sdkconfig.defaults").read_text(encoding="utf-8")
     sdkconfig = (ROOT / "sdkconfig").read_text(encoding="utf-8")
+    api = (ROOT / "main" / "api_server.cpp").read_text(encoding="utf-8")
 
-    assert "CONFIG_LWIP_MAX_SOCKETS=32" in defaults
-    assert "CONFIG_LWIP_MAX_SOCKETS=32" in sdkconfig
+    assert "CONFIG_LWIP_MAX_SOCKETS=24" in defaults
+    assert "CONFIG_LWIP_MAX_SOCKETS=24" in sdkconfig
+    assert "http_config.max_open_sockets   = 2;" in api
+    assert "websocket_config.max_open_sockets = 2;" in api
 
 
 def test_integration_credential_changes_use_transaction_mutex() -> None:

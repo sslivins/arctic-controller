@@ -389,7 +389,9 @@ bool api_server_start(void)
         http_config.stack_size         = stack_size;
         http_config.max_resp_headers   = max_headers;
         http_config.recv_wait_timeout  = recv_timeout;
-        http_config.max_open_sockets   = 4;
+        // Port 80 only serves essential health/OTA bootstrap routes when
+        // mandatory HTTPS is active, so two concurrent clients are sufficient.
+        http_config.max_open_sockets   = 2;
 #ifdef CONFIG_TEST_ENDPOINTS
         http_config.send_wait_timeout  = 1;
 #endif
@@ -1036,7 +1038,7 @@ bool api_server_start(void)
     websocket_config.server_port = 81;
     websocket_config.ctrl_port = 32770;
     websocket_config.max_uri_handlers = 1;
-    websocket_config.max_open_sockets = 4;
+    websocket_config.max_open_sockets = 2;
     websocket_config.stack_size = 8192;
     websocket_config.lru_purge_enable = true;
     websocket_config.recv_wait_timeout = 10;

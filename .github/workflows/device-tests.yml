@@ -381,14 +381,20 @@ jobs:
           fi
       - name: Detect HTTPS support
         run: |
-          # If HTTPS is available, use it for all tests (avoids HTTP→HTTPS redirect issues with cookies/auth)
+          # Production routes are HTTPS-only. Retry transient TLS startup or
+          # handshake failures, but never run the suite against health-only HTTP.
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          if curl -sk --connect-timeout 3 "$ARCTIC_URL_HTTPS/api/health" > /dev/null 2>&1; then
-            echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> $GITHUB_ENV
-            echo "Device supports HTTPS — using $ARCTIC_URL_HTTPS for tests"
-          else
-            echo "Device does not support HTTPS — keeping $ARCTIC_URL"
-          fi
+          for i in $(seq 1 12); do
+            if curl -skf --connect-timeout 5 --max-time 10 \
+              "$ARCTIC_URL_HTTPS/api/health" > /dev/null; then
+              echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> "$GITHUB_ENV"
+              echo "Mandatory HTTPS is ready after attempt $i"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: Mandatory HTTPS did not become ready"
+          exit 1
 
       - name: Start controller serial capture
         run: |
