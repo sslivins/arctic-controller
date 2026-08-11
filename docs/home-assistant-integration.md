@@ -399,6 +399,22 @@ test also passed.
   one controller client instance; do not use process-global device state.
 - Test against a deterministic fake server and the physical controller.
 
+Status: complete. The standalone `ha_client` package has no Home Assistant
+dependency and provides pinned TLS pairing, authenticated REST/WSS, typed
+capability and state models, one shared ordering gate, revision-gap and reboot
+reconciliation, fallback polling, bounded reconnect backoff with jitter,
+availability/stream status callbacks, reauthentication signaling, and clean
+session/task ownership. Each client instance owns state for exactly one stable
+device ID.
+
+The deterministic TLS fake-controller suite covers invalid pins and tokens,
+malformed stream messages, stale delayed REST responses across reboot,
+revision gaps, reconnect and fallback behavior, credential rotation,
+cancellation, externally owned sessions, and two controllers operating
+concurrently without shared state. The same client also passed against the
+physical controller with a real WSS telemetry update arriving before the
+60-second reconciliation interval.
+
 ### Phase 6: Read-only Home Assistant integration
 
 - Implement config flow, zeroconf, pairing, reauthentication, diagnostics, and
