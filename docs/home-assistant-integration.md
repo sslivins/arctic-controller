@@ -26,6 +26,9 @@ protocol are not required.
 - Provide stable, versioned contracts that can evolve without breaking older
   integrations.
 - Prevent stale reconciliation responses from overwriting newer pushed state.
+- Support multiple Arctic Controllers in one Home Assistant instance, with
+  independent credentials, certificate pins, connections, state, and entities
+  for each controller.
 
 ## Non-goals
 
@@ -392,12 +395,16 @@ test also passed.
 
 - Implement secure REST/WSS, pinning, ordering, reconnect, reconciliation,
   fallback polling, cancellation, and typed models.
+- Keep all transport, authentication, revision, and reconnect state scoped to
+  one controller client instance; do not use process-global device state.
 - Test against a deterministic fake server and the physical controller.
 
 ### Phase 6: Read-only Home Assistant integration
 
 - Implement config flow, zeroconf, pairing, reauthentication, diagnostics, and
   read-only entities.
+- Allow multiple config entries, keyed by stable device ID, so each discovered
+  controller is paired and managed independently.
 - Verify push updates occur without entity polling.
 
 ### Phase 7: Security gate
