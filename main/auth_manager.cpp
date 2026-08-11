@@ -646,3 +646,27 @@ uint32_t auth_mgr_get_integration_generation(void)
     portEXIT_CRITICAL(&integration_token_lock);
     return generation;
 }
+
+bool auth_mgr_begin_control_write(uint32_t generation)
+{
+    if (integration_token_mutex == NULL ||
+        xSemaphoreTake(integration_token_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&integration_token_lock);
+    const bool valid = state.integration_token_set &&
+                       state.integration_generation == generation;
+    portEXIT_CRITICAL(&integration_token_lock);
+    if (!valid) {
+        xSemaphoreGive(integration_token_mutex);
+    }
+    return valid;
+}
+
+void auth_mgr_end_control_write(void)
+{
+    if (integration_token_mutex != NULL) {
+        xSemaphoreGive(integration_token_mutex);
+    }
+}

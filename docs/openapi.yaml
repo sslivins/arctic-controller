@@ -2567,6 +2567,96 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/control/power:
+    put:
+      tags:
+        - HomeAssistant
+      summary: Accept an allowlisted power command
+      operationId: setHomeAssistantPower
+      security:
+        - integrationBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HomeAssistantPowerCommand'
+      responses:
+        '202':
+          description: Command accepted; wait for pushed or reconciled state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCommandAccepted'
+        '401':
+          description: Missing or invalid integration token
+        '409':
+          description: Conflicting command ID reuse
+        '422':
+          description: Invalid body or value
+        '503':
+          description: Control unavailable or unsupported
+
+  /api/v1/control/mode:
+    put:
+      tags:
+        - HomeAssistant
+      summary: Accept an allowlisted exact-mode command
+      operationId: setHomeAssistantMode
+      security:
+        - integrationBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HomeAssistantModeCommand'
+      responses:
+        '202':
+          description: Command accepted; wait for pushed or reconciled state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCommandAccepted'
+        '401':
+          description: Missing or invalid integration token
+        '409':
+          description: Conflicting command ID reuse
+        '422':
+          description: Invalid body or mode
+        '503':
+          description: Control unavailable or unsupported
+
+  /api/v1/control/setpoint:
+    put:
+      tags:
+        - HomeAssistant
+      summary: Accept one allowlisted setpoint command
+      operationId: setHomeAssistantSetpoint
+      security:
+        - integrationBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HomeAssistantSetpointCommand'
+      responses:
+        '202':
+          description: Command accepted; wait for pushed or reconciled state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCommandAccepted'
+        '401':
+          description: Missing or invalid integration token
+        '409':
+          description: Conflicting command ID reuse
+        '422':
+          description: Invalid body, kind, or range
+        '503':
+          description: Control unavailable or unsupported
+
   /api/v1/events:
     get:
       tags:
@@ -2664,6 +2754,8 @@ components:
             - control_setpoints
             - advanced_parameters
             - raw_registers
+            - supported_modes
+            - setpoint_controls
           properties:
             read_state:
               type: boolean
@@ -2679,8 +2771,78 @@ components:
             raw_registers:
               type: boolean
               enum: [false]
+            supported_modes:
+              type: array
+              items:
+                type: string
+                enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+            setpoint_controls:
+              type: object
+              required: [cooling, heating, hot_water]
+              properties:
+                cooling:
+                  type: boolean
+                heating:
+                  type: boolean
+                hot_water:
+                  type: boolean
         setpoint_limits_c:
           type: object
+
+    HomeAssistantCommandAccepted:
+      type: object
+      required: [accepted, command_id, status]
+      properties:
+        accepted:
+          type: boolean
+          enum: [true]
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        status:
+          type: string
+          example: accepted_waiting_for_reported_state
+
+    HomeAssistantPowerCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, on]
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        on:
+          type: boolean
+
+    HomeAssistantModeCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, mode]
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        mode:
+          type: string
+          enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+
+    HomeAssistantSetpointCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, value]
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        kind:
+          type: string
+          enum: [cooling, heating, hot_water]
+        value:
+          type: integer
 
     HomeAssistantStateSnapshot:
       type: object

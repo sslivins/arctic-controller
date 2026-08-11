@@ -92,6 +92,47 @@ def test_device_test_build_explicitly_overrides_production_config() -> None:
     assert "Verify test instrumentation was compiled" in workflow
 
 
+def test_home_assistant_controls_are_allowlisted_and_generation_guarded() -> None:
+    api = (ROOT / "main" / "api_server.cpp").read_text(encoding="utf-8")
+    auth = (ROOT / "main" / "auth_manager.cpp").read_text(encoding="utf-8")
+    capabilities = (
+        ROOT / "main" / "ha_integration.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert '"/api/v1/control/power"' in api
+    assert '"/api/v1/control/mode"' in api
+    assert '"/api/v1/control/setpoint"' in api
+    assert "ha_command_begin" in api
+    assert api.count("auth_mgr_begin_control_write") >= 3
+    assert "auth_mgr_end_control_write" in api
+    assert "auth_mgr_begin_control_write" in auth
+    assert "state.integration_generation == generation" in auth
+    assert "return state.connected && arctic::isDemoMode();" in api
+    assert "macon_master::is_active()" in api
+    assert "supported_modes" in capabilities
+    assert "setpoint_controls" in capabilities
+    assert "Heating setpoint writes are available only" in capabilities
+
+
+def test_home_assistant_command_validation_rejects_ambiguous_controls() -> None:
+    api = (ROOT / "main" / "api_server.cpp").read_text(encoding="utf-8")
+
+    assert "command_id was already used with a different command" in api
+    assert "Setpoint is outside the advertised inclusive range" in api
+    assert "Power control is unsupported by the active runtime" in api
+    assert "Selected-mode control is unsupported by the active runtime" in api
+    assert "Heating setpoint is unsupported by the active Tuya runtime" in api
+    assert '"heating") == 0' in api
+    assert '"floor_heating") == 0' in api
+    assert '"fan_coil_heating") == 0' in api
+    assert "/api/v1/control/register" not in api
+    assert "/api/v1/control/advanced" not in api
+    capabilities = (
+        ROOT / "main" / "ha_integration.cpp"
+    ).read_text(encoding="utf-8")
+    assert '"advanced_parameters"' in capabilities
+
+
 def test_secret_bearing_automation_is_https_only() -> None:
     renewal = (
         ROOT / ".github" / "workflows" / "renew-tls-cert.yml"

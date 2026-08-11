@@ -12,5 +12,6 @@ DEFAULT_PORT = 8443
 PLATFORMS = [
     Platform.BINARY_SENSOR,
     Platform.CLIMATE,
+    Platform.SELECT,
     Platform.SENSOR,
 ]

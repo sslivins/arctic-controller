@@ -38,6 +38,8 @@ class FakeController:
         self.release_state_request = asyncio.Event()
         self.release_state_request.set()
         self.hold_state_response = False
+        self.commands: dict[str, tuple[str, tuple[tuple[str, Any], ...]]] = {}
+        self.command_requests: list[dict[str, Any]] = []
         self._temp_path = temp_path
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
@@ -56,6 +58,9 @@ class FakeController:
         app.router.add_get("/api/v1/capabilities", self._capabilities)
         app.router.add_get("/api/v1/state", self._state)
         app.router.add_get("/api/v1/events", self._events)
+        app.router.add_put("/api/v1/control/power", self._power)
+        app.router.add_put("/api/v1/control/mode", self._mode)
+        app.router.add_put("/api/v1/control/setpoint", self._setpoint)
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         self._site = web.TCPSite(
@@ -162,11 +167,23 @@ class FakeController:
             "transports": {"rest": True, "websocket": True},
             "capabilities": {
                 "read_state": True,
-                "control_power": False,
-                "control_mode": False,
-                "control_setpoints": False,
+                "control_power": True,
+                "control_mode": True,
+                "control_setpoints": True,
                 "advanced_parameters": False,
                 "raw_registers": False,
+                "supported_modes": [
+                    "cooling",
+                    "floor_heating",
+                    "fan_coil_heating",
+                    "hot_water",
+                    "auto",
+                ],
+                "setpoint_controls": {
+                    "cooling": True,
+                    "heating": True,
+                    "hot_water": True,
+                },
             },
             "setpoint_limits_c": {
                 "cooling": {"min": 5, "max": 30},
@@ -211,6 +228,57 @@ class FakeController:
             self.state_request_started.set()
             await self.release_state_request.wait()
         return web.json_response(snapshot)
+
+    async def _command(
+        self,
+        request: web.Request,
+        operation: str,
+        payload: tuple,
+        body: dict[str, Any],
+    ) -> web.Response:
+        if not self._authorized(request):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        command_id = body.get("command_id")
+        if not isinstance(command_id, str):
+            return web.json_response({"error": "invalid command"}, status=422)
+        self.command_requests.append(body)
+        existing = self.commands.get(command_id)
+        if existing is not None:
+            if existing != (operation, payload):
+                return web.json_response(
+                    {"error": "command_id conflict"}, status=409
+                )
+        else:
+            self.commands[command_id] = (operation, payload)
+        return web.json_response(
+            {
+                "accepted": True,
+                "command_id": command_id,
+                "status": "accepted_waiting_for_reported_state",
+            },
+            status=202,
+        )
+
+    async def _power(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        return await self._command(
+            request, "power", (("on", body.get("on")),), body
+        )
+
+    async def _mode(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        return await self._command(
+            request, "mode", (("mode", body.get("mode")),), body
+        )
+
+    async def _setpoint(self, request: web.Request) -> web.Response:
+        body = await request.json()
+        return await self._command(
+            request,
+            "setpoint",
+            (("kind", body.get("kind")), ("value", body.get("value"))),
+            body,
+        )
 
     async def _events(self, request: web.Request) -> web.StreamResponse:
         if not self._authorized(request):

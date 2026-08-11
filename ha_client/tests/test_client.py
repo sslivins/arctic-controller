@@ -10,10 +10,12 @@ import pytest
 from arctic_controller import (
     ArcticAuthenticationError,
     ArcticCertificateError,
+    ArcticCommandConflictError,
     ArcticConnectionError,
     ArcticControllerClient,
     ArcticPairingError,
     ArcticProtocolError,
+    ControllerCapabilities,
 )
 
 from fake_controller import FakeController, wait_for
@@ -107,6 +109,48 @@ async def test_setup_returns_typed_capabilities_and_state(controller):
     assert snapshot.device_id == controller.device_id
     assert snapshot.state.temperatures_c.tank == 40
     assert snapshot.state.readings.cop == 3.42
+    await client.stop()
+
+
+def test_capabilities_require_per_setpoint_flags(controller):
+    data = controller.capabilities()
+    del data["capabilities"]["setpoint_controls"]
+
+    with pytest.raises(ArcticProtocolError):
+        ControllerCapabilities.from_dict(data)
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_refreshes_dynamic_capabilities(controller):
+    client = make_client(controller)
+    changes = []
+    client.subscribe_capabilities(changes.append)
+    await client.start()
+    await wait_for(lambda: client.stream_connected)
+    assert client.capabilities is not None
+    assert client.capabilities.control_mode is True
+
+    original_capabilities = controller.capabilities
+
+    def passive_capabilities():
+        data = original_capabilities()
+        data["capabilities"]["control_power"] = False
+        data["capabilities"]["control_mode"] = False
+        data["capabilities"]["control_setpoints"] = False
+        data["capabilities"]["supported_modes"] = []
+        data["capabilities"]["setpoint_controls"] = {
+            "cooling": False,
+            "heating": False,
+            "hot_water": False,
+        }
+        return data
+
+    controller.capabilities = passive_capabilities
+    await wait_for(
+        lambda: client.capabilities is not None
+        and not client.capabilities.control_mode
+    )
+    assert changes[-1].supported_modes == ()
     await client.stop()
 
 
@@ -297,4 +341,36 @@ async def test_wrong_device_and_malformed_messages_are_rejected(controller):
     controller.device_id = "arctic-deadbeef0000"
     with pytest.raises(ArcticProtocolError):
         await client.fetch_state()
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_commands_require_idempotent_ids_and_deduplicate(controller):
+    client = make_client(controller)
+    await client.async_setup()
+
+    first = await client.async_set_power(True, command_id="same-command")
+    second = await client.async_set_power(True, command_id="same-command")
+    assert first == second
+    assert len(controller.command_requests) == 2
+
+    with pytest.raises(ArcticCommandConflictError):
+        await client.async_set_power(False, command_id="same-command")
+
+    generated = await client.async_set_cooling_setpoint(24)
+    assert len(generated.command_id) == 36
+    assert generated.accepted is True
+    await client.stop()
+
+
+@pytest.mark.asyncio
+async def test_client_rejects_invalid_command_values_before_http(controller):
+    client = make_client(controller)
+    await client.async_setup()
+    with pytest.raises(ValueError):
+        await client.async_set_mode("")
+    with pytest.raises(ValueError):
+        await client.async_set_setpoint("unsupported", 20)
+    with pytest.raises(ValueError):
+        await client.async_set_cooling_setpoint(20, command_id="")
     await client.stop()

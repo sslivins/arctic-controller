@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import random
+import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from typing import Any
@@ -16,13 +17,17 @@ from yarl import URL
 from .exceptions import (
     ArcticAuthenticationError,
     ArcticCertificateError,
+    ArcticCommandConflictError,
+    ArcticCommandValidationError,
     ArcticConnectionError,
+    ArcticControlUnavailableError,
     ArcticPairingError,
     ArcticProtocolError,
 )
 from .models import (
     PROTOCOL_VERSION,
     ClientStatus,
+    CommandResult,
     ControllerCapabilities,
     HelloMessage,
     PairingResult,
@@ -31,6 +36,9 @@ from .models import (
 
 SnapshotCallback = Callable[[StateSnapshot], Awaitable[None] | None]
 StatusCallback = Callable[[ClientStatus], Awaitable[None] | None]
+CapabilitiesCallback = Callable[
+    [ControllerCapabilities], Awaitable[None] | None
+]
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -120,6 +128,7 @@ class ArcticControllerClient:
         )
         self._callbacks: set[SnapshotCallback] = set()
         self._status_callbacks: set[StatusCallback] = set()
+        self._capabilities_callbacks: set[CapabilitiesCallback] = set()
         self._snapshot: StateSnapshot | None = None
         self._capabilities: ControllerCapabilities | None = None
         self._status = ClientStatus(False, False, None)
@@ -253,6 +262,17 @@ class ArcticControllerClient:
 
         return unsubscribe
 
+    def subscribe_capabilities(
+        self, callback: CapabilitiesCallback
+    ) -> Callable[[], None]:
+        """Receive changes to the controller's dynamic control surface."""
+        self._capabilities_callbacks.add(callback)
+
+        def unsubscribe() -> None:
+            self._capabilities_callbacks.discard(callback)
+
+        return unsubscribe
+
     async def async_setup(self) -> StateSnapshot:
         """Load capabilities and the initial coherent REST snapshot."""
         created_session = self._session is None
@@ -334,7 +354,18 @@ class ArcticControllerClient:
         self._validate_identity(
             capabilities.protocol_version, capabilities.device_id
         )
+        changed = capabilities != self._capabilities
         self._capabilities = capabilities
+        if changed:
+            for callback in tuple(self._capabilities_callbacks):
+                try:
+                    result = callback(capabilities)
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception:
+                    _LOGGER.exception(
+                        "Arctic capabilities callback failed"
+                    )
         await self._set_status(available=True, last_error=None)
         return capabilities
 
@@ -356,6 +387,70 @@ class ArcticControllerClient:
             return self._snapshot
         return snapshot
 
+    async def async_set_power(
+        self, on: bool, *, command_id: str | None = None
+    ) -> CommandResult:
+        """Ask the controller to change power; state remains push-confirmed."""
+        if not isinstance(on, bool):
+            raise ValueError("on must be a boolean")
+        return await self._put_command(
+            "/api/v1/control/power",
+            {"command_id": self._command_id(command_id), "on": on},
+        )
+
+    async def async_set_mode(
+        self, mode: str, *, command_id: str | None = None
+    ) -> CommandResult:
+        """Ask the controller to select one exact Arctic working mode."""
+        if not isinstance(mode, str) or not mode:
+            raise ValueError("mode must be a non-empty string")
+        return await self._put_command(
+            "/api/v1/control/mode",
+            {"command_id": self._command_id(command_id), "mode": mode},
+        )
+
+    async def async_set_setpoint(
+        self,
+        kind: str,
+        value: int,
+        *,
+        command_id: str | None = None,
+    ) -> CommandResult:
+        """Ask the controller to change one named setpoint."""
+        if kind not in {"cooling", "heating", "hot_water"}:
+            raise ValueError("unsupported setpoint kind")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("setpoint value must be an integer")
+        return await self._put_command(
+            "/api/v1/control/setpoint",
+            {
+                "command_id": self._command_id(command_id),
+                "kind": kind,
+                "value": value,
+            },
+        )
+
+    async def async_set_cooling_setpoint(
+        self, value: int, *, command_id: str | None = None
+    ) -> CommandResult:
+        return await self.async_set_setpoint(
+            "cooling", value, command_id=command_id
+        )
+
+    async def async_set_heating_setpoint(
+        self, value: int, *, command_id: str | None = None
+    ) -> CommandResult:
+        return await self.async_set_setpoint(
+            "heating", value, command_id=command_id
+        )
+
+    async def async_set_hot_water_setpoint(
+        self, value: int, *, command_id: str | None = None
+    ) -> CommandResult:
+        return await self.async_set_setpoint(
+            "hot_water", value, command_id=command_id
+        )
+
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             if not self._owns_session:
@@ -364,6 +459,15 @@ class ArcticControllerClient:
                 )
             self._session = aiohttp.ClientSession()
         return self._session
+
+    @staticmethod
+    def _command_id(command_id: str | None) -> str:
+        value = str(uuid.uuid4()) if command_id is None else command_id
+        if not isinstance(value, str) or not 0 < len(value) <= 64:
+            raise ValueError("command_id must be 1 to 64 characters")
+        if any(ord(char) < 0x21 or ord(char) > 0x7E for char in value):
+            raise ValueError("command_id must contain printable ASCII")
+        return value
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -403,6 +507,66 @@ class ArcticControllerClient:
         if not isinstance(data, Mapping):
             raise ArcticProtocolError(f"GET {path} returned non-object JSON")
         return data
+
+    async def _put_command(
+        self, path: str, payload: Mapping[str, Any]
+    ) -> CommandResult:
+        session = await self._ensure_session()
+        try:
+            async with session.put(
+                self._base_url.join(URL(path)),
+                headers=self._headers(),
+                json=dict(payload),
+                ssl=self._ssl,
+                timeout=self._request_timeout,
+            ) as response:
+                if response.status == 401:
+                    raise ArcticAuthenticationError(
+                        "integration credential was rejected"
+                    )
+                if response.status == 409:
+                    raise ArcticCommandConflictError(
+                        await self._error_message(response)
+                    )
+                if response.status == 422:
+                    raise ArcticCommandValidationError(
+                        await self._error_message(response)
+                    )
+                if response.status == 503:
+                    raise ArcticControlUnavailableError(
+                        await self._error_message(response)
+                    )
+                if response.status != 202:
+                    message = await self._error_message(response)
+                    raise ArcticConnectionError(
+                        f"PUT {path} failed with HTTP {response.status}: "
+                        f"{message}"
+                    )
+                data = await response.json()
+        except (
+            ArcticAuthenticationError,
+            ArcticCommandConflictError,
+            ArcticCommandValidationError,
+            ArcticControlUnavailableError,
+            ArcticConnectionError,
+        ):
+            raise
+        except aiohttp.ServerFingerprintMismatch as error:
+            raise ArcticCertificateError(
+                "controller certificate fingerprint changed"
+            ) from error
+        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+            raise ArcticConnectionError(
+                f"PUT {path} could not reach the controller"
+            ) from error
+        if not isinstance(data, Mapping):
+            raise ArcticProtocolError(f"PUT {path} returned non-object JSON")
+        result = CommandResult.from_dict(data)
+        if not result.accepted or result.command_id != payload["command_id"]:
+            raise ArcticProtocolError(
+                f"PUT {path} returned an invalid command acknowledgement"
+            )
+        return result
 
     async def _stream_supervisor(self) -> None:
         delay = self._reconnect_min_delay
@@ -540,6 +704,7 @@ class ArcticControllerClient:
             if not self._running:
                 return
             try:
+                await self.fetch_capabilities()
                 await self.fetch_state()
             except ArcticAuthenticationError as error:
                 await self._shutdown_background(error)

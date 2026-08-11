@@ -42,6 +42,14 @@ def _boolean(value: Any, name: str) -> bool:
     return value
 
 
+def _string_tuple(value: Any, name: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item for item in value
+    ):
+        raise ArcticProtocolError(f"{name} must be an array of strings")
+    return tuple(value)
+
+
 def _optional_string(value: Any, name: str) -> str | None:
     if value is None:
         return None
@@ -104,6 +112,30 @@ class SetpointRange:
 
 
 @dataclass(frozen=True, slots=True)
+class SetpointCapabilities:
+    cooling: bool
+    heating: bool
+    hot_water: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CommandResult:
+    """Acknowledgement that a controller accepted a command for execution."""
+
+    accepted: bool
+    command_id: str
+    status: str
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> CommandResult:
+        return cls(
+            accepted=_boolean(data.get("accepted"), "accepted"),
+            command_id=_string(data.get("command_id"), "command_id"),
+            status=_string(data.get("status"), "status"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ControllerCapabilities:
     protocol_version: int
     device_id: str
@@ -115,6 +147,8 @@ class ControllerCapabilities:
     control_power: bool
     control_mode: bool
     control_setpoints: bool
+    supported_modes: tuple[str, ...]
+    setpoint_controls: SetpointCapabilities
     cooling_range: SetpointRange
     heating_range: SetpointRange
     hot_water_range: SetpointRange
@@ -129,6 +163,10 @@ class ControllerCapabilities:
         )
         limits = _mapping(
             data.get("setpoint_limits_c"), "setpoint_limits_c"
+        )
+        setpoint_controls_data = _mapping(
+            capabilities.get("setpoint_controls"),
+            "capabilities.setpoint_controls",
         )
         return cls(
             protocol_version=_integer(
@@ -159,6 +197,24 @@ class ControllerCapabilities:
             control_setpoints=_boolean(
                 capabilities.get("control_setpoints"),
                 "capabilities.control_setpoints",
+            ),
+            supported_modes=_string_tuple(
+                capabilities.get("supported_modes", []),
+                "capabilities.supported_modes",
+            ),
+            setpoint_controls=SetpointCapabilities(
+                cooling=_boolean(
+                    setpoint_controls_data.get("cooling"),
+                    "capabilities.setpoint_controls.cooling",
+                ),
+                heating=_boolean(
+                    setpoint_controls_data.get("heating"),
+                    "capabilities.setpoint_controls.heating",
+                ),
+                hot_water=_boolean(
+                    setpoint_controls_data.get("hot_water"),
+                    "capabilities.setpoint_controls.hot_water",
+                ),
             ),
             cooling_range=SetpointRange.from_dict(
                 _mapping(limits.get("cooling"), "setpoint_limits_c.cooling"),

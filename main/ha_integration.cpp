@@ -5,6 +5,7 @@
 
 #include "heatpump_controller.h"
 #include "macon_state.h"
+#include "macon_master.h"
 #include "wifi_manager.h"
 
 #include <esp_app_desc.h>
@@ -222,6 +223,17 @@ cJSON* createCapabilities()
     }
 
     const esp_app_desc_t* app = esp_app_get_description();
+    const HeatPumpState hp = getState();
+    const bool connected = hp.connected;
+    const bool demo_controls = connected && isDemoMode();
+    const bool active_master_controls =
+        connected && macon_master::is_active();
+    const bool cooling_setpoint =
+        demo_controls || active_master_controls;
+    const bool hot_water_setpoint =
+        demo_controls || active_master_controls;
+    const bool heating_setpoint = demo_controls;
+
     cJSON_AddNumberToObject(root, "protocol_version", PROTOCOL_VERSION);
     cJSON_AddStringToObject(root, "device_id", s_device_id);
     cJSON_AddStringToObject(root, "model", "Arctic Heat Pump Controller");
@@ -233,11 +245,32 @@ cJSON* createCapabilities()
 
     cJSON* capabilities = cJSON_AddObjectToObject(root, "capabilities");
     cJSON_AddBoolToObject(capabilities, "read_state", true);
-    cJSON_AddBoolToObject(capabilities, "control_power", false);
-    cJSON_AddBoolToObject(capabilities, "control_mode", false);
-    cJSON_AddBoolToObject(capabilities, "control_setpoints", false);
+    cJSON_AddBoolToObject(capabilities, "control_power", demo_controls);
+    cJSON_AddBoolToObject(capabilities, "control_mode", demo_controls);
+    cJSON_AddBoolToObject(
+        capabilities, "control_setpoints",
+        cooling_setpoint || hot_water_setpoint);
     cJSON_AddBoolToObject(capabilities, "advanced_parameters", false);
     cJSON_AddBoolToObject(capabilities, "raw_registers", false);
+
+    cJSON* modes = cJSON_AddArrayToObject(capabilities, "supported_modes");
+    if (demo_controls) {
+        cJSON_AddItemToArray(modes, cJSON_CreateString("cooling"));
+        cJSON_AddItemToArray(modes, cJSON_CreateString("floor_heating"));
+        cJSON_AddItemToArray(
+            modes, cJSON_CreateString("fan_coil_heating"));
+        cJSON_AddItemToArray(modes, cJSON_CreateString("hot_water"));
+        cJSON_AddItemToArray(modes, cJSON_CreateString("auto"));
+    }
+
+    cJSON* setpoint_controls =
+        cJSON_AddObjectToObject(capabilities, "setpoint_controls");
+    cJSON_AddBoolToObject(setpoint_controls, "cooling", cooling_setpoint);
+    // Heating setpoint writes are available only in the synthetic demo
+    // adapter; the live Tuya mapping is unverified and unsupported.
+    cJSON_AddBoolToObject(setpoint_controls, "heating", heating_setpoint);
+    cJSON_AddBoolToObject(
+        setpoint_controls, "hot_water", hot_water_setpoint);
 
     cJSON* limits = cJSON_AddObjectToObject(root, "setpoint_limits_c");
     addSetpointLimits(limits);

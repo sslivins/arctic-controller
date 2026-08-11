@@ -9,6 +9,7 @@ from arctic_controller import (
     ArcticCertificateError,
     ArcticControllerClient,
     ClientStatus,
+    ControllerCapabilities,
     StateSnapshot,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -35,6 +36,7 @@ class ArcticRuntime:
         self._listeners: set[Callable[[], None]] = set()
         self._unsubscribe_snapshot: Callable[[], None] | None = None
         self._unsubscribe_status: Callable[[], None] | None = None
+        self._unsubscribe_capabilities: Callable[[], None] | None = None
         self._reauth_started = False
 
     @property
@@ -67,6 +69,9 @@ class ArcticRuntime:
         self._unsubscribe_status = self.client.subscribe_status(
             self._async_status_received
         )
+        self._unsubscribe_capabilities = self.client.subscribe_capabilities(
+            self._async_capabilities_received
+        )
         self.snapshot = await self.client.start()
         self.status = self.client.status
 
@@ -77,6 +82,9 @@ class ArcticRuntime:
         if self._unsubscribe_status is not None:
             self._unsubscribe_status()
             self._unsubscribe_status = None
+        if self._unsubscribe_capabilities is not None:
+            self._unsubscribe_capabilities()
+            self._unsubscribe_capabilities = None
         await self.client.stop()
         self._listeners.clear()
 
@@ -109,6 +117,12 @@ class ArcticRuntime:
         ):
             self._reauth_started = True
             self.entry.async_start_reauth(self.hass)
+        self._async_notify_listeners()
+
+    @callback
+    def _async_capabilities_received(
+        self, capabilities: ControllerCapabilities
+    ) -> None:
         self._async_notify_listeners()
 
     @callback

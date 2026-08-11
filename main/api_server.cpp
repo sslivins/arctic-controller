@@ -15,6 +15,7 @@
 #include "ha_websocket.h"
 #include "heatpump_controller.h"
 #include "heatpump_types.h"
+#include "macon_master.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
@@ -40,6 +41,7 @@
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 static const char* TAG = "api_server";
@@ -62,6 +64,23 @@ extern const uint8_t index_html_gz_end[] asm("_binary_index_html_gz_end");
 
 // Session cookie name
 static const char* SESSION_COOKIE_NAME = "arctic_session";
+
+// Home Assistant commands are serialized and retained only after an
+// acknowledged write. This bounds memory and makes a retry with the same
+// command ID safe even while another request is in flight.
+static constexpr size_t HA_COMMAND_ID_MAX = 64;
+static constexpr size_t HA_COMMAND_OPERATION_MAX = 16;
+static constexpr size_t HA_COMMAND_PAYLOAD_MAX = 96;
+static constexpr size_t HA_COMMAND_CACHE_SIZE = 32;
+struct HaCommandRecord {
+    bool accepted;
+    char command_id[HA_COMMAND_ID_MAX + 1];
+    char operation[HA_COMMAND_OPERATION_MAX + 1];
+    char payload[HA_COMMAND_PAYLOAD_MAX + 1];
+};
+static HaCommandRecord s_ha_command_cache[HA_COMMAND_CACHE_SIZE] = {};
+static size_t s_ha_command_next = 0;
+static SemaphoreHandle_t s_ha_command_mutex = nullptr;
 
 // ============================================================================
 // Forward Declarations
@@ -88,6 +107,9 @@ static esp_err_t info_get_handler(httpd_req_t* req);
 static esp_err_t ha_pair_post_handler(httpd_req_t* req);
 static esp_err_t ha_capabilities_get_handler(httpd_req_t* req);
 static esp_err_t ha_state_get_handler(httpd_req_t* req);
+static esp_err_t ha_power_put_handler(httpd_req_t* req);
+static esp_err_t ha_mode_put_handler(httpd_req_t* req);
+static esp_err_t ha_setpoint_put_handler(httpd_req_t* req);
 static esp_err_t ota_status_get_handler(httpd_req_t* req);
 static esp_err_t ota_update_post_handler(httpd_req_t* req);
 static esp_err_t ota_upload_post_handler(httpd_req_t* req);
@@ -209,7 +231,8 @@ static bool check_api_auth(httpd_req_t* req)
     return false;
 }
 
-static bool check_integration_auth(httpd_req_t* req)
+static bool check_integration_auth(
+    httpd_req_t* req, uint32_t* generation_out = nullptr)
 {
     constexpr const char* BEARER_PREFIX = "Bearer ";
     constexpr size_t BEARER_PREFIX_LEN = 7;
@@ -224,8 +247,8 @@ static bool check_integration_auth(httpd_req_t* req)
         return false;
     }
 
-    return auth_mgr_validate_integration_token(
-        authorization + BEARER_PREFIX_LEN);
+    return auth_mgr_validate_integration_token_with_generation(
+        authorization + BEARER_PREFIX_LEN, generation_out);
 }
 
 static void set_session_cookie(httpd_req_t* req, const char* token)
@@ -345,6 +368,14 @@ bool api_server_start(void)
     const int recv_timeout = 10;     // seconds
     
     esp_err_t ret;
+
+    if (s_ha_command_mutex == nullptr) {
+        s_ha_command_mutex = xSemaphoreCreateMutex();
+        if (s_ha_command_mutex == nullptr) {
+            ESP_LOGE(TAG, "Failed to initialize HA command mutex");
+            return false;
+        }
+    }
     
     // ---- Always start HTTP on port 80 ----
     // This ensures CI, local development, and OTA always work regardless of TLS state.
@@ -430,7 +461,7 @@ bool api_server_start(void)
         httpd_ssl_config_t integration_config = HTTPD_SSL_CONFIG_DEFAULT();
         integration_config.port_secure = 8443;
         integration_config.httpd.ctrl_port = 32771;
-        integration_config.httpd.max_uri_handlers = 4;
+        integration_config.httpd.max_uri_handlers = 8;
         integration_config.httpd.max_open_sockets = 4;
         integration_config.httpd.stack_size = 12288;
         // Reject surplus connections instead of evicting established WSS
@@ -1087,6 +1118,51 @@ bool api_server_start(void)
             ESP_LOGE(TAG, "Home Assistant WebSocket push unavailable");
             httpd_ssl_stop(server_integration);
             server_integration = NULL;
+        } else {
+            httpd_uri_t ha_power_uri = {
+                .uri = "/api/v1/control/power",
+                .method = HTTP_PUT,
+                .handler = ha_power_put_handler,
+                .user_ctx = NULL
+            };
+            ret = httpd_register_uri_handler(
+                server_integration, &ha_power_uri);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register HA power control: %s",
+                         esp_err_to_name(ret));
+                api_server_stop();
+                return false;
+            }
+
+            httpd_uri_t ha_mode_uri = {
+                .uri = "/api/v1/control/mode",
+                .method = HTTP_PUT,
+                .handler = ha_mode_put_handler,
+                .user_ctx = NULL
+            };
+            ret = httpd_register_uri_handler(
+                server_integration, &ha_mode_uri);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register HA mode control: %s",
+                         esp_err_to_name(ret));
+                api_server_stop();
+                return false;
+            }
+
+            httpd_uri_t ha_setpoint_uri = {
+                .uri = "/api/v1/control/setpoint",
+                .method = HTTP_PUT,
+                .handler = ha_setpoint_put_handler,
+                .user_ctx = NULL
+            };
+            ret = httpd_register_uri_handler(
+                server_integration, &ha_setpoint_uri);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register HA setpoint control: %s",
+                         esp_err_to_name(ret));
+                api_server_stop();
+                return false;
+            }
         }
     }
 
@@ -1723,6 +1799,196 @@ static esp_err_t send_integration_document(
     return ESP_OK;
 }
 
+static bool read_integration_body(
+        httpd_req_t* req, char* buffer, size_t capacity)
+    {
+        if (buffer == nullptr || capacity < 2 ||
+            req->content_len <= 0 ||
+            static_cast<size_t>(req->content_len) >= capacity) {
+            return false;
+        }
+
+        size_t received = 0;
+        while (received < static_cast<size_t>(req->content_len)) {
+            const int count = httpd_req_recv(
+                req, buffer + received,
+                static_cast<size_t>(req->content_len) - received);
+            if (count <= 0) {
+                return false;
+            }
+            received += static_cast<size_t>(count);
+        }
+        buffer[received] = '\0';
+        return true;
+    }
+
+    static bool integration_object_has_only_keys(
+        const cJSON* object, const char* const* keys, size_t key_count)
+    {
+        if (object == nullptr || !cJSON_IsObject(object)) {
+            return false;
+        }
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, object) {
+            bool known = false;
+            for (size_t i = 0; i < key_count; ++i) {
+                if (strcmp(item->string, keys[i]) == 0) {
+                    known = true;
+                    break;
+                }
+            }
+            if (!known) {
+                return false;
+            }
+
+        }
+        return true;
+    }
+
+    static bool integration_command_id(
+        const cJSON* root, char* command_id)
+    {
+        cJSON* value = cJSON_GetObjectItemCaseSensitive(root, "command_id");
+        if (value == nullptr || !cJSON_IsString(value) ||
+            value->valuestring == nullptr) {
+            return false;
+        }
+        const size_t length = strlen(value->valuestring);
+        if (length == 0 || length > HA_COMMAND_ID_MAX) {
+            return false;
+        }
+        for (size_t i = 0; i < length; ++i) {
+            const unsigned char c =
+                static_cast<unsigned char>(value->valuestring[i]);
+            if (c < 0x21 || c > 0x7e) {
+                return false;
+            }
+        }
+        memcpy(command_id, value->valuestring, length + 1);
+        return true;
+    }
+
+    enum class HaCommandLookup {
+        New,
+        Duplicate,
+        Conflict,
+    };
+
+    static HaCommandLookup ha_command_begin(
+        const char* command_id, const char* operation, const char* payload,
+        size_t* slot_out)
+    {
+        if (s_ha_command_mutex == nullptr ||
+            xSemaphoreTake(s_ha_command_mutex, portMAX_DELAY) != pdTRUE) {
+            return HaCommandLookup::Conflict;
+        }
+
+        for (size_t i = 0; i < HA_COMMAND_CACHE_SIZE; ++i) {
+            const HaCommandRecord& record = s_ha_command_cache[i];
+            if (!record.accepted || strcmp(record.command_id, command_id) != 0) {
+                continue;
+            }
+            if (strcmp(record.operation, operation) == 0 &&
+                strcmp(record.payload, payload) == 0) {
+                if (slot_out != nullptr) {
+                    *slot_out = i;
+                }
+                return HaCommandLookup::Duplicate;
+            }
+            xSemaphoreGive(s_ha_command_mutex);
+            return HaCommandLookup::Conflict;
+        }
+
+        const size_t slot = s_ha_command_next++ % HA_COMMAND_CACHE_SIZE;
+        s_ha_command_cache[slot] = {};
+        if (slot_out != nullptr) {
+            *slot_out = slot;
+        }
+        return HaCommandLookup::New;
+    }
+
+    static void ha_command_finish(
+        size_t slot, bool accepted, const char* command_id,
+        const char* operation, const char* payload)
+    {
+        if (s_ha_command_mutex == nullptr) {
+            return;
+        }
+        if (accepted) {
+            HaCommandRecord& record = s_ha_command_cache[slot];
+            record.accepted = true;
+            snprintf(record.command_id, sizeof(record.command_id), "%s", command_id);
+            snprintf(record.operation, sizeof(record.operation), "%s", operation);
+            snprintf(record.payload, sizeof(record.payload), "%s", payload);
+        }
+        xSemaphoreGive(s_ha_command_mutex);
+    }
+
+    static esp_err_t send_accepted_command(
+        httpd_req_t* req, const char* command_id)
+    {
+        httpd_resp_set_status(req, "202 Accepted");
+        set_json_content_type(req);
+        cJSON* response = cJSON_CreateObject();
+        cJSON_AddBoolToObject(response, "accepted", true);
+        cJSON_AddStringToObject(response, "command_id", command_id);
+        cJSON_AddStringToObject(
+            response, "status", "accepted_waiting_for_reported_state");
+        char* json = cJSON_PrintUnformatted(response);
+        cJSON_Delete(response);
+        if (json == nullptr) {
+            send_json_error(
+                req, "500 Internal Server Error", "Command response failed");
+            return ESP_OK;
+        }
+        httpd_resp_sendstr(req, json);
+        cJSON_free(json);
+        return ESP_OK;
+    }
+
+    static bool ha_supports_power_or_mode()
+    {
+        const arctic::HeatPumpState state = arctic::getState();
+        return state.connected && arctic::isDemoMode();
+    }
+
+    static bool ha_supports_setpoint(const char* kind)
+    {
+        const arctic::HeatPumpState state = arctic::getState();
+        if (!state.connected) {
+            return false;
+        }
+        if (arctic::isDemoMode()) {
+            return strcmp(kind, "cooling") == 0 ||
+                   strcmp(kind, "heating") == 0 ||
+                   strcmp(kind, "hot_water") == 0;
+        }
+        if (macon_master::is_active()) {
+            return strcmp(kind, "cooling") == 0 ||
+                   strcmp(kind, "hot_water") == 0;
+        }
+        return false;
+    }
+
+    static const char* ha_control_unavailable_message(
+        const char* operation, const char* kind = nullptr)
+    {
+        const arctic::HeatPumpState state = arctic::getState();
+        if (!state.connected) {
+            return "Heat pump not connected";
+        }
+        if (kind != nullptr && strcmp(kind, "heating") == 0) {
+            return "Heating setpoint is unsupported by the active Tuya runtime";
+        }
+        if (strcmp(operation, "power") == 0) {
+            return "Power control is unsupported by the active runtime";
+        }
+        if (strcmp(operation, "mode") == 0) {
+            return "Selected-mode control is unsupported by the active runtime";
+        }
+        return "Setpoint control is unsupported by the active runtime";
+    }
+
 static esp_err_t ha_pair_post_handler(httpd_req_t* req)
 {
     if (req->content_len <= 0 || req->content_len >= 64) {
@@ -1861,6 +2127,291 @@ static esp_err_t ha_state_get_handler(httpd_req_t* req)
         return ESP_OK;
     }
     return send_integration_document(req, arctic::ha::createStateSnapshot());
+}
+
+static esp_err_t ha_power_put_handler(httpd_req_t* req)
+{
+    uint32_t generation = 0;
+    if (!check_integration_auth(req, &generation)) {
+        send_json_error(req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+
+    char body[160];
+    if (!read_integration_body(req, body, sizeof(body))) {
+        send_json_error(req, "422 Unprocessable Entity", "Invalid request body");
+        return ESP_OK;
+    }
+    cJSON* root = cJSON_ParseWithLength(body, strlen(body));
+    const char* keys[] = {"command_id", "on"};
+    cJSON* on = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "on");
+    char command_id[HA_COMMAND_ID_MAX + 1] = {};
+    if (root == nullptr ||
+        !integration_object_has_only_keys(root, keys, 2) ||
+        !integration_command_id(root, command_id) ||
+        on == nullptr || !cJSON_IsBool(on)) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Body must contain only command_id and boolean on");
+        return ESP_OK;
+    }
+
+    const bool power_on = cJSON_IsTrue(on);
+    char payload[HA_COMMAND_PAYLOAD_MAX + 1];
+    snprintf(payload, sizeof(payload), "on=%u", power_on ? 1U : 0U);
+    size_t slot = 0;
+    const HaCommandLookup lookup =
+        ha_command_begin(command_id, "power", payload, &slot);
+    if (lookup == HaCommandLookup::Duplicate) {
+        xSemaphoreGive(s_ha_command_mutex);
+        cJSON_Delete(root);
+        return send_accepted_command(req, command_id);
+    }
+    if (lookup == HaCommandLookup::Conflict) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "409 Conflict",
+            "command_id was already used with a different command");
+        return ESP_OK;
+    }
+
+    if (!ha_supports_power_or_mode()) {
+        ha_command_finish(slot, false, command_id, "power", payload);
+        cJSON_Delete(root);
+        send_json_error(
+            req, "503 Service Unavailable",
+            ha_control_unavailable_message("power"));
+        return ESP_OK;
+    }
+    if (!auth_mgr_begin_control_write(generation)) {
+        ha_command_finish(slot, false, command_id, "power", payload);
+        cJSON_Delete(root);
+        send_json_error(req, "401 Unauthorized", "Integration token rotated");
+        return ESP_OK;
+    }
+    const bool written = arctic::setUnitPower(power_on);
+    auth_mgr_end_control_write();
+    cJSON_Delete(root);
+    if (!written) {
+        ha_command_finish(slot, false, command_id, "power", payload);
+        send_json_error(
+            req, "503 Service Unavailable", "Power command was not accepted");
+        return ESP_OK;
+    }
+    ha_command_finish(slot, true, command_id, "power", payload);
+    return send_accepted_command(req, command_id);
+}
+
+static esp_err_t ha_mode_put_handler(httpd_req_t* req)
+{
+    uint32_t generation = 0;
+    if (!check_integration_auth(req, &generation)) {
+        send_json_error(req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+
+    char body[192];
+    if (!read_integration_body(req, body, sizeof(body))) {
+        send_json_error(req, "422 Unprocessable Entity", "Invalid request body");
+        return ESP_OK;
+    }
+    cJSON* root = cJSON_ParseWithLength(body, strlen(body));
+    const char* keys[] = {"command_id", "mode"};
+    cJSON* mode_value = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "mode");
+    char command_id[HA_COMMAND_ID_MAX + 1] = {};
+    const char* mode = mode_value != nullptr && cJSON_IsString(mode_value)
+        ? mode_value->valuestring
+        : nullptr;
+    const bool valid_mode =
+        mode != nullptr &&
+        (strcmp(mode, "cooling") == 0 ||
+         strcmp(mode, "floor_heating") == 0 ||
+         strcmp(mode, "fan_coil_heating") == 0 ||
+         strcmp(mode, "hot_water") == 0 ||
+         strcmp(mode, "auto") == 0);
+    if (root == nullptr ||
+        !integration_object_has_only_keys(root, keys, 2) ||
+        !integration_command_id(root, command_id) ||
+        !valid_mode) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Body must contain command_id and an allowlisted mode");
+        return ESP_OK;
+    }
+
+    char payload[HA_COMMAND_PAYLOAD_MAX + 1];
+    snprintf(payload, sizeof(payload), "mode=%s", mode);
+    size_t slot = 0;
+    const HaCommandLookup lookup =
+        ha_command_begin(command_id, "mode", payload, &slot);
+    if (lookup == HaCommandLookup::Duplicate) {
+        xSemaphoreGive(s_ha_command_mutex);
+        cJSON_Delete(root);
+        return send_accepted_command(req, command_id);
+    }
+    if (lookup == HaCommandLookup::Conflict) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "409 Conflict",
+            "command_id was already used with a different command");
+        return ESP_OK;
+    }
+
+    if (!ha_supports_power_or_mode()) {
+        ha_command_finish(slot, false, command_id, "mode", payload);
+        cJSON_Delete(root);
+        send_json_error(
+            req, "503 Service Unavailable",
+            ha_control_unavailable_message("mode"));
+        return ESP_OK;
+    }
+    arctic::WorkingMode working_mode = arctic::WorkingMode::COOLING;
+    if (strcmp(mode, "floor_heating") == 0) {
+        working_mode = arctic::WorkingMode::FLOOR_HEATING;
+    } else if (strcmp(mode, "fan_coil_heating") == 0) {
+        working_mode = arctic::WorkingMode::FAN_COIL_HEATING;
+    } else if (strcmp(mode, "hot_water") == 0) {
+        working_mode = arctic::WorkingMode::HOT_WATER;
+    } else if (strcmp(mode, "auto") == 0) {
+        working_mode = arctic::WorkingMode::AUTO;
+    }
+    if (!auth_mgr_begin_control_write(generation)) {
+        ha_command_finish(slot, false, command_id, "mode", payload);
+        cJSON_Delete(root);
+        send_json_error(req, "401 Unauthorized", "Integration token rotated");
+        return ESP_OK;
+    }
+    const bool written = arctic::setWorkingMode(working_mode);
+    auth_mgr_end_control_write();
+    cJSON_Delete(root);
+    if (!written) {
+        ha_command_finish(slot, false, command_id, "mode", payload);
+        send_json_error(
+            req, "503 Service Unavailable",
+            "Selected-mode command was not accepted");
+        return ESP_OK;
+    }
+    ha_command_finish(slot, true, command_id, "mode", payload);
+    return send_accepted_command(req, command_id);
+}
+
+static esp_err_t ha_setpoint_put_handler(httpd_req_t* req)
+{
+    uint32_t generation = 0;
+    if (!check_integration_auth(req, &generation)) {
+        send_json_error(req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+
+    char body[192];
+    if (!read_integration_body(req, body, sizeof(body))) {
+        send_json_error(req, "422 Unprocessable Entity", "Invalid request body");
+        return ESP_OK;
+    }
+    cJSON* root = cJSON_ParseWithLength(body, strlen(body));
+    const char* keys[] = {"command_id", "kind", "value"};
+    cJSON* kind_value = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "kind");
+    cJSON* setpoint_value = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "value");
+    char command_id[HA_COMMAND_ID_MAX + 1] = {};
+    const char* kind = kind_value != nullptr && cJSON_IsString(kind_value)
+        ? kind_value->valuestring
+        : nullptr;
+    const bool valid_kind =
+        kind != nullptr &&
+        (strcmp(kind, "cooling") == 0 ||
+         strcmp(kind, "heating") == 0 ||
+         strcmp(kind, "hot_water") == 0);
+    const bool valid_number =
+        setpoint_value != nullptr && cJSON_IsNumber(setpoint_value) &&
+        setpoint_value->valuedouble ==
+            static_cast<double>(setpoint_value->valueint);
+    const int value = valid_number ? setpoint_value->valueint : 0;
+    if (root == nullptr ||
+        !integration_object_has_only_keys(root, keys, 3) ||
+        !integration_command_id(root, command_id) ||
+        !valid_kind || !valid_number) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Body must contain command_id, kind, and integer value");
+        return ESP_OK;
+    }
+
+    const arctic::SetpointKind setpoint_kind =
+        strcmp(kind, "cooling") == 0
+            ? arctic::SetpointKind::Cooling
+            : (strcmp(kind, "heating") == 0
+                   ? arctic::SetpointKind::Heating
+                   : arctic::SetpointKind::HotWater);
+    const arctic::SetpointLimits limits =
+        arctic::setpoint_limits(setpoint_kind);
+    if (value < limits.min_c || value > limits.max_c) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Setpoint is outside the advertised inclusive range");
+        return ESP_OK;
+    }
+
+    char payload[HA_COMMAND_PAYLOAD_MAX + 1];
+    snprintf(payload, sizeof(payload), "kind=%s;value=%d", kind, value);
+    size_t slot = 0;
+    const HaCommandLookup lookup =
+        ha_command_begin(command_id, "setpoint", payload, &slot);
+    if (lookup == HaCommandLookup::Duplicate) {
+        xSemaphoreGive(s_ha_command_mutex);
+        cJSON_Delete(root);
+        return send_accepted_command(req, command_id);
+    }
+    if (lookup == HaCommandLookup::Conflict) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "409 Conflict",
+            "command_id was already used with a different command");
+        return ESP_OK;
+    }
+
+    if (!ha_supports_setpoint(kind)) {
+        ha_command_finish(slot, false, command_id, "setpoint", payload);
+        cJSON_Delete(root);
+        send_json_error(
+            req, "503 Service Unavailable",
+            ha_control_unavailable_message("setpoint", kind));
+        return ESP_OK;
+    }
+    if (!auth_mgr_begin_control_write(generation)) {
+        ha_command_finish(slot, false, command_id, "setpoint", payload);
+        cJSON_Delete(root);
+        send_json_error(req, "401 Unauthorized", "Integration token rotated");
+        return ESP_OK;
+    }
+    bool written = false;
+    if (setpoint_kind == arctic::SetpointKind::Cooling) {
+        written = arctic::setCoolingSetpoint(static_cast<int16_t>(value));
+    } else if (setpoint_kind == arctic::SetpointKind::HotWater) {
+        written = arctic::setHotWaterSetpoint(static_cast<int16_t>(value));
+    }
+    auth_mgr_end_control_write();
+    cJSON_Delete(root);
+    if (!written) {
+        ha_command_finish(slot, false, command_id, "setpoint", payload);
+        send_json_error(
+            req, "503 Service Unavailable",
+            "Setpoint command was not accepted");
+        return ESP_OK;
+    }
+    ha_command_finish(slot, true, command_id, "setpoint", payload);
+    return send_accepted_command(req, command_id);
 }
 
 static esp_err_t info_get_handler(httpd_req_t* req)

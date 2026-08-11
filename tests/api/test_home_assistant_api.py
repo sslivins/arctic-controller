@@ -177,7 +177,15 @@ def test_capabilities_exclude_advanced_and_raw_controls():
     assert data["device_id"].startswith("arctic-")
     assert data["transports"] == {"rest": True, "websocket": True}
     assert data["capabilities"]["read_state"] is True
-    assert data["capabilities"]["control_power"] is False
+    assert isinstance(data["capabilities"]["control_power"], bool)
+    assert isinstance(data["capabilities"]["control_mode"], bool)
+    assert isinstance(data["capabilities"]["control_setpoints"], bool)
+    assert set(data["capabilities"]["setpoint_controls"]) == {
+        "cooling",
+        "heating",
+        "hot_water",
+    }
+    assert isinstance(data["capabilities"]["supported_modes"], list)
     assert data["capabilities"]["advanced_parameters"] is False
     assert data["capabilities"]["raw_registers"] is False
 

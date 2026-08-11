@@ -1,12 +1,16 @@
-"""Read-only climate entity for selected mode and actual operation."""
+"""Climate entity for power, coarse HVAC display, and advertised setpoints."""
 
 from __future__ import annotations
 
 from arctic_controller import ControllerState
 from homeassistant.components.climate import ClimateEntity
-from homeassistant.components.climate.const import HVACAction, HVACMode
+from homeassistant.components.climate.const import (
+    HVACAction,
+    HVACMode,
+    ClimateEntityFeature,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -18,7 +22,6 @@ MODE_MAP = {
     "cooling": HVACMode.COOL,
     "floor_heating": HVACMode.HEAT,
     "fan_coil_heating": HVACMode.HEAT,
-    "heating": HVACMode.HEAT,
     "hot_water": HVACMode.HEAT,
     "auto": HVACMode.HEAT_COOL,
 }
@@ -45,12 +48,6 @@ class ArcticClimate(ArcticEntity, ClimateEntity):
     """Expose requested mode separately from actual heat-pump operation."""
 
     _attr_name = None
-    _attr_hvac_modes = [
-        HVACMode.OFF,
-        HVACMode.HEAT,
-        HVACMode.COOL,
-        HVACMode.HEAT_COOL,
-    ]
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
 
     def __init__(self, runtime: ArcticRuntime) -> None:
@@ -73,6 +70,73 @@ class ArcticClimate(ArcticEntity, ClimateEntity):
         return state.setpoints_c.heating
 
     @property
+    def min_temp(self) -> float:
+        capabilities = self.runtime.client.capabilities
+        state = self._state
+        if capabilities is None or state is None:
+            return 0
+        if state.mode == "cooling":
+            return capabilities.cooling_range.minimum
+        if state.mode == "hot_water":
+            return capabilities.hot_water_range.minimum
+        return capabilities.heating_range.minimum
+
+    @property
+    def max_temp(self) -> float:
+        capabilities = self.runtime.client.capabilities
+        state = self._state
+        if capabilities is None or state is None:
+            return 0
+        if state.mode == "cooling":
+            return capabilities.cooling_range.maximum
+        if state.mode == "hot_water":
+            return capabilities.hot_water_range.maximum
+        return capabilities.heating_range.maximum
+
+    @property
+    def hvac_modes(self) -> list[HVACMode]:
+        capabilities = self.runtime.client.capabilities
+        modes = [HVACMode.OFF]
+        state = self._state
+        if capabilities is not None and capabilities.control_power:
+            if "cooling" in capabilities.supported_modes:
+                modes.append(HVACMode.COOL)
+            if "auto" in capabilities.supported_modes:
+                modes.append(HVACMode.HEAT_COOL)
+            if any(
+                mode in capabilities.supported_modes
+                for mode in (
+                    "floor_heating",
+                    "fan_coil_heating",
+                    "hot_water",
+                )
+            ):
+                modes.append(HVACMode.HEAT)
+        if state is not None:
+            current_mode = MODE_MAP.get(state.mode)
+            if current_mode is not None and current_mode not in modes:
+                modes.append(current_mode)
+        return modes
+
+    @property
+    def supported_features(self) -> int:
+        state = self._state
+        capabilities = self.runtime.client.capabilities
+        if state is None or capabilities is None:
+            return 0
+        supported = 0
+        if state.mode == "cooling" and capabilities.setpoint_controls.cooling:
+            supported |= ClimateEntityFeature.TARGET_TEMPERATURE
+        elif (
+            state.mode == "hot_water"
+            and capabilities.setpoint_controls.hot_water
+        ):
+            supported |= ClimateEntityFeature.TARGET_TEMPERATURE
+        elif capabilities.setpoint_controls.heating:
+            supported |= ClimateEntityFeature.TARGET_TEMPERATURE
+        return supported
+
+    @property
     def hvac_mode(self) -> HVACMode | None:
         state = self._state
         if state is None:
@@ -89,9 +153,66 @@ class ArcticClimate(ArcticEntity, ClimateEntity):
         return ACTION_MAP.get(state.operation, HVACAction.IDLE)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        raise HomeAssistantError(
-            "Arctic Controller controls are not enabled yet"
-        )
+        capabilities = self.runtime.client.capabilities
+        if capabilities is None or not capabilities.control_power:
+            raise HomeAssistantError("Power control is unavailable")
+        if hvac_mode == HVACMode.OFF:
+            await self.runtime.client.async_set_power(False)
+            return
+
+        if hvac_mode == HVACMode.HEAT:
+            state = self._state
+            if state is not None and state.mode in {
+                "floor_heating",
+                "fan_coil_heating",
+                "hot_water",
+            }:
+                await self.runtime.client.async_set_power(True)
+                return
+            raise HomeAssistantError(
+                "Select an exact Arctic heating mode before turning heat on"
+            )
+
+        exact_mode = {
+            HVACMode.COOL: "cooling",
+            HVACMode.HEAT_COOL: "auto",
+        }.get(hvac_mode)
+        if exact_mode is None:
+            raise HomeAssistantError(
+                "Select an exact Arctic mode from the mode entity"
+            )
+        if (
+            not capabilities.control_mode
+            or exact_mode not in capabilities.supported_modes
+        ):
+            raise HomeAssistantError("Selected-mode control is unavailable")
+        await self.runtime.client.async_set_mode(exact_mode)
+        await self.runtime.client.async_set_power(True)
+
+    async def async_set_temperature(self, **kwargs: float) -> None:
+        value = kwargs.get(ATTR_TEMPERATURE)
+        if value is None or isinstance(value, bool) or int(value) != value:
+            raise HomeAssistantError("Arctic setpoints require whole degrees C")
+        state = self._state
+        capabilities = self.runtime.client.capabilities
+        if state is None or capabilities is None:
+            raise HomeAssistantError("Setpoint control is unavailable")
+        if state.mode == "cooling":
+            if not capabilities.setpoint_controls.cooling:
+                raise HomeAssistantError("Cooling setpoint control is unavailable")
+            await self.runtime.client.async_set_cooling_setpoint(int(value))
+        elif state.mode == "hot_water":
+            if not capabilities.setpoint_controls.hot_water:
+                raise HomeAssistantError(
+                    "Hot-water setpoint control is unavailable"
+                )
+            await self.runtime.client.async_set_hot_water_setpoint(int(value))
+        else:
+            if not capabilities.setpoint_controls.heating:
+                raise HomeAssistantError(
+                    "Heating setpoint control is unavailable"
+                )
+            await self.runtime.client.async_set_heating_setpoint(int(value))
 
     @property
     def _state(self) -> ControllerState | None:

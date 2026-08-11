@@ -180,6 +180,20 @@ bool auth_mgr_validate_integration_token_with_generation(
  */
 uint32_t auth_mgr_get_integration_generation(void);
 
+/**
+ * @brief Reserve a control write for an authenticated integration request.
+ *
+ * The integration-token transaction mutex remains held until
+ * auth_mgr_end_control_write(), preventing token rotation or revocation from
+ * racing the generation check and the bus write.
+ */
+bool auth_mgr_begin_control_write(uint32_t generation);
+
+/**
+ * @brief Release the reservation acquired by auth_mgr_begin_control_write().
+ */
+void auth_mgr_end_control_write(void);
+
 #ifdef __cplusplus
 }
 #endif

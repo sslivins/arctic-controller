@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from arctic_controller import (
     ArcticAuthenticationError,
     ArcticCertificateError,
@@ -12,9 +14,11 @@ from arctic_controller import (
 )
 from homeassistant.components.climate import DOMAIN as CLIMATE_DOMAIN
 from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
+from homeassistant.components.select import DOMAIN as SELECT_DOMAIN
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -121,7 +125,68 @@ async def test_availability_and_unload_cleanup(
     assert entry.state is ConfigEntryState.NOT_LOADED
     client.unsubscribe_snapshot.assert_called_once()
     client.unsubscribe_status.assert_called_once()
+    client.unsubscribe_capabilities.assert_called_once()
     client.stop.assert_awaited_once()
+
+
+async def test_controls_are_command_driven_and_not_optimistic(
+    hass: HomeAssistant, mock_clients: dict[str, MagicMock]
+) -> None:
+    await setup_entry(hass, "arctic-001", "controller.local")
+    client = mock_clients["controller.local"]
+    climate = entity_id(hass, CLIMATE_DOMAIN, "arctic-001_climate")
+    mode = entity_id(hass, SELECT_DOMAIN, "arctic-001_mode")
+
+    await hass.services.async_call(
+        CLIMATE_DOMAIN,
+        "set_hvac_mode",
+        {"entity_id": climate, "hvac_mode": "off"},
+        blocking=True,
+    )
+    client.async_set_power.assert_awaited_once_with(False)
+    assert hass.states.get(climate).state == "heat"
+
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": mode, "option": "fan_coil_heating"},
+        blocking=True,
+    )
+    client.async_set_mode.assert_awaited_once_with("fan_coil_heating")
+    assert hass.states.get(mode).state == "heating"
+
+
+async def test_generic_heat_does_not_choose_an_arctic_heating_subtype(
+    hass: HomeAssistant, mock_clients: dict[str, MagicMock]
+) -> None:
+    await setup_entry(hass, "arctic-001", "controller.local")
+    climate = entity_id(hass, CLIMATE_DOMAIN, "arctic-001_climate")
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            CLIMATE_DOMAIN,
+            "set_hvac_mode",
+            {"entity_id": climate, "hvac_mode": "heat"},
+            blocking=True,
+        )
+
+
+async def test_mode_entity_tracks_dynamic_capabilities(
+    hass: HomeAssistant, mock_clients: dict[str, MagicMock]
+) -> None:
+    await setup_entry(hass, "arctic-001", "controller.local")
+    client = mock_clients["controller.local"]
+    mode = entity_id(hass, SELECT_DOMAIN, "arctic-001_mode")
+    assert hass.states.get(mode).state != "unavailable"
+
+    client.capabilities = replace(
+        client.capabilities,
+        control_mode=False,
+        supported_modes=(),
+    )
+    client.capabilities_callback(client.capabilities)
+    await hass.async_block_till_done()
+    assert hass.states.get(mode).state == "unavailable"
 
 
 async def test_diagnostics_redact_connection_secrets(

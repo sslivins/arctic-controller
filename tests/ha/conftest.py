@@ -92,9 +92,21 @@ def make_capabilities(device_id: str) -> ControllerCapabilities:
             "transports": {"rest": True, "websocket": True},
             "capabilities": {
                 "read_state": True,
-                "control_power": False,
-                "control_mode": False,
-                "control_setpoints": False,
+                "control_power": True,
+                "control_mode": True,
+                "control_setpoints": True,
+                "supported_modes": [
+                    "cooling",
+                    "floor_heating",
+                    "fan_coil_heating",
+                    "hot_water",
+                    "auto",
+                ],
+                "setpoint_controls": {
+                    "cooling": True,
+                    "heating": True,
+                    "hot_water": True,
+                },
             },
             "setpoint_limits_c": {
                 "cooling": {"min": 5, "max": 25},
@@ -117,6 +129,11 @@ def mock_clients() -> Generator[dict[str, MagicMock]]:
         client.status = ClientStatus(True, True, None)
         client.start = AsyncMock(return_value=make_snapshot(device_id))
         client.stop = AsyncMock()
+        client.async_set_power = AsyncMock()
+        client.async_set_mode = AsyncMock()
+        client.async_set_cooling_setpoint = AsyncMock()
+        client.async_set_heating_setpoint = AsyncMock()
+        client.async_set_hot_water_setpoint = AsyncMock()
 
         def subscribe(callback):
             client.snapshot_callback = callback
@@ -126,10 +143,16 @@ def mock_clients() -> Generator[dict[str, MagicMock]]:
             client.status_callback = callback
             return client.unsubscribe_status
 
+        def subscribe_capabilities(callback):
+            client.capabilities_callback = callback
+            return client.unsubscribe_capabilities
+
         client.unsubscribe_snapshot = MagicMock()
         client.unsubscribe_status = MagicMock()
+        client.unsubscribe_capabilities = MagicMock()
         client.subscribe.side_effect = subscribe
         client.subscribe_status.side_effect = subscribe_status
+        client.subscribe_capabilities.side_effect = subscribe_capabilities
         clients[host] = client
         return client
 
@@ -138,4 +161,3 @@ def mock_clients() -> Generator[dict[str, MagicMock]]:
         side_effect=create_client,
     ):
         yield clients
-

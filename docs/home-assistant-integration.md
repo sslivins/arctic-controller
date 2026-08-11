@@ -41,7 +41,7 @@ protocol are not required.
 
 ## Home Assistant Control Allowlist
 
-Home Assistant may eventually control only:
+Home Assistant may control only the subset advertised by the controller:
 
 - Unit power.
 - Selected working mode.
@@ -49,9 +49,14 @@ Home Assistant may eventually control only:
 - Heating setpoint.
 - Hot-water setpoint.
 
-All controls remain disabled until the read-only integration has completed its
-security gate. Commands are non-optimistic: a successful REST response means
-the command was accepted, not that the reported heat-pump state has changed.
+Controls are enabled only after authenticated capability discovery and are
+disabled when the active runtime does not advertise them. Commands are
+non-optimistic: a successful REST response means the command was accepted, not
+that the reported heat-pump state has changed.
+The client generates a UUID `command_id` for every command unless the caller
+supplies one. Reusing an ID with the same operation and payload returns the
+original accepted acknowledgement; reusing it with different data is a
+conflict.
 
 The following are permanently excluded:
 
@@ -130,13 +135,37 @@ The Home Assistant client discards a REST or WebSocket snapshot when:
 ### Commands
 
 The allowlisted controls use versioned endpoints rather than generic register
-writes. Each request includes a client-generated command ID and each response
-reports accepted/rejected status.
+writes. They exist only on the dedicated HTTPS server on port `8443` and
+require the paired integration credential in the `Authorization` header.
 
-The device includes the most recent applicable command ID in a subsequent
-snapshot when practical. If confirmation is not observed within a bounded
-interval, Home Assistant performs a reconciliation request and reports failure
-instead of fabricating success.
+- `PUT /api/v1/control/power` — `{ "command_id": "...", "on": true }`
+- `PUT /api/v1/control/mode` — `{ "command_id": "...", "mode": "cooling" }`
+- `PUT /api/v1/control/setpoint` — `{ "command_id": "...", "kind":
+  "cooling", "value": 24 }`
+
+The exact mode allowlist is `cooling`, `floor_heating`, `fan_coil_heating`,
+`hot_water`, and `auto`; generic `heating` is not a selectable mode. Setpoint
+values must be whole degrees and inside the advertised inclusive range.
+Responses use `202 Accepted` and acknowledge command acceptance only.
+
+`401` means the integration token is missing, invalid, or rotated; `409` means
+conflicting command-ID reuse; `422` means a malformed or out-of-range request;
+and `503` means the control is disconnected or unsupported by the active
+runtime. The device rechecks the token generation while reserving the control
+write, so rotation or revocation prevents a raced bus write.
+
+Capabilities are dynamic. Demo mode advertises power, exact-mode, and all
+three setpoints. The live Tuya master advertises only cooling and hot-water
+setpoints; power, selected-mode, and heating-setpoint writes are unsupported.
+Passive-listen and disconnected runtimes advertise no controls. Home Assistant
+must wire only advertised controls and wait for the normal pushed/reconciled
+reported state; it never mutates entity state optimistically.
+
+The climate entity uses coarse HVAC display semantics only. An exact Arctic
+mode select entity preserves `floor_heating`, `fan_coil_heating`, and
+`hot_water`; a reported generic `heating` mode remains display-only because
+the control allowlist never guesses a heating subtype. Generic Home Assistant
+`HEAT` never selects an arbitrary Arctic heating subtype.
 
 ## WebSocket Contract
 
@@ -477,6 +506,15 @@ generic register access remain excluded.
 - Confirm changes through pushed or reconciled reported state.
 - Explicitly reject unavailable, disconnected, out-of-range, and unsupported
   operations.
+
+Status: complete. The firmware exposes only the three authenticated
+operation-specific endpoints on port 8443, with strict bodies, command-ID
+deduplication, generation-guarded writes, and dynamic runtime capabilities.
+The client provides typed command methods and status exceptions. Home
+Assistant wires only advertised controls, preserves exact Arctic modes in a
+separate select entity, and never mutates state optimistically. Live Tuya
+support is limited to cooling and hot-water setpoints; demo mode supports the
+full allowlist.
 
 ### Phase 9: Hardening and beta
 

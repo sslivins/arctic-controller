@@ -23,3 +23,15 @@ class ArcticPairingError(ArcticControllerError):
 
 class ArcticProtocolError(ArcticControllerError):
     """The controller returned an invalid or unsupported protocol message."""
+
+
+class ArcticCommandConflictError(ArcticControllerError):
+    """A command ID was reused for a different operation or payload."""
+
+
+class ArcticCommandValidationError(ArcticControllerError):
+    """The controller rejected a command body or value."""
+
+
+class ArcticControlUnavailableError(ArcticControllerError):
+    """The requested control is unavailable in the active runtime."""
