@@ -2807,13 +2807,13 @@ components:
     HomeAssistantPowerCommand:
       type: object
       additionalProperties: false
-      required: [command_id, on]
+      required: [command_id, "on"]
       properties:
         command_id:
           type: string
           minLength: 1
           maxLength: 64
-        on:
+        "on":
           type: boolean
 
     HomeAssistantModeCommand:

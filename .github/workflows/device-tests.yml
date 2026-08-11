@@ -316,6 +316,31 @@ jobs:
           echo "Device did not come back online within 60s"
           exit 1
 
+      - name: Provision isolated test credentials
+        run: |
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          TEST_USERNAME="arctic"
+          TEST_PASSWORD="ArcticTest!2026"
+          BODY=$(python3 -c 'import json,os; print(json.dumps({"username": os.environ["TEST_USERNAME"], "password": os.environ["TEST_PASSWORD"]}))')
+
+          for URL in "$ARCTIC_URL_HTTPS" "$ARCTIC_URL"; do
+            if curl -skf --connect-timeout 3 --max-time 10 \
+              -X POST "$URL/api/test/credentials" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" > /dev/null; then
+              echo "ARCTIC_USERNAME=$TEST_USERNAME" >> "$GITHUB_ENV"
+              echo "ARCTIC_PASSWORD=$TEST_PASSWORD" >> "$GITHUB_ENV"
+              echo "Provisioned non-default credentials for test firmware"
+              exit 0
+            fi
+          done
+
+          echo "ERROR: Could not provision test credentials"
+          exit 1
+        env:
+          TEST_USERNAME: arctic
+          TEST_PASSWORD: ArcticTest!2026
+
       - name: Sync API key from device
         run: |
           # The device may have a randomly-generated API key (fresh flash without
@@ -354,10 +379,6 @@ jobs:
           else
             echo "WARNING: Could not read device API key — tests may fail"
           fi
-        env:
-          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
-
       - name: Detect HTTPS support
         run: |
           # If HTTPS is available, use it for all tests (avoids HTTP→HTTPS redirect issues with cookies/auth)
@@ -396,8 +417,6 @@ jobs:
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
           # ARCTIC_API_KEY is set via $GITHUB_ENV by the "Sync API key" step
-          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           HYPOTHESIS_PROFILE: ci
           PYTHONDONTWRITEBYTECODE: '1'
 
@@ -411,8 +430,6 @@ jobs:
         continue-on-error: true
         run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
         env:
-          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
           TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 

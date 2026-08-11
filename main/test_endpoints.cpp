@@ -145,6 +145,54 @@ static esp_err_t integration_pairing_post_handler(httpd_req_t* req)
     return send_result;
 }
 
+static esp_err_t test_credentials_post_handler(httpd_req_t* req)
+{
+    if (req->content_len <= 0 || req->content_len >= 256) {
+        send_json_error(req, "400 Bad Request", "Invalid body");
+        return ESP_OK;
+    }
+
+    char body[256] = {};
+    const int received = httpd_req_recv(req, body, req->content_len);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Failed to read body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    memset(body, 0, sizeof(body));
+    cJSON* username = root ? cJSON_GetObjectItem(root, "username") : NULL;
+    cJSON* password = root ? cJSON_GetObjectItem(root, "password") : NULL;
+    const bool valid =
+        cJSON_IsString(username) && username->valuestring != NULL &&
+        username->valuestring[0] != '\0' &&
+        strlen(username->valuestring) <= AUTH_MAX_USERNAME_LEN &&
+        cJSON_IsString(password) && password->valuestring != NULL &&
+        strlen(password->valuestring) >= 12;
+    if (!valid) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "400 Bad Request",
+            "A username and password of at least 12 characters are required");
+        return ESP_OK;
+    }
+
+    const bool saved =
+        auth_mgr_set_credentials(username->valuestring, password->valuestring);
+    cJSON_Delete(root);
+    if (!saved) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not persist test credentials");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
 static esp_err_t websocket_feasibility_handler(httpd_req_t* req)
 {
     if (req->method == HTTP_GET) {
@@ -2085,6 +2133,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &integration_pairing_uri);
+
+    httpd_uri_t test_credentials_uri = {
+        .uri = "/api/test/credentials",
+        .method = HTTP_POST,
+        .handler = test_credentials_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &test_credentials_uri);
 
     httpd_uri_t ui_state_uri = {
         .uri = "/api/test/ui-state",
