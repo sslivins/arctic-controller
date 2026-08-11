@@ -87,7 +87,7 @@ def test_device_test_build_explicitly_overrides_production_config() -> None:
         ROOT / ".github" / "workflows" / "device-tests.yml"
     ).read_text(encoding="utf-8")
 
-    assert "sed -i" in workflow
+    assert 'disabled = "# CONFIG_TEST_ENDPOINTS is not set"' in workflow
     assert "CONFIG_TEST_ENDPOINTS=y" in workflow
     assert "Verify test instrumentation was compiled" in workflow
 

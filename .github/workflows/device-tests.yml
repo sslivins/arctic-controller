@@ -47,7 +47,19 @@ jobs:
 
       - name: Enable test endpoints for device testing
         run: |
-          sed -i 's/^# CONFIG_TEST_ENDPOINTS is not set$/CONFIG_TEST_ENDPOINTS=y/' sdkconfig
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("sdkconfig")
+          disabled = "# CONFIG_TEST_ENDPOINTS is not set"
+          config = path.read_text(encoding="utf-8")
+          if disabled not in config:
+              raise SystemExit("CONFIG_TEST_ENDPOINTS is not disabled in sdkconfig")
+          path.write_text(
+              config.replace(disabled, "CONFIG_TEST_ENDPOINTS=y", 1),
+              encoding="utf-8",
+          )
+          PY
           grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
 
       - name: ESP-IDF Build (test firmware)
