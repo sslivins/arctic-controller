@@ -762,7 +762,7 @@ CONFIG_PARTITION_TABLE_MD5=y
 #
 # Arctic Controller
 #
-CONFIG_TEST_ENDPOINTS=y
+# CONFIG_TEST_ENDPOINTS is not set
 # CONFIG_ARCTIC_TUYA_LISTEN is not set
 CONFIG_ARCTIC_TUYA_MASTER=y
 # end of Arctic Controller

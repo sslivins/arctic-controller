@@ -10,6 +10,7 @@
 #include <mbedtls/sha256.h>
 #include <mbedtls/platform_util.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <string.h>
 #include <time.h>
 
@@ -47,6 +48,8 @@ static struct {
     session_t sessions[AUTH_MAX_SESSIONS];
 } state = {};
 static portMUX_TYPE integration_token_lock = portMUX_INITIALIZER_UNLOCKED;
+static StaticSemaphore_t integration_token_mutex_buffer;
+static SemaphoreHandle_t integration_token_mutex = NULL;
 
 // ============================================================================
 // Helper Functions
@@ -233,6 +236,13 @@ void auth_mgr_init(void)
     if (state.initialized) return;
     
     ESP_LOGI(TAG, "Initializing authentication manager...");
+
+    integration_token_mutex =
+        xSemaphoreCreateMutexStatic(&integration_token_mutex_buffer);
+    if (integration_token_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create integration token mutex");
+        return;
+    }
     
     memset(&state, 0, sizeof(state));
     bool loaded = load_from_nvs();
@@ -249,6 +259,14 @@ void auth_mgr_init(void)
     } else {
         ESP_LOGI(TAG, "Credentials loaded from NVS: username='%s', password_set=%d", 
                  state.username, state.password_set ? 1 : 0);
+    }
+
+    // Remote administration is always authenticated. The factory credential
+    // may only be used to sign in and replace itself.
+    if (!state.web_auth_enabled || !state.api_auth_enabled) {
+        state.web_auth_enabled = true;
+        state.api_auth_enabled = true;
+        save_to_nvs();
     }
     
     // Generate API key if not set
@@ -276,6 +294,10 @@ bool auth_mgr_web_auth_enabled(void)
 
 void auth_mgr_set_web_auth_enabled(bool enabled)
 {
+    if (!enabled) {
+        ESP_LOGW(TAG, "Ignoring attempt to disable mandatory web authentication");
+        return;
+    }
     if (state.web_auth_enabled != enabled) {
         state.web_auth_enabled = enabled;
         save_to_nvs();
@@ -324,6 +346,18 @@ bool auth_mgr_set_credentials(const char* username, const char* password)
     return true;
 }
 
+bool auth_mgr_credentials_change_required(void)
+{
+    uint8_t default_hash[32];
+    hash_password("arctic", default_hash);
+    const bool factory_credentials =
+        state.password_set &&
+        constant_time_equal(
+            state.password_hash, default_hash, sizeof(default_hash));
+    mbedtls_platform_zeroize(default_hash, sizeof(default_hash));
+    return factory_credentials;
+}
+
 const char* auth_mgr_get_username(void)
 {
     return state.username;
@@ -331,11 +365,6 @@ const char* auth_mgr_get_username(void)
 
 bool auth_mgr_login(const char* username, const char* password, char* session_token)
 {
-    if (!state.web_auth_enabled) {
-        // Auth disabled - always succeed with no token
-        return true;
-    }
-    
     if (username == NULL || password == NULL) {
         ESP_LOGW(TAG, "Login failed: null credentials");
         return false;
@@ -356,7 +385,10 @@ bool auth_mgr_login(const char* username, const char* password, char* session_to
     uint8_t input_hash[32];
     hash_password(password, input_hash);
     
-    if (memcmp(input_hash, state.password_hash, 32) != 0) {
+    const bool password_matches =
+        constant_time_equal(input_hash, state.password_hash, sizeof(input_hash));
+    mbedtls_platform_zeroize(input_hash, sizeof(input_hash));
+    if (!password_matches) {
         ESP_LOGW(TAG, "Login failed: invalid password");
         return false;
     }
@@ -383,10 +415,6 @@ bool auth_mgr_login(const char* username, const char* password, char* session_to
 
 bool auth_mgr_validate_session(const char* token)
 {
-    if (!state.web_auth_enabled) {
-        return true;  // Auth disabled
-    }
-    
     session_t* session = find_session(token);
     if (session == NULL) {
         return false;
@@ -431,6 +459,10 @@ bool auth_mgr_api_auth_enabled(void)
 
 void auth_mgr_set_api_auth_enabled(bool enabled)
 {
+    if (!enabled) {
+        ESP_LOGW(TAG, "Ignoring attempt to disable mandatory API authentication");
+        return;
+    }
     if (state.api_auth_enabled != enabled) {
         state.api_auth_enabled = enabled;
         save_to_nvs();
@@ -466,10 +498,6 @@ bool auth_mgr_regenerate_api_key(char* buffer)
 
 bool auth_mgr_validate_api_key(const char* key)
 {
-    if (!state.api_auth_enabled) {
-        return true;  // Auth disabled
-    }
-    
     if (key == NULL || key[0] == '\0') {
         return false;
     }
@@ -491,7 +519,8 @@ bool auth_mgr_has_integration_token(void)
 
 bool auth_mgr_issue_integration_token(char* buffer)
 {
-    if (buffer == NULL) {
+    if (buffer == NULL || integration_token_mutex == NULL ||
+        xSemaphoreTake(integration_token_mutex, portMAX_DELAY) != pdTRUE) {
         return false;
     }
 
@@ -518,6 +547,7 @@ bool auth_mgr_issue_integration_token(char* buffer)
         buffer[0] = '\0';
         mbedtls_platform_zeroize(token, sizeof(token));
         mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+        xSemaphoreGive(integration_token_mutex);
         return false;
     }
 
@@ -529,12 +559,18 @@ bool auth_mgr_issue_integration_token(char* buffer)
     memcpy(buffer, token, sizeof(token));
     mbedtls_platform_zeroize(token, sizeof(token));
     mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+    xSemaphoreGive(integration_token_mutex);
     ESP_LOGI(TAG, "Integration token issued");
     return true;
 }
 
 bool auth_mgr_revoke_integration_token(void)
 {
+    if (integration_token_mutex == NULL ||
+        xSemaphoreTake(integration_token_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+
     nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
@@ -552,6 +588,7 @@ bool auth_mgr_revoke_integration_token(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to revoke integration token: %s",
                  esp_err_to_name(err));
+        xSemaphoreGive(integration_token_mutex);
         return false;
     }
 
@@ -561,6 +598,7 @@ bool auth_mgr_revoke_integration_token(void)
     state.integration_token_set = false;
     state.integration_generation++;
     portEXIT_CRITICAL(&integration_token_lock);
+    xSemaphoreGive(integration_token_mutex);
     ESP_LOGI(TAG, "Integration token revoked");
     return true;
 }

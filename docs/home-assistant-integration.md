@@ -448,7 +448,28 @@ must be completed before distributing the integration through HACS.
 - Review authentication, TLS/pinning, token lifecycle, legacy endpoints,
   malformed/slow clients, resource exhaustion, diagnostics, and command design.
 
-Controls cannot proceed until this gate passes.
+Status: complete. Production builds exclude all `/api/test/*` instrumentation,
+and release/device-test workflows verify their opposite security profiles.
+Integration-token issuance and revocation serialize the complete NVS and
+in-memory transaction so a concurrent physical revocation cannot reappear
+after reboot.
+
+The legacy web/API surface now fails closed: web login and API-key
+authentication are mandatory, operational and administrative APIs remain
+blocked while the factory password exists, and the factory credential can only
+be replaced after a one-time code is opened on the physical controller. Port
+443 is available from first boot using the persistent device identity, and
+secret-bearing requests never fall back to plaintext HTTP. Port 80 exposes only
+the health check, plus test instrumentation in explicitly built test firmware.
+TLS renewal uses validated HTTPS and keeps the wildcard private key local to
+the runner step rather than passing it through workflow outputs.
+
+The gate permits Phase 8 only for operation-specific power, selected-mode, and
+setpoint endpoints on the isolated port-8443 service. Those commands must keep
+strict integration authentication, server-side allowlists and ranges,
+credential-generation rechecks immediately before bus writes, idempotent
+command IDs, and confirmation through reported state. Advanced parameters and
+generic register access remain excluded.
 
 ### Phase 8: Allowlisted controls
 

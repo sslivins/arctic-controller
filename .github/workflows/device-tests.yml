@@ -47,7 +47,8 @@ jobs:
 
       - name: Enable test endpoints for device testing
         run: |
-          echo "CONFIG_TEST_ENDPOINTS=y" >> sdkconfig.defaults
+          sed -i 's/^# CONFIG_TEST_ENDPOINTS is not set$/CONFIG_TEST_ENDPOINTS=y/' sdkconfig
+          grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
 
       - name: ESP-IDF Build (test firmware)
         uses: espressif/esp-idf-ci-action@v1
@@ -55,6 +56,9 @@ jobs:
           esp_idf_version: v5.5.2
           target: esp32p4
           path: '.'
+
+      - name: Verify test instrumentation was compiled
+        run: grep -q '^#define CONFIG_TEST_ENDPOINTS 1$' build/config/sdkconfig.h
 
       - name: Upload firmware + flash metadata
         uses: actions/upload-artifact@v7
@@ -140,7 +144,7 @@ jobs:
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           DEVICE_KEY=""
 
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+          for URL in "$ARCTIC_URL_HTTPS"; do
             RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
 
@@ -195,7 +199,7 @@ jobs:
           # Quick connectivity check — bail fast if device isn't actually responding
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           DEVICE_REACHABLE=false
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+          for URL in "$ARCTIC_URL_HTTPS"; do
             if curl -sk --connect-timeout 3 --max-time 5 "$URL/api/health" > /dev/null 2>&1; then
               DEVICE_REACHABLE=true
               echo "Device responding at $URL"
@@ -208,7 +212,7 @@ jobs:
           fi
 
           # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+          for URL in "$ARCTIC_URL_HTTPS"; do
             echo "Trying $URL/api/ota/upload ..."
             HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
               -X POST \
@@ -309,7 +313,7 @@ jobs:
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           DEVICE_KEY=""
 
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+          for URL in "$ARCTIC_URL_HTTPS"; do
             RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
 

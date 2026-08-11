@@ -61,6 +61,13 @@ ha_pairing_claim_result_t ha_pairing_claim(
     const char* code,
     char* token_out);
 
+/**
+ * @brief Consume the physical pairing code without issuing an HA token.
+ *
+ * Used for first-boot administrator credential replacement.
+ */
+ha_pairing_claim_result_t ha_pairing_authorize(const char* code);
+
 #ifdef __cplusplus
 }
 #endif

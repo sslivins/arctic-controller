@@ -2,7 +2,7 @@ menu "Arctic Controller"
 
     config TEST_ENDPOINTS
         bool "Enable test instrumentation endpoints (/api/test/*)"
-        default y
+        default n
         help
             Enables REST API endpoints for UI testing:
             - GET /api/test/ui-state  (read LVGL widget tree)

@@ -130,9 +130,6 @@ static esp_err_t tls_status_get_handler(httpd_req_t* req);
 static esp_err_t tls_cert_post_handler(httpd_req_t* req);
 static esp_err_t tls_cert_delete_handler(httpd_req_t* req);
 
-// HTTP→HTTPS redirect handler (catch-all when HTTPS is active)
-static esp_err_t http_to_https_redirect_handler(httpd_req_t* req);
-
 // ============================================================================
 // Authentication Helpers
 // ============================================================================
@@ -179,10 +176,6 @@ static bool get_api_key_from_header(httpd_req_t* req, char* key_out)
 
 static bool check_web_auth(httpd_req_t* req)
 {
-    if (!auth_mgr_web_auth_enabled()) {
-        return true;  // Auth disabled
-    }
-    
     char token[AUTH_SESSION_TOKEN_LEN + 1] = {0};
     if (get_session_from_cookie(req, token)) {
         if (auth_mgr_validate_session(token)) {
@@ -195,8 +188,8 @@ static bool check_web_auth(httpd_req_t* req)
 
 static bool check_api_auth(httpd_req_t* req)
 {
-    if (!auth_mgr_api_auth_enabled()) {
-        return true;  // API auth disabled
+    if (auth_mgr_credentials_change_required()) {
+        return false;
     }
     
     // First check for API key in header (programmatic access)
@@ -211,12 +204,6 @@ static bool check_api_auth(httpd_req_t* req)
         if (auth_mgr_validate_session(token)) {
             return true;
         }
-    }
-    
-    // If web auth is disabled, allow access from the web interface
-    // (API auth is for external programmatic access, not for blocking the local web UI)
-    if (!auth_mgr_web_auth_enabled()) {
-        return true;
     }
     
     return false;
@@ -383,11 +370,17 @@ bool api_server_start(void)
         }
     }
     
-    // ---- Optionally start HTTPS on port 443 alongside HTTP ----
-    if (tls_mgr_has_certs()) {
+    // ---- Always start HTTPS using either the administrator certificate or
+    // the persistent device identity generated on first boot. ----
+    if (tls_mgr_has_certs() || tls_mgr_has_identity()) {
         size_t cert_len = 0, key_len = 0;
-        const uint8_t* cert = tls_mgr_get_cert(&cert_len);
-        const uint8_t* key  = tls_mgr_get_key(&key_len);
+        const bool administrator_cert = tls_mgr_has_certs();
+        const uint8_t* cert = administrator_cert
+            ? tls_mgr_get_cert(&cert_len)
+            : tls_mgr_get_identity_cert(&cert_len);
+        const uint8_t* key = administrator_cert
+            ? tls_mgr_get_key(&key_len)
+            : tls_mgr_get_identity_key(&key_len);
         
         ESP_LOGI(TAG, "Starting HTTPS server on port 443...");
         
@@ -410,12 +403,22 @@ bool api_server_start(void)
         ret = httpd_ssl_start(&server_ssl, &ssl_config);
         if (ret == ESP_OK) {
             tls_mgr_set_https_active(true);
-            ESP_LOGI(TAG, "HTTPS server started on port 443");
+            ESP_LOGI(
+                TAG, "HTTPS server started on port 443 using %s",
+                administrator_cert
+                    ? "administrator certificate"
+                    : "persistent device identity");
         } else {
-            ESP_LOGE(TAG, "Failed to start HTTPS server: %s (HTTP still available on port 80)", esp_err_to_name(ret));
+            ESP_LOGE(
+                TAG, "Failed to start mandatory HTTPS server: %s",
+                esp_err_to_name(ret));
+            api_server_stop();
+            return false;
         }
     } else {
-        ESP_LOGW(TAG, "No TLS certs provisioned — HTTP only on port 80");
+        ESP_LOGE(TAG, "No TLS identity available for mandatory HTTPS");
+        api_server_stop();
+        return false;
     }
 
     if (tls_mgr_has_identity()) {
@@ -467,8 +470,7 @@ bool api_server_start(void)
         } \
     } while(0)
     
-    // Register on BOTH HTTP and HTTPS (essential endpoints that must work over HTTP
-    // even when HTTPS is active: health, OTA, TLS management)
+    // Register on both HTTP and HTTPS only for explicitly public health checks.
     #define REGISTER_URI_ESSENTIAL(uri_struct) do { \
         esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
         if (err != ESP_OK) { \
@@ -637,7 +639,7 @@ bool api_server_start(void)
         .handler = info_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(info_uri);
+    REGISTER_URI(info_uri);
     
     // GET /api/ota/status
     httpd_uri_t ota_status_uri = {
@@ -646,7 +648,7 @@ bool api_server_start(void)
         .handler = ota_status_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_status_uri);
+    REGISTER_URI(ota_status_uri);
     
     // POST /api/ota/update
     httpd_uri_t ota_update_uri = {
@@ -655,7 +657,7 @@ bool api_server_start(void)
         .handler = ota_update_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_update_uri);
+    REGISTER_URI(ota_update_uri);
     
     // POST /api/ota/upload
     httpd_uri_t ota_upload_uri = {
@@ -664,7 +666,7 @@ bool api_server_start(void)
         .handler = ota_upload_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_upload_uri);
+    REGISTER_URI(ota_upload_uri);
     
     // POST /api/ota/reboot
     httpd_uri_t ota_reboot_uri = {
@@ -673,7 +675,7 @@ bool api_server_start(void)
         .handler = ota_reboot_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_reboot_uri);
+    REGISTER_URI(ota_reboot_uri);
     
     // GET /api/ota/releases - Check GitHub for updates
     httpd_uri_t ota_releases_uri = {
@@ -682,7 +684,7 @@ bool api_server_start(void)
         .handler = ota_releases_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_releases_uri);
+    REGISTER_URI(ota_releases_uri);
     
     // POST /api/ota/github - Start update from GitHub
     httpd_uri_t ota_github_uri = {
@@ -691,7 +693,7 @@ bool api_server_start(void)
         .handler = ota_github_update_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_github_uri);
+    REGISTER_URI(ota_github_uri);
     
     // GET /api/auth/config
     httpd_uri_t auth_config_get_uri = {
@@ -971,7 +973,7 @@ bool api_server_start(void)
         .handler = tls_status_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(tls_status_uri);
+    REGISTER_URI(tls_status_uri);
 
     // POST /api/tls/certificate
     httpd_uri_t tls_cert_post_uri = {
@@ -980,7 +982,7 @@ bool api_server_start(void)
         .handler = tls_cert_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(tls_cert_post_uri);
+    REGISTER_URI(tls_cert_post_uri);
 
     // DELETE /api/tls/certificate
     httpd_uri_t tls_cert_delete_uri = {
@@ -989,7 +991,7 @@ bool api_server_start(void)
         .handler = tls_cert_delete_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(tls_cert_delete_uri);
+    REGISTER_URI(tls_cert_delete_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
     // Test endpoints need HTTP for CI (no TLS on test runner)
@@ -1107,25 +1109,6 @@ bool api_server_start(void)
         }
     } else {
         ESP_LOGE(TAG, "Home Assistant REST disabled: no identity server");
-    }
-    
-    // When HTTPS is active, add catch-all redirects on HTTP for non-essential endpoints.
-    // Essential endpoints (health, OTA, TLS, test) are already registered above and
-    // match before this wildcard.  Everything else gets a 307 → https://host/path.
-    if (server_ssl != NULL) {
-        static const httpd_method_t redirect_methods[] = {
-            HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE, HTTP_PATCH
-        };
-        for (auto method : redirect_methods) {
-            httpd_uri_t http_redirect_uri = {
-                .uri = "/*",
-                .method = method,
-                .handler = http_to_https_redirect_handler,
-                .user_ctx = NULL
-            };
-            httpd_register_uri_handler(server, &http_redirect_uri);
-        }
-        ESP_LOGI(TAG, "HTTP→HTTPS redirect active for non-essential endpoints");
     }
     
     #undef REGISTER_URI
@@ -1304,22 +1287,6 @@ static esp_err_t favicon_handler(httpd_req_t* req)
     // Return 204 No Content - no favicon available
     httpd_resp_set_status(req, "204 No Content");
     httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
-// ============================================================================
-// HTTP → HTTPS Redirect (when TLS certs are installed)
-// ============================================================================
-
-static esp_err_t http_to_https_redirect_handler(httpd_req_t* req)
-{
-    // Build the HTTPS redirect URL: https://<hostname>.local<uri>
-    char location[640];
-    snprintf(location, sizeof(location), "https://%s.local%s", hostname, req->uri);
-    
-    httpd_resp_set_status(req, "307 Temporary Redirect");
-    httpd_resp_set_hdr(req, "Location", location);
-    httpd_resp_sendstr(req, "Redirecting to HTTPS");
     return ESP_OK;
 }
 
@@ -2264,13 +2231,15 @@ static esp_err_t ota_github_update_post_handler(httpd_req_t* req)
 
 static esp_err_t auth_config_get_handler(httpd_req_t* req)
 {
-    // Allow unauthenticated access to check if auth is enabled
     set_json_content_type(req);
     
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "web_auth_enabled", auth_mgr_web_auth_enabled());
     cJSON_AddBoolToObject(root, "api_auth_enabled", auth_mgr_api_auth_enabled());
     cJSON_AddStringToObject(root, "username", auth_mgr_get_username());
+    cJSON_AddBoolToObject(
+        root, "credentials_change_required",
+        auth_mgr_credentials_change_required());
     
     // Check if current request is authenticated
     cJSON_AddBoolToObject(root, "authenticated", check_web_auth(req));
@@ -2291,6 +2260,9 @@ static esp_err_t auth_status_get_handler(httpd_req_t* req)
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "web_auth_enabled", auth_mgr_web_auth_enabled());
     cJSON_AddBoolToObject(root, "session_valid", check_web_auth(req));
+    cJSON_AddBoolToObject(
+        root, "credentials_change_required",
+        auth_mgr_credentials_change_required());
     
     char* json_str = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json_str);
@@ -2302,8 +2274,7 @@ static esp_err_t auth_status_get_handler(httpd_req_t* req)
 
 static esp_err_t auth_config_post_handler(httpd_req_t* req)
 {
-    // Must be authenticated to change config (if auth is enabled)
-    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+    if (!check_web_auth(req)) {
         send_json_error(req, "401 Unauthorized", "Login required");
         return ESP_OK;
     }
@@ -2324,25 +2295,16 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
     
-    // Block disabling auth when TLS certs are provisioned
-    if (tls_mgr_has_certs()) {
-        cJSON* web_auth = cJSON_GetObjectItem(root, "web_auth_enabled");
-        cJSON* api_auth = cJSON_GetObjectItem(root, "api_auth_enabled");
-        
-        bool trying_to_disable_web = (web_auth && cJSON_IsBool(web_auth) && !cJSON_IsTrue(web_auth));
-        bool trying_to_disable_api = (api_auth && cJSON_IsBool(api_auth) && !cJSON_IsTrue(api_auth));
-        
-        if (trying_to_disable_web || trying_to_disable_api) {
-            cJSON_Delete(root);
-            send_json_error(req, "403 Forbidden",
-                            "Authentication cannot be disabled while TLS certificates are provisioned");
-            return ESP_OK;
-        }
-    }
-    
     cJSON* web_auth = cJSON_GetObjectItem(root, "web_auth_enabled");
     if (web_auth && cJSON_IsBool(web_auth)) {
-        auth_mgr_set_web_auth_enabled(cJSON_IsTrue(web_auth));
+        if (!cJSON_IsTrue(web_auth)) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "403 Forbidden",
+                "Web authentication cannot be disabled");
+            return ESP_OK;
+        }
+        auth_mgr_set_web_auth_enabled(true);
     }
     
     cJSON* api_auth = cJSON_GetObjectItem(root, "api_auth_enabled");
@@ -2350,19 +2312,19 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
     char new_api_key[AUTH_API_KEY_LEN + 1] = {0};
     
     if (api_auth && cJSON_IsBool(api_auth)) {
-        bool enable_api = cJSON_IsTrue(api_auth);
-        
-        // If enabling API auth and no key exists, generate one
-        if (enable_api) {
-            char existing_key[AUTH_API_KEY_LEN + 1];
-            if (!auth_mgr_get_api_key(existing_key)) {
-                // No key exists, generate one
-                auth_mgr_regenerate_api_key(new_api_key);
-                api_key_generated = true;
-            }
+        if (!cJSON_IsTrue(api_auth)) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "403 Forbidden",
+                "API authentication cannot be disabled");
+            return ESP_OK;
         }
-        
-        auth_mgr_set_api_auth_enabled(enable_api);
+        char existing_key[AUTH_API_KEY_LEN + 1];
+        if (!auth_mgr_get_api_key(existing_key)) {
+            auth_mgr_regenerate_api_key(new_api_key);
+            api_key_generated = true;
+        }
+        auth_mgr_set_api_auth_enabled(true);
     }
     
     cJSON_Delete(root);
@@ -2385,8 +2347,7 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
 
 static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
 {
-    // Must be authenticated to change credentials (if auth is enabled)
-    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+    if (!check_web_auth(req)) {
         send_json_error(req, "401 Unauthorized", "Login required");
         return ESP_OK;
     }
@@ -2409,9 +2370,47 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
     
     cJSON* username = cJSON_GetObjectItem(root, "username");
     cJSON* password = cJSON_GetObjectItem(root, "password");
+    cJSON* pairing_code = cJSON_GetObjectItem(root, "pairing_code");
     
     const char* u = (username && cJSON_IsString(username)) ? username->valuestring : NULL;
     const char* p = (password && cJSON_IsString(password)) ? password->valuestring : NULL;
+
+    if (u == NULL || u[0] == '\0' ||
+        strlen(u) > AUTH_MAX_USERNAME_LEN ||
+        p == NULL || strlen(p) < 12 ||
+        strlen(p) > AUTH_MAX_PASSWORD_LEN ||
+        (strcmp(u, "arctic") == 0 && strcmp(p, "arctic") == 0)) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "400 Bad Request",
+            "A username and a non-default password of at least 12 characters are required");
+        return ESP_OK;
+    }
+
+    if (auth_mgr_credentials_change_required()) {
+        if (!cJSON_IsString(pairing_code) ||
+            pairing_code->valuestring == NULL) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "403 Forbidden",
+                "Physical setup code required");
+            return ESP_OK;
+        }
+        char code[HA_PAIRING_CODE_LEN + 1] = {};
+        if (strlen(pairing_code->valuestring) == HA_PAIRING_CODE_LEN) {
+            memcpy(code, pairing_code->valuestring, HA_PAIRING_CODE_LEN);
+        }
+        const ha_pairing_claim_result_t authorization =
+            ha_pairing_authorize(code);
+        memset(code, 0, sizeof(code));
+        if (authorization != HA_PAIRING_CLAIM_OK) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "403 Forbidden",
+                "Physical setup code was rejected");
+            return ESP_OK;
+        }
+    }
     
     ESP_LOGI(TAG, "Credential update request: username='%s', password=%s", 
              u ? u : "(null)", p ? (p[0] ? "(provided)" : "(empty)") : "(null)");
@@ -2432,8 +2431,7 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
 
 static esp_err_t auth_apikey_get_handler(httpd_req_t* req)
 {
-    // Must be authenticated to view API key
-    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+    if (auth_mgr_credentials_change_required() || !check_web_auth(req)) {
         send_json_error(req, "401 Unauthorized", "Login required");
         return ESP_OK;
     }
@@ -2456,8 +2454,7 @@ static esp_err_t auth_apikey_get_handler(httpd_req_t* req)
 
 static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req)
 {
-    // Must be authenticated to regenerate API key
-    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+    if (auth_mgr_credentials_change_required() || !check_web_auth(req)) {
         send_json_error(req, "401 Unauthorized", "Login required");
         return ESP_OK;
     }

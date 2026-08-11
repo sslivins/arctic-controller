@@ -403,7 +403,7 @@
     const modes = ["cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto"];
 
     const state = {
-      auth: { checked: false, required: false, loggedIn: false },
+      auth: { checked: false, required: true, loggedIn: false, changeRequired: false },
       route: "home", settingsPage: "wifi", busy: false,
       info: {}, status: { time: {} }, wifi: {}, hp: {
         temperatures: {}, setpoints: {}, setpoint_limits: {}, readings: {}
@@ -763,12 +763,10 @@
         <p class="metric-sub">Changing demo mode requires a restart.</p></section>`;
     }
     function securitySettings() {
-      return `<div class="grid"><section class="card"><h2>Authentication</h2><form data-form="auth-config">
-        <div class="field"><label><input style="width:auto" type="checkbox" name="web" ${state.security.web_auth_enabled?"checked":""}> Require web login</label></div>
-        <div class="field"><label><input style="width:auto" type="checkbox" name="api" ${state.security.api_auth_enabled?"checked":""}> Require API key</label></div>
-        <button class="btn primary" type="submit">Save authentication</button></form>
+      return `<div class="grid"><section class="card"><h2>Authentication</h2>
+        <div class="notice">Web login and API-key authentication are always required.</div>
         <h3 style="margin-top:24px">Credentials</h3><form data-form="credentials"><div class="field"><label>Username</label><input name="username" value="${esc(state.security.username || "arctic")}"></div>
-          <div class="field"><label>New password</label><input name="password" type="password" autocomplete="new-password"></div><button class="btn" type="submit">Save credentials</button></form>
+          <div class="field"><label>New password</label><input name="password" type="password" minlength="12" autocomplete="new-password"></div><button class="btn" type="submit">Save credentials</button></form>
         <h3 style="margin-top:24px">API key</h3><div class="field"><input readonly value="${esc(state.security.api_key || "")}"></div>
         <div class="btn-row"><button class="btn" data-action="copy-key">Copy</button><button class="btn danger" data-action="regenerate-key">Regenerate</button></div></section>
         <section class="card"><div class="card-head"><h2>TLS certificate</h2><span class="badge ${state.tls.https_active?"good":""}">${state.tls.https_active?"HTTPS active":state.tls.has_certs?"Reboot required":"HTTP only"}</span></div>
@@ -808,6 +806,17 @@
         <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
         <button class="btn primary" type="submit">Sign in</button></form></div>`;
     }
+    function credentialChangePage() {
+      return `<div class="login"><form class="card login-card" data-form="change-credentials">
+        <div class="brand" style="margin-bottom:20px"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
+        <h1>Secure this controller</h1>
+        <p class="metric-sub">Open Settings → Home Assistant on the physical controller, start pairing, verify this site's certificate fingerprint, and enter the displayed code.</p>
+        <div class="field"><label>Physical setup code</label><input name="pairing_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></div>
+        <div class="field"><label>Username</label><input name="username" value="arctic" autocomplete="username" required></div>
+        <div class="field"><label>New password</label><input name="password" type="password" minlength="12" autocomplete="new-password" required></div>
+        <div class="field"><label>Confirm password</label><input name="confirm_password" type="password" minlength="12" autocomplete="new-password" required></div>
+        <button class="btn primary" type="submit">Save credentials</button></form></div>`;
+    }
     function render() {
       if (!state.auth.checked) {
         $("#app").innerHTML = `<div class="login"><div class="spinner"></div></div>`;
@@ -815,6 +824,9 @@
       }
       if (state.auth.required && !state.auth.loggedIn) {
         $("#app").innerHTML = loginPage(); return;
+      }
+      if (state.auth.changeRequired) {
+        $("#app").innerHTML = credentialChangePage(); return;
       }
       const pages = { home: homePage, status: statusPage, control: controlPage, events: eventsPage,
         errors: errorsPage, settings: settingsPage };
@@ -906,8 +918,25 @@
       if (type === "login") {
         try {
           await api("/login", jsonOptions("POST", { username: data.get("username"), password: data.get("password") }));
-          state.auth.loggedIn = true; await loadCore(); render();
+          const auth = await api("/api/auth/status");
+          state.auth.loggedIn = !!auth.session_valid;
+          state.auth.changeRequired = !!auth.credentials_change_required;
+          if (!state.auth.changeRequired) await loadCore();
+          render();
         } catch (error) { toast(error.message, "bad"); }
+      }
+      if (type === "change-credentials") {
+        const password = String(data.get("password") || "");
+        if (password !== data.get("confirm_password")) {
+          throw new Error("Passwords do not match");
+        }
+        await mutate("/api/auth/credentials", jsonOptions("POST", {
+          username: data.get("username"), password,
+          pairing_code: data.get("pairing_code")
+        }), "Credentials changed. Sign in again.");
+        state.auth.loggedIn = false;
+        state.auth.changeRequired = false;
+        render();
       }
       if (type === "setpoint") {
         const key = form.dataset.key, c = toCelsius(data.get("value"));
@@ -1084,8 +1113,13 @@
       routeFromHash();
       try {
         const auth = await fetch("/api/auth/status").then(r => r.json());
-        state.auth = { checked: true, required: !!auth.web_auth_enabled, loggedIn: !!auth.session_valid };
-        if (!state.auth.required || state.auth.loggedIn) {
+        state.auth = {
+          checked: true,
+          required: true,
+          loggedIn: !!auth.session_valid,
+          changeRequired: !!auth.credentials_change_required
+        };
+        if (state.auth.loggedIn && !state.auth.changeRequired) {
           render();
           await loadCore();
           if (state.route === "control") await loadParams();
@@ -1100,7 +1134,7 @@
       else render();
       if (state.route === "settings" && state.settingsPage === "diagnostics") startLogPolling();
       state.pollTimer = setInterval(async () => {
-        if (state.auth.required && !state.auth.loggedIn) return;
+        if (!state.auth.loggedIn || state.auth.changeRequired) return;
         try {
           const [status, hp, wifi, ota, errors] = await Promise.all([
             api("/api/status"), api("/api/heatpump/status"), api("/api/wifi"), api("/api/ota/status"), api("/api/heatpump/errors")

@@ -57,6 +57,11 @@ void auth_mgr_set_web_auth_enabled(bool enabled);
 bool auth_mgr_set_credentials(const char* username, const char* password);
 
 /**
+ * @brief Check whether the factory credentials still need replacement.
+ */
+bool auth_mgr_credentials_change_required(void);
+
+/**
  * @brief Get the current username
  * @return Username string (empty if not set)
  */
@@ -94,14 +99,14 @@ void auth_mgr_logout_all(void);
 // ============================================================================
 
 /**
- * @brief Check if API key authentication is enabled
- * @return true if API key is required for API endpoints
+ * @brief Check if API key authentication is enabled.
+ * @return true; remote API authentication is mandatory.
  */
 bool auth_mgr_api_auth_enabled(void);
 
 /**
- * @brief Set API key authentication enabled/disabled
- * @param enabled true to require API key
+ * @brief Set API key authentication.
+ * @param enabled must be true; disabling is rejected.
  */
 void auth_mgr_set_api_auth_enabled(bool enabled);
 

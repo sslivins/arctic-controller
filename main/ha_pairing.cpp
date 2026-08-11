@@ -120,15 +120,8 @@ ha_pairing_status_t ha_pairing_get_status(void)
     return result;
 }
 
-ha_pairing_claim_result_t ha_pairing_claim(
-    const char* code,
-    char* token_out)
+static ha_pairing_claim_result_t consume_code(const char* code)
 {
-    if (token_out == NULL) {
-        return HA_PAIRING_CLAIM_STORAGE_ERROR;
-    }
-    token_out[0] = '\0';
-
     const bool shape_valid = valid_code_shape(code);
     bool matched = false;
     bool locked = false;
@@ -159,6 +152,22 @@ ha_pairing_claim_result_t ha_pairing_claim(
     // Close before persisting so concurrent requests cannot claim twice.
     clear_locked();
     portEXIT_CRITICAL(&state_lock);
+    return HA_PAIRING_CLAIM_OK;
+}
+
+ha_pairing_claim_result_t ha_pairing_claim(
+    const char* code,
+    char* token_out)
+{
+    if (token_out == NULL) {
+        return HA_PAIRING_CLAIM_STORAGE_ERROR;
+    }
+    token_out[0] = '\0';
+
+    const ha_pairing_claim_result_t authorization = consume_code(code);
+    if (authorization != HA_PAIRING_CLAIM_OK) {
+        return authorization;
+    }
 
     if (!auth_mgr_issue_integration_token(token_out)) {
         ESP_LOGE(TAG, "Could not persist token for pairing claim");
@@ -167,4 +176,13 @@ ha_pairing_claim_result_t ha_pairing_claim(
 
     ESP_LOGI(TAG, "Integration pairing claim completed");
     return HA_PAIRING_CLAIM_OK;
+}
+
+ha_pairing_claim_result_t ha_pairing_authorize(const char* code)
+{
+    const ha_pairing_claim_result_t result = consume_code(code);
+    if (result == HA_PAIRING_CLAIM_OK) {
+        ESP_LOGI(TAG, "Physical administrator authorization completed");
+    }
+    return result;
 }
