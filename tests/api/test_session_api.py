@@ -519,18 +519,13 @@ class TestApiKeyViaSession:
 
 
 # =========================================================================
-# TLS Auth Enforcement
+# Mandatory Auth Enforcement
 # =========================================================================
 
-class TestTLSAuthEnforcement:
-    """When TLS certs are provisioned, auth must remain enabled."""
+class TestMandatoryAuthEnforcement:
+    """Remote administration authentication must remain enabled."""
 
-    @pytest.fixture(autouse=True)
-    def _require_tls(self):
-        if not _device_has_tls_certs():
-            pytest.skip("Device has no TLS certs — enforcement tests N/A")
-
-    def test_cannot_disable_web_auth_with_tls_certs(self):
+    def test_cannot_disable_web_auth(self):
         """POST /api/auth/config with web_auth_enabled=false should return 403."""
         s = _admin_session()
         r = s.post(
@@ -541,7 +536,7 @@ class TestTLSAuthEnforcement:
         assert r.status_code == 403
         assert "TLS" in r.json().get("error", "") or "cannot" in r.json().get("error", "").lower()
 
-    def test_cannot_disable_api_auth_with_tls_certs(self):
+    def test_cannot_disable_api_auth(self):
         """POST /api/auth/config with api_auth_enabled=false should return 403."""
         s = _admin_session()
         r = s.post(
@@ -551,7 +546,7 @@ class TestTLSAuthEnforcement:
         )
         assert r.status_code == 403
 
-    def test_cannot_disable_both_auth_with_tls_certs(self):
+    def test_cannot_disable_both_auth_methods(self):
         """Disabling both web and API auth simultaneously should return 403."""
         s = _admin_session()
         r = s.post(
@@ -561,8 +556,8 @@ class TestTLSAuthEnforcement:
         )
         assert r.status_code == 403
 
-    def test_can_still_enable_auth_with_tls_certs(self):
-        """Enabling auth (already on) should succeed — not blocked by TLS check."""
+    def test_can_still_enable_auth(self):
+        """Enabling authentication when already enabled should succeed."""
         s = _admin_session()
         r = s.post(
             f"{BASE_URL}/api/auth/config",

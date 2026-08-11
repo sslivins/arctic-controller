@@ -464,10 +464,11 @@ bool api_server_start(void)
         integration_config.port_secure = 8443;
         integration_config.httpd.ctrl_port = 32771;
         integration_config.httpd.max_uri_handlers = 8;
-        integration_config.httpd.max_open_sockets = 4;
+        integration_config.httpd.max_open_sockets = 5;
         integration_config.httpd.stack_size = 12288;
         // Reject surplus connections instead of evicting established WSS
-        // clients. Three WSS slots leave one socket for REST reconciliation.
+        // clients. Three WSS slots leave capacity for REST reconciliation
+        // while another TLS connection is still closing or handshaking.
         integration_config.httpd.lru_purge_enable = false;
         integration_config.httpd.recv_wait_timeout = 10;
         integration_config.httpd.send_wait_timeout = 1;

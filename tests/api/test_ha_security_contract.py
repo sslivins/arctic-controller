@@ -31,6 +31,7 @@ def test_socket_budget_covers_all_three_http_servers() -> None:
     assert "CONFIG_LWIP_MAX_SOCKETS=24" in defaults
     assert "CONFIG_LWIP_MAX_SOCKETS=24" in sdkconfig
     assert "http_config.max_open_sockets   = 2;" in api
+    assert "integration_config.httpd.max_open_sockets = 5;" in api
     assert "websocket_config.max_open_sockets = 2;" in api
 
 
