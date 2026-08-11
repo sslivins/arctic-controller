@@ -13,18 +13,6 @@ BASE_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 NEW_PASSWORD = "N3wS3cure!Pass"
 
 
-def headers():
-    return {"X-API-Key": API_KEY} if API_KEY else {}
-
-
-def set_web_auth(enabled: bool):
-    requests.post(
-        f"{BASE_URL}/api/auth/config",
-        json={"web_auth_enabled": enabled},
-        headers=headers(), timeout=5, verify=False,
-    ).raise_for_status()
-
-
 def restore():
     for password in (NEW_PASSWORD, WEB_PASSWORD):
         session = requests.Session()
@@ -37,12 +25,6 @@ def restore():
         )
         if response.status_code == 200:
             break
-    try:
-        set_web_auth(False)
-    except Exception:
-        pass
-
-
 def browser_login(page: Page, password: str):
     page.locator('input[name="username"]').fill(WEB_USERNAME)
     page.locator('input[name="password"]').fill(password)
@@ -67,7 +49,6 @@ class TestCredentials:
 
     @pytest.mark.skipif(not API_KEY, reason="ARCTIC_API_KEY not set")
     def test_change_password_and_login(self, page: Page, base_url: str):
-        set_web_auth(True)
         page.goto(base_url, wait_until="domcontentloaded")
         page.wait_for_selector(".login-card")
         browser_login(page, WEB_PASSWORD)

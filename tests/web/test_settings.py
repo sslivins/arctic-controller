@@ -40,11 +40,14 @@ class TestSettingsWorkspace:
 
     def test_security_and_tls(self, dashboard_page: Page):
         open_settings(dashboard_page, "Security")
-        auth_form = dashboard_page.locator('form[data-form="auth-config"]')
         tls_form = dashboard_page.locator('form[data-form="tls"]')
-        expect(auth_form).to_be_visible()
+        expect(
+            dashboard_page.locator(
+                ".notice",
+                has_text="Web login and API-key authentication are always required",
+            )
+        ).to_be_visible()
         expect(tls_form).to_be_visible()
-        assert auth_form.locator('input[type="checkbox"]').count() == 2
         assert tls_form.locator("textarea").count() == 2
 
     def test_diagnostics(self, dashboard_page: Page):

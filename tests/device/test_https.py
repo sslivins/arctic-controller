@@ -1,13 +1,13 @@
 """
 Test: HTTPS / TLS Certificate Lifecycle
 
-Verifies the full TLS certificate lifecycle on the device:
+Verifies the administrator TLS certificate lifecycle on the device:
   1. Upload a self-signed certificate
   2. Reboot to activate HTTPS
   3. Confirm HTTPS is serving on port 443
   4. Verify API endpoints work over HTTPS
-  5. Delete certificate and reboot back to HTTP-only
-  6. Confirm HTTPS is no longer active
+  5. Delete the administrator certificate and reboot
+  6. Confirm HTTPS falls back to the persistent device identity
 
 These tests require both web auth and API key auth to be enabled
 (firmware prerequisite for cert upload). The fixture handles enabling
@@ -170,10 +170,11 @@ class TestTlsStatus:
     """Verify /api/tls/status reports correct state."""
 
     def test_no_certs_initially(self, device: DeviceClient, auth_enabled):
-        """With no certs provisioned, status should reflect that."""
+        """Without an administrator cert, HTTPS uses the device identity."""
         status = _tls_status()
         assert status["has_certs"] is False
-        assert status["https_active"] is False
+        assert status["https_active"] is True
+        assert status["integration_identity"] is True
 
     def test_status_requires_auth(self):
         """TLS status endpoint requires API key authentication."""
@@ -233,10 +234,10 @@ class TestHttpsLifecycle:
         data = r.json()
         assert data["success"] is True
 
-        # Certs stored but HTTPS not active until reboot
+        # The current HTTPS server keeps using the device identity until reboot.
         status = _tls_status()
         assert status["has_certs"] is True
-        assert status["https_active"] is False
+        assert status["https_active"] is True
 
     def test_reboot_activates_https(self, device: DeviceClient, self_signed_cert, auth_enabled):
         """After uploading cert and rebooting, HTTPS should be active on port 443."""
@@ -282,8 +283,8 @@ class TestHttpsLifecycle:
         assert status["has_certs"] is True
         assert status["https_active"] is True
 
-    def test_delete_cert_and_revert_to_http(self, device: DeviceClient, auth_enabled):
-        """Deleting cert and rebooting reverts to HTTP-only."""
+    def test_delete_cert_and_revert_to_identity(self, device: DeviceClient, auth_enabled):
+        """Deleting the administrator cert restores identity-backed HTTPS."""
         https_url = _https_url()
 
         # Delete cert (try HTTPS first since that's where routes are registered
@@ -306,11 +307,12 @@ class TestHttpsLifecycle:
         device.reboot()
         assert device.wait_for_device(timeout=30.0), "Device did not come back after reboot"
 
-        # HTTPS should no longer be active
+        # HTTPS remains mandatory and falls back to the persistent identity.
         status = _tls_status()
         assert status["has_certs"] is False
-        assert status["https_active"] is False
-
-        # Port 443 should refuse connections
-        with pytest.raises(Exception):
-            requests.get(f"{https_url}/api/health", verify=False, timeout=3)
+        assert status["https_active"] is True
+        assert status["integration_identity"] is True
+        response = requests.get(
+            f"{https_url}/api/health", verify=False, timeout=10
+        )
+        assert response.status_code == 200
