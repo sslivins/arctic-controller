@@ -7,6 +7,7 @@ from .client import (
 )
 from .exceptions import (
     ArcticAuthenticationError,
+    ArcticCertificateError,
     ArcticConnectionError,
     ArcticControllerError,
     ArcticPairingError,
@@ -30,6 +31,7 @@ from .models import (
 __all__ = [
     "PROTOCOL_VERSION",
     "ArcticAuthenticationError",
+    "ArcticCertificateError",
     "ArcticConnectionError",
     "ArcticControllerClient",
     "ArcticControllerError",

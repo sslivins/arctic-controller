@@ -9,6 +9,7 @@ import pytest
 
 from arctic_controller import (
     ArcticAuthenticationError,
+    ArcticCertificateError,
     ArcticConnectionError,
     ArcticControllerClient,
     ArcticPairingError,
@@ -80,7 +81,7 @@ async def test_tls_pin_and_authentication_are_strict(controller):
         device_id=controller.device_id,
         port=controller.port,
     )
-    with pytest.raises(ArcticConnectionError):
+    with pytest.raises(ArcticCertificateError):
         await client.async_setup()
     await client.stop()
 

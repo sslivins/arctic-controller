@@ -9,6 +9,10 @@ class ArcticConnectionError(ArcticControllerError):
     """The controller could not be reached or returned an HTTP error."""
 
 
+class ArcticCertificateError(ArcticConnectionError):
+    """The controller certificate does not match the configured pin."""
+
+
 class ArcticAuthenticationError(ArcticControllerError):
     """The integration credential was rejected."""
 

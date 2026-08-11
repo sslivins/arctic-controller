@@ -15,6 +15,7 @@ from yarl import URL
 
 from .exceptions import (
     ArcticAuthenticationError,
+    ArcticCertificateError,
     ArcticConnectionError,
     ArcticPairingError,
     ArcticProtocolError,
@@ -204,6 +205,10 @@ class ArcticControllerClient:
                 result = PairingResult.from_dict(await response.json())
         except ArcticPairingError:
             raise
+        except aiohttp.ServerFingerprintMismatch as error:
+            raise ArcticCertificateError(
+                "controller certificate fingerprint changed"
+            ) from error
         except (aiohttp.ClientError, asyncio.TimeoutError) as error:
             raise ArcticConnectionError(
                 f"could not pair with controller at {host}"
@@ -387,6 +392,10 @@ class ArcticControllerClient:
                 data = await response.json()
         except (ArcticAuthenticationError, ArcticConnectionError):
             raise
+        except aiohttp.ServerFingerprintMismatch as error:
+            raise ArcticCertificateError(
+                "controller certificate fingerprint changed"
+            ) from error
         except (aiohttp.ClientError, asyncio.TimeoutError) as error:
             raise ArcticConnectionError(
                 f"GET {path} could not reach the controller"
@@ -458,6 +467,10 @@ class ArcticControllerClient:
                 ) from error
             raise ArcticConnectionError(
                 f"WebSocket upgrade failed with HTTP {error.status}"
+            ) from error
+        except aiohttp.ServerFingerprintMismatch as error:
+            raise ArcticCertificateError(
+                "controller certificate fingerprint changed"
             ) from error
 
         async with websocket:

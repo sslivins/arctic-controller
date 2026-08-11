@@ -423,6 +423,26 @@ physical controller with a real WSS telemetry update arriving before the
   controller is paired and managed independently.
 - Verify push updates occur without entity polling.
 
+Status: complete. The custom integration provides manual and zeroconf setup,
+physical pairing, certificate-pin confirmation, duplicate-device prevention,
+credential reauthentication, per-entry client/runtime ownership, clean unload,
+redacted diagnostics, and read-only climate, sensor, and binary-sensor
+entities. Runtime authentication or certificate-identity failures start Home
+Assistant's reauthentication flow, while connection failures use normal
+config-entry retry behavior.
+
+The Home Assistant test suite runs against Home Assistant 2026.8 and covers
+manual setup, invalid certificate pins, zeroconf updates and duplicate
+prevention, wrong-device and successful reauthentication, two simultaneous
+controllers, push-driven entity updates, selected mode versus actual operation,
+availability transitions, unload cleanup, setup failures, and diagnostics
+redaction.
+
+The integration manifest currently references
+`arctic-controller-client==0.1.0`. Publishing that package, or replacing it
+with an intentional vendoring strategy, remains part of Phase 9 packaging and
+must be completed before distributing the integration through HACS.
+
 ### Phase 7: Security gate
 
 - Review authentication, TLS/pinning, token lifecycle, legacy endpoints,
