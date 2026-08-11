@@ -428,7 +428,8 @@ test also passed.
   one controller client instance; do not use process-global device state.
 - Test against a deterministic fake server and the physical controller.
 
-Status: complete. The standalone `ha_client` package has no Home Assistant
+Status: complete. The independently maintained
+[`pymacon`](https://github.com/sslivins/pymacon) package has no Home Assistant
 dependency and provides pinned TLS pairing, authenticated REST/WSS, typed
 capability and state models, one shared ordering gate, revision-gap and reboot
 reconciliation, fallback polling, bounded reconnect backoff with jitter,
@@ -467,10 +468,10 @@ controllers, push-driven entity updates, selected mode versus actual operation,
 availability transitions, unload cleanup, setup failures, and diagnostics
 redaction.
 
-The integration manifest currently references
-`arctic-controller-client==0.1.0`. Publishing that package, or replacing it
-with an intentional vendoring strategy, remains part of Phase 9 packaging and
-must be completed before distributing the integration through HACS.
+The independently maintained
+[`hass-macon`](https://github.com/sslivins/hass-macon) integration is published
+for HACS and pins the released `pymacon` package. Its Home Assistant tests and
+release lifecycle live with that repository rather than the firmware.
 
 ### Phase 7: Security gate
 

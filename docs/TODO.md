@@ -7,12 +7,12 @@ Architecture and security requirements are defined in
 
 - [x] Define hybrid REST + WebSocket + reconciliation architecture
 - [x] Define threat model and explicit control allowlist
-- [ ] Run the WSS socket/heap/slow-client feasibility spike
-- [ ] Implement integration identity, pairing, strict auth, and versioned state
-- [ ] Implement resilient device-hosted WebSocket push
-- [ ] Build async Python client and read-only Home Assistant integration
-- [ ] Complete security gate before enabling controls
-- [ ] Add only power, selected mode, and setpoint controls
+- [x] Run the WSS socket/heap/slow-client feasibility spike
+- [x] Implement integration identity, pairing, strict auth, and versioned state
+- [x] Implement resilient device-hosted WebSocket push
+- [x] Build async Python client and read-only Home Assistant integration
+- [x] Complete security gate before enabling controls
+- [x] Add only power, selected mode, and setpoint controls
 - [ ] Complete soak testing and staged beta rollout
 
 ## Fahrenheit Support (Complete)
