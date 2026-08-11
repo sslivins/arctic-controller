@@ -39,30 +39,6 @@ API_KEY = os.environ.get("ARCTIC_API_KEY")
 USERNAME = os.environ.get("ARCTIC_USERNAME", "arctic")
 PASSWORD = os.environ.get("ARCTIC_PASSWORD", "arctic")
 
-# Cached TLS status (checked once per module)
-_tls_has_certs = None
-
-def _device_has_tls_certs():
-    """Check if the device has TLS certificates provisioned.
-    Auth cannot be disabled when TLS certs are present (403 Forbidden)."""
-    global _tls_has_certs
-    if _tls_has_certs is not None:
-        return _tls_has_certs
-    try:
-        r = requests.get(
-            f"{BASE_URL}/api/tls/status",
-            headers=_api_headers(),
-            timeout=5,
-        )
-        if r.status_code == 200:
-            _tls_has_certs = r.json().get("has_certs", False)
-        else:
-            _tls_has_certs = False
-    except Exception:
-        _tls_has_certs = False
-    return _tls_has_certs
-
-
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 def _api_headers():
@@ -126,7 +102,7 @@ def _enable_web_auth():
 
 
 def _disable_web_auth():
-    """Disable web + API auth.  Returns False if blocked (e.g. TLS certs)."""
+    """Attempt to disable mandatory auth; returns False when rejected."""
     return _auth_config_post({"web_auth_enabled": False, "api_auth_enabled": False})
 
 
@@ -180,9 +156,9 @@ def _check_prerequisites():
 
 @pytest.fixture(autouse=True)
 def _always_restore_auth():
-    """Ensure web auth is disabled and credentials are reset after *each* test."""
+    """Ensure mandatory auth and CI credentials are restored after each test."""
     yield
-    _disable_web_auth()
+    _enable_web_auth()
     _restore_credentials()
 
 
@@ -364,14 +340,14 @@ class TestCredentialChange:
     def test_change_password_invalidates_old_login(self):
         """After changing the password, old credentials should fail."""
         _enable_web_auth()
-        new_password = "Tmp$ecure99"
+        new_password = "Tmp$ecure990"
 
         try:
             # Change password via session (admin endpoints require session auth)
             s = _admin_session()
             r = s.post(
                 f"{BASE_URL}/api/auth/credentials",
-                json={"password": new_password},
+                json={"username": USERNAME, "password": new_password},
                 timeout=5,
             )
             assert r.status_code == 200
@@ -405,7 +381,7 @@ class TestCredentialChange:
             s = _admin_session()
             s.post(
                 f"{BASE_URL}/api/auth/credentials",
-                json={"username": new_user},
+                json={"username": new_user, "password": PASSWORD},
                 timeout=5,
             )
 
@@ -434,11 +410,11 @@ class TestCredentialChange:
         s = requests.Session()
         _login(s)
 
-        new_pw = "TempPass1!"
+        new_pw = "TempPass123!"
         try:
             r = s.post(
                 f"{BASE_URL}/api/auth/credentials",
-                json={"password": new_pw},
+                json={"username": USERNAME, "password": new_pw},
                 timeout=5,
             )
             assert r.status_code == 200
@@ -456,13 +432,10 @@ class TestCredentialChange:
 # =========================================================================
 
 class TestAuthToggle:
-    """POST /api/auth/config — enabling/disabling web auth."""
+    """POST /api/auth/config — mandatory authentication enforcement."""
 
-    def test_disable_web_auth_grants_open_access(self):
-        """With web_auth_enabled=false, endpoints are accessible without login."""
-        if _device_has_tls_certs():
-            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
-
+    def test_disable_web_auth_is_rejected(self):
+        """Remote administration must never permit unauthenticated access."""
         _enable_web_auth()
 
         # Confirm locked first (no API key, no session)
@@ -470,33 +443,23 @@ class TestAuthToggle:
         assert r.status_code == 401
 
         # Disable auth (needs session since web auth is on)
-        _disable_web_auth()
+        assert _disable_web_auth() is False
 
-        # Now should be open (no credentials at all)
+        # The endpoint remains protected.
         r = requests.get(f"{BASE_URL}/api/info", timeout=5)
-        assert r.status_code == 200
+        assert r.status_code == 401
 
     def test_enable_web_auth_locks_endpoints(self):
         """Enabling web auth should immediately require credentials."""
-        if _device_has_tls_certs():
-            pytest.skip("Auth cannot be disabled when TLS certs are provisioned")
-
-        _disable_web_auth()
-
-        # Open access (no credentials needed)
-        r = requests.get(f"{BASE_URL}/api/info", timeout=5)
-        # API auth may still be enabled — use API key
-        if r.status_code == 401:
-            r = requests.get(
-                f"{BASE_URL}/api/info", headers=_api_headers(), timeout=5
-            )
-        assert r.status_code == 200
-
         _enable_web_auth()
 
-        # Now locked (no credentials at all)
+        # Locked without credentials; API-key access remains available.
         r = requests.get(f"{BASE_URL}/api/info", timeout=5)
         assert r.status_code == 401
+        authorized = requests.get(
+            f"{BASE_URL}/api/info", headers=_api_headers(), timeout=5
+        )
+        assert authorized.status_code == 200
 
     def test_auth_status_reflects_session_validity(self):
         """GET /api/auth/status should report session_valid correctly."""

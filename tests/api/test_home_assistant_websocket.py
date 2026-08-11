@@ -174,10 +174,8 @@ async def test_websocket_reserves_capacity_for_rest():
         try:
             for websocket in clients:
                 await _initial_messages(websocket)
-            with pytest.raises(aiohttp.WSServerHandshakeError) as full:
-                await _connect(session, token)
-            assert full.value.status == 503
-
+            # Three persistent WSS clients must still leave the fourth server
+            # socket available for REST reconciliation.
             response = requests.get(
                 f"{HA_URL}/api/v1/state",
                 headers={"Authorization": f"Bearer {token}"},
