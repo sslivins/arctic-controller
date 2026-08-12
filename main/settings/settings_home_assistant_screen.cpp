@@ -8,15 +8,23 @@
 #include "settings_menu.h"
 #include "auth_manager.h"
 #include "ha_pairing.h"
-#include "tls_manager.h"
+#include "ha_integration.h"
 #include "i18n/i18n.h"
 
 #include <esp_log.h>
 #include <mbedtls/platform_util.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
 static const char* TAG = "ha_settings";
+
+// The pairing screen shows the exact name Home Assistant will display for the
+// device so a user with more than one controller can tell them apart. This
+// must stay in sync with the title produced by the hass-macon integration
+// (custom_components/macon/config_flow.py): "Macon Heat Pump Controller <LAST4>"
+// where <LAST4> is the upper-cased last 4 characters of the device_id.
+static const char* HA_DEVICE_NAME_PREFIX = "Macon Heat Pump Controller";
 
 typedef struct {
     bool visible;
@@ -27,7 +35,6 @@ typedef struct {
     lv_obj_t* description_label;
     lv_obj_t* code_title;
     lv_obj_t* code_label;
-    lv_obj_t* fingerprint_label;
     lv_obj_t* countdown_label;
     lv_obj_t* pairing_btn;
     lv_obj_t* pairing_btn_label;
@@ -67,31 +74,6 @@ static lv_obj_t* create_button(
     lv_obj_set_style_text_color(label, lv_color_hex(0x0d1117), LV_PART_MAIN);
     lv_obj_center(label);
     return button;
-}
-
-static void format_fingerprint(char* output, size_t output_size)
-{
-    char fingerprint[TLS_SHA256_FINGERPRINT_HEX_LEN + 1] = {};
-    if (!tls_mgr_get_identity_fingerprint(fingerprint)) {
-        snprintf(output, output_size, "%s", i18n_get(STR_ERROR));
-        return;
-    }
-
-    size_t offset = 0;
-    for (size_t i = 0; i < TLS_SHA256_FINGERPRINT_HEX_LEN; i += 4) {
-        const char separator = ((i / 4 + 1) % 4 == 0) ? '\n' : ' ';
-        const int written = snprintf(
-            output + offset,
-            output_size - offset,
-            "%.4s%c",
-            fingerprint + i,
-            separator);
-        if (written <= 0 || (size_t)written >= output_size - offset) {
-            break;
-        }
-        offset += (size_t)written;
-    }
-    mbedtls_platform_zeroize(fingerprint, sizeof(fingerprint));
 }
 
 static void refresh_ui(void)
@@ -352,6 +334,29 @@ void home_assistant_screen_create(
         state.status_label, (void*)"home_assistant_status");
     lv_obj_set_style_text_font(state.status_label, FONT_LARGE, LV_PART_MAIN);
 
+    lv_obj_t* device_name_label = lv_label_create(card);
+    lv_obj_set_user_data(
+        device_name_label, (void*)"home_assistant_device_name");
+    lv_obj_set_width(device_name_label, LV_PCT(100));
+    lv_label_set_long_mode(device_name_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(device_name_label, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(device_name_label, COLOR_TEXT, LV_PART_MAIN);
+    {
+        const char* device_id = arctic::ha::deviceId();
+        const size_t id_len = strlen(device_id);
+        char last4[5] = {};
+        const char* suffix =
+            id_len >= 4 ? device_id + (id_len - 4) : device_id;
+        for (size_t i = 0; i < 4 && suffix[i] != '\0'; ++i) {
+            last4[i] = (char)toupper((unsigned char)suffix[i]);
+        }
+        char device_name[64];
+        snprintf(
+            device_name, sizeof(device_name), "%s %s",
+            HA_DEVICE_NAME_PREFIX, last4);
+        lv_label_set_text(device_name_label, device_name);
+    }
+
     state.description_label = lv_label_create(card);
     lv_obj_set_width(state.description_label, LV_PCT(100));
     lv_label_set_long_mode(
@@ -387,29 +392,6 @@ void home_assistant_screen_create(
         state.countdown_label, COLOR_WARNING, LV_PART_MAIN);
     lv_obj_set_style_text_align(
         state.countdown_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-
-    lv_obj_t* fingerprint_title = lv_label_create(card);
-    lv_label_set_text(
-        fingerprint_title, i18n_get(STR_HA_FINGERPRINT));
-    lv_obj_set_style_text_font(
-        fingerprint_title, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(
-        fingerprint_title, COLOR_TEXT_DIM, LV_PART_MAIN);
-
-    state.fingerprint_label = lv_label_create(card);
-    lv_obj_set_user_data(
-        state.fingerprint_label, (void*)"home_assistant_fingerprint");
-    char fingerprint[96] = {};
-    format_fingerprint(fingerprint, sizeof(fingerprint));
-    lv_label_set_text(state.fingerprint_label, fingerprint);
-    lv_obj_set_width(state.fingerprint_label, LV_PCT(100));
-    lv_obj_set_style_text_font(
-        state.fingerprint_label, &montserrat_24_latin, LV_PART_MAIN);
-    lv_obj_set_style_text_color(
-        state.fingerprint_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_set_style_text_align(
-        state.fingerprint_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    mbedtls_platform_zeroize(fingerprint, sizeof(fingerprint));
 
     state.pairing_btn = create_button(
         content,

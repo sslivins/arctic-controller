@@ -20,10 +20,12 @@ def test_pairing_screen_shows_identity_and_one_time_code(
 ):
     _open_pairing_screen(device)
 
-    fingerprint = device.find_widget(tag="home_assistant_fingerprint")
-    assert fingerprint is not None
-    assert fingerprint.text is not None
-    assert len(re.sub(r"\s", "", fingerprint.text)) == 64
+    device_name = device.find_widget(tag="home_assistant_device_name")
+    assert device_name is not None
+    assert device_name.text is not None
+    assert re.fullmatch(
+        r"Macon Heat Pump Controller [0-9A-F]{4}", device_name.text
+    )
 
     device.click(tag="home_assistant_pair")
     code = device.find_widget(tag="home_assistant_code")
