@@ -99,6 +99,8 @@ SKIP_ENTIRELY = {
     "/api/heatpump/errors/history", # clears persisted error history
     "/api/heatpump/demo",           # mutates simulated sensor fields
     "/api/brownout/clear",          # clears persistent boot statistics
+    "/api/ha/pair",                 # opens/cancels a Home Assistant pairing window
+    "/api/ha/revoke",               # revokes the Home Assistant integration token
     "/login",                       # session management
     "/logout",                      # session management
 }

@@ -32,6 +32,7 @@
 #include <esp_log.h>
 #include <mdns.h>
 #include <cJSON.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <esp_ota_ops.h>
@@ -151,6 +152,12 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req);
 static esp_err_t tls_status_get_handler(httpd_req_t* req);
 static esp_err_t tls_cert_post_handler(httpd_req_t* req);
 static esp_err_t tls_cert_delete_handler(httpd_req_t* req);
+
+// Home Assistant management handlers (web UI)
+static esp_err_t ha_manage_status_get_handler(httpd_req_t* req);
+static esp_err_t ha_manage_pair_post_handler(httpd_req_t* req);
+static esp_err_t ha_manage_pair_cancel_handler(httpd_req_t* req);
+static esp_err_t ha_manage_revoke_post_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -362,7 +369,7 @@ bool api_server_start(void)
         return false;
     }
 
-    const int uri_handlers = 107;
+    const int uri_handlers = 111;
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
@@ -1026,6 +1033,42 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(tls_cert_delete_uri);
+
+    // GET /api/ha/status - Home Assistant pairing status for the web UI
+    httpd_uri_t ha_manage_status_uri = {
+        .uri = "/api/ha/status",
+        .method = HTTP_GET,
+        .handler = ha_manage_status_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(ha_manage_status_uri);
+
+    // POST /api/ha/pair - Open a pairing window (code shown on device screen)
+    httpd_uri_t ha_manage_pair_uri = {
+        .uri = "/api/ha/pair",
+        .method = HTTP_POST,
+        .handler = ha_manage_pair_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(ha_manage_pair_uri);
+
+    // DELETE /api/ha/pair - Cancel the active pairing window
+    httpd_uri_t ha_manage_pair_cancel_uri = {
+        .uri = "/api/ha/pair",
+        .method = HTTP_DELETE,
+        .handler = ha_manage_pair_cancel_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(ha_manage_pair_cancel_uri);
+
+    // POST /api/ha/revoke - Revoke the Home Assistant integration token
+    httpd_uri_t ha_manage_revoke_uri = {
+        .uri = "/api/ha/revoke",
+        .method = HTTP_POST,
+        .handler = ha_manage_revoke_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(ha_manage_revoke_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
     // Test endpoints need HTTP for CI (no TLS on test runner)
@@ -4509,6 +4552,145 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "Screenshot streamed: %ldx%ld in %ld ms (uncompressed PNG)",
              (long)w, (long)h, (long)encode_ms);
+    return ESP_OK;
+}
+
+// ============================================================================
+// Home Assistant Management Handlers (web UI)
+//
+// These endpoints let the authenticated web UI manage Home Assistant pairing
+// with full parity to the on-device Settings -> Home Assistant screen. They sit
+// behind check_api_auth like every other /api/* settings call, so they inherit
+// the fail-closed-when-unsecured behaviour: a factory-fresh controller that has
+// not yet had its credentials set will reject them until it is secured (which
+// itself requires physical presence).
+//
+// Showing the pairing code to an authenticated web user is not a privilege
+// escalation: that user is already a full administrator (they can change every
+// setting, revoke pairing, or drive the controller directly), and the Home
+// Assistant integration token is strictly weaker than the access they already
+// hold. Taking ownership of the controller ("Secure this controller") remains
+// physical-presence-only and is unaffected by these endpoints.
+// ============================================================================
+
+// Build the exact name Home Assistant displays for this controller. Must stay
+// in sync with the hass-macon integration (custom_components/macon/
+// config_flow.py) and the on-device screen (settings_home_assistant_screen.cpp):
+// "Macon Heat Pump Controller <LAST4>" where <LAST4> is the upper-cased last 4
+// characters of the device_id.
+static void ha_manage_build_device_name(char* out, size_t out_len)
+{
+    const char* device_id = arctic::ha::deviceId();
+    const size_t id_len = strlen(device_id);
+    char last4[5] = {};
+    const char* suffix = id_len >= 4 ? device_id + (id_len - 4) : device_id;
+    for (size_t i = 0; i < 4 && suffix[i] != '\0'; ++i) {
+        last4[i] = (char)toupper((unsigned char)suffix[i]);
+    }
+    snprintf(out, out_len, "Macon Heat Pump Controller %s", last4);
+}
+
+static esp_err_t ha_manage_status_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    const setup_pairing_status_t pairing = setup_pairing_get_status();
+    char device_name[64];
+    ha_manage_build_device_name(device_name, sizeof(device_name));
+
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "paired", auth_mgr_has_integration_token());
+    cJSON_AddStringToObject(root, "device_name", device_name);
+    cJSON_AddBoolToObject(root, "pairing_active", pairing.active);
+    cJSON_AddNumberToObject(
+        root, "remaining_seconds", pairing.remaining_seconds);
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t ha_manage_pair_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    char code[SETUP_PAIRING_CODE_LEN + 1] = {};
+    if (!setup_pairing_start(code)) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not open pairing window");
+        return ESP_OK;
+    }
+
+    const setup_pairing_status_t pairing = setup_pairing_get_status();
+
+    set_json_content_type(req);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "code", code);
+    cJSON_AddNumberToObject(
+        root, "expires_in_seconds", pairing.remaining_seconds);
+    memset(code, 0, sizeof(code));
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t ha_manage_pair_cancel_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    setup_pairing_cancel();
+
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t ha_manage_revoke_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    const bool revoked = auth_mgr_revoke_integration_token();
+    setup_pairing_cancel();
+
+    if (!revoked) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not revoke Home Assistant credential");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "ok", true);
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 

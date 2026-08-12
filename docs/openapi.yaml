@@ -1210,6 +1210,166 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/ha/status:
+    get:
+      tags:
+        - HomeAssistant
+      summary: Home Assistant pairing status (web UI)
+      description: |
+        Returns the current Home Assistant pairing state for the authenticated
+        web UI: whether an integration token is provisioned, the device name
+        Home Assistant displays, and whether a pairing window is currently open.
+
+        This management endpoint sits behind the standard web/API authentication
+        (unlike the integration-facing `/api/v1/*` endpoints, which use the
+        integration bearer token). It never returns the pairing code.
+      operationId: getHomeAssistantStatus
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Home Assistant pairing status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paired:
+                    type: boolean
+                    description: Whether an integration token is currently provisioned
+                    example: false
+                  device_name:
+                    type: string
+                    description: Name Home Assistant displays for this controller
+                    example: "Macon Heat Pump Controller A1B2"
+                  pairing_active:
+                    type: boolean
+                    description: Whether a pairing window is currently open
+                    example: false
+                  remaining_seconds:
+                    type: integer
+                    description: Seconds left in the active pairing window (0 when inactive)
+                    example: 0
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/ha/pair:
+    post:
+      tags:
+        - HomeAssistant
+      summary: Open a Home Assistant pairing window (web UI)
+      description: |
+        Opens a short-lived physical-presence pairing window and returns the
+        six-digit code. Enter it into Home Assistant to complete pairing. The
+        code is shown only on the surface that opened the window (this response);
+        the on-device screen displays a code only when pairing is started there.
+
+        The authenticated web user is already a full administrator, so returning
+        the code here is not a privilege escalation; the integration token it
+        yields is strictly weaker than the access the user already holds. Taking
+        ownership of the controller remains physical-presence-only.
+      operationId: startHomeAssistantPairing
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Pairing window opened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    description: Six-digit pairing code
+                    example: "526203"
+                  expires_in_seconds:
+                    type: integer
+                    description: Seconds until the pairing window closes
+                    example: 300
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Could not open pairing window
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+        - HomeAssistant
+      summary: Cancel the active Home Assistant pairing window (web UI)
+      description: |
+        Closes any open pairing window and erases the current pairing code.
+      operationId: cancelHomeAssistantPairing
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Pairing window cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/ha/revoke:
+    post:
+      tags:
+        - HomeAssistant
+      summary: Revoke the Home Assistant integration token (web UI)
+      description: |
+        Revokes the Home Assistant integration token and cancels any open
+        pairing window. Home Assistant loses access until the controller is
+        paired again.
+      operationId: revokeHomeAssistantToken
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Integration token revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Could not revoke Home Assistant credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/heatpump/status:
     get:
       tags:

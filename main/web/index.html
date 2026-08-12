@@ -398,7 +398,8 @@
     ];
     const settingsNav = [
       ["wifi", "WiFi"], ["firmware", "Firmware"], ["time", "Time"], ["display", "Display"],
-      ["preferences", "Preferences"], ["security", "Security"], ["diagnostics", "Diagnostics"], ["system", "System"]
+      ["preferences", "Preferences"], ["security", "Security"], ["home_assistant", "Home Assistant"],
+      ["diagnostics", "Diagnostics"], ["system", "System"]
     ];
     const modes = ["cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto"];
 
@@ -412,6 +413,7 @@
       errors: { active: [], history: [] }, params: {}, events: [], eventTotal: 0,
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
+      ha: {}, haTimer: null,
       settingsLoaded: false, settingsPromise: null,
       logs: [], logSeq: 0, logLevel: "V", logTimer: null, pollTimer: null,
       powerHoldTimer: null, powerHolding: false
@@ -775,6 +777,34 @@
           ${state.tls.has_certs ? `<p><button class="btn danger" data-action="delete-tls">Delete certificate</button></p>` : ""}
           ${!state.tls.auth_ready ? `<div class="notice">Enable both authentication methods before provisioning TLS.</div>` : ""}</section></div>`;
     }
+    function homeAssistantSettings() {
+      const ha = state.ha || {};
+      const paired = !!ha.paired;
+      const active = !!ha.pairing_active;
+      const code = ha.code || "";
+      const remaining = Math.max(0, ha.remaining_seconds || 0);
+      const clock = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
+      let body;
+      if (active && code) {
+        body = `<div class="notice">Pairing is active. Enter this code in Home Assistant to finish.</div>
+          <div style="font-size:44px;letter-spacing:12px;text-align:center;color:var(--cp-accent);font-weight:700;margin:14px 0">${esc(code)}</div>
+          <div class="metric-sub" style="text-align:center">Expires in ${clock}</div>
+          <div class="btn-row" style="margin-top:14px"><button class="btn danger" data-action="ha-cancel">Cancel pairing</button></div>`;
+      } else if (active) {
+        body = `<div class="notice">A pairing window is already open. Enter the code shown where it was started (this page or the controller's screen) into Home Assistant.</div>
+          <div class="metric-sub" style="text-align:center">Expires in ${clock}</div>
+          <div class="btn-row" style="margin-top:14px"><button class="btn danger" data-action="ha-cancel">Cancel pairing</button></div>`;
+      } else {
+        body = `<p class="metric-sub">Start pairing to connect this controller to Home Assistant. A six-digit code will be shown here; enter it in Home Assistant to finish.</p>
+          <div class="btn-row"><button class="btn primary" data-action="ha-pair">Start pairing</button></div>`;
+      }
+      return `<div class="grid"><section class="card">
+        <div class="card-head"><h2>Home Assistant</h2><span class="badge ${paired ? "good" : ""}">${paired ? "Paired" : "Not paired"}</span></div>
+        <div class="kv"><span>Device name</span><strong>${esc(ha.device_name || "--")}</strong></div>
+        ${body}
+        ${paired ? `<div class="btn-row" style="margin-top:18px"><button class="btn danger" data-action="ha-revoke">Revoke pairing</button></div>` : ""}
+      </section></div>`;
+    }
     function diagnosticsSettings() {
       return `<section class="card"><div class="card-head"><div><h2>Diagnostics</h2><div class="metric-sub">Logs poll only while this page is open.</div></div>
         <select id="log-level" style="width:120px"><option>V</option><option>D</option><option>I</option><option>W</option><option>E</option></select></div>
@@ -793,7 +823,8 @@
     }
     function settingsPage() {
       const pages = { wifi: wifiSettings, firmware: firmwareSettings, time: timeSettings, display: displaySettings,
-        preferences: preferenceSettings, security: securitySettings, diagnostics: diagnosticsSettings, system: systemSettings };
+        preferences: preferenceSettings, security: securitySettings, home_assistant: homeAssistantSettings,
+        diagnostics: diagnosticsSettings, system: systemSettings };
       if (!state.settingsLoaded) {
         return settingsShell(`<section class="card"><div class="spinner"></div></section>`);
       }
@@ -886,8 +917,26 @@
       }, 2000);
     }
     function stopLogPolling() { if (state.logTimer) clearInterval(state.logTimer); state.logTimer = null; }
+    async function loadHaStatus() {
+      const prevCode = state.ha ? state.ha.code : "";
+      const data = await api("/api/ha/status");
+      state.ha = { ...data, code: data.pairing_active ? (prevCode || "") : "" };
+    }
+    function startHaPolling() {
+      stopHaPolling();
+      state.haTimer = setInterval(async () => {
+        if (state.route !== "settings" || state.settingsPage !== "home_assistant") { stopHaPolling(); return; }
+        try {
+          await loadHaStatus();
+          if (!state.ha.pairing_active) stopHaPolling();
+          render();
+        } catch (_) {}
+      }, 1000);
+    }
+    function stopHaPolling() { if (state.haTimer) clearInterval(state.haTimer); state.haTimer = null; }
     async function navigate(route, settingsPage = null) {
       stopLogPolling();
+      stopHaPolling();
       state.route = route;
       if (settingsPage) state.settingsPage = settingsPage;
       const targetHash = route === "settings" ? `#/settings/${state.settingsPage}` : `#/${route}`;
@@ -900,6 +949,7 @@
           await ensureSettings();
           if (state.settingsPage === "wifi") { await api("/api/wifi/scan", { method: "POST" }).catch(() => {}); setTimeout(loadNetworks, 500); }
           if (state.settingsPage === "diagnostics") startLogPolling();
+          if (state.settingsPage === "home_assistant") { await loadHaStatus().catch(() => {}); if (state.ha.pairing_active) startHaPolling(); }
         }
       } catch (error) { toast(error.message, "bad"); }
       if (route === "events" && document.activeElement?.id === "event-search") refreshEventResults();
@@ -1030,6 +1080,19 @@
       }
       if (action === "delete-tls" && confirm("Delete the TLS certificate?")) {
         await mutate("/api/tls/certificate", { method: "DELETE" }, "Certificate deleted; restart required"); await loadSettings(); render();
+      }
+      if (action === "ha-pair") {
+        const data = await mutate("/api/ha/pair", { method: "POST" }, "Pairing started");
+        state.ha = { ...state.ha, code: data.code || "", pairing_active: true, remaining_seconds: data.expires_in_seconds || 0 };
+        render(); startHaPolling();
+      }
+      if (action === "ha-cancel") {
+        await mutate("/api/ha/pair", { method: "DELETE" }, "Pairing cancelled");
+        stopHaPolling(); state.ha = { ...state.ha, code: "", pairing_active: false, remaining_seconds: 0 }; render();
+      }
+      if (action === "ha-revoke" && confirm("Revoke Home Assistant pairing? Home Assistant will lose access until you pair again.")) {
+        await mutate("/api/ha/revoke", { method: "POST" }, "Pairing revoked");
+        stopHaPolling(); state.ha = { ...state.ha, paired: false, code: "", pairing_active: false, remaining_seconds: 0 }; render();
       }
       if (action === "refresh-logs") await loadLogs(true);
       if (action === "clear-logs" && confirm("Clear controller logs?")) {
