@@ -150,6 +150,22 @@ typedef enum {
     STR_HA_PAIRING_FAILED,
     
     // ========================================================================
+    // Security Panel (Home-Assistant-independent device securing)
+    // ========================================================================
+    STR_SETTINGS_SECURITY,
+    STR_SECURITY_TITLE,
+    STR_SECURITY_SECURED,
+    STR_SECURITY_NOT_SECURED,
+    STR_SECURITY_NOT_SECURED_DESC,
+    STR_SECURITY_SECURED_DESC,
+    STR_SECURITY_SHOW_CODE,
+    STR_SECURITY_HIDE_CODE,
+    STR_SECURITY_CODE_LABEL,
+    STR_SECURITY_CODE_ACTIVE,
+    STR_SECURITY_EXPIRES_IN,
+    STR_SECURITY_FAILED,
+    
+    // ========================================================================
     // Heat Pump - Main Screen
     // ========================================================================
     STR_HP_COMMUNICATION_ERROR,

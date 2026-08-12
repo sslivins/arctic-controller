@@ -811,8 +811,8 @@
       return `<div class="login"><form class="card login-card" data-form="change-credentials">
         <div class="brand" style="margin-bottom:20px"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
         <h1>Secure this controller</h1>
-        <p class="metric-sub">Open Settings → Home Assistant on the physical controller, start pairing, verify this site's certificate fingerprint, and enter the displayed code.</p>
-        <div class="field"><label>Physical setup code</label><input name="pairing_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></div>
+        <p class="metric-sub">Open Settings → Security on the controller's screen, tap Show Setup Code, and enter the six-digit code below to set your own password.</p>
+        <div class="field"><label>Setup code</label><input name="pairing_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></div>
         <div class="field"><label>Username</label><input name="username" value="arctic" autocomplete="username" required></div>
         <div class="field"><label>New password</label><input name="password" type="password" minlength="12" autocomplete="new-password" required></div>
         <div class="field"><label>Confirm password</label><input name="confirm_password" type="password" minlength="12" autocomplete="new-password" required></div>

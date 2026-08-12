@@ -135,6 +135,20 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HA_REVOKE_CONFIRM] = "Revoke Home Assistant?",
     [STR_HA_REVOKE_DESCRIPTION] = "Home Assistant will lose access until you pair it again.",
     [STR_HA_PAIRING_FAILED] = "Unable to start pairing. Please try again.",
+
+    // Security Panel (Home-Assistant-independent device securing)
+    [STR_SETTINGS_SECURITY] = "Security",
+    [STR_SECURITY_TITLE] = "Security",
+    [STR_SECURITY_SECURED] = "Secured",
+    [STR_SECURITY_NOT_SECURED] = "Not secured",
+    [STR_SECURITY_NOT_SECURED_DESC] = "This controller still uses its factory password. Open its web interface, then enter the setup code shown here to set your own password.",
+    [STR_SECURITY_SECURED_DESC] = "A custom administrator password is set. Show a setup code only if you need to change credentials from the web interface.",
+    [STR_SECURITY_SHOW_CODE] = "Show Setup Code",
+    [STR_SECURITY_HIDE_CODE] = "Hide Setup Code",
+    [STR_SECURITY_CODE_LABEL] = "Setup code",
+    [STR_SECURITY_CODE_ACTIVE] = "Enter this code in the web interface to set your password.",
+    [STR_SECURITY_EXPIRES_IN] = "Expires in %u:%02u",
+    [STR_SECURITY_FAILED] = "Unable to start. Please try again.",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Communication Error",
@@ -512,6 +526,20 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HA_REVOKE_CONFIRM] = "Révoquer Home Assistant ?",
     [STR_HA_REVOKE_DESCRIPTION] = "Home Assistant perdra l'accès jusqu'à une nouvelle association.",
     [STR_HA_PAIRING_FAILED] = "Impossible de démarrer l'association. Réessayez.",
+
+    // Security Panel (Home-Assistant-independent device securing)
+    [STR_SETTINGS_SECURITY] = "Sécurité",
+    [STR_SECURITY_TITLE] = "Sécurité",
+    [STR_SECURITY_SECURED] = "Sécurisé",
+    [STR_SECURITY_NOT_SECURED] = "Non sécurisé",
+    [STR_SECURITY_NOT_SECURED_DESC] = "Ce contrôleur utilise encore son mot de passe d'usine. Ouvrez son interface web, puis saisissez le code de configuration affiché ici pour définir votre propre mot de passe.",
+    [STR_SECURITY_SECURED_DESC] = "Un mot de passe administrateur personnalisé est défini. N'affichez un code de configuration que si vous devez modifier les identifiants depuis l'interface web.",
+    [STR_SECURITY_SHOW_CODE] = "Afficher le code",
+    [STR_SECURITY_HIDE_CODE] = "Masquer le code",
+    [STR_SECURITY_CODE_LABEL] = "Code de configuration",
+    [STR_SECURITY_CODE_ACTIVE] = "Saisissez ce code dans l'interface web pour définir votre mot de passe.",
+    [STR_SECURITY_EXPIRES_IN] = "Expire dans %u:%02u",
+    [STR_SECURITY_FAILED] = "Impossible de démarrer. Réessayez.",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Erreur de communication",
@@ -889,6 +917,20 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HA_REVOKE_CONFIRM] = "¿Revocar Home Assistant?",
     [STR_HA_REVOKE_DESCRIPTION] = "Home Assistant perderá el acceso hasta que vuelvas a emparejarlo.",
     [STR_HA_PAIRING_FAILED] = "No se pudo iniciar el emparejamiento. Inténtalo de nuevo.",
+
+    // Security Panel (Home-Assistant-independent device securing)
+    [STR_SETTINGS_SECURITY] = "Seguridad",
+    [STR_SECURITY_TITLE] = "Seguridad",
+    [STR_SECURITY_SECURED] = "Protegido",
+    [STR_SECURITY_NOT_SECURED] = "Sin proteger",
+    [STR_SECURITY_NOT_SECURED_DESC] = "Este controlador aún usa su contraseña de fábrica. Abre su interfaz web y luego introduce el código de configuración que se muestra aquí para establecer tu propia contraseña.",
+    [STR_SECURITY_SECURED_DESC] = "Hay una contraseña de administrador personalizada. Muestra un código de configuración solo si necesitas cambiar las credenciales desde la interfaz web.",
+    [STR_SECURITY_SHOW_CODE] = "Mostrar código",
+    [STR_SECURITY_HIDE_CODE] = "Ocultar código",
+    [STR_SECURITY_CODE_LABEL] = "Código de configuración",
+    [STR_SECURITY_CODE_ACTIVE] = "Introduce este código en la interfaz web para establecer tu contraseña.",
+    [STR_SECURITY_EXPIRES_IN] = "Caduca en %u:%02u",
+    [STR_SECURITY_FAILED] = "No se pudo iniciar. Inténtalo de nuevo.",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Error de comunicación",
