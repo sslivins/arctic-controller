@@ -1,6 +1,9 @@
 /*
  * Arctic Heat Pump Controller
- * Physical Home Assistant pairing authorization
+ * Physical-presence setup/pairing authorization primitive.
+ *
+ * Generates a short-lived on-device code proving physical presence. Consumed
+ * by first-boot administrator credential securing and Home Assistant pairing.
  */
 #pragma once
 
@@ -13,23 +16,23 @@
 extern "C" {
 #endif
 
-#define HA_PAIRING_CODE_LEN 6
-#define HA_PAIRING_WINDOW_SECONDS 300
-#define HA_PAIRING_MAX_ATTEMPTS 5
+#define SETUP_PAIRING_CODE_LEN 6
+#define SETUP_PAIRING_WINDOW_SECONDS 300
+#define SETUP_PAIRING_MAX_ATTEMPTS 5
 
 typedef struct {
     bool active;
     uint32_t remaining_seconds;
     uint8_t failed_attempts;
-} ha_pairing_status_t;
+} setup_pairing_status_t;
 
 typedef enum {
-    HA_PAIRING_CLAIM_OK,
-    HA_PAIRING_CLAIM_NOT_OPEN,
-    HA_PAIRING_CLAIM_INVALID_CODE,
-    HA_PAIRING_CLAIM_LOCKED,
-    HA_PAIRING_CLAIM_STORAGE_ERROR,
-} ha_pairing_claim_result_t;
+    SETUP_PAIRING_CLAIM_OK,
+    SETUP_PAIRING_CLAIM_NOT_OPEN,
+    SETUP_PAIRING_CLAIM_INVALID_CODE,
+    SETUP_PAIRING_CLAIM_LOCKED,
+    SETUP_PAIRING_CLAIM_STORAGE_ERROR,
+} setup_pairing_claim_result_t;
 
 /**
  * @brief Open a new physical pairing window.
@@ -37,19 +40,19 @@ typedef enum {
  * Starting a window does not revoke the current integration token. The token
  * is rotated only after a successful claim.
  *
- * @param code_out Receives the six-digit code (HA_PAIRING_CODE_LEN + 1).
+ * @param code_out Receives the six-digit code (SETUP_PAIRING_CODE_LEN + 1).
  */
-bool ha_pairing_start(char* code_out);
+bool setup_pairing_start(char* code_out);
 
 /**
  * @brief Cancel and erase the active pairing code.
  */
-void ha_pairing_cancel(void);
+void setup_pairing_cancel(void);
 
 /**
  * @brief Read the current pairing-window status.
  */
-ha_pairing_status_t ha_pairing_get_status(void);
+setup_pairing_status_t setup_pairing_get_status(void);
 
 /**
  * @brief Claim the active pairing window and rotate the integration token.
@@ -57,7 +60,7 @@ ha_pairing_status_t ha_pairing_get_status(void);
  * @param code Six-digit code displayed on the physical controller.
  * @param token_out Receives the one-time plaintext integration token.
  */
-ha_pairing_claim_result_t ha_pairing_claim(
+setup_pairing_claim_result_t setup_pairing_claim(
     const char* code,
     char* token_out);
 
@@ -66,7 +69,7 @@ ha_pairing_claim_result_t ha_pairing_claim(
  *
  * Used for first-boot administrator credential replacement.
  */
-ha_pairing_claim_result_t ha_pairing_authorize(const char* code);
+setup_pairing_claim_result_t setup_pairing_authorize(const char* code);
 
 #ifdef __cplusplus
 }

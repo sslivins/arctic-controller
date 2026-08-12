@@ -21,6 +21,7 @@ SUB_SCREENS = [
         "home_assistant",
         "home_assistant_back",
     ),
+    ("settings_security", "security", "security_back"),
 ]
 
 

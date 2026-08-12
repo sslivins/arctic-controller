@@ -82,16 +82,16 @@ def test_factory_credential_replacement_requires_physical_tls_flow() -> None:
     api = (ROOT / "main" / "api_server.cpp").read_text(
         encoding="utf-8"
     )
-    pairing = (ROOT / "main" / "ha_pairing.cpp").read_text(
+    pairing = (ROOT / "main" / "setup_pairing.cpp").read_text(
         encoding="utf-8"
     )
 
     assert 'hash_password("arctic", default_hash)' in auth
     assert 'strcmp(state.username, "arctic")' not in auth
-    assert "ha_pairing_authorize(code)" in api
+    assert "setup_pairing_authorize(code)" in api
     assert "persistent device identity" in api
     assert "Failed to start mandatory HTTPS server" in api
-    assert "ha_pairing_authorize" in pairing
+    assert "setup_pairing_authorize" in pairing
 
 
 def test_device_test_build_explicitly_overrides_production_config() -> None:

@@ -22,6 +22,7 @@
 #include "settings/settings_menu.h"
 #include "settings/settings_display_screen.h"
 #include "settings/settings_home_assistant_screen.h"
+#include "settings/settings_security_screen.h"
 #include "settings/settings_wifi_screen.h"
 #include "settings/settings_firmware_screen.h"
 #include "settings/settings_time_screen.h"
@@ -30,7 +31,7 @@
 #include "i18n/i18n.h"
 #include "heatpump_controller.h"
 #include "auth_manager.h"
-#include "ha_pairing.h"
+#include "setup_pairing.h"
 #include "tls_manager.h"
 #include "app_preferences.h"
 #include "heatpump_errors.h"
@@ -130,8 +131,8 @@ static esp_err_t integration_token_post_handler(httpd_req_t* req)
 
 static esp_err_t integration_pairing_post_handler(httpd_req_t* req)
 {
-    char code[HA_PAIRING_CODE_LEN + 1] = {};
-    if (!ha_pairing_start(code)) {
+    char code[SETUP_PAIRING_CODE_LEN + 1] = {};
+    if (!setup_pairing_start(code)) {
         send_json_error(
             req, "500 Internal Server Error",
             "Could not open integration pairing window");
@@ -145,11 +146,11 @@ static esp_err_t integration_pairing_post_handler(httpd_req_t* req)
         sizeof(response),
         "{\"code\":\"%s\",\"expires_in_seconds\":%u}",
         code,
-        HA_PAIRING_WINDOW_SECONDS);
+        SETUP_PAIRING_WINDOW_SECONDS);
     memset(code, 0, sizeof(code));
     if (response_len <= 0 || response_len >= (int)sizeof(response)) {
         memset(response, 0, sizeof(response));
-        ha_pairing_cancel();
+        setup_pairing_cancel();
         send_json_error(
             req, "500 Internal Server Error",
             "Could not serialize pairing window");
@@ -597,6 +598,7 @@ static const char* get_screen_name(void)
     // the persistent tab shell, so they take precedence when visible.
     if (display_screen_is_visible()) return "display";
     if (home_assistant_screen_is_visible()) return "home_assistant";
+    if (security_screen_is_visible()) return "security";
     if (wifi_screen_is_visible()) return "wifi";
     if (firmware_screen_is_visible()) return "firmware";
     if (time_screen_is_visible()) return "time";

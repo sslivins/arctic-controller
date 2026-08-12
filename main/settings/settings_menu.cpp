@@ -12,6 +12,7 @@
 #include "settings_language_screen.h"
 #include "settings_display_screen.h"
 #include "settings_home_assistant_screen.h"
+#include "settings_security_screen.h"
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
@@ -55,6 +56,7 @@ typedef enum {
     SETTINGS_LANGUAGE,
     SETTINGS_DISPLAY,
     SETTINGS_HOME_ASSISTANT,
+    SETTINGS_SECURITY,
     SETTINGS_COUNT
 } settings_item_t;
 
@@ -448,6 +450,14 @@ static void row_click_cb(lv_event_t* e)
         home_assistant_screen_create(&ha_cfg);
         state.sub_screen_active = true;
         state.active_sub_screen = SETTINGS_HOME_ASSISTANT;
+    } else if (strcmp(tag, "settings_security") == 0) {
+        ESP_LOGI(TAG, "Opening Security settings...");
+        security_screen_config_t sec_cfg = {
+            .on_back = settings_menu_show,
+        };
+        security_screen_create(&sec_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_SECURITY;
     } else if (strcmp(tag, "settings_factory_reset") == 0) {
         show_factory_reset_confirmation();
     }
@@ -673,6 +683,11 @@ static void create_menu_list(void)
         state.list_container, LV_SYMBOL_HOME,
         i18n_get(STR_SETTINGS_HOME_ASSISTANT),
         "settings_home_assistant");
+
+    state.rows[SETTINGS_SECURITY] = create_settings_row(
+        state.list_container, LV_SYMBOL_KEYBOARD,
+        i18n_get(STR_SETTINGS_SECURITY),
+        "settings_security");
     
     // Demo Mode toggle
     lv_obj_t* demo_row = create_toggle_row(state.list_container, LV_SYMBOL_PLAY,
@@ -817,6 +832,9 @@ void settings_menu_force_close(lv_obj_t* return_screen)
             case SETTINGS_DISPLAY: display_screen_close(); break;
             case SETTINGS_HOME_ASSISTANT:
                 home_assistant_screen_close();
+                break;
+            case SETTINGS_SECURITY:
+                security_screen_close();
                 break;
             default: break;
         }

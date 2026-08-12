@@ -11,7 +11,7 @@
 #include "ota_manager.h"
 #include "auth_manager.h"
 #include "ha_integration.h"
-#include "ha_pairing.h"
+#include "setup_pairing.h"
 #include "ha_websocket.h"
 #include "heatpump_controller.h"
 #include "heatpump_types.h"
@@ -2026,14 +2026,14 @@ static esp_err_t ha_pair_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    char code[HA_PAIRING_CODE_LEN + 1] = {};
-    if (strlen(code_json->valuestring) != HA_PAIRING_CODE_LEN) {
+    char code[SETUP_PAIRING_CODE_LEN + 1] = {};
+    if (strlen(code_json->valuestring) != SETUP_PAIRING_CODE_LEN) {
         cJSON_Delete(root);
         send_json_error(
             req, "400 Bad Request", "Pairing code must be six digits");
         return ESP_OK;
     }
-    memcpy(code, code_json->valuestring, HA_PAIRING_CODE_LEN);
+    memcpy(code, code_json->valuestring, SETUP_PAIRING_CODE_LEN);
     memset(
         code_json->valuestring, 0, strlen(code_json->valuestring));
     cJSON_Delete(root);
@@ -2048,23 +2048,23 @@ static esp_err_t ha_pair_post_handler(httpd_req_t* req)
     }
 
     char token[AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
-    const ha_pairing_claim_result_t result =
-        ha_pairing_claim(code, token);
+    const setup_pairing_claim_result_t result =
+        setup_pairing_claim(code, token);
     memset(code, 0, sizeof(code));
 
-    if (result != HA_PAIRING_CLAIM_OK) {
+    if (result != SETUP_PAIRING_CLAIM_OK) {
         memset(token, 0, sizeof(token));
         memset(fingerprint, 0, sizeof(fingerprint));
         switch (result) {
-            case HA_PAIRING_CLAIM_NOT_OPEN:
+            case SETUP_PAIRING_CLAIM_NOT_OPEN:
                 send_json_error(
                     req, "403 Forbidden", "Pairing window is not open");
                 break;
-            case HA_PAIRING_CLAIM_INVALID_CODE:
+            case SETUP_PAIRING_CLAIM_INVALID_CODE:
                 send_json_error(
                     req, "401 Unauthorized", "Invalid pairing code");
                 break;
-            case HA_PAIRING_CLAIM_LOCKED:
+            case SETUP_PAIRING_CLAIM_LOCKED:
                 send_json_error(
                     req, "429 Too Many Requests",
                     "Pairing window closed after too many attempts");
@@ -2950,14 +2950,14 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
                 "Physical setup code required");
             return ESP_OK;
         }
-        char code[HA_PAIRING_CODE_LEN + 1] = {};
-        if (strlen(pairing_code->valuestring) == HA_PAIRING_CODE_LEN) {
-            memcpy(code, pairing_code->valuestring, HA_PAIRING_CODE_LEN);
+        char code[SETUP_PAIRING_CODE_LEN + 1] = {};
+        if (strlen(pairing_code->valuestring) == SETUP_PAIRING_CODE_LEN) {
+            memcpy(code, pairing_code->valuestring, SETUP_PAIRING_CODE_LEN);
         }
-        const ha_pairing_claim_result_t authorization =
-            ha_pairing_authorize(code);
+        const setup_pairing_claim_result_t authorization =
+            setup_pairing_authorize(code);
         memset(code, 0, sizeof(code));
-        if (authorization != HA_PAIRING_CLAIM_OK) {
+        if (authorization != SETUP_PAIRING_CLAIM_OK) {
             cJSON_Delete(root);
             send_json_error(
                 req, "403 Forbidden",

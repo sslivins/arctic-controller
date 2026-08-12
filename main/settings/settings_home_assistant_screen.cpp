@@ -7,7 +7,7 @@
 #include "settings_common.h"
 #include "settings_menu.h"
 #include "auth_manager.h"
-#include "ha_pairing.h"
+#include "setup_pairing.h"
 #include "ha_integration.h"
 #include "i18n/i18n.h"
 
@@ -41,7 +41,7 @@ typedef struct {
     lv_obj_t* revoke_btn;
     lv_obj_t* revoke_overlay;
     lv_timer_t* timer;
-    char pairing_code[HA_PAIRING_CODE_LEN + 1];
+    char pairing_code[SETUP_PAIRING_CODE_LEN + 1];
 } home_assistant_screen_state_t;
 
 static home_assistant_screen_state_t state = {};
@@ -82,7 +82,7 @@ static void refresh_ui(void)
         return;
     }
 
-    const ha_pairing_status_t pairing = ha_pairing_get_status();
+    const setup_pairing_status_t pairing = setup_pairing_get_status();
     const bool paired = auth_mgr_has_integration_token();
 
     lv_label_set_text(
@@ -160,13 +160,13 @@ static void back_btn_cb(lv_event_t* event)
 static void pairing_btn_cb(lv_event_t* event)
 {
     (void)event;
-    const ha_pairing_status_t pairing = ha_pairing_get_status();
+    const setup_pairing_status_t pairing = setup_pairing_get_status();
     if (pairing.active && state.pairing_started) {
-        ha_pairing_cancel();
+        setup_pairing_cancel();
         state.pairing_started = false;
         mbedtls_platform_zeroize(
             state.pairing_code, sizeof(state.pairing_code));
-    } else if (!ha_pairing_start(state.pairing_code)) {
+    } else if (!setup_pairing_start(state.pairing_code)) {
         lv_label_set_text(
             state.description_label, i18n_get(STR_HA_PAIRING_FAILED));
         return;
@@ -190,7 +190,7 @@ static void revoke_confirm_cb(lv_event_t* event)
     if (!auth_mgr_revoke_integration_token()) {
         ESP_LOGE(TAG, "Failed to revoke Home Assistant credential");
     }
-    ha_pairing_cancel();
+    setup_pairing_cancel();
     dismiss_revoke_overlay();
     refresh_ui();
 }
@@ -425,7 +425,7 @@ void home_assistant_screen_close(void)
         state.timer = NULL;
     }
     if (state.pairing_started) {
-        ha_pairing_cancel();
+        setup_pairing_cancel();
     }
     mbedtls_platform_zeroize(
         state.pairing_code, sizeof(state.pairing_code));
