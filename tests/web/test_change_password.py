@@ -5,26 +5,66 @@ import time
 
 import pytest
 import requests
-from playwright.sync_api import Page, expect
-
 from conftest import API_KEY, WEB_PASSWORD, WEB_USERNAME
+from playwright.sync_api import Page, expect
 
 BASE_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 NEW_PASSWORD = "N3wS3cure!Pass"
 
 
 def restore():
-    for password in (NEW_PASSWORD, WEB_PASSWORD):
-        session = requests.Session()
-        session.verify = False
-        session.post(f"{BASE_URL}/login", json={"username": WEB_USERNAME, "password": password}, timeout=5)
-        response = session.post(
-            f"{BASE_URL}/api/auth/credentials",
-            json={"username": WEB_USERNAME, "password": WEB_PASSWORD},
-            timeout=5,
-        )
-        if response.status_code == 200:
-            break
+    last_error = "credential restoration did not run"
+    for _ in range(3):
+        for password in (NEW_PASSWORD, WEB_PASSWORD):
+            session = requests.Session()
+            session.verify = False
+            try:
+                login = session.post(
+                    f"{BASE_URL}/login",
+                    json={"username": WEB_USERNAME, "password": password},
+                    timeout=5,
+                )
+                if login.status_code != 200:
+                    last_error = f"login returned {login.status_code}"
+                    continue
+
+                response = session.post(
+                    f"{BASE_URL}/api/auth/credentials",
+                    json={
+                        "username": WEB_USERNAME,
+                        "password": WEB_PASSWORD,
+                    },
+                    timeout=5,
+                )
+                if response.status_code != 200:
+                    last_error = (
+                        f"credential restore returned {response.status_code}"
+                    )
+                    continue
+
+                verify = requests.Session()
+                verify.verify = False
+                verified = verify.post(
+                    f"{BASE_URL}/login",
+                    json={
+                        "username": WEB_USERNAME,
+                        "password": WEB_PASSWORD,
+                    },
+                    timeout=5,
+                )
+                if verified.status_code == 200:
+                    return
+                last_error = f"verification login returned {verified.status_code}"
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+            ) as exc:
+                last_error = str(exc)
+        time.sleep(1)
+
+    raise AssertionError(f"Could not restore test credentials: {last_error}")
+
+
 def browser_login(page: Page, password: str):
     page.locator('input[name="username"]').fill(WEB_USERNAME)
     page.locator('input[name="password"]').fill(password)
