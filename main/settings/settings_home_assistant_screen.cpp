@@ -124,13 +124,13 @@ static void refresh_ui(void)
         lv_label_set_text(state.code_label, "");
         lv_label_set_text(
             state.description_label,
-            i18n_get(STR_HA_PAIRING_DESCRIPTION));
+            paired ? i18n_get(STR_HA_PAIRED_DESCRIPTION) : i18n_get(STR_HA_PAIRING_DESCRIPTION));
         lv_obj_add_flag(state.code_title, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(state.code_label, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(state.countdown_label, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(
             state.pairing_btn_label,
-            i18n_get(STR_HA_START_PAIRING));
+            paired ? i18n_get(STR_HA_REPAIR) : i18n_get(STR_HA_START_PAIRING));
         lv_obj_set_style_bg_color(
             state.pairing_btn, COLOR_ACCENT, LV_PART_MAIN);
     }
