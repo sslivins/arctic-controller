@@ -93,6 +93,7 @@ def _return_to_main(device: DeviceClient):
         "time",
         "language",
         "home_assistant",
+        "security",
     ):
         if current == "wifi":
             try:
