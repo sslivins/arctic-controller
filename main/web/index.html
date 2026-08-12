@@ -403,7 +403,7 @@
     const modes = ["cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto"];
 
     const state = {
-      auth: { checked: false, required: true, loggedIn: false, changeRequired: false },
+      auth: { checked: false, required: true, loggedIn: false, changeRequired: false, loginError: "" },
       route: "home", settingsPage: "wifi", busy: false,
       info: {}, status: { time: {} }, wifi: {}, hp: {
         temperatures: {}, setpoints: {}, setpoint_limits: {}, readings: {}
@@ -802,6 +802,7 @@
     function loginPage() {
       return `<div class="login"><form class="card login-card" data-form="login"><div class="brand" style="margin-bottom:20px"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
         <h1>Sign in</h1><p class="metric-sub">Enter the controller credentials.</p>
+        ${state.auth.loginError ? `<div class="notice bad" style="margin:0 0 16px">${esc(state.auth.loginError)}</div>` : ""}
         <div class="field"><label>Username</label><input name="username" autocomplete="username" required></div>
         <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
         <button class="btn primary" type="submit">Sign in</button></form></div>`;
@@ -916,6 +917,7 @@
     async function handleForm(form) {
       const type = form.dataset.form, data = new FormData(form);
       if (type === "login") {
+        state.auth.loginError = "";
         try {
           await api("/login", jsonOptions("POST", { username: data.get("username"), password: data.get("password") }));
           const auth = await api("/api/auth/status");
@@ -923,7 +925,12 @@
           state.auth.changeRequired = !!auth.credentials_change_required;
           if (!state.auth.changeRequired) await loadCore();
           render();
-        } catch (error) { toast(error.message, "bad"); }
+        } catch (error) {
+          state.auth.loggedIn = false;
+          state.auth.loginError = /authentication required|401|unauthorized/i.test(error.message)
+            ? "Incorrect username or password." : error.message;
+          render();
+        }
       }
       if (type === "change-credentials") {
         const password = String(data.get("password") || "");
