@@ -4,6 +4,7 @@
 #include "ha_integration.h"
 
 #include "heatpump_controller.h"
+#include "heatpump_errors.h"
 #include "macon_state.h"
 #include "macon_master.h"
 #include "wifi_manager.h"
@@ -121,11 +122,40 @@ cJSON* createStateObject(const HeatPumpState& hp)
     cJSON* error = cJSON_AddObjectToObject(state, "error");
     cJSON_AddBoolToObject(error, "active", hp.hasAnyError());
     if (hp.hasAnyError()) {
-        char descriptions[256];
-        getErrorDescriptions(descriptions, sizeof(descriptions));
-        cJSON_AddStringToObject(error, "description", descriptions);
+        // Surface the primary (highest-severity) active fault so the HA
+        // integration can expose a stable code + severity. The full active
+        // list and suggested resolutions remain a device-local convenience
+        // (see /api/heatpump/errors).
+        ActiveError actives[16];
+        int active_count = getActiveErrors(actives, 16);
+        const ActiveError* primary = nullptr;
+        for (int i = 0; i < active_count; ++i) {
+            if (primary == nullptr ||
+                actives[i].severity > primary->severity) {
+                primary = &actives[i];
+            }
+        }
+        if (primary != nullptr) {
+            cJSON_AddStringToObject(error, "code", primary->code);
+            cJSON_AddStringToObject(error, "name", primary->name);
+            cJSON_AddStringToObject(
+                error, "description", primary->description);
+            cJSON_AddStringToObject(
+                error, "severity", severityToString(primary->severity));
+        } else {
+            // Error bits set but unmapped — fall back to concatenated text.
+            char descriptions[256];
+            getErrorDescriptions(descriptions, sizeof(descriptions));
+            cJSON_AddNullToObject(error, "code");
+            cJSON_AddNullToObject(error, "name");
+            cJSON_AddStringToObject(error, "description", descriptions);
+            cJSON_AddNullToObject(error, "severity");
+        }
     } else {
+        cJSON_AddNullToObject(error, "code");
+        cJSON_AddNullToObject(error, "name");
         cJSON_AddNullToObject(error, "description");
+        cJSON_AddNullToObject(error, "severity");
     }
 
     return state;
