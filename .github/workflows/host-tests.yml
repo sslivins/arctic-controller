@@ -1,0 +1,56 @@
+name: Host Tests
+
+# Fast, hardware-free gate. These tests read the firmware/web sources and
+# static contracts (openapi, partition layout, i18n, etc.) and never touch the
+# physical controller, so they run on a hosted runner in seconds. They are
+# selected by the `hostside` pytest marker rather than a hard-coded file list,
+# so any newly-marked test is automatically covered.
+#
+# Intentionally has NO `paths:` filter: a required check that gets skipped by a
+# path filter stays pending forever and blocks the merge queue. Keeping this
+# always-on guarantees it reports a conclusion on every PR and merge group.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: tests/requirements.txt
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Run host-side tests (no hardware)
+        run: >-
+          python -m pytest tests -m hostside -v --tb=short
+          -p no:cacheprovider --junitxml=host-test-results.xml
+
+      - name: Publish host-side test results
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: Host-Side Test Results
+          path: host-test-results.xml
+          reporter: java-junit
+          use-actions-summary: 'false'
