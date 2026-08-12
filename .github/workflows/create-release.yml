@@ -8,32 +8,123 @@ on:
         required: false
         default: false
         type: boolean
+      target_sha:
+        description: 'Full commit SHA on main to release (defaults to current main HEAD)'
+        required: false
+        default: ''
+        type: string
 
-# Device serialization is handled by the device-tests.yml reusable workflow's
-# own concurrency group — no need to duplicate it here.
+# This workflow no longer runs the physical device suite. It consumes the
+# attestation produced by the authoritative post-merge device-tests.yml run
+# for the exact target SHA, so releases never re-run the ~40-minute hardware
+# suite and there is no device to serialize here.
 
 permissions:
   contents: write
   checks: write
+  actions: read
 
 jobs:
-  device-tests:
-    uses: ./.github/workflows/device-tests.yml
-    secrets: inherit
+  verify-validation:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve and require a full target SHA
+        id: resolve
+        env:
+          INPUT_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          MAIN_SHA=$(git rev-parse origin/main)
+          if [ -n "$INPUT_SHA" ]; then
+            # Expand to a full SHA and require it to be an ancestor-or-equal of main.
+            TARGET_SHA=$(git rev-parse "$INPUT_SHA^{commit}")
+          else
+            TARGET_SHA="$MAIN_SHA"
+          fi
+          if [ "$TARGET_SHA" != "$MAIN_SHA" ]; then
+            echo "::error::Target SHA $TARGET_SHA is not the current main HEAD ($MAIN_SHA). Releases must target main's tip."
+            exit 1
+          fi
+          echo "sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+          echo "✅ Release target SHA: $TARGET_SHA"
+
+      - name: Require a successful post-merge device validation for this SHA
+        id: run
+        env:
+          TARGET_SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          set -euo pipefail
+          RUNS=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/device-tests.yml/runs?head_sha=$TARGET_SHA&event=push&status=completed&per_page=100")
+          RUN_ID=$(echo "$RUNS" | jq -r \
+            '[.workflow_runs[] | select(.conclusion=="success")] | sort_by(.run_started_at) | last | .id // empty')
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::No successful push-to-main device-tests run found for $TARGET_SHA. The exact commit must pass the physical device suite before it can be released."
+            exit 1
+          fi
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "✅ Found validated run $RUN_ID for $TARGET_SHA"
+
+      - name: Download and verify the validation attestation
+        env:
+          TARGET_SHA: ${{ steps.resolve.outputs.sha }}
+          RUN_ID: ${{ steps.run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run download "$RUN_ID" -R "${{ github.repository }}" \
+            -n "release-attestation-$TARGET_SHA" -D attestation
+          FILE=attestation/release-attestation.json
+          if [ ! -f "$FILE" ]; then
+            echo "::error::Validation run $RUN_ID did not publish a release attestation."
+            exit 1
+          fi
+          echo "Attestation contents:"; cat "$FILE"
+          TREE_SHA=$(git rev-parse "$TARGET_SHA^{tree}")
+          jq -e --arg sha "$TARGET_SHA" '.commit_sha == $sha' "$FILE" > /dev/null \
+            || { echo "::error::Attestation commit_sha does not match $TARGET_SHA"; exit 1; }
+          jq -e --arg t "$TREE_SHA" '.tree_sha == $t' "$FILE" > /dev/null \
+            || { echo "::error::Attestation tree_sha does not match $TREE_SHA"; exit 1; }
+          jq -e '.suites.ui == "success" and .suites.api == "success" and .suites.web == "success"' "$FILE" > /dev/null \
+            || { echo "::error::Attestation records a non-passing suite"; exit 1; }
+          echo "✅ Attestation verified for $TARGET_SHA (run $RUN_ID)"
 
   build-and-release:
-    needs: device-tests
+    needs: verify-validation
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Checkout code
+      - name: Checkout validated commit
         uses: actions/checkout@v6
         with:
+          ref: ${{ needs.verify-validation.outputs.sha }}
           fetch-depth: 0
           submodules: 'recursive'
           token: ${{ secrets.ARCTIC_RELEASE_TOKEN }}
+
+      - name: Verify main still points to the validated SHA
+        env:
+          TARGET_SHA: ${{ needs.verify-validation.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin main --depth=1
+          MAIN_SHA=$(git rev-parse origin/main)
+          if [ "$MAIN_SHA" != "$TARGET_SHA" ]; then
+            echo "::error::main advanced to $MAIN_SHA after validation ($TARGET_SHA). Re-run the release for the new HEAD."
+            exit 1
+          fi
+          echo "✅ main still points to the validated SHA $TARGET_SHA"
 
       - name: Extract version from CMakeLists.txt
         id: version
@@ -73,6 +164,24 @@ jobs:
           target: esp32p4
           path: '.'
 
+      - name: Record production firmware provenance
+        env:
+          TARGET_SHA: ${{ needs.verify-validation.outputs.sha }}
+        run: |
+          set -euo pipefail
+          PROD_DIGEST=$(sha256sum build/arctic_controller.bin | awk '{print $1}')
+          echo "PROD_FW_SHA256=$PROD_DIGEST" >> "$GITHUB_ENV"
+          {
+            echo "### Production firmware provenance"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| Source SHA | \`$TARGET_SHA\` |"
+            echo "| Production firmware SHA256 | \`$PROD_DIGEST\` |"
+            echo "| Test endpoints | disabled |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Production firmware sha256: $PROD_DIGEST (source $TARGET_SHA)"
+
       - name: Dry run summary
         if: ${{ inputs.dry_run }}
         run: |
@@ -84,17 +193,31 @@ jobs:
 
       - name: Create and push tag
         if: ${{ !inputs.dry_run }}
+        env:
+          TARGET_SHA: ${{ needs.verify-validation.outputs.sha }}
         run: |
+          set -euo pipefail
           TAG="${{ steps.version.outputs.tag }}"
           VERSION="${{ steps.version.outputs.version }}"
-          
+
+          # Final guard: refuse to tag if main advanced past the validated SHA
+          # during the production build. This shrinks the TOCTOU window to the
+          # moment between this check and the tag push; the tag is always
+          # annotated on the validated TARGET_SHA that is checked out here.
+          git fetch origin main --depth=1
+          MAIN_SHA=$(git rev-parse origin/main)
+          if [ "$MAIN_SHA" != "$TARGET_SHA" ]; then
+            echo "::error::main advanced to $MAIN_SHA after validation ($TARGET_SHA); aborting before tag. Re-run the release for the new HEAD."
+            exit 1
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git tag -a "$TAG" -m "Release $VERSION"
+
+          git tag -a "$TAG" "$TARGET_SHA" -m "Release $VERSION"
           git push origin "$TAG"
-          
-          echo "🏷️ Created tag: $TAG"
+
+          echo "🏷️ Created tag: $TAG -> $TARGET_SHA"
 
       - name: Upload firmware artifact
         if: ${{ !inputs.dry_run }}
