@@ -21,7 +21,7 @@ jobs:
     name: Renew wildcard cert and deploy to device
     runs-on: vm-mi
     env:
-      ARCTIC_URL: http://arctic-01b0.mennlabs.com
+      ARCTIC_URL: https://arctic-01b0.mennlabs.com
     steps:
       - uses: actions/checkout@v6
 
@@ -65,45 +65,21 @@ jobs:
             echo "Certificate renewed successfully."
           fi
 
-      - name: Read renewed certificate files
-        if: steps.certbot.outputs.renewed == 'true'
-        id: read_certs
-        run: |
-          CERT_DIR="/etc/letsencrypt/live/mennlabs-wildcard"
-
-          # Read fullchain and privkey
-          FULLCHAIN=$(sudo cat "$CERT_DIR/fullchain.pem")
-          PRIVKEY=$(sudo cat "$CERT_DIR/privkey.pem")
-
-          # Store as multiline outputs
-          {
-            echo "fullchain<<CERT_EOF"
-            echo "$FULLCHAIN"
-            echo "CERT_EOF"
-          } >> "$GITHUB_OUTPUT"
-
-          {
-            echo "privkey<<KEY_EOF"
-            echo "$PRIVKEY"
-            echo "KEY_EOF"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Sync API key from device
         if: steps.certbot.outputs.renewed == 'true'
         run: |
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           DEVICE_KEY=""
 
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
-            RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+          for URL in "$ARCTIC_URL"; do
+            RESP=$(curl -sS --fail --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
 
             if [ -z "$DEVICE_KEY" ]; then
               JAR=$(mktemp)
-              curl -sk -c "$JAR" -X POST "$URL/login" \
+              curl -sS --fail -c "$JAR" -X POST "$URL/login" \
                 -H "Content-Type: application/json" \
                 -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
-              RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+              RESP=$(curl -sS --fail -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
               DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
               rm -f "$JAR"
             fi
@@ -126,18 +102,11 @@ jobs:
       - name: Enable both auth methods on device
         if: steps.certbot.outputs.renewed == 'true'
         run: |
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          # Ensure both web auth and API auth are enabled (required for cert upload)
-          curl -sf --max-time 10 \
+          curl -sSf --max-time 10 \
             -H "X-API-Key: ${ARCTIC_API_KEY}" \
             -H "Content-Type: application/json" \
             -d '{"web_auth_enabled": true, "api_auth_enabled": true}' \
             "$ARCTIC_URL/api/auth/config" \
-            || curl -skf --max-time 10 \
-              -H "X-API-Key: ${ARCTIC_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d '{"web_auth_enabled": true, "api_auth_enabled": true}' \
-              "$ARCTIC_URL_HTTPS/api/auth/config" \
             || echo "Warning: Could not configure auth (may already be set)"
 
       - name: Clear existing certs on device
@@ -145,9 +114,8 @@ jobs:
         run: |
           # Delete any existing certs to avoid the deadlock where certs exist
           # in NVS but HTTPS failed to start (blocks HTTP cert uploads).
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
-            curl -sk --max-time 10 -X DELETE \
+          for URL in "$ARCTIC_URL"; do
+            curl -sS --fail --max-time 10 -X DELETE \
               -H "X-API-Key: ${ARCTIC_API_KEY}" \
               "$URL/api/tls/certificate" 2>/dev/null && break || true
           done
@@ -155,15 +123,16 @@ jobs:
       - name: Upload certificate to device
         if: steps.certbot.outputs.renewed == 'true'
         run: |
-          # Upload new cert + key via the TLS provisioning API
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          CERT_DIR="/etc/letsencrypt/live/mennlabs-wildcard"
+          FULLCHAIN=$(sudo cat "$CERT_DIR/fullchain.pem")
+          PRIVKEY=$(sudo cat "$CERT_DIR/privkey.pem")
           PAYLOAD=$(jq -n \
-            --arg cert "${{ steps.read_certs.outputs.fullchain }}" \
-            --arg key "${{ steps.read_certs.outputs.privkey }}" \
+            --arg cert "$FULLCHAIN" \
+            --arg key "$PRIVKEY" \
             '{cert: $cert, key: $key}')
 
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
-            RESPONSE=$(curl -sk --max-time 30 -w '\n%{http_code}' \
+          for URL in "$ARCTIC_URL"; do
+            RESPONSE=$(curl -sS --max-time 30 -w '\n%{http_code}' \
               -H "X-API-Key: ${ARCTIC_API_KEY}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
@@ -178,29 +147,23 @@ jobs:
             fi
           done
 
-          echo "::error::Certificate upload failed on both HTTP and HTTPS"
+          echo "::error::Certificate upload failed over HTTPS"
           exit 1
 
       - name: Reboot device to activate new cert
         if: steps.certbot.outputs.renewed == 'true'
         run: |
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          curl -skf --max-time 10 \
+          curl -sSf --max-time 10 \
             -H "X-API-Key: ${ARCTIC_API_KEY}" \
             -X POST \
             "$ARCTIC_URL/api/ota/reboot" \
-            || curl -skf --max-time 10 \
-              -H "X-API-Key: ${ARCTIC_API_KEY}" \
-              -X POST \
-              "$ARCTIC_URL_HTTPS/api/ota/reboot" \
             || true
 
           echo "Reboot triggered. Waiting for device to come back..."
           sleep 10
 
           for i in $(seq 1 30); do
-            if curl -sk --connect-timeout 2 "$ARCTIC_URL/api/health" > /dev/null 2>&1 || \
-               curl -sk --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/health" > /dev/null 2>&1; then
+            if curl -sS --fail --connect-timeout 2 "$ARCTIC_URL/api/health" > /dev/null 2>&1; then
               echo "Device is back online after $((i + 10))s."
               exit 0
             fi

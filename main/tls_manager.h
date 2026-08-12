@@ -19,6 +19,7 @@ extern "C" {
 /* Maximum PEM sizes — Let's Encrypt fullchain is ~3.2 KB, key ~250 B */
 #define TLS_MAX_CERT_LEN 4000
 #define TLS_MAX_KEY_LEN  2000
+#define TLS_SHA256_FINGERPRINT_HEX_LEN 64
 
 /**
  * @brief Initialise the TLS manager (loads certs from NVS if available)
@@ -79,6 +80,25 @@ bool tls_mgr_store_certs(const char* cert, size_t cert_len,
  * @return true on success
  */
 bool tls_mgr_clear_certs(void);
+
+/**
+ * @brief Check whether the automatic integration identity is available.
+ */
+bool tls_mgr_has_identity(void);
+
+/**
+ * @brief Get the automatic integration identity certificate and key.
+ */
+const uint8_t* tls_mgr_get_identity_cert(size_t* out_len);
+const uint8_t* tls_mgr_get_identity_key(size_t* out_len);
+
+/**
+ * @brief Get the SHA-256 fingerprint of the integration certificate DER.
+ *
+ * @param buffer Receives 64 lowercase hex characters plus null terminator.
+ */
+bool tls_mgr_get_identity_fingerprint(
+    char buffer[TLS_SHA256_FINGERPRINT_HEX_LEN + 1]);
 
 #ifdef __cplusplus
 }

@@ -8,6 +8,9 @@
 #include <nvs_flash.h>
 #include <nvs.h>
 #include <mbedtls/sha256.h>
+#include <mbedtls/platform_util.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <string.h>
 #include <time.h>
 
@@ -20,6 +23,7 @@ static const char* NVS_KEY_API_ENABLED = "api_en";
 static const char* NVS_KEY_USERNAME = "username";
 static const char* NVS_KEY_PASS_HASH = "pass_hash";
 static const char* NVS_KEY_API_KEY = "api_key";
+static const char* NVS_KEY_INTEGRATION_HASH = "ha_hash";
 
 // Session structure
 typedef struct {
@@ -38,8 +42,14 @@ static struct {
     uint8_t password_hash[32];  // SHA-256
     bool password_set;
     char api_key[AUTH_API_KEY_LEN + 1];
+    uint8_t integration_token_hash[32];
+    bool integration_token_set;
+    uint32_t integration_generation;
     session_t sessions[AUTH_MAX_SESSIONS];
 } state = {};
+static portMUX_TYPE integration_token_lock = portMUX_INITIALIZER_UNLOCKED;
+static StaticSemaphore_t integration_token_mutex_buffer;
+static SemaphoreHandle_t integration_token_mutex = NULL;
 
 // ============================================================================
 // Helper Functions
@@ -64,9 +74,18 @@ static void hash_password(const char* password, uint8_t* hash_out)
     mbedtls_sha256_free(&ctx);
 }
 
+static bool constant_time_equal(const uint8_t* lhs, const uint8_t* rhs, size_t len)
+{
+    uint8_t difference = 0;
+    for (size_t i = 0; i < len; ++i) {
+        difference |= lhs[i] ^ rhs[i];
+    }
+    return difference == 0;
+}
+
 static bool load_from_nvs(void)
 {
-    nvs_handle_t nvs;
+    nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
     if (err != ESP_OK) {
         ESP_LOGI(TAG, "No auth settings in NVS (err=%s), will use defaults", esp_err_to_name(err));
@@ -113,6 +132,17 @@ static bool load_from_nvs(void)
     if (nvs_get_str(nvs, NVS_KEY_API_KEY, state.api_key, &len) != ESP_OK) {
         state.api_key[0] = '\0';
     }
+
+    len = sizeof(state.integration_token_hash);
+    err = nvs_get_blob(nvs, NVS_KEY_INTEGRATION_HASH,
+                       state.integration_token_hash, &len);
+    state.integration_token_set =
+        err == ESP_OK && len == sizeof(state.integration_token_hash);
+    state.integration_generation = state.integration_token_set ? 1 : 0;
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Failed to load integration token hash: %s",
+                 esp_err_to_name(err));
+    }
     
     nvs_close(nvs);
     return true;
@@ -120,7 +150,7 @@ static bool load_from_nvs(void)
 
 static bool save_to_nvs(void)
 {
-    nvs_handle_t nvs;
+    nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
@@ -206,6 +236,13 @@ void auth_mgr_init(void)
     if (state.initialized) return;
     
     ESP_LOGI(TAG, "Initializing authentication manager...");
+
+    integration_token_mutex =
+        xSemaphoreCreateMutexStatic(&integration_token_mutex_buffer);
+    if (integration_token_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create integration token mutex");
+        return;
+    }
     
     memset(&state, 0, sizeof(state));
     bool loaded = load_from_nvs();
@@ -222,6 +259,14 @@ void auth_mgr_init(void)
     } else {
         ESP_LOGI(TAG, "Credentials loaded from NVS: username='%s', password_set=%d", 
                  state.username, state.password_set ? 1 : 0);
+    }
+
+    // Remote administration is always authenticated. The factory credential
+    // may only be used to sign in and replace itself.
+    if (!state.web_auth_enabled || !state.api_auth_enabled) {
+        state.web_auth_enabled = true;
+        state.api_auth_enabled = true;
+        save_to_nvs();
     }
     
     // Generate API key if not set
@@ -249,6 +294,10 @@ bool auth_mgr_web_auth_enabled(void)
 
 void auth_mgr_set_web_auth_enabled(bool enabled)
 {
+    if (!enabled) {
+        ESP_LOGW(TAG, "Ignoring attempt to disable mandatory web authentication");
+        return;
+    }
     if (state.web_auth_enabled != enabled) {
         state.web_auth_enabled = enabled;
         save_to_nvs();
@@ -297,6 +346,18 @@ bool auth_mgr_set_credentials(const char* username, const char* password)
     return true;
 }
 
+bool auth_mgr_credentials_change_required(void)
+{
+    uint8_t default_hash[32];
+    hash_password("arctic", default_hash);
+    const bool factory_credentials =
+        state.password_set &&
+        constant_time_equal(
+            state.password_hash, default_hash, sizeof(default_hash));
+    mbedtls_platform_zeroize(default_hash, sizeof(default_hash));
+    return factory_credentials;
+}
+
 const char* auth_mgr_get_username(void)
 {
     return state.username;
@@ -304,11 +365,6 @@ const char* auth_mgr_get_username(void)
 
 bool auth_mgr_login(const char* username, const char* password, char* session_token)
 {
-    if (!state.web_auth_enabled) {
-        // Auth disabled - always succeed with no token
-        return true;
-    }
-    
     if (username == NULL || password == NULL) {
         ESP_LOGW(TAG, "Login failed: null credentials");
         return false;
@@ -329,7 +385,10 @@ bool auth_mgr_login(const char* username, const char* password, char* session_to
     uint8_t input_hash[32];
     hash_password(password, input_hash);
     
-    if (memcmp(input_hash, state.password_hash, 32) != 0) {
+    const bool password_matches =
+        constant_time_equal(input_hash, state.password_hash, sizeof(input_hash));
+    mbedtls_platform_zeroize(input_hash, sizeof(input_hash));
+    if (!password_matches) {
         ESP_LOGW(TAG, "Login failed: invalid password");
         return false;
     }
@@ -356,10 +415,6 @@ bool auth_mgr_login(const char* username, const char* password, char* session_to
 
 bool auth_mgr_validate_session(const char* token)
 {
-    if (!state.web_auth_enabled) {
-        return true;  // Auth disabled
-    }
-    
     session_t* session = find_session(token);
     if (session == NULL) {
         return false;
@@ -404,6 +459,10 @@ bool auth_mgr_api_auth_enabled(void)
 
 void auth_mgr_set_api_auth_enabled(bool enabled)
 {
+    if (!enabled) {
+        ESP_LOGW(TAG, "Ignoring attempt to disable mandatory API authentication");
+        return;
+    }
     if (state.api_auth_enabled != enabled) {
         state.api_auth_enabled = enabled;
         save_to_nvs();
@@ -439,13 +498,175 @@ bool auth_mgr_regenerate_api_key(char* buffer)
 
 bool auth_mgr_validate_api_key(const char* key)
 {
-    if (!state.api_auth_enabled) {
-        return true;  // Auth disabled
-    }
-    
     if (key == NULL || key[0] == '\0') {
         return false;
     }
     
     return strcmp(key, state.api_key) == 0;
+}
+
+// ============================================================================
+// Home Assistant Integration Authentication
+// ============================================================================
+
+bool auth_mgr_has_integration_token(void)
+{
+    portENTER_CRITICAL(&integration_token_lock);
+    const bool configured = state.integration_token_set;
+    portEXIT_CRITICAL(&integration_token_lock);
+    return configured;
+}
+
+bool auth_mgr_issue_integration_token(char* buffer)
+{
+    if (buffer == NULL || integration_token_mutex == NULL ||
+        xSemaphoreTake(integration_token_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+
+    char token[AUTH_INTEGRATION_TOKEN_LEN + 1];
+    uint8_t token_hash[sizeof(state.integration_token_hash)];
+    generate_random_hex(token, AUTH_INTEGRATION_TOKEN_LEN);
+    hash_password(token, token_hash);
+
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_blob(nvs, NVS_KEY_INTEGRATION_HASH,
+                           token_hash, sizeof(token_hash));
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    if (nvs != 0) {
+        nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to persist integration token hash: %s",
+                 esp_err_to_name(err));
+        buffer[0] = '\0';
+        mbedtls_platform_zeroize(token, sizeof(token));
+        mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+        xSemaphoreGive(integration_token_mutex);
+        return false;
+    }
+
+    portENTER_CRITICAL(&integration_token_lock);
+    memcpy(state.integration_token_hash, token_hash, sizeof(token_hash));
+    state.integration_token_set = true;
+    state.integration_generation++;
+    portEXIT_CRITICAL(&integration_token_lock);
+    memcpy(buffer, token, sizeof(token));
+    mbedtls_platform_zeroize(token, sizeof(token));
+    mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+    xSemaphoreGive(integration_token_mutex);
+    ESP_LOGI(TAG, "Integration token issued");
+    return true;
+}
+
+bool auth_mgr_revoke_integration_token(void)
+{
+    if (integration_token_mutex == NULL ||
+        xSemaphoreTake(integration_token_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_erase_key(nvs, NVS_KEY_INTEGRATION_HASH);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    if (nvs != 0) {
+        nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to revoke integration token: %s",
+                 esp_err_to_name(err));
+        xSemaphoreGive(integration_token_mutex);
+        return false;
+    }
+
+    portENTER_CRITICAL(&integration_token_lock);
+    mbedtls_platform_zeroize(state.integration_token_hash,
+                             sizeof(state.integration_token_hash));
+    state.integration_token_set = false;
+    state.integration_generation++;
+    portEXIT_CRITICAL(&integration_token_lock);
+    xSemaphoreGive(integration_token_mutex);
+    ESP_LOGI(TAG, "Integration token revoked");
+    return true;
+}
+
+bool auth_mgr_validate_integration_token(const char* token)
+{
+    return auth_mgr_validate_integration_token_with_generation(token, NULL);
+}
+
+bool auth_mgr_validate_integration_token_with_generation(
+    const char* token,
+    uint32_t* generation_out)
+{
+    if (token == NULL || strlen(token) != AUTH_INTEGRATION_TOKEN_LEN) {
+        return false;
+    }
+
+    uint8_t token_hash[sizeof(state.integration_token_hash)];
+    uint8_t expected_hash[sizeof(state.integration_token_hash)];
+    portENTER_CRITICAL(&integration_token_lock);
+    const bool configured = state.integration_token_set;
+    const uint32_t generation = state.integration_generation;
+    memcpy(expected_hash, state.integration_token_hash, sizeof(expected_hash));
+    portEXIT_CRITICAL(&integration_token_lock);
+    if (!configured) {
+        mbedtls_platform_zeroize(expected_hash, sizeof(expected_hash));
+        return false;
+    }
+
+    hash_password(token, token_hash);
+    const bool valid = constant_time_equal(
+        token_hash, expected_hash, sizeof(token_hash));
+    mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+    mbedtls_platform_zeroize(expected_hash, sizeof(expected_hash));
+    if (valid && generation_out != NULL) {
+        *generation_out = generation;
+    }
+    return valid;
+}
+
+uint32_t auth_mgr_get_integration_generation(void)
+{
+    portENTER_CRITICAL(&integration_token_lock);
+    const uint32_t generation = state.integration_generation;
+    portEXIT_CRITICAL(&integration_token_lock);
+    return generation;
+}
+
+bool auth_mgr_begin_control_write(uint32_t generation)
+{
+    if (integration_token_mutex == NULL ||
+        xSemaphoreTake(integration_token_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&integration_token_lock);
+    const bool valid = state.integration_token_set &&
+                       state.integration_generation == generation;
+    portEXIT_CRITICAL(&integration_token_lock);
+    if (!valid) {
+        xSemaphoreGive(integration_token_mutex);
+    }
+    return valid;
+}
+
+void auth_mgr_end_control_write(void)
+{
+    if (integration_token_mutex != NULL) {
+        xSemaphoreGive(integration_token_mutex);
+    }
 }

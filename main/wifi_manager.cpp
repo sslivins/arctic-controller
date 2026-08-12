@@ -13,6 +13,7 @@
 #include <esp_netif.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <freertos/task.h>
 #include <bsp/m5stack_tab5.h>
 
 static const char* TAG = "wifi_mgr";
@@ -46,12 +47,27 @@ static struct {
     
 } wifi_state = {};
 
+static TaskHandle_t api_start_task_handle = NULL;
+
 // Forward declarations
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data);
 static void ip_event_handler(void* arg, esp_event_base_t event_base,
                              int32_t event_id, void* event_data);
 static void notify_state_change(wifi_mgr_state_t new_state);
+static void api_start_task(void* arg);
+
+static void api_start_task(void* arg)
+{
+    (void)arg;
+    const bool mdns_started = api_server_init_mdns();
+    const bool api_started = mdns_started && api_server_start();
+    if (!api_started) {
+        ESP_LOGE(TAG, "API server startup failed");
+    }
+    api_start_task_handle = NULL;
+    vTaskDelete(NULL);
+}
 
 // ============================================================================
 // Public API
@@ -414,9 +430,18 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
         // Start NTP time synchronization
         time_mgr_start_sync();
         
-        // Initialize mDNS and start REST API server
-        api_server_init_mdns();
-        api_server_start();
+        // Route registration is intentionally kept off the system event task:
+        // WebSocket-enabled URI descriptors make the startup frame too large
+        // for that shared infrastructure stack.
+        if (!api_server_is_running() && api_start_task_handle == NULL) {
+            const BaseType_t created = xTaskCreate(
+                api_start_task, "api_start", 16384, NULL, 5,
+                &api_start_task_handle);
+            if (created != pdPASS) {
+                api_start_task_handle = NULL;
+                ESP_LOGE(TAG, "Failed to create API startup task");
+            }
+        }
         
         xEventGroupSetBits(wifi_state.event_group, WIFI_CONNECTED_BIT);
         notify_state_change(WIFI_MGR_STATE_CONNECTED);

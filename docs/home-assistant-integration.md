@@ -1,0 +1,568 @@
+# Home Assistant Local Integration Architecture
+
+Status: Accepted for phased implementation
+
+## Decision
+
+The Arctic Controller will support a local-only Home Assistant custom
+integration using a hybrid transport:
+
+1. REST provides the initial state snapshot, capabilities, and commands.
+2. A device-hosted WebSocket provides immediate state updates.
+3. Periodic REST reconciliation repairs missed updates and provides fallback
+   operation while the WebSocket is unavailable.
+
+MQTT, cloud relays, Home Assistant webhooks, Matter, and the ESPHome native
+protocol are not required.
+
+## Goals
+
+- Immediate local state updates without a broker or cloud dependency.
+- Correctly distinguish selected working mode from actual heat-pump operation.
+- Remain useful during WebSocket interruption through bounded fallback polling.
+- Keep the device UI, Web UI, heat-pump communication, and OTA responsive when
+  Home Assistant is absent, disconnected, slow, or malicious.
+- Require explicit, revocable authentication even on a trusted home network.
+- Provide stable, versioned contracts that can evolve without breaking older
+  integrations.
+- Prevent stale reconciliation responses from overwriting newer pushed state.
+- Support multiple Arctic Controllers in one Home Assistant instance, with
+  independent credentials, certificate pins, connections, state, and entities
+  for each controller.
+
+## Non-goals
+
+- Cloud control or telemetry.
+- Generic register access from Home Assistant.
+- Reading or writing advanced/technician parameters from Home Assistant.
+- Replacing the device UI or Web UI.
+- Making Home Assistant part of the heat-pump control loop.
+- Browser use of the integration WebSocket.
+
+## Home Assistant Control Allowlist
+
+Home Assistant may control only the subset advertised by the controller:
+
+- Unit power.
+- Selected working mode.
+- Cooling setpoint.
+- Heating setpoint.
+- Hot-water setpoint.
+
+Controls are enabled only after authenticated capability discovery and are
+disabled when the active runtime does not advertise them. Commands are
+non-optimistic: a successful REST response means the command was accepted, not
+that the reported heat-pump state has changed.
+The client generates a UUID `command_id` for every command unless the caller
+supplies one. Reusing an ID with the same operation and payload returns the
+original accepted acknowledgement; reusing it with different data is a
+conflict.
+
+The following are permanently excluded:
+
+- Generic register writes.
+- Advanced or technician parameter writes.
+- Raw Macon/Tuya access.
+- OTA, Wi-Fi, authentication, TLS, factory reset, and device preferences.
+
+## State Semantics
+
+The integration must preserve these independent concepts:
+
+- `mode`: selected working-mode policy.
+- `operation`: actual live operation decoded from heat-pump telemetry.
+
+Home Assistant maps selected mode to the climate entity's requested HVAC mode
+and actual operation to `hvac_action`. It must never infer operation from mode.
+
+The initial exposed snapshot includes:
+
+- Connection and availability state.
+- Unit power.
+- Selected mode and actual operation.
+- Defrost and component state.
+- Temperatures.
+- Setpoints and setpoint limits.
+- Compressor frequency, power, thermal output, and COP when valid.
+- Current error state.
+- Firmware, protocol, and capability metadata.
+
+Diagnostic entities that are noisy or primarily useful for troubleshooting
+should be disabled by default.
+
+## Versioned REST Contract
+
+### `GET /api/v1/capabilities`
+
+Returns:
+
+- Stable device ID.
+- Model and firmware version.
+- API protocol version.
+- Supported transports.
+- Supported state fields.
+- Read and control capabilities.
+- Setpoint limits.
+
+The stable device ID is derived from a hardware identity and does not depend on
+hostname, IP address, or Home Assistant configuration.
+
+### `GET /api/v1/state`
+
+Returns one coherent snapshot built by the same serializer used by WebSocket
+snapshot messages.
+
+Every snapshot includes:
+
+- `protocol_version`
+- `device_id`
+- `boot_id`
+- `revision`
+- `captured_at_ms`
+- `state`
+
+`boot_id` changes on every controller boot. `revision` increases whenever any
+exposed state field changes. The revision is assigned while the state snapshot
+is coherent, but serialization and network transmission occur without holding
+the heat-pump state mutex.
+
+The Home Assistant client discards a REST or WebSocket snapshot when:
+
+- Its device ID does not match the configured device.
+- Its boot ID matches the current boot but its revision is not newer.
+- Its protocol version is unsupported.
+
+### Commands
+
+The allowlisted controls use versioned endpoints rather than generic register
+writes. They exist only on the dedicated HTTPS server on port `8443` and
+require the paired integration credential in the `Authorization` header.
+
+- `PUT /api/v1/control/power` — `{ "command_id": "...", "on": true }`
+- `PUT /api/v1/control/mode` — `{ "command_id": "...", "mode": "cooling" }`
+- `PUT /api/v1/control/setpoint` — `{ "command_id": "...", "kind":
+  "cooling", "value": 24 }`
+
+The exact mode allowlist is `cooling`, `floor_heating`, `fan_coil_heating`,
+`hot_water`, and `auto`; generic `heating` is not a selectable mode. Setpoint
+values must be whole degrees and inside the advertised inclusive range.
+Responses use `202 Accepted` and acknowledge command acceptance only.
+
+`401` means the integration token is missing, invalid, or rotated; `409` means
+conflicting command-ID reuse; `422` means a malformed or out-of-range request;
+and `503` means the control is disconnected or unsupported by the active
+runtime. The device rechecks the token generation while reserving the control
+write, so rotation or revocation prevents a raced bus write.
+
+Capabilities are dynamic. Demo mode advertises power, exact-mode, and all
+three setpoints. The live Tuya master advertises only cooling and hot-water
+setpoints; power, selected-mode, and heating-setpoint writes are unsupported.
+Passive-listen and disconnected runtimes advertise no controls. Home Assistant
+must wire only advertised controls and wait for the normal pushed/reconciled
+reported state; it never mutates entity state optimistically.
+
+The climate entity uses coarse HVAC display semantics only. An exact Arctic
+mode select entity preserves `floor_heating`, `fan_coil_heating`, and
+`hot_water`; a reported generic `heating` mode remains display-only because
+the control allowlist never guesses a heating subtype. Generic Home Assistant
+`HEAT` never selects an arbitrary Arctic heating subtype.
+
+## WebSocket Contract
+
+### Endpoint
+
+`GET /api/v1/events`
+
+The endpoint is intended for native clients such as Home Assistant. It uses an
+authenticated HTTP upgrade and does not accept credentials in the URL, query
+string, WebSocket subprotocol, or application frames.
+
+### Connection sequence
+
+1. Authenticate the HTTP upgrade.
+2. Send `hello` containing protocol version, device ID, boot ID, and current
+   revision.
+3. Send a complete state snapshot.
+4. Send complete snapshots when exposed state changes.
+5. Exchange heartbeat ping/pong frames.
+
+Complete snapshots are used initially instead of deltas. The state payload is
+small enough for local transport, and complete snapshots avoid divergent
+client state and complicated schema migration.
+
+### Ordering and recovery
+
+- Revisions are monotonic within one boot.
+- A new boot ID invalidates the previous revision sequence.
+- A missing or out-of-order revision causes REST resynchronization.
+- A protocol-version change causes capability negotiation before accepting new
+  state.
+- A periodic full snapshot bounds state age even when exposed values do not
+  change.
+
+### Backpressure
+
+- WebSocket sends never occur while holding the heat-pump state mutex.
+- Each client has a small bounded queue.
+- State is latest-value-wins; stale queued snapshots may be replaced.
+- A slow client cannot block the HTTP worker, UI, Web UI, heat-pump tasks, or
+  another client.
+- Sends use a hard local timeout. A stalled or failed socket is disconnected.
+- Queue overflow triggers resynchronization or disconnection rather than
+  unbounded allocation.
+- Concurrent clients are capped.
+
+The feasibility spike selected a separate server, task, port, and socket pool.
+Production integration traffic will use WSS on port 8443. The test-only spike
+uses plain WebSocket on port 81 when `CONFIG_TEST_ENDPOINTS` is enabled.
+
+The integration server uses:
+
+- A four-socket pool independent of the Web UI and REST servers.
+- A 100 ms per-socket send deadline.
+- A three-client cap that reserves one socket for REST reconciliation.
+- One in-flight send per client, revision coalescing, and disconnection after
+  a stalled send or missed heartbeat.
+
+The shared-server prototype failed because one non-reading client produced a
+2.26-second REST response and one REST timeout. With the isolated server and
+bounded socket send, the 15-second stress gate had no REST or healthy-client
+failures. REST p95 was 229 ms with a 370 ms maximum; healthy WebSocket p95 was
+152 ms with a 905 ms maximum. A follow-up run that also fetched the complete
+Web UI throughout the stall had zero failures, 207 ms p95, and a 293 ms
+maximum.
+
+Ten additional connect/stall/disconnect cycles had no failures. Across those
+cycles, worst REST p95 was 305 ms, worst REST latency was 1.36 seconds, worst
+healthy-WebSocket p95 was 556 ms, worst healthy-WebSocket latency was 943 ms,
+and free-heap drift was 3,144 bytes. Minimum free heap remained 27,704,772
+bytes.
+
+Enabling ESP-IDF WebSocket support enlarged every `httpd_uri_t` and exposed
+that route registration was exhausting the 4 KB system-event task stack. The
+spike uses an 8 KB event-task stack. Production work must move server creation
+and route registration out of the Wi-Fi event callback into a dedicated
+startup task rather than relying on further event-stack growth.
+
+## Home Assistant Update Model
+
+The integration is classified as `local_push` and its entities do not use Home
+Assistant entity polling.
+
+The client performs:
+
+- One REST snapshot during setup.
+- Immediate coordinator updates from accepted WebSocket snapshots.
+- REST reconciliation every 60 seconds while the stream is healthy.
+- Temporary 10-15 second REST polling while the stream is unavailable.
+- Exponential WebSocket reconnect backoff with jitter.
+- Immediate reconciliation after sequence gaps, reboot, or command timeout.
+
+REST and WebSocket updates pass through one ordering gate so a delayed REST
+response cannot regress state after a newer push update.
+
+## Discovery and Configuration
+
+The controller advertises zeroconf metadata containing:
+
+- Device type.
+- Stable device ID.
+- Protocol version.
+- HTTPS availability.
+- WebSocket push capability.
+
+Discovery never advertises credentials, tokens, certificate material, state,
+or identifying network information beyond what zeroconf requires.
+
+The Home Assistant config flow supports:
+
+- Zeroconf discovery and manual host entry.
+- Duplicate-device detection by stable device ID.
+- Secure pairing.
+- Host and IP address changes.
+- Token rotation and reauthentication.
+- Certificate fingerprint changes that require explicit user confirmation.
+- Clean unload and reload without orphaned tasks or sockets.
+
+## Security Model
+
+### Dedicated integration credentials
+
+The Home Assistant API uses a dedicated random 256-bit token:
+
+- Generated only after a six-digit one-time code from the physical controller
+  is claimed during a five-minute pairing window.
+- Returned once during pairing.
+- Stored as a cryptographic hash on the controller.
+- Compared in constant time.
+- Stored in Home Assistant config-entry storage.
+- Redacted from logs, exceptions, traces, and diagnostics.
+- Independently revocable and rotatable.
+
+Integration endpoints use a strict authentication helper that always requires
+the dedicated token. Existing web/API authentication toggles cannot bypass it.
+The pairing endpoint is the sole exception: it is TLS-only, accepts only the
+controller-displayed one-time code, closes after one successful claim, and
+closes after five invalid attempts. Opening a new window does not revoke the
+current token; a successful claim atomically rotates it.
+If the client disconnects after a successful claim but before receiving the
+one-time token, the user reopens pairing on the controller and claims a new
+code.
+
+### Transport identity
+
+Pairing and authenticated integration traffic require TLS. The supported local
+identity model is certificate/public-key fingerprint pinning:
+
+- The controller automatically generates a dedicated P-256 self-signed
+  integration certificate and private key on first boot.
+- The identity is stored in NVS and served only by the dedicated integration
+  HTTPS/WSS server on port 8443.
+- It is independent of the optional manually uploaded Web UI certificate on
+  port 443; changing or deleting that certificate does not disrupt Home
+  Assistant.
+- Home Assistant records the fingerprint during the physically authorized
+  pairing flow.
+- Subsequent connections reject a changed fingerprint.
+- Fingerprint pinning does not depend on the controller having a correct clock.
+- Plain HTTP does not silently downgrade from a configured secure connection.
+
+There is no production insecure mode and no certificate renewal workflow.
+The integration identity changes only after factory reset or an explicit future
+identity-reset action. Test firmware may expose HTTP-only provisioning helpers,
+but production integration state and events remain HTTPS/WSS-only.
+
+### Threats and mitigations
+
+| Threat | Mitigation |
+|---|---|
+| LAN eavesdropping or token theft | TLS-only pairing and traffic; no query-string credentials |
+| LAN man-in-the-middle | Physically authorized fingerprint pinning |
+| Stolen Home Assistant backup | Revocable dedicated token; documented rotation |
+| Replay | TLS plus command IDs and current authenticated session |
+| Weak global API settings | Strict integration auth independent of existing toggles |
+| Malicious or slow client | Client cap, bounded queues, send timeout, disconnect policy |
+| Socket exhaustion | Hardware feasibility gate and reserved UI/API capacity |
+| Oversized or malformed frames | Frame-size limits and strict schema validation |
+| Stale state overwrite | Shared boot ID and revision ordering gate |
+| Firmware schema change | Version negotiation and capability refresh |
+| Secret disclosure | Redacted diagnostics/logging and one-time token delivery |
+| Unauthorized heat-pump changes | Explicit command allowlist; no AP or register writes |
+
+Before control entities are enabled, existing legacy control endpoints must
+either use equivalent strict authentication or be fenced from the integration
+security boundary.
+
+## Implementation Phases
+
+### Phase 1: Protocol and threat model
+
+- Finalize this contract and message schemas.
+- Define stable device identity and revision ownership.
+- Document pairing, pinning, token lifecycle, and legacy endpoint policy.
+- Define measurable acceptance and abuse tests.
+
+### Phase 2: Hardware feasibility gate
+
+- Prototype persistent WebSocket connections on the physical controller.
+- Exercise two persistent clients plus Web UI and REST traffic.
+- Simulate a stalled/zero-window client.
+- Measure socket usage, request latency, free heap, minimum heap, and
+  fragmentation during sustained full-snapshot traffic.
+- Select shared-server or separate-server architecture.
+
+Status: complete. The separate-server architecture passed the gate. Production
+TLS and authentication are implemented in Phase 3 before the endpoint is
+exposed outside test builds.
+
+### Phase 3: Security and state foundation
+
+- Implement strict integration authentication.
+- Implement dedicated token pairing, hashing, revocation, and rotation.
+- Implement TLS fingerprint identity behavior.
+- Add stable device identity, state revision, shared serializer, capabilities,
+  state endpoint, and zeroconf metadata.
+
+Status: complete. The dedicated 256-bit token is stored only as a SHA-256
+hash, strict Bearer validation is independent of legacy authentication
+toggles, token rotation invalidates the previous credential immediately, and
+the versioned capabilities/state endpoints now expose stable device identity,
+per-boot identity, and monotonic revisions. API startup also runs on a
+dedicated task rather than the system event stack. The automatic integration
+TLS identity, dedicated port 8443 server, certificate fingerprint, and
+zeroconf metadata are also implemented. The physical settings flow opens a
+five-minute pairing window, displays a six-digit one-time code and certificate
+fingerprint, limits invalid claims, supports cancellation and revocation, and
+rotates the credential only after a successful TLS claim. Home Assistant-side
+pin confirmation is implemented later with the async client and config flow.
+
+### Phase 4: Device push transport
+
+- Implement WebSocket hello, snapshot, heartbeat, ordering, coalescing,
+  backpressure, disconnect, and resynchronization.
+- Verify telemetry-only changes produce push updates.
+- Run physical reliability and resource tests.
+
+Status: complete. The production WSS endpoint shares the dedicated
+port-8443 TLS identity while retaining its own client cap and push task. It
+authenticates the HTTP upgrade, reserves one integration socket for REST,
+sends hello plus complete snapshots, detects state changes every 250 ms,
+refreshes snapshots every 30 seconds, uses native ping/pong heartbeats, applies
+a 100 ms socket send deadline, acknowledges clean close frames, rejects
+application frames, and disconnects sessions immediately after credential
+rotation or revocation.
+
+The physical gate passed with a non-reading TLS client, two healthy WSS
+clients, continuous telemetry changes, and concurrent port-80 health, complete
+Web UI, and port-8443 REST probes. A three-minute soak processed 833 telemetry
+changes with no client or HTTP failures; both healthy clients remained
+connected, the stalled client was removed, and free heap finished 4,396 bytes
+above baseline. Twenty repeated connect/close cycles and a 50-second heartbeat
+test also passed.
+
+### Phase 5: Async Python client
+
+- Implement secure REST/WSS, pinning, ordering, reconnect, reconciliation,
+  fallback polling, cancellation, and typed models.
+- Keep all transport, authentication, revision, and reconnect state scoped to
+  one controller client instance; do not use process-global device state.
+- Test against a deterministic fake server and the physical controller.
+
+Status: complete. The independently maintained
+[`pymacon`](https://github.com/sslivins/pymacon) package has no Home Assistant
+dependency and provides pinned TLS pairing, authenticated REST/WSS, typed
+capability and state models, one shared ordering gate, revision-gap and reboot
+reconciliation, fallback polling, bounded reconnect backoff with jitter,
+availability/stream status callbacks, reauthentication signaling, and clean
+session/task ownership. Each client instance owns state for exactly one stable
+device ID.
+
+The deterministic TLS fake-controller suite covers invalid pins and tokens,
+malformed stream messages, stale delayed REST responses across reboot,
+revision gaps, reconnect and fallback behavior, credential rotation,
+cancellation, externally owned sessions, and two controllers operating
+concurrently without shared state. The same client also passed against the
+physical controller with a real WSS telemetry update arriving before the
+60-second reconciliation interval.
+
+### Phase 6: Read-only Home Assistant integration
+
+- Implement config flow, zeroconf, pairing, reauthentication, diagnostics, and
+  read-only entities.
+- Allow multiple config entries, keyed by stable device ID, so each discovered
+  controller is paired and managed independently.
+- Verify push updates occur without entity polling.
+
+Status: complete. The custom integration provides manual and zeroconf setup,
+physical pairing, certificate-pin confirmation, duplicate-device prevention,
+credential reauthentication, per-entry client/runtime ownership, clean unload,
+redacted diagnostics, and read-only climate, sensor, and binary-sensor
+entities. Runtime authentication or certificate-identity failures start Home
+Assistant's reauthentication flow, while connection failures use normal
+config-entry retry behavior.
+
+The Home Assistant test suite runs against Home Assistant 2026.8 and covers
+manual setup, invalid certificate pins, zeroconf updates and duplicate
+prevention, wrong-device and successful reauthentication, two simultaneous
+controllers, push-driven entity updates, selected mode versus actual operation,
+availability transitions, unload cleanup, setup failures, and diagnostics
+redaction.
+
+The independently maintained
+[`hass-macon`](https://github.com/sslivins/hass-macon) integration is published
+for HACS and pins the released `pymacon` package. Its Home Assistant tests and
+release lifecycle live with that repository rather than the firmware.
+
+### Phase 7: Security gate
+
+- Review authentication, TLS/pinning, token lifecycle, legacy endpoints,
+  malformed/slow clients, resource exhaustion, diagnostics, and command design.
+
+Status: complete. Production builds exclude all `/api/test/*` instrumentation,
+and release/device-test workflows verify their opposite security profiles.
+Integration-token issuance and revocation serialize the complete NVS and
+in-memory transaction so a concurrent physical revocation cannot reappear
+after reboot.
+
+The legacy web/API surface now fails closed: web login and API-key
+authentication are mandatory, operational and administrative APIs remain
+blocked while the factory password exists, and the factory credential can only
+be replaced after a one-time code is opened on the physical controller. Port
+443 is available from first boot using the persistent device identity, and
+secret-bearing requests never fall back to plaintext HTTP. Port 80 exposes only
+the health check, plus test instrumentation in explicitly built test firmware.
+TLS renewal uses validated HTTPS and keeps the wildcard private key local to
+the runner step rather than passing it through workflow outputs.
+
+The gate permits Phase 8 only for operation-specific power, selected-mode, and
+setpoint endpoints on the isolated port-8443 service. Those commands must keep
+strict integration authentication, server-side allowlists and ranges,
+credential-generation rechecks immediately before bus writes, idempotent
+command IDs, and confirmation through reported state. Advanced parameters and
+generic register access remain excluded.
+
+### Phase 8: Allowlisted controls
+
+- Add power, selected mode, and setpoint entities only.
+- Confirm changes through pushed or reconciled reported state.
+- Explicitly reject unavailable, disconnected, out-of-range, and unsupported
+  operations.
+
+Status: complete. The firmware exposes only the three authenticated
+operation-specific endpoints on port 8443, with strict bodies, command-ID
+deduplication, generation-guarded writes, and dynamic runtime capabilities.
+The client provides typed command methods and status exceptions. Home
+Assistant wires only advertised controls, preserves exact Arctic modes in a
+separate select entity, and never mutates state optimistically. Live Tuya
+support is limited to cooling and hot-water setpoints; demo mode supports the
+full allowlist.
+
+### Phase 9: Hardening and beta
+
+- Long-duration high-rate and reconnect soak tests.
+- Multi-client and firmware-upgrade testing.
+- HACS packaging, documentation, and staged on-site rollout.
+
+## Acceptance Criteria
+
+- State changes visible to the controller are normally reflected in Home
+  Assistant within two seconds.
+- A healthy stream does not require fast polling.
+- Stream loss falls back to polling and recovers automatically.
+- Reboot, dropped messages, and delayed REST responses never regress state.
+- A stalled client causes no REST or healthy-stream failures and keeps
+  stress-test REST and healthy-stream latency below 1.5 seconds.
+- No integration endpoint accepts unauthenticated requests.
+- Pairing credentials are never transmitted over plaintext HTTP.
+- Home Assistant cannot read or write advanced parameters or raw registers.
+- Home Assistant remains optional; removing it changes no controller behavior.
+- Control commands never report optimistic state.
+
+## Required Test Coverage
+
+Firmware:
+
+- Shared serializer and revision ordering.
+- Strict, missing, invalid, revoked, and rotated token behavior.
+- Pairing-window expiry and one-time token delivery.
+- WebSocket initial snapshot, telemetry-only changes, reboot, sequence gaps,
+  heartbeat, queue overflow, two clients, malformed frames, and stalled sends.
+- Web UI and REST responsiveness during push load.
+- Heap and socket stability during sustained traffic.
+
+Python client:
+
+- Certificate pinning and fingerprint change.
+- Authentication and token rotation.
+- Ordering and stale-update rejection.
+- Reconnect/backoff, boot changes, malformed frames, cancellation, and cleanup.
+- Reconciliation and fallback polling.
+
+Home Assistant:
+
+- Discovery, manual setup, duplicate prevention, reauthentication, and unload.
+- Correct selected-mode versus actual-operation mapping.
+- Push updates without entity polling.
+- Availability, fallback, recovery, command confirmation, and errors.
+- Diagnostics redaction.
+- Permanent absence of advanced-parameter and generic-register entities.

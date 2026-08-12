@@ -17,9 +17,11 @@
 #include <esp_heap_caps.h>
 #include <cJSON.h>
 #include <lvgl.h>
+#include <lwip/sockets.h>
 #include <bsp/m5stack_tab5.h>
 #include "settings/settings_menu.h"
 #include "settings/settings_display_screen.h"
+#include "settings/settings_home_assistant_screen.h"
 #include "settings/settings_wifi_screen.h"
 #include "settings/settings_firmware_screen.h"
 #include "settings/settings_time_screen.h"
@@ -27,6 +29,9 @@
 #include "settings/settings_types.h"
 #include "i18n/i18n.h"
 #include "heatpump_controller.h"
+#include "auth_manager.h"
+#include "ha_pairing.h"
+#include "tls_manager.h"
 #include "app_preferences.h"
 #include "heatpump_errors.h"
 #include "heatpump_temps_screen.h"
@@ -43,6 +48,200 @@
 #include <time.h>
 
 static const char* TAG = "test_api";
+
+static constexpr size_t WS_FEASIBILITY_MAX_PAYLOAD = 8192;
+static uint8_t s_ws_feasibility_payload[WS_FEASIBILITY_MAX_PAYLOAD];
+
+static void set_json_content_type(httpd_req_t* req);
+static void send_json_error(
+    httpd_req_t* req, const char* status, const char* message);
+
+static esp_err_t integration_identity_get_handler(httpd_req_t* req)
+{
+    char fingerprint[65];
+    if (!tls_mgr_get_identity_fingerprint(fingerprint)) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Integration TLS identity is unavailable");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "sha256_fingerprint", fingerprint);
+    cJSON_AddNumberToObject(root, "port", 8443);
+    char* json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    memset(fingerprint, 0, sizeof(fingerprint));
+    if (json == NULL) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not serialize integration identity");
+        return ESP_OK;
+    }
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    return ESP_OK;
+}
+
+static esp_err_t integration_token_post_handler(httpd_req_t* req)
+{
+    char token[AUTH_INTEGRATION_TOKEN_LEN + 1];
+    if (!auth_mgr_issue_integration_token(token)) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not persist integration token");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "token", token);
+    char* json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    memset(token, 0, sizeof(token));
+    if (json == NULL) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not serialize integration token");
+        return ESP_OK;
+    }
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    return ESP_OK;
+}
+
+static esp_err_t integration_pairing_post_handler(httpd_req_t* req)
+{
+    char code[HA_PAIRING_CODE_LEN + 1] = {};
+    if (!ha_pairing_start(code)) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not open integration pairing window");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    char response[96];
+    const int response_len = snprintf(
+        response,
+        sizeof(response),
+        "{\"code\":\"%s\",\"expires_in_seconds\":%u}",
+        code,
+        HA_PAIRING_WINDOW_SECONDS);
+    memset(code, 0, sizeof(code));
+    if (response_len <= 0 || response_len >= (int)sizeof(response)) {
+        memset(response, 0, sizeof(response));
+        ha_pairing_cancel();
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not serialize pairing window");
+        return ESP_OK;
+    }
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t send_result =
+        httpd_resp_send(req, response, response_len);
+    memset(response, 0, sizeof(response));
+    return send_result;
+}
+
+static esp_err_t test_credentials_post_handler(httpd_req_t* req)
+{
+    if (req->content_len <= 0 || req->content_len >= 256) {
+        send_json_error(req, "400 Bad Request", "Invalid body");
+        return ESP_OK;
+    }
+
+    char body[256] = {};
+    const int received = httpd_req_recv(req, body, req->content_len);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Failed to read body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    memset(body, 0, sizeof(body));
+    cJSON* username = root ? cJSON_GetObjectItem(root, "username") : NULL;
+    cJSON* password = root ? cJSON_GetObjectItem(root, "password") : NULL;
+    const bool valid =
+        cJSON_IsString(username) && username->valuestring != NULL &&
+        username->valuestring[0] != '\0' &&
+        strlen(username->valuestring) <= AUTH_MAX_USERNAME_LEN &&
+        cJSON_IsString(password) && password->valuestring != NULL &&
+        strlen(password->valuestring) >= 12;
+    if (!valid) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "400 Bad Request",
+            "A username and password of at least 12 characters are required");
+        return ESP_OK;
+    }
+
+    const bool saved =
+        auth_mgr_set_credentials(username->valuestring, password->valuestring);
+    cJSON_Delete(root);
+    if (!saved) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not persist test credentials");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+static esp_err_t websocket_feasibility_handler(httpd_req_t* req)
+{
+    if (req->method == HTTP_GET) {
+        const int fd = httpd_req_to_sockfd(req);
+        const timeval send_timeout = {
+            .tv_sec = 0,
+            .tv_usec = 100000,
+        };
+        if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &send_timeout,
+                       sizeof(send_timeout)) != 0) {
+            ESP_LOGE(TAG, "Failed to set WebSocket send timeout (fd=%d)", fd);
+            return ESP_FAIL;
+        }
+
+        memset(s_ws_feasibility_payload, 'x', sizeof(s_ws_feasibility_payload));
+        ESP_LOGI(TAG, "WebSocket feasibility client connected (fd=%d)",
+                 fd);
+        return ESP_OK;
+    }
+
+    httpd_ws_frame_t frame = {};
+    esp_err_t err = httpd_ws_recv_frame(req, &frame, 0);
+    if (err != ESP_OK) return err;
+    if (frame.len > 64) return ESP_ERR_INVALID_SIZE;
+
+    uint8_t request[65] = {};
+    frame.payload = request;
+    err = httpd_ws_recv_frame(req, &frame, frame.len);
+    if (err != ESP_OK) return err;
+
+    if (frame.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
+
+    unsigned int requested_len = 1024;
+    if (sscanf(reinterpret_cast<const char*>(request),
+               "payload:%u", &requested_len) != 1) {
+        requested_len = 1024;
+    }
+    size_t response_len = requested_len;
+    if (response_len < 1) response_len = 1;
+    if (response_len > WS_FEASIBILITY_MAX_PAYLOAD) {
+        response_len = WS_FEASIBILITY_MAX_PAYLOAD;
+    }
+
+    httpd_ws_frame_t response = {};
+    response.type = HTTPD_WS_TYPE_BINARY;
+    response.payload = s_ws_feasibility_payload;
+    response.len = response_len;
+    return httpd_ws_send_frame(req, &response);
+}
 
 // ============================================================================
 // Session Lock State — prevents concurrent test sessions on the device
@@ -380,6 +579,7 @@ static const char* get_screen_name(void)
     // Settings sub-screens and the errors screen are overlays drawn on top of
     // the persistent tab shell, so they take precedence when visible.
     if (display_screen_is_visible()) return "display";
+    if (home_assistant_screen_is_visible()) return "home_assistant";
     if (wifi_screen_is_visible()) return "wifi";
     if (firmware_screen_is_visible()) return "firmware";
     if (time_screen_is_visible()) return "time";
@@ -1894,8 +2094,54 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
 // Registration
 // ============================================================================
 
+void test_endpoints_register_websocket(httpd_handle_t server)
+{
+    httpd_uri_t websocket_feasibility_uri = {
+        .uri = "/api/test/ws-feasibility",
+        .method = HTTP_GET,
+        .handler = websocket_feasibility_handler,
+        .user_ctx = NULL,
+        .is_websocket = true,
+        .handle_ws_control_frames = false,
+        .supported_subprotocol = NULL,
+    };
+    httpd_register_uri_handler(server, &websocket_feasibility_uri);
+}
+
 void test_endpoints_register(httpd_handle_t server)
 {
+    httpd_uri_t integration_identity_uri = {
+        .uri = "/api/test/ha-identity",
+        .method = HTTP_GET,
+        .handler = integration_identity_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &integration_identity_uri);
+
+    httpd_uri_t integration_token_uri = {
+        .uri = "/api/test/ha-token",
+        .method = HTTP_POST,
+        .handler = integration_token_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &integration_token_uri);
+
+    httpd_uri_t integration_pairing_uri = {
+        .uri = "/api/test/ha-pairing-window",
+        .method = HTTP_POST,
+        .handler = integration_pairing_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &integration_pairing_uri);
+
+    httpd_uri_t test_credentials_uri = {
+        .uri = "/api/test/credentials",
+        .method = HTTP_POST,
+        .handler = test_credentials_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &test_credentials_uri);
+
     httpd_uri_t ui_state_uri = {
         .uri = "/api/test/ui-state",
         .method = HTTP_GET,

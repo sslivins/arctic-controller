@@ -1,5 +1,20 @@
 # Arctic Controller - TODO
 
+## Home Assistant Local Integration
+
+Architecture and security requirements are defined in
+[`home-assistant-integration.md`](home-assistant-integration.md).
+
+- [x] Define hybrid REST + WebSocket + reconciliation architecture
+- [x] Define threat model and explicit control allowlist
+- [x] Run the WSS socket/heap/slow-client feasibility spike
+- [x] Implement integration identity, pairing, strict auth, and versioned state
+- [x] Implement resilient device-hosted WebSocket push
+- [x] Build async Python client and read-only Home Assistant integration
+- [x] Complete security gate before enabling controls
+- [x] Add only power, selected mode, and setpoint controls
+- [ ] Complete soak testing and staged beta rollout
+
 ## Fahrenheit Support (Complete)
 - [x] Basic C→F conversion for display (`app_prefs_convert_temp()`)
 - [x] Temperature unit toggle in settings menu

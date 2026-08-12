@@ -10,8 +10,12 @@
 #include "time_manager.h"
 #include "ota_manager.h"
 #include "auth_manager.h"
+#include "ha_integration.h"
+#include "ha_pairing.h"
+#include "ha_websocket.h"
 #include "heatpump_controller.h"
 #include "heatpump_types.h"
+#include "macon_master.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
@@ -28,6 +32,7 @@
 #include <esp_log.h>
 #include <mdns.h>
 #include <cJSON.h>
+#include <stdio.h>
 #include <string.h>
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
@@ -36,6 +41,7 @@
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 static const char* TAG = "api_server";
@@ -47,6 +53,10 @@ static char hostname[32] = "arctic";  // Actual hostname (may have suffix)
 // HTTP/HTTPS server handle (only one is active per boot)
 static httpd_handle_t server = NULL;      // HTTP (port 80) — always running
 static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — when TLS certs present
+static httpd_handle_t server_integration = NULL;  // HA HTTPS/WSS (port 8443)
+#ifdef CONFIG_TEST_ENDPOINTS
+static httpd_handle_t websocket_test_server = NULL;  // WS feasibility (port 81)
+#endif
 
 // Embedded web files (from EMBED_FILES) - gzip compressed
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -54,6 +64,23 @@ extern const uint8_t index_html_gz_end[] asm("_binary_index_html_gz_end");
 
 // Session cookie name
 static const char* SESSION_COOKIE_NAME = "arctic_session";
+
+// Home Assistant commands are serialized and retained only after an
+// acknowledged write. This bounds memory and makes a retry with the same
+// command ID safe even while another request is in flight.
+static constexpr size_t HA_COMMAND_ID_MAX = 64;
+static constexpr size_t HA_COMMAND_OPERATION_MAX = 16;
+static constexpr size_t HA_COMMAND_PAYLOAD_MAX = 96;
+static constexpr size_t HA_COMMAND_CACHE_SIZE = 32;
+struct HaCommandRecord {
+    bool accepted;
+    char command_id[HA_COMMAND_ID_MAX + 1];
+    char operation[HA_COMMAND_OPERATION_MAX + 1];
+    char payload[HA_COMMAND_PAYLOAD_MAX + 1];
+};
+static HaCommandRecord s_ha_command_cache[HA_COMMAND_CACHE_SIZE] = {};
+static size_t s_ha_command_next = 0;
+static SemaphoreHandle_t s_ha_command_mutex = nullptr;
 
 // ============================================================================
 // Forward Declarations
@@ -77,6 +104,12 @@ static esp_err_t wifi_networks_get_handler(httpd_req_t* req);
 static esp_err_t wifi_connect_post_handler(httpd_req_t* req);
 static esp_err_t wifi_disconnect_post_handler(httpd_req_t* req);
 static esp_err_t info_get_handler(httpd_req_t* req);
+static esp_err_t ha_pair_post_handler(httpd_req_t* req);
+static esp_err_t ha_capabilities_get_handler(httpd_req_t* req);
+static esp_err_t ha_state_get_handler(httpd_req_t* req);
+static esp_err_t ha_power_put_handler(httpd_req_t* req);
+static esp_err_t ha_mode_put_handler(httpd_req_t* req);
+static esp_err_t ha_setpoint_put_handler(httpd_req_t* req);
 static esp_err_t ota_status_get_handler(httpd_req_t* req);
 static esp_err_t ota_update_post_handler(httpd_req_t* req);
 static esp_err_t ota_upload_post_handler(httpd_req_t* req);
@@ -118,9 +151,6 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req);
 static esp_err_t tls_status_get_handler(httpd_req_t* req);
 static esp_err_t tls_cert_post_handler(httpd_req_t* req);
 static esp_err_t tls_cert_delete_handler(httpd_req_t* req);
-
-// HTTP→HTTPS redirect handler (catch-all when HTTPS is active)
-static esp_err_t http_to_https_redirect_handler(httpd_req_t* req);
 
 // ============================================================================
 // Authentication Helpers
@@ -168,10 +198,6 @@ static bool get_api_key_from_header(httpd_req_t* req, char* key_out)
 
 static bool check_web_auth(httpd_req_t* req)
 {
-    if (!auth_mgr_web_auth_enabled()) {
-        return true;  // Auth disabled
-    }
-    
     char token[AUTH_SESSION_TOKEN_LEN + 1] = {0};
     if (get_session_from_cookie(req, token)) {
         if (auth_mgr_validate_session(token)) {
@@ -184,8 +210,8 @@ static bool check_web_auth(httpd_req_t* req)
 
 static bool check_api_auth(httpd_req_t* req)
 {
-    if (!auth_mgr_api_auth_enabled()) {
-        return true;  // API auth disabled
+    if (auth_mgr_credentials_change_required()) {
+        return false;
     }
     
     // First check for API key in header (programmatic access)
@@ -202,13 +228,27 @@ static bool check_api_auth(httpd_req_t* req)
         }
     }
     
-    // If web auth is disabled, allow access from the web interface
-    // (API auth is for external programmatic access, not for blocking the local web UI)
-    if (!auth_mgr_web_auth_enabled()) {
-        return true;
-    }
-    
     return false;
+}
+
+static bool check_integration_auth(
+    httpd_req_t* req, uint32_t* generation_out = nullptr)
+{
+    constexpr const char* BEARER_PREFIX = "Bearer ";
+    constexpr size_t BEARER_PREFIX_LEN = 7;
+    char authorization[BEARER_PREFIX_LEN + AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
+    const size_t header_len =
+        httpd_req_get_hdr_value_len(req, "Authorization");
+    if (header_len != sizeof(authorization) - 1 ||
+        httpd_req_get_hdr_value_str(
+            req, "Authorization", authorization,
+            sizeof(authorization)) != ESP_OK ||
+        strncmp(authorization, BEARER_PREFIX, BEARER_PREFIX_LEN) != 0) {
+        return false;
+    }
+
+    return auth_mgr_validate_integration_token_with_generation(
+        authorization + BEARER_PREFIX_LEN, generation_out);
 }
 
 static void set_session_cookie(httpd_req_t* req, const char* token)
@@ -317,12 +357,25 @@ bool api_server_start(void)
     }
     
     // Common httpd config values
-    const int uri_handlers = 104;
+    if (!arctic::ha::init()) {
+        ESP_LOGE(TAG, "Failed to initialize Home Assistant state foundation");
+        return false;
+    }
+
+    const int uri_handlers = 106;
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
     
     esp_err_t ret;
+
+    if (s_ha_command_mutex == nullptr) {
+        s_ha_command_mutex = xSemaphoreCreateMutex();
+        if (s_ha_command_mutex == nullptr) {
+            ESP_LOGE(TAG, "Failed to initialize HA command mutex");
+            return false;
+        }
+    }
     
     // ---- Always start HTTP on port 80 ----
     // This ensures CI, local development, and OTA always work regardless of TLS state.
@@ -336,7 +389,12 @@ bool api_server_start(void)
         http_config.stack_size         = stack_size;
         http_config.max_resp_headers   = max_headers;
         http_config.recv_wait_timeout  = recv_timeout;
-        http_config.max_open_sockets   = 4;
+        // Port 80 only serves essential health/OTA bootstrap routes when
+        // mandatory HTTPS is active, so two concurrent clients are sufficient.
+        http_config.max_open_sockets   = 2;
+#ifdef CONFIG_TEST_ENDPOINTS
+        http_config.send_wait_timeout  = 1;
+#endif
         
         ret = httpd_start(&server, &http_config);
         if (ret != ESP_OK) {
@@ -345,11 +403,17 @@ bool api_server_start(void)
         }
     }
     
-    // ---- Optionally start HTTPS on port 443 alongside HTTP ----
-    if (tls_mgr_has_certs()) {
+    // ---- Always start HTTPS using either the administrator certificate or
+    // the persistent device identity generated on first boot. ----
+    if (tls_mgr_has_certs() || tls_mgr_has_identity()) {
         size_t cert_len = 0, key_len = 0;
-        const uint8_t* cert = tls_mgr_get_cert(&cert_len);
-        const uint8_t* key  = tls_mgr_get_key(&key_len);
+        const bool administrator_cert = tls_mgr_has_certs();
+        const uint8_t* cert = administrator_cert
+            ? tls_mgr_get_cert(&cert_len)
+            : tls_mgr_get_identity_cert(&cert_len);
+        const uint8_t* key = administrator_cert
+            ? tls_mgr_get_key(&key_len)
+            : tls_mgr_get_identity_key(&key_len);
         
         ESP_LOGI(TAG, "Starting HTTPS server on port 443...");
         
@@ -361,6 +425,9 @@ bool api_server_start(void)
         ssl_config.httpd.max_resp_headers   = max_headers;
         ssl_config.httpd.recv_wait_timeout  = recv_timeout;
         ssl_config.httpd.max_open_sockets   = 4;      // TLS buffers in PSRAM via EXTERNAL_MEM_ALLOC
+#ifdef CONFIG_TEST_ENDPOINTS
+        ssl_config.httpd.send_wait_timeout  = 1;
+#endif
         ssl_config.servercert    = cert;
         ssl_config.servercert_len = cert_len;
         ssl_config.prvtkey_pem   = key;
@@ -369,12 +436,59 @@ bool api_server_start(void)
         ret = httpd_ssl_start(&server_ssl, &ssl_config);
         if (ret == ESP_OK) {
             tls_mgr_set_https_active(true);
-            ESP_LOGI(TAG, "HTTPS server started on port 443");
+            ESP_LOGI(
+                TAG, "HTTPS server started on port 443 using %s",
+                administrator_cert
+                    ? "administrator certificate"
+                    : "persistent device identity");
         } else {
-            ESP_LOGE(TAG, "Failed to start HTTPS server: %s (HTTP still available on port 80)", esp_err_to_name(ret));
+            ESP_LOGE(
+                TAG, "Failed to start mandatory HTTPS server: %s",
+                esp_err_to_name(ret));
+            api_server_stop();
+            return false;
         }
     } else {
-        ESP_LOGW(TAG, "No TLS certs provisioned — HTTP only on port 80");
+        ESP_LOGE(TAG, "No TLS identity available for mandatory HTTPS");
+        api_server_stop();
+        return false;
+    }
+
+    if (tls_mgr_has_identity()) {
+        size_t cert_len = 0;
+        size_t key_len = 0;
+        const uint8_t* cert = tls_mgr_get_identity_cert(&cert_len);
+        const uint8_t* key = tls_mgr_get_identity_key(&key_len);
+
+        httpd_ssl_config_t integration_config = HTTPD_SSL_CONFIG_DEFAULT();
+        integration_config.port_secure = 8443;
+        integration_config.httpd.ctrl_port = 32771;
+        integration_config.httpd.max_uri_handlers = 8;
+        integration_config.httpd.max_open_sockets = 5;
+        integration_config.httpd.stack_size = 12288;
+        // Reject surplus connections instead of evicting established WSS
+        // clients. Three WSS slots leave capacity for REST reconciliation
+        // while another TLS connection is still closing or handshaking.
+        integration_config.httpd.lru_purge_enable = false;
+        integration_config.httpd.recv_wait_timeout = 10;
+        integration_config.httpd.send_wait_timeout = 1;
+        integration_config.servercert = cert;
+        integration_config.servercert_len = cert_len;
+        integration_config.prvtkey_pem = key;
+        integration_config.prvtkey_len = key_len;
+
+        ret = httpd_ssl_start(&server_integration, &integration_config);
+        if (ret != ESP_OK) {
+            server_integration = NULL;
+            ESP_LOGE(TAG,
+                     "Failed to start integration HTTPS server: %s "
+                     "(HTTP remains available on port 80)",
+                     esp_err_to_name(ret));
+        } else {
+            ESP_LOGI(TAG, "Integration HTTPS server started on port 8443");
+        }
+    } else {
+        ESP_LOGE(TAG, "Integration HTTPS identity is unavailable");
     }
     
     // Helper macro - abort if URI registration fails (catches max_uri_handlers issues)
@@ -390,8 +504,7 @@ bool api_server_start(void)
         } \
     } while(0)
     
-    // Register on BOTH HTTP and HTTPS (essential endpoints that must work over HTTP
-    // even when HTTPS is active: health, OTA, TLS management)
+    // Register on both HTTP and HTTPS only for explicitly public health checks.
     #define REGISTER_URI_ESSENTIAL(uri_struct) do { \
         esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
         if (err != ESP_OK) { \
@@ -560,7 +673,7 @@ bool api_server_start(void)
         .handler = info_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(info_uri);
+    REGISTER_URI(info_uri);
     
     // GET /api/ota/status
     httpd_uri_t ota_status_uri = {
@@ -569,7 +682,7 @@ bool api_server_start(void)
         .handler = ota_status_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_status_uri);
+    REGISTER_URI(ota_status_uri);
     
     // POST /api/ota/update
     httpd_uri_t ota_update_uri = {
@@ -578,7 +691,7 @@ bool api_server_start(void)
         .handler = ota_update_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_update_uri);
+    REGISTER_URI(ota_update_uri);
     
     // POST /api/ota/upload
     httpd_uri_t ota_upload_uri = {
@@ -587,7 +700,7 @@ bool api_server_start(void)
         .handler = ota_upload_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_upload_uri);
+    REGISTER_URI(ota_upload_uri);
     
     // POST /api/ota/reboot
     httpd_uri_t ota_reboot_uri = {
@@ -596,7 +709,7 @@ bool api_server_start(void)
         .handler = ota_reboot_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_reboot_uri);
+    REGISTER_URI(ota_reboot_uri);
     
     // GET /api/ota/releases - Check GitHub for updates
     httpd_uri_t ota_releases_uri = {
@@ -605,7 +718,7 @@ bool api_server_start(void)
         .handler = ota_releases_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_releases_uri);
+    REGISTER_URI(ota_releases_uri);
     
     // POST /api/ota/github - Start update from GitHub
     httpd_uri_t ota_github_uri = {
@@ -614,7 +727,7 @@ bool api_server_start(void)
         .handler = ota_github_update_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(ota_github_uri);
+    REGISTER_URI(ota_github_uri);
     
     // GET /api/auth/config
     httpd_uri_t auth_config_get_uri = {
@@ -894,7 +1007,7 @@ bool api_server_start(void)
         .handler = tls_status_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(tls_status_uri);
+    REGISTER_URI(tls_status_uri);
 
     // POST /api/tls/certificate
     httpd_uri_t tls_cert_post_uri = {
@@ -903,7 +1016,7 @@ bool api_server_start(void)
         .handler = tls_cert_post_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(tls_cert_post_uri);
+    REGISTER_URI(tls_cert_post_uri);
 
     // DELETE /api/tls/certificate
     httpd_uri_t tls_cert_delete_uri = {
@@ -912,7 +1025,7 @@ bool api_server_start(void)
         .handler = tls_cert_delete_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(tls_cert_delete_uri);
+    REGISTER_URI(tls_cert_delete_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
     // Test endpoints need HTTP for CI (no TLS on test runner)
@@ -921,25 +1034,160 @@ bool api_server_start(void)
         test_endpoints_register(server_ssl);
     }
     ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
+
+    httpd_config_t websocket_config = HTTPD_DEFAULT_CONFIG();
+    websocket_config.server_port = 81;
+    websocket_config.ctrl_port = 32770;
+    websocket_config.max_uri_handlers = 1;
+    websocket_config.max_open_sockets = 2;
+    websocket_config.stack_size = 8192;
+    websocket_config.lru_purge_enable = true;
+    websocket_config.recv_wait_timeout = 10;
+    websocket_config.send_wait_timeout = 1;
+    ret = httpd_start(&websocket_test_server, &websocket_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start isolated WebSocket test server: %s",
+                 esp_err_to_name(ret));
+        api_server_stop();
+        return false;
+    }
+    test_endpoints_register_websocket(websocket_test_server);
+    ESP_LOGI(TAG, "WebSocket feasibility server started on port 81");
 #endif
-    
-    // When HTTPS is active, add catch-all redirects on HTTP for non-essential endpoints.
-    // Essential endpoints (health, OTA, TLS, test) are already registered above and
-    // match before this wildcard.  Everything else gets a 307 → https://host/path.
-    if (server_ssl != NULL) {
-        static const httpd_method_t redirect_methods[] = {
-            HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE, HTTP_PATCH
+
+    if (server_integration != NULL) {
+        httpd_uri_t ha_pair_uri = {
+            .uri = "/api/v1/pair",
+            .method = HTTP_POST,
+            .handler = ha_pair_post_handler,
+            .user_ctx = NULL
         };
-        for (auto method : redirect_methods) {
-            httpd_uri_t http_redirect_uri = {
-                .uri = "/*",
-                .method = method,
-                .handler = http_to_https_redirect_handler,
+        ret = httpd_register_uri_handler(server_integration, &ha_pair_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA pairing: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
+        httpd_uri_t ha_capabilities_uri = {
+            .uri = "/api/v1/capabilities",
+            .method = HTTP_GET,
+            .handler = ha_capabilities_get_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(
+            server_integration, &ha_capabilities_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA capabilities: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
+        httpd_uri_t ha_state_uri = {
+            .uri = "/api/v1/state",
+            .method = HTTP_GET,
+            .handler = ha_state_get_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(server_integration, &ha_state_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA state: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
+        httpd_uri_t ha_events_uri = {
+            .uri = "/api/v1/events",
+            .method = HTTP_GET,
+            .handler = ha_websocket_handler,
+            .user_ctx = NULL,
+            .is_websocket = true,
+            .handle_ws_control_frames = true,
+            .supported_subprotocol = NULL,
+            .ws_pre_handshake_cb = ha_websocket_pre_handshake,
+        };
+        ret = httpd_register_uri_handler(
+            server_integration, &ha_events_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA WebSocket: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+        if (!ha_websocket_start(server_integration)) {
+            ESP_LOGE(TAG, "Home Assistant WebSocket push unavailable");
+            httpd_ssl_stop(server_integration);
+            server_integration = NULL;
+        } else {
+            httpd_uri_t ha_power_uri = {
+                .uri = "/api/v1/control/power",
+                .method = HTTP_PUT,
+                .handler = ha_power_put_handler,
                 .user_ctx = NULL
             };
-            httpd_register_uri_handler(server, &http_redirect_uri);
+            ret = httpd_register_uri_handler(
+                server_integration, &ha_power_uri);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register HA power control: %s",
+                         esp_err_to_name(ret));
+                api_server_stop();
+                return false;
+            }
+
+            httpd_uri_t ha_mode_uri = {
+                .uri = "/api/v1/control/mode",
+                .method = HTTP_PUT,
+                .handler = ha_mode_put_handler,
+                .user_ctx = NULL
+            };
+            ret = httpd_register_uri_handler(
+                server_integration, &ha_mode_uri);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register HA mode control: %s",
+                         esp_err_to_name(ret));
+                api_server_stop();
+                return false;
+            }
+
+            httpd_uri_t ha_setpoint_uri = {
+                .uri = "/api/v1/control/setpoint",
+                .method = HTTP_PUT,
+                .handler = ha_setpoint_put_handler,
+                .user_ctx = NULL
+            };
+            ret = httpd_register_uri_handler(
+                server_integration, &ha_setpoint_uri);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to register HA setpoint control: %s",
+                         esp_err_to_name(ret));
+                api_server_stop();
+                return false;
+            }
         }
-        ESP_LOGI(TAG, "HTTP→HTTPS redirect active for non-essential endpoints");
+    }
+
+    if (server_integration != NULL) {
+        ESP_LOGI(TAG, "Home Assistant REST foundation enabled");
+
+        mdns_txt_item_t integration_txt[] = {
+            {"device", "arctic-controller"},
+            {"id", arctic::ha::deviceId()},
+            {"version", "1"},
+            {"tls", "1"},
+            {"push", "1"},
+        };
+        ret = mdns_service_add(
+            "Arctic Home Assistant", "_arctic", "_tcp", 8443,
+            integration_txt, sizeof(integration_txt) / sizeof(integration_txt[0]));
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "HA mDNS service add failed: %s",
+                     esp_err_to_name(ret));
+        }
+    } else {
+        ESP_LOGE(TAG, "Home Assistant REST disabled: no identity server");
     }
     
     #undef REGISTER_URI
@@ -958,6 +1206,19 @@ bool api_server_start(void)
 
 void api_server_stop(void)
 {
+#ifdef CONFIG_TEST_ENDPOINTS
+    if (websocket_test_server != NULL) {
+        ESP_LOGI(TAG, "Stopping WebSocket feasibility server...");
+        httpd_stop(websocket_test_server);
+        websocket_test_server = NULL;
+    }
+#endif
+    if (server_integration != NULL) {
+        ha_websocket_stop();
+        ESP_LOGI(TAG, "Stopping integration HTTPS server...");
+        httpd_ssl_stop(server_integration);
+        server_integration = NULL;
+    }
     if (server_ssl != NULL) {
         ESP_LOGI(TAG, "Stopping HTTPS server...");
         httpd_ssl_stop(server_ssl);
@@ -1105,22 +1366,6 @@ static esp_err_t favicon_handler(httpd_req_t* req)
     // Return 204 No Content - no favicon available
     httpd_resp_set_status(req, "204 No Content");
     httpd_resp_send(req, NULL, 0);
-    return ESP_OK;
-}
-
-// ============================================================================
-// HTTP → HTTPS Redirect (when TLS certs are installed)
-// ============================================================================
-
-static esp_err_t http_to_https_redirect_handler(httpd_req_t* req)
-{
-    // Build the HTTPS redirect URL: https://<hostname>.local<uri>
-    char location[640];
-    snprintf(location, sizeof(location), "https://%s.local%s", hostname, req->uri);
-    
-    httpd_resp_set_status(req, "307 Temporary Redirect");
-    httpd_resp_set_hdr(req, "Location", location);
-    httpd_resp_sendstr(req, "Redirecting to HTTPS");
     return ESP_OK;
 }
 
@@ -1535,6 +1780,643 @@ static esp_err_t wifi_disconnect_post_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+static esp_err_t send_integration_document(
+    httpd_req_t* req, cJSON* document)
+{
+    if (document == NULL) {
+        send_json_error(
+            req, "500 Internal Server Error", "State serialization failed");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    char* json = cJSON_PrintUnformatted(document);
+    cJSON_Delete(document);
+    if (json == NULL) {
+        send_json_error(
+            req, "500 Internal Server Error", "State serialization failed");
+        return ESP_OK;
+    }
+    httpd_resp_sendstr(req, json);
+    cJSON_free(json);
+    return ESP_OK;
+}
+
+static bool read_integration_body(
+        httpd_req_t* req, char* buffer, size_t capacity)
+    {
+        if (buffer == nullptr || capacity < 2 ||
+            req->content_len <= 0 ||
+            static_cast<size_t>(req->content_len) >= capacity) {
+            return false;
+        }
+
+        size_t received = 0;
+        while (received < static_cast<size_t>(req->content_len)) {
+            const int count = httpd_req_recv(
+                req, buffer + received,
+                static_cast<size_t>(req->content_len) - received);
+            if (count <= 0) {
+                return false;
+            }
+            received += static_cast<size_t>(count);
+        }
+        buffer[received] = '\0';
+        return true;
+    }
+
+    static bool integration_object_has_only_keys(
+        const cJSON* object, const char* const* keys, size_t key_count)
+    {
+        if (object == nullptr || !cJSON_IsObject(object)) {
+            return false;
+        }
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, object) {
+            bool known = false;
+            for (size_t i = 0; i < key_count; ++i) {
+                if (strcmp(item->string, keys[i]) == 0) {
+                    known = true;
+                    break;
+                }
+            }
+            if (!known) {
+                return false;
+            }
+
+        }
+        return true;
+    }
+
+    static bool integration_command_id(
+        const cJSON* root, char* command_id)
+    {
+        cJSON* value = cJSON_GetObjectItemCaseSensitive(root, "command_id");
+        if (value == nullptr || !cJSON_IsString(value) ||
+            value->valuestring == nullptr) {
+            return false;
+        }
+        const size_t length = strlen(value->valuestring);
+        if (length == 0 || length > HA_COMMAND_ID_MAX) {
+            return false;
+        }
+        for (size_t i = 0; i < length; ++i) {
+            const unsigned char c =
+                static_cast<unsigned char>(value->valuestring[i]);
+            if (c < 0x21 || c > 0x7e) {
+                return false;
+            }
+        }
+        memcpy(command_id, value->valuestring, length + 1);
+        return true;
+    }
+
+    enum class HaCommandLookup {
+        New,
+        Duplicate,
+        Conflict,
+    };
+
+    static HaCommandLookup ha_command_begin(
+        const char* command_id, const char* operation, const char* payload,
+        size_t* slot_out)
+    {
+        if (s_ha_command_mutex == nullptr ||
+            xSemaphoreTake(s_ha_command_mutex, portMAX_DELAY) != pdTRUE) {
+            return HaCommandLookup::Conflict;
+        }
+
+        for (size_t i = 0; i < HA_COMMAND_CACHE_SIZE; ++i) {
+            const HaCommandRecord& record = s_ha_command_cache[i];
+            if (!record.accepted || strcmp(record.command_id, command_id) != 0) {
+                continue;
+            }
+            if (strcmp(record.operation, operation) == 0 &&
+                strcmp(record.payload, payload) == 0) {
+                if (slot_out != nullptr) {
+                    *slot_out = i;
+                }
+                return HaCommandLookup::Duplicate;
+            }
+            xSemaphoreGive(s_ha_command_mutex);
+            return HaCommandLookup::Conflict;
+        }
+
+        const size_t slot = s_ha_command_next++ % HA_COMMAND_CACHE_SIZE;
+        s_ha_command_cache[slot] = {};
+        if (slot_out != nullptr) {
+            *slot_out = slot;
+        }
+        return HaCommandLookup::New;
+    }
+
+    static void ha_command_finish(
+        size_t slot, bool accepted, const char* command_id,
+        const char* operation, const char* payload)
+    {
+        if (s_ha_command_mutex == nullptr) {
+            return;
+        }
+        if (accepted) {
+            HaCommandRecord& record = s_ha_command_cache[slot];
+            record.accepted = true;
+            snprintf(record.command_id, sizeof(record.command_id), "%s", command_id);
+            snprintf(record.operation, sizeof(record.operation), "%s", operation);
+            snprintf(record.payload, sizeof(record.payload), "%s", payload);
+        }
+        xSemaphoreGive(s_ha_command_mutex);
+    }
+
+    static esp_err_t send_accepted_command(
+        httpd_req_t* req, const char* command_id)
+    {
+        httpd_resp_set_status(req, "202 Accepted");
+        set_json_content_type(req);
+        cJSON* response = cJSON_CreateObject();
+        cJSON_AddBoolToObject(response, "accepted", true);
+        cJSON_AddStringToObject(response, "command_id", command_id);
+        cJSON_AddStringToObject(
+            response, "status", "accepted_waiting_for_reported_state");
+        char* json = cJSON_PrintUnformatted(response);
+        cJSON_Delete(response);
+        if (json == nullptr) {
+            send_json_error(
+                req, "500 Internal Server Error", "Command response failed");
+            return ESP_OK;
+        }
+        httpd_resp_sendstr(req, json);
+        cJSON_free(json);
+        return ESP_OK;
+    }
+
+    static bool ha_supports_power_or_mode()
+    {
+        const arctic::HeatPumpState state = arctic::getState();
+        return state.connected && arctic::isDemoMode();
+    }
+
+    static bool ha_supports_setpoint(const char* kind)
+    {
+        const arctic::HeatPumpState state = arctic::getState();
+        if (!state.connected) {
+            return false;
+        }
+        if (arctic::isDemoMode()) {
+            return strcmp(kind, "cooling") == 0 ||
+                   strcmp(kind, "heating") == 0 ||
+                   strcmp(kind, "hot_water") == 0;
+        }
+        if (macon_master::is_active()) {
+            return strcmp(kind, "cooling") == 0 ||
+                   strcmp(kind, "hot_water") == 0;
+        }
+        return false;
+    }
+
+    static const char* ha_control_unavailable_message(
+        const char* operation, const char* kind = nullptr)
+    {
+        const arctic::HeatPumpState state = arctic::getState();
+        if (!state.connected) {
+            return "Heat pump not connected";
+        }
+        if (kind != nullptr && strcmp(kind, "heating") == 0) {
+            return "Heating setpoint is unsupported by the active Tuya runtime";
+        }
+        if (strcmp(operation, "power") == 0) {
+            return "Power control is unsupported by the active runtime";
+        }
+        if (strcmp(operation, "mode") == 0) {
+            return "Selected-mode control is unsupported by the active runtime";
+        }
+        return "Setpoint control is unsupported by the active runtime";
+    }
+
+static esp_err_t ha_pair_post_handler(httpd_req_t* req)
+{
+    if (req->content_len <= 0 || req->content_len >= 64) {
+        send_json_error(req, "400 Bad Request", "Pairing code required");
+        return ESP_OK;
+    }
+
+    char body[64];
+    int received = 0;
+    while (received < req->content_len) {
+        const int result = httpd_req_recv(
+            req, body + received, req->content_len - received);
+        if (result <= 0) {
+            send_json_error(req, "400 Bad Request", "Could not read body");
+            return ESP_OK;
+        }
+        received += result;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    memset(body, 0, sizeof(body));
+    if (root == NULL) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* code_json = cJSON_GetObjectItemCaseSensitive(root, "code");
+    if (!cJSON_IsString(code_json) || code_json->valuestring == NULL) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Pairing code required");
+        return ESP_OK;
+    }
+
+    char code[HA_PAIRING_CODE_LEN + 1] = {};
+    if (strlen(code_json->valuestring) != HA_PAIRING_CODE_LEN) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "400 Bad Request", "Pairing code must be six digits");
+        return ESP_OK;
+    }
+    memcpy(code, code_json->valuestring, HA_PAIRING_CODE_LEN);
+    memset(
+        code_json->valuestring, 0, strlen(code_json->valuestring));
+    cJSON_Delete(root);
+
+    char fingerprint[TLS_SHA256_FINGERPRINT_HEX_LEN + 1] = {};
+    if (!tls_mgr_get_identity_fingerprint(fingerprint)) {
+        memset(code, 0, sizeof(code));
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Integration TLS identity is unavailable");
+        return ESP_OK;
+    }
+
+    char token[AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
+    const ha_pairing_claim_result_t result =
+        ha_pairing_claim(code, token);
+    memset(code, 0, sizeof(code));
+
+    if (result != HA_PAIRING_CLAIM_OK) {
+        memset(token, 0, sizeof(token));
+        memset(fingerprint, 0, sizeof(fingerprint));
+        switch (result) {
+            case HA_PAIRING_CLAIM_NOT_OPEN:
+                send_json_error(
+                    req, "403 Forbidden", "Pairing window is not open");
+                break;
+            case HA_PAIRING_CLAIM_INVALID_CODE:
+                send_json_error(
+                    req, "401 Unauthorized", "Invalid pairing code");
+                break;
+            case HA_PAIRING_CLAIM_LOCKED:
+                send_json_error(
+                    req, "429 Too Many Requests",
+                    "Pairing window closed after too many attempts");
+                break;
+            default:
+                send_json_error(
+                    req, "500 Internal Server Error",
+                    "Could not persist integration token");
+                break;
+        }
+        return ESP_OK;
+    }
+
+    char response[320];
+    const int response_len = snprintf(
+        response,
+        sizeof(response),
+        "{\"protocol_version\":1,\"device_id\":\"%s\","
+        "\"sha256_fingerprint\":\"%s\",\"token\":\"%s\"}",
+        arctic::ha::deviceId(),
+        fingerprint,
+        token);
+    memset(token, 0, sizeof(token));
+    memset(fingerprint, 0, sizeof(fingerprint));
+    if (response_len <= 0 || response_len >= (int)sizeof(response)) {
+        memset(response, 0, sizeof(response));
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not serialize pairing response");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t send_result =
+        httpd_resp_send(req, response, response_len);
+    memset(response, 0, sizeof(response));
+    if (send_result != ESP_OK) {
+        ESP_LOGW(
+            TAG,
+            "Pairing token rotated but response delivery failed; "
+            "physical re-pairing is required");
+    }
+    return send_result;
+}
+
+static esp_err_t ha_capabilities_get_handler(httpd_req_t* req)
+{
+    if (!check_integration_auth(req)) {
+        send_json_error(
+            req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+    return send_integration_document(
+        req, arctic::ha::createCapabilities());
+}
+
+static esp_err_t ha_state_get_handler(httpd_req_t* req)
+{
+    if (!check_integration_auth(req)) {
+        send_json_error(
+            req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+    return send_integration_document(req, arctic::ha::createStateSnapshot());
+}
+
+static esp_err_t ha_power_put_handler(httpd_req_t* req)
+{
+    uint32_t generation = 0;
+    if (!check_integration_auth(req, &generation)) {
+        send_json_error(req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+
+    char body[160];
+    if (!read_integration_body(req, body, sizeof(body))) {
+        send_json_error(req, "422 Unprocessable Entity", "Invalid request body");
+        return ESP_OK;
+    }
+    cJSON* root = cJSON_ParseWithLength(body, strlen(body));
+    const char* keys[] = {"command_id", "on"};
+    cJSON* on = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "on");
+    char command_id[HA_COMMAND_ID_MAX + 1] = {};
+    if (root == nullptr ||
+        !integration_object_has_only_keys(root, keys, 2) ||
+        !integration_command_id(root, command_id) ||
+        on == nullptr || !cJSON_IsBool(on)) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Body must contain only command_id and boolean on");
+        return ESP_OK;
+    }
+
+    const bool power_on = cJSON_IsTrue(on);
+    char payload[HA_COMMAND_PAYLOAD_MAX + 1];
+    snprintf(payload, sizeof(payload), "on=%u", power_on ? 1U : 0U);
+    size_t slot = 0;
+    const HaCommandLookup lookup =
+        ha_command_begin(command_id, "power", payload, &slot);
+    if (lookup == HaCommandLookup::Duplicate) {
+        xSemaphoreGive(s_ha_command_mutex);
+        cJSON_Delete(root);
+        return send_accepted_command(req, command_id);
+    }
+    if (lookup == HaCommandLookup::Conflict) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "409 Conflict",
+            "command_id was already used with a different command");
+        return ESP_OK;
+    }
+
+    if (!ha_supports_power_or_mode()) {
+        ha_command_finish(slot, false, command_id, "power", payload);
+        cJSON_Delete(root);
+        send_json_error(
+            req, "503 Service Unavailable",
+            ha_control_unavailable_message("power"));
+        return ESP_OK;
+    }
+    if (!auth_mgr_begin_control_write(generation)) {
+        ha_command_finish(slot, false, command_id, "power", payload);
+        cJSON_Delete(root);
+        send_json_error(req, "401 Unauthorized", "Integration token rotated");
+        return ESP_OK;
+    }
+    const bool written = arctic::setUnitPower(power_on);
+    auth_mgr_end_control_write();
+    cJSON_Delete(root);
+    if (!written) {
+        ha_command_finish(slot, false, command_id, "power", payload);
+        send_json_error(
+            req, "503 Service Unavailable", "Power command was not accepted");
+        return ESP_OK;
+    }
+    ha_command_finish(slot, true, command_id, "power", payload);
+    return send_accepted_command(req, command_id);
+}
+
+static esp_err_t ha_mode_put_handler(httpd_req_t* req)
+{
+    uint32_t generation = 0;
+    if (!check_integration_auth(req, &generation)) {
+        send_json_error(req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+
+    char body[192];
+    if (!read_integration_body(req, body, sizeof(body))) {
+        send_json_error(req, "422 Unprocessable Entity", "Invalid request body");
+        return ESP_OK;
+    }
+    cJSON* root = cJSON_ParseWithLength(body, strlen(body));
+    const char* keys[] = {"command_id", "mode"};
+    cJSON* mode_value = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "mode");
+    char command_id[HA_COMMAND_ID_MAX + 1] = {};
+    const char* mode = mode_value != nullptr && cJSON_IsString(mode_value)
+        ? mode_value->valuestring
+        : nullptr;
+    const bool valid_mode =
+        mode != nullptr &&
+        (strcmp(mode, "cooling") == 0 ||
+         strcmp(mode, "floor_heating") == 0 ||
+         strcmp(mode, "fan_coil_heating") == 0 ||
+         strcmp(mode, "hot_water") == 0 ||
+         strcmp(mode, "auto") == 0);
+    if (root == nullptr ||
+        !integration_object_has_only_keys(root, keys, 2) ||
+        !integration_command_id(root, command_id) ||
+        !valid_mode) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Body must contain command_id and an allowlisted mode");
+        return ESP_OK;
+    }
+
+    char payload[HA_COMMAND_PAYLOAD_MAX + 1];
+    snprintf(payload, sizeof(payload), "mode=%s", mode);
+    size_t slot = 0;
+    const HaCommandLookup lookup =
+        ha_command_begin(command_id, "mode", payload, &slot);
+    if (lookup == HaCommandLookup::Duplicate) {
+        xSemaphoreGive(s_ha_command_mutex);
+        cJSON_Delete(root);
+        return send_accepted_command(req, command_id);
+    }
+    if (lookup == HaCommandLookup::Conflict) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "409 Conflict",
+            "command_id was already used with a different command");
+        return ESP_OK;
+    }
+
+    if (!ha_supports_power_or_mode()) {
+        ha_command_finish(slot, false, command_id, "mode", payload);
+        cJSON_Delete(root);
+        send_json_error(
+            req, "503 Service Unavailable",
+            ha_control_unavailable_message("mode"));
+        return ESP_OK;
+    }
+    arctic::WorkingMode working_mode = arctic::WorkingMode::COOLING;
+    if (strcmp(mode, "floor_heating") == 0) {
+        working_mode = arctic::WorkingMode::FLOOR_HEATING;
+    } else if (strcmp(mode, "fan_coil_heating") == 0) {
+        working_mode = arctic::WorkingMode::FAN_COIL_HEATING;
+    } else if (strcmp(mode, "hot_water") == 0) {
+        working_mode = arctic::WorkingMode::HOT_WATER;
+    } else if (strcmp(mode, "auto") == 0) {
+        working_mode = arctic::WorkingMode::AUTO;
+    }
+    if (!auth_mgr_begin_control_write(generation)) {
+        ha_command_finish(slot, false, command_id, "mode", payload);
+        cJSON_Delete(root);
+        send_json_error(req, "401 Unauthorized", "Integration token rotated");
+        return ESP_OK;
+    }
+    const bool written = arctic::setWorkingMode(working_mode);
+    auth_mgr_end_control_write();
+    cJSON_Delete(root);
+    if (!written) {
+        ha_command_finish(slot, false, command_id, "mode", payload);
+        send_json_error(
+            req, "503 Service Unavailable",
+            "Selected-mode command was not accepted");
+        return ESP_OK;
+    }
+    ha_command_finish(slot, true, command_id, "mode", payload);
+    return send_accepted_command(req, command_id);
+}
+
+static esp_err_t ha_setpoint_put_handler(httpd_req_t* req)
+{
+    uint32_t generation = 0;
+    if (!check_integration_auth(req, &generation)) {
+        send_json_error(req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+
+    char body[192];
+    if (!read_integration_body(req, body, sizeof(body))) {
+        send_json_error(req, "422 Unprocessable Entity", "Invalid request body");
+        return ESP_OK;
+    }
+    cJSON* root = cJSON_ParseWithLength(body, strlen(body));
+    const char* keys[] = {"command_id", "kind", "value"};
+    cJSON* kind_value = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "kind");
+    cJSON* setpoint_value = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "value");
+    char command_id[HA_COMMAND_ID_MAX + 1] = {};
+    const char* kind = kind_value != nullptr && cJSON_IsString(kind_value)
+        ? kind_value->valuestring
+        : nullptr;
+    const bool valid_kind =
+        kind != nullptr &&
+        (strcmp(kind, "cooling") == 0 ||
+         strcmp(kind, "heating") == 0 ||
+         strcmp(kind, "hot_water") == 0);
+    const bool valid_number =
+        setpoint_value != nullptr && cJSON_IsNumber(setpoint_value) &&
+        setpoint_value->valuedouble ==
+            static_cast<double>(setpoint_value->valueint);
+    const int value = valid_number ? setpoint_value->valueint : 0;
+    if (root == nullptr ||
+        !integration_object_has_only_keys(root, keys, 3) ||
+        !integration_command_id(root, command_id) ||
+        !valid_kind || !valid_number) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Body must contain command_id, kind, and integer value");
+        return ESP_OK;
+    }
+
+    const arctic::SetpointKind setpoint_kind =
+        strcmp(kind, "cooling") == 0
+            ? arctic::SetpointKind::Cooling
+            : (strcmp(kind, "heating") == 0
+                   ? arctic::SetpointKind::Heating
+                   : arctic::SetpointKind::HotWater);
+    const arctic::SetpointLimits limits =
+        arctic::setpoint_limits(setpoint_kind);
+    if (value < limits.min_c || value > limits.max_c) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Setpoint is outside the advertised inclusive range");
+        return ESP_OK;
+    }
+
+    char payload[HA_COMMAND_PAYLOAD_MAX + 1];
+    snprintf(payload, sizeof(payload), "kind=%s;value=%d", kind, value);
+    size_t slot = 0;
+    const HaCommandLookup lookup =
+        ha_command_begin(command_id, "setpoint", payload, &slot);
+    if (lookup == HaCommandLookup::Duplicate) {
+        xSemaphoreGive(s_ha_command_mutex);
+        cJSON_Delete(root);
+        return send_accepted_command(req, command_id);
+    }
+    if (lookup == HaCommandLookup::Conflict) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "409 Conflict",
+            "command_id was already used with a different command");
+        return ESP_OK;
+    }
+
+    if (!ha_supports_setpoint(kind)) {
+        ha_command_finish(slot, false, command_id, "setpoint", payload);
+        cJSON_Delete(root);
+        send_json_error(
+            req, "503 Service Unavailable",
+            ha_control_unavailable_message("setpoint", kind));
+        return ESP_OK;
+    }
+    if (!auth_mgr_begin_control_write(generation)) {
+        ha_command_finish(slot, false, command_id, "setpoint", payload);
+        cJSON_Delete(root);
+        send_json_error(req, "401 Unauthorized", "Integration token rotated");
+        return ESP_OK;
+    }
+    bool written = false;
+    if (setpoint_kind == arctic::SetpointKind::Cooling) {
+        written = arctic::setCoolingSetpoint(static_cast<int16_t>(value));
+    } else if (setpoint_kind == arctic::SetpointKind::HotWater) {
+        written = arctic::setHotWaterSetpoint(static_cast<int16_t>(value));
+    }
+    auth_mgr_end_control_write();
+    cJSON_Delete(root);
+    if (!written) {
+        ha_command_finish(slot, false, command_id, "setpoint", payload);
+        send_json_error(
+            req, "503 Service Unavailable",
+            "Setpoint command was not accepted");
+        return ESP_OK;
+    }
+    ha_command_finish(slot, true, command_id, "setpoint", payload);
+    return send_accepted_command(req, command_id);
+}
+
 static esp_err_t info_get_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -1903,13 +2785,15 @@ static esp_err_t ota_github_update_post_handler(httpd_req_t* req)
 
 static esp_err_t auth_config_get_handler(httpd_req_t* req)
 {
-    // Allow unauthenticated access to check if auth is enabled
     set_json_content_type(req);
     
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "web_auth_enabled", auth_mgr_web_auth_enabled());
     cJSON_AddBoolToObject(root, "api_auth_enabled", auth_mgr_api_auth_enabled());
     cJSON_AddStringToObject(root, "username", auth_mgr_get_username());
+    cJSON_AddBoolToObject(
+        root, "credentials_change_required",
+        auth_mgr_credentials_change_required());
     
     // Check if current request is authenticated
     cJSON_AddBoolToObject(root, "authenticated", check_web_auth(req));
@@ -1930,6 +2814,9 @@ static esp_err_t auth_status_get_handler(httpd_req_t* req)
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "web_auth_enabled", auth_mgr_web_auth_enabled());
     cJSON_AddBoolToObject(root, "session_valid", check_web_auth(req));
+    cJSON_AddBoolToObject(
+        root, "credentials_change_required",
+        auth_mgr_credentials_change_required());
     
     char* json_str = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json_str);
@@ -1941,8 +2828,7 @@ static esp_err_t auth_status_get_handler(httpd_req_t* req)
 
 static esp_err_t auth_config_post_handler(httpd_req_t* req)
 {
-    // Must be authenticated to change config (if auth is enabled)
-    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+    if (!check_web_auth(req)) {
         send_json_error(req, "401 Unauthorized", "Login required");
         return ESP_OK;
     }
@@ -1963,25 +2849,16 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
     
-    // Block disabling auth when TLS certs are provisioned
-    if (tls_mgr_has_certs()) {
-        cJSON* web_auth = cJSON_GetObjectItem(root, "web_auth_enabled");
-        cJSON* api_auth = cJSON_GetObjectItem(root, "api_auth_enabled");
-        
-        bool trying_to_disable_web = (web_auth && cJSON_IsBool(web_auth) && !cJSON_IsTrue(web_auth));
-        bool trying_to_disable_api = (api_auth && cJSON_IsBool(api_auth) && !cJSON_IsTrue(api_auth));
-        
-        if (trying_to_disable_web || trying_to_disable_api) {
-            cJSON_Delete(root);
-            send_json_error(req, "403 Forbidden",
-                            "Authentication cannot be disabled while TLS certificates are provisioned");
-            return ESP_OK;
-        }
-    }
-    
     cJSON* web_auth = cJSON_GetObjectItem(root, "web_auth_enabled");
     if (web_auth && cJSON_IsBool(web_auth)) {
-        auth_mgr_set_web_auth_enabled(cJSON_IsTrue(web_auth));
+        if (!cJSON_IsTrue(web_auth)) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "403 Forbidden",
+                "Web authentication cannot be disabled");
+            return ESP_OK;
+        }
+        auth_mgr_set_web_auth_enabled(true);
     }
     
     cJSON* api_auth = cJSON_GetObjectItem(root, "api_auth_enabled");
@@ -1989,19 +2866,19 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
     char new_api_key[AUTH_API_KEY_LEN + 1] = {0};
     
     if (api_auth && cJSON_IsBool(api_auth)) {
-        bool enable_api = cJSON_IsTrue(api_auth);
-        
-        // If enabling API auth and no key exists, generate one
-        if (enable_api) {
-            char existing_key[AUTH_API_KEY_LEN + 1];
-            if (!auth_mgr_get_api_key(existing_key)) {
-                // No key exists, generate one
-                auth_mgr_regenerate_api_key(new_api_key);
-                api_key_generated = true;
-            }
+        if (!cJSON_IsTrue(api_auth)) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "403 Forbidden",
+                "API authentication cannot be disabled");
+            return ESP_OK;
         }
-        
-        auth_mgr_set_api_auth_enabled(enable_api);
+        char existing_key[AUTH_API_KEY_LEN + 1];
+        if (!auth_mgr_get_api_key(existing_key)) {
+            auth_mgr_regenerate_api_key(new_api_key);
+            api_key_generated = true;
+        }
+        auth_mgr_set_api_auth_enabled(true);
     }
     
     cJSON_Delete(root);
@@ -2024,8 +2901,7 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
 
 static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
 {
-    // Must be authenticated to change credentials (if auth is enabled)
-    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+    if (!check_web_auth(req)) {
         send_json_error(req, "401 Unauthorized", "Login required");
         return ESP_OK;
     }
@@ -2048,9 +2924,47 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
     
     cJSON* username = cJSON_GetObjectItem(root, "username");
     cJSON* password = cJSON_GetObjectItem(root, "password");
+    cJSON* pairing_code = cJSON_GetObjectItem(root, "pairing_code");
     
     const char* u = (username && cJSON_IsString(username)) ? username->valuestring : NULL;
     const char* p = (password && cJSON_IsString(password)) ? password->valuestring : NULL;
+
+    if (u == NULL || u[0] == '\0' ||
+        strlen(u) > AUTH_MAX_USERNAME_LEN ||
+        p == NULL || strlen(p) < 12 ||
+        strlen(p) > AUTH_MAX_PASSWORD_LEN ||
+        (strcmp(u, "arctic") == 0 && strcmp(p, "arctic") == 0)) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "400 Bad Request",
+            "A username and a non-default password of at least 12 characters are required");
+        return ESP_OK;
+    }
+
+    if (auth_mgr_credentials_change_required()) {
+        if (!cJSON_IsString(pairing_code) ||
+            pairing_code->valuestring == NULL) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "403 Forbidden",
+                "Physical setup code required");
+            return ESP_OK;
+        }
+        char code[HA_PAIRING_CODE_LEN + 1] = {};
+        if (strlen(pairing_code->valuestring) == HA_PAIRING_CODE_LEN) {
+            memcpy(code, pairing_code->valuestring, HA_PAIRING_CODE_LEN);
+        }
+        const ha_pairing_claim_result_t authorization =
+            ha_pairing_authorize(code);
+        memset(code, 0, sizeof(code));
+        if (authorization != HA_PAIRING_CLAIM_OK) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "403 Forbidden",
+                "Physical setup code was rejected");
+            return ESP_OK;
+        }
+    }
     
     ESP_LOGI(TAG, "Credential update request: username='%s', password=%s", 
              u ? u : "(null)", p ? (p[0] ? "(provided)" : "(empty)") : "(null)");
@@ -2071,8 +2985,7 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
 
 static esp_err_t auth_apikey_get_handler(httpd_req_t* req)
 {
-    // Must be authenticated to view API key
-    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+    if (auth_mgr_credentials_change_required() || !check_web_auth(req)) {
         send_json_error(req, "401 Unauthorized", "Login required");
         return ESP_OK;
     }
@@ -2095,8 +3008,7 @@ static esp_err_t auth_apikey_get_handler(httpd_req_t* req)
 
 static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req)
 {
-    // Must be authenticated to regenerate API key
-    if (auth_mgr_web_auth_enabled() && !check_web_auth(req)) {
+    if (auth_mgr_credentials_change_required() || !check_web_auth(req)) {
         send_json_error(req, "401 Unauthorized", "Login required");
         return ESP_OK;
     }
@@ -3618,6 +4530,8 @@ static esp_err_t tls_status_get_handler(httpd_req_t* req)
     cJSON_AddBoolToObject(root, "https_active", tls_mgr_is_https_active());
     cJSON_AddBoolToObject(root, "auth_ready",
                           auth_mgr_web_auth_enabled() && auth_mgr_api_auth_enabled());
+    cJSON_AddBoolToObject(
+        root, "integration_identity", tls_mgr_has_identity());
 
     char* json_str = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, json_str);

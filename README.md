@@ -29,6 +29,14 @@ Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based
 - **Multi-Language** - Web interface in English, French, and Spanish
 - **mDNS Discovery** - Access via `arctic.local` (auto-increments for multiple controllers)
 
+The accepted architecture for a secure, local-push Home Assistant integration
+is documented in
+[docs/home-assistant-integration.md](docs/home-assistant-integration.md).
+The independently released components are
+[`pymacon`](https://github.com/sslivins/pymacon) for the secure Python client
+and [`hass-macon`](https://github.com/sslivins/hass-macon) for the Home
+Assistant integration.
+
 ## Heat Pump Communication
 
 The controller communicates with the Arctic heat pump through the shared

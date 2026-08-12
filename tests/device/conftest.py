@@ -86,7 +86,14 @@ def _return_to_main(device: DeviceClient):
         return
 
     # If on a sub-screen, go back to settings first
-    if current in ("display", "wifi", "firmware", "time", "language"):
+    if current in (
+        "display",
+        "wifi",
+        "firmware",
+        "time",
+        "language",
+        "home_assistant",
+    ):
         if current == "wifi":
             try:
                 device.wifi_mock_reset()

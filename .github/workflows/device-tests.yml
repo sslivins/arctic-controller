@@ -47,7 +47,20 @@ jobs:
 
       - name: Enable test endpoints for device testing
         run: |
-          echo "CONFIG_TEST_ENDPOINTS=y" >> sdkconfig.defaults
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("sdkconfig")
+          disabled = "# CONFIG_TEST_ENDPOINTS is not set"
+          config = path.read_text(encoding="utf-8")
+          if disabled not in config:
+              raise SystemExit("CONFIG_TEST_ENDPOINTS is not disabled in sdkconfig")
+          path.write_text(
+              config.replace(disabled, "CONFIG_TEST_ENDPOINTS=y", 1),
+              encoding="utf-8",
+          )
+          PY
+          grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
 
       - name: ESP-IDF Build (test firmware)
         uses: espressif/esp-idf-ci-action@v1
@@ -55,6 +68,9 @@ jobs:
           esp_idf_version: v5.5.2
           target: esp32p4
           path: '.'
+
+      - name: Verify test instrumentation was compiled
+        run: grep -q '^#define CONFIG_TEST_ENDPOINTS 1$' build/config/sdkconfig.h
 
       - name: Upload firmware + flash metadata
         uses: actions/upload-artifact@v7
@@ -140,7 +156,7 @@ jobs:
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           DEVICE_KEY=""
 
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+          for URL in "$ARCTIC_URL_HTTPS"; do
             RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
 
@@ -195,7 +211,7 @@ jobs:
           # Quick connectivity check — bail fast if device isn't actually responding
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           DEVICE_REACHABLE=false
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+          for URL in "$ARCTIC_URL_HTTPS"; do
             if curl -sk --connect-timeout 3 --max-time 5 "$URL/api/health" > /dev/null 2>&1; then
               DEVICE_REACHABLE=true
               echo "Device responding at $URL"
@@ -208,7 +224,7 @@ jobs:
           fi
 
           # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+          for URL in "$ARCTIC_URL_HTTPS"; do
             echo "Trying $URL/api/ota/upload ..."
             HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
               -X POST \
@@ -300,57 +316,82 @@ jobs:
           echo "Device did not come back online within 60s"
           exit 1
 
+      - name: Require HTTPS readiness
+        run: |
+          # Production routes are HTTPS-only. Retry transient TLS startup or
+          # handshake failures before any authenticated setup or test traffic.
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          for i in $(seq 1 12); do
+            if curl -skf --connect-timeout 5 --max-time 10 \
+              "$ARCTIC_URL_HTTPS/api/health" > /dev/null; then
+              echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> "$GITHUB_ENV"
+              echo "Mandatory HTTPS is ready after attempt $i"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: Mandatory HTTPS did not become ready"
+          exit 1
+
+      - name: Provision isolated test credentials
+        run: |
+          TEST_USERNAME="arctic"
+          TEST_PASSWORD="ArcticTest!2026"
+          BODY=$(python3 -c 'import json,os; print(json.dumps({"username": os.environ["TEST_USERNAME"], "password": os.environ["TEST_PASSWORD"]}))')
+
+          for i in $(seq 1 5); do
+            if curl -skf --connect-timeout 3 --max-time 10 \
+              -X POST "$ARCTIC_URL/api/test/credentials" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" > /dev/null; then
+              echo "ARCTIC_USERNAME=$TEST_USERNAME" >> "$GITHUB_ENV"
+              echo "ARCTIC_PASSWORD=$TEST_PASSWORD" >> "$GITHUB_ENV"
+              echo "Provisioned non-default credentials for test firmware"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "ERROR: Could not provision test credentials"
+          exit 1
+        env:
+          TEST_USERNAME: arctic
+          TEST_PASSWORD: ArcticTest!2026
+
       - name: Sync API key from device
         run: |
           # The device may have a randomly-generated API key (fresh flash without
           # NVS provisioning, or pre-existing device).  Read the actual key from
-          # the device and override the env var so tests use the correct value.
-
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          # the device and require success so authenticated tests cannot run with
+          # a stale secret after a transient TLS handshake failure.
           DEVICE_KEY=""
 
-          for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
-            RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
+          for i in $(seq 1 12); do
+            JAR=$(mktemp)
+            curl -skf -c "$JAR" --connect-timeout 5 --max-time 10 \
+              -X POST "$ARCTIC_URL/login" \
+              -H "Content-Type: application/json" \
+              -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
+            RESP=$(curl -skf -b "$JAR" --connect-timeout 5 --max-time 10 \
+              "$ARCTIC_URL/api/auth/apikey" 2>/dev/null) || true
+            rm -f "$JAR"
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
-
-            if [ -z "$DEVICE_KEY" ]; then
-              JAR=$(mktemp)
-              curl -sk -c "$JAR" -X POST "$URL/login" \
-                -H "Content-Type: application/json" \
-                -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
-              RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
-              DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
-              rm -f "$JAR"
-            fi
-
             if [ -n "$DEVICE_KEY" ]; then
               break
             fi
+            sleep 2
           done
 
           if [ -n "$DEVICE_KEY" ]; then
-            echo "ARCTIC_API_KEY=$DEVICE_KEY" >> $GITHUB_ENV
+            echo "ARCTIC_API_KEY=$DEVICE_KEY" >> "$GITHUB_ENV"
             if [ "$DEVICE_KEY" = "$ARCTIC_API_KEY" ]; then
               echo "Device API key matches secret — no override needed"
             else
               echo "Device API key differs from secret — overriding ARCTIC_API_KEY"
             fi
           else
-            echo "WARNING: Could not read device API key — tests may fail"
-          fi
-        env:
-          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
-
-      - name: Detect HTTPS support
-        run: |
-          # If HTTPS is available, use it for all tests (avoids HTTP→HTTPS redirect issues with cookies/auth)
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          if curl -sk --connect-timeout 3 "$ARCTIC_URL_HTTPS/api/health" > /dev/null 2>&1; then
-            echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> $GITHUB_ENV
-            echo "Device supports HTTPS — using $ARCTIC_URL_HTTPS for tests"
-          else
-            echo "Device does not support HTTPS — keeping $ARCTIC_URL"
+            echo "ERROR: Could not read device API key after HTTPS became ready"
+            exit 1
           fi
 
       - name: Start controller serial capture
@@ -380,8 +421,6 @@ jobs:
         run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
           # ARCTIC_API_KEY is set via $GITHUB_ENV by the "Sync API key" step
-          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           HYPOTHESIS_PROFILE: ci
           PYTHONDONTWRITEBYTECODE: '1'
 
@@ -395,8 +434,6 @@ jobs:
         continue-on-error: true
         run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
         env:
-          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
           TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
           TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 

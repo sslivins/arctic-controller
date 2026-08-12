@@ -128,6 +128,25 @@ typedef enum {
     STR_DISPLAY_NEVER,
     STR_DISPLAY_MINUTE,
     STR_DISPLAY_MINUTES,
+
+    // ========================================================================
+    // Home Assistant Pairing Panel
+    // ========================================================================
+    STR_SETTINGS_HOME_ASSISTANT,
+    STR_HA_TITLE,
+    STR_HA_PAIRED,
+    STR_HA_NOT_PAIRED,
+    STR_HA_PAIRING_DESCRIPTION,
+    STR_HA_PAIRING_ACTIVE,
+    STR_HA_START_PAIRING,
+    STR_HA_CANCEL_PAIRING,
+    STR_HA_PAIRING_CODE,
+    STR_HA_FINGERPRINT,
+    STR_HA_EXPIRES_IN,
+    STR_HA_REVOKE,
+    STR_HA_REVOKE_CONFIRM,
+    STR_HA_REVOKE_DESCRIPTION,
+    STR_HA_PAIRING_FAILED,
     
     // ========================================================================
     // Heat Pump - Main Screen

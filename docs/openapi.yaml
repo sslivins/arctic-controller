@@ -29,6 +29,12 @@ info:
     The API key can be retrieved from the web interface settings.
     
     Both authentication types can be independently enabled/disabled via `/api/auth/config`.
+
+    ### Home Assistant Integration Authentication
+    Home Assistant uses a separate 256-bit Bearer token that cannot be disabled
+    or bypassed by the web/API authentication settings. Integration REST and
+    WebSocket traffic uses an automatically generated self-signed identity on
+    port 8443 and validates it by pinned SHA-256 certificate fingerprint.
   version: 2.1.0
   contact:
     name: Arctic Controller
@@ -40,6 +46,12 @@ servers:
     description: Local mDNS hostname
   - url: https://{ip_address}
     description: Direct IP address
+    variables:
+      ip_address:
+        default: 192.168.1.100
+        description: Device IP address
+  - url: https://{ip_address}:8443
+    description: Home Assistant integration identity endpoint
     variables:
       ip_address:
         default: 192.168.1.100
@@ -66,6 +78,8 @@ tags:
     description: Operational event log
   - name: Logs
     description: System debug log buffer
+  - name: HomeAssistant
+    description: Strictly authenticated local Home Assistant integration
 
 paths:
   /login:
@@ -2420,6 +2434,260 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/capabilities:
+    get:
+      tags:
+        - HomeAssistant
+      summary: Home Assistant integration capabilities
+      description: |
+        Returns the stable device identity, protocol version, supported
+        transports, read/control capabilities, and setpoint limits. Production
+        firmware exposes this endpoint only over HTTPS.
+      operationId: getHomeAssistantCapabilities
+      security:
+        - integrationBearer: []
+      responses:
+        '200':
+          description: Integration capabilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCapabilities'
+        '401':
+          description: Missing or invalid integration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/pair:
+    post:
+      tags:
+        - HomeAssistant
+      summary: Claim a physically authorized pairing window
+      description: |
+        Exchanges the six-digit code displayed on the physical controller for
+        a one-time plaintext integration token. The window lasts five minutes,
+        closes after one successful claim, and closes after five invalid
+        attempts. A successful claim rotates any previous integration token.
+        This endpoint is available only over the dedicated TLS identity on
+        port 8443.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+              properties:
+                code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+                  example: '042731'
+      responses:
+        '200':
+          description: Pairing claimed and integration token issued once
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - protocol_version
+                  - device_id
+                  - sha256_fingerprint
+                  - token
+                properties:
+                  protocol_version:
+                    type: integer
+                    example: 1
+                  device_id:
+                    type: string
+                    example: arctic-dc1ed587e540
+                  sha256_fingerprint:
+                    type: string
+                    pattern: '^[0-9a-f]{64}$'
+                  token:
+                    type: string
+                    pattern: '^[0-9a-f]{64}$'
+        '400':
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid pairing code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Physical pairing window is not open
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Pairing window closed after too many invalid attempts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/state:
+    get:
+      tags:
+        - HomeAssistant
+      summary: Coherent Home Assistant state snapshot
+      description: |
+        Returns a complete versioned state snapshot. Revisions are monotonic
+        within one boot and change whenever an exposed state field changes.
+        Production firmware exposes this endpoint only over HTTPS.
+      operationId: getHomeAssistantState
+      security:
+        - integrationBearer: []
+      responses:
+        '200':
+          description: Versioned state snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantStateSnapshot'
+        '401':
+          description: Missing or invalid integration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/control/power:
+    put:
+      tags:
+        - HomeAssistant
+      summary: Accept an allowlisted power command
+      operationId: setHomeAssistantPower
+      security:
+        - integrationBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HomeAssistantPowerCommand'
+      responses:
+        '202':
+          description: Command accepted; wait for pushed or reconciled state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCommandAccepted'
+        '401':
+          description: Missing or invalid integration token
+        '409':
+          description: Conflicting command ID reuse
+        '422':
+          description: Invalid body or value
+        '503':
+          description: Control unavailable or unsupported
+
+  /api/v1/control/mode:
+    put:
+      tags:
+        - HomeAssistant
+      summary: Accept an allowlisted exact-mode command
+      operationId: setHomeAssistantMode
+      security:
+        - integrationBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HomeAssistantModeCommand'
+      responses:
+        '202':
+          description: Command accepted; wait for pushed or reconciled state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCommandAccepted'
+        '401':
+          description: Missing or invalid integration token
+        '409':
+          description: Conflicting command ID reuse
+        '422':
+          description: Invalid body or mode
+        '503':
+          description: Control unavailable or unsupported
+
+  /api/v1/control/setpoint:
+    put:
+      tags:
+        - HomeAssistant
+      summary: Accept one allowlisted setpoint command
+      operationId: setHomeAssistantSetpoint
+      security:
+        - integrationBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HomeAssistantSetpointCommand'
+      responses:
+        '202':
+          description: Command accepted; wait for pushed or reconciled state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCommandAccepted'
+        '401':
+          description: Missing or invalid integration token
+        '409':
+          description: Conflicting command ID reuse
+        '422':
+          description: Invalid body, kind, or range
+        '503':
+          description: Control unavailable or unsupported
+
+  /api/v1/events:
+    get:
+      tags:
+        - HomeAssistant
+      summary: Authenticated Home Assistant WebSocket event stream
+      description: |
+        Upgrades to WSS on port 8443. The server sends a hello message followed
+        by a complete versioned snapshot, then sends latest-value complete
+        snapshots when exposed state changes and at least every 30 seconds.
+        Native WebSocket ping/pong frames provide liveness. At most three event
+        clients are accepted so one integration-server socket remains
+        available for REST reconciliation.
+      operationId: streamHomeAssistantEvents
+      security:
+        - integrationBearer: []
+      responses:
+        '101':
+          description: WebSocket upgrade accepted
+        '401':
+          description: Missing or invalid integration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: WebSocket client limit reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     apiKey:
@@ -2432,6 +2700,13 @@ components:
       in: cookie
       name: arctic_session
       description: Session cookie obtained from /login endpoint
+    integrationBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: 256-bit integration token
+      description: |
+        Dedicated token issued only by the physical Home Assistant pairing
+        flow. Existing web/API authentication settings never bypass it.
 
   schemas:
     Error:
@@ -2440,6 +2715,174 @@ components:
         error:
           type: string
           description: Error message
+
+    HomeAssistantCapabilities:
+      type: object
+      required:
+        - protocol_version
+        - device_id
+        - model
+        - firmware_version
+        - transports
+        - capabilities
+        - setpoint_limits_c
+      properties:
+        protocol_version:
+          type: integer
+          example: 1
+        device_id:
+          type: string
+          pattern: '^arctic-[0-9a-f]{12}$'
+        model:
+          type: string
+        firmware_version:
+          type: string
+        transports:
+          type: object
+          required: [rest, websocket]
+          properties:
+            rest:
+              type: boolean
+            websocket:
+              type: boolean
+        capabilities:
+          type: object
+          required:
+            - read_state
+            - control_power
+            - control_mode
+            - control_setpoints
+            - advanced_parameters
+            - raw_registers
+            - supported_modes
+            - setpoint_controls
+          properties:
+            read_state:
+              type: boolean
+            control_power:
+              type: boolean
+            control_mode:
+              type: boolean
+            control_setpoints:
+              type: boolean
+            advanced_parameters:
+              type: boolean
+              enum: [false]
+            raw_registers:
+              type: boolean
+              enum: [false]
+            supported_modes:
+              type: array
+              items:
+                type: string
+                enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+            setpoint_controls:
+              type: object
+              required: [cooling, heating, hot_water]
+              properties:
+                cooling:
+                  type: boolean
+                heating:
+                  type: boolean
+                hot_water:
+                  type: boolean
+        setpoint_limits_c:
+          type: object
+
+    HomeAssistantCommandAccepted:
+      type: object
+      required: [accepted, command_id, status]
+      properties:
+        accepted:
+          type: boolean
+          enum: [true]
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        status:
+          type: string
+          example: accepted_waiting_for_reported_state
+
+    HomeAssistantPowerCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, "on"]
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        "on":
+          type: boolean
+
+    HomeAssistantModeCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, mode]
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        mode:
+          type: string
+          enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+
+    HomeAssistantSetpointCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, kind, value]
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        kind:
+          type: string
+          enum: [cooling, heating, hot_water]
+        value:
+          type: integer
+
+    HomeAssistantStateSnapshot:
+      type: object
+      required:
+        - protocol_version
+        - device_id
+        - boot_id
+        - revision
+        - captured_at_ms
+        - state
+      properties:
+        protocol_version:
+          type: integer
+          example: 1
+        device_id:
+          type: string
+          pattern: '^arctic-[0-9a-f]{12}$'
+        boot_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+        revision:
+          type: integer
+          minimum: 1
+        captured_at_ms:
+          type: integer
+          minimum: 0
+        state:
+          type: object
+          required:
+            - connected
+            - unit_on
+            - mode
+            - operation
+            - defrosting
+            - components
+            - temperatures_c
+            - setpoints_c
+            - readings
+            - error
+
 
     LogEntry:
       type: object

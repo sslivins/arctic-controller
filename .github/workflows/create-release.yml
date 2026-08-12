@@ -59,6 +59,13 @@ jobs:
       - name: Fetch dependencies
         run: python3 fetch_repos.py
 
+      - name: Verify production security configuration
+        run: |
+          if grep -q '^CONFIG_TEST_ENDPOINTS=y' sdkconfig sdkconfig.defaults; then
+            echo "::error::Production releases must not include /api/test/* endpoints"
+            exit 1
+          fi
+
       - name: ESP-IDF Production Build (no test endpoints)
         uses: espressif/esp-idf-ci-action@v1
         with:
