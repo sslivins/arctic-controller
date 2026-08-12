@@ -84,6 +84,23 @@ static esp_err_t integration_identity_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+static esp_err_t integration_token_delete_handler(httpd_req_t* req)
+{
+    // Revoke any integration token so the device is left unpaired. Used by
+    // pairing test teardown to avoid leaving the controller in a "Paired"
+    // state (and its revoke button visible) after the suite runs.
+    if (!auth_mgr_revoke_integration_token()) {
+        send_json_error(
+            req, "500 Internal Server Error",
+            "Could not revoke integration token");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, "{\"revoked\":true}");
+    return ESP_OK;
+}
+
 static esp_err_t integration_token_post_handler(httpd_req_t* req)
 {
     char token[AUTH_INTEGRATION_TOKEN_LEN + 1];
@@ -2125,6 +2142,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &integration_token_uri);
+
+    httpd_uri_t integration_token_delete_uri = {
+        .uri = "/api/test/ha-token",
+        .method = HTTP_DELETE,
+        .handler = integration_token_delete_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &integration_token_delete_uri);
 
     httpd_uri_t integration_pairing_uri = {
         .uri = "/api/test/ha-pairing-window",

@@ -4,7 +4,24 @@ import re
 import time
 from urllib.parse import urlsplit
 
+import pytest
+
 from device_client import DeviceClient
+
+
+@pytest.fixture(autouse=True)
+def _revoke_integration_token(device: DeviceClient):
+    """Leave the controller unpaired after each test.
+
+    Several tests pair the controller (issuing an integration token). Without
+    cleanup the device is left in a "Paired" state with the revoke button
+    visible, which misrepresents a fresh device on the next boot/CI run.
+    """
+    yield
+    try:
+        device.session.delete(f"{device.base_url}/api/test/ha-token", timeout=10)
+    except Exception:
+        pass
 
 
 def _open_pairing_screen(device: DeviceClient) -> None:
@@ -75,3 +92,30 @@ def test_controller_code_completes_pairing(device: DeviceClient):
     status = device.find_widget(tag="home_assistant_status")
     assert status is not None
     assert status.text == "Paired"
+
+
+def test_revoke_button_hidden_until_paired(device: DeviceClient):
+    """The revoke button only appears once an integration token exists."""
+    device.session.delete(f"{device.base_url}/api/test/ha-token", timeout=10)
+    _open_pairing_screen(device)
+    assert device.find_widget(tag="home_assistant_revoke") is None
+
+    device.session.post(f"{device.base_url}/api/test/ha-token", timeout=10)
+    device.click(tag="home_assistant_back")
+    assert device.wait_for_screen("settings", timeout=5.0)
+    device.click(tag="settings_home_assistant")
+    assert device.wait_for_screen("home_assistant", timeout=5.0)
+    time.sleep(0.5)
+    assert device.find_widget(tag="home_assistant_revoke") is not None
+
+
+def test_revoke_modal_confirm_label_is_concise(device: DeviceClient):
+    """Revoke modal confirm button uses the short 'Revoke' label so the text
+    does not overflow the fixed-width button."""
+    device.session.post(f"{device.base_url}/api/test/ha-token", timeout=10)
+    _open_pairing_screen(device)
+    device.click(tag="home_assistant_revoke")
+    time.sleep(0.5)
+    # The full "Revoke Home Assistant" wording remains on the background
+    # screen button; the modal confirm button must be the concise action.
+    assert device.find_widget(text="Revoke") is not None

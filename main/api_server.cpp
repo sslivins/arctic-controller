@@ -362,7 +362,7 @@ bool api_server_start(void)
         return false;
     }
 
-    const int uri_handlers = 106;
+    const int uri_handlers = 107;
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
