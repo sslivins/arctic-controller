@@ -256,7 +256,7 @@ static void revoke_btn_cb(lv_event_t* event)
     lv_obj_set_style_bg_color(confirm, COLOR_ERROR, LV_PART_MAIN);
     lv_obj_add_event_cb(confirm, revoke_confirm_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t* confirm_label = lv_label_create(confirm);
-    lv_label_set_text(confirm_label, i18n_get(STR_HA_REVOKE));
+    lv_label_set_text(confirm_label, i18n_get(STR_HA_REVOKE_ACTION));
     lv_obj_set_style_text_font(confirm_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_center(confirm_label);
 }
