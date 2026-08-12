@@ -42,8 +42,11 @@ jobs:
         run: pip install -r tests/requirements.txt
 
       - name: Run host-side tests (no hardware)
+        # tests/web has its own playwright dependency set and is browser-only;
+        # exclude it from collection so a missing browser dep can't abort the
+        # host-side run. The `hostside` marker still deselects everything else.
         run: >-
-          python -m pytest tests -m hostside -v --tb=short
+          python -m pytest tests -m hostside --ignore=tests/web -v --tb=short
           -p no:cacheprovider --junitxml=host-test-results.xml
 
       - name: Publish host-side test results
