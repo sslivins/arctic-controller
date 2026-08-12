@@ -21,6 +21,15 @@ on:
       - 'tests/**'
       - '!tests/**/*.md'
       - '.github/workflows/device-tests.yml'
+  push:
+    # Authoritative post-merge validation of the exact main commit SHA. The
+    # release workflow consumes the attestation produced by these runs instead
+    # of re-running the physical device suite, and it requires the release
+    # target to equal main HEAD. To keep main HEAD always releasable, validate
+    # EVERY main commit (no paths filter). Version-bump commits carry [skip ci]
+    # and are therefore not redundantly re-validated.
+    branches:
+      - main
   workflow_call:
   workflow_dispatch:
 
@@ -581,6 +590,77 @@ jobs:
           resp = urllib.request.urlopen(req)
           print(f'Gist updated: {resp.status}')
           "
+
+      - name: Record release validation attestation
+        id: attestation
+        if: >-
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          steps.ui_tests.outcome == 'success' &&
+          steps.api_tests.outcome == 'success' &&
+          steps.web_tests.outcome == 'success'
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          REPOSITORY: ${{ github.repository }}
+          RUNNER_NAME: ${{ runner.name }}
+          ESP_IDF_VERSION: v5.5.2
+          UI_OUTCOME: ${{ steps.ui_tests.outcome }}
+          API_OUTCOME: ${{ steps.api_tests.outcome }}
+          WEB_OUTCOME: ${{ steps.web_tests.outcome }}
+        run: |
+          set -euo pipefail
+          # Authoritative record that this exact main SHA passed the physical
+          # device suite. create-release.yml consumes this instead of re-running
+          # the ~40-minute hardware suite.
+          TREE_SHA=$(git rev-parse "HEAD^{tree}")
+          FW_DIGEST=$(sha256sum build/arctic_controller.bin | awk '{print $1}')
+          export TREE_SHA FW_DIGEST
+          python3 - <<'PY'
+          import json, os, datetime
+
+          attestation = {
+              "schema_version": 1,
+              "kind": "arctic-device-validation",
+              "repository": os.environ["REPOSITORY"],
+              "commit_sha": os.environ["COMMIT_SHA"],
+              "tree_sha": os.environ["TREE_SHA"],
+              "workflow": "device-tests.yml",
+              "event": "push",
+              "run_id": os.environ["RUN_ID"],
+              "run_attempt": os.environ["RUN_ATTEMPT"],
+              "suites": {
+                  "ui": os.environ["UI_OUTCOME"],
+                  "api": os.environ["API_OUTCOME"],
+                  "web": os.environ["WEB_OUTCOME"],
+              },
+              "test_firmware": {
+                  "file": "build/arctic_controller.bin",
+                  "sha256": os.environ["FW_DIGEST"],
+                  "test_endpoints_enabled": True,
+              },
+              "environment": {
+                  "esp_idf_version": os.environ["ESP_IDF_VERSION"],
+                  "target": "esp32p4",
+                  "runner": os.environ["RUNNER_NAME"],
+              },
+              "created_at": datetime.datetime.now(
+                  datetime.timezone.utc
+              ).isoformat(),
+          }
+          with open("release-attestation.json", "w", encoding="utf-8") as fh:
+              json.dump(attestation, fh, indent=2, sort_keys=True)
+          print(json.dumps(attestation, indent=2, sort_keys=True))
+          PY
+
+      - name: Upload release validation attestation
+        if: steps.attestation.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-attestation-${{ github.sha }}
+          path: release-attestation.json
+          retention-days: 90
 
       - name: Fail job if any tests failed
         if: always()
