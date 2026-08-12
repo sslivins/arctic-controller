@@ -1,5 +1,9 @@
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.hostside
+
 
 FLASH_SIZE = 16 * 1024 * 1024
 

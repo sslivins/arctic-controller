@@ -41,6 +41,11 @@ on:
         options:
           - esp32p4
 
+  # Run against the prospective merged state when a PR is queued via the merge
+  # queue. No paths filter here: skipping a required check in the queue would
+  # stall it, so build always runs for merge groups.
+  merge_group:
+
 permissions:
   contents: read
 

@@ -4,7 +4,9 @@ import re
 from pathlib import Path
 
 import yaml
+import pytest
 
+pytestmark = pytest.mark.hostside
 
 ROOT = Path(__file__).resolve().parents[2]
 API_SERVER = ROOT / "main" / "api_server.cpp"

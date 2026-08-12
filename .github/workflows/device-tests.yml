@@ -33,6 +33,11 @@ on:
   workflow_call:
   workflow_dispatch:
 
+  # Validate the prospective merged state when a PR is queued via the merge
+  # queue. No paths filter: a skipped required check would stall the queue, so
+  # the physical suite always runs for merge groups.
+  merge_group:
+
 # Only one device-test run at a time (single device on the network)
 concurrency:
   group: device-tests
