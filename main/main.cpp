@@ -311,6 +311,20 @@ extern "C" void app_main(void)
     if (ota_mgr_is_pending_verify()) {
         ESP_LOGW(TAG, "*** First boot after OTA — firmware pending verification ***");
         ESP_LOGW(TAG, "*** Will mark valid after UI creation succeeds ***");
+        // ================== DEMO — DO NOT MERGE ==================
+        // Simulate a broken build that crashes on the first post-OTA boot,
+        // BEFORE esp_ota_mark_app_valid_cancel_rollback() is ever reached. We
+        // crash here (before WiFi/HTTP start) so the broken image is NEVER
+        // reachable on the network — the device can only be observed AFTER the
+        // bootloader rolls back to the previous good image, making the CI
+        // identity gate deterministically fail (no race with a briefly-online
+        // broken image). Expected chain: OTA installs this image -> boots
+        // PENDING_VERIFY -> abort() -> panic reboot -> bootloader rolls back to
+        // the previous good image -> device comes online on the OLD firmware ->
+        // CI sees the OLD build_sha and FAILS the job. This block only exists in
+        // this broken image; the rolled-back image does not contain it.
+        ESP_LOGE(TAG, "DEMO: forcing early crash before mark_valid to exercise OTA rollback");
+        abort();
     }
 
     // Start WiFi initialization in background task (runs parallel to animation)
