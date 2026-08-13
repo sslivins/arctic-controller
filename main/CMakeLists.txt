@@ -133,6 +133,29 @@ add_custom_command(
 add_custom_target(web_assets DEPENDS "${WEB_GZ}")
 add_dependencies(${COMPONENT_LIB} web_assets)
 
+# Bake a per-build fingerprint into the firmware so CI can verify, after an OTA,
+# that the device is actually running THE BUILD UNDER TEST and did not silently
+# roll back to the previous good image. CI writes build_sha.txt (at the project
+# root) before building; local builds default to "dev". A file is used rather
+# than an env var because the ESP-IDF build runs in a container that does not
+# forward arbitrary host environment variables. The define is attached directly
+# to this component's target (not add_compile_definitions at the project root),
+# because the root CMakeLists runs after project()/component registration, so a
+# directory-scope define there never reaches these translation units.
+if(EXISTS "${CMAKE_SOURCE_DIR}/build_sha.txt")
+    file(READ "${CMAKE_SOURCE_DIR}/build_sha.txt" ARCTIC_BUILD_SHA)
+    string(STRIP "${ARCTIC_BUILD_SHA}" ARCTIC_BUILD_SHA)
+elseif(DEFINED ENV{ARCTIC_BUILD_SHA} AND NOT "$ENV{ARCTIC_BUILD_SHA}" STREQUAL "")
+    set(ARCTIC_BUILD_SHA "$ENV{ARCTIC_BUILD_SHA}")
+else()
+    set(ARCTIC_BUILD_SHA "dev")
+endif()
+if("${ARCTIC_BUILD_SHA}" STREQUAL "")
+    set(ARCTIC_BUILD_SHA "dev")
+endif()
+message(STATUS "ARCTIC_BUILD_SHA=${ARCTIC_BUILD_SHA}")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE ARCTIC_BUILD_SHA="${ARCTIC_BUILD_SHA}")
+
 # LVGL (a separate archive, liblvgl.a) references lv_malloc_core / lv_free_core /
 # etc., which we provide from lv_mem_psram.c here in libmain.a. Because libmain
 # is placed before liblvgl on the link line, the linker discards our object
