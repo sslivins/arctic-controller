@@ -9,6 +9,9 @@ dependencies.lock
 # Generated files
 main/web/*.gz
 
+# Per-build fingerprint written by CI (see CMakeLists.txt / build_sha gate)
+build_sha.txt
+
 # Dependencies (fetched via fetch_repos.py)
 dependencies/
 
