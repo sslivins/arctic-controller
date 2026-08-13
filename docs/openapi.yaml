@@ -4,7 +4,10 @@ info:
   description: |
     REST API for the Arctic Heat Pump Controller running on ESP32-P4 with ESP32-C6 WiFi.
     
-    The device is discoverable via mDNS at `http://arctic.local` when connected to your local network.
+    The device is discoverable via mDNS at `http://arctic-<xxxx>.local` when connected to your local network,
+    where `<xxxx>` is the last two bytes of the WiFi MAC (lowercase hex, e.g. `arctic-3f2a.local`).
+    The suffix keeps multiple controllers from colliding on `arctic.local`. The exact name is reported as
+    `hostname`/`local_url` by `GET /api/wifi`.
     HTTPS is available on port 443 when TLS certificates are provisioned via the `/api/tls/certificate` endpoint.
     
     ## Features

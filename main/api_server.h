@@ -13,7 +13,10 @@ extern "C" {
 /**
  * @brief Initialize mDNS service
  * 
- * Registers the device as "arctic.local" on the network
+ * Registers the device on the network as "arctic-<xxxx>.local", where
+ * <xxxx> is the last two bytes of the WiFi station MAC (lowercase hex).
+ * The MAC suffix keeps the name unique when multiple controllers share a
+ * network.
  * 
  * @return true on success
  */
@@ -45,7 +48,7 @@ bool api_server_is_running(void);
 /**
  * @brief Get the device hostname for mDNS
  * 
- * @return hostname (e.g., "arctic")
+ * @return hostname (e.g., "arctic-3f2a")
  */
 const char* api_server_get_hostname(void);
 
