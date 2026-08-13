@@ -74,6 +74,11 @@ jobs:
       - name: Fetch dependencies
         run: python3 fetch_repos.py
 
+      - name: Stamp build fingerprint
+        run: |
+          echo -n "${GITHUB_SHA}" > build_sha.txt
+          echo "Baked build_sha=${GITHUB_SHA}"
+
       - name: Disable test endpoints for production build
         run: |
           echo "CONFIG_TEST_ENDPOINTS=n" >> sdkconfig.defaults

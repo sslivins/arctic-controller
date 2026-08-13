@@ -59,6 +59,11 @@ jobs:
       - name: Fetch dependencies
         run: python3 fetch_repos.py
 
+      - name: Stamp build fingerprint
+        run: |
+          echo -n "${GITHUB_SHA}" > build_sha.txt
+          echo "Baked build_sha=${GITHUB_SHA}"
+
       - name: Enable test endpoints for device testing
         run: |
           python3 - <<'PY'
@@ -97,12 +102,16 @@ jobs:
           fi
           echo "OK: CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y in compiled firmware"
 
+      - name: Stage build fingerprint for device job
+        run: cp build_sha.txt build/build_sha.txt
+
       - name: Upload firmware + flash metadata
         uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: |
             build/arctic_controller.bin
+            build/build_sha.txt
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
             build/ota_data_initial.bin
@@ -418,6 +427,48 @@ jobs:
             echo "ERROR: Could not read device API key after HTTPS became ready"
             exit 1
           fi
+
+      - name: Verify running firmware is the build under test (rollback guard)
+        # CRITICAL release-safety gate. After the OTA (or USB fallback) the device
+        # MUST be running the exact firmware we just built. If the new firmware
+        # crashed before esp_ota_mark_app_valid_cancel_rollback(), the bootloader
+        # rolls back to the PREVIOUS good image — the device would then come back
+        # online and happily pass every test suite against the OLD firmware,
+        # masking a broken build and letting it be released. This step catches
+        # that: the device's reported build_sha must equal the build_sha we baked
+        # into this build. A mismatch (or missing field = pre-build_sha firmware)
+        # means a rollback or a stale OTA, and the job fails BEFORE any suite runs.
+        run: |
+          set -euo pipefail
+          EXPECTED=$(cat build/build_sha.txt 2>/dev/null || true)
+          if [ -z "$EXPECTED" ]; then
+            echo "::error::build/build_sha.txt is empty/missing — cannot verify firmware identity."
+            exit 1
+          fi
+          echo "Expected build_sha: $EXPECTED"
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          ACTUAL=""
+          for attempt in $(seq 1 15); do
+            for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
+              RESP=$(curl -sk --connect-timeout 3 --max-time 8 \
+                -H "X-API-Key: ${ARCTIC_API_KEY}" "$URL/api/ota/status" 2>/dev/null) || true
+              ACTUAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || true
+              if [ -n "$ACTUAL" ]; then
+                break
+              fi
+            done
+            if [ -n "$ACTUAL" ]; then
+              break
+            fi
+            sleep 2
+          done
+          echo "Device reported build_sha: '${ACTUAL:-<none>}'"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::Firmware identity mismatch — device is NOT running the build under test."
+            echo "::error::expected='$EXPECTED' actual='${ACTUAL:-<missing>}'. The device likely ROLLED BACK to the previous good image (the new firmware crashed before marking itself valid), or the OTA did not take. Refusing to run the suite against firmware that is not the build being validated."
+            exit 1
+          fi
+          echo "OK: device is running the build under test ($EXPECTED)"
 
       - name: Start controller serial capture
         run: |
