@@ -86,6 +86,17 @@ jobs:
       - name: Verify test instrumentation was compiled
         run: grep -q '^#define CONFIG_TEST_ENDPOINTS 1$' build/config/sdkconfig.h
 
+      - name: Verify OTA rollback protection is enabled
+        # P0 tripwire — see build.yml for rationale. A disabled bool has NO
+        # #define at all in sdkconfig.h, so this grep fails loudly if bootloader
+        # app rollback is not compiled in.
+        run: |
+          if ! grep -q '^#define CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is NOT enabled in the compiled firmware — OTA rollback protection is OFF."
+            exit 1
+          fi
+          echo "OK: CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y in compiled firmware"
+
       - name: Upload firmware + flash metadata
         uses: actions/upload-artifact@v7
         with:
