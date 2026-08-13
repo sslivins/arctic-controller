@@ -398,7 +398,8 @@
     ];
     const settingsNav = [
       ["wifi", "WiFi"], ["firmware", "Firmware"], ["time", "Time"], ["display", "Display"],
-      ["preferences", "Preferences"], ["security", "Security"], ["diagnostics", "Diagnostics"], ["system", "System"]
+      ["preferences", "Preferences"], ["security", "Security"], ["home_assistant", "Home Assistant"],
+      ["diagnostics", "Diagnostics"], ["system", "System"]
     ];
     const modes = ["cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto"];
 
@@ -412,6 +413,7 @@
       errors: { active: [], history: [] }, params: {}, events: [], eventTotal: 0,
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
+      ha: {}, haTimer: null,
       settingsLoaded: false, settingsPromise: null,
       logs: [], logSeq: 0, logLevel: "V", logTimer: null, pollTimer: null,
       powerHoldTimer: null, powerHolding: false
@@ -498,6 +500,7 @@
             <span class="status-item">${esc(state.wifi.ssid || "WiFi disconnected")}</span>
             <span class="status-item">${esc(state.status.time?.local || "--:--")}</span>
             <button class="icon-btn" data-route="settings" aria-label="Settings">⚙</button>
+            ${state.auth.required ? `<button class="btn" data-action="logout" style="padding:6px 12px;font-size:13px" aria-label="Sign out">Sign out</button>` : ""}
           </div>
         </header>
         <div class="layout">
@@ -775,6 +778,37 @@
           ${state.tls.has_certs ? `<p><button class="btn danger" data-action="delete-tls">Delete certificate</button></p>` : ""}
           ${!state.tls.auth_ready ? `<div class="notice">Enable both authentication methods before provisioning TLS.</div>` : ""}</section></div>`;
     }
+    function homeAssistantSettings() {
+      const ha = state.ha || {};
+      const paired = !!ha.paired;
+      const active = !!ha.pairing_active;
+      const code = ha.code || "";
+      const remaining = Math.max(0, ha.remaining_seconds || 0);
+      const clock = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
+      let body;
+      if (active && code) {
+        body = `<div class="notice">Pairing is active. Enter this code in Home Assistant to finish.</div>
+          <div style="font-size:44px;letter-spacing:12px;text-align:center;color:var(--cp-accent);font-weight:700;margin:14px 0">${esc(code)}</div>
+          <div class="metric-sub" style="text-align:center">Expires in <span id="ha-clock">${clock}</span></div>
+          <div class="btn-row" style="margin-top:14px"><button class="btn" data-action="copy-ha-code">Copy code</button><button class="btn danger" data-action="ha-cancel">Cancel pairing</button></div>`;
+      } else if (active) {
+        body = `<div class="notice">A pairing window is already open. Enter the code shown where it was started (this page or the controller's screen) into Home Assistant, or cancel to start a new one.</div>
+          <div class="metric-sub" style="text-align:center">Expires in <span id="ha-clock">${clock}</span></div>
+          <div class="btn-row" style="margin-top:14px"><button class="btn danger" data-action="ha-cancel">Cancel pairing</button></div>`;
+      } else {
+        const pairIntro = paired
+          ? "This controller is paired with Home Assistant. Re-pair to connect a different Home Assistant or refresh the credential — the current connection keeps working until you finish."
+          : "Start pairing to connect this controller to Home Assistant. A six-digit code will be shown here; enter it in Home Assistant to finish.";
+        body = `<p class="metric-sub">${pairIntro}</p>
+          <div class="btn-row"><button class="btn ${paired ? "" : "primary"}" data-action="ha-pair">${paired ? "Re-pair" : "Start pairing"}</button></div>`;
+      }
+      return `<div class="grid"><section class="card">
+        <div class="card-head"><h2>Home Assistant</h2><span class="badge ${paired ? "good" : ""}">${paired ? "Paired" : "Not paired"}</span></div>
+        <div class="kv"><span>Device name</span><strong>${esc(ha.device_name || "--")}</strong></div>
+        ${body}
+        ${paired ? `<div class="btn-row" style="margin-top:18px"><button class="btn danger" data-action="ha-revoke">Revoke pairing</button></div>` : ""}
+      </section></div>`;
+    }
     function diagnosticsSettings() {
       return `<section class="card"><div class="card-head"><div><h2>Diagnostics</h2><div class="metric-sub">Logs poll only while this page is open.</div></div>
         <select id="log-level" style="width:120px"><option>V</option><option>D</option><option>I</option><option>W</option><option>E</option></select></div>
@@ -793,7 +827,8 @@
     }
     function settingsPage() {
       const pages = { wifi: wifiSettings, firmware: firmwareSettings, time: timeSettings, display: displaySettings,
-        preferences: preferenceSettings, security: securitySettings, diagnostics: diagnosticsSettings, system: systemSettings };
+        preferences: preferenceSettings, security: securitySettings, home_assistant: homeAssistantSettings,
+        diagnostics: diagnosticsSettings, system: systemSettings };
       if (!state.settingsLoaded) {
         return settingsShell(`<section class="card"><div class="spinner"></div></section>`);
       }
@@ -886,8 +921,39 @@
       }, 2000);
     }
     function stopLogPolling() { if (state.logTimer) clearInterval(state.logTimer); state.logTimer = null; }
+    async function loadHaStatus() {
+      const data = await api("/api/ha/status");
+      if (data.pairing_active) {
+        const code = (state.ha && state.ha.code) || sessionStorage.getItem("ha_pair_code") || "";
+        state.ha = { ...data, code };
+      } else {
+        sessionStorage.removeItem("ha_pair_code");
+        state.ha = { ...data, code: "" };
+      }
+    }
+    function startHaPolling() {
+      stopHaPolling();
+      state.haTimer = setInterval(async () => {
+        if (state.route !== "settings" || state.settingsPage !== "home_assistant") { stopHaPolling(); return; }
+        try {
+          const before = JSON.stringify([state.ha.paired, state.ha.pairing_active, state.ha.device_name, state.ha.code]);
+          await loadHaStatus();
+          const after = JSON.stringify([state.ha.paired, state.ha.pairing_active, state.ha.device_name, state.ha.code]);
+          if (before !== after) { render(); return; }
+          // Only the countdown changed: update it in place so an active code
+          // stays selectable and the DOM isn't rebuilt every second.
+          const clockEl = document.getElementById("ha-clock");
+          if (clockEl) {
+            const remaining = Math.max(0, state.ha.remaining_seconds || 0);
+            clockEl.textContent = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
+          }
+        } catch (_) {}
+      }, 1000);
+    }
+    function stopHaPolling() { if (state.haTimer) clearInterval(state.haTimer); state.haTimer = null; }
     async function navigate(route, settingsPage = null) {
       stopLogPolling();
+      stopHaPolling();
       state.route = route;
       if (settingsPage) state.settingsPage = settingsPage;
       const targetHash = route === "settings" ? `#/settings/${state.settingsPage}` : `#/${route}`;
@@ -900,6 +966,7 @@
           await ensureSettings();
           if (state.settingsPage === "wifi") { await api("/api/wifi/scan", { method: "POST" }).catch(() => {}); setTimeout(loadNetworks, 500); }
           if (state.settingsPage === "diagnostics") startLogPolling();
+          if (state.settingsPage === "home_assistant") { await loadHaStatus().catch(() => {}); startHaPolling(); }
         }
       } catch (error) { toast(error.message, "bad"); }
       if (route === "events" && document.activeElement?.id === "event-search") refreshEventResults();
@@ -1031,6 +1098,25 @@
       if (action === "delete-tls" && confirm("Delete the TLS certificate?")) {
         await mutate("/api/tls/certificate", { method: "DELETE" }, "Certificate deleted; restart required"); await loadSettings(); render();
       }
+      if (action === "logout") { await api("/logout", { method: "POST" }).catch(() => {}); location.reload(); return; }
+      if (action === "copy-ha-code") { await navigator.clipboard.writeText(state.ha.code || ""); toast("Pairing code copied", "good"); }
+      if (action === "ha-pair") {
+        const data = await mutate("/api/ha/pair", { method: "POST" }, "Pairing started");
+        const code = data.code || "";
+        if (code) sessionStorage.setItem("ha_pair_code", code);
+        state.ha = { ...state.ha, code, pairing_active: true, remaining_seconds: data.expires_in_seconds || 0 };
+        render(); startHaPolling();
+      }
+      if (action === "ha-cancel") {
+        await mutate("/api/ha/pair", { method: "DELETE" }, "Pairing cancelled");
+        sessionStorage.removeItem("ha_pair_code");
+        stopHaPolling(); state.ha = { ...state.ha, code: "", pairing_active: false, remaining_seconds: 0 }; render();
+      }
+      if (action === "ha-revoke" && confirm("Revoke Home Assistant pairing? Home Assistant will lose access until you pair again.")) {
+        await mutate("/api/ha/revoke", { method: "POST" }, "Pairing revoked");
+        sessionStorage.removeItem("ha_pair_code");
+        stopHaPolling(); state.ha = { ...state.ha, paired: false, code: "", pairing_active: false, remaining_seconds: 0 }; render();
+      }
       if (action === "refresh-logs") await loadLogs(true);
       if (action === "clear-logs" && confirm("Clear controller logs?")) {
         await mutate("/api/logs", { method: "DELETE" }, "Logs cleared"); state.logs = []; state.logSeq = 0; render();
@@ -1140,6 +1226,11 @@
       if (state.route === "events" && document.activeElement?.id === "event-search") refreshEventResults();
       else render();
       if (state.route === "settings" && state.settingsPage === "diagnostics") startLogPolling();
+      if (state.route === "settings" && state.settingsPage === "home_assistant") {
+        await loadHaStatus().catch(() => {});
+        render();
+        startHaPolling();
+      }
       state.pollTimer = setInterval(async () => {
         if (!state.auth.loggedIn || state.auth.changeRequired) return;
         try {
