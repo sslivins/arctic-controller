@@ -448,17 +448,16 @@ jobs:
             exit 1
           fi
           echo "Expected build_sha: $EXPECTED"
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          # HTTPS-only: this request carries the X-API-Key secret, and the
+          # security contract (tests/api/test_ha_security_contract.py) forbids
+          # secret-bearing automation from ever falling back to plain HTTP.
+          # ARCTIC_URL is already https:// and the preceding "Require HTTPS
+          # readiness" step guarantees the TLS server is up.
           ACTUAL=""
           for attempt in $(seq 1 15); do
-            for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"; do
-              RESP=$(curl -sk --connect-timeout 3 --max-time 8 \
-                -H "X-API-Key: ${ARCTIC_API_KEY}" "$URL/api/ota/status" 2>/dev/null) || true
-              ACTUAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || true
-              if [ -n "$ACTUAL" ]; then
-                break
-              fi
-            done
+            RESP=$(curl -sk --connect-timeout 3 --max-time 8 \
+              -H "X-API-Key: ${ARCTIC_API_KEY}" "${ARCTIC_URL}/api/ota/status" 2>/dev/null) || true
+            ACTUAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || true
             if [ -n "$ACTUAL" ]; then
               break
             fi
