@@ -187,39 +187,55 @@ jobs:
 
       - name: Sync API key from device (pre-OTA)
         run: |
-          # Read the device's current API key before OTA so the upload can authenticate.
-          # The device may have a randomly-generated key or one from a previous NVS flash.
+          # Authenticate to the device that is CURRENTLY running (the previous
+          # build) so the OTA upload below can present a valid API key. The
+          # device's credentials are unknown at this point (a prior run set its
+          # own isolated test creds), so we first reset them to known values via
+          # the unauthenticated test-only endpoint /api/test/credentials, exactly
+          # like the post-flash "Provision isolated test credentials" step. We
+          # then log in and read the device's API key. Without this the upload
+          # 401s and the job silently falls back to a USB flash, which does NOT
+          # exercise the A/B OTA pending-verify path — so rollback would never be
+          # tested and a rolled-back broken build could pass. Real OTA is what
+          # the identity gate is meant to guard, so make OTA the primary path.
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          TEST_USERNAME="arctic"
+          TEST_PASSWORD="ArcticTest!2026"
+          BODY="{\"username\": \"$TEST_USERNAME\", \"password\": \"$TEST_PASSWORD\"}"
           DEVICE_KEY=""
 
-          for URL in "$ARCTIC_URL_HTTPS"; do
-            RESP=$(curl -sk --connect-timeout 3 --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
-            DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+          for i in $(seq 1 6); do
+            # (Re)set the running firmware's credentials to known values. This is
+            # a test-only endpoint (CONFIG_TEST_ENDPOINTS) and needs no auth.
+            curl -sk --connect-timeout 3 --max-time 8 \
+              -X POST "$ARCTIC_URL_HTTPS/api/test/credentials" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" > /dev/null 2>&1 || true
 
-            if [ -z "$DEVICE_KEY" ]; then
-              JAR=$(mktemp)
-              curl -sk -c "$JAR" -X POST "$URL/login" \
-                -H "Content-Type: application/json" \
-                -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
-              RESP=$(curl -sk -b "$JAR" --max-time 5 "$URL/api/auth/apikey" 2>/dev/null) || true
-              DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
-              rm -f "$JAR"
-            fi
+            JAR=$(mktemp)
+            curl -sk -c "$JAR" --connect-timeout 3 --max-time 8 \
+              -X POST "$ARCTIC_URL_HTTPS/login" \
+              -H "Content-Type: application/json" \
+              -d "{\"username\": \"$TEST_USERNAME\", \"password\": \"$TEST_PASSWORD\"}" > /dev/null 2>&1 || true
+            RESP=$(curl -sk -b "$JAR" --connect-timeout 3 --max-time 8 \
+              "$ARCTIC_URL_HTTPS/api/auth/apikey" 2>/dev/null) || true
+            rm -f "$JAR"
+            DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
 
             if [ -n "$DEVICE_KEY" ]; then
               break
             fi
+            sleep 2
           done
 
           if [ -n "$DEVICE_KEY" ]; then
             echo "ARCTIC_API_KEY=$DEVICE_KEY" >> $GITHUB_ENV
-            echo "Synced API key from device"
+            echo "Synced API key from device (OTA will authenticate)"
           else
-            echo "Could not read device API key — OTA will use secret"
+            echo "WARNING: Could not read device API key pre-OTA — OTA upload will"
+            echo "likely 401 and the job will fall back to USB serial flash, which"
+            echo "does NOT exercise the OTA rollback path."
           fi
-        env:
-          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
 
       - name: Flash device via OTA
         id: ota_flash
