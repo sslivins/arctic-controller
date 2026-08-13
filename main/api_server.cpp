@@ -1362,7 +1362,9 @@ static esp_err_t http_to_https_redirect_handler(httpd_req_t* req,
         *colon = '\0';
     }
 
-    char location[512];
+    // Sized for "https://" + max Host header + max request URI so the
+    // compiler can prove no truncation (-Werror=format-truncation).
+    char location[640];
     snprintf(location, sizeof(location), "https://%s%s", host, req->uri);
 
     httpd_resp_set_status(req, "301 Moved Permanently");
