@@ -103,7 +103,9 @@ jobs:
           echo "OK: CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y in compiled firmware"
 
       - name: Stage build fingerprint for device job
-        run: cp build_sha.txt build/build_sha.txt
+        # build/ is created by the ESP-IDF Docker container as root, so a plain
+        # cp is denied; use sudo (GitHub-hosted runner has passwordless sudo).
+        run: sudo cp build_sha.txt build/build_sha.txt
 
       - name: Upload firmware + flash metadata
         uses: actions/upload-artifact@v7
