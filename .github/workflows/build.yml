@@ -85,6 +85,22 @@ jobs:
           target: ${{ env.TARGET }}
           path: '.'
 
+      - name: Verify OTA rollback protection is enabled
+        # P0 tripwire: assert the EFFECTIVE compiled config (not what
+        # sdkconfig.defaults merely requests) has bootloader app rollback
+        # enabled. A committed/stale sdkconfig silently overrides the default,
+        # which would ship firmware with the OTA rollback safety net disabled
+        # (esp_ota_mark_app_valid_cancel_rollback() becomes dead code because
+        # the bootloader never arms PENDING_VERIFY). A disabled bool has NO
+        # #define in sdkconfig.h, so this fails loudly. If it ever regresses we
+        # must know immediately, on every build.
+        run: |
+          if ! grep -q '^#define CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is NOT enabled in the compiled firmware — OTA rollback protection is OFF. A bad OTA would not auto-roll-back. Set it =y in the committed sdkconfig to match sdkconfig.defaults."
+            exit 1
+          fi
+          echo "OK: CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y in compiled firmware"
+
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v7
         with:
