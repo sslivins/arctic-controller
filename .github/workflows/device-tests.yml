@@ -201,7 +201,7 @@ jobs:
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           TEST_USERNAME="arctic"
           TEST_PASSWORD="ArcticTest!2026"
-          BODY=$(python3 -c 'import json,os; print(json.dumps({"username": os.environ["TEST_USERNAME"], "password": os.environ["TEST_PASSWORD"]}))')
+          BODY="{\"username\": \"$TEST_USERNAME\", \"password\": \"$TEST_PASSWORD\"}"
           DEVICE_KEY=""
 
           for i in $(seq 1 6); do
