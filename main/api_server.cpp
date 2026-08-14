@@ -3228,9 +3228,7 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(readings, "ac_voltage", hp.ac_voltage);
     cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
     cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
-    cJSON_AddNumberToObject(readings, "dc_current", hp.dc_current);
     cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
-    cJSON_AddNumberToObject(readings, "secondary_eev", hp.secondary_eev_opening);
     cJSON_AddNumberToObject(readings, "power_consumption", hp.realtime_power_w);
     // Estimated performance (macon lib; water flow is an assumed input).
     if (hp.cop_valid) {
@@ -3933,11 +3931,7 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "Reading,DC Voltage,,2122,%.1f,V\r\n", hp.getDcVoltageV());
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,DC Current,,2123,%.1f,A\r\n", hp.dc_current / 10.0f);
-    httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,2124,%u,steps\r\n", hp.primary_eev_opening);
-    httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Secondary EEV Opening,,2125,%u,steps\r\n", hp.secondary_eev_opening);
     httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "Reading,Power Consumption,,2114,%lu,W\r\n", (unsigned long)hp.realtime_power_w);
     httpd_resp_sendstr_chunk(req, line);
@@ -3948,72 +3942,42 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
         httpd_resp_sendstr_chunk(req, line);
     }
 
-    // --- Component Status (register 2135) ---
-    #define DIAG_STATUS1(name_str, mask) \
-        snprintf(line, sizeof(line), "Status,%s,,2135,\"%s\",\r\n", name_str, (hp.status1 & arctic::status1::mask) ? "ON" : "OFF"); \
+    // --- Component Status (derived by the macon library from live registers) ---
+    #define DIAG_BOOL(name_str, val) \
+        snprintf(line, sizeof(line), "Status,%s,,,\"%s\",\r\n", name_str, (val) ? "ON" : "OFF"); \
         httpd_resp_sendstr_chunk(req, line);
 
-    DIAG_STATUS1("Unit",            UNIT_ON)
-    DIAG_STATUS1("Compressor",      COMPRESSOR)
-    DIAG_STATUS1("Fan High",        FAN_HIGH)
-    DIAG_STATUS1("Fan Medium",      FAN_MED)
-    DIAG_STATUS1("Fan Low",         FAN_LOW)
-    DIAG_STATUS1("Water Pump",      WATER_PUMP)
-    DIAG_STATUS1("Four-Way Valve",  FOUR_WAY_VALVE)
-    DIAG_STATUS1("Backup Heater",   BACKUP_HEATER)
-    DIAG_STATUS1("Water Flow Switch", WATER_FLOW_SW)
-    DIAG_STATUS1("High Press Switch", HIGH_PRESS_SW)
-    DIAG_STATUS1("Low Press Switch",  LOW_PRESS_SW)
-    DIAG_STATUS1("Emergency Switch",  EMERGENCY_SW)
-    DIAG_STATUS1("AC Online",       AC_ONLINE)
-    DIAG_STATUS1("Mode Switch",     MODE_SWITCH)
-    DIAG_STATUS1("3-Way Valve 1",   THREE_WAY_V1)
-    DIAG_STATUS1("3-Way Valve 2",   THREE_WAY_V2)
-    #undef DIAG_STATUS1
+    DIAG_BOOL("Unit",              hp.unit_on)
+    DIAG_BOOL("Compressor",        hp.isCompressorRunning())
+    DIAG_BOOL("Fan",               hp.isFanRunning())
+    DIAG_BOOL("Water Pump",        hp.isWaterPumpRunning())
+    DIAG_BOOL("Reversing Valve (cooling)", hp.reversing_valve_cooling)
+    DIAG_BOOL("Backup Heater",     hp.isBackupHeaterOn())
+    DIAG_BOOL("Defrosting",        hp.isDefrosting())
+    #undef DIAG_BOOL
 
-    // --- Component Status (register 2136) ---
-    #define DIAG_STATUS2(name_str, mask) \
-        snprintf(line, sizeof(line), "Status,%s,,2136,\"%s\",\r\n", name_str, (hp.status2 & arctic::status2::mask) ? "ON" : "OFF"); \
-        httpd_resp_sendstr_chunk(req, line);
-
-    DIAG_STATUS2("Solenoid Valve",    SOLENOID_VALVE)
-    DIAG_STATUS2("Unloading Valve",   UNLOADING_VALVE)
-    DIAG_STATUS2("Oil Return Valve",  OIL_RETURN_VALVE)
-    DIAG_STATUS2("Defrosting",        DEFROSTING)
-    DIAG_STATUS2("Refrigerant Recovery", REFRIG_RECOVERY)
-    DIAG_STATUS2("Oil Return",        OIL_RETURN)
-    DIAG_STATUS2("Wired Controller",  WIRED_CTRL_CONN)
-    DIAG_STATUS2("Energy Saving",     ENERGY_SAVING)
-    DIAG_STATUS2("Antifreeze Level 1", ANTIFREEZE_1)
-    DIAG_STATUS2("Antifreeze Level 2", ANTIFREEZE_2)
-    DIAG_STATUS2("Sterilization",     STERILIZATION)
-    #undef DIAG_STATUS2
-
-    // --- Raw status/error register values ---
-    snprintf(line, sizeof(line), "Register,Status 1 (raw),,2135,0x%04X,\r\n", hp.status1);
+    // --- Raw fault-register bytes (2007 + 2125-2128) ---
+    snprintf(line, sizeof(line), "Register,Fault Run/State (raw),,2007,0x%02X,\r\n", hp.fault_run);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Register,Status 2 (raw),,2136,0x%04X,\r\n", hp.status2);
+    snprintf(line, sizeof(line), "Register,Fault Sensor/EE (raw),,2125,0x%02X,\r\n", hp.fault_ee);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Register,Error 1 (raw),,2137,0x%04X,\r\n", hp.error1);
+    snprintf(line, sizeof(line), "Register,Fault Sensor/Comp (raw),,2126,0x%02X,\r\n", hp.fault_comp);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Register,Error 2 (raw),,2138,0x%04X,\r\n", hp.error2);
+    snprintf(line, sizeof(line), "Register,Fault Electrical (raw),,2127,0x%02X,\r\n", hp.fault_elec);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Register,Fault Refrigerant (raw),,2128,0x%02X,\r\n", hp.fault_ref);
     httpd_resp_sendstr_chunk(req, line);
 
-    // --- Active Errors (from ErrorDef arrays with Arctic codes) ---
-    int err_count = 0;
-    const arctic::ErrorDef* err1_defs = arctic::getError1Definitions(&err_count);
-    for (int i = 0; i < err_count; i++) {
-        if (hp.error1 & err1_defs[i].mask) {
-            snprintf(line, sizeof(line), "Error,\"%s\",%s,2137,ACTIVE,\r\n",
-                     err1_defs[i].description, err1_defs[i].code);
-            httpd_resp_sendstr_chunk(req, line);
-        }
-    }
-    err1_defs = arctic::getError2Definitions(&err_count);
-    for (int i = 0; i < err_count; i++) {
-        if (hp.error2 & err1_defs[i].mask) {
-            snprintf(line, sizeof(line), "Error,\"%s\",%s,2138,ACTIVE,\r\n",
-                     err1_defs[i].description, err1_defs[i].code);
+    // --- Active Errors (natively decoded by the macon library) ---
+    {
+        arctic::ActiveError actives[32];
+        int active_count = arctic::getActiveErrors(actives, 32);
+        for (int i = 0; i < active_count; i++) {
+            const char* label = actives[i].description && actives[i].description[0]
+                                    ? actives[i].description
+                                    : (actives[i].name ? actives[i].name : "");
+            snprintf(line, sizeof(line), "Error,\"%s\",%s,%u,ACTIVE,\r\n",
+                     label, actives[i].code, actives[i].reg);
             httpd_resp_sendstr_chunk(req, line);
         }
     }

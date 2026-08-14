@@ -59,9 +59,11 @@ class TestEventLogNavigation:
 
     def test_scrolled_events_control_events_does_not_reset(self, device: DeviceClient):
         """A scrolled event list can be left and reopened repeatedly."""
-        device.set_demo_fields(error1=0xFFFF, error2=0xFFFF)
+        device.inject_fault("P02", True)
+        device.inject_fault("P06", True)
+        device.inject_fault("E19", True)
         time.sleep(1.5)
-        device.set_demo_fields(error1=0, error2=0)
+        device.clear_all_faults()
         time.sleep(1.5)
 
         previous_uptime = device.session.get(
@@ -162,10 +164,10 @@ class TestEventLogDisplay:
         The tab shell has no count header, so we generate activity (an error
         transition logs events) and assert content is present indirectly:
         the empty-state label must be absent."""
-        # Generate events via an error set/clear transition.
-        device.set_demo_fields(error1=0x0001)
+        # Generate events via a fault set/clear transition.
+        device.inject_fault("P02", True)
         time.sleep(1.5)
-        device.set_demo_fields(error1=0)
+        device.clear_all_faults()
         time.sleep(1.5)
 
         _open_event_log(device)
@@ -276,9 +278,9 @@ class TestEventLogSearchAndFilters:
         device.click(tag="event_search_cancel")
 
     def test_search_filters_event_descriptions(self, device: DeviceClient):
-        device.set_demo_fields(error1=0x0001)
+        device.inject_fault("P02", True)
         time.sleep(1.0)
-        device.set_demo_fields(error1=0)
+        device.clear_all_faults()
         time.sleep(1.0)
 
         _open_event_log(device)

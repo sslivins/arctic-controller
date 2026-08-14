@@ -61,10 +61,8 @@ static struct {
     lv_obj_t* ac_voltage = nullptr;
     lv_obj_t* ac_current = nullptr;
     lv_obj_t* dc_voltage = nullptr;
-    lv_obj_t* dc_current = nullptr;
     // System - expansion valve readings
     lv_obj_t* primary_eev = nullptr;
-    lv_obj_t* secondary_eev = nullptr;
     // System - setpoints
     lv_obj_t* cooling_setpoint = nullptr;
     lv_obj_t* heating_setpoint = nullptr;
@@ -253,9 +251,7 @@ static void update_readings() {
         lv_label_set_text(state.ac_voltage, "230 V");
         lv_label_set_text(state.ac_current, "5 A");
         lv_label_set_text(state.dc_voltage, "380.0 V");
-        lv_label_set_text(state.dc_current, "4 A");
         lv_label_set_text(state.primary_eev, "350 steps");
-        lv_label_set_text(state.secondary_eev, "200 steps");
         snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(20), app_prefs_temp_unit_str());
         lv_label_set_text(state.cooling_setpoint, buf);
         snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(45), app_prefs_temp_unit_str());
@@ -283,9 +279,7 @@ static void update_readings() {
         lv_label_set_text(state.ac_voltage, na);
         lv_label_set_text(state.ac_current, na);
         lv_label_set_text(state.dc_voltage, na);
-        lv_label_set_text(state.dc_current, na);
         lv_label_set_text(state.primary_eev, na);
-        lv_label_set_text(state.secondary_eev, na);
         lv_label_set_text(state.cooling_setpoint, na);
         lv_label_set_text(state.heating_setpoint, na);
         lv_label_set_text(state.hotwater_setpoint, na);
@@ -350,14 +344,8 @@ static void update_readings() {
     snprintf(buf, sizeof(buf), "%.0f V", hp.getDcVoltageV());
     lv_label_set_text(state.dc_voltage, buf);
 
-    snprintf(buf, sizeof(buf), "%d A", hp.dc_current);
-    lv_label_set_text(state.dc_current, buf);
-
     snprintf(buf, sizeof(buf), "%d steps", hp.primary_eev_opening);
     lv_label_set_text(state.primary_eev, buf);
-
-    snprintf(buf, sizeof(buf), "%d steps", hp.secondary_eev_opening);
-    lv_label_set_text(state.secondary_eev, buf);
 
     snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(hp.cooling_setpoint), app_prefs_temp_unit_str());
     lv_label_set_text(state.cooling_setpoint, buf);
@@ -452,9 +440,7 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
     create_reading_row(content, i18n_get(STR_HP_AC_VOLTAGE), &state.ac_voltage);
     create_reading_row(content, i18n_get(STR_HP_AC_CURRENT), &state.ac_current);
     create_reading_row(content, i18n_get(STR_HP_DC_VOLTAGE), &state.dc_voltage);
-    create_reading_row(content, i18n_get(STR_HP_DC_CURRENT), &state.dc_current);
     create_reading_row(content, i18n_get(STR_HP_PRIMARY_EEV), &state.primary_eev);
-    create_reading_row(content, i18n_get(STR_HP_SECONDARY_EEV), &state.secondary_eev);
     create_reading_row(content, i18n_get(STR_HP_COOLING), &state.cooling_setpoint);
     create_reading_row(content, i18n_get(STR_HP_HEATING), &state.heating_setpoint);
     create_reading_row(content, i18n_get(STR_HP_HOT_WATER), &state.hotwater_setpoint);
@@ -522,9 +508,7 @@ void heatpump_temps_hide(void) {
     state.ac_voltage = nullptr;
     state.ac_current = nullptr;
     state.dc_voltage = nullptr;
-    state.dc_current = nullptr;
     state.primary_eev = nullptr;
-    state.secondary_eev = nullptr;
     state.cooling_setpoint = nullptr;
     state.heating_setpoint = nullptr;
     state.hotwater_setpoint = nullptr;

@@ -9,6 +9,7 @@
 #include "nav_bar.h"
 #include "event_log.h"
 #include "heatpump_errors.h"
+#include "macon_faults.h"
 #include "time_manager.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
@@ -222,28 +223,14 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
         }
         case EVENT_ERROR_APPEARED:
         case EVENT_ERROR_CLEARED: {
-            int reg = (p >> 16) & 0xFFFF;
-            uint16_t bit = p & 0xFFFF;
-            // Look up error code and description from error definitions
-            const arctic::ErrorDef* defs = nullptr;
-            int count = 0;
-            if (reg == 1) {
-                defs = arctic::getError1Definitions(&count);
-            } else if (reg == 2) {
-                defs = arctic::getError2Definitions(&count);
-            }
-            bool found = false;
-            if (defs) {
-                for (int i = 0; i < count; i++) {
-                    if (defs[i].mask == bit) {
-                        snprintf(buf, buf_size, "(%s) %s", defs[i].code, defs[i].description);
-                        found = true;
-                        break;
-                    }
-                }
-            }
-            if (!found) {
-                snprintf(buf, buf_size, "Reg %d bit 0x%04X", reg, bit);
+            // Payload = (fault register << 8) | bit index, per detectAndLogStateEvents.
+            uint16_t reg = (p >> 8) & 0xFFFF;
+            uint8_t  bit = p & 0xFF;
+            const arctic::MaconFaultBit* fb = arctic::macon_fault_bit(reg, bit);
+            if (fb != nullptr) {
+                snprintf(buf, buf_size, "(%s) %s", fb->code, fb->label);
+            } else {
+                snprintf(buf, buf_size, "Reg %u bit %u", reg, bit);
             }
             break;
         }

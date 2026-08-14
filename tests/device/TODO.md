@@ -38,8 +38,8 @@ The following screens and features have **no automated test coverage** yet:
 - [x] `GET /api/heatpump/status` — confirm status fields match device state
 - [x] `GET /api/heatpump/errors` — test with 0 errors, active errors, error history
 - [x] `PATCH /api/heatpump/demo` — inject all supported fields, verify UI updates
-- [x] `PATCH /api/heatpump/demo` — test error injection (`error1`, `error2`) and clearing
-- [x] `PATCH /api/heatpump/demo` — test status1 bit manipulation (compressor, fan, pump on/off)
+- [x] `POST /api/test/inject-fault` — inject faults by Macon code and clear them
+- [x] Component state — test compressor/fan/pump on/off via named demo fields
 - [x] `POST /api/heatpump/mode` — test all working modes
 - [x] `POST /api/heatpump/setpoint` — test cooling/heating/hot water setpoints
 - [x] `POST /api/heatpump/power` — test power on/off
@@ -96,11 +96,11 @@ The following screens and features have **no automated test coverage** yet:
 
 ## Error Handling Testing (expanded)
 
-- [ ] Inject error1/error2 via demo API, verify error card turns red with count
+- [ ] Inject faults via `/api/test/inject-fault`, verify error card turns red with count
 - [ ] Tap error card: verify navigation to error details screen
 - [ ] Verify error history shows timestamps and durations
-- [ ] Clear error registers: verify card returns to green "No Errors"
-- [ ] Test multiple simultaneous errors (both error1 and error2 active)
+- [ ] Clear faults: verify card returns to green "No Errors"
+- [ ] Test multiple simultaneous faults (several codes active at once)
 - [ ] Verify disconnected state: hero card shows DISCONNECTED, error card shows appropriate message
 - [ ] Test error history clear button
 
@@ -290,7 +290,7 @@ Items completed in this branch (for reference):
 - [x] Lightweight `/api/test/screen` endpoint for fast screen detection
 - [x] Iterative widget tree walk with PSRAM buffer (handles 100+ widget screens)
 - [x] REST API functional tests — 254 tests across 7 files covering heatpump
-      status/control/demo/params/errors/status1-bits, logs, auth (config,
+      status/control/demo/params/errors/component-state, logs, auth (config,
       login/logout, API key, sessions), events, health, time config, OTA
       (status schema, auth, URL allowlist, bad uploads, releases, error state),
       WiFi, info, display brightness, preferences

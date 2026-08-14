@@ -41,17 +41,13 @@ struct HeatPumpState {
     int16_t outdoor_ambient_temp = 0;
     int16_t ipm_temp = 0;
     
-    // System readings (from input registers 2118-2127)
+    // System readings (decoded by the macon library from the real Tuya window)
     uint16_t compressor_freq = 0;    // Hz
-    uint16_t fan_speed = 0;          // RPM
+    uint16_t fan_speed = 0;          // reg2003 A10 DC motor raw level (0..~72)
     uint16_t ac_voltage = 0;         // V
-    uint16_t ac_current = 0;         // A (raw, may need conversion)
+    uint16_t ac_current = 0;         // A
     uint16_t dc_voltage = 0;         // V (volts; unit conversion owned by macon lib)
-    uint16_t dc_current = 0;         // A (raw)
     uint16_t primary_eev_opening = 0;   // steps
-    uint16_t secondary_eev_opening = 0; // steps
-    uint16_t high_pressure = 0;      // MPa (raw ÷ 100)
-    uint16_t low_pressure = 0;       // MPa (raw ÷ 100)
     uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
 
     // Estimated performance (owned by the macon library; flow is an outside
@@ -60,33 +56,46 @@ struct HeatPumpState {
     uint16_t cop_x100 = 0;           // COP x100 (e.g. 392 = 3.92); 0 when !cop_valid
     bool     cop_valid = false;      // true when the estimate is meaningful
     
-    // Status bitmaps
-    uint16_t status1 = 0;  // Register 2135
-    uint16_t status2 = 0;  // Register 2136
-    uint16_t error1 = 0;   // Register 2137
-    uint16_t error2 = 0;   // Register 2138
-    
-    // Convenience status getters
-    bool isCompressorRunning() const { return (status1 & status1::COMPRESSOR) != 0; }
-    bool isWaterPumpRunning() const { return (status1 & status1::WATER_PUMP) != 0; }
-    bool isFanRunning() const { return (status1 & status1::FAN_ANY) != 0; }
-    bool isDefrosting() const { return (status2 & status2::DEFROSTING) != 0; }
-    bool isBackupHeaterOn() const { return (status1 & status1::BACKUP_HEATER) != 0; }
-    bool hasAnyError() const { return (error1 != 0) || (error2 != 0); }
-    
+    // Component run-state, derived by the macon library from the native
+    // MaconState (icon bits / compressor frequency / reversing-valve mode).
+    // These replace the fictional Arctic status1/status2 bitfields, which the
+    // Macon mainboard never actually used.
+    bool compressor_running = false;
+    bool pump_running = false;
+    bool fan_running = false;
+    bool defrosting = false;
+    bool backup_heater = false;           // no confirmed Macon register -> always false
+    bool reversing_valve_cooling = false; // reversing valve energized (cooling)
+
+    // Raw Macon fault-register bytes (reg 2007, 2125, 2126, 2127, 2128) exactly
+    // as the mainboard reports them. Decoded natively via arctic-macon's
+    // macon_decode_faults(); NOT the old fictional error1/error2 masks.
+    uint8_t fault_run = 0;   // reg2007
+    uint8_t fault_ee = 0;    // reg2125
+    uint8_t fault_comp = 0;  // reg2126
+    uint8_t fault_elec = 0;  // reg2127
+    uint8_t fault_ref = 0;   // reg2128
+    bool    any_fault = false; // macon_has_fault() over the five bytes (ex-RUN)
+
+    // Convenience status getters (now plain accessors over the derived fields).
+    bool isCompressorRunning() const { return compressor_running; }
+    bool isWaterPumpRunning() const { return pump_running; }
+    bool isFanRunning() const { return fan_running; }
+    bool isDefrosting() const { return defrosting; }
+    bool isBackupHeaterOn() const { return backup_heater; }
+    bool hasAnyError() const { return any_fault; }
+
     // DC bus voltage in volts (already converted by the macon library).
     float getDcVoltageV() const { return static_cast<float>(dc_voltage); }
-    
-    // Get actual pressures (register value ÷ 100)
-    float getHighPressureMPa() const { return high_pressure / 100.0f; }
-    float getLowPressureMPa() const { return low_pressure / 100.0f; }
-    
-    // Get fan speed level (0=off, 1=low, 2=med, 3=high)
+
+    // Fan UI level (0=off..3=high) bucketed from the raw reg2003 level.
+    // TODO(fan-rework): replace with bars = round(fan_speed/fan_speed_max*N)
+    // once the library exposes fan_speed + fan_speed_max.
     int getFanSpeedLevel() const {
-        if (status1 & status1::FAN_HIGH) return 3;
-        if (status1 & status1::FAN_MED) return 2;
-        if (status1 & status1::FAN_LOW) return 1;
-        return 0;
+        if (!fan_running || fan_speed == 0) return 0;
+        if (fan_speed >= 60) return 3;
+        if (fan_speed >= 30) return 2;
+        return 1;
     }
 };
 
@@ -178,6 +187,17 @@ void getStatusDescription(char* buffer, size_t buffer_size);
 // Set a field in the heat pump state by name. Returns true if the field was found.
 // Allows testing read-only values (temps, readings, errors, status) via REST API.
 bool setDemoField(const char* field, int32_t value);
+
+// Inject (or clear) a fault by its canonical Macon code (e.g. "P02", "E19").
+// Delegates the code -> (register, bit) mapping to the arctic-macon library so
+// no bit positions are hardcoded here. Returns the number of register-bit sites
+// written (a code such as E28/E05 maps to two sites), or 0 if the code is
+// unknown. Demo mode only; re-decodes the register cache before returning.
+int injectDemoFault(const char* code, bool active);
+
+// Clear every active fault in the demo register cache (all five fault
+// registers), preserving the run/state indicator. Demo mode only.
+void clearDemoFaults();
 
 // ============================================================================
 // External Feed (passive Tuya listen mode)

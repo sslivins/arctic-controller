@@ -15,16 +15,32 @@ import pytest
 from device_client import DeviceClient
 
 # ---------------------------------------------------------------------------
-# Status register bit masks (must match arctic_registers.h)
+# Component/fault state helpers.
+#
+# Run state is decoded natively by arctic-macon from the real Tuya registers —
+# there is no fictional "status1" bitfield. Faults are injected by their Macon
+# code so the library owns the code->register,bit mapping.
 # ---------------------------------------------------------------------------
-UNIT_ON       = 0x0001
-COMPRESSOR    = 0x0002
-FAN_MED       = 0x0008
-WATER_PUMP    = 0x0020
+FAN_MED = 45  # fan_speed byte level -> 2 bars
 
-# Default demo state
-DEMO_STATUS1 = UNIT_ON | COMPRESSOR | FAN_MED | WATER_PUMP  # 0x2B
-DEMO_ERROR2  = 0x0040  # HIGH_PRESSURE (P02)
+# Default demo fault (matches initDemoState()).
+DEMO_FAULT = "P02"
+
+
+def _set_running(device: DeviceClient, **overrides):
+    """Compressor + fan + pump running, unit on. Clears faults unless overridden."""
+    fields = dict(compressor_freq=60, fan_on=1, fan_speed=FAN_MED, pump_on=1,
+                  unit_on=1)
+    fields.update(overrides)
+    device.set_demo_fields(**fields)
+
+
+def _set_idle(device: DeviceClient, **overrides):
+    """Unit on, compressor off (idle)."""
+    fields = dict(compressor_freq=0, fan_on=0, fan_speed=0, pump_on=1, unit_on=1)
+    fields.update(overrides)
+    device.set_demo_fields(**fields)
+
 
 MODE_COOLING       = 0
 MODE_FLOOR_HEATING = 1
@@ -140,13 +156,9 @@ def _restore_english_and_demo(device: DeviceClient):
     """Restore English and default demo state after each test."""
     yield
     # Restore demo defaults
-    device.set_demo_fields(
-        error1=0,
-        error2=DEMO_ERROR2,
-        status1=DEMO_STATUS1,
-        unit_on=1,
-        working_mode=MODE_FLOOR_HEATING,
-    )
+    device.clear_all_faults()
+    device.inject_fault(DEMO_FAULT, True)
+    _set_running(device, working_mode=MODE_FLOOR_HEATING)
     # Restore English if switched
     prefs = device.get_preferences()
     if prefs["language"] != "English":
@@ -169,11 +181,8 @@ class TestFrenchHeroStates:
 
     def test_idle_french(self, device: DeviceClient):
         """IDLE → INACTIF in French."""
-        device.set_demo_fields(
-            status1=UNIT_ON | WATER_PUMP,  # no compressor → IDLE
-            error1=0, error2=0,
-            working_mode=MODE_FLOOR_HEATING,
-        )
+        device.clear_all_faults()
+        _set_idle(device, working_mode=MODE_FLOOR_HEATING)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -181,7 +190,8 @@ class TestFrenchHeroStates:
 
     def test_fault_french(self, device: DeviceClient):
         """FAULT → PANNE in French."""
-        device.set_demo_fields(error1=0x0001, error2=0)
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -189,7 +199,8 @@ class TestFrenchHeroStates:
 
     def test_standby_french(self, device: DeviceClient):
         """STANDBY → EN VEILLE in French."""
-        device.set_demo_fields(unit_on=0, error1=0, error2=0)
+        device.clear_all_faults()
+        device.set_demo_fields(unit_on=0)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -197,11 +208,8 @@ class TestFrenchHeroStates:
 
     def test_floor_heat_selection_shows_heating_french(self, device: DeviceClient):
         """Floor-heat selection still reports the actual heating operation."""
-        device.set_demo_fields(
-            status1=DEMO_STATUS1,
-            working_mode=MODE_FLOOR_HEATING,
-            error1=0, error2=0,
-        )
+        device.clear_all_faults()
+        _set_running(device, working_mode=MODE_FLOOR_HEATING)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -209,11 +217,8 @@ class TestFrenchHeroStates:
 
     def test_cooling_french(self, device: DeviceClient):
         """COOLING → REFROIDISSEMENT in French."""
-        device.set_demo_fields(
-            status1=DEMO_STATUS1,
-            working_mode=MODE_COOLING,
-            error1=0, error2=0,
-        )
+        device.clear_all_faults()
+        _set_running(device, working_mode=MODE_COOLING)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -221,11 +226,8 @@ class TestFrenchHeroStates:
 
     def test_hot_water_selection_shows_heating_french(self, device: DeviceClient):
         """Hot-water selection still reports the actual heating operation."""
-        device.set_demo_fields(
-            status1=DEMO_STATUS1,
-            working_mode=MODE_HOT_WATER,
-            error1=0, error2=0,
-        )
+        device.clear_all_faults()
+        _set_running(device, working_mode=MODE_HOT_WATER)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -256,7 +258,7 @@ class TestFrenchMainLabels:
 
     def test_error_card_no_errors_french(self, device: DeviceClient):
         """Error card shows French 'no errors' text."""
-        device.set_demo_fields(error1=0, error2=0)
+        device.clear_all_faults()
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="error_label")
         assert w is not None
@@ -277,11 +279,8 @@ class TestSpanishHeroStates:
 
     def test_idle_spanish(self, device: DeviceClient):
         """IDLE → INACTIVO in Spanish."""
-        device.set_demo_fields(
-            status1=UNIT_ON | WATER_PUMP,
-            error1=0, error2=0,
-            working_mode=MODE_FLOOR_HEATING,
-        )
+        device.clear_all_faults()
+        _set_idle(device, working_mode=MODE_FLOOR_HEATING)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -289,7 +288,8 @@ class TestSpanishHeroStates:
 
     def test_fault_spanish(self, device: DeviceClient):
         """FAULT → FALLO in Spanish."""
-        device.set_demo_fields(error1=0x0001, error2=0)
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -297,7 +297,8 @@ class TestSpanishHeroStates:
 
     def test_standby_spanish(self, device: DeviceClient):
         """STANDBY → EN ESPERA in Spanish."""
-        device.set_demo_fields(unit_on=0, error1=0, error2=0)
+        device.clear_all_faults()
+        device.set_demo_fields(unit_on=0)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -305,11 +306,8 @@ class TestSpanishHeroStates:
 
     def test_floor_heat_selection_shows_heating_spanish(self, device: DeviceClient):
         """Floor-heat selection still reports the actual heating operation."""
-        device.set_demo_fields(
-            status1=DEMO_STATUS1,
-            working_mode=MODE_FLOOR_HEATING,
-            error1=0, error2=0,
-        )
+        device.clear_all_faults()
+        _set_running(device, working_mode=MODE_FLOOR_HEATING)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -317,11 +315,8 @@ class TestSpanishHeroStates:
 
     def test_cooling_spanish(self, device: DeviceClient):
         """COOLING → ENFRIAMIENTO in Spanish."""
-        device.set_demo_fields(
-            status1=DEMO_STATUS1,
-            working_mode=MODE_COOLING,
-            error1=0, error2=0,
-        )
+        device.clear_all_faults()
+        _set_running(device, working_mode=MODE_COOLING)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -329,11 +324,8 @@ class TestSpanishHeroStates:
 
     def test_hot_water_selection_shows_heating_spanish(self, device: DeviceClient):
         """Hot-water selection still reports the actual heating operation."""
-        device.set_demo_fields(
-            status1=DEMO_STATUS1,
-            working_mode=MODE_HOT_WATER,
-            error1=0, error2=0,
-        )
+        device.clear_all_faults()
+        _set_running(device, working_mode=MODE_HOT_WATER)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -364,7 +356,7 @@ class TestSpanishMainLabels:
 
     def test_error_card_no_errors_spanish(self, device: DeviceClient):
         """Error card shows Spanish 'no errors' text."""
-        device.set_demo_fields(error1=0, error2=0)
+        device.clear_all_faults()
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="error_label")
         assert w is not None

@@ -1516,26 +1516,10 @@ paths:
                         type: number
                         description: DC bus voltage
                         example: 380.0
-                      dc_current:
-                        type: integer
-                        description: DC current in amps
-                        example: 4
-                      high_pressure:
-                        type: number
-                        description: High side pressure in MPa
-                        example: 2.50
-                      low_pressure:
-                        type: number
-                        description: Low side pressure in MPa
-                        example: 0.85
                       primary_eev:
                         type: integer
                         description: Primary EEV opening in steps
                         example: 350
-                      secondary_eev:
-                        type: integer
-                        description: Secondary EEV opening in steps
-                        example: 200
                       power_consumption:
                         type: integer
                         description: Calculated power consumption in watts (AC voltage × AC current)

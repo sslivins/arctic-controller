@@ -60,8 +60,7 @@ static struct {
     bool history_header_created = false;
     
     // Track previous error state to detect changes
-    uint16_t prev_error1 = 0;
-    uint16_t prev_error2 = 0;
+    uint64_t prev_fault_sig = 0;
     int prev_history_count = 0;
 } state;
 
@@ -338,26 +337,17 @@ static void create_history_card(const arctic::ErrorHistoryEntry* entry) {
     hist_err.first_seen = entry->occurred;
     hist_err.last_seen = entry->cleared;
 
-    int def_count;
-    const arctic::ErrorDef* defs = arctic::getError1Definitions(&def_count);
-    for (int d = 0; d < def_count; d++) {
-        if (strcmp(defs[d].code, entry->code) == 0) {
-            hist_err.description = defs[d].description;
-            hist_err.resolution = defs[d].resolution;
-            hist_err.severity = defs[d].severity;
-            break;
-        }
-    }
-    if (hist_err.description[0] == '\0') {
-        defs = arctic::getError2Definitions(&def_count);
-        for (int d = 0; d < def_count; d++) {
-            if (strcmp(defs[d].code, entry->code) == 0) {
-                hist_err.description = defs[d].description;
-                hist_err.resolution = defs[d].resolution;
-                hist_err.severity = defs[d].severity;
-                break;
-            }
-        }
+    // Enrich from the macon library's canonical fault table (first site sharing
+    // this code). No fictional error1/error2 definition tables any more.
+    const char* name = nullptr;
+    const char* desc = nullptr;
+    const char* resolution = nullptr;
+    arctic::ErrorSeverity sev = arctic::ErrorSeverity::INFO;
+    if (arctic::describeFaultCode(entry->code, &name, &desc, &resolution, &sev)) {
+        hist_err.name = name ? name : "";
+        hist_err.description = desc ? desc : "";
+        hist_err.resolution = resolution;
+        hist_err.severity = sev;
     }
 
     create_error_card(state.error_list, &hist_err);
@@ -507,10 +497,14 @@ static void error_screen_timer_cb(lv_timer_t* timer) {
     arctic::ErrorHistoryEntry hist[arctic::ERROR_HISTORY_SIZE];
     int hist_count = arctic::getErrorHistory(hist, arctic::ERROR_HISTORY_SIZE);
     
-    if (hp.error1 != state.prev_error1 || hp.error2 != state.prev_error2 ||
+    // Pack the five raw fault-register bytes into a signature for change detection.
+    uint64_t fault_sig =
+        (uint64_t)hp.fault_run | ((uint64_t)hp.fault_ee << 8) |
+        ((uint64_t)hp.fault_comp << 16) | ((uint64_t)hp.fault_elec << 24) |
+        ((uint64_t)hp.fault_ref << 32);
+    if (fault_sig != state.prev_fault_sig ||
         hist_count != state.prev_history_count) {
-        state.prev_error1 = hp.error1;
-        state.prev_error2 = hp.error2;
+        state.prev_fault_sig = fault_sig;
         state.prev_history_count = hist_count;
         update_error_list();
         ESP_LOGI(TAG, "Error state changed - refreshed list");
@@ -615,8 +609,10 @@ void heatpump_errors_show(heatpump_errors_close_cb_t on_close) {
     
     // Snapshot current error state for change detection
     arctic::HeatPumpState hp = arctic::getState();
-    state.prev_error1 = hp.error1;
-    state.prev_error2 = hp.error2;
+    state.prev_fault_sig =
+        (uint64_t)hp.fault_run | ((uint64_t)hp.fault_ee << 8) |
+        ((uint64_t)hp.fault_comp << 16) | ((uint64_t)hp.fault_elec << 24) |
+        ((uint64_t)hp.fault_ref << 32);
     arctic::ErrorHistoryEntry hist_snap[arctic::ERROR_HISTORY_SIZE];
     state.prev_history_count = arctic::getErrorHistory(hist_snap, arctic::ERROR_HISTORY_SIZE);
     

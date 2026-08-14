@@ -570,8 +570,7 @@
         <h2 style="margin-top:28px">Electrical & mechanical</h2><div class="grid grid-4">
           ${metricCard("Compressor", `${r.compressor_freq ?? "--"} Hz`)}${metricCard("Fan speed", `${r.fan_rpm ?? "--"} RPM`)}
           ${metricCard("AC voltage", `${r.ac_voltage ?? "--"} V`)}${metricCard("AC current", `${r.ac_current ?? "--"} A`)}
-          ${metricCard("DC voltage", `${r.dc_voltage ?? "--"} V`)}${metricCard("DC current", `${r.dc_current ?? "--"} A`)}
-          ${metricCard("Main EEV", `${r.primary_eev ?? "--"} steps`)}${metricCard("EVI EEV", `${r.secondary_eev ?? "--"} steps`)}
+          ${metricCard("DC voltage", `${r.dc_voltage ?? "--"} V`)}${metricCard("Main EEV", `${r.primary_eev ?? "--"} steps`)}
           ${metricCard("Input power", `${r.power_consumption ?? "--"} W`)}${metricCard("Heat output", r.heat_out == null ? "--" : `${r.heat_out} W`)}
           ${metricCard("Estimated COP", r.cop == null ? "--" : Number(r.cop).toFixed(2))}${metricCard("Controller uptime", fmtUptime(state.status.uptime_ms))}
         </div>

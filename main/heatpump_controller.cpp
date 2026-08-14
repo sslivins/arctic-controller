@@ -7,6 +7,8 @@
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "macon_state.h"
+#include "macon_registers.h"
+#include "macon_faults.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -19,37 +21,8 @@ static const char* TAG = "arctic";
 
 namespace arctic {
 
-// Synthetic register layout used only by the demo/test state adapter.
-namespace reg {
-constexpr uint16_t UNIT_ON_OFF = 2000;
-constexpr uint16_t WORKING_MODE = 2001;
-constexpr uint16_t COOLING_SETPOINT = 2002;
-constexpr uint16_t HEATING_SETPOINT = 2003;
-constexpr uint16_t HOT_WATER_SETPOINT = 2004;
-constexpr uint16_t WATER_TANK_TEMP = 2100;
-constexpr uint16_t OUTLET_WATER_TEMP = 2102;
-constexpr uint16_t INLET_WATER_TEMP = 2103;
-constexpr uint16_t DISCHARGE_TEMP = 2104;
-constexpr uint16_t SUCTION_TEMP = 2105;
-constexpr uint16_t OUTDOOR_COIL_TEMP = 2107;
-constexpr uint16_t INDOOR_COIL_TEMP = 2108;
-constexpr uint16_t OUTDOOR_AMBIENT_TEMP = 2110;
-constexpr uint16_t IPM_TEMP = 2114;
-constexpr uint16_t COMPRESSOR_FREQ = 2118;
-constexpr uint16_t FAN_SPEED = 2119;
-constexpr uint16_t AC_VOLTAGE = 2120;
-constexpr uint16_t AC_CURRENT = 2121;
-constexpr uint16_t DC_VOLTAGE = 2122;
-constexpr uint16_t DC_CURRENT = 2123;
-constexpr uint16_t PRIMARY_EEV_OPENING = 2124;
-constexpr uint16_t SECONDARY_EEV_OPENING = 2125;
-constexpr uint16_t HIGH_PRESSURE = 2126;
-constexpr uint16_t LOW_PRESSURE = 2127;
-constexpr uint16_t STATUS_1 = 2135;
-constexpr uint16_t STATUS_2 = 2136;
-constexpr uint16_t ERROR_1 = 2137;
-constexpr uint16_t ERROR_2 = 2138;
-}  // namespace reg
+// Forward declaration: decode the real-Tuya register cache into HeatPumpState.
+static void applyMaconMapping();
 
 // State protected by mutex
 static HeatPumpState s_state;
@@ -81,8 +54,7 @@ static bool s_prev_fan = false;
 static bool s_prev_pump = false;
 static bool s_prev_aux_heater = false;
 static bool s_prev_defrosting = false;
-static uint16_t s_prev_error1 = 0;
-static uint16_t s_prev_error2 = 0;
+static uint8_t s_prev_fault_bytes[5] = {0};  // reg 2007,2125,2126,2127,2128
 static int16_t s_prev_cooling_sp = 0;
 static int16_t s_prev_heating_sp = 0;
 static int16_t s_prev_hotwater_sp = 0;
@@ -98,147 +70,36 @@ static bool elapsed_within(uint32_t now, uint32_t then, uint32_t limit) {
 }
 
 // ============================================================================
-// Demo Register Array
+// Register Cache
 // ============================================================================
-// Demo mode uses a synthetic register-shaped backing store so test endpoints
-// can update fields independently while reusing the state/event mapping.
+// The real Tuya wire registers are cached here (index = reg - DEMO_REG_BASE),
+// exactly as the passive listener / active master / demo simulator populate
+// them. The arctic-macon library (decode_state) owns interpreting this image
+// into a MaconState; the controller only adapts that into HeatPumpState.
 static const uint16_t DEMO_REG_BASE = 2000;
 static const uint16_t DEMO_REG_COUNT = 143; // 2000..2142 inclusive (telemetry window reaches reg2142)
 static uint16_t s_demo_regs[DEMO_REG_COUNT];
 
-// Read multiple registers from the demo/live-feed cache.
-static esp_err_t readRegisters(uint16_t address, uint16_t count, uint16_t* data) {
-    if (data == nullptr || address < DEMO_REG_BASE) {
+// Read a single register from the cache.
+static esp_err_t readCacheReg(uint16_t address, uint16_t* out) {
+    if (out == nullptr || address < DEMO_REG_BASE ||
+        (uint16_t)(address - DEMO_REG_BASE) >= DEMO_REG_COUNT) {
         return ESP_ERR_INVALID_ARG;
     }
-    uint16_t offset = address - DEMO_REG_BASE;
-    if (offset >= DEMO_REG_COUNT || count > DEMO_REG_COUNT - offset) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    memcpy(data, &s_demo_regs[offset], count * sizeof(uint16_t));
+    *out = s_demo_regs[address - DEMO_REG_BASE];
     return ESP_OK;
 }
 
-// Write a synthetic demo register.
-static esp_err_t writeSingleReg(uint16_t address, uint16_t value) {
-    if (!s_demo_mode || address < DEMO_REG_BASE ||
-        address - DEMO_REG_BASE >= DEMO_REG_COUNT) {
-        return ESP_ERR_INVALID_STATE;
+// Write a single register into the cache (real Tuya layout).
+static esp_err_t writeCacheReg(uint16_t address, uint16_t value) {
+    if (address < DEMO_REG_BASE ||
+        (uint16_t)(address - DEMO_REG_BASE) >= DEMO_REG_COUNT) {
+        return ESP_ERR_INVALID_ARG;
     }
-    uint16_t offset = address - DEMO_REG_BASE;
-    s_demo_regs[offset] = value;
-    // Simulate heat pump acking power command via STATUS_1 bit 0.
-    if (address == reg::UNIT_ON_OFF) {
-        uint16_t& st1 = s_demo_regs[reg::STATUS_1 - DEMO_REG_BASE];
-        if (value) st1 |= status1::UNIT_ON;
-        else       st1 &= ~status1::UNIT_ON;
-    }
+    s_demo_regs[address - DEMO_REG_BASE] = value;
     return ESP_OK;
 }
 
-// Poll holding registers (settings)
-static bool pollHoldingRegisters() {
-    uint16_t data[8];
-    esp_err_t err = readRegisters(reg::UNIT_ON_OFF, 8, data);
-    
-    if (err != ESP_OK) {
-        return false;
-    }
-    
-    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    // unit_on is derived from STATUS_1 bit 0 in pollStatus(), not from the command register
-    s_state.working_mode = static_cast<WorkingMode>(data[1]);
-    s_state.cooling_setpoint = static_cast<int16_t>(data[2]);
-    s_state.heating_setpoint = static_cast<int16_t>(data[3]);
-    s_state.hot_water_setpoint = static_cast<int16_t>(data[4]);
-    xSemaphoreGive(s_state_mutex);
-    
-    return true;
-}
-
-static HeatPumpOperation demo_operation(const HeatPumpState& state) {
-    if (state.hasAnyError()) return HeatPumpOperation::FAULT;
-    if (!state.unit_on) return HeatPumpOperation::OFF;
-    if (state.isDefrosting()) return HeatPumpOperation::DEFROST;
-    if (!state.isCompressorRunning()) return HeatPumpOperation::IDLE;
-    return state.working_mode == WorkingMode::COOLING
-        ? HeatPumpOperation::COOLING
-        : HeatPumpOperation::HEATING;
-}
-
-// Poll temperature registers (2100-2117)
-static bool pollTemperatures() {
-    uint16_t data[18];  // 2100-2117
-    esp_err_t err = readRegisters(reg::WATER_TANK_TEMP, 18, data);
-    
-    if (err != ESP_OK) {
-        return false;
-    }
-    
-    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    s_state.water_tank_temp = static_cast<int16_t>(data[0]);       // 2100
-    // data[1] is reserved (2101)
-    s_state.outlet_water_temp = static_cast<int16_t>(data[2]);     // 2102
-    s_state.inlet_water_temp = static_cast<int16_t>(data[3]);      // 2103
-    s_state.discharge_temp = static_cast<int16_t>(data[4]);        // 2104
-    s_state.suction_temp = static_cast<int16_t>(data[5]);          // 2105
-    // data[6] is EVI suction (2106)
-    s_state.outdoor_coil_temp = static_cast<int16_t>(data[7]);     // 2107
-    s_state.indoor_coil_temp = static_cast<int16_t>(data[8]);      // 2108
-    // data[9] is indoor ambient (2109)
-    s_state.outdoor_ambient_temp = static_cast<int16_t>(data[10]); // 2110
-    // data[11-13] are saturation temps (2111-2113)
-    s_state.ipm_temp = static_cast<int16_t>(data[14]);             // 2114
-    // data[15-17] are reserved temps (2115-2117)
-    xSemaphoreGive(s_state_mutex);
-    
-    return true;
-}
-
-// Poll system readings (2118-2127)
-static bool pollSystemReadings() {
-    uint16_t data[10];  // 2118-2127
-    esp_err_t err = readRegisters(reg::COMPRESSOR_FREQ, 10, data);
-    
-    if (err != ESP_OK) {
-        return false;
-    }
-    
-    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    s_state.compressor_freq = data[0];        // 2118
-    s_state.fan_speed = data[1];              // 2119
-    s_state.ac_voltage = data[2];             // 2120
-    s_state.ac_current = data[3];             // 2121
-    s_state.dc_voltage = data[4] / 10;        // 2122 (raw tenths-of-volts -> volts; legacy path)
-    s_state.dc_current = data[5];             // 2123
-    s_state.primary_eev_opening = data[6];    // 2124
-    s_state.secondary_eev_opening = data[7];  // 2125
-    s_state.high_pressure = data[8];          // 2126
-    s_state.low_pressure = data[9];           // 2127
-    xSemaphoreGive(s_state_mutex);
-    
-    return true;
-}
-
-// Poll status and error registers (2135-2138)
-static bool pollStatus() {
-    uint16_t data[4];
-    esp_err_t err = readRegisters(reg::STATUS_1, 4, data);
-    
-    if (err != ESP_OK) {
-        return false;
-    }
-    
-    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    s_state.status1 = data[0];  // 2135
-    s_state.status2 = data[1];  // 2136
-    s_state.error1 = data[2];   // 2137
-    s_state.error2 = data[3];   // 2138
-    s_state.unit_on = (s_state.status1 & status1::UNIT_ON) != 0;
-    xSemaphoreGive(s_state_mutex);
-    
-    return true;
-}
 
 // Compare the freshly-updated s_state against the previous snapshot and record
 // operational events (power/mode/setpoint/component/defrost/error transitions).
@@ -291,16 +152,21 @@ static void detectAndLogStateEvents() {
         if (cur_defrost != s_prev_defrosting) {
             event_log_record(cur_defrost ? EVENT_DEFROST_START : EVENT_DEFROST_END, 0);
         }
-        // Error changes (check individual bits)
-        uint16_t new_err1 = s_state.error1 & ~s_prev_error1;
-        uint16_t clr_err1 = s_prev_error1 & ~s_state.error1;
-        uint16_t new_err2 = s_state.error2 & ~s_prev_error2;
-        uint16_t clr_err2 = s_prev_error2 & ~s_state.error2;
-        for (int b = 0; b < 16; b++) {
-            if (new_err1 & (1 << b)) event_log_record(EVENT_ERROR_APPEARED, (1 << 16) | (1 << b));
-            if (clr_err1 & (1 << b)) event_log_record(EVENT_ERROR_CLEARED, (1 << 16) | (1 << b));
-            if (new_err2 & (1 << b)) event_log_record(EVENT_ERROR_APPEARED, (2 << 16) | (1 << b));
-            if (clr_err2 & (1 << b)) event_log_record(EVENT_ERROR_CLEARED, (2 << 16) | (1 << b));
+        // Fault changes (per Macon fault register/bit; skip the RUN indicator).
+        const uint8_t cur_faults[5] = {
+            s_state.fault_run, s_state.fault_ee, s_state.fault_comp,
+            s_state.fault_elec, s_state.fault_ref };
+        static const uint16_t kFaultRegs[5] = {2007, 2125, 2126, 2127, 2128};
+        for (int r = 0; r < 5; r++) {
+            uint8_t appeared = cur_faults[r] & ~s_prev_fault_bytes[r];
+            uint8_t cleared  = s_prev_fault_bytes[r] & ~cur_faults[r];
+            for (int b = 0; b < 8; b++) {
+                const MaconFaultBit* fb = macon_fault_bit(kFaultRegs[r], b);
+                if (fb == nullptr || fb->severity == FaultSeverity::INFO) continue;
+                uint32_t payload = ((uint32_t)kFaultRegs[r] << 8) | (uint32_t)b;
+                if (appeared & (1 << b)) event_log_record(EVENT_ERROR_APPEARED, payload);
+                if (cleared & (1 << b))  event_log_record(EVENT_ERROR_CLEARED, payload);
+            }
         }
     }
 
@@ -315,48 +181,49 @@ static void detectAndLogStateEvents() {
     s_prev_pump = s_state.isWaterPumpRunning();
     s_prev_aux_heater = s_state.isBackupHeaterOn();
     s_prev_defrosting = s_state.isDefrosting();
-    s_prev_error1 = s_state.error1;
-    s_prev_error2 = s_state.error2;
+    s_prev_fault_bytes[0] = s_state.fault_run;
+    s_prev_fault_bytes[1] = s_state.fault_ee;
+    s_prev_fault_bytes[2] = s_state.fault_comp;
+    s_prev_fault_bytes[3] = s_state.fault_elec;
+    s_prev_fault_bytes[4] = s_state.fault_ref;
     s_prev_state_valid = true;
 }
 
-// Periodically synchronize demo registers into HeatPumpState and emit events.
+// Periodically decode the register cache into HeatPumpState and emit events.
 static void demoSyncTask(void*) {
     ESP_LOGI(TAG, "Demo synchronization task started");
 
     while (s_demo_sync_enabled) {
         uint32_t now = getTimeMs();
-        
+
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_state.last_attempt_ms = now;
         xSemaphoreGive(s_state_mutex);
-        
-        bool success = true;
-        if (success) success = pollStatus();          // Most important - status/errors
-        if (success) success = pollTemperatures();    // Temperatures
-        if (success) success = pollSystemReadings();  // Compressor, voltage, etc.
-        if (success) success = pollHoldingRegisters();// Settings (less frequent would be fine)
-        
+
+        // Decode the real-Tuya register cache into HeatPumpState (locks internally).
+        applyMaconMapping();
+
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        
-        if (success) {
-            s_state.connected = true;
-            s_state.last_successful_read_ms = now;
-            s_state.consecutive_failures = 0;
-            s_state.operation = demo_operation(s_state);
+        s_state.connected = true;
+        s_state.last_successful_read_ms = now;
+        s_state.consecutive_failures = 0;
 
-            updateErrorHistory(s_state.error1, s_state.error2);
-
-            if (!s_was_connected) {
-                ESP_LOGI(TAG, "Demo heat pump connected");
-                s_was_connected = true;
-                event_log_record(EVENT_CONNECTED, 0);
-            }
-
-            detectAndLogStateEvents();
+        if (!s_was_connected) {
+            ESP_LOGI(TAG, "Demo heat pump connected");
+            s_was_connected = true;
+            event_log_record(EVENT_CONNECTED, 0);
         }
 
+        detectAndLogStateEvents();
+
+        const uint8_t f_run  = s_state.fault_run;
+        const uint8_t f_ee   = s_state.fault_ee;
+        const uint8_t f_comp = s_state.fault_comp;
+        const uint8_t f_elec = s_state.fault_elec;
+        const uint8_t f_ref  = s_state.fault_ref;
         xSemaphoreGive(s_state_mutex);
+
+        updateErrorHistory(f_run, f_ee, f_comp, f_elec, f_ref);
 
         vTaskDelay(pdMS_TO_TICKS(500));
     }
@@ -370,69 +237,72 @@ void initDemoState() {
     if (s_state_mutex == nullptr) {
         s_state_mutex = xSemaphoreCreateMutex();
     }
-    
+
     s_demo_mode = true;
-    
-    // Populate demo registers with realistic initial values
+
+    // Seed the register cache with a realistic RUNNING image in the REAL Tuya
+    // wire layout (index = reg - DEMO_REG_BASE). The arctic-macon library
+    // (decode_state) interprets these exactly as it does live device registers.
     memset(s_demo_regs, 0, sizeof(s_demo_regs));
-    
-    // Settings (2000-2007)
-    s_demo_regs[reg::UNIT_ON_OFF - DEMO_REG_BASE]       = 1;  // ON
-    s_demo_regs[reg::WORKING_MODE - DEMO_REG_BASE]      = static_cast<uint16_t>(WorkingMode::FLOOR_HEATING);
-    s_demo_regs[reg::COOLING_SETPOINT - DEMO_REG_BASE]  = 18;
-    s_demo_regs[reg::HEATING_SETPOINT - DEMO_REG_BASE]  = 45;
-    s_demo_regs[reg::HOT_WATER_SETPOINT - DEMO_REG_BASE] = 50;
-    
-    // Temperatures (°C)
-    s_demo_regs[reg::WATER_TANK_TEMP - DEMO_REG_BASE]    = 42;
-    s_demo_regs[reg::OUTLET_WATER_TEMP - DEMO_REG_BASE]  = 45;
-    s_demo_regs[reg::INLET_WATER_TEMP - DEMO_REG_BASE]   = 38;
-    s_demo_regs[reg::DISCHARGE_TEMP - DEMO_REG_BASE]     = 85;
-    s_demo_regs[reg::SUCTION_TEMP - DEMO_REG_BASE]       = 12;
-    s_demo_regs[reg::OUTDOOR_COIL_TEMP - DEMO_REG_BASE]  = 35;
-    s_demo_regs[reg::INDOOR_COIL_TEMP - DEMO_REG_BASE]   = 40;
-    s_demo_regs[reg::OUTDOOR_AMBIENT_TEMP - DEMO_REG_BASE] = 22;
-    s_demo_regs[reg::IPM_TEMP - DEMO_REG_BASE]           = 55;
-    
-    // System readings
-    s_demo_regs[reg::COMPRESSOR_FREQ - DEMO_REG_BASE]      = 60;
-    s_demo_regs[reg::FAN_SPEED - DEMO_REG_BASE]            = 850;
-    s_demo_regs[reg::AC_VOLTAGE - DEMO_REG_BASE]           = 230;
-    s_demo_regs[reg::AC_CURRENT - DEMO_REG_BASE]           = 52;    // tenths of amps → 5.2A
-    s_demo_regs[reg::DC_VOLTAGE - DEMO_REG_BASE]           = 3800;  // ÷10 = 380V
-    s_demo_regs[reg::DC_CURRENT - DEMO_REG_BASE]           = 3;
-    s_demo_regs[reg::PRIMARY_EEV_OPENING - DEMO_REG_BASE]  = 320;
-    s_demo_regs[reg::SECONDARY_EEV_OPENING - DEMO_REG_BASE] = 0;
-    s_demo_regs[reg::HIGH_PRESSURE - DEMO_REG_BASE]        = 280;   // ÷100 = 2.80 MPa
-    s_demo_regs[reg::LOW_PRESSURE - DEMO_REG_BASE]         = 85;    // ÷100 = 0.85 MPa
-    
-    // Status - compressor, fan medium, water pump running
-    s_demo_regs[reg::STATUS_1 - DEMO_REG_BASE] = status1::UNIT_ON | status1::COMPRESSOR | status1::FAN_MED | status1::WATER_PUMP;
-    s_demo_regs[reg::STATUS_2 - DEMO_REG_BASE] = 0;
-    
-    // Errors - P02 high pressure active
-    s_demo_regs[reg::ERROR_1 - DEMO_REG_BASE] = 0;
-    s_demo_regs[reg::ERROR_2 - DEMO_REG_BASE] = error2::HIGH_PRESSURE;
-    
-    // Sync demo registers into s_state via the poll functions
-    pollStatus();
-    pollTemperatures();
-    pollSystemReadings();
-    pollHoldingRegisters();
-    
-    // Mark as connected
+    auto seed = [&](uint16_t r, uint16_t v) { s_demo_regs[r - DEMO_REG_BASE] = v; };
+
+    // Run-state / mode.
+    seed(REG_FAULT_RUNSTATE, 0x20);   // reg2007 bit5 = running
+    seed(REG_OPERATING_MODE, 0x00);   // reg2049 = heating (reversing valve)
+    seed(REG_WORKING_MODE, static_cast<uint16_t>(MaconWorkingMode::FloorHeating)); // reg2096 = 1
+    // Icon bits: compressor + pump (reg2130 bit2/bit3), fan (reg2129 bit4).
+    seed(REG_STATUS_BYTE, 0x04 | 0x08);
+    seed(REG_ICON_BITS2, 0x10);
+
+    // Setpoints (whole °C).
+    seed(REG_COOLING_SETPOINT, 18);   // reg2093
+    seed(REG_AUX_HEAT_SETPOINT, 45);  // reg2094 (aux/heating, demo only)
+    seed(REG_HOT_WATER_SETPOINT, 50); // reg2095
+    seed(REG_HOT_WATER_CEILING, 50);  // reg2012 AP13 ceiling
+
+    // Temperatures (signed whole °C).
+    seed(REG_WATER_TANK_TEMP, 42);       // reg2008 o1
+    seed(REG_OUTLET_WATER_TEMP, 45);     // reg2132 o3
+    seed(REG_INLET_WATER_TEMP, 38);      // reg2133 o2
+    seed(REG_OUTDOOR_AMBIENT_TEMP, 22);  // reg2134 o4
+    seed(REG_COOL_COIL_TEMP, 40);        // reg2135 A6 (indoor coil)
+    seed(REG_COIL_TEMP, 35);             // reg2136 A2 (outdoor coil)
+    seed(REG_SUCTION_TEMP, 12);          // reg2137 A3
+    seed(REG_DISCHARGE_TEMP, 85);        // reg2138 A1
+    seed(REG_IPM_TEMP, 55);              // reg2113 A8
+
+    // Electrical / system readings (raw register values; decode owns scaling).
+    seed(REG_AC_CURRENT, 5);        // reg2000 A4 (whole A)
+    seed(REG_AC_VOLTAGE, 23);       // reg2101 A13 (x10 => 230 V)
+    seed(REG_DC_BUS_VOLTAGE, 38);   // reg2001 A7 (x10 => 380 V)
+    seed(REG_DC_MOTOR_SPEED, 40);   // reg2003 A10 fan level
+    seed(REG_MAIN_EEV, 200);        // reg2104 A5 EEV steps
+    seed(REG_COMPRESSOR_FREQ, 60);  // reg2141 A14 Hz
+    seed(REG_REALTIME_POWER, 12);   // reg2114 A9 (x100 => 1200 W)
+
+    // Seed one active fault — P02 high pressure — via the library's canonical
+    // (reg,bit) encoder so no bit position is hardcoded here.
+    macon_set_fault_by_code(s_demo_regs, DEMO_REG_BASE, DEMO_REG_COUNT, "P02", true);
+
+    // Decode the seeded cache into HeatPumpState and mark connected.
+    applyMaconMapping();
+
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_state.connected = true;
     s_state.last_successful_read_ms = getTimeMs();
-    s_state.operation = demo_operation(s_state);
+    const uint8_t f_run  = s_state.fault_run;
+    const uint8_t f_ee   = s_state.fault_ee;
+    const uint8_t f_comp = s_state.fault_comp;
+    const uint8_t f_elec = s_state.fault_elec;
+    const uint8_t f_ref  = s_state.fault_ref;
     xSemaphoreGive(s_state_mutex);
-    
-    // Seed error history with the current error state
-    updateErrorHistory(s_state.error1, s_state.error2);
-    
+
+    // Seed error history with the current fault state.
+    updateErrorHistory(f_run, f_ee, f_comp, f_elec, f_ref);
+
     // Also seed some cleared historical errors
     populateDemoErrorHistory();
-    
+
     ESP_LOGI(TAG, "Demo state initialized");
 }
 
@@ -532,20 +402,6 @@ static void applyMaconMapping() {
     MaconState ms;
     decode_state(DEMO_REG_BASE, s_demo_regs, DEMO_REG_COUNT, &ms);
 
-    // Synthesize the legacy status1 bitfield the HeatPumpState helpers expect
-    // (isCompressorRunning()/isWaterPumpRunning()/isFanRunning()/getFanSpeedLevel()).
-    uint16_t st1 = 0;
-    if (ms.running)       st1 |= status1::UNIT_ON;
-    if (ms.compressor_freq_valid && ms.compressor_freq > 0) {
-        st1 |= status1::COMPRESSOR;
-    }
-    if (ms.pump_on)       st1 |= status1::WATER_PUMP;
-    if (ms.fan_on) {
-        if (ms.fan_level >= 60)      st1 |= status1::FAN_HIGH;
-        else if (ms.fan_level >= 30) st1 |= status1::FAN_MED;
-        else                         st1 |= status1::FAN_LOW;
-    }
-
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
 
     // Temperatures (signed whole °C).
@@ -577,9 +433,14 @@ static void applyMaconMapping() {
     s_mode_valid = ms.working_mode_valid;
     s_compressor_valid = ms.compressor_freq_valid;
 
-    // Running state + readings.
-    s_state.status1         = st1;
-    s_state.status2         = ms.defrost_on ? status2::DEFROSTING : 0;
+    // Component run-state (derived by the macon library from the native
+    // MaconState) + readings. No fictional status bitfields any more.
+    s_state.compressor_running      = ms.compressor_freq_valid && ms.compressor_freq > 0;
+    s_state.pump_running            = ms.pump_on;
+    s_state.fan_running             = ms.fan_on;
+    s_state.defrosting              = ms.defrost_on;
+    s_state.backup_heater           = false;  // no confirmed Macon register
+    s_state.reversing_valve_cooling = ms.cooling_on;
     s_state.unit_on         = ms.running;
     s_state.working_mode    = to_working_mode(ms);
     s_state.operation       = to_operation(ms);
@@ -611,70 +472,16 @@ static void applyMaconMapping() {
     s_state.cop_valid = perf.valid;
 
 
-    // Macon fault/protection registers = reg2007 (holding run/fault bits) plus
-    // the INPUT fault cluster reg2125-2128, all mapped live 2026-07-05 one bit at
-    // a time against the OEM LCD + Smart Life app and cross-referenced to the
-    // official Arctic fault catalog. The Macon bit ordering does NOT match the
-    // legacy Arctic error1/error2 tables, so each confirmed Macon bit is
-    // translated to its *semantic* legacy mask, letting the existing P-code/UI
-    // pipeline report the correct fault. Device-only codes with no legacy slot
-    // (P10, P30, E03) are intentionally left undecoded. The library
-    // address-encapsulates the five raw fault registers (MaconState.fault_*);
-    // the bit->mask translation below stays here (native fault decode = Phase 2).
-    const uint8_t f_run  = ms.fault_run;   // reg2007
-    const uint8_t f_ee   = ms.fault_ee;    // reg2125 sensor/EE/comm
-    const uint8_t f_comp = ms.fault_comp;  // reg2126 sensor/comm/compressor
-    const uint8_t f_elec = ms.fault_elec;  // reg2127 electrical/power-stage
-    const uint8_t f_ref  = ms.fault_ref;   // reg2128 refrigerant/protection
-    uint16_t e1 = 0;
-    uint16_t e2 = 0;
-
-    // reg2007 (holding) — differential/temp-diff faults (bit5=0x20 is the RUN
-    // indicator, decoded above as `running`, and is NOT a fault).
-    if (f_run & 0x01) e2 |= error2::WATER_TEMP_DIFF;   // P15 inlet/outlet ΔT large
-    if (f_run & 0x02) e2 |= error2::LOW_OUTLET_TEMP;   // P16 outlet water temp low
-    if (f_run & 0x04) e2 |= error2::COMP_PRESS_DIFF;   // FE start diff-pressure prot
-    if (f_run & 0x08) e2 |= error2::COMP_PRESS_DIFF;   // FF run diff-pressure prot
-
-    // reg2128 — refrigerant / P-codes.
-    if (f_ref & 0x01) e2 |= error2::LOW_PRESSURE;      // P06 low pressure
-    if (f_ref & 0x02) e2 |= error2::COOLING_HIGH_COIL; // P27 coil overheat
-    if (f_ref & 0x04) e2 |= error2::LOW_AMBIENT_TEMP;  // PC ambient protection
-    // bit3 (0x08) = P10 — device code, no legacy slot.
-    // bit4 (0x10) = P30 antifreeze — no clean legacy slot.
-    if (f_ref & 0x20) e1 |= error1::OUTDOOR_COIL_SENS; // E05 coil sensor
-    if (f_ref & 0x80) e2 |= error2::WATER_FLOW;        // P01 water flow (confirmed live)
-
-    // reg2127 — electrical / r-codes + P02/P11.
-    if (f_elec & 0x02) e2 |= error2::AC_CURRENT_PROT;    // P19 AC current
-    if (f_elec & 0x04) e2 |= error2::COMP_CURRENT_PROT;  // r06 comp phase current
-    if (f_elec & 0x08) e1 |= error1::AC_VOLTAGE_PROT;    // r10 AC voltage
-    if (f_elec & 0x10) e2 |= error2::BUS_VOLTAGE_PROT;   // r11 DC bus voltage
-    if (f_elec & 0x20) e2 |= error2::IPM_HIGH_TEMP;      // r05 IPM temp
-    if (f_elec & 0x40) e2 |= error2::HIGH_DISCHARGE_TEMP;// P11 high discharge temp
-    if (f_elec & 0x80) e2 |= error2::HIGH_PRESSURE;      // P02 high pressure
-
-    // reg2126 — sensor / comm / compressor.
-    if (f_comp & 0x01) e1 |= error1::COMP_START;         // r02 compressor start
-    if (f_comp & 0x02) e1 |= error1::INDOOR_OUTDOOR_COMM;// E26 in/out comm
-    if (f_comp & 0x04) e1 |= error1::IPM_ERROR;          // r01 IPM
-    if (f_comp & 0x10) e1 |= error1::DISCHARGE_SENS;     // E01 discharge sensor
-    if (f_comp & 0x20) e1 |= error1::SUCTION_SENS;       // E09 suction sensor
-    if (f_comp & 0x40) e1 |= error1::OUTDOOR_COIL_SENS;  // E05 coil sensor
-    if (f_comp & 0x80) e1 |= error1::OUTDOOR_TEMP_SENS;  // E22 ambient sensor
-
-    // reg2125 — sensor / EE / comm E-codes.
-    if (f_ee & 0x01) e1 |= error1::OUTDOOR_EE;           // E28 outdoor EE
-    if (f_ee & 0x02) e1 |= error1::INLET_TEMP_SENS;      // E19 inlet sensor
-    if (f_ee & 0x04) e1 |= error1::OUTLET_TEMP_SENS;     // E18 outlet sensor
-    if (f_ee & 0x08) e1 |= error1::INDOOR_COIL_SENS;     // E13 cool-coil sensor
-    // bit4 (0x10) = E03 — device code, no legacy slot.
-    if (f_ee & 0x20) e1 |= error1::INDOOR_EE;            // E28 indoor EE
-    if (f_ee & 0x40) e1 |= error1::COMP_DRIVE;           // E27 driver comm
-    if (f_ee & 0x80) e1 |= error1::WIRED_CTRL_COMM;      // E21 controller comm
-
-    s_state.error1 = e1;
-    s_state.error2 = e2;
+    // Raw Macon fault-register bytes, stored exactly as the mainboard reports
+    // them. Decoding into P/E codes is done natively by macon_decode_faults()
+    // (see heatpump_errors.cpp) — no fictional error1/error2 mask translation.
+    s_state.fault_run  = ms.fault_run;
+    s_state.fault_ee   = ms.fault_ee;
+    s_state.fault_comp = ms.fault_comp;
+    s_state.fault_elec = ms.fault_elec;
+    s_state.fault_ref  = ms.fault_ref;
+    s_state.any_fault  = macon_has_fault(ms.fault_run, ms.fault_ee, ms.fault_comp,
+                                         ms.fault_elec, ms.fault_ref);
 
     xSemaphoreGive(s_state_mutex);
 }
@@ -778,11 +585,14 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
     s_state.consecutive_failures = 0;
     // Log operational transitions for the Tuya feed path.
     detectAndLogStateEvents();
-    uint16_t err1 = s_state.error1;
-    uint16_t err2 = s_state.error2;
+    const uint8_t f_run  = s_state.fault_run;
+    const uint8_t f_ee   = s_state.fault_ee;
+    const uint8_t f_comp = s_state.fault_comp;
+    const uint8_t f_elec = s_state.fault_elec;
+    const uint8_t f_ref  = s_state.fault_ref;
     xSemaphoreGive(s_state_mutex);
 
-    updateErrorHistory(err1, err2);
+    updateErrorHistory(f_run, f_ee, f_comp, f_elec, f_ref);
 
     if (!s_was_connected) {
         ESP_LOGI(TAG, "Heat pump connected (passive feed)");
@@ -833,10 +643,10 @@ TelemetrySnapshot getTelemetrySnapshot() {
             elapsed_within(now, s_telemetry_window_ms, TELEMETRY_FRESHNESS_MS);
         snapshot.connected = telemetry_fresh;
         snapshot.inlet_valid = telemetry_fresh && s_inlet_valid &&
-            !(s_state.error1 & error1::INLET_TEMP_SENS) &&
+            !(s_state.fault_ee & 0x02) &&   // E19 inlet-water sensor (reg2125 bit1)
             s_state.inlet_water_temp >= -50 && s_state.inlet_water_temp <= 150;
         snapshot.outlet_valid = telemetry_fresh && s_outlet_valid &&
-            !(s_state.error1 & error1::OUTLET_TEMP_SENS) &&
+            !(s_state.fault_ee & 0x04) &&   // E18 outlet-water sensor (reg2125 bit2)
             s_state.outlet_water_temp >= -50 && s_state.outlet_water_temp <= 150;
         snapshot.compressor_valid = telemetry_fresh && s_compressor_valid;
         snapshot.compressor_running =
@@ -946,9 +756,13 @@ bool setUnitPower(bool on) {
         ESP_LOGW(TAG, "Unit power write unsupported in Tuya master mode (no verified fc06 mapping)");
         return false;
     }
-    esp_err_t err = writeSingleReg(reg::UNIT_ON_OFF, on ? 1 : 0);
+    // Toggle only the run-state bit (reg2007 bit5); other bits carry faults.
+    uint16_t rs = 0;
+    readCacheReg(REG_FAULT_RUNSTATE, &rs);
+    if (on) rs |= 0x20; else rs &= ~0x20;
+    esp_err_t err = writeCacheReg(REG_FAULT_RUNSTATE, rs);
     if (err == ESP_OK) {
-        // unit_on will update from STATUS_1 on next pollStatus() cycle
+        applyMaconMapping();
         ESP_LOGI(TAG, "Unit power set to %s", on ? "ON" : "OFF");
         return true;
     }
@@ -961,11 +775,9 @@ bool setWorkingMode(WorkingMode mode) {
         ESP_LOGW(TAG, "Working-mode write unsupported in Tuya master mode (no verified fc06 mapping)");
         return false;
     }
-    esp_err_t err = writeSingleReg(reg::WORKING_MODE, static_cast<uint16_t>(mode));
+    esp_err_t err = writeCacheReg(REG_WORKING_MODE, static_cast<uint16_t>(mode));
     if (err == ESP_OK) {
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_state.working_mode = mode;
-        xSemaphoreGive(s_state_mutex);
+        applyMaconMapping();
         ESP_LOGI(TAG, "Working mode set to %s", workingModeToString(mode));
         return true;
     }
@@ -986,11 +798,9 @@ bool setCoolingSetpoint(int16_t temp) {
         }
         return false;
     }
-    esp_err_t err = writeSingleReg(reg::COOLING_SETPOINT, static_cast<uint16_t>(temp));
+    esp_err_t err = writeCacheReg(REG_COOLING_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_state.cooling_setpoint = temp;
-        xSemaphoreGive(s_state_mutex);
+        applyMaconMapping();
         ESP_LOGI(TAG, "Cooling setpoint set to %d", temp);
         return true;
     }
@@ -1006,11 +816,9 @@ bool setHeatingSetpoint(int16_t temp) {
         ESP_LOGW(TAG, "Heating setpoint write unsupported in Tuya master mode (reg2094 unverified)");
         return false;
     }
-    esp_err_t err = writeSingleReg(reg::HEATING_SETPOINT, static_cast<uint16_t>(temp));
+    esp_err_t err = writeCacheReg(REG_AUX_HEAT_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_state.heating_setpoint = temp;
-        xSemaphoreGive(s_state_mutex);
+        applyMaconMapping();
         ESP_LOGI(TAG, "Heating setpoint set to %d", temp);
         return true;
     }
@@ -1029,11 +837,9 @@ bool setHotWaterSetpoint(int16_t temp) {
         }
         return false;
     }
-    esp_err_t err = writeSingleReg(reg::HOT_WATER_SETPOINT, static_cast<uint16_t>(temp));
+    esp_err_t err = writeCacheReg(REG_HOT_WATER_SETPOINT, static_cast<uint16_t>(temp));
     if (err == ESP_OK) {
-        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        s_state.hot_water_setpoint = temp;
-        xSemaphoreGive(s_state_mutex);
+        applyMaconMapping();
         ESP_LOGI(TAG, "Hot water setpoint set to %d", temp);
         return true;
     }
@@ -1057,7 +863,8 @@ bool writeRegister(uint16_t address, uint16_t value) {
     if (macon_master::is_active()) {
         return macon_master::write_register(address, static_cast<uint8_t>(value));
     }
-    if (writeSingleReg(address, value) == ESP_OK) {
+    if (writeCacheReg(address, value) == ESP_OK) {
+        applyMaconMapping();
         ESP_LOGI(TAG, "Register %d set to %d", address, value);
         return true;
     }
@@ -1071,11 +878,7 @@ bool readRegister(uint16_t address, uint16_t* value_out) {
     }
     // Demo, passive-listen, and active-master polling all populate this cache.
     if (s_demo_mode || s_feed_mode) {
-        if (address < DEMO_REG_BASE ||
-            (uint16_t)(address - DEMO_REG_BASE) >= DEMO_REG_COUNT) {
-            return false;  // outside the cached register window
-        }
-        return readRegisters(address, 1, value_out) == ESP_OK;
+        return readCacheReg(address, value_out) == ESP_OK;
     }
     ESP_LOGW(TAG, "Register cache is not initialized");
     return false;
@@ -1089,53 +892,19 @@ int getErrorDescriptions(char* buffer, size_t buffer_size) {
     HeatPumpState state = getState();
     int error_count = 0;
     size_t offset = 0;
-    
-    #define CHECK_ERROR(reg, mask, desc) \
-        if ((state.reg & mask) && offset < buffer_size - 1) { \
-            int written = snprintf(buffer + offset, buffer_size - offset, "%s%s", \
-                                   error_count > 0 ? ", " : "", desc); \
-            if (written > 0) offset += written; \
-            error_count++; \
-        }
-    
-    // Error register 1 (2137)
-    CHECK_ERROR(error1, error1::INDOOR_EE, "Indoor EEPROM");
-    CHECK_ERROR(error1, error1::OUTDOOR_EE, "Outdoor EEPROM");
-    CHECK_ERROR(error1, error1::INLET_TEMP_SENS, "Inlet temp sensor");
-    CHECK_ERROR(error1, error1::OUTLET_TEMP_SENS, "Outlet temp sensor");
-    CHECK_ERROR(error1, error1::INDOOR_COIL_SENS, "Indoor coil sensor");
-    CHECK_ERROR(error1, error1::OUTDOOR_COIL_SENS, "Outdoor coil sensor");
-    CHECK_ERROR(error1, error1::DISCHARGE_SENS, "Discharge sensor");
-    CHECK_ERROR(error1, error1::SUCTION_SENS, "Suction sensor");
-    CHECK_ERROR(error1, error1::OUTDOOR_TEMP_SENS, "Outdoor temp sensor");
-    CHECK_ERROR(error1, error1::INDOOR_OUTDOOR_COMM, "Indoor/outdoor comm");
-    CHECK_ERROR(error1, error1::WIRED_CTRL_COMM, "Controller comm");
-    CHECK_ERROR(error1, error1::COMP_START, "Compressor start");
-    CHECK_ERROR(error1, error1::COMP_DRIVE, "Compressor drive");
-    CHECK_ERROR(error1, error1::IPM_ERROR, "IPM error");
-    CHECK_ERROR(error1, error1::COMP_TOP_PROT, "Compressor overheat");
-    CHECK_ERROR(error1, error1::AC_VOLTAGE_PROT, "AC voltage");
-    
-    // Error register 2 (2138)
-    CHECK_ERROR(error2, error2::AC_CURRENT_PROT, "AC current");
-    CHECK_ERROR(error2, error2::COMP_CURRENT_PROT, "Compressor current");
-    CHECK_ERROR(error2, error2::FAN_MOTOR, "Fan motor");
-    CHECK_ERROR(error2, error2::BUS_VOLTAGE_PROT, "Bus voltage");
-    CHECK_ERROR(error2, error2::IPM_HIGH_TEMP, "IPM high temp");
-    CHECK_ERROR(error2, error2::HIGH_DISCHARGE_TEMP, "High discharge temp");
-    CHECK_ERROR(error2, error2::HIGH_PRESSURE, "High pressure");
-    CHECK_ERROR(error2, error2::LOW_PRESSURE, "Low pressure");
-    CHECK_ERROR(error2, error2::WATER_FLOW, "Water flow");
-    CHECK_ERROR(error2, error2::COOLING_HIGH_COIL, "High coil temp");
-    CHECK_ERROR(error2, error2::LOW_AMBIENT_TEMP, "Low ambient temp");
-    CHECK_ERROR(error2, error2::EEV_LOW_PRESS, "EEV low pressure");
-    CHECK_ERROR(error2, error2::EVI_LOW_PRESS, "EVI low pressure");
-    CHECK_ERROR(error2, error2::WATER_TEMP_DIFF, "Water temp diff");
-    CHECK_ERROR(error2, error2::LOW_OUTLET_TEMP, "Low outlet temp");
-    CHECK_ERROR(error2, error2::COMP_PRESS_DIFF, "Compressor pressure");
-    
-    #undef CHECK_ERROR
-    
+
+    // Iterate the natively-decoded active faults (macon library owns the
+    // canonical (reg,bit) -> code/label table); no fictional error1/error2 masks.
+    arctic::ActiveError active[32];
+    int n = arctic::getActiveErrors(active, 32);
+    for (int i = 0; i < n && offset < buffer_size - 1; ++i) {
+        const char* label = active[i].name ? active[i].name : active[i].code;
+        int written = snprintf(buffer + offset, buffer_size - offset, "%s%s",
+                               error_count > 0 ? ", " : "", label);
+        if (written > 0) offset += written;
+        error_count++;
+    }
+
     if (error_count == 0 && buffer_size > 0) {
         strncpy(buffer, "No errors", buffer_size - 1);
         buffer[buffer_size - 1] = '\0';
@@ -1163,54 +932,93 @@ void getStatusDescription(char* buffer, size_t buffer_size) {
 bool setDemoField(const char* field, int32_t value) {
     if (!s_demo_mode) return false;
     
-    // Map field name to register address
+    // Map the demo field name to its REAL Tuya register address (index =
+    // reg - DEMO_REG_BASE). Fault injection is done by writing the raw fault
+    // register bytes directly (fault_run/ee/comp/elec/ref) — the macon library
+    // decodes them into P/E codes. There are no fictional status/error regs.
     uint16_t addr = 0;
-    
+    // For bit-level (read-modify-write) fields we set rmw_reg/rmw_mask instead
+    // of writing a whole register, so unrelated bits in shared icon/run
+    // registers are preserved.
+    uint16_t rmw_reg = 0;
+    uint16_t rmw_mask = 0;
+
     // Temperatures
-    if (strcmp(field, "water_tank_temp") == 0)            addr = reg::WATER_TANK_TEMP;
-    else if (strcmp(field, "outlet_water_temp") == 0)     addr = reg::OUTLET_WATER_TEMP;
-    else if (strcmp(field, "inlet_water_temp") == 0)      addr = reg::INLET_WATER_TEMP;
-    else if (strcmp(field, "discharge_temp") == 0)        addr = reg::DISCHARGE_TEMP;
-    else if (strcmp(field, "suction_temp") == 0)          addr = reg::SUCTION_TEMP;
-    else if (strcmp(field, "outdoor_coil_temp") == 0)     addr = reg::OUTDOOR_COIL_TEMP;
-    else if (strcmp(field, "indoor_coil_temp") == 0)      addr = reg::INDOOR_COIL_TEMP;
-    else if (strcmp(field, "outdoor_ambient_temp") == 0)  addr = reg::OUTDOOR_AMBIENT_TEMP;
-    else if (strcmp(field, "ipm_temp") == 0)              addr = reg::IPM_TEMP;
+    if (strcmp(field, "water_tank_temp") == 0)            addr = REG_WATER_TANK_TEMP;
+    else if (strcmp(field, "outlet_water_temp") == 0)     addr = REG_OUTLET_WATER_TEMP;
+    else if (strcmp(field, "inlet_water_temp") == 0)      addr = REG_INLET_WATER_TEMP;
+    else if (strcmp(field, "discharge_temp") == 0)        addr = REG_DISCHARGE_TEMP;
+    else if (strcmp(field, "suction_temp") == 0)          addr = REG_SUCTION_TEMP;
+    else if (strcmp(field, "outdoor_coil_temp") == 0)     addr = REG_COIL_TEMP;
+    else if (strcmp(field, "indoor_coil_temp") == 0)      addr = REG_COOL_COIL_TEMP;
+    else if (strcmp(field, "outdoor_ambient_temp") == 0)  addr = REG_OUTDOOR_AMBIENT_TEMP;
+    else if (strcmp(field, "ipm_temp") == 0)              addr = REG_IPM_TEMP;
     // System readings
-    else if (strcmp(field, "compressor_freq") == 0)       addr = reg::COMPRESSOR_FREQ;
-    else if (strcmp(field, "fan_speed") == 0)             addr = reg::FAN_SPEED;
-    else if (strcmp(field, "ac_voltage") == 0)            addr = reg::AC_VOLTAGE;
-    else if (strcmp(field, "ac_current") == 0)            addr = reg::AC_CURRENT;
-    else if (strcmp(field, "dc_voltage") == 0)            addr = reg::DC_VOLTAGE;
-    else if (strcmp(field, "dc_current") == 0)            addr = reg::DC_CURRENT;
-    else if (strcmp(field, "primary_eev_opening") == 0)   addr = reg::PRIMARY_EEV_OPENING;
-    else if (strcmp(field, "secondary_eev_opening") == 0) addr = reg::SECONDARY_EEV_OPENING;
-    else if (strcmp(field, "high_pressure") == 0)         addr = reg::HIGH_PRESSURE;
-    else if (strcmp(field, "low_pressure") == 0)          addr = reg::LOW_PRESSURE;
-    // Status/error registers
-    else if (strcmp(field, "status1") == 0)               addr = reg::STATUS_1;
-    else if (strcmp(field, "status2") == 0)               addr = reg::STATUS_2;
-    else if (strcmp(field, "error1") == 0)                addr = reg::ERROR_1;
-    else if (strcmp(field, "error2") == 0)                addr = reg::ERROR_2;
+    else if (strcmp(field, "compressor_freq") == 0)       addr = REG_COMPRESSOR_FREQ;
+    else if (strcmp(field, "fan_speed") == 0)             addr = REG_DC_MOTOR_SPEED;
+    else if (strcmp(field, "ac_voltage") == 0)            addr = REG_AC_VOLTAGE;
+    else if (strcmp(field, "ac_current") == 0)            addr = REG_AC_CURRENT;
+    else if (strcmp(field, "dc_voltage") == 0)            addr = REG_DC_BUS_VOLTAGE;
+    else if (strcmp(field, "main_eev") == 0 ||
+             strcmp(field, "primary_eev_opening") == 0)   addr = REG_MAIN_EEV;
+    else if (strcmp(field, "realtime_power") == 0)        addr = REG_REALTIME_POWER;
+    // Raw fault-register bytes (fault injection). Decoded natively.
+    else if (strcmp(field, "fault_run") == 0)             addr = REG_FAULT_RUNSTATE;
+    else if (strcmp(field, "fault_ee") == 0)              addr = REG_FAULT_SENSOR_EE;
+    else if (strcmp(field, "fault_comp") == 0)            addr = REG_FAULT_SENSOR_COMP;
+    else if (strcmp(field, "fault_elec") == 0)            addr = REG_FAULT_ELEC;
+    else if (strcmp(field, "fault_ref") == 0)             addr = REG_FAULT;
+    // Component run-state (bit-level, decoded live). Compressor state is driven
+    // by compressor_freq (reg2141), not an icon bit.
+    else if (strcmp(field, "fan_on") == 0)                { rmw_reg = REG_ICON_BITS2; rmw_mask = 0x10; }  // bit4
+    else if (strcmp(field, "pump_on") == 0)               { rmw_reg = REG_STATUS_BYTE; rmw_mask = 0x08; } // bit3
     // Settings
-    else if (strcmp(field, "unit_on") == 0)               addr = reg::UNIT_ON_OFF;
-    else if (strcmp(field, "working_mode") == 0)          addr = reg::WORKING_MODE;
-    else if (strcmp(field, "cooling_setpoint") == 0)      addr = reg::COOLING_SETPOINT;
-    else if (strcmp(field, "heating_setpoint") == 0)      addr = reg::HEATING_SETPOINT;
-    else if (strcmp(field, "hot_water_setpoint") == 0)    addr = reg::HOT_WATER_SETPOINT;
+    else if (strcmp(field, "unit_on") == 0)               { rmw_reg = REG_FAULT_RUNSTATE; rmw_mask = 0x20; } // bit5
+    else if (strcmp(field, "working_mode") == 0)          addr = REG_WORKING_MODE;
+    else if (strcmp(field, "cooling_setpoint") == 0)      addr = REG_COOLING_SETPOINT;
+    else if (strcmp(field, "heating_setpoint") == 0)      addr = REG_AUX_HEAT_SETPOINT;
+    else if (strcmp(field, "hot_water_setpoint") == 0)    addr = REG_HOT_WATER_SETPOINT;
     else return false;
-    
-    s_demo_regs[addr - DEMO_REG_BASE] = (uint16_t)value;
-    
-    // Mirror UNIT_ON_OFF to STATUS_1 bit 0 (same as writeSingleReg)
-    if (addr == reg::UNIT_ON_OFF) {
-        uint16_t& st1 = s_demo_regs[reg::STATUS_1 - DEMO_REG_BASE];
-        if (value) st1 |= status1::UNIT_ON;
-        else       st1 &= ~status1::UNIT_ON;
+
+    if (rmw_mask != 0) {
+        // Read-modify-write a single bit, preserving the rest of the register.
+        uint16_t& r = s_demo_regs[rmw_reg - DEMO_REG_BASE];
+        if (value) r |= rmw_mask; else r &= ~rmw_mask;
+        addr = rmw_reg;  // for the log line below
+    } else {
+        s_demo_regs[addr - DEMO_REG_BASE] = (uint16_t)value;
     }
-    
+
+    // Re-decode the cache into HeatPumpState so the change is reflected live.
+    applyMaconMapping();
+
     ESP_LOGI(TAG, "[DEMO] Field '%s' (reg %d) set to %ld", field, addr, (long)value);
     return true;
+}
+
+int injectDemoFault(const char* code, bool active) {
+    if (!s_demo_mode || code == nullptr) return 0;
+    int sites = macon_set_fault_by_code(s_demo_regs, DEMO_REG_BASE,
+                                        DEMO_REG_COUNT, code, active);
+    if (sites > 0) {
+        applyMaconMapping();
+        ESP_LOGI(TAG, "[DEMO] Fault '%s' %s (%d site%s)",
+                 code, active ? "set" : "cleared", sites, sites == 1 ? "" : "s");
+    }
+    return sites;
+}
+
+void clearDemoFaults() {
+    if (!s_demo_mode) return;
+    // Clear the four telemetry fault registers entirely; on the run/state
+    // register keep bit5 (RUN indicator) and clear only the fault bits.
+    s_demo_regs[REG_FAULT_RUNSTATE - DEMO_REG_BASE]   &= 0x20;
+    s_demo_regs[REG_FAULT_SENSOR_EE - DEMO_REG_BASE]   = 0;
+    s_demo_regs[REG_FAULT_SENSOR_COMP - DEMO_REG_BASE] = 0;
+    s_demo_regs[REG_FAULT_ELEC - DEMO_REG_BASE]        = 0;
+    s_demo_regs[REG_FAULT - DEMO_REG_BASE]             = 0;
+    applyMaconMapping();
+    ESP_LOGI(TAG, "[DEMO] All faults cleared");
 }
 
 }  // namespace arctic
