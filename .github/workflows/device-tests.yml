@@ -50,6 +50,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      # contents:write is needed only on the nightly (schedule) run to publish
+      # the build-under-test to the ci-nightly prerelease for the /api/ota/update
+      # pull-path validation. read is sufficient for checkout on all other events.
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -119,6 +124,32 @@ jobs:
             build/ota_data_initial.bin
             build/flasher_args.json
           retention-days: 7
+
+      - name: Publish build-under-test to CI prerelease (nightly OTA pull path)
+        # The nightly device-tests job validates /api/ota/update, which can only
+        # pull firmware from a GitHub release URL on the device's OTA allowlist.
+        # Publish the exact build-under-test to a dedicated CI *prerelease* tag.
+        # A prerelease is deliberate: the firmware's field update-check hits
+        # /releases/latest, which EXCLUDES prereleases and drafts, so this asset is
+        # invisible to production devices while still being publicly downloadable
+        # via its direct /releases/download/ci-nightly/ URL (which the nightly test
+        # passes explicitly to /api/ota/update). The release is clobbered every run.
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view ci-nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload ci-nightly build/arctic_controller.bin \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create ci-nightly build/arctic_controller.bin \
+              --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --title "CI nightly build-under-test" \
+              --notes "Automated CI artifact for the nightly /api/ota/update pull-path validation. NOT a production release; excluded from /releases/latest. Overwritten on every nightly run."
+          fi
+          echo "Published build/arctic_controller.bin to the ci-nightly prerelease."
 
   device-tests:
     needs: build
@@ -242,7 +273,13 @@ jobs:
         if: steps.partition_layout.outputs.changed != 'true'
         continue-on-error: true
         run: |
-          echo "Uploading firmware to device via OTA..."
+          # Non-schedule runs (PR/push/dispatch) validate the SYNCHRONOUS push path:
+          # /api/ota/upload streams the local build straight to the device. The
+          # nightly (schedule) run instead validates the ASYNCHRONOUS pull path that
+          # field devices actually use: /api/ota/update tells the device to download
+          # the build-under-test from its ci-nightly GitHub release and A/B-flash it
+          # itself.
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
 
           # Wait for mDNS name resolution (up to 30s)
           HOSTNAME="${ARCTIC_URL#*://}"   # strip scheme → arctic.local
@@ -261,23 +298,68 @@ jobs:
           fi
 
           # Quick connectivity check — bail fast if device isn't actually responding
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          DEVICE_REACHABLE=false
-          for URL in "$ARCTIC_URL_HTTPS"; do
-            if curl -sk --connect-timeout 3 --max-time 5 "$URL/api/health" > /dev/null 2>&1; then
-              DEVICE_REACHABLE=true
-              echo "Device responding at $URL"
-              break
-            fi
-          done
-          if [ "$DEVICE_REACHABLE" = "false" ]; then
-            echo "ERROR: Device resolved but not responding on HTTP or HTTPS"
+          if ! curl -sk --connect-timeout 3 --max-time 5 "$ARCTIC_URL_HTTPS/api/health" > /dev/null 2>&1; then
+            echo "ERROR: Device resolved but not responding on HTTPS"
             exit 1
           fi
+          echo "Device responding at $ARCTIC_URL_HTTPS"
 
-          # Try HTTP first, fall back to HTTPS (device may only serve HTTPS when TLS certs are installed)
-          for URL in "$ARCTIC_URL_HTTPS"; do
-            echo "Trying $URL/api/ota/upload ..."
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            # ---- Nightly: asynchronous PULL path (/api/ota/update) ----
+            ASSET_URL="https://github.com/sslivins/arctic-controller/releases/download/ci-nightly/arctic_controller.bin"
+            echo "Nightly OTA pull path: instructing device to download $ASSET_URL"
+            HTTP_CODE=$(curl -sk -o /tmp/ota_response.txt -w "%{http_code}" \
+              -X POST \
+              -H "Content-Type: application/json" \
+              -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              --connect-timeout 5 --max-time 20 \
+              -d "{\"url\": \"$ASSET_URL\"}" \
+              "$ARCTIC_URL_HTTPS/api/ota/update") || true
+            echo "Update trigger: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "::error::/api/ota/update was rejected (HTTP $HTTP_CODE). Nightly pull-path OTA failed to start."
+              exit 1
+            fi
+            # /api/ota/update is asynchronous: the device downloads ~2MB to PSRAM,
+            # then QUIESCES the network (api_server_stop) and A/B-flashes + reboots.
+            # The status server goes offline *before* it reports ready_to_reboot, so
+            # poll /api/ota/status until either it reports 'failed', or the device
+            # goes offline AFTER we have observed download progress (= quiesce/flash/
+            # reboot underway). The subsequent "Wait for device reboot" step reconnects.
+            SAW_PROGRESS=false
+            for i in $(seq 1 90); do
+              ST=$(curl -sk --connect-timeout 2 --max-time 5 \
+                -H "X-API-Key: ${ARCTIC_API_KEY}" \
+                "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || ST=""
+              if [ -z "$ST" ]; then
+                if [ "$SAW_PROGRESS" = "true" ]; then
+                  echo "Device went offline after download progress — quiesce/flash/reboot underway"
+                  exit 0
+                fi
+                echo "  device not yet reachable for status (no progress seen yet)..."
+              else
+                STATE=$(echo "$ST" | python3 -c "import sys,json; print(json.load(sys.stdin).get('state',''))" 2>/dev/null) || STATE=""
+                BYTES=$(echo "$ST" | python3 -c "import sys,json; print(int(json.load(sys.stdin).get('bytes_downloaded',0)))" 2>/dev/null) || BYTES=0
+                echo "  ota status: state='${STATE}' bytes_downloaded=${BYTES}"
+                if [ "$STATE" = "failed" ]; then
+                  echo "::error::Device reported OTA state='failed' during nightly pull-path update."
+                  exit 1
+                fi
+                if [ "${BYTES:-0}" -gt 0 ] || [ "$STATE" = "downloading" ] || [ "$STATE" = "verifying" ]; then
+                  SAW_PROGRESS=true
+                fi
+                if [ "$STATE" = "ready_to_reboot" ]; then
+                  echo "Device reported ready_to_reboot — rebooting into new firmware"
+                  exit 0
+                fi
+              fi
+              sleep 2
+            done
+            echo "::error::Nightly pull-path OTA did not complete within timeout (no reboot observed)."
+            exit 1
+          else
+            # ---- PR/push: synchronous PUSH path (/api/ota/upload) ----
+            echo "Uploading firmware to device via /api/ota/upload ..."
             HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
               -X POST \
               -H "Content-Type: application/octet-stream" \
@@ -285,22 +367,26 @@ jobs:
               --connect-timeout 5 \
               --max-time 30 \
               --data-binary @build/arctic_controller.bin \
-              "$URL/api/ota/upload") || true
-            echo "Response ($URL): HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
+              "$ARCTIC_URL_HTTPS/api/ota/upload") || true
+            echo "Response: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
             if [ "$HTTP_CODE" = "200" ]; then
               echo "OTA upload successful, waiting for reboot..."
               exit 0
             fi
-          done
-          echo "OTA upload failed on both HTTP and HTTPS"
-          exit 1
+            echo "OTA upload failed"
+            exit 1
+          fi
 
       - name: Wait for device reboot (OTA)
         if: steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'success'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 10
-          for i in $(seq 1 30); do
+          # 80s window: the async pull path (nightly) only starts flashing +
+          # rebooting AFTER this step begins (it quiesced the network mid-download),
+          # so allow for flash-from-PSRAM + reboot + C6 bringup. Harmless for the
+          # synchronous upload path, which is already rebooting by now.
+          for i in $(seq 1 80); do
             if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
                curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
               echo "Device is back online after $((i + 10))s"
@@ -308,7 +394,7 @@ jobs:
             fi
             sleep 1
           done
-          echo "Device did not come back online within 40s"
+          echo "Device did not come back online within 90s"
           exit 1
 
       - name: Fallback — flash via USB serial
@@ -486,6 +572,18 @@ jobs:
             exit 1
           fi
           echo "OK: device is running the build under test ($EXPECTED)"
+
+      - name: Enforce nightly OTA pull-path success (strict)
+        # The nightly run exists to validate the /api/ota/update pull path that
+        # field devices use. If that path failed, the USB fallback above will have
+        # recovered the device to the build-under-test (so the rollback guard still
+        # passes), which would otherwise silently mask the failure. Fail the job
+        # explicitly so a broken pull-path OTA can never pass nightly. This runs
+        # AFTER recovery so the device is left healthy for the next scheduled run.
+        if: github.event_name == 'schedule' && steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'failure'
+        run: |
+          echo "::error::Nightly /api/ota/update (pull-path OTA) FAILED. The device was recovered via USB fallback, but nightly must strictly validate the pull path. Failing the job."
+          exit 1
 
       - name: Start controller serial capture
         run: |
