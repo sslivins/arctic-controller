@@ -214,9 +214,14 @@ bool ota_mgr_try_lock_upload(void)
         return false;
     }
     
-    // Acquire lock by setting state
+    // Acquire lock by setting state. Reset the download counters too: a prior
+    // URL-download that failed part-way (e.g. a 404) leaves bytes_downloaded
+    // non-zero, and callers/tests expect starting a new OTA op to clear it so
+    // the idle-state contract (bytes_downloaded == 0) holds.
     ota_status.state = OTA_STATE_UPLOADING;
     ota_status.progress_percent = 0;
+    ota_status.bytes_downloaded = 0;
+    ota_status.total_bytes = 0;
     ota_status.error_msg[0] = '\0';
     
     xSemaphoreGive(status_mutex);
