@@ -23,10 +23,8 @@ DEMO_READINGS = {
     "AC Voltage": "230 V",
     "AC Current": "5 A",
     "DC Voltage": "380.0 V",
-    "DC Current": "4 A",
     # Expansion valves section
     "Primary EEV": "350 steps",
-    "Secondary EEV": "200 steps",
 }
 
 DEMO_SETPOINTS = {

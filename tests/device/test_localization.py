@@ -30,7 +30,7 @@ DEMO_FAULT = "P02"
 def _set_running(device: DeviceClient, **overrides):
     """Compressor + fan + pump running, unit on. Clears faults unless overridden."""
     fields = dict(compressor_freq=60, fan_on=1, fan_speed=FAN_MED, pump_on=1,
-                  unit_on=1)
+                  unit_on=1, cooling_on=0)
     fields.update(overrides)
     device.set_demo_fields(**fields)
 
@@ -218,7 +218,7 @@ class TestFrenchHeroStates:
     def test_cooling_french(self, device: DeviceClient):
         """COOLING → REFROIDISSEMENT in French."""
         device.clear_all_faults()
-        _set_running(device, working_mode=MODE_COOLING)
+        _set_running(device, working_mode=MODE_COOLING, cooling_on=1)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -316,7 +316,7 @@ class TestSpanishHeroStates:
     def test_cooling_spanish(self, device: DeviceClient):
         """COOLING → ENFRIAMIENTO in Spanish."""
         device.clear_all_faults()
-        _set_running(device, working_mode=MODE_COOLING)
+        _set_running(device, working_mode=MODE_COOLING, cooling_on=1)
         time.sleep(UI_SETTLE)
         w = device.find_widget(tag="hero_state")
         assert w is not None

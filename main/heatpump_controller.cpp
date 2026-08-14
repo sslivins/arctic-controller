@@ -971,6 +971,7 @@ bool setDemoField(const char* field, int32_t value) {
     // Component run-state (bit-level, decoded live). Compressor state is driven
     // by compressor_freq (reg2141), not an icon bit.
     else if (strcmp(field, "fan_on") == 0)                { rmw_reg = REG_ICON_BITS2; rmw_mask = 0x10; }  // bit4
+    else if (strcmp(field, "cooling_on") == 0)            { rmw_reg = REG_ICON_BITS2; rmw_mask = 0x04; }  // bit2 (reversing valve = cooling)
     else if (strcmp(field, "pump_on") == 0)               { rmw_reg = REG_STATUS_BYTE; rmw_mask = 0x08; } // bit3
     // Settings
     else if (strcmp(field, "unit_on") == 0)               { rmw_reg = REG_FAULT_RUNSTATE; rmw_mask = 0x20; } // bit5

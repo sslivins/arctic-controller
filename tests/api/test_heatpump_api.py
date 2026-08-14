@@ -274,11 +274,13 @@ class TestDemoModeInjection:
 
     def test_inject_electrical_readings(self):
         """Inject voltage/current and verify they are reflected in status."""
-        _inject_demo({"ac_voltage": 230, "ac_current": 50})
+        # Demo fields write RAW register values; the macon library owns scaling.
+        # AC voltage (reg2101) is scaled x10 on decode; AC current (reg2000) is 1:1.
+        _inject_demo({"ac_voltage": 23, "ac_current": 50})
         time.sleep(1.0)
         data = _get("/api/heatpump/status").json()
-        assert data["readings"]["ac_voltage"] == 230
-        assert data["readings"]["ac_current"] == 50
+        assert data["readings"]["ac_voltage"] == 230   # 23 x 10
+        assert data["readings"]["ac_current"] == 50     # 50 x 1
         # power_consumption is sourced from the unit's real-time power register
         # (reg2114), not derived from V*I, so it is reported independently.
         assert isinstance(data["readings"]["power_consumption"], (int, float))

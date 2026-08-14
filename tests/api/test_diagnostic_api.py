@@ -310,7 +310,10 @@ class TestDiagnosticContent:
     def test_status_bits_have_values(self):
         """Status rows should have On/Off values."""
         status_rows = self._rows_by_category("Status")
-        assert len(status_rows) >= 10, "Expected at least 10 status bits"
+        # The macon library derives seven component states (Unit, Compressor,
+        # Fan, Water Pump, Reversing Valve, Backup Heater, Defrosting) — there
+        # is no fictional status1/status2 bitfield any more.
+        assert len(status_rows) >= 7, "Expected at least 7 component-status rows"
         for row in status_rows:
             assert row["Value"] in ("ON", "OFF"), (
                 f"Status '{row['Name']}' has unexpected value: {row['Value']}"
