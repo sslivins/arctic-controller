@@ -3,8 +3,15 @@ dependencies:
   ## Required IDF version
   idf: '>=5.3'
   espressif/esp_lcd_ili9881c: ^1.0.1
-  ## Pin to M5Stack Tab5's compatible versions (matches pre-flashed C6 firmware)
-  espressif/esp_hosted: "1.4.0"
+  ## Pin to M5Stack Tab5's compatible versions (matches pre-flashed C6 firmware).
+  ## esp_hosted is vendored + patched locally (override_path): host-side backport of
+  ## esp-hosted-mcu 2.12.8 MEMPOOL_PREFER_SPIRAM so the streaming SDIO RX buffer is
+  ## allocated from PSRAM (P4 GDMA-reachable) instead of scarce internal DMA SRAM,
+  ## fixing the sdio_rx_get_buffer:670 OOM assert during OTA. See the component's
+  ## host/port/include/os_wrapper.h MEM_ALLOC macro.
+  espressif/esp_hosted:
+    version: "1.4.0"
+    override_path: "../components/espressif__esp_hosted"
   espressif/esp_wifi_remote: "0.8.5"
   ## mDNS for local network discovery (arctic.local)
   espressif/mdns: "^1.4"
