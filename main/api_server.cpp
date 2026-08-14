@@ -31,7 +31,6 @@
 #include <esp_https_server.h>
 #include <esp_log.h>
 #include <mdns.h>
-#include <esp_mac.h>
 #include <cJSON.h>
 #include <ctype.h>
 #include <stdio.h>
@@ -93,8 +92,8 @@ static SemaphoreHandle_t s_ha_command_mutex = nullptr;
 
 // Web handlers
 static esp_err_t web_root_handler(httpd_req_t* req);
-static esp_err_t http_to_https_redirect_handler(httpd_req_t* req,
-                                                httpd_err_code_t err);
+static esp_err_t http_https_required_handler(httpd_req_t* req,
+                                             httpd_err_code_t err);
 static esp_err_t web_login_handler(httpd_req_t* req);
 static esp_err_t web_logout_handler(httpd_req_t* req);
 static esp_err_t favicon_handler(httpd_req_t* req);
@@ -310,18 +309,18 @@ bool api_server_init_mdns(void)
     
     // Build a per-device hostname by appending the last two bytes of the
     // WiFi station MAC as four lowercase hex digits (e.g. "arctic-3f2a").
-    // esp_read_mac() reads the factory MAC from eFuse, so the value is
-    // deterministic across reboots and available even before Wi-Fi is up.
     // This avoids "arctic.local" collisions when several controllers share a
-    // network. If the read fails for any reason, fall back to the base name.
+    // network. We use wifi_mgr_get_mac_addr() so the suffix is derived from
+    // the actual C6 station MAC that the device advertises (the same value
+    // reported by GET /api/wifi) rather than the P4 host MAC. api_server_init_mdns()
+    // runs after the station has an IP, so this MAC is available here. If the
+    // read fails for any reason, fall back to the base name.
     uint8_t mac[6] = {0};
-    esp_err_t mac_err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    if (mac_err == ESP_OK) {
+    if (wifi_mgr_get_mac_addr(mac)) {
         snprintf(hostname, sizeof(hostname), "%s-%02x%02x",
                  HOSTNAME_BASE, mac[4], mac[5]);
     } else {
-        ESP_LOGW(TAG, "esp_read_mac failed (%s); using base hostname",
-                 esp_err_to_name(mac_err));
+        ESP_LOGW(TAG, "wifi_mgr_get_mac_addr failed; using base hostname");
         snprintf(hostname, sizeof(hostname), "%s", HOSTNAME_BASE);
     }
     
@@ -1259,13 +1258,15 @@ bool api_server_start(void)
     // With mandatory HTTPS active, port 80 only serves the essential bootstrap
     // routes; any other path (e.g. a browser opening http://<device>) would
     // otherwise hit the bare "Nothing matches the given URI" 404. Register a
-    // 404 handler on the HTTP server that upgrades those requests to HTTPS so
-    // users land on the real UI instead of an error.
+    // 404 handler on the HTTP server that returns a clean "use HTTPS" notice
+    // instead. It does NOT redirect: mandatory HTTPS means port 80 must stay a
+    // dead end so secret-bearing requests are never normalised onto plaintext
+    // HTTP (see tests/api/test_ha_security_contract.py).
     if (server != NULL && server_ssl != NULL) {
         esp_err_t rerr = httpd_register_err_handler(
-            server, HTTPD_404_NOT_FOUND, http_to_https_redirect_handler);
+            server, HTTPD_404_NOT_FOUND, http_https_required_handler);
         if (rerr != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to register HTTP->HTTPS redirect: %s",
+            ESP_LOGW(TAG, "Failed to register HTTP 404 handler: %s",
                      esp_err_to_name(rerr));
         }
     }
@@ -1343,33 +1344,28 @@ static void send_json_error(httpd_req_t* req, const char* status, const char* me
 
 // 404 handler for the plain-HTTP server (port 80). Because mandatory HTTPS is
 // active, all normal routes are registered on the HTTPS server only, so any
-// non-essential HTTP request lands here. Redirect it to the same path on
-// HTTPS (default port 443) instead of returning the default esp_http_server
-// 404 body. Preserves whatever host the client used (IP or arctic-xxxx.local).
-static esp_err_t http_to_https_redirect_handler(httpd_req_t* req,
-                                                httpd_err_code_t err)
+// non-essential HTTP request lands here. Return a clean 404 with a short
+// plain-text notice pointing at the device's HTTPS URL instead of the default
+// esp_http_server "Nothing matches the given URI" body.
+//
+// This intentionally does NOT redirect (no Location header / 3xx): under
+// mandatory HTTPS, port 80 must stay a dead end so clients are never
+// encouraged to send secret-bearing requests (X-API-Key / bearer tokens) over
+// plaintext HTTP. The message uses the device's own advertised hostname rather
+// than reflecting the client-supplied Host header.
+static esp_err_t http_https_required_handler(httpd_req_t* req,
+                                             httpd_err_code_t err)
 {
     (void)err;
 
-    char host[80];
-    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK
-            || host[0] == '\0') {
-        snprintf(host, sizeof(host), "%s.local", hostname);
-    }
-    // Drop any :port suffix so the redirect targets the default HTTPS port.
-    char* colon = strchr(host, ':');
-    if (colon != NULL) {
-        *colon = '\0';
-    }
+    char body[128];
+    snprintf(body, sizeof(body),
+             "This controller requires a secure connection.\n"
+             "Use https://%s.local/\n", hostname);
 
-    // Sized for "https://" + max Host header + max request URI so the
-    // compiler can prove no truncation (-Werror=format-truncation).
-    char location[640];
-    snprintf(location, sizeof(location), "https://%s%s", host, req->uri);
-
-    httpd_resp_set_status(req, "301 Moved Permanently");
-    httpd_resp_set_hdr(req, "Location", location);
-    httpd_resp_send(req, NULL, 0);
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
