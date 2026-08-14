@@ -2641,7 +2641,16 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     }
     
     esp_ota_handle_t ota_handle;
-    esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
+    // OTA_WITH_SEQUENTIAL_WRITES: do NOT erase the whole partition up front.
+    // esp_ota_begin() returns immediately and each esp_ota_write() erases only the
+    // sector(s) it is about to write. This bounds the longest CPU/cache-disabled,
+    // interrupts-masked window to a single ~4KB sector erase (~50ms) instead of a
+    // multi-second whole-partition erase. On the ESP32-P4 (RISC-V) a flash op masks
+    // ALL interrupts (MIE cleared) for its whole duration, so a long monolithic erase
+    // starves both the USB-CDC console AND the esp_hosted SDIO-RX servicing -> the C6
+    // link wedges and the network dies with no reboot. Writes below are <=4KB, so
+    // exactly one sector is erased per write. See ota_manager.cpp for the full story.
+    esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
         ota_mgr_unlock_upload();

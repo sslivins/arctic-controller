@@ -78,9 +78,6 @@ CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
 # Move FreeRTOS functions from IRAM to flash
 CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
 
-# Move SPI flash driver functions from IRAM to flash (saves ~2KB IRAM)
-CONFIG_SPI_FLASH_ROM_IMPL=y
-
 # Reduce HAL IRAM usage
 CONFIG_HAL_DEFAULT_ASSERTION_LEVEL=0
 
@@ -145,3 +142,17 @@ CONFIG_ESP_HTTPS_SERVER_ENABLE=y
 # before the next reboot; otherwise the bootloader rolls back to the previous
 # working partition.  This prevents a bad OTA from bricking the device.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- OTA flash-erase watchdog mitigations (ESP32-P4 host + esp_hosted C6 SDIO) ---
+# On ESP32-P4 (RISC-V) a SPI-flash erase clears MIE globally, masking ALL
+# interrupts (even IRAM ISRs) for the whole erase duration. A 64KB block erase
+# (hundreds of ms .. ~2s worst case) starves the esp_hosted SDIO-RX servicing
+# and blows the stock 300ms interrupt watchdog -> rst:0x7 (HP_SYS_HP_WDT_RESET),
+# bricking the device mid-OTA. Force per-4KB-sector erases (short blackouts),
+# yield between erases, and give both watchdogs generous headroom so a legitimate
+# flash-erase blackout during an OTA download does not trip a reset. Device is
+# mains-powered/always-on, so the larger WDT windows are an acceptable tradeoff.
+CONFIG_SPI_FLASH_BYPASS_BLOCK_ERASE=y
+CONFIG_SPI_FLASH_YIELD_DURING_ERASE=y
+CONFIG_ESP_INT_WDT_TIMEOUT_MS=8000
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=60

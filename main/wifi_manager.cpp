@@ -82,8 +82,15 @@ bool wifi_mgr_init(void)
     
     ESP_LOGI(TAG, "Initializing WiFi manager...");
     
-    // Power on the ESP32-C6 WiFi module
-    ESP_LOGI(TAG, "Powering on ESP32-C6 WiFi module...");
+    // Power-cycle the ESP32-C6 WiFi module.
+    // A P4-only reset (e.g. after an OTA/watchdog reset) does NOT power-cycle
+    // the C6, so if the C6's SDIO/esp_hosted link was wedged it stays wedged
+    // across the reboot. Explicitly drive the power rail low, let it fully
+    // discharge, then bring it back up so every boot starts the C6 from a
+    // clean power-on state (mimics a hardware power cycle).
+    ESP_LOGI(TAG, "Power-cycling ESP32-C6 WiFi module...");
+    bsp_set_wifi_power_enable(false);
+    vTaskDelay(pdMS_TO_TICKS(500));   // Hold power off long enough for the rail to discharge
     bsp_set_wifi_power_enable(true);
     // ESP-Hosted requires adequate time for C6 to boot and initialize SDIO
     vTaskDelay(pdMS_TO_TICKS(1500));  // Give C6 time to boot
