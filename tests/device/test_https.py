@@ -316,3 +316,39 @@ class TestHttpsLifecycle:
             f"{https_url}/api/health", verify=False, timeout=10
         )
         assert response.status_code == 200
+
+
+class TestHttpNonEssentialRoutes:
+    """Under mandatory HTTPS, port 80 is a dead end for non-essential routes.
+
+    Instead of redirecting (which would normalise sending secret-bearing
+    requests over plaintext HTTP), the device returns a clean 404 pointing at
+    its HTTPS URL. Essential bootstrap routes remain available over HTTP.
+    """
+
+    def _http_url(self) -> str:
+        return ARCTIC_URL.replace("https://", "http://")
+
+    def test_http_root_returns_404_not_redirect(self):
+        """GET http://<device>/ returns 404 and does NOT redirect."""
+        r = requests.get(
+            f"{self._http_url()}/", allow_redirects=False, timeout=10
+        )
+        assert r.status_code == 404
+        assert "Location" not in r.headers
+
+    def test_http_404_body_points_to_https(self):
+        """The 404 body tells the user to use the HTTPS URL."""
+        r = requests.get(
+            f"{self._http_url()}/settings", allow_redirects=False, timeout=10
+        )
+        assert r.status_code == 404
+        assert "Location" not in r.headers
+        assert "https" in r.text.lower()
+
+    def test_http_health_still_served(self):
+        """Essential bootstrap routes remain available over plain HTTP."""
+        r = requests.get(
+            f"{self._http_url()}/api/health", allow_redirects=False, timeout=10
+        )
+        assert r.status_code == 200

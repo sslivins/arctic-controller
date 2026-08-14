@@ -225,7 +225,7 @@ These validate that a bad firmware gets reverted by the bootloader.
 ## WiFi Testing (expanded)
 
 - [ ] Test WiFi scan and connect from settings
-- [ ] Verify mDNS discovery (`arctic.local`)
+- [x] Verify mDNS hostname carries MAC suffix (`arctic-<xxxx>.local`) — `test_events_and_misc_api.py::TestWiFiAPI::test_hostname_has_mac_suffix`
 - [ ] Test WiFi reconnection after signal loss
 - [ ] Verify API server starts correctly after WiFi connection
 - [ ] Test with ESP32-C6 WiFi module (hosted mode)

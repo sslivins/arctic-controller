@@ -17,6 +17,7 @@ Prerequisites:
 """
 
 import os
+import re
 import time
 
 import pytest
@@ -280,6 +281,35 @@ class TestWiFiAPI:
         assert "rssi" in data
         assert isinstance(data["rssi"], int)
         assert data["rssi"] < 0  # RSSI is always negative dBm
+
+    def test_hostname_has_mac_suffix(self):
+        """Hostname is 'arctic-<xxxx>' where xxxx is the last two MAC bytes.
+
+        The MAC suffix keeps multiple controllers from colliding on
+        'arctic.local'. The suffix must match the low two bytes of the
+        reported station MAC (lowercase hex).
+        """
+        data = _get("/api/wifi").json()
+        if not data["connected"]:
+            pytest.skip("WiFi not connected")
+        assert "hostname" in data
+        assert "mac" in data
+        hostname = data["hostname"]
+        assert re.fullmatch(r"arctic-[0-9a-f]{4}", hostname), (
+            f"hostname {hostname!r} does not match 'arctic-<4 hex>'"
+        )
+        last_two = data["mac"].replace(":", "")[-4:].lower()
+        assert hostname == f"arctic-{last_two}", (
+            f"hostname suffix {hostname!r} does not match MAC {data['mac']!r}"
+        )
+
+    def test_local_url_uses_suffixed_hostname(self):
+        """local_url advertises the per-device .local name."""
+        data = _get("/api/wifi").json()
+        if not data["connected"]:
+            pytest.skip("WiFi not connected")
+        assert "local_url" in data
+        assert data["local_url"].endswith(f"{data['hostname']}.local")
 
 
 # ── Info API ──────────────────────────────────────────────────────────────
