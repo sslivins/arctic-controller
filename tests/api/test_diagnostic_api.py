@@ -343,6 +343,55 @@ class TestDiagnosticContent:
             assert addr.isdigit(), f"Parameter '{row['Name']}' has non-numeric address: {addr}"
 
 
+# ── Value scaling (regression guard) ──────────────────────────────────────
+
+
+class TestDiagnosticValues:
+    """Regression guard for CSV value magnitudes.
+
+    The arctic-macon library decodes raw registers into whole-unit values;
+    the diagnostic CSV must render those as-is and must NOT re-scale them. A
+    prior bug divided every temperature and the AC current by 10, so they
+    were reported 10x low (42 C -> "4.2", 5 A -> "0.5"). These tests inject
+    known demo register values and assert the exact rendered value, so any
+    reintroduced scaling error fails loudly. Demo injection writes the RAW
+    register byte; the library owns the raw->unit conversion.
+    """
+
+    def _row_value(self, category: str, name: str):
+        r = _get("/api/heatpump/diagnostic")
+        rows = _parse_csv(r.content.decode("utf-8-sig"))
+        for row in rows:
+            if row["Category"] == category and row["Name"] == name:
+                return row["Value"]
+        return None
+
+    def test_temperatures_are_whole_celsius(self):
+        # Raw temp registers decode 1:1 to whole degrees C.
+        _inject_demo({"water_tank_temp": 42, "inlet_water_temp": 38})
+        time.sleep(1.0)
+        assert self._row_value("Temperature", "Water Tank") == "42"
+        assert self._row_value("Temperature", "Inlet Water") == "38"
+
+    def test_ac_current_is_whole_amps(self):
+        # AC current decodes 1:1 to whole amps (not tenths).
+        _inject_demo({"ac_current": 5})
+        time.sleep(1.0)
+        assert self._row_value("Reading", "AC Current") == "5"
+
+    def test_ac_voltage_uses_library_scaling(self):
+        # Raw AC voltage is x10; the library decodes 23 -> 230 V and the CSV
+        # must show the decoded value without re-scaling.
+        _inject_demo({"ac_voltage": 23})
+        time.sleep(1.0)
+        assert self._row_value("Reading", "AC Voltage") == "230"
+
+    def test_compressor_frequency_value(self):
+        _inject_demo({"compressor_freq": 60})
+        time.sleep(1.0)
+        assert self._row_value("Reading", "Compressor Frequency") == "60"
+
+
 # ── Error Injection ───────────────────────────────────────────────────────
 
 
