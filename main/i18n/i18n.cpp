@@ -243,13 +243,8 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_AC_VOLTAGE] = "AC Voltage",
     [STR_HP_AC_CURRENT] = "AC Current",
     [STR_HP_DC_VOLTAGE] = "DC Voltage",
-    [STR_HP_DC_CURRENT] = "DC Current",
-    [STR_HP_PRESSURES] = "Pressures",
-    [STR_HP_HIGH_PRESSURE] = "High Pressure",
-    [STR_HP_LOW_PRESSURE] = "Low Pressure",
     [STR_HP_EXPANSION_VALVES] = "Expansion Valves",
     [STR_HP_PRIMARY_EEV] = "Primary EEV",
-    [STR_HP_SECONDARY_EEV] = "Secondary EEV",
     [STR_HP_SETPOINTS] = "Setpoints",
     
     // Heat Pump - Errors Screen
@@ -636,13 +631,8 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_AC_VOLTAGE] = "Tension CA",
     [STR_HP_AC_CURRENT] = "Courant CA",
     [STR_HP_DC_VOLTAGE] = "Tension CC",
-    [STR_HP_DC_CURRENT] = "Courant CC",
-    [STR_HP_PRESSURES] = "Pressions",
-    [STR_HP_HIGH_PRESSURE] = "Haute pression",
-    [STR_HP_LOW_PRESSURE] = "Basse pression",
     [STR_HP_EXPANSION_VALVES] = "Détendeurs",
     [STR_HP_PRIMARY_EEV] = "Détendeur primaire",
-    [STR_HP_SECONDARY_EEV] = "Détendeur secondaire",
     [STR_HP_SETPOINTS] = "Consignes",
     
     // Heat Pump - Errors Screen
@@ -1029,13 +1019,8 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_AC_VOLTAGE] = "Tensión CA",
     [STR_HP_AC_CURRENT] = "Corriente CA",
     [STR_HP_DC_VOLTAGE] = "Tensión CC",
-    [STR_HP_DC_CURRENT] = "Corriente CC",
-    [STR_HP_PRESSURES] = "Presiones",
-    [STR_HP_HIGH_PRESSURE] = "Alta presión",
-    [STR_HP_LOW_PRESSURE] = "Baja presión",
     [STR_HP_EXPANSION_VALVES] = "Válvulas de expansión",
     [STR_HP_PRIMARY_EEV] = "VEE primaria",
-    [STR_HP_SECONDARY_EEV] = "VEE secundaria",
     [STR_HP_SETPOINTS] = "Consignas",
     
     // Heat Pump - Errors Screen

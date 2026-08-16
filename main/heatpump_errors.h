@@ -119,4 +119,12 @@ const char* formatDuration(time_t start_time, time_t end_time = 0);
 // Check if a specific (reg, bit) fault is currently active.
 bool isErrorActive(uint16_t reg, uint8_t bit);
 
+// True if the fault identified by `code` (e.g. "E18", "E19") is currently
+// active in the supplied raw Macon fault-register bytes. The macon library
+// owns the code->(reg, bit) mapping; callers reference only the public code
+// string and never a bit position. Takes the raw bytes (rather than reading
+// global state) so it is safe to call while holding the controller state lock.
+bool hasActiveFaultCode(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
+                        uint8_t fault_elec, uint8_t fault_ref, const char* code);
+
 }  // namespace arctic

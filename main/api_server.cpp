@@ -17,6 +17,7 @@
 #include "heatpump_types.h"
 #include "macon_master.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
+#include "macon_registers.h"  // arctic::REG_* address constants (single source of truth)
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
 #include "event_log.h"
@@ -3891,49 +3892,53 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "System,Demo Mode,,,\"%s\",\r\n", demo ? "Yes" : "No");
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "System,Unit Power,,2000,\"%s\",\r\n", hp.unit_on ? "ON" : "OFF");
+    // Unit power and working mode are derived by the macon library from
+    // several registers, so there is no single canonical address to report.
+    snprintf(line, sizeof(line), "System,Unit Power,,,\"%s\",\r\n", hp.unit_on ? "ON" : "OFF");
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "System,Working Mode,,2001,\"%s\",\r\n", arctic::workingModeToString(hp.working_mode));
+    snprintf(line, sizeof(line), "System,Working Mode,,,\"%s\",\r\n", arctic::workingModeToString(hp.working_mode));
     httpd_resp_sendstr_chunk(req, line);
 
-    // --- Temperatures (stored as tenths of °C) ---
+    // --- Temperatures (whole °C, already decoded by the macon library) ---
+    // Addresses are the real macon register constants (single source of truth);
+    // the consumer never hardcodes wire addresses.
     #define DIAG_TEMP(name_str, field, addr) \
-        snprintf(line, sizeof(line), "Temperature,%s,,%d,%.1f,°C\r\n", name_str, addr, (field) / 10.0f); \
+        snprintf(line, sizeof(line), "Temperature,%s,,%u,%d,°C\r\n", name_str, (addr), (int)(field)); \
         httpd_resp_sendstr_chunk(req, line);
 
-    DIAG_TEMP("Water Tank",       hp.water_tank_temp,       2100)
-    DIAG_TEMP("Outlet Water",     hp.outlet_water_temp,     2102)
-    DIAG_TEMP("Inlet Water",      hp.inlet_water_temp,      2103)
-    DIAG_TEMP("Discharge",        hp.discharge_temp,        2104)
-    DIAG_TEMP("Suction",          hp.suction_temp,          2105)
-    DIAG_TEMP("Outdoor Coil",     hp.outdoor_coil_temp,     2107)
-    DIAG_TEMP("Indoor Coil",      hp.indoor_coil_temp,      2108)
-    DIAG_TEMP("Outdoor Ambient",  hp.outdoor_ambient_temp,  2110)
-    DIAG_TEMP("IPM Module",       hp.ipm_temp,              2114)
+    DIAG_TEMP("Water Tank",       hp.water_tank_temp,       arctic::REG_WATER_TANK_TEMP)
+    DIAG_TEMP("Outlet Water",     hp.outlet_water_temp,     arctic::REG_OUTLET_WATER_TEMP)
+    DIAG_TEMP("Inlet Water",      hp.inlet_water_temp,      arctic::REG_INLET_WATER_TEMP)
+    DIAG_TEMP("Discharge",        hp.discharge_temp,        arctic::REG_DISCHARGE_TEMP)
+    DIAG_TEMP("Suction",          hp.suction_temp,          arctic::REG_SUCTION_TEMP)
+    DIAG_TEMP("Outdoor Coil",     hp.outdoor_coil_temp,     arctic::REG_COIL_TEMP)
+    DIAG_TEMP("Indoor Coil",      hp.indoor_coil_temp,      arctic::REG_COOL_COIL_TEMP)
+    DIAG_TEMP("Outdoor Ambient",  hp.outdoor_ambient_temp,  arctic::REG_OUTDOOR_AMBIENT_TEMP)
+    DIAG_TEMP("IPM Module",       hp.ipm_temp,              arctic::REG_IPM_TEMP)
     #undef DIAG_TEMP
 
-    // --- Setpoints ---
-    snprintf(line, sizeof(line), "Setpoint,Cooling,,2002,%d,°C\r\n", hp.cooling_setpoint);
+    // --- Setpoints (whole °C) ---
+    snprintf(line, sizeof(line), "Setpoint,Cooling,,%u,%d,°C\r\n", arctic::REG_COOLING_SETPOINT, hp.cooling_setpoint);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Setpoint,Heating,,2003,%d,°C\r\n", hp.heating_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Heating,,%u,%d,°C\r\n", arctic::REG_AUX_HEAT_SETPOINT, hp.heating_setpoint);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Setpoint,Hot Water,,2004,%d,°C\r\n", hp.hot_water_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Hot Water,,%u,%d,°C\r\n", arctic::REG_HOT_WATER_SETPOINT, hp.hot_water_setpoint);
     httpd_resp_sendstr_chunk(req, line);
 
-    // --- System Readings ---
-    snprintf(line, sizeof(line), "Reading,Compressor Frequency,,2118,%u,Hz\r\n", hp.compressor_freq);
+    // --- System Readings (already decoded to whole units by the macon library) ---
+    snprintf(line, sizeof(line), "Reading,Compressor Frequency,,%u,%u,Hz\r\n", arctic::REG_COMPRESSOR_FREQ, hp.compressor_freq);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Fan Speed,,2119,%u,RPM\r\n", hp.fan_speed);
+    snprintf(line, sizeof(line), "Reading,Fan Speed,,%u,%u,RPM\r\n", arctic::REG_DC_MOTOR_SPEED, hp.fan_speed);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,AC Voltage,,2120,%u,V\r\n", hp.ac_voltage);
+    snprintf(line, sizeof(line), "Reading,AC Voltage,,%u,%u,V\r\n", arctic::REG_AC_VOLTAGE, hp.ac_voltage);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,AC Current,,2121,%.1f,A\r\n", hp.ac_current / 10.0f);
+    snprintf(line, sizeof(line), "Reading,AC Current,,%u,%u,A\r\n", arctic::REG_AC_CURRENT, hp.ac_current);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,DC Voltage,,2122,%.1f,V\r\n", hp.getDcVoltageV());
+    snprintf(line, sizeof(line), "Reading,DC Voltage,,%u,%.1f,V\r\n", arctic::REG_DC_BUS_VOLTAGE, hp.getDcVoltageV());
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,2124,%u,steps\r\n", hp.primary_eev_opening);
+    snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,%u,%u,steps\r\n", arctic::REG_MAIN_EEV, hp.primary_eev_opening);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Power Consumption,,2114,%lu,W\r\n", (unsigned long)hp.realtime_power_w);
+    snprintf(line, sizeof(line), "Reading,Power Consumption,,%u,%lu,W\r\n", arctic::REG_REALTIME_POWER, (unsigned long)hp.realtime_power_w);
     httpd_resp_sendstr_chunk(req, line);
     if (hp.cop_valid) {
         snprintf(line, sizeof(line), "Reading,Heat Output (est),,,%ld,W\r\n", (long)hp.thermal_w);
@@ -3957,15 +3962,15 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     #undef DIAG_BOOL
 
     // --- Raw fault-register bytes (2007 + 2125-2128) ---
-    snprintf(line, sizeof(line), "Register,Fault Run/State (raw),,2007,0x%02X,\r\n", hp.fault_run);
+    snprintf(line, sizeof(line), "Register,Fault Run/State (raw),,%u,0x%02X,\r\n", arctic::REG_FAULT_RUNSTATE, hp.fault_run);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Register,Fault Sensor/EE (raw),,2125,0x%02X,\r\n", hp.fault_ee);
+    snprintf(line, sizeof(line), "Register,Fault Sensor/EE (raw),,%u,0x%02X,\r\n", arctic::REG_FAULT_SENSOR_EE, hp.fault_ee);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Register,Fault Sensor/Comp (raw),,2126,0x%02X,\r\n", hp.fault_comp);
+    snprintf(line, sizeof(line), "Register,Fault Sensor/Comp (raw),,%u,0x%02X,\r\n", arctic::REG_FAULT_SENSOR_COMP, hp.fault_comp);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Register,Fault Electrical (raw),,2127,0x%02X,\r\n", hp.fault_elec);
+    snprintf(line, sizeof(line), "Register,Fault Electrical (raw),,%u,0x%02X,\r\n", arctic::REG_FAULT_ELEC, hp.fault_elec);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Register,Fault Refrigerant (raw),,2128,0x%02X,\r\n", hp.fault_ref);
+    snprintf(line, sizeof(line), "Register,Fault Refrigerant (raw),,%u,0x%02X,\r\n", arctic::REG_FAULT, hp.fault_ref);
     httpd_resp_sendstr_chunk(req, line);
 
     // --- Active Errors (natively decoded by the macon library) ---

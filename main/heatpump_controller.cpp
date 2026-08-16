@@ -76,8 +76,10 @@ static bool elapsed_within(uint32_t now, uint32_t then, uint32_t limit) {
 // exactly as the passive listener / active master / demo simulator populate
 // them. The arctic-macon library (decode_state) owns interpreting this image
 // into a MaconState; the controller only adapts that into HeatPumpState.
-static const uint16_t DEMO_REG_BASE = 2000;
-static const uint16_t DEMO_REG_COUNT = 143; // 2000..2142 inclusive (telemetry window reaches reg2142)
+static const uint16_t DEMO_REG_BASE = HOLDING_START;  // 2000
+// Spans both the holding (2000..2057) and telemetry (2093..2142) windows as a
+// single flat cache; bounds come from the macon library, not magic numbers.
+static const uint16_t DEMO_REG_COUNT = INPUT_START + INPUT_COUNT - HOLDING_START;  // 2000..2142
 static uint16_t s_demo_regs[DEMO_REG_COUNT];
 
 // Read a single register from the cache.
@@ -156,7 +158,9 @@ static void detectAndLogStateEvents() {
         const uint8_t cur_faults[5] = {
             s_state.fault_run, s_state.fault_ee, s_state.fault_comp,
             s_state.fault_elec, s_state.fault_ref };
-        static const uint16_t kFaultRegs[5] = {2007, 2125, 2126, 2127, 2128};
+        static const uint16_t kFaultRegs[5] = {
+            REG_FAULT_RUNSTATE, REG_FAULT_SENSOR_EE, REG_FAULT_SENSOR_COMP,
+            REG_FAULT_ELEC, REG_FAULT };
         for (int r = 0; r < 5; r++) {
             uint8_t appeared = cur_faults[r] & ~s_prev_fault_bytes[r];
             uint8_t cleared  = s_prev_fault_bytes[r] & ~cur_faults[r];
@@ -334,36 +338,15 @@ bool isExternalFeed() {
     return s_feed_mode;
 }
 
-// Empirically-derived Macon (OEM) Tuya register->field mapping (index = reg-2000).
-// Confirmed against the unit's official o/A parameter-code legend cross-checked
-// with live ground truth (idle + running pump->fan->compressor staged states):
-//   TEMPERATURES (signed int8, whole °C):
-//     reg2008 = o1 water tank
-//     reg2132 = o3 water outlet/supply    (idle 28 -> running 40)
-//     reg2133 = o2 water inlet/return     (idle 28 -> running 36)
-//     reg2134 = o4 ambient/outdoor
-//     reg2135 = A6 cool coil
-//     reg2136 = A2 coil
-//     reg2137 = A3 suction
-//     reg2138 = A1 discharge
-//     reg2113 = A8 IPM module
-//   SETPOINT: reg2012 = hot-water setpoint
-//   STATUS:   reg2007 run/fault bitfield (0x20 = hot-water ON; bits0-3 = ΔT/temp faults),
-//             reg2130 icon bits #1 (0x01 heating, 0x04 compressor, 0x08 pump, 0x20 hours),
-//             reg2129 icon bits #2 (0x02 defrost, 0x10 fan)
-//   ELECTRICAL (register value == A-code menu value, 1:1):
-//     reg2000 = A4 AC input current    reg2101 = A13 AC input voltage
-//     reg2001 = A7 DC bus voltage(*10) reg2140 = A5 main EEV degree
-//     reg2003 = A10 DC motor (fan) speed
-//     reg2141 = A14 compressor frequency (Hz)   [telemetry window reaches 2142]
-//   real-time power comes from the macon library (reg2114/A9), in watts.
-// High/low pressure (A11/A12) read static nonsense values (-6 / 3), i.e.
-// uninstalled sensors on this DHW unit, so left cleared. The fault/protection
-// registers are reg2007 (holding) + the INPUT cluster reg2125-2128, all mapped
-// live 2026-07-05; their bit ordering differs from the legacy Arctic error
-// tables, so each confirmed bit is translated to its semantic legacy mask.
-// Adapt the confirmed reg2096 working-mode enum. In Auto, expose the actual
-// water-side direction while the compressor runs.
+// The arctic-macon library (decode_state) is the single source of truth for the
+// Macon Tuya register layout, scaling, and fault/icon bit positions — see
+// components/arctic-macon/include/macon_registers.h and macon_faults.h. This
+// adapter consumes the already-decoded MaconState; it does NOT re-interpret raw
+// registers. High/low pressure (A11/A12) are uninstalled sensors on this DHW
+// unit and are not reported.
+//
+// In Auto working mode, expose the actual water-side direction while the
+// compressor runs (rather than the raw menu enum).
 static WorkingMode to_working_mode(const MaconState& state) {
     switch (state.working_mode) {
         case MaconWorkingMode::Cooling:
@@ -559,8 +542,8 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
 
     const uint32_t now = getTimeMs();
     const uint32_t window_end = (uint32_t)reg_base + (uint32_t)count;
-    const bool has_holding_state = reg_base <= 2049 && window_end > 2049;
-    const bool has_telemetry_state = reg_base <= 2141 && window_end > 2141;
+    const bool has_holding_state = reg_base <= REG_OPERATING_MODE && window_end > REG_OPERATING_MODE;
+    const bool has_telemetry_state = reg_base <= REG_COMPRESSOR_FREQ && window_end > REG_COMPRESSOR_FREQ;
 
     // Copy the window's 1-byte registers into the register cache (bounds-checked).
     for (size_t i = 0; i < count; ++i) {
@@ -643,10 +626,14 @@ TelemetrySnapshot getTelemetrySnapshot() {
             elapsed_within(now, s_telemetry_window_ms, TELEMETRY_FRESHNESS_MS);
         snapshot.connected = telemetry_fresh;
         snapshot.inlet_valid = telemetry_fresh && s_inlet_valid &&
-            !(s_state.fault_ee & 0x02) &&   // E19 inlet-water sensor (reg2125 bit1)
+            !hasActiveFaultCode(s_state.fault_run, s_state.fault_ee,
+                                s_state.fault_comp, s_state.fault_elec,
+                                s_state.fault_ref, "E19") &&  // inlet-water sensor
             s_state.inlet_water_temp >= -50 && s_state.inlet_water_temp <= 150;
         snapshot.outlet_valid = telemetry_fresh && s_outlet_valid &&
-            !(s_state.fault_ee & 0x04) &&   // E18 outlet-water sensor (reg2125 bit2)
+            !hasActiveFaultCode(s_state.fault_run, s_state.fault_ee,
+                                s_state.fault_comp, s_state.fault_elec,
+                                s_state.fault_ref, "E18") &&  // outlet-water sensor
             s_state.outlet_water_temp >= -50 && s_state.outlet_water_temp <= 150;
         snapshot.compressor_valid = telemetry_fresh && s_compressor_valid;
         snapshot.compressor_running =
@@ -848,8 +835,10 @@ bool setHotWaterSetpoint(int16_t temp) {
 }
 
 bool writeRegister(uint16_t address, uint16_t value) {
-    const bool in_holding_window = address >= 2000 && address <= 2057;
-    const bool in_telemetry_window = address >= 2093 && address <= 2142;
+    const bool in_holding_window =
+        address >= HOLDING_START && address < HOLDING_START + HOLDING_COUNT;
+    const bool in_telemetry_window =
+        address >= INPUT_START && address < INPUT_START + INPUT_COUNT;
     if (!in_holding_window && !in_telemetry_window) {
         ESP_LOGE(TAG, "Register %u is outside known Macon windows",
                  (unsigned)address);
