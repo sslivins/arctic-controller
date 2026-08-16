@@ -76,8 +76,10 @@ static bool elapsed_within(uint32_t now, uint32_t then, uint32_t limit) {
 // exactly as the passive listener / active master / demo simulator populate
 // them. The arctic-macon library (decode_state) owns interpreting this image
 // into a MaconState; the controller only adapts that into HeatPumpState.
-static const uint16_t DEMO_REG_BASE = 2000;
-static const uint16_t DEMO_REG_COUNT = 143; // 2000..2142 inclusive (telemetry window reaches reg2142)
+static const uint16_t DEMO_REG_BASE = HOLDING_START;  // 2000
+// Spans both the holding (2000..2057) and telemetry (2093..2142) windows as a
+// single flat cache; bounds come from the macon library, not magic numbers.
+static const uint16_t DEMO_REG_COUNT = INPUT_START + INPUT_COUNT - HOLDING_START;  // 2000..2142
 static uint16_t s_demo_regs[DEMO_REG_COUNT];
 
 // Read a single register from the cache.
@@ -156,7 +158,9 @@ static void detectAndLogStateEvents() {
         const uint8_t cur_faults[5] = {
             s_state.fault_run, s_state.fault_ee, s_state.fault_comp,
             s_state.fault_elec, s_state.fault_ref };
-        static const uint16_t kFaultRegs[5] = {2007, 2125, 2126, 2127, 2128};
+        static const uint16_t kFaultRegs[5] = {
+            REG_FAULT_RUNSTATE, REG_FAULT_SENSOR_EE, REG_FAULT_SENSOR_COMP,
+            REG_FAULT_ELEC, REG_FAULT };
         for (int r = 0; r < 5; r++) {
             uint8_t appeared = cur_faults[r] & ~s_prev_fault_bytes[r];
             uint8_t cleared  = s_prev_fault_bytes[r] & ~cur_faults[r];
@@ -559,8 +563,8 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
 
     const uint32_t now = getTimeMs();
     const uint32_t window_end = (uint32_t)reg_base + (uint32_t)count;
-    const bool has_holding_state = reg_base <= 2049 && window_end > 2049;
-    const bool has_telemetry_state = reg_base <= 2141 && window_end > 2141;
+    const bool has_holding_state = reg_base <= REG_OPERATING_MODE && window_end > REG_OPERATING_MODE;
+    const bool has_telemetry_state = reg_base <= REG_COMPRESSOR_FREQ && window_end > REG_COMPRESSOR_FREQ;
 
     // Copy the window's 1-byte registers into the register cache (bounds-checked).
     for (size_t i = 0; i < count; ++i) {
@@ -643,10 +647,14 @@ TelemetrySnapshot getTelemetrySnapshot() {
             elapsed_within(now, s_telemetry_window_ms, TELEMETRY_FRESHNESS_MS);
         snapshot.connected = telemetry_fresh;
         snapshot.inlet_valid = telemetry_fresh && s_inlet_valid &&
-            !(s_state.fault_ee & 0x02) &&   // E19 inlet-water sensor (reg2125 bit1)
+            !hasActiveFaultCode(s_state.fault_run, s_state.fault_ee,
+                                s_state.fault_comp, s_state.fault_elec,
+                                s_state.fault_ref, "E19") &&  // inlet-water sensor
             s_state.inlet_water_temp >= -50 && s_state.inlet_water_temp <= 150;
         snapshot.outlet_valid = telemetry_fresh && s_outlet_valid &&
-            !(s_state.fault_ee & 0x04) &&   // E18 outlet-water sensor (reg2125 bit2)
+            !hasActiveFaultCode(s_state.fault_run, s_state.fault_ee,
+                                s_state.fault_comp, s_state.fault_elec,
+                                s_state.fault_ref, "E18") &&  // outlet-water sensor
             s_state.outlet_water_temp >= -50 && s_state.outlet_water_temp <= 150;
         snapshot.compressor_valid = telemetry_fresh && s_compressor_valid;
         snapshot.compressor_running =
@@ -848,8 +856,10 @@ bool setHotWaterSetpoint(int16_t temp) {
 }
 
 bool writeRegister(uint16_t address, uint16_t value) {
-    const bool in_holding_window = address >= 2000 && address <= 2057;
-    const bool in_telemetry_window = address >= 2093 && address <= 2142;
+    const bool in_holding_window =
+        address >= HOLDING_START && address < HOLDING_START + HOLDING_COUNT;
+    const bool in_telemetry_window =
+        address >= INPUT_START && address < INPUT_START + INPUT_COUNT;
     if (!in_holding_window && !in_telemetry_window) {
         ESP_LOGE(TAG, "Register %u is outside known Macon windows",
                  (unsigned)address);

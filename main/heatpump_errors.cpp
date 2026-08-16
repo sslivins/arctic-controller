@@ -10,6 +10,7 @@
 #include "heatpump_errors.h"
 #include "heatpump_controller.h"
 #include "macon_faults.h"
+#include "macon_registers.h"  // arctic::REG_FAULT_* address constants
 #include <cJSON.h>
 #include <esp_log.h>
 #include <stdio.h>
@@ -79,23 +80,23 @@ static const char* resolutionForCode(const char* code) {
 // MACON_FAULT_REGS: 2007, 2125, 2126, 2127, 2128).
 static int regIndex(uint16_t reg) {
     switch (reg) {
-        case 2007: return 0;
-        case 2125: return 1;
-        case 2126: return 2;
-        case 2127: return 3;
-        case 2128: return 4;
-        default:   return -1;
+        case REG_FAULT_RUNSTATE:    return 0;
+        case REG_FAULT_SENSOR_EE:   return 1;
+        case REG_FAULT_SENSOR_COMP: return 2;
+        case REG_FAULT_ELEC:        return 3;
+        case REG_FAULT:             return 4;
+        default:                    return -1;
     }
 }
 
 static uint8_t regByte(const HeatPumpState& s, uint16_t reg) {
     switch (reg) {
-        case 2007: return s.fault_run;
-        case 2125: return s.fault_ee;
-        case 2126: return s.fault_comp;
-        case 2127: return s.fault_elec;
-        case 2128: return s.fault_ref;
-        default:   return 0;
+        case REG_FAULT_RUNSTATE:    return s.fault_run;
+        case REG_FAULT_SENSOR_EE:   return s.fault_ee;
+        case REG_FAULT_SENSOR_COMP: return s.fault_comp;
+        case REG_FAULT_ELEC:        return s.fault_elec;
+        case REG_FAULT:             return s.fault_ref;
+        default:                    return 0;
     }
 }
 
@@ -352,6 +353,18 @@ bool isErrorActive(uint16_t reg, uint8_t bit) {
     HeatPumpState state = getState();
     if (regIndex(reg) < 0) return false;
     return (regByte(state, reg) >> bit) & 0x1;
+}
+
+bool hasActiveFaultCode(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
+                        uint8_t fault_elec, uint8_t fault_ref, const char* code) {
+    if (!code) return false;
+    MaconFault faults[32];
+    size_t n = macon_decode_faults(fault_run, fault_ee, fault_comp,
+                                   fault_elec, fault_ref, faults, 32);
+    for (size_t i = 0; i < n; ++i) {
+        if (faults[i].code && strcmp(faults[i].code, code) == 0) return true;
+    }
+    return false;
 }
 
 char* getErrorsAsJson() {
