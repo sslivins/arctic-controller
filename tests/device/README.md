@@ -143,7 +143,7 @@ The `conftest.py` session fixture handles this automatically.
 | File | Tests | Description |
 |------|-------|-------------|
 | [`test_main_screen.py`](test_main_screen.py) | 20 | Hero card states, tank temp, component dots, performance strip, error card |
-| [`test_error_mapping.py`](test_error_mapping.py) | 36 | All 32 error1/error2 bits → correct code + description on UI |
+| [`test_error_mapping.py`](test_error_mapping.py) | 33 | Every Macon fault code → correct code + description on UI |
 | [`test_system_screen.py`](test_system_screen.py) | 31 | System sub-screen: temps, flows, component states, section headers |
 | [`test_fahrenheit.py`](test_fahrenheit.py) | 24 | °F/°C conversion: hero card, temps screen, API preference, math verification |
 | [`test_temps_screen.py`](test_temps_screen.py) | 22 | Temps sub-screen: all temperature rows, labels, values, navigation |
@@ -167,7 +167,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_screenshot_api.py`](test_screenshot_api.py) | 9 | Production screenshot endpoint: PNG validity, dimensions, auth |
 | [`test_https.py`](test_https.py) | 10 | HTTPS lifecycle: self-signed cert upload, reboot, HTTPS verification, cleanup |
 | [`../api/test_api_schema.py`](../api/test_api_schema.py) | 8+ | API contract validation via Schemathesis + targeted smoke tests |
-| [`../api/test_heatpump_api.py`](../api/test_heatpump_api.py) | 65 | Heat pump status, demo injection, status1 bits, power/mode/setpoint control, params, errors |
+| [`../api/test_heatpump_api.py`](../api/test_heatpump_api.py) | 65 | Heat pump status, demo injection, component state, power/mode/setpoint control, params, errors |
 | [`../api/test_logs_api.py`](../api/test_logs_api.py) | 17 | Log buffer retrieval, filtering (since/level/limit), incremental polling, clear |
 | [`../api/test_auth_api.py`](../api/test_auth_api.py) | 17 | Auth config, login/logout sessions, API key management, auth enforcement |
 | [`../api/test_session_api.py`](../api/test_session_api.py) | 23 | Session lifecycle: login/logout, concurrent (max 4), credential changes, auth toggle |

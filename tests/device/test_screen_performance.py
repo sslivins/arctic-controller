@@ -26,6 +26,21 @@ import pytest
 from device_client import DeviceClient
 
 
+# Every canonical Macon fault code (mirrors arctic-macon MACON_FAULT_BITS),
+# used to stress the event log / errors screen with a full set of faults.
+ALL_FAULT_CODES = [
+    "P15", "P16", "FE", "FF", "E28", "E19", "E18", "E13", "E03", "E27", "E21",
+    "r02", "E26", "r01", "E01", "E09", "E05", "E22", "P19", "r06", "r10", "r11",
+    "r05", "P11", "P02", "P06", "P27", "PC", "P10", "P30", "P01",
+]
+
+
+def _inject_all_faults(device: DeviceClient):
+    """Activate every known fault to fill the event log / errors screen."""
+    for code in ALL_FAULT_CODES:
+        device.inject_fault(code, True)
+
+
 # ---------------------------------------------------------------------------
 # Budget (microseconds).  300 ms = 300 000 µs.
 # ---------------------------------------------------------------------------
@@ -114,13 +129,14 @@ class TestHeavyStatePerformance:
     def test_event_log_full_buffer(self, device: DeviceClient):
         """Event log screen with a full ring buffer stays within budget.
 
-        Injects all error1+error2 bits to generate many events, then
+        Injects every known fault to generate many events, then
         opens the event log screen and checks render time.
         """
-        # Fill the event log by toggling error bits
-        device.set_demo_fields(error1=0xFFFF, error2=0xFFFF)
+        # Fill the event log by toggling faults
+        _inject_all_faults(device)
         time.sleep(2)  # let poll loop fire events
-        device.set_demo_fields(error1=0, error2=0x0040)
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
         time.sleep(2)  # clear events also logged
 
         # Now open the event log — this is the hot path
@@ -131,7 +147,7 @@ class TestHeavyStatePerformance:
 
     def test_errors_screen_many_errors(self, device: DeviceClient):
         """Errors screen with multiple active errors stays within budget."""
-        device.set_demo_fields(error1=0xFFFF, error2=0xFFFF)
+        _inject_all_faults(device)
         time.sleep(2)
 
         try:
@@ -147,16 +163,20 @@ class TestHeavyStatePerformance:
                 time.sleep(0.5)
             except Exception:
                 pass
-            device.set_demo_fields(error1=0, error2=0x0040)
+            device.clear_all_faults()
+            device.inject_fault("P02", True)
             time.sleep(1.5)
 
     def test_errors_screen_with_history(self, device: DeviceClient):
         """Errors screen with active + cleared history stays within budget."""
         try:
-            # Create history by setting then clearing errors
-            device.set_demo_fields(error1=0x00FF, error2=0x0040)
+            # Create history by setting then clearing faults
+            device.clear_all_faults()
+            for code in ["E19", "E18", "E13", "E01", "E09", "E22", "P02", "P06"]:
+                device.inject_fault(code, True)
             time.sleep(2)
-            device.set_demo_fields(error1=0x0001)  # clear 7 of 8, keep 1 active
+            device.clear_all_faults()
+            device.inject_fault("P02", True)  # keep 1 active, rest go to history
             time.sleep(2)
 
             result = device.click(tag="error_label")
@@ -171,7 +191,8 @@ class TestHeavyStatePerformance:
                 time.sleep(0.5)
             except Exception:
                 pass
-            device.set_demo_fields(error1=0, error2=0x0040)
+            device.clear_all_faults()
+            device.inject_fault("P02", True)
             device.clear_error_history()
             time.sleep(1.5)
 

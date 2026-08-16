@@ -937,6 +937,99 @@ paths:
         "423":
           $ref: "#/components/responses/Locked"
 
+  /api/test/inject-fault:
+    post:
+      tags: [Mocking]
+      summary: Inject or clear a single Macon fault by its code
+      description: |
+        Atomically set or clear a fault in the demo Macon registers by its
+        canonical fault code (e.g. `E01`, `P02`, `r01`).  The mapping from
+        code to register bit(s) lives in the arctic-macon library, so the
+        test suite never hardcodes register layouts.  Requires demo mode.
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  description: Canonical Macon fault code
+                  example: E01
+                active:
+                  type: boolean
+                  description: True to set the fault, false to clear it
+                  default: true
+              required: [code]
+      responses:
+        "200":
+          description: Fault injected or cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  code:
+                    type: string
+                  active:
+                    type: boolean
+                  sites_written:
+                    type: integer
+                    description: Number of register bit sites written
+                required: [success, code, active, sites_written]
+        "400":
+          description: Unknown or invalid fault code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Demo mode is not enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          $ref: "#/components/responses/Locked"
+
+  /api/test/clear-faults:
+    post:
+      tags: [Mocking]
+      summary: Clear all active Macon faults
+      description: |
+        Zero every fault register in the demo Macon state, leaving the RUN
+        status bit intact.  Requires demo mode.
+      parameters:
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: All faults cleared
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "403":
+          description: Demo mode is not enabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "423":
+          $ref: "#/components/responses/Locked"
+
   /api/test/clear-error-history:
     post:
       tags: [Mocking]

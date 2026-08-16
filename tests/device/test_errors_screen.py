@@ -5,9 +5,9 @@ Navigates to the errors sub-screen and verifies the no-errors state,
 active error injection via demo fields, error cards, clear history,
 and error display via the /api/heatpump/errors endpoint.
 
-Error registers (error1, error2) are bitmasks — setting a bit triggers
-the corresponding error. The errors screen reads from getActiveErrors()
-which uses the state object populated by demo field registers.
+Faults are injected by their canonical Macon code via inject_fault(), which
+lets the arctic-macon library own the code->register,bit mapping. The errors
+screen reads from getActiveErrors() which decodes the raw fault registers.
 """
 
 import time
@@ -16,22 +16,16 @@ from device_client import DeviceClient
 
 UI_SETTLE = 1.5
 
-# Error register bit masks (from heatpump_errors.cpp)
-# error2 register bits
-ERROR2_P02_HIGH_PRESSURE = 0x0040    # P02: High pressure protection (CRITICAL)
-ERROR2_P06_LOW_PRESSURE  = 0x0080    # P06: Low pressure protection (ERROR)
-ERROR2_E26_LOW_AMBIENT   = 0x0400    # E26: Low ambient temp protection (WARNING)
-
-# error1 register bits
-ERROR1_E19_INLET_SENSOR  = 0x0004    # E19: Inlet water temp sensor fault (ERROR)
-ERROR1_E10_COMM_ERROR    = 0x0200    # E10: Drive/main board comm error (CRITICAL)
+# Default demo fault restored after each test (matches initDemoState()).
+DEMO_FAULT = "P02"
 
 
 @pytest.fixture(autouse=True)
 def _restore_error_state(device: DeviceClient):
     """Clear error state after each test."""
     yield
-    device.set_demo_fields(error1=0, error2=0x0040)  # restore default demo error
+    device.clear_all_faults()
+    device.inject_fault(DEMO_FAULT, True)  # restore default demo fault
     device.clear_error_history()
     time.sleep(UI_SETTLE)
 
@@ -104,8 +98,8 @@ class TestNoErrorsState:
 
     def test_no_errors_message(self, device: DeviceClient):
         """When no errors are active, the no-errors message should appear."""
-        # Clear all errors and history
-        device.set_demo_fields(error1=0, error2=0)
+        # Clear all faults and history
+        device.clear_all_faults()
         device.clear_error_history()
         time.sleep(UI_SETTLE)
 
@@ -130,7 +124,8 @@ class TestActiveErrors:
 
     def test_p02_error_card(self, device: DeviceClient):
         """Injecting P02 (High Pressure) shows the error card."""
-        device.set_demo_fields(error2=ERROR2_P02_HIGH_PRESSURE)
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
         time.sleep(UI_SETTLE)
 
         _open_errors(device)
@@ -142,7 +137,8 @@ class TestActiveErrors:
 
     def test_error_description_shown(self, device: DeviceClient):
         """Active errors should show a description."""
-        device.set_demo_fields(error2=ERROR2_P02_HIGH_PRESSURE)
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
         time.sleep(UI_SETTLE)
 
         _open_errors(device)
@@ -153,11 +149,11 @@ class TestActiveErrors:
             "Error description for P02 not found on screen"
 
     def test_multiple_errors(self, device: DeviceClient):
-        """Setting multiple error bits shows multiple error cards."""
+        """Setting multiple faults shows multiple error cards."""
         # Set both P02 and P06
-        device.set_demo_fields(
-            error2=ERROR2_P02_HIGH_PRESSURE | ERROR2_P06_LOW_PRESSURE
-        )
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
+        device.inject_fault("P06", True)
         time.sleep(UI_SETTLE)
 
         _open_errors(device)
@@ -169,18 +165,16 @@ class TestActiveErrors:
             "P06 error not found"
 
     def test_error_from_register1(self, device: DeviceClient):
-        """Error register 1 bits should also show error cards."""
-        device.set_demo_fields(
-            error1=ERROR1_E19_INLET_SENSOR,
-            error2=0,
-        )
+        """A sensor fault (reg2125) should also show error cards."""
+        device.clear_all_faults()
+        device.inject_fault("E19", True)
         time.sleep(UI_SETTLE)
 
         _open_errors(device)
         time.sleep(UI_SETTLE)
 
         assert _has_text_containing(device, "E19"), \
-            "E19 error from register 1 not found"
+            "E19 sensor fault not found"
 
 
 # =========================================================================
@@ -226,7 +220,8 @@ class TestErrorsApi:
 
     def test_errors_endpoint_returns_data(self, device: DeviceClient):
         """GET /api/heatpump/errors should return error data."""
-        device.set_demo_fields(error2=ERROR2_P02_HIGH_PRESSURE)
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
         time.sleep(UI_SETTLE)
 
         resp = device.session.get(f"{device.base_url}/api/heatpump/errors")
@@ -237,7 +232,8 @@ class TestErrorsApi:
 
     def test_errors_endpoint_reflects_injected_error(self, device: DeviceClient):
         """Injected errors should appear in the API response."""
-        device.set_demo_fields(error2=ERROR2_P02_HIGH_PRESSURE)
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
         time.sleep(UI_SETTLE)
 
         resp = device.session.get(f"{device.base_url}/api/heatpump/errors")

@@ -432,6 +432,44 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def inject_fault(self, code: str, active: bool = True) -> dict:
+        """POST /api/test/inject-fault — set or clear a fault by its Macon code.
+
+        The (code -> register,bit) mapping is owned by the arctic-macon library,
+        so tests never hardcode bit positions. A code such as ``E28``/``E05``
+        maps to two register-bit sites; the response's ``sites_written`` reports
+        how many were touched. Raises DeviceError for an unknown code (HTTP 400).
+
+        Example: device.inject_fault("P02")           # activate P02
+                 device.inject_fault("P02", False)    # clear P02
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/inject-fault",
+            json={"code": code, "active": active},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Inject fault failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def clear_all_faults(self) -> dict:
+        """POST /api/test/clear-faults — clear every active fault atomically."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/clear-faults",
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Clear faults failed ({r.status_code}): {msg}")
+        return r.json()
+
     def populate_temperature_history(self) -> dict:
         """Replace telemetry history with an eight-hour graph fixture."""
         r = self.session.post(

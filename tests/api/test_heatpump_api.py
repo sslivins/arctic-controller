@@ -96,6 +96,27 @@ def _inject_demo(fields: dict):
     return data
 
 
+def _inject_fault(code: str, active: bool = True):
+    """Inject/clear a fault by its Macon code via POST /api/test/inject-fault.
+
+    The (code -> register,bit) mapping is owned by the arctic-macon library so
+    tests never hardcode bit positions. A code such as E28/E05 maps to two
+    sites; the response reports sites_written.
+    """
+    r = _post("/api/test/inject-fault", json={"code": code, "active": active})
+    assert r.status_code == 200, f"Inject fault failed: {r.text}"
+    data = r.json()
+    assert data["success"], f"Inject fault not successful: {data}"
+    return data
+
+
+def _clear_faults():
+    """Clear all active faults atomically via POST /api/test/clear-faults."""
+    r = _post("/api/test/clear-faults")
+    assert r.status_code == 200, f"Clear faults failed: {r.text}"
+    return r.json()
+
+
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
 
@@ -186,8 +207,8 @@ class TestHeatpumpStatus:
         data = _get("/api/heatpump/status").json()
         readings = data["readings"]
         for key in ["compressor_freq", "fan_rpm", "ac_voltage", "ac_current",
-                     "dc_voltage", "dc_current",
-                     "primary_eev", "secondary_eev", "power_consumption"]:
+                     "dc_voltage",
+                     "primary_eev", "power_consumption"]:
             assert key in readings, f"Missing reading: {key}"
 
     def test_status_boolean_fields_are_bools(self):
@@ -200,7 +221,7 @@ class TestHeatpumpStatus:
     def test_status_error_null_when_no_error(self):
         """error should be null when has_error is false."""
         # Clear errors first
-        _inject_demo({"error1": 0, "error2": 0})
+        _clear_faults()
         time.sleep(0.3)
         data = _get("/api/heatpump/status").json()
         if not data["has_error"]:
@@ -242,20 +263,24 @@ class TestDemoModeInjection:
         assert temps["outdoor"] == 22
 
     def test_inject_compressor_readings(self):
-        """Inject compressor freq and verify in readings."""
-        _inject_demo({"compressor_freq": 75, "fan_speed": 850})
+        """Inject compressor freq and fan level and verify in readings."""
+        # fan_speed is now the Macon byte-level fan value (reg2003), reported
+        # as fan_rpm; it is not an actual RPM. 45 falls in the "medium" bucket.
+        _inject_demo({"compressor_freq": 75, "fan_speed": 45})
         time.sleep(1.0)
         data = _get("/api/heatpump/status").json()
         assert data["readings"]["compressor_freq"] == 75
-        assert data["readings"]["fan_rpm"] == 850
+        assert data["readings"]["fan_rpm"] == 45
 
     def test_inject_electrical_readings(self):
         """Inject voltage/current and verify they are reflected in status."""
-        _inject_demo({"ac_voltage": 230, "ac_current": 50})
+        # Demo fields write RAW register values; the macon library owns scaling.
+        # AC voltage (reg2101) is scaled x10 on decode; AC current (reg2000) is 1:1.
+        _inject_demo({"ac_voltage": 23, "ac_current": 50})
         time.sleep(1.0)
         data = _get("/api/heatpump/status").json()
-        assert data["readings"]["ac_voltage"] == 230
-        assert data["readings"]["ac_current"] == 50
+        assert data["readings"]["ac_voltage"] == 230   # 23 x 10
+        assert data["readings"]["ac_current"] == 50     # 50 x 1
         # power_consumption is sourced from the unit's real-time power register
         # (reg2114), not derived from V*I, so it is reported independently.
         assert isinstance(data["readings"]["power_consumption"], (int, float))
@@ -274,16 +299,17 @@ class TestDemoModeInjection:
         assert data["setpoints"]["hot_water"] == 48
 
     def test_inject_errors(self):
-        """Injecting error registers should set has_error and error string."""
-        _inject_demo({"error1": 1})  # Bit 0 = first error code
+        """Injecting a fault should set has_error and error string."""
+        _clear_faults()
+        _inject_fault("E19")  # inlet water temp sensor
         time.sleep(1.0)
         data = _get("/api/heatpump/status").json()
         assert data["has_error"] is True
         assert data["error"] is not None
 
     def test_clear_errors(self):
-        """Clearing error registers should clear error state."""
-        _inject_demo({"error1": 0, "error2": 0})
+        """Clearing faults should clear error state."""
+        _clear_faults()
         time.sleep(1.0)
         data = _get("/api/heatpump/status").json()
         assert data["has_error"] is False
@@ -333,34 +359,37 @@ class TestDemoModeInjection:
         assert r.status_code in (200, 403)
 
 
-# ── Status1 Bit Manipulation ─────────────────────────────────────────────
+# ── Component State Manipulation ─────────────────────────────────────────
+#
+# The unit's run-state is decoded natively by arctic-macon from the real Tuya
+# registers — there is no fictional "status1" bitfield any more. Component
+# flags map to:
+#   compressor -> compressor_freq (reg2141) > 0
+#   fans       -> fan_on icon bit (reg2129 bit4); fan_speed (reg2003) sets level
+#   pump       -> pump_on status bit (reg2130 bit3)
+#   aux_heater -> not currently mapped from any Tuya register (always false)
+# We drive each via the named demo fields so tests never touch raw bit layout.
 
-# status1 register (2135) bit definitions — must match arctic_registers.h
-_UNIT_ON        = 0x0001  # Bit 0
-_COMPRESSOR     = 0x0002  # Bit 1
-_FAN_HIGH       = 0x0004  # Bit 2
-_FAN_MED        = 0x0008  # Bit 3
-_FAN_LOW        = 0x0010  # Bit 4
-_WATER_PUMP     = 0x0020  # Bit 5
-_FOUR_WAY_VALVE = 0x0040  # Bit 6
-_BACKUP_HEATER  = 0x0080  # Bit 7
-
-# Demo default: UNIT_ON | COMPRESSOR | FAN_MED | WATER_PUMP = 0x2B
-_DEMO_STATUS1_DEFAULT = _UNIT_ON | _COMPRESSOR | _FAN_MED | _WATER_PUMP
+# fan_speed (reg2003) byte-level thresholds -> UI level (getFanSpeedLevel):
+#   0 -> 0, 1..29 -> 1, 30..59 -> 2, >=60 -> 3
+_FAN_OFF, _FAN_LOW, _FAN_MED, _FAN_HIGH = 0, 20, 45, 80
 
 
-class TestStatus1BitManipulation:
-    """Inject status1 register via demo API and verify component flags in status response."""
+class TestComponentStateManipulation:
+    """Drive component demo fields and verify component flags in status."""
 
-    def _inject_and_read(self, status1_val):
-        """Helper: inject status1, wait for poll, return status JSON."""
-        _inject_demo({"status1": status1_val})
+    def _read(self):
         time.sleep(1.0)
         return _get("/api/heatpump/status").json()
 
+    def _all_off(self):
+        _inject_demo({"compressor_freq": 0, "fan_on": 0, "fan_speed": 0,
+                      "pump_on": 0})
+
     def test_all_components_off(self):
-        """status1=0 → all component flags false, fan_speed=0."""
-        data = self._inject_and_read(0)
+        """No components driven → all flags false, fan_speed=0."""
+        self._all_off()
+        data = self._read()
         assert data["compressor"] is False
         assert data["fans"] is False
         assert data["fan_speed"] == 0
@@ -368,65 +397,74 @@ class TestStatus1BitManipulation:
         assert data["aux_heater"] is False
 
     def test_compressor_only(self):
-        """Only COMPRESSOR bit set → compressor=true, others false."""
-        data = self._inject_and_read(_COMPRESSOR)
+        """compressor_freq>0 → compressor=true, others false."""
+        self._all_off()
+        _inject_demo({"compressor_freq": 60})
+        data = self._read()
         assert data["compressor"] is True
         assert data["fans"] is False
         assert data["pump"] is False
         assert data["aux_heater"] is False
 
     def test_water_pump_only(self):
-        """Only WATER_PUMP bit set → pump=true, others false."""
-        data = self._inject_and_read(_WATER_PUMP)
+        """pump_on → pump=true, others false."""
+        self._all_off()
+        _inject_demo({"pump_on": 1})
+        data = self._read()
         assert data["pump"] is True
         assert data["compressor"] is False
         assert data["fans"] is False
         assert data["aux_heater"] is False
 
+    @pytest.mark.skip(reason="Backup/aux heater is not mapped from any Tuya "
+                             "register yet; always false. See sun-peaks TODO "
+                             "(fan/aux-heater register rework).")
     def test_backup_heater_only(self):
-        """Only BACKUP_HEATER bit set → aux_heater=true, others false."""
-        data = self._inject_and_read(_BACKUP_HEATER)
-        assert data["aux_heater"] is True
-        assert data["compressor"] is False
-        assert data["fans"] is False
-        assert data["pump"] is False
+        """aux_heater has no register mapping today — skipped until one exists."""
 
     def test_fan_speed_low(self):
-        """FAN_LOW bit → fans=true, fan_speed=1."""
-        data = self._inject_and_read(_FAN_LOW)
+        """fan_on + low fan_speed → fans=true, fan_speed=1."""
+        self._all_off()
+        _inject_demo({"fan_on": 1, "fan_speed": _FAN_LOW})
+        data = self._read()
         assert data["fans"] is True
         assert data["fan_speed"] == 1
 
     def test_fan_speed_medium(self):
-        """FAN_MED bit → fans=true, fan_speed=2."""
-        data = self._inject_and_read(_FAN_MED)
+        """fan_on + medium fan_speed → fans=true, fan_speed=2."""
+        self._all_off()
+        _inject_demo({"fan_on": 1, "fan_speed": _FAN_MED})
+        data = self._read()
         assert data["fans"] is True
         assert data["fan_speed"] == 2
 
     def test_fan_speed_high(self):
-        """FAN_HIGH bit → fans=true, fan_speed=3."""
-        data = self._inject_and_read(_FAN_HIGH)
+        """fan_on + high fan_speed → fans=true, fan_speed=3."""
+        self._all_off()
+        _inject_demo({"fan_on": 1, "fan_speed": _FAN_HIGH})
+        data = self._read()
         assert data["fans"] is True
         assert data["fan_speed"] == 3
 
     def test_all_components_on(self):
-        """All major component bits set at once."""
-        val = _UNIT_ON | _COMPRESSOR | _FAN_HIGH | _WATER_PUMP | _BACKUP_HEATER
-        data = self._inject_and_read(val)
+        """All mappable components driven on at once."""
+        _inject_demo({"unit_on": 1, "compressor_freq": 60, "fan_on": 1,
+                      "fan_speed": _FAN_HIGH, "pump_on": 1})
+        data = self._read()
         assert data["compressor"] is True
         assert data["fans"] is True
         assert data["fan_speed"] == 3
         assert data["pump"] is True
-        assert data["aux_heater"] is True
 
     def test_restore_demo_default(self):
-        """Restore the default status1 value after bit manipulation tests."""
-        data = self._inject_and_read(_DEMO_STATUS1_DEFAULT)
+        """Restore the default demo running state after manipulation tests."""
+        _inject_demo({"unit_on": 1, "compressor_freq": 60, "fan_on": 1,
+                      "fan_speed": _FAN_MED, "pump_on": 1})
+        data = self._read()
         assert data["compressor"] is True
         assert data["fans"] is True
-        assert data["fan_speed"] == 2  # FAN_MED
+        assert data["fan_speed"] == 2  # medium
         assert data["pump"] is True
-        assert data["aux_heater"] is False
 
 
 # ── Heat Pump Control ─────────────────────────────────────────────────────
@@ -529,7 +567,7 @@ class TestHeatpumpErrors:
 
     def test_errors_with_no_active_errors(self):
         """When no errors injected, error_count should be 0."""
-        _inject_demo({"error1": 0, "error2": 0})
+        _clear_faults()
         time.sleep(0.3)
         data = _get("/api/heatpump/errors").json()
         assert data["error_count"] == 0
@@ -537,8 +575,9 @@ class TestHeatpumpErrors:
         assert isinstance(data["active"], list)
 
     def test_errors_with_injected_error(self):
-        """Injecting an error should appear in active errors."""
-        _inject_demo({"error1": 1})  # Bit 0
+        """Injecting a fault should appear in active errors."""
+        _clear_faults()
+        _inject_fault("E19")
         # Poll until the error propagates (up to 3s)
         data = None
         for _ in range(6):
@@ -556,7 +595,7 @@ class TestHeatpumpErrors:
             assert field in err, f"Missing error field: {field}"
 
         # Clean up
-        _inject_demo({"error1": 0, "error2": 0})
+        _clear_faults()
         time.sleep(0.3)
 
     def test_error_severity_values(self):

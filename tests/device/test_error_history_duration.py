@@ -19,9 +19,8 @@ from device_client import DeviceClient
 
 UI_SETTLE = 1.5  # Wait for 1s main screen timer
 
-# Default demo state
-DEMO_STATUS1 = 0x002B
-DEMO_ERROR2 = 0x0040  # HIGH_PRESSURE (P02)
+# Default demo fault (matches initDemoState()).
+DEMO_FAULT = "P02"
 ERROR_HOLD_SECONDS = 3
 
 
@@ -29,12 +28,9 @@ ERROR_HOLD_SECONDS = 3
 def _restore_demo_state(device: DeviceClient):
     """Restore default demo state after each test."""
     yield
-    device.set_demo_fields(
-        error1=0,
-        error2=DEMO_ERROR2,
-        status1=DEMO_STATUS1,
-        unit_on=1,
-    )
+    device.clear_all_faults()
+    device.inject_fault(DEMO_FAULT, True)
+    device.set_demo_fields(unit_on=1)
     time.sleep(UI_SETTLE)
 
 
@@ -43,20 +39,20 @@ class TestErrorHistoryDuration:
 
     def test_cleared_error_shows_seconds_format(self, device: DeviceClient):
         """A cleared error held for ~3s should show duration like '3s' or '4s'."""
-        # 1. Clear all errors and history
-        device.set_demo_fields(error1=0, error2=0)
+        # 1. Clear all faults and history
+        device.clear_all_faults()
         time.sleep(UI_SETTLE)
         device.clear_error_history()
 
-        # 2. Set P02 error
-        device.set_demo_fields(error2=DEMO_ERROR2)
+        # 2. Set P02 fault
+        device.inject_fault("P02", True)
         time.sleep(UI_SETTLE)
 
         # 3. Hold for a known duration
         time.sleep(ERROR_HOLD_SECONDS)
 
-        # 4. Clear the error — this creates a history entry
-        device.set_demo_fields(error2=0)
+        # 4. Clear the fault — this creates a history entry
+        device.inject_fault("P02", False)
         time.sleep(UI_SETTLE)
 
         # 5. Open the error panel

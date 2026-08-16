@@ -103,6 +103,39 @@ def _parse_csv(text: str) -> list[dict]:
     return list(reader)
 
 
+def _inject_fault(code: str, active: bool = True):
+    """Inject/clear a fault by its Macon code (library owns the bit mapping)."""
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/test/inject-fault",
+                headers=_headers(),
+                json={"code": code, "active": active},
+                timeout=10,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
+
+
+def _clear_faults():
+    """Clear all active faults atomically."""
+    for attempt in range(3):
+        try:
+            requests.post(
+                f"{BASE_URL}/api/test/clear-faults",
+                headers=_headers(),
+                timeout=10,
+            )
+            return
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+            time.sleep(2)
+
+
 @pytest.fixture(autouse=True)
 def _check_prerequisites():
     """Skip if device is unreachable or not in demo mode."""
@@ -277,7 +310,10 @@ class TestDiagnosticContent:
     def test_status_bits_have_values(self):
         """Status rows should have On/Off values."""
         status_rows = self._rows_by_category("Status")
-        assert len(status_rows) >= 10, "Expected at least 10 status bits"
+        # The macon library derives seven component states (Unit, Compressor,
+        # Fan, Water Pump, Reversing Valve, Backup Heater, Defrosting) — there
+        # is no fictional status1/status2 bitfield any more.
+        assert len(status_rows) >= 7, "Expected at least 7 component-status rows"
         for row in status_rows:
             assert row["Value"] in ("ON", "OFF"), (
                 f"Status '{row['Name']}' has unexpected value: {row['Value']}"
@@ -314,8 +350,9 @@ class TestDiagnosticErrors:
     """Verify error reporting in the diagnostic CSV."""
 
     def test_errors_appear_when_injected(self):
-        """Injecting error1 bit should produce Error rows in CSV."""
-        _inject_demo({"error1": 1})  # Bit 0 = E01
+        """Injecting a fault should produce Error rows in CSV."""
+        _clear_faults()
+        _inject_fault("E01")  # discharge temp sensor
         time.sleep(0.5)
 
         try:
@@ -329,12 +366,12 @@ class TestDiagnosticErrors:
             codes = [r["P-Code"] for r in error_rows if r["P-Code"]]
             assert len(codes) >= 1, "Error rows should have Arctic error codes"
         finally:
-            _inject_demo({"error1": 0, "error2": 0})
+            _clear_faults()
             time.sleep(0.3)
 
     def test_no_errors_when_clear(self):
         """With no errors injected, Error category should be absent or empty."""
-        _inject_demo({"error1": 0, "error2": 0})
+        _clear_faults()
         time.sleep(0.3)
 
         r = _get("/api/heatpump/diagnostic")

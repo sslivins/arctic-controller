@@ -1792,6 +1792,83 @@ static esp_err_t clear_error_history_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/inject-fault — inject or clear a fault by its Macon code
+// Body: {"code":"P02","active":true}. The (code -> register,bit) mapping is
+// owned by the arctic-macon library, so tests never hardcode bit positions.
+// ============================================================================
+
+static esp_err_t inject_fault_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    if (!arctic::isDemoMode()) {
+        send_json_error(req, "403 Forbidden", "Demo mode is not enabled");
+        return ESP_OK;
+    }
+
+    char body[256];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return ESP_OK;
+    }
+    body[received] = '\0';
+
+    cJSON* root = cJSON_Parse(body);
+    cJSON* code = root ? cJSON_GetObjectItem(root, "code") : NULL;
+    if (!code || !cJSON_IsString(code) || code->valuestring[0] == '\0') {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Provide non-empty string 'code'");
+        return ESP_OK;
+    }
+    // 'active' is optional and defaults to true.
+    cJSON* active_item = cJSON_GetObjectItem(root, "active");
+    bool active = active_item ? cJSON_IsTrue(active_item) : true;
+
+    int sites = arctic::injectDemoFault(code->valuestring, active);
+    if (sites <= 0) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request", "Unknown fault code");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddStringToObject(resp, "code", code->valuestring);
+    cJSON_AddBoolToObject(resp, "active", active);
+    cJSON_AddNumberToObject(resp, "sites_written", sites);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/clear-faults — clear all active faults in the demo cache
+// ============================================================================
+
+static esp_err_t clear_faults_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    if (!arctic::isDemoMode()) {
+        send_json_error(req, "403 Forbidden", "Demo mode is not enabled");
+        return ESP_OK;
+    }
+    arctic::clearDemoFaults();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/populate-temperature-history
 // ============================================================================
 
@@ -2424,6 +2501,38 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &clear_error_history_options_uri);
+
+    httpd_uri_t inject_fault_uri = {
+        .uri = "/api/test/inject-fault",
+        .method = HTTP_POST,
+        .handler = inject_fault_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &inject_fault_uri);
+
+    httpd_uri_t inject_fault_options_uri = {
+        .uri = "/api/test/inject-fault",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &inject_fault_options_uri);
+
+    httpd_uri_t clear_faults_uri = {
+        .uri = "/api/test/clear-faults",
+        .method = HTTP_POST,
+        .handler = clear_faults_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &clear_faults_uri);
+
+    httpd_uri_t clear_faults_options_uri = {
+        .uri = "/api/test/clear-faults",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &clear_faults_options_uri);
 
     httpd_uri_t populate_temperature_history_uri = {
         .uri = "/api/test/populate-temperature-history",

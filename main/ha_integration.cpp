@@ -86,7 +86,7 @@ cJSON* createStateObject(const HeatPumpState& hp)
     cJSON_AddBoolToObject(components, "backup_heater", hp.isBackupHeaterOn());
     cJSON_AddBoolToObject(
         components, "reversing_valve_request",
-        (hp.status1 & status1::FOUR_WAY_VALVE) != 0);
+        hp.reversing_valve_cooling);
 
     cJSON* temperatures = cJSON_AddObjectToObject(state, "temperatures_c");
     cJSON_AddNumberToObject(temperatures, "tank", hp.water_tank_temp);
