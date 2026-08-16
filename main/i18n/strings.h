@@ -264,13 +264,8 @@ typedef enum {
     STR_HP_AC_VOLTAGE,
     STR_HP_AC_CURRENT,
     STR_HP_DC_VOLTAGE,
-    STR_HP_DC_CURRENT,
-    STR_HP_PRESSURES,
-    STR_HP_HIGH_PRESSURE,
-    STR_HP_LOW_PRESSURE,
     STR_HP_EXPANSION_VALVES,
     STR_HP_PRIMARY_EEV,
-    STR_HP_SECONDARY_EEV,
     STR_HP_SETPOINTS,
     
     // ========================================================================

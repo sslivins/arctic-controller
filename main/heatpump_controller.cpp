@@ -338,36 +338,15 @@ bool isExternalFeed() {
     return s_feed_mode;
 }
 
-// Empirically-derived Macon (OEM) Tuya register->field mapping (index = reg-2000).
-// Confirmed against the unit's official o/A parameter-code legend cross-checked
-// with live ground truth (idle + running pump->fan->compressor staged states):
-//   TEMPERATURES (signed int8, whole °C):
-//     reg2008 = o1 water tank
-//     reg2132 = o3 water outlet/supply    (idle 28 -> running 40)
-//     reg2133 = o2 water inlet/return     (idle 28 -> running 36)
-//     reg2134 = o4 ambient/outdoor
-//     reg2135 = A6 cool coil
-//     reg2136 = A2 coil
-//     reg2137 = A3 suction
-//     reg2138 = A1 discharge
-//     reg2113 = A8 IPM module
-//   SETPOINT: reg2012 = hot-water setpoint
-//   STATUS:   reg2007 run/fault bitfield (0x20 = hot-water ON; bits0-3 = ΔT/temp faults),
-//             reg2130 icon bits #1 (0x01 heating, 0x04 compressor, 0x08 pump, 0x20 hours),
-//             reg2129 icon bits #2 (0x02 defrost, 0x10 fan)
-//   ELECTRICAL (register value == A-code menu value, 1:1):
-//     reg2000 = A4 AC input current    reg2101 = A13 AC input voltage
-//     reg2001 = A7 DC bus voltage(*10) reg2140 = A5 main EEV degree
-//     reg2003 = A10 DC motor (fan) speed
-//     reg2141 = A14 compressor frequency (Hz)   [telemetry window reaches 2142]
-//   real-time power comes from the macon library (reg2114/A9), in watts.
-// High/low pressure (A11/A12) read static nonsense values (-6 / 3), i.e.
-// uninstalled sensors on this DHW unit, so left cleared. The fault/protection
-// registers are reg2007 (holding) + the INPUT cluster reg2125-2128, all mapped
-// live 2026-07-05; their bit ordering differs from the legacy Arctic error
-// tables, so each confirmed bit is translated to its semantic legacy mask.
-// Adapt the confirmed reg2096 working-mode enum. In Auto, expose the actual
-// water-side direction while the compressor runs.
+// The arctic-macon library (decode_state) is the single source of truth for the
+// Macon Tuya register layout, scaling, and fault/icon bit positions — see
+// components/arctic-macon/include/macon_registers.h and macon_faults.h. This
+// adapter consumes the already-decoded MaconState; it does NOT re-interpret raw
+// registers. High/low pressure (A11/A12) are uninstalled sensors on this DHW
+// unit and are not reported.
+//
+// In Auto working mode, expose the actual water-side direction while the
+// compressor runs (rather than the raw menu enum).
 static WorkingMode to_working_mode(const MaconState& state) {
     switch (state.working_mode) {
         case MaconWorkingMode::Cooling:
