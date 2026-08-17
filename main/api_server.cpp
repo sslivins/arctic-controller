@@ -3983,8 +3983,8 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
 
     // --- Active Errors (natively decoded by the macon library) ---
     {
-        arctic::ActiveError actives[32];
-        int active_count = arctic::getActiveErrors(actives, 32);
+        arctic::ActiveError actives[arctic::MAX_ACTIVE_FAULTS];
+        int active_count = arctic::getActiveErrors(actives, arctic::MAX_ACTIVE_FAULTS);
         for (int i = 0; i < active_count; i++) {
             const char* label = actives[i].description && actives[i].description[0]
                                     ? actives[i].description

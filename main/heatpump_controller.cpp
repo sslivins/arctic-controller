@@ -147,14 +147,14 @@ static void detectAndLogStateEvents() {
         // semantic sites (the library skips the RUN indicator) and diff by
         // opaque site id. The event-log payload is that site id — no register
         // or bit position is handled here.
-        MaconFault prev_f[32];
-        MaconFault cur_f[32];
+        MaconFault prev_f[arctic::MAX_ACTIVE_FAULTS];
+        MaconFault cur_f[arctic::MAX_ACTIVE_FAULTS];
         const size_t np = macon_decode_faults(
             s_prev_fault_bytes[0], s_prev_fault_bytes[1], s_prev_fault_bytes[2],
-            s_prev_fault_bytes[3], s_prev_fault_bytes[4], prev_f, 32);
+            s_prev_fault_bytes[3], s_prev_fault_bytes[4], prev_f, arctic::MAX_ACTIVE_FAULTS);
         const size_t nc = macon_decode_faults(
             s_state.fault_run, s_state.fault_ee, s_state.fault_comp,
-            s_state.fault_elec, s_state.fault_ref, cur_f, 32);
+            s_state.fault_elec, s_state.fault_ref, cur_f, arctic::MAX_ACTIVE_FAULTS);
         for (size_t i = 0; i < nc; ++i) {
             bool was_present = false;
             for (size_t j = 0; j < np; ++j) {
@@ -869,8 +869,8 @@ int getErrorDescriptions(char* buffer, size_t buffer_size) {
 
     // Iterate the natively-decoded active faults (macon library owns the
     // canonical (reg,bit) -> code/label table); no fictional error1/error2 masks.
-    arctic::ActiveError active[32];
-    int n = arctic::getActiveErrors(active, 32);
+    arctic::ActiveError active[arctic::MAX_ACTIVE_FAULTS];
+    int n = arctic::getActiveErrors(active, arctic::MAX_ACTIVE_FAULTS);
     for (int i = 0; i < n && offset < buffer_size - 1; ++i) {
         const char* label = active[i].name ? active[i].name : active[i].code;
         int written = snprintf(buffer + offset, buffer_size - offset, "%s%s",

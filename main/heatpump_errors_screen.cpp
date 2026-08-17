@@ -51,7 +51,7 @@ static struct {
     lv_timer_t* load_timer = nullptr;
 
     // Stable snapshots used while progressively appending cards.
-    arctic::ActiveError active_errors[32] = {};
+    arctic::ActiveError active_errors[arctic::MAX_ACTIVE_FAULTS] = {};
     int active_count = 0;
     int active_displayed = 0;
     arctic::ErrorHistoryEntry cleared_history[arctic::ERROR_HISTORY_SIZE] = {};
@@ -409,7 +409,7 @@ static void update_error_list() {
     lv_obj_clean(state.error_list);
     
     // Get active errors and connection state
-    state.active_count = arctic::getActiveErrors(state.active_errors, 32);
+    state.active_count = arctic::getActiveErrors(state.active_errors, arctic::MAX_ACTIVE_FAULTS);
     state.active_displayed = 0;
     state.history_count = 0;
     state.history_displayed = 0;

@@ -24,6 +24,14 @@ namespace arctic {
 // Maximum number of error history entries (ring buffer — oldest entries are overwritten)
 constexpr int ERROR_HISTORY_SIZE = 50;
 
+// Upper bound on simultaneously-decodable fault sites. Must stay >= the
+// library's MACON_FAULT_BITS_COUNT (total decodable fault bits across all five
+// fault registers). macon_decode_faults fills the output buffer in table order
+// and stops at the buffer size, so an undersized buffer silently drops the
+// physically-last table entries (a critical fault could be lost). 64 leaves
+// ample headroom over the current fault-bit count.
+constexpr int MAX_ACTIVE_FAULTS = 64;
+
 // Error severity levels
 enum class ErrorSeverity {
     INFO,       // Informational (e.g., run indicator)

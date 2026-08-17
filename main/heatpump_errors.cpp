@@ -110,10 +110,10 @@ static void addHistoryEntry(const char* code, bool is_clearing, time_t occurred_
 
 int getActiveErrors(ActiveError* errors, int max_errors) {
     HeatPumpState state = getState();
-    MaconFault faults[32];
+    MaconFault faults[MAX_ACTIVE_FAULTS];
     size_t n = macon_decode_faults(state.fault_run, state.fault_ee,
                                    state.fault_comp, state.fault_elec,
-                                   state.fault_ref, faults, 32);
+                                   state.fault_ref, faults, MAX_ACTIVE_FAULTS);
     time_t now = time(nullptr);
     int count = 0;
     for (size_t i = 0; i < n && count < max_errors; ++i) {
@@ -134,18 +134,18 @@ int getActiveErrors(ActiveError* errors, int max_errors) {
 
 int getActiveErrorCount() {
     HeatPumpState state = getState();
-    MaconFault faults[32];
+    MaconFault faults[MAX_ACTIVE_FAULTS];
     return (int)macon_decode_faults(state.fault_run, state.fault_ee,
                                     state.fault_comp, state.fault_elec,
-                                    state.fault_ref, faults, 32);
+                                    state.fault_ref, faults, MAX_ACTIVE_FAULTS);
 }
 
 ErrorSeverity getHighestSeverity() {
     HeatPumpState state = getState();
-    MaconFault faults[32];
+    MaconFault faults[MAX_ACTIVE_FAULTS];
     size_t n = macon_decode_faults(state.fault_run, state.fault_ee,
                                    state.fault_comp, state.fault_elec,
-                                   state.fault_ref, faults, 32);
+                                   state.fault_ref, faults, MAX_ACTIVE_FAULTS);
     ErrorSeverity highest = ErrorSeverity::INFO;
     for (size_t i = 0; i < n; ++i) {
         ErrorSeverity sv = toErrorSeverity(faults[i].severity);
@@ -176,11 +176,11 @@ void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
     // Decode previous and current fault bytes into opaque fault sites, then diff
     // by site id. The controller never inspects register/bit here — the library
     // owns the bit layout; we only compare and store site tokens.
-    MaconFault prev_f[32], cur_f[32];
+    MaconFault prev_f[MAX_ACTIVE_FAULTS], cur_f[MAX_ACTIVE_FAULTS];
     size_t np = macon_decode_faults(s_prev_regs[0], s_prev_regs[1], s_prev_regs[2],
-                                    s_prev_regs[3], s_prev_regs[4], prev_f, 32);
+                                    s_prev_regs[3], s_prev_regs[4], prev_f, MAX_ACTIVE_FAULTS);
     size_t nc = macon_decode_faults(fault_run, fault_ee, fault_comp,
-                                    fault_elec, fault_ref, cur_f, 32);
+                                    fault_elec, fault_ref, cur_f, MAX_ACTIVE_FAULTS);
 
     // Newly appeared: present now, absent before.
     for (size_t i = 0; i < nc; ++i) {
@@ -334,8 +334,8 @@ const char* formatDuration(time_t start_time, time_t end_time) {
 char* getErrorsAsJson() {
     cJSON* root = cJSON_CreateArray();
 
-    ActiveError errors[32];
-    int count = getActiveErrors(errors, 32);
+    ActiveError errors[MAX_ACTIVE_FAULTS];
+    int count = getActiveErrors(errors, MAX_ACTIVE_FAULTS);
 
     for (int i = 0; i < count; i++) {
         cJSON* err = cJSON_CreateObject();
