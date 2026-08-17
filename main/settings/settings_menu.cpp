@@ -5,6 +5,7 @@
  * Main settings screen with a list of setting categories.
  * Each row opens a full-screen sub-setting when tapped.
  */
+#include "sdkconfig.h"
 #include "settings_menu.h"
 #include "settings_wifi_screen.h"
 #include "settings_firmware_screen.h"
@@ -100,7 +101,9 @@ static void create_header(void);
 static void create_menu_list(void);
 static void close_btn_event_cb(lv_event_t* e);
 static void row_click_cb(lv_event_t* e);
+#if CONFIG_DEMO_MODE
 static void demo_mode_switch_cb(lv_event_t* e);
+#endif
 static void temp_unit_switch_cb(lv_event_t* e);
 static void show_reboot_confirmation(void);
 static void reboot_confirm_cb(lv_event_t* e);
@@ -215,6 +218,7 @@ static lv_obj_t* create_toggle_row(lv_obj_t* parent, const char* icon,
 // Event Handlers
 // ============================================================================
 
+#if CONFIG_DEMO_MODE
 static void demo_mode_switch_cb(lv_event_t* e)
 {
     lv_obj_t* sw = (lv_obj_t*)lv_event_get_target(e);
@@ -224,6 +228,7 @@ static void demo_mode_switch_cb(lv_event_t* e)
     ESP_LOGI(TAG, "Demo mode %s — showing reboot confirmation", on ? "enabled" : "disabled");
     show_reboot_confirmation();
 }
+#endif  // CONFIG_DEMO_MODE
 
 // ============================================================================
 // Reboot Confirmation Panel
@@ -690,11 +695,13 @@ static void create_menu_list(void)
         "settings_security");
     
     // Demo Mode toggle
+#if CONFIG_DEMO_MODE
     lv_obj_t* demo_row = create_toggle_row(state.list_container, LV_SYMBOL_PLAY,
                       i18n_get(STR_SETTINGS_DEMO_MODE), app_prefs_is_demo_mode(),
                       &state.demo_mode_switch, demo_mode_switch_cb);
     lv_obj_set_user_data(demo_row, (void*)"settings_demo_mode");
     lv_obj_set_user_data(state.demo_mode_switch, (void*)"demo_mode_switch");
+#endif
     
     // Temperature Units toggle with °C / °F labels
     {

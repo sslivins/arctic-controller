@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include "sdkconfig.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -124,13 +125,18 @@ struct TelemetrySnapshot {
 // ============================================================================
 
 // Initialize demo mode - populates state with simulated values
+#if CONFIG_DEMO_MODE
 void initDemoState();
+#endif
 
-// Check if running in demo mode
+// Check if running in demo mode (always available; returns false when demo
+// mode is compiled out so callers can guard without extra #ifdefs)
 bool isDemoMode();
 
 // Start the demo-state synchronization task.
+#if CONFIG_DEMO_MODE
 void startDemoSync();
+#endif
 
 // Get current state (thread-safe copy)
 HeatPumpState getState();
@@ -183,6 +189,7 @@ void getStatusDescription(char* buffer, size_t buffer_size);
 // ============================================================================
 // Demo State Injection (only works in demo mode)
 // ============================================================================
+#if CONFIG_DEMO_MODE
 
 // Set a field in the heat pump state by name. Returns true if the field was found.
 // Allows testing read-only values (temps, readings, errors, status) via REST API.
@@ -199,6 +206,9 @@ int injectDemoFault(const char* code, bool active);
 // Clear every active fault in the demo register cache (all five fault
 // registers), preserving the run/state indicator. Demo mode only.
 void clearDemoFaults();
+
+#endif  // CONFIG_DEMO_MODE
+
 
 // ============================================================================
 // External Feed (passive Tuya listen mode)

@@ -2,6 +2,7 @@
  * Arctic Heat Pump State and Control
  */
 
+#include "sdkconfig.h"
 #include "heatpump_controller.h"
 #include "macon_master_iface.h"
 #include "heatpump_errors.h"
@@ -27,8 +28,10 @@ static void applyMaconMapping();
 // State protected by mutex
 static HeatPumpState s_state;
 static SemaphoreHandle_t s_state_mutex = nullptr;
+#if CONFIG_DEMO_MODE
 static TaskHandle_t s_demo_sync_task = nullptr;
 static bool s_demo_sync_enabled = false;
+#endif
 static bool s_demo_mode = false;
 static bool s_feed_mode = false;  // Passive Tuya external-feed mode
 static uint32_t s_holding_window_ms = 0;
@@ -191,6 +194,7 @@ static void detectAndLogStateEvents() {
 }
 
 // Periodically decode the register cache into HeatPumpState and emit events.
+#if CONFIG_DEMO_MODE
 static void demoSyncTask(void*) {
     ESP_LOGI(TAG, "Demo synchronization task started");
 
@@ -310,6 +314,7 @@ void initDemoState() {
 
     ESP_LOGI(TAG, "Demo state initialized");
 }
+#endif  // CONFIG_DEMO_MODE
 
 bool isDemoMode() {
     return s_demo_mode;
@@ -677,6 +682,7 @@ TelemetrySnapshot getTelemetrySnapshot() {
         return snapshot;
 }
 
+#if CONFIG_DEMO_MODE
 void startDemoSync() {
     if (!s_demo_mode) {
         ESP_LOGE(TAG, "Cannot start demo synchronization outside demo mode");
@@ -703,6 +709,7 @@ void startDemoSync() {
         s_demo_sync_enabled = false;
     }
 }
+#endif  // CONFIG_DEMO_MODE
 
 HeatPumpState getState() {
     HeatPumpState copy;
@@ -903,6 +910,7 @@ void getStatusDescription(char* buffer, size_t buffer_size) {
              state.getFanSpeedLevel());
 }
 
+#if CONFIG_DEMO_MODE
 bool setDemoField(const char* field, int32_t value) {
     if (!s_demo_mode || field == nullptr) return false;
 
@@ -995,5 +1003,6 @@ void clearDemoFaults() {
     applyMaconMapping();
     ESP_LOGI(TAG, "[DEMO] All faults cleared");
 }
+#endif  // CONFIG_DEMO_MODE
 
 }  // namespace arctic

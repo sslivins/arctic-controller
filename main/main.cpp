@@ -250,11 +250,14 @@ extern "C" void app_main(void)
     event_log_record_reset_reason(reset_reason);
 
     // Initialize demo state or one of the two Macon/Tuya bus modes.
+#if CONFIG_DEMO_MODE
     if (app_prefs_is_demo_mode()) {
         mclog::tagInfo(TAG, "Demo mode enabled - initializing demo state");
         arctic::initDemoState();
         arctic::startDemoSync();
-    } else {
+    } else
+#endif
+    {
 #if CONFIG_ARCTIC_TUYA_LISTEN
         // Passive Tuya listen mode: RX-only decode of the existing bus.
         // The Tab5 stays silent on RS485.

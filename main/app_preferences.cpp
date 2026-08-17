@@ -3,6 +3,7 @@
  * Application Preferences Implementation
  */
 
+#include "sdkconfig.h"
 #include "app_preferences.h"
 #include <nvs_flash.h>
 #include <nvs.h>
@@ -53,10 +54,18 @@ void app_prefs_init(void) {
 }
 
 bool app_prefs_is_demo_mode(void) {
+#if CONFIG_DEMO_MODE
     return s_prefs.demo_mode;
+#else
+    return false;
+#endif
 }
 
 void app_prefs_set_demo_mode(bool enabled) {
+#if !CONFIG_DEMO_MODE
+    (void)enabled;  // demo mode compiled out; toggle is a no-op
+    return;
+#else
     if (s_prefs.demo_mode == enabled) return;
     
     s_prefs.demo_mode = enabled;
@@ -71,6 +80,7 @@ void app_prefs_set_demo_mode(bool enabled) {
     } else {
         ESP_LOGE(TAG, "Failed to save demo_mode: %s", esp_err_to_name(err));
     }
+#endif
 }
 
 temp_unit_t app_prefs_get_temp_unit(void) {

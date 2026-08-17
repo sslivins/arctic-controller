@@ -2,6 +2,7 @@
  * Arctic Heat Pump Controller
  * REST API Server with mDNS, Web Interface, and Authentication
  */
+#include "sdkconfig.h"
 #include "api_server.h"
 #include "settings/settings_display_screen.h"
 #include "app_preferences.h"
@@ -141,7 +142,9 @@ static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_errors_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req);
+#if CONFIG_DEMO_MODE
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
+#endif
 static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
@@ -920,6 +923,7 @@ bool api_server_start(void)
     REGISTER_URI(heatpump_diagnostic_uri);
 
     // PATCH /api/heatpump/demo - Write fields in demo mode (for testing)
+#if CONFIG_DEMO_MODE
     httpd_uri_t heatpump_demo_uri = {
         .uri = "/api/heatpump/demo",
         .method = HTTP_PATCH,
@@ -927,6 +931,7 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_demo_uri);
+#endif
     
     // GET /api/events - Get event log
     httpd_uri_t events_get_uri = {
@@ -4082,6 +4087,7 @@ static esp_err_t heatpump_errors_get_handler(httpd_req_t* req)
 //                              string; the arctic-macon library owns the
 //                              code -> register/bit mapping.
 // Only available when demo mode is enabled
+#if CONFIG_DEMO_MODE
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -4178,6 +4184,7 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
     
     return ESP_OK;
 }
+#endif  // CONFIG_DEMO_MODE
 
 // ============================================================================
 // Events API
