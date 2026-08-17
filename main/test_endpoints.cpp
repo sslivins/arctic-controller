@@ -1665,9 +1665,11 @@ static esp_err_t set_preference_post_handler(httpd_req_t* req)
         bool enable = cJSON_IsTrue(demo);
         app_prefs_set_demo_mode(enable);
         // Also set the runtime flag so isDemoMode() reflects the change immediately
+#if CONFIG_DEMO_MODE
         if (enable && !arctic::isDemoMode()) {
             arctic::initDemoState();
         }
+#endif
         ESP_LOGI(TAG, "set-preference: demo_mode=%s", enable ? "true" : "false");
     }
 
@@ -1725,10 +1727,13 @@ static esp_err_t set_demo_field_post_handler(httpd_req_t* req)
             continue;
         }
         int32_t value = (int32_t)item->valuedouble;
+#if CONFIG_DEMO_MODE
         if (arctic::setDemoField(item->string, value)) {
             cJSON_AddStringToObject(results, item->string, "ok");
             success_count++;
-        } else {
+        } else
+#endif
+        {
             cJSON_AddStringToObject(results, item->string, "error: unknown field");
             fail_count++;
         }
@@ -1824,7 +1829,11 @@ static esp_err_t inject_fault_post_handler(httpd_req_t* req)
     cJSON* active_item = cJSON_GetObjectItem(root, "active");
     bool active = active_item ? cJSON_IsTrue(active_item) : true;
 
+#if CONFIG_DEMO_MODE
     int sites = arctic::injectDemoFault(code->valuestring, active);
+#else
+    int sites = 0;
+#endif
     if (sites <= 0) {
         cJSON_Delete(root);
         send_json_error(req, "400 Bad Request", "Unknown fault code");
@@ -1856,7 +1865,9 @@ static esp_err_t clear_faults_post_handler(httpd_req_t* req)
         send_json_error(req, "403 Forbidden", "Demo mode is not enabled");
         return ESP_OK;
     }
+#if CONFIG_DEMO_MODE
     arctic::clearDemoFaults();
+#endif
 
     set_json_content_type(req);
     cJSON* resp = cJSON_CreateObject();

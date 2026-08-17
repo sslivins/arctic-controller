@@ -2,6 +2,7 @@
  * Arctic Heat Pump Controller
  * REST API Server with mDNS, Web Interface, and Authentication
  */
+#include "sdkconfig.h"
 #include "api_server.h"
 #include "settings/settings_display_screen.h"
 #include "app_preferences.h"
@@ -141,7 +142,9 @@ static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_errors_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req);
+#if CONFIG_DEMO_MODE
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
+#endif
 static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
@@ -920,6 +923,7 @@ bool api_server_start(void)
     REGISTER_URI(heatpump_diagnostic_uri);
 
     // PATCH /api/heatpump/demo - Write fields in demo mode (for testing)
+#if CONFIG_DEMO_MODE
     httpd_uri_t heatpump_demo_uri = {
         .uri = "/api/heatpump/demo",
         .method = HTTP_PATCH,
@@ -927,6 +931,7 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_demo_uri);
+#endif
     
     // GET /api/events - Get event log
     httpd_uri_t events_get_uri = {
@@ -4076,7 +4081,13 @@ static esp_err_t heatpump_errors_get_handler(httpd_req_t* req)
 
 // PATCH /api/heatpump/demo - Write read-only fields for testing
 // Body: { "field1": value1, "field2": value2, ... }
+//   - Numeric telemetry/setpoint fields go to setDemoField() in natural units.
+//   - "clear_faults": 1        clears every active demo fault.
+//   - "fault:<CODE>": 1|0      sets/clears one fault by its opaque OEM code
+//                              string; the arctic-macon library owns the
+//                              code -> register/bit mapping.
 // Only available when demo mode is enabled
+#if CONFIG_DEMO_MODE
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -4115,6 +4126,35 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
     // Iterate all keys in the JSON object
     cJSON* item = NULL;
     cJSON_ArrayForEach(item, root) {
+        // Reserved opaque fault controls. Faults are referenced by their
+        // canonical OEM code (an opaque runtime string) which the arctic-macon
+        // library maps to register/bit sites — no protocol knowledge here.
+        //   {"clear_faults": 1}      -> clear every active demo fault
+        //   {"fault:<CODE>": 1|0}    -> set/clear a single fault by code
+        if (strcmp(item->string, "clear_faults") == 0) {
+            arctic::clearDemoFaults();
+            cJSON_AddStringToObject(results, item->string, "ok");
+            success_count++;
+            continue;
+        }
+        if (strncmp(item->string, "fault:", 6) == 0) {
+            if (!cJSON_IsNumber(item)) {
+                cJSON_AddStringToObject(results, item->string, "error: value must be a number");
+                fail_count++;
+                continue;
+            }
+            const char* code = item->string + 6;
+            bool active = ((int32_t)item->valuedouble) != 0;
+            if (arctic::injectDemoFault(code, active) > 0) {
+                cJSON_AddStringToObject(results, item->string, "ok");
+                success_count++;
+            } else {
+                cJSON_AddStringToObject(results, item->string, "error: unknown fault code");
+                fail_count++;
+            }
+            continue;
+        }
+
         if (!cJSON_IsNumber(item)) {
             cJSON_AddStringToObject(results, item->string, "error: value must be a number");
             fail_count++;
@@ -4144,6 +4184,7 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
     
     return ESP_OK;
 }
+#endif  // CONFIG_DEMO_MODE
 
 // ============================================================================
 // Events API

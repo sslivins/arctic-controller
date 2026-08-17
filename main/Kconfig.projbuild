@@ -1,5 +1,20 @@
 menu "Arctic Controller"
 
+    config DEMO_MODE
+        bool "Include demo mode (simulated heat pump, no bus)"
+        default y
+        help
+            Compiles in demo mode: a fully simulated heat pump that runs with
+            no RS485 bus attached, driven by seeded register values and the
+            /api/heatpump/demo injection endpoint. Used for UI demos, kiosk
+            units, and the automated API/device test suites.
+
+            When disabled, all demo scaffolding (the seeded state, the demo
+            sync task, the /api/heatpump/demo endpoint, and the Settings demo
+            toggle) is excluded from the image and app_prefs_is_demo_mode()
+            is always false. Leave enabled for production images for now;
+            disable to ship a build that can only talk to a real bus.
+
     config TEST_ENDPOINTS
         bool "Enable test instrumentation endpoints (/api/test/*)"
         default n

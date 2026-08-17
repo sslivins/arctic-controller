@@ -132,3 +132,47 @@ jobs:
           echo "- \`bootloader.bin\` - Bootloader" >> $GITHUB_STEP_SUMMARY
           echo "- \`partition-table.bin\` - Partition table" >> $GITHUB_STEP_SUMMARY
           echo "- \`ota_data_initial.bin\` - OTA data partition" >> $GITHUB_STEP_SUMMARY
+
+  # Compile-only guard for the demo-mode removal path. The production image
+  # ships with CONFIG_DEMO_MODE=y, so the =n branches (all the #if
+  # CONFIG_DEMO_MODE / #else gating around the demo scaffolding) are never
+  # exercised by the main build. Build once with demo disabled AND test
+  # endpoints enabled so the trickiest demo-off #else branches in
+  # test_endpoints.cpp are actually compiled. No artifacts are published; this
+  # job exists solely to keep the "ship without demo" path healthy.
+  build-demo-disabled:
+    runs-on: ubuntu-latest
+    env:
+      TARGET: ${{ inputs.target || 'esp32p4' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+
+      - name: Fetch dependencies
+        run: python3 fetch_repos.py
+
+      - name: Stamp build fingerprint
+        run: |
+          echo -n "${GITHUB_SHA}" > build_sha.txt
+
+      - name: Disable demo mode (keep test endpoints to cover demo-off branches)
+        run: |
+          echo "CONFIG_DEMO_MODE=n" >> sdkconfig.defaults
+          echo "CONFIG_TEST_ENDPOINTS=y" >> sdkconfig.defaults
+
+      - name: ESP-IDF Build (demo disabled)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.2
+          target: ${{ env.TARGET }}
+          path: '.'
+
+      - name: Verify demo mode is compiled out
+        run: |
+          if grep -q '^#define CONFIG_DEMO_MODE 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_DEMO_MODE is still enabled in this variant — the demo-disabled build did not take effect."
+            exit 1
+          fi
+          echo "OK: CONFIG_DEMO_MODE is disabled in the compiled firmware"
