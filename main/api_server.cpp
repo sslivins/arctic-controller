@@ -4076,6 +4076,11 @@ static esp_err_t heatpump_errors_get_handler(httpd_req_t* req)
 
 // PATCH /api/heatpump/demo - Write read-only fields for testing
 // Body: { "field1": value1, "field2": value2, ... }
+//   - Numeric telemetry/setpoint fields go to setDemoField() in natural units.
+//   - "clear_faults": 1        clears every active demo fault.
+//   - "fault:<CODE>": 1|0      sets/clears one fault by its opaque OEM code
+//                              string; the arctic-macon library owns the
+//                              code -> register/bit mapping.
 // Only available when demo mode is enabled
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
 {
@@ -4115,6 +4120,35 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
     // Iterate all keys in the JSON object
     cJSON* item = NULL;
     cJSON_ArrayForEach(item, root) {
+        // Reserved opaque fault controls. Faults are referenced by their
+        // canonical OEM code (an opaque runtime string) which the arctic-macon
+        // library maps to register/bit sites — no protocol knowledge here.
+        //   {"clear_faults": 1}      -> clear every active demo fault
+        //   {"fault:<CODE>": 1|0}    -> set/clear a single fault by code
+        if (strcmp(item->string, "clear_faults") == 0) {
+            arctic::clearDemoFaults();
+            cJSON_AddStringToObject(results, item->string, "ok");
+            success_count++;
+            continue;
+        }
+        if (strncmp(item->string, "fault:", 6) == 0) {
+            if (!cJSON_IsNumber(item)) {
+                cJSON_AddStringToObject(results, item->string, "error: value must be a number");
+                fail_count++;
+                continue;
+            }
+            const char* code = item->string + 6;
+            bool active = ((int32_t)item->valuedouble) != 0;
+            if (arctic::injectDemoFault(code, active) > 0) {
+                cJSON_AddStringToObject(results, item->string, "ok");
+                success_count++;
+            } else {
+                cJSON_AddStringToObject(results, item->string, "error: unknown fault code");
+                fail_count++;
+            }
+            continue;
+        }
+
         if (!cJSON_IsNumber(item)) {
             cJSON_AddStringToObject(results, item->string, "error: value must be a number");
             fail_count++;

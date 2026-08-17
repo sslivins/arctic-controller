@@ -359,6 +359,62 @@ class TestDemoModeInjection:
         assert r.status_code in (200, 403)
 
 
+class TestDemoFaultControlViaDemoEndpoint:
+    """PATCH /api/heatpump/demo — opaque fault control on the production path.
+
+    Faults are set/cleared by their canonical OEM code through the always-on
+    demo endpoint (no CONFIG_TEST_ENDPOINTS build required). The code ->
+    register/bit mapping is owned by the arctic-macon library, so no protocol
+    knowledge is exposed on the wire.
+    """
+
+    def teardown_method(self):
+        # Leave the device with no active faults for subsequent tests.
+        _inject_demo({"clear_faults": 1})
+        time.sleep(0.3)
+
+    def test_set_fault_by_code(self):
+        """{"fault:P02": 1} activates the high-pressure fault."""
+        _inject_demo({"clear_faults": 1})
+        _inject_demo({"fault:P02": 1})
+        time.sleep(1.0)
+        assert _get("/api/heatpump/status").json()["has_error"] is True
+        codes = [e["code"] for e in _get("/api/heatpump/errors").json()["active"]]
+        assert "P02" in codes
+
+    def test_clear_single_fault_by_code(self):
+        """{"fault:P02": 0} clears only that fault, leaving others active."""
+        _inject_demo({"clear_faults": 1})
+        _inject_demo({"fault:P02": 1, "fault:E19": 1})
+        time.sleep(1.0)
+        _inject_demo({"fault:P02": 0})
+        time.sleep(1.0)
+        codes = [e["code"] for e in _get("/api/heatpump/errors").json()["active"]]
+        assert "P02" not in codes
+        assert "E19" in codes
+
+    def test_clear_all_faults(self):
+        """{"clear_faults": 1} clears every active fault."""
+        _inject_demo({"fault:P02": 1, "fault:E19": 1})
+        time.sleep(1.0)
+        _inject_demo({"clear_faults": 1})
+        time.sleep(1.0)
+        assert _get("/api/heatpump/status").json()["has_error"] is False
+        assert _get("/api/heatpump/errors").json()["error_count"] == 0
+
+    def test_unknown_fault_code_reports_failure(self):
+        """An unknown fault code is reported as failed, not silently applied."""
+        r = _patch("/api/heatpump/demo", json={"fault:ZZ99": 1})
+        assert r.status_code == 200
+        assert r.json()["failed"] > 0
+
+    def test_fault_key_non_numeric_value_fails(self):
+        """A non-numeric value for a fault key is rejected."""
+        r = _patch("/api/heatpump/demo", json={"fault:P02": "on"})
+        assert r.status_code == 200
+        assert r.json()["failed"] > 0
+
+
 # ── Component State Manipulation ─────────────────────────────────────────
 #
 # The unit's run-state is decoded natively by arctic-macon from the real Tuya
