@@ -2,24 +2,35 @@
  * Arctic Heat Pump Controller
  * Error Management Module
  *
- * Presentation adapter over the arctic-macon library's native fault decode
- * (macon_decode_faults / MACON_FAULT_BITS). The library owns the canonical
- * (reg, bit) -> code / label / severity table; this module adds the controller
- * concerns the library does not carry: human remedy ("resolution") text,
- * per-fault first-seen tracking, and a cleared/active history ring buffer.
+ * Presentation adapter over the arctic-macon library's opaque fault decode
+ * (macon_decode_faults). The library owns the canonical fault identity and
+ * emits an opaque per-fault site token (MaconFaultSiteId); this module adds the
+ * controller concerns the library does not surface directly: per-fault
+ * first-seen tracking (keyed by that opaque site token) and a cleared/active
+ * history ring buffer. Remedy ("resolution") text is looked up from the library
+ * by semantic fault id.
  *
- * There is no fictional Arctic error1/error2 bitfield here any more — a fault's
- * stable identity is the (reg, bit) pair straight from the Macon mainboard.
+ * A fault's stable identity here is the opaque site token from the library —
+ * the controller carries no register/bit/code knowledge of its own.
  */
 #pragma once
 
 #include <stdint.h>
 #include <time.h>
+#include "macon_faults.h"  // MaconFaultId / MaconFaultSiteId tokens + severity map
 
 namespace arctic {
 
 // Maximum number of error history entries (ring buffer — oldest entries are overwritten)
 constexpr int ERROR_HISTORY_SIZE = 50;
+
+// Upper bound on simultaneously-decodable fault sites. Must stay >= the
+// library's MACON_FAULT_BITS_COUNT (total decodable fault bits across all five
+// fault registers). macon_decode_faults fills the output buffer in table order
+// and stops at the buffer size, so an undersized buffer silently drops the
+// physically-last table entries (a critical fault could be lost). 64 leaves
+// ample headroom over the current fault-bit count.
+constexpr int MAX_ACTIVE_FAULTS = 64;
 
 // Error severity levels
 enum class ErrorSeverity {
@@ -29,17 +40,17 @@ enum class ErrorSeverity {
     CRITICAL    // Critical error (compressor protection, high pressure)
 };
 
-// Active fault with timestamp. Identity is (reg, bit) — the raw Macon fault
-// register and the bit within it — NOT a code string (codes are not unique;
-// e.g. E28 and E05 each appear at two distinct bits).
+// Active fault with timestamp. Identity is the opaque MaconFaultSiteId site
+// token from the arctic-macon library — NOT a code string (codes are not
+// unique; some appear at two distinct sites) and NOT a register/bit pair (that
+// layout is library-private).
 struct ActiveError {
-    const char* code;       // Code as shown on the OEM LCD (e.g. "P02", "E19")
+    const char* code;       // Code as shown on the OEM LCD (library-provided)
     const char* name;       // Short label (from the macon library)
     const char* description;// Human-readable description (from the macon library)
-    const char* resolution; // Suggested resolution steps (controller-owned)
+    const char* resolution; // Suggested resolution steps (library-provided)
     ErrorSeverity severity;
-    uint16_t reg;           // Macon fault register (2007/2125/2126/2127/2128)
-    uint8_t  bit;           // Bit within that register (0..7)
+    MaconFaultSiteId site;  // Opaque per-fault site token (library-owned)
     time_t first_seen;      // When error first appeared
     time_t last_seen;       // Last time error was active
     bool active;            // Currently active
@@ -115,16 +126,5 @@ const char* severityToString(ErrorSeverity severity);
 // Format duration as human readable string (e.g., "2h 15m", "45s", "Active")
 // Returns static buffer, not thread-safe
 const char* formatDuration(time_t start_time, time_t end_time = 0);
-
-// Check if a specific (reg, bit) fault is currently active.
-bool isErrorActive(uint16_t reg, uint8_t bit);
-
-// True if the fault identified by `code` (e.g. "E18", "E19") is currently
-// active in the supplied raw Macon fault-register bytes. The macon library
-// owns the code->(reg, bit) mapping; callers reference only the public code
-// string and never a bit position. Takes the raw bytes (rather than reading
-// global state) so it is safe to call while holding the controller state lock.
-bool hasActiveFaultCode(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
-                        uint8_t fault_elec, uint8_t fault_ref, const char* code);
 
 }  // namespace arctic

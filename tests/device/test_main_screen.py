@@ -74,7 +74,7 @@ def _ensure_demo_defaults(device: DeviceClient):
         fan_on=1,
         fan_speed=FAN_MED,
         pump_on=1,
-        ac_voltage=23,
+        ac_voltage=230,
         ac_current=52,
         inlet_water_temp=38,
         outlet_water_temp=45,
@@ -318,7 +318,7 @@ class TestPerformanceStrip:
     def test_power_displayed(self, device: DeviceClient):
         """Power consumption should be displayed when compressor is running."""
         device.clear_all_faults()
-        _running(device, ac_voltage=23, ac_current=52)
+        _running(device, ac_voltage=230, ac_current=52)
         _wait_for_update()
         power = device.find_widget(tag="perf_power")
         assert power is not None, "perf_power widget not found"

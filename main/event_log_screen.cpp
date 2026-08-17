@@ -223,14 +223,16 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
         }
         case EVENT_ERROR_APPEARED:
         case EVENT_ERROR_CLEARED: {
-            // Payload = (fault register << 8) | bit index, per detectAndLogStateEvents.
-            uint16_t reg = (p >> 8) & 0xFFFF;
-            uint8_t  bit = p & 0xFF;
-            const arctic::MaconFaultBit* fb = arctic::macon_fault_bit(reg, bit);
+            // Payload = opaque fault site id, per detectAndLogStateEvents. The
+            // library resolves it to a code/label; the screen handles no
+            // register or bit position.
+            const arctic::MaconFaultSiteId site =
+                static_cast<arctic::MaconFaultSiteId>(p);
+            const arctic::MaconFaultBit* fb = arctic::macon_fault_bit_for_site(site);
             if (fb != nullptr) {
                 snprintf(buf, buf_size, "(%s) %s", fb->code, fb->label);
             } else {
-                snprintf(buf, buf_size, "Reg %u bit %u", reg, bit);
+                snprintf(buf, buf_size, "Error %u", (unsigned)site);
             }
             break;
         }

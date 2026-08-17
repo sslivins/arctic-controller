@@ -10,7 +10,6 @@
 #include "heatpump_errors.h"
 #include "heatpump_controller.h"
 #include "macon_faults.h"
-#include "macon_registers.h"  // arctic::REG_FAULT_* address constants
 #include <cJSON.h>
 #include <esp_log.h>
 #include <stdio.h>
@@ -35,70 +34,12 @@ static ErrorSeverity toErrorSeverity(FaultSeverity s) {
 }
 
 // ============================================================================
-// Controller-owned remedy text, keyed by fault code
+// Controller-owned remedy text
 // ============================================================================
-// The arctic-macon library owns the code/label/severity/(reg,bit) identity but
-// deliberately does NOT carry human remedy steps. Those installation-facing
-// instructions live here, keyed by the LCD code. Codes absent from this table
-// fall back to kDefaultResolution.
-static const char* kDefaultResolution = "Contact the dealer.";
-
-struct CodeResolution { const char* code; const char* resolution; };
-static const CodeResolution kResolutions[] = {
-    { "E19", "Check the inlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace." },
-    { "E18", "Check the outlet water temperature sensor at the heat exchanger for a short or open circuit and correct or replace." },
-    { "E13", "Check the coil temperature sensor for a short or open circuit and correct or replace." },
-    { "E05", "Check the heat pump coil temperature sensor and wires for a short or open circuit and correct or replace sensors." },
-    { "E01", "Check if the compressor discharge temperature sensor for short or open circuit and correct or replace." },
-    { "E09", "Check if the compressor suction temperature sensor for short or open circuit and correct or replace." },
-    { "E22", "Check if the ambient temperature sensor for the heat pump or its wiring has a short or open circuit and correct or replace." },
-    { "E21", "Check the wired controller's cable and its connections." },
-    { "r06", "This applies to 3-phase units where the phasing of the wires is incorrect and needs to be corrected." },
-    { "P11", "1) Check water system is operating normal, look for reduction in normal water flow. 2) Check whether there was a refrigerant leak and repair. 3) Verify unit is in normal operation with proper exhaust temperature and system pressure." },
-    { "P02", "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked or if evaporator fins are blocked. 3) Check whether snow or ice has built up inside the unit. 4) Check that the water tank temperature setting is not too high." },
-    { "P06", "1) Check whether the unit is leaking refrigerant. 2) Repair and vacuum system, then refill with exact amount of refrigerant as per nameplate." },
-    { "P27", "Check that the fan is in good condition and that the evaporator fins are not in need of cleaning." },
-    { "P01", "Flow is too low or wiring is open circuit. Check the water system, water pump, and operation of water flow switch and correct problem." },
-    { "P15", "1) Check if water system is operating abnormally, such as water flow is too low. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure." },
-    { "P16", "1) Check water system is normal and water flow is adequate. 2) Verify unit is in normal operation with proper exhaust temperature and system pressure." },
-    { "PC",  "Ambient temperature is out of the allowed operating range. Wait for conditions to improve." },
-};
-
-static const char* resolutionForCode(const char* code) {
-    if (code) {
-        for (const auto& r : kResolutions) {
-            if (strcmp(r.code, code) == 0) return r.resolution;
-        }
-    }
-    return kDefaultResolution;
-}
-
-// ============================================================================
-// Fault register indexing helpers
-// ============================================================================
-// Map a Macon fault register address to a 0..4 index (order matches
-// MACON_FAULT_REGS: 2007, 2125, 2126, 2127, 2128).
-static int regIndex(uint16_t reg) {
-    switch (reg) {
-        case REG_FAULT_RUNSTATE:    return 0;
-        case REG_FAULT_SENSOR_EE:   return 1;
-        case REG_FAULT_SENSOR_COMP: return 2;
-        case REG_FAULT_ELEC:        return 3;
-        case REG_FAULT:             return 4;
-        default:                    return -1;
-    }
-}
-
-static uint8_t regByte(const HeatPumpState& s, uint16_t reg) {
-    switch (reg) {
-        case REG_FAULT_RUNSTATE:    return s.fault_run;
-        case REG_FAULT_SENSOR_EE:   return s.fault_ee;
-        case REG_FAULT_SENSOR_COMP: return s.fault_comp;
-        case REG_FAULT_ELEC:        return s.fault_elec;
-        case REG_FAULT:             return s.fault_ref;
-        default:                    return 0;
-    }
-}
+// Remedy ("resolution") text lives in the arctic-macon library, keyed by the
+// semantic MaconFaultId so multi-site codes cannot drift; the controller only
+// looks it up via macon_fault_resolution(id) and carries no code strings of
+// its own.
 
 // ============================================================================
 // Error History
@@ -107,10 +48,37 @@ static ErrorHistoryEntry s_history[ERROR_HISTORY_SIZE];
 static int s_history_head = 0;  // Next write position
 static int s_history_count = 0;
 
-// Previous raw fault-register bytes and per-(reg,bit) first-seen tracking.
-// Indexed by position in the library's MACON_FAULT_BITS table.
+// Previous raw fault-register bytes (for edge detection) and first-seen
+// timestamps keyed by OPAQUE fault site id. The site store is a small linear
+// table (there are ~31 distinct sites); the controller never derives a register
+// or bit from a site — it only compares and stores the token.
 static uint8_t s_prev_regs[5] = {0};
-static time_t  s_first_seen[64] = {0};  // >= MACON_FAULT_BITS_COUNT
+
+struct FirstSeen { MaconFaultSiteId site; time_t when; };
+static FirstSeen s_first_seen[64];
+static size_t    s_first_seen_count = 0;
+
+static time_t getFirstSeen(MaconFaultSiteId site) {
+    for (size_t i = 0; i < s_first_seen_count; ++i) {
+        if (s_first_seen[i].site == site) return s_first_seen[i].when;
+    }
+    return 0;
+}
+
+static void setFirstSeen(MaconFaultSiteId site, time_t when) {
+    for (size_t i = 0; i < s_first_seen_count; ++i) {
+        if (s_first_seen[i].site == site) { s_first_seen[i].when = when; return; }
+    }
+    if (s_first_seen_count < (sizeof(s_first_seen) / sizeof(s_first_seen[0]))) {
+        s_first_seen[s_first_seen_count++] = { site, when };
+    }
+}
+
+static void clearFirstSeen(MaconFaultSiteId site) {
+    for (size_t i = 0; i < s_first_seen_count; ++i) {
+        if (s_first_seen[i].site == site) { s_first_seen[i].when = 0; return; }
+    }
+}
 
 // Add entry to history ring buffer
 static void addHistoryEntry(const char* code, bool is_clearing, time_t occurred_time) {
@@ -136,26 +104,16 @@ static void addHistoryEntry(const char* code, bool is_clearing, time_t occurred_
     }
 }
 
-// Find the MACON_FAULT_BITS index for a (reg, bit), or -1.
-static int faultTableIndex(uint16_t reg, uint8_t bit) {
-    for (size_t i = 0; i < MACON_FAULT_BITS_COUNT; ++i) {
-        if (MACON_FAULT_BITS[i].reg == reg && MACON_FAULT_BITS[i].bit == bit) {
-            return (int)i;
-        }
-    }
-    return -1;
-}
-
 // ============================================================================
 // Public Functions
 // ============================================================================
 
 int getActiveErrors(ActiveError* errors, int max_errors) {
     HeatPumpState state = getState();
-    MaconFault faults[32];
+    MaconFault faults[MAX_ACTIVE_FAULTS];
     size_t n = macon_decode_faults(state.fault_run, state.fault_ee,
                                    state.fault_comp, state.fault_elec,
-                                   state.fault_ref, faults, 32);
+                                   state.fault_ref, faults, MAX_ACTIVE_FAULTS);
     time_t now = time(nullptr);
     int count = 0;
     for (size_t i = 0; i < n && count < max_errors; ++i) {
@@ -163,12 +121,11 @@ int getActiveErrors(ActiveError* errors, int max_errors) {
         e.code = faults[i].code;
         e.name = faults[i].label;
         e.description = faults[i].label;
-        e.resolution = resolutionForCode(faults[i].code);
+        e.resolution = macon_fault_resolution(faults[i].id);
         e.severity = toErrorSeverity(faults[i].severity);
-        e.reg = faults[i].reg;
-        e.bit = faults[i].bit;
-        int ti = faultTableIndex(faults[i].reg, faults[i].bit);
-        e.first_seen = (ti >= 0 && s_first_seen[ti] > 0) ? s_first_seen[ti] : now;
+        e.site = faults[i].site;
+        time_t fs = getFirstSeen(faults[i].site);
+        e.first_seen = (fs > 0) ? fs : now;
         e.last_seen = now;
         e.active = true;
     }
@@ -177,18 +134,18 @@ int getActiveErrors(ActiveError* errors, int max_errors) {
 
 int getActiveErrorCount() {
     HeatPumpState state = getState();
-    MaconFault faults[32];
+    MaconFault faults[MAX_ACTIVE_FAULTS];
     return (int)macon_decode_faults(state.fault_run, state.fault_ee,
                                     state.fault_comp, state.fault_elec,
-                                    state.fault_ref, faults, 32);
+                                    state.fault_ref, faults, MAX_ACTIVE_FAULTS);
 }
 
 ErrorSeverity getHighestSeverity() {
     HeatPumpState state = getState();
-    MaconFault faults[32];
+    MaconFault faults[MAX_ACTIVE_FAULTS];
     size_t n = macon_decode_faults(state.fault_run, state.fault_ee,
                                    state.fault_comp, state.fault_elec,
-                                   state.fault_ref, faults, 32);
+                                   state.fault_ref, faults, MAX_ACTIVE_FAULTS);
     ErrorSeverity highest = ErrorSeverity::INFO;
     for (size_t i = 0; i < n; ++i) {
         ErrorSeverity sv = toErrorSeverity(faults[i].severity);
@@ -207,7 +164,7 @@ bool describeFaultCode(const char* code, const char** name_out,
     const MaconFaultBit* fb = sites[0];
     if (name_out)        *name_out = fb->label;
     if (description_out)  *description_out = fb->label;
-    if (resolution_out)   *resolution_out = resolutionForCode(code);
+    if (resolution_out)   *resolution_out = macon_fault_resolution(fb->id);
     if (severity_out)     *severity_out = toErrorSeverity(fb->severity);
     return true;
 }
@@ -215,30 +172,50 @@ bool describeFaultCode(const char* code, const char** name_out,
 void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
                         uint8_t fault_elec, uint8_t fault_ref) {
     time_t now = time(nullptr);
-    const uint8_t cur[5] = { fault_run, fault_ee, fault_comp, fault_elec, fault_ref };
 
-    for (size_t i = 0; i < MACON_FAULT_BITS_COUNT; ++i) {
-        const MaconFaultBit& fb = MACON_FAULT_BITS[i];
-        if (fb.severity == FaultSeverity::INFO) continue;  // skip RUN indicator
-        int ri = regIndex(fb.reg);
-        if (ri < 0) continue;
-        bool now_set = (cur[ri] >> fb.bit) & 0x1;
-        bool was_set = (s_prev_regs[ri] >> fb.bit) & 0x1;
-        if (now_set && !was_set) {
-            s_first_seen[i] = now;
-            ESP_LOGW(TAG, "Error SET: %s - %s", fb.code, fb.label);
-            addHistoryEntry(fb.code, false, 0);
-        } else if (!now_set && was_set) {
-            time_t occurred = s_first_seen[i];
-            time_t duration = (occurred > 0 && now > occurred) ? (now - occurred) : 0;
-            ESP_LOGI(TAG, "Error CLEARED: %s - %s (duration: %d sec)",
-                     fb.code, fb.label, (int)duration);
-            addHistoryEntry(fb.code, true, occurred);
-            s_first_seen[i] = 0;
+    // Decode previous and current fault bytes into opaque fault sites, then diff
+    // by site id. The controller never inspects register/bit here — the library
+    // owns the bit layout; we only compare and store site tokens.
+    MaconFault prev_f[MAX_ACTIVE_FAULTS], cur_f[MAX_ACTIVE_FAULTS];
+    size_t np = macon_decode_faults(s_prev_regs[0], s_prev_regs[1], s_prev_regs[2],
+                                    s_prev_regs[3], s_prev_regs[4], prev_f, MAX_ACTIVE_FAULTS);
+    size_t nc = macon_decode_faults(fault_run, fault_ee, fault_comp,
+                                    fault_elec, fault_ref, cur_f, MAX_ACTIVE_FAULTS);
+
+    // Newly appeared: present now, absent before.
+    for (size_t i = 0; i < nc; ++i) {
+        bool was = false;
+        for (size_t j = 0; j < np; ++j) {
+            if (prev_f[j].site == cur_f[i].site) { was = true; break; }
+        }
+        if (!was) {
+            setFirstSeen(cur_f[i].site, now);
+            ESP_LOGW(TAG, "Error SET: %s - %s", cur_f[i].code, cur_f[i].label);
+            addHistoryEntry(cur_f[i].code, false, 0);
         }
     }
 
-    for (int r = 0; r < 5; ++r) s_prev_regs[r] = cur[r];
+    // Cleared: present before, absent now.
+    for (size_t j = 0; j < np; ++j) {
+        bool still = false;
+        for (size_t i = 0; i < nc; ++i) {
+            if (cur_f[i].site == prev_f[j].site) { still = true; break; }
+        }
+        if (!still) {
+            time_t occurred = getFirstSeen(prev_f[j].site);
+            time_t duration = (occurred > 0 && now > occurred) ? (now - occurred) : 0;
+            ESP_LOGI(TAG, "Error CLEARED: %s - %s (duration: %d sec)",
+                     prev_f[j].code, prev_f[j].label, (int)duration);
+            addHistoryEntry(prev_f[j].code, true, occurred);
+            clearFirstSeen(prev_f[j].site);
+        }
+    }
+
+    s_prev_regs[0] = fault_run;
+    s_prev_regs[1] = fault_ee;
+    s_prev_regs[2] = fault_comp;
+    s_prev_regs[3] = fault_elec;
+    s_prev_regs[4] = fault_ref;
 }
 
 int getErrorHistory(ErrorHistoryEntry* history, int max_entries) {
@@ -267,9 +244,14 @@ void populateDemoErrorHistory() {
 
     time_t now = time(nullptr);
 
-    // E26 - Low ambient / comm, cleared 15 minutes ago (was active for 45 min)
+    // Codes come from the library by semantic fault id — the controller bakes in
+    // no OEM code strings of its own.
+    const char* comm_code = macon_code_for_fault_id(MaconFaultId::IndoorOutdoorCommunication);
+    const char* inlet_code = macon_code_for_fault_id(MaconFaultId::InletWaterSensor);
+
+    // Comm fault, cleared 15 minutes ago (was active for 45 min)
     ErrorHistoryEntry& e1 = s_history[s_history_head];
-    strncpy(e1.code, "E26", sizeof(e1.code) - 1);
+    strncpy(e1.code, comm_code ? comm_code : "", sizeof(e1.code) - 1);
     e1.code[sizeof(e1.code) - 1] = '\0';
     e1.occurred = now - 3600;   // Started 1h ago
     e1.cleared = now - 900;     // Cleared 15m ago
@@ -277,9 +259,9 @@ void populateDemoErrorHistory() {
     s_history_head = (s_history_head + 1) % ERROR_HISTORY_SIZE;
     s_history_count++;
 
-    // E19 - Inlet sensor, cleared 18 minutes ago (was active for 12 min)
+    // Inlet sensor, cleared 18 minutes ago (was active for 12 min)
     ErrorHistoryEntry& e2 = s_history[s_history_head];
-    strncpy(e2.code, "E19", sizeof(e2.code) - 1);
+    strncpy(e2.code, inlet_code ? inlet_code : "", sizeof(e2.code) - 1);
     e2.code[sizeof(e2.code) - 1] = '\0';
     e2.occurred = now - 1800;   // Started 30m ago
     e2.cleared = now - 1080;    // Cleared 18m ago
@@ -349,29 +331,11 @@ const char* formatDuration(time_t start_time, time_t end_time) {
     return buf;
 }
 
-bool isErrorActive(uint16_t reg, uint8_t bit) {
-    HeatPumpState state = getState();
-    if (regIndex(reg) < 0) return false;
-    return (regByte(state, reg) >> bit) & 0x1;
-}
-
-bool hasActiveFaultCode(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
-                        uint8_t fault_elec, uint8_t fault_ref, const char* code) {
-    if (!code) return false;
-    MaconFault faults[32];
-    size_t n = macon_decode_faults(fault_run, fault_ee, fault_comp,
-                                   fault_elec, fault_ref, faults, 32);
-    for (size_t i = 0; i < n; ++i) {
-        if (faults[i].code && strcmp(faults[i].code, code) == 0) return true;
-    }
-    return false;
-}
-
 char* getErrorsAsJson() {
     cJSON* root = cJSON_CreateArray();
 
-    ActiveError errors[32];
-    int count = getActiveErrors(errors, 32);
+    ActiveError errors[MAX_ACTIVE_FAULTS];
+    int count = getActiveErrors(errors, MAX_ACTIVE_FAULTS);
 
     for (int i = 0; i < count; i++) {
         cJSON* err = cJSON_CreateObject();

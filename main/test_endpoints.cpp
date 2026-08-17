@@ -1793,8 +1793,8 @@ static esp_err_t clear_error_history_post_handler(httpd_req_t* req)
 
 // ============================================================================
 // POST /api/test/inject-fault — inject or clear a fault by its Macon code
-// Body: {"code":"P02","active":true}. The (code -> register,bit) mapping is
-// owned by the arctic-macon library, so tests never hardcode bit positions.
+// Body: {"code":"<code>","active":true}. The code->site mapping is owned by
+// the arctic-macon library, so tests never hardcode bit positions.
 // ============================================================================
 
 static esp_err_t inject_fault_post_handler(httpd_req_t* req)

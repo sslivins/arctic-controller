@@ -188,7 +188,8 @@ void getStatusDescription(char* buffer, size_t buffer_size);
 // Allows testing read-only values (temps, readings, errors, status) via REST API.
 bool setDemoField(const char* field, int32_t value);
 
-// Inject (or clear) a fault by its canonical Macon code (e.g. "P02", "E19").
+// Inject (or clear) a fault by its canonical Macon code (opaque to the
+// controller — the arctic-macon library owns the code namespace).
 // Delegates the code -> (register, bit) mapping to the arctic-macon library so
 // no bit positions are hardcoded here. Returns the number of register-bit sites
 // written (a code such as E28/E05 maps to two sites), or 0 if the code is
