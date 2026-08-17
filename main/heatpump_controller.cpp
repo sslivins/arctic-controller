@@ -3,7 +3,7 @@
  */
 
 #include "heatpump_controller.h"
-#include "macon_master.h"
+#include "macon_master_iface.h"
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "macon_state.h"

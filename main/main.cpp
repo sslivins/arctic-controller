@@ -28,7 +28,7 @@
 #include "tls_manager.h"
 #include "heatpump_controller.h"
 #include "tuya/tuya_listener.h"
-#include "tuya/macon_master.h"
+#include "tuya/macon_master_iface.h"
 #include "heatpump_screen.h"
 #include "heatpump_control_screen.h"
 #include "heatpump_history_screen.h"

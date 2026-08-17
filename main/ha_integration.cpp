@@ -6,7 +6,7 @@
 #include "heatpump_controller.h"
 #include "heatpump_errors.h"
 #include "macon_state.h"
-#include "macon_master.h"
+#include "macon_master_iface.h"
 #include "wifi_manager.h"
 
 #include <esp_app_desc.h>
