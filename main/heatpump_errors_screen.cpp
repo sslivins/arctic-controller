@@ -160,7 +160,7 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     lv_obj_set_style_pad_all(top_row, 0, LV_PART_MAIN);
     lv_obj_clear_flag(top_row, LV_OBJ_FLAG_SCROLLABLE);
     
-    // Error code (e.g., "P02") with tap hint
+    // Error code text with tap hint
     lv_obj_t* code_label = lv_label_create(top_row);
     char code_buf[32];
     snprintf(code_buf, sizeof(code_buf), "%s %s  " LV_SYMBOL_DOWN, severity_to_icon(error->severity), error->code);

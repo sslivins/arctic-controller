@@ -379,10 +379,10 @@ class TestDiagnosticValues:
         time.sleep(1.0)
         assert self._row_value("Reading", "AC Current") == "5"
 
-    def test_ac_voltage_uses_library_scaling(self):
-        # Raw AC voltage is x10; the library decodes 23 -> 230 V and the CSV
-        # must show the decoded value without re-scaling.
-        _inject_demo({"ac_voltage": 23})
+    def test_ac_voltage_natural_units(self):
+        # Demo AC voltage is expressed in natural volts; it round-trips through
+        # the diagnostic CSV unchanged (the library handles any wire scaling).
+        _inject_demo({"ac_voltage": 230})
         time.sleep(1.0)
         assert self._row_value("Reading", "AC Voltage") == "230"
 

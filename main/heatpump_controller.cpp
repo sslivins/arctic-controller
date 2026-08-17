@@ -7,7 +7,7 @@
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "macon_state.h"
-#include "macon_registers.h"
+#include "macon_image.h"
 #include "macon_faults.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -70,37 +70,26 @@ static bool elapsed_within(uint32_t now, uint32_t then, uint32_t limit) {
 }
 
 // ============================================================================
-// Register Cache
+// Register Image
 // ============================================================================
-// The real Tuya wire registers are cached here (index = reg - DEMO_REG_BASE),
-// exactly as the passive listener / active master / demo simulator populate
-// them. The arctic-macon library (decode_state) owns interpreting this image
-// into a MaconState; the controller only adapts that into HeatPumpState.
-static const uint16_t DEMO_REG_BASE = HOLDING_START;  // 2000
-// Spans both the holding (2000..2057) and telemetry (2093..2142) windows as a
-// single flat cache; bounds come from the macon library, not magic numbers.
-static const uint16_t DEMO_REG_COUNT = INPUT_START + INPUT_COUNT - HOLDING_START;  // 2000..2142
-static uint16_t s_demo_regs[DEMO_REG_COUNT];
+// The heat pump's register state is held OPAQUELY in a MaconImage. The
+// controller never references a register address, bit position, or scaling
+// factor: the arctic-macon library owns all of that. The image is mutated
+// through semantic operations (set_flag/set_value/set_fault/ingest/…) under
+// s_image_mutex; applyMaconMapping() copies it under that lock, releases it,
+// then decodes the copy — so the image lock and the state lock are never held
+// at the same time.
+static MaconImage s_image;
+static SemaphoreHandle_t s_image_mutex = nullptr;
 
-// Read a single register from the cache.
-static esp_err_t readCacheReg(uint16_t address, uint16_t* out) {
-    if (out == nullptr || address < DEMO_REG_BASE ||
-        (uint16_t)(address - DEMO_REG_BASE) >= DEMO_REG_COUNT) {
-        return ESP_ERR_INVALID_ARG;
+static void ensureImageMutex() {
+    if (s_image_mutex == nullptr) {
+        s_image_mutex = xSemaphoreCreateMutex();
     }
-    *out = s_demo_regs[address - DEMO_REG_BASE];
-    return ESP_OK;
 }
 
-// Write a single register into the cache (real Tuya layout).
-static esp_err_t writeCacheReg(uint16_t address, uint16_t value) {
-    if (address < DEMO_REG_BASE ||
-        (uint16_t)(address - DEMO_REG_BASE) >= DEMO_REG_COUNT) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    s_demo_regs[address - DEMO_REG_BASE] = value;
-    return ESP_OK;
-}
+static inline void imageLock()   { if (s_image_mutex) xSemaphoreTake(s_image_mutex, portMAX_DELAY); }
+static inline void imageUnlock() { if (s_image_mutex) xSemaphoreGive(s_image_mutex); }
 
 
 // Compare the freshly-updated s_state against the previous snapshot and record
@@ -154,23 +143,31 @@ static void detectAndLogStateEvents() {
         if (cur_defrost != s_prev_defrosting) {
             event_log_record(cur_defrost ? EVENT_DEFROST_START : EVENT_DEFROST_END, 0);
         }
-        // Fault changes (per Macon fault register/bit; skip the RUN indicator).
-        const uint8_t cur_faults[5] = {
+        // Fault changes: decode the previous and current fault bytes into
+        // semantic sites (the library skips the RUN indicator) and diff by
+        // opaque site id. The event-log payload is that site id — no register
+        // or bit position is handled here.
+        MaconFault prev_f[32];
+        MaconFault cur_f[32];
+        const size_t np = macon_decode_faults(
+            s_prev_fault_bytes[0], s_prev_fault_bytes[1], s_prev_fault_bytes[2],
+            s_prev_fault_bytes[3], s_prev_fault_bytes[4], prev_f, 32);
+        const size_t nc = macon_decode_faults(
             s_state.fault_run, s_state.fault_ee, s_state.fault_comp,
-            s_state.fault_elec, s_state.fault_ref };
-        static const uint16_t kFaultRegs[5] = {
-            REG_FAULT_RUNSTATE, REG_FAULT_SENSOR_EE, REG_FAULT_SENSOR_COMP,
-            REG_FAULT_ELEC, REG_FAULT };
-        for (int r = 0; r < 5; r++) {
-            uint8_t appeared = cur_faults[r] & ~s_prev_fault_bytes[r];
-            uint8_t cleared  = s_prev_fault_bytes[r] & ~cur_faults[r];
-            for (int b = 0; b < 8; b++) {
-                const MaconFaultBit* fb = macon_fault_bit(kFaultRegs[r], b);
-                if (fb == nullptr || fb->severity == FaultSeverity::INFO) continue;
-                uint32_t payload = ((uint32_t)kFaultRegs[r] << 8) | (uint32_t)b;
-                if (appeared & (1 << b)) event_log_record(EVENT_ERROR_APPEARED, payload);
-                if (cleared & (1 << b))  event_log_record(EVENT_ERROR_CLEARED, payload);
+            s_state.fault_elec, s_state.fault_ref, cur_f, 32);
+        for (size_t i = 0; i < nc; ++i) {
+            bool was_present = false;
+            for (size_t j = 0; j < np; ++j) {
+                if (prev_f[j].site == cur_f[i].site) { was_present = true; break; }
             }
+            if (!was_present) event_log_record(EVENT_ERROR_APPEARED, cur_f[i].site);
+        }
+        for (size_t j = 0; j < np; ++j) {
+            bool still_present = false;
+            for (size_t i = 0; i < nc; ++i) {
+                if (cur_f[i].site == prev_f[j].site) { still_present = true; break; }
+            }
+            if (!still_present) event_log_record(EVENT_ERROR_CLEARED, prev_f[j].site);
         }
     }
 
@@ -241,52 +238,56 @@ void initDemoState() {
     if (s_state_mutex == nullptr) {
         s_state_mutex = xSemaphoreCreateMutex();
     }
+    ensureImageMutex();
 
     s_demo_mode = true;
 
-    // Seed the register cache with a realistic RUNNING image in the REAL Tuya
-    // wire layout (index = reg - DEMO_REG_BASE). The arctic-macon library
-    // (decode_state) interprets these exactly as it does live device registers.
-    memset(s_demo_regs, 0, sizeof(s_demo_regs));
-    auto seed = [&](uint16_t r, uint16_t v) { s_demo_regs[r - DEMO_REG_BASE] = v; };
+    // Seed a realistic RUNNING image entirely through the opaque semantic API:
+    // no register address, bit, or scaling factor appears here. The arctic-macon
+    // library applies the wire encoding (e.g. AcVoltage 230 V -> raw 23).
+    imageLock();
+    s_image.clear();
 
-    // Run-state / mode.
-    seed(REG_FAULT_RUNSTATE, 0x20);   // reg2007 bit5 = running
-    seed(REG_OPERATING_MODE, 0x00);   // reg2049 = heating (reversing valve)
-    seed(REG_WORKING_MODE, static_cast<uint16_t>(MaconWorkingMode::FloorHeating)); // reg2096 = 1
-    // Icon bits: compressor + pump (reg2130 bit2/bit3), fan (reg2129 bit4).
-    seed(REG_STATUS_BYTE, 0x04 | 0x08);
-    seed(REG_ICON_BITS2, 0x10);
+    // Run-state / mode. (Compressor run-state is derived from compressor_freq,
+    // and the operating-mode register is unused by the mapping, so neither is
+    // seeded.)
+    s_image.set_working_mode(MaconWorkingMode::FloorHeating);
+    s_image.set_flag(MaconFlag::Pump, true);
+    s_image.set_flag(MaconFlag::Fan, true);
 
     // Setpoints (whole °C).
-    seed(REG_COOLING_SETPOINT, 18);   // reg2093
-    seed(REG_AUX_HEAT_SETPOINT, 45);  // reg2094 (aux/heating, demo only)
-    seed(REG_HOT_WATER_SETPOINT, 50); // reg2095
-    seed(REG_HOT_WATER_CEILING, 50);  // reg2012 AP13 ceiling
+    s_image.set_temp(MaconField::CoolingSetpoint, 18);
+    s_image.set_temp(MaconField::HeatingSetpoint, 45);   // aux/heating, demo only
+    s_image.set_temp(MaconField::HotWaterSetpoint, 50);
+    s_image.set_value(MaconField::HotWaterCeiling, 50);   // AP13 ceiling
 
     // Temperatures (signed whole °C).
-    seed(REG_WATER_TANK_TEMP, 42);       // reg2008 o1
-    seed(REG_OUTLET_WATER_TEMP, 45);     // reg2132 o3
-    seed(REG_INLET_WATER_TEMP, 38);      // reg2133 o2
-    seed(REG_OUTDOOR_AMBIENT_TEMP, 22);  // reg2134 o4
-    seed(REG_COOL_COIL_TEMP, 40);        // reg2135 A6 (indoor coil)
-    seed(REG_COIL_TEMP, 35);             // reg2136 A2 (outdoor coil)
-    seed(REG_SUCTION_TEMP, 12);          // reg2137 A3
-    seed(REG_DISCHARGE_TEMP, 85);        // reg2138 A1
-    seed(REG_IPM_TEMP, 55);              // reg2113 A8
+    s_image.set_temp(MaconField::WaterTankTemp, 42);
+    s_image.set_temp(MaconField::OutletWaterTemp, 45);
+    s_image.set_temp(MaconField::InletWaterTemp, 38);
+    s_image.set_temp(MaconField::OutdoorAmbientTemp, 22);
+    s_image.set_temp(MaconField::IndoorCoilTemp, 40);
+    s_image.set_temp(MaconField::OutdoorCoilTemp, 35);
+    s_image.set_temp(MaconField::SuctionTemp, 12);
+    s_image.set_temp(MaconField::DischargeTemp, 85);
+    s_image.set_temp(MaconField::IpmTemp, 55);
 
-    // Electrical / system readings (raw register values; decode owns scaling).
-    seed(REG_AC_CURRENT, 5);        // reg2000 A4 (whole A)
-    seed(REG_AC_VOLTAGE, 23);       // reg2101 A13 (x10 => 230 V)
-    seed(REG_DC_BUS_VOLTAGE, 38);   // reg2001 A7 (x10 => 380 V)
-    seed(REG_DC_MOTOR_SPEED, 40);   // reg2003 A10 fan level
-    seed(REG_MAIN_EEV, 200);        // reg2104 A5 EEV steps
-    seed(REG_COMPRESSOR_FREQ, 60);  // reg2141 A14 Hz
-    seed(REG_REALTIME_POWER, 12);   // reg2114 A9 (x100 => 1200 W)
+    // Electrical / system readings (natural units; the library owns scaling).
+    s_image.set_value(MaconField::AcCurrent, 5);        // A
+    s_image.set_value(MaconField::AcVoltage, 230);      // V
+    s_image.set_value(MaconField::DcVoltage, 380);      // V
+    s_image.set_value(MaconField::FanLevel, 40);        // raw DC motor level
+    s_image.set_value(MaconField::PrimaryEev, 200);     // EEV steps
+    s_image.set_value(MaconField::CompressorFreq, 60);  // Hz
+    s_image.set_value(MaconField::RealtimePower, 1200); // W
 
-    // Seed one active fault — P02 high pressure — via the library's canonical
-    // (reg,bit) encoder so no bit position is hardcoded here.
-    macon_set_fault_by_code(s_demo_regs, DEMO_REG_BASE, DEMO_REG_COUNT, "P02", true);
+    // Mark all five fault registers present (so faults decode as valid), keep
+    // the unit running, then light the demo's default high-pressure protection
+    // fault by semantic identity — no OEM code string here.
+    s_image.clear_faults();
+    s_image.set_flag(MaconFlag::UnitOn, true);
+    s_image.set_fault(MaconFaultId::HighPressureProtection, true);
+    imageUnlock();
 
     // Decode the seeded cache into HeatPumpState and mark connected.
     applyMaconMapping();
@@ -322,9 +323,12 @@ void initExternalFeed() {
     if (s_state_mutex == nullptr) {
         s_state_mutex = xSemaphoreCreateMutex();
     }
+    ensureImageMutex();
     s_feed_mode = true;
 
-    memset(s_demo_regs, 0, sizeof(s_demo_regs));
+    imageLock();
+    s_image.clear();
+    imageUnlock();
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_state = HeatPumpState();  // Reset to defaults (connected=false until first feed)
@@ -338,11 +342,10 @@ bool isExternalFeed() {
     return s_feed_mode;
 }
 
-// The arctic-macon library (decode_state) is the single source of truth for the
-// Macon Tuya register layout, scaling, and fault/icon bit positions — see
-// components/arctic-macon/include/macon_registers.h and macon_faults.h. This
-// adapter consumes the already-decoded MaconState; it does NOT re-interpret raw
-// registers. High/low pressure (A11/A12) are uninstalled sensors on this DHW
+// The arctic-macon library is the single source of truth for the Macon Tuya
+// register layout, scaling, and fault/icon bit positions. This adapter consumes
+// the already-decoded MaconState; it does NOT re-interpret raw registers.
+// High/low pressure (A11/A12) are uninstalled sensors on this DHW
 // unit and are not reported.
 //
 // In Auto working mode, expose the actual water-side direction while the
@@ -377,13 +380,16 @@ static HeatPumpOperation to_operation(const MaconState& state) {
 }
 
 static void applyMaconMapping() {
-    // The arctic-macon library owns the register->field mapping: it knows which
-    // wire register carries which field and how to interpret it. This function
-    // now only (a) drives that decode over the fed register cache and (b) adapts
-    // the native MaconState into the controller's legacy HeatPumpState (status
-    // bitfields, WorkingMode enum, error masks).
+    // The arctic-macon library owns the register->field mapping. Copy the opaque
+    // image under its own lock, release it, then decode the copy — so the image
+    // lock and the state lock are never held simultaneously. This adapter only
+    // (a) drives that decode and (b) adapts the native MaconState into the
+    // controller's legacy HeatPumpState (status bitfields, WorkingMode enum).
+    imageLock();
+    MaconImage snapshot = s_image;
+    imageUnlock();
     MaconState ms;
-    decode_state(DEMO_REG_BASE, s_demo_regs, DEMO_REG_COUNT, &ms);
+    snapshot.decode(&ms);
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
 
@@ -470,16 +476,11 @@ static void applyMaconMapping() {
 }
 
 uint16_t getRawRegisters(uint16_t* out, uint16_t max_count, uint16_t* base_out) {
-    if (base_out) {
-        *base_out = DEMO_REG_BASE;
-    }
-    if (out == nullptr || max_count == 0) {
-        return 0;
-    }
-    uint16_t n = (max_count < DEMO_REG_COUNT) ? max_count : DEMO_REG_COUNT;
-    for (uint16_t i = 0; i < n; ++i) {
-        out[i] = s_demo_regs[i];
-    }
+    // The image relays its bytes without interpretation; it owns the window base
+    // so the controller needs no window-bound constants of its own.
+    imageLock();
+    uint16_t n = s_image.raw(base_out, out, max_count);
+    imageUnlock();
     return n;
 }
 
@@ -541,27 +542,20 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
     }
 
     const uint32_t now = getTimeMs();
-    const uint32_t window_end = (uint32_t)reg_base + (uint32_t)count;
-    const bool has_holding_state = reg_base <= REG_OPERATING_MODE && window_end > REG_OPERATING_MODE;
-    const bool has_telemetry_state = reg_base <= REG_COMPRESSOR_FREQ && window_end > REG_COMPRESSOR_FREQ;
 
-    // Copy the window's 1-byte registers into the register cache (bounds-checked).
-    for (size_t i = 0; i < count; ++i) {
-        int32_t idx = (int32_t)reg_base + (int32_t)i - (int32_t)DEMO_REG_BASE;
-        if (idx >= 0 && idx < (int32_t)DEMO_REG_COUNT) {
-            s_demo_regs[idx] = regs[i];
-        }
-    }
+    // Feed the window into the opaque image; it reports which decode-relevant
+    // windows were covered (status / telemetry) without exposing any register
+    // number to the controller.
+    imageLock();
+    const MaconCoverage cov = s_image.ingest_bytes(reg_base, regs, count);
+    imageUnlock();
 
-    // Map the cache into HeatPumpState using the empirically-derived ECO-600
-    // Tuya layout (see applyMaconMapping). The Arctic/ECO-600 doc-based poll parsers do
-    // NOT apply here: the real byte offsets differ and the doc's status/error
-    // registers (2135-2138) are actually live temperature bytes on this unit.
+    // Map the image into HeatPumpState using the library-owned decode.
     applyMaconMapping();
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-    if (has_holding_state) s_holding_window_ms = now;
-    if (has_telemetry_state) s_telemetry_window_ms = now;
+    if (cov.status_updated) s_holding_window_ms = now;
+    if (cov.telemetry_updated) s_telemetry_window_ms = now;
     s_state.connected = true;
     s_state.last_successful_read_ms = now;
     s_state.last_attempt_ms = s_state.last_successful_read_ms;
@@ -626,14 +620,14 @@ TelemetrySnapshot getTelemetrySnapshot() {
             elapsed_within(now, s_telemetry_window_ms, TELEMETRY_FRESHNESS_MS);
         snapshot.connected = telemetry_fresh;
         snapshot.inlet_valid = telemetry_fresh && s_inlet_valid &&
-            !hasActiveFaultCode(s_state.fault_run, s_state.fault_ee,
+            !macon_has_fault_id(s_state.fault_run, s_state.fault_ee,
                                 s_state.fault_comp, s_state.fault_elec,
-                                s_state.fault_ref, "E19") &&  // inlet-water sensor
+                                s_state.fault_ref, MaconFaultId::InletWaterSensor) &&
             s_state.inlet_water_temp >= -50 && s_state.inlet_water_temp <= 150;
         snapshot.outlet_valid = telemetry_fresh && s_outlet_valid &&
-            !hasActiveFaultCode(s_state.fault_run, s_state.fault_ee,
+            !macon_has_fault_id(s_state.fault_run, s_state.fault_ee,
                                 s_state.fault_comp, s_state.fault_elec,
-                                s_state.fault_ref, "E18") &&  // outlet-water sensor
+                                s_state.fault_ref, MaconFaultId::OutletWaterSensor) &&
             s_state.outlet_water_temp >= -50 && s_state.outlet_water_temp <= 150;
         snapshot.compressor_valid = telemetry_fresh && s_compressor_valid;
         snapshot.compressor_running =
@@ -743,18 +737,14 @@ bool setUnitPower(bool on) {
         ESP_LOGW(TAG, "Unit power write unsupported in Tuya master mode (no verified fc06 mapping)");
         return false;
     }
-    // Toggle only the run-state bit (reg2007 bit5); other bits carry faults.
-    uint16_t rs = 0;
-    readCacheReg(REG_FAULT_RUNSTATE, &rs);
-    if (on) rs |= 0x20; else rs &= ~0x20;
-    esp_err_t err = writeCacheReg(REG_FAULT_RUNSTATE, rs);
-    if (err == ESP_OK) {
-        applyMaconMapping();
-        ESP_LOGI(TAG, "Unit power set to %s", on ? "ON" : "OFF");
-        return true;
-    }
-    ESP_LOGW(TAG, "Unit power write rejected outside demo mode");
-    return false;
+    // Set the run-state flag by identity; the library owns the bit position and
+    // preserves the fault bits sharing that register.
+    imageLock();
+    s_image.set_flag(MaconFlag::UnitOn, on);
+    imageUnlock();
+    applyMaconMapping();
+    ESP_LOGI(TAG, "Unit power set to %s", on ? "ON" : "OFF");
+    return true;
 }
 
 bool setWorkingMode(WorkingMode mode) {
@@ -762,14 +752,15 @@ bool setWorkingMode(WorkingMode mode) {
         ESP_LOGW(TAG, "Working-mode write unsupported in Tuya master mode (no verified fc06 mapping)");
         return false;
     }
-    esp_err_t err = writeCacheReg(REG_WORKING_MODE, static_cast<uint16_t>(mode));
-    if (err == ESP_OK) {
-        applyMaconMapping();
-        ESP_LOGI(TAG, "Working mode set to %s", workingModeToString(mode));
-        return true;
-    }
-    ESP_LOGW(TAG, "Working-mode write rejected outside demo mode");
-    return false;
+    // The controller's WorkingMode and the library's MaconWorkingMode share the
+    // same semantic encoding by construction; convert between the two enums
+    // without touching any register.
+    imageLock();
+    s_image.set_working_mode(static_cast<MaconWorkingMode>(static_cast<uint8_t>(mode)));
+    imageUnlock();
+    applyMaconMapping();
+    ESP_LOGI(TAG, "Working mode set to %s", workingModeToString(mode));
+    return true;
 }
 
 bool setCoolingSetpoint(int16_t temp) {
@@ -785,14 +776,12 @@ bool setCoolingSetpoint(int16_t temp) {
         }
         return false;
     }
-    esp_err_t err = writeCacheReg(REG_COOLING_SETPOINT, static_cast<uint16_t>(temp));
-    if (err == ESP_OK) {
-        applyMaconMapping();
-        ESP_LOGI(TAG, "Cooling setpoint set to %d", temp);
-        return true;
-    }
-    ESP_LOGW(TAG, "Cooling setpoint write rejected in passive-listen mode");
-    return false;
+    imageLock();
+    s_image.set_temp(MaconField::CoolingSetpoint, temp);
+    imageUnlock();
+    applyMaconMapping();
+    ESP_LOGI(TAG, "Cooling setpoint set to %d", temp);
+    return true;
 }
 
 bool setHeatingSetpoint(int16_t temp) {
@@ -803,14 +792,12 @@ bool setHeatingSetpoint(int16_t temp) {
         ESP_LOGW(TAG, "Heating setpoint write unsupported in Tuya master mode (reg2094 unverified)");
         return false;
     }
-    esp_err_t err = writeCacheReg(REG_AUX_HEAT_SETPOINT, static_cast<uint16_t>(temp));
-    if (err == ESP_OK) {
-        applyMaconMapping();
-        ESP_LOGI(TAG, "Heating setpoint set to %d", temp);
-        return true;
-    }
-    ESP_LOGW(TAG, "Heating setpoint write rejected outside demo mode");
-    return false;
+    imageLock();
+    s_image.set_temp(MaconField::HeatingSetpoint, temp);
+    imageUnlock();
+    applyMaconMapping();
+    ESP_LOGI(TAG, "Heating setpoint set to %d", temp);
+    return true;
 }
 
 bool setHotWaterSetpoint(int16_t temp) {
@@ -824,22 +811,18 @@ bool setHotWaterSetpoint(int16_t temp) {
         }
         return false;
     }
-    esp_err_t err = writeCacheReg(REG_HOT_WATER_SETPOINT, static_cast<uint16_t>(temp));
-    if (err == ESP_OK) {
-        applyMaconMapping();
-        ESP_LOGI(TAG, "Hot water setpoint set to %d", temp);
-        return true;
-    }
-    ESP_LOGW(TAG, "Hot-water setpoint write rejected in passive-listen mode");
-    return false;
+    imageLock();
+    s_image.set_temp(MaconField::HotWaterSetpoint, temp);
+    imageUnlock();
+    applyMaconMapping();
+    ESP_LOGI(TAG, "Hot water setpoint set to %d", temp);
+    return true;
 }
 
 bool writeRegister(uint16_t address, uint16_t value) {
-    const bool in_holding_window =
-        address >= HOLDING_START && address < HOLDING_START + HOLDING_COUNT;
-    const bool in_telemetry_window =
-        address >= INPUT_START && address < INPUT_START + INPUT_COUNT;
-    if (!in_holding_window && !in_telemetry_window) {
+    // The image owns the window bounds, so the controller keeps no window
+    // constants of its own.
+    if (!s_image.in_window(address)) {
         ESP_LOGE(TAG, "Register %u is outside known Macon windows",
                  (unsigned)address);
         return false;
@@ -852,24 +835,26 @@ bool writeRegister(uint16_t address, uint16_t value) {
     if (macon_master::is_active()) {
         return macon_master::write_register(address, static_cast<uint8_t>(value));
     }
-    if (writeCacheReg(address, value) == ESP_OK) {
-        applyMaconMapping();
-        ESP_LOGI(TAG, "Register %d set to %d", address, value);
-        return true;
-    }
-    ESP_LOGW(TAG, "Register write rejected in passive-listen mode");
-    return false;
+    imageLock();
+    s_image.set_register(address, value);
+    imageUnlock();
+    applyMaconMapping();
+    ESP_LOGI(TAG, "Register %d set to %d", address, value);
+    return true;
 }
 
 bool readRegister(uint16_t address, uint16_t* value_out) {
     if (value_out == nullptr) {
         return false;
     }
-    // Demo, passive-listen, and active-master polling all populate this cache.
+    // Demo, passive-listen, and active-master polling all populate this image.
     if (s_demo_mode || s_feed_mode) {
-        return readCacheReg(address, value_out) == ESP_OK;
+        imageLock();
+        bool ok = s_image.get_register(address, value_out);
+        imageUnlock();
+        return ok;
     }
-    ESP_LOGW(TAG, "Register cache is not initialized");
+    ESP_LOGW(TAG, "Register image is not initialized");
     return false;
 }
 
@@ -919,77 +904,81 @@ void getStatusDescription(char* buffer, size_t buffer_size) {
 }
 
 bool setDemoField(const char* field, int32_t value) {
-    if (!s_demo_mode) return false;
-    
-    // Map the demo field name to its REAL Tuya register address (index =
-    // reg - DEMO_REG_BASE). Fault injection is done by writing the raw fault
-    // register bytes directly (fault_run/ee/comp/elec/ref) — the macon library
-    // decodes them into P/E codes. There are no fictional status/error regs.
-    uint16_t addr = 0;
-    // For bit-level (read-modify-write) fields we set rmw_reg/rmw_mask instead
-    // of writing a whole register, so unrelated bits in shared icon/run
-    // registers are preserved.
-    uint16_t rmw_reg = 0;
-    uint16_t rmw_mask = 0;
+    if (!s_demo_mode || field == nullptr) return false;
 
-    // Temperatures
-    if (strcmp(field, "water_tank_temp") == 0)            addr = REG_WATER_TANK_TEMP;
-    else if (strcmp(field, "outlet_water_temp") == 0)     addr = REG_OUTLET_WATER_TEMP;
-    else if (strcmp(field, "inlet_water_temp") == 0)      addr = REG_INLET_WATER_TEMP;
-    else if (strcmp(field, "discharge_temp") == 0)        addr = REG_DISCHARGE_TEMP;
-    else if (strcmp(field, "suction_temp") == 0)          addr = REG_SUCTION_TEMP;
-    else if (strcmp(field, "outdoor_coil_temp") == 0)     addr = REG_COIL_TEMP;
-    else if (strcmp(field, "indoor_coil_temp") == 0)      addr = REG_COOL_COIL_TEMP;
-    else if (strcmp(field, "outdoor_ambient_temp") == 0)  addr = REG_OUTDOOR_AMBIENT_TEMP;
-    else if (strcmp(field, "ipm_temp") == 0)              addr = REG_IPM_TEMP;
-    // System readings
-    else if (strcmp(field, "compressor_freq") == 0)       addr = REG_COMPRESSOR_FREQ;
-    else if (strcmp(field, "fan_speed") == 0)             addr = REG_DC_MOTOR_SPEED;
-    else if (strcmp(field, "ac_voltage") == 0)            addr = REG_AC_VOLTAGE;
-    else if (strcmp(field, "ac_current") == 0)            addr = REG_AC_CURRENT;
-    else if (strcmp(field, "dc_voltage") == 0)            addr = REG_DC_BUS_VOLTAGE;
-    else if (strcmp(field, "main_eev") == 0 ||
-             strcmp(field, "primary_eev_opening") == 0)   addr = REG_MAIN_EEV;
-    else if (strcmp(field, "realtime_power") == 0)        addr = REG_REALTIME_POWER;
-    // Raw fault-register bytes (fault injection). Decoded natively.
-    else if (strcmp(field, "fault_run") == 0)             addr = REG_FAULT_RUNSTATE;
-    else if (strcmp(field, "fault_ee") == 0)              addr = REG_FAULT_SENSOR_EE;
-    else if (strcmp(field, "fault_comp") == 0)            addr = REG_FAULT_SENSOR_COMP;
-    else if (strcmp(field, "fault_elec") == 0)            addr = REG_FAULT_ELEC;
-    else if (strcmp(field, "fault_ref") == 0)             addr = REG_FAULT;
-    // Component run-state (bit-level, decoded live). Compressor state is driven
-    // by compressor_freq (reg2141), not an icon bit.
-    else if (strcmp(field, "fan_on") == 0)                { rmw_reg = REG_ICON_BITS2; rmw_mask = 0x10; }  // bit4
-    else if (strcmp(field, "cooling_on") == 0)            { rmw_reg = REG_ICON_BITS2; rmw_mask = 0x04; }  // bit2 (reversing valve = cooling)
-    else if (strcmp(field, "pump_on") == 0)               { rmw_reg = REG_STATUS_BYTE; rmw_mask = 0x08; } // bit3
-    // Settings
-    else if (strcmp(field, "unit_on") == 0)               { rmw_reg = REG_FAULT_RUNSTATE; rmw_mask = 0x20; } // bit5
-    else if (strcmp(field, "working_mode") == 0)          addr = REG_WORKING_MODE;
-    else if (strcmp(field, "cooling_setpoint") == 0)      addr = REG_COOLING_SETPOINT;
-    else if (strcmp(field, "heating_setpoint") == 0)      addr = REG_AUX_HEAT_SETPOINT;
-    else if (strcmp(field, "hot_water_setpoint") == 0)    addr = REG_HOT_WATER_SETPOINT;
-    else return false;
+    // Map the demo field name to an opaque MaconImage operation. No register
+    // address, bit position, or scaling factor appears here — the arctic-macon
+    // library owns all of that. Fault injection is NOT a field write: use
+    // injectDemoFault()/clearDemoFaults() (which reference faults by identity).
+    struct FieldEntry { const char* name; MaconField field; };
+    static const FieldEntry kFields[] = {
+        { "water_tank_temp",      MaconField::WaterTankTemp },
+        { "outlet_water_temp",    MaconField::OutletWaterTemp },
+        { "inlet_water_temp",     MaconField::InletWaterTemp },
+        { "discharge_temp",       MaconField::DischargeTemp },
+        { "suction_temp",         MaconField::SuctionTemp },
+        { "outdoor_coil_temp",    MaconField::OutdoorCoilTemp },
+        { "indoor_coil_temp",     MaconField::IndoorCoilTemp },
+        { "outdoor_ambient_temp", MaconField::OutdoorAmbientTemp },
+        { "ipm_temp",             MaconField::IpmTemp },
+        { "compressor_freq",      MaconField::CompressorFreq },
+        { "fan_speed",            MaconField::FanLevel },
+        { "ac_voltage",           MaconField::AcVoltage },
+        { "ac_current",           MaconField::AcCurrent },
+        { "dc_voltage",           MaconField::DcVoltage },
+        { "main_eev",             MaconField::PrimaryEev },
+        { "primary_eev_opening",  MaconField::PrimaryEev },
+        { "realtime_power",       MaconField::RealtimePower },
+        { "cooling_setpoint",     MaconField::CoolingSetpoint },
+        { "heating_setpoint",     MaconField::HeatingSetpoint },
+        { "hot_water_setpoint",   MaconField::HotWaterSetpoint },
+    };
+    struct FlagEntry { const char* name; MaconFlag flag; };
+    static const FlagEntry kFlags[] = {
+        { "fan_on",     MaconFlag::Fan },
+        { "cooling_on", MaconFlag::Cooling },
+        { "pump_on",    MaconFlag::Pump },
+        { "unit_on",    MaconFlag::UnitOn },
+    };
 
-    if (rmw_mask != 0) {
-        // Read-modify-write a single bit, preserving the rest of the register.
-        uint16_t& r = s_demo_regs[rmw_reg - DEMO_REG_BASE];
-        if (value) r |= rmw_mask; else r &= ~rmw_mask;
-        addr = rmw_reg;  // for the log line below
-    } else {
-        s_demo_regs[addr - DEMO_REG_BASE] = (uint16_t)value;
+    bool matched = false;
+    imageLock();
+    for (const FieldEntry& e : kFields) {
+        if (strcmp(field, e.name) == 0) {
+            s_image.set_value(e.field, value);
+            matched = true;
+            break;
+        }
     }
+    if (!matched) {
+        for (const FlagEntry& e : kFlags) {
+            if (strcmp(field, e.name) == 0) {
+                s_image.set_flag(e.flag, value != 0);
+                matched = true;
+                break;
+            }
+        }
+    }
+    if (!matched && strcmp(field, "working_mode") == 0) {
+        s_image.set_working_mode(static_cast<MaconWorkingMode>(static_cast<uint8_t>(value)));
+        matched = true;
+    }
+    imageUnlock();
 
-    // Re-decode the cache into HeatPumpState so the change is reflected live.
+    if (!matched) return false;
+
+    // Re-decode the image into HeatPumpState so the change is reflected live.
     applyMaconMapping();
 
-    ESP_LOGI(TAG, "[DEMO] Field '%s' (reg %d) set to %ld", field, addr, (long)value);
+    ESP_LOGI(TAG, "[DEMO] Field '%s' set to %ld", field, (long)value);
     return true;
 }
 
 int injectDemoFault(const char* code, bool active) {
     if (!s_demo_mode || code == nullptr) return 0;
-    int sites = macon_set_fault_by_code(s_demo_regs, DEMO_REG_BASE,
-                                        DEMO_REG_COUNT, code, active);
+    imageLock();
+    int sites = s_image.set_fault_by_code(code, active);
+    imageUnlock();
     if (sites > 0) {
         applyMaconMapping();
         ESP_LOGI(TAG, "[DEMO] Fault '%s' %s (%d site%s)",
@@ -1000,13 +989,9 @@ int injectDemoFault(const char* code, bool active) {
 
 void clearDemoFaults() {
     if (!s_demo_mode) return;
-    // Clear the four telemetry fault registers entirely; on the run/state
-    // register keep bit5 (RUN indicator) and clear only the fault bits.
-    s_demo_regs[REG_FAULT_RUNSTATE - DEMO_REG_BASE]   &= 0x20;
-    s_demo_regs[REG_FAULT_SENSOR_EE - DEMO_REG_BASE]   = 0;
-    s_demo_regs[REG_FAULT_SENSOR_COMP - DEMO_REG_BASE] = 0;
-    s_demo_regs[REG_FAULT_ELEC - DEMO_REG_BASE]        = 0;
-    s_demo_regs[REG_FAULT - DEMO_REG_BASE]             = 0;
+    imageLock();
+    s_image.clear_faults();
+    imageUnlock();
     applyMaconMapping();
     ESP_LOGI(TAG, "[DEMO] All faults cleared");
 }
