@@ -15,7 +15,7 @@
 #include "ha_websocket.h"
 #include "heatpump_controller.h"
 #include "heatpump_types.h"
-#include "macon_master.h"
+#include "macon_master_iface.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
 #include "macon_image.h"   // arctic::MaconField / macon_field_address (opaque address lookup)
 #include "macon_faults.h"  // arctic::MACON_FAULT_REGS (fault-register addresses)

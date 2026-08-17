@@ -1,10 +1,22 @@
 /*
- * Active Tuya master runtime. See macon_master.h.
+ * Active Tuya master runtime — ESP-IDF shim. See macon_master_iface.h.
+ *
+ * The wire logic (window polling, bus-idle preflight, verified writes) now
+ * lives in the shared library as arctic::MaconMaster. This file is only the
+ * platform glue the library deliberately does not own:
+ *
+ *   * the concrete RS485 UART transport (tuya::MaconUartTransport),
+ *   * a monotonic clock over esp_timer (EspClock),
+ *   * a window sink that routes decoded windows into HeatPumpState
+ *     (ControllerSink -> feedRegisterWindow / recordObservedWindow),
+ *   * the FreeRTOS poll task and the bus mutex that serialises transactions.
+ *
+ * The controller carries no Tuya/Macon wire knowledge: every register/bit/frame
+ * detail is behind the library API.
  */
-#include "macon_master.h"
+#include "macon_master_iface.h"    // this module's public API (macon_master::)
 
 #include <atomic>
-#include <cstring>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -12,205 +24,77 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
-#include "macon_uart_transport.h"
-#include "tuya_codec.h"
-#include "macon_link.h"
-#include "heatpump_controller.h"   // feedRegisterWindow / recordObservedWindow
+#include "macon_uart_transport.h"   // tuya::MaconUartTransport
+#include "macon_master.h"           // arctic::MaconMaster / MaconClock / MaconWindowSink
+#include "macon_link.h"             // arctic::MaconResult / macon_result_name
+#include "heatpump_controller.h"    // feedRegisterWindow / recordObservedWindow
 
 static const char *TAG = "macon_master";
 
 namespace macon_master {
 
 // ---------------------------------------------------------------------------
-// Tunables
+// Tunables (controller-side cadence + timeouts handed to the library master)
 // ---------------------------------------------------------------------------
-static constexpr int    POLL_INTERVAL_MS    = 800;   // gap between poll cycles
-static constexpr int    RESP_TIMEOUT_MS     = 200;   // per transport read slice
-static constexpr int    POLL_TXN_DEADLINE_MS = 500;  // whole read of one window
-static constexpr int    PREFLIGHT_MS        = 2000;  // bus-idle listen window
-static constexpr size_t ACC_CAP             = 192;   // >= echo(9)+resp(67)+tag+slack
+static constexpr int POLL_INTERVAL_MS     = 800;   // gap between poll cycles
+static constexpr int RESP_TIMEOUT_MS      = 200;   // per transport read slice
+static constexpr int POLL_TXN_DEADLINE_MS = 500;   // whole read of one window
+static constexpr int PREFLIGHT_MS         = 2000;  // bus-idle listen window
 
-// The two windows the OEM controller rotates through: telemetry (reg2093..) and
-// holding (reg2000..). Indices into tuya_codec::KNOWN_WINDOWS.
-static const tuya_codec::RegWindow &TELEMETRY_WIN = tuya_codec::KNOWN_WINDOWS[0]; // {0,50,2093}
-static const tuya_codec::RegWindow &HOLDING_WIN   = tuya_codec::KNOWN_WINDOWS[1]; // {50,58,2000}
+// ---------------------------------------------------------------------------
+// Platform adapters injected into arctic::MaconMaster
+// ---------------------------------------------------------------------------
+
+// Monotonic millisecond clock over esp_timer.
+class EspClock : public arctic::MaconClock {
+public:
+    uint32_t now_ms() override {
+        return static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    }
+};
+
+// Routes windows decoded by the master into HeatPumpState. Keeps the library
+// free of any controller-state knowledge.
+class ControllerSink : public arctic::MaconWindowSink {
+public:
+    void on_window(uint16_t reg_base, const uint8_t *data, size_t len) override {
+        arctic::feedRegisterWindow(reg_base, data, len);
+    }
+    void on_observed(uint16_t field_a, uint16_t field_b,
+                     const uint8_t *payload, size_t payload_len) override {
+        arctic::recordObservedWindow(field_a, field_b, 1, payload, payload_len);
+    }
+};
 
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 static tuya::MaconUartTransport s_transport;   // trivial ctor; hardware set up in init()
-static arctic::MaconLink       *s_link       = nullptr;
+static EspClock                 s_clock;
+static ControllerSink           s_sink;
+static arctic::MaconMaster     *s_master      = nullptr;
 static SemaphoreHandle_t        s_bus_mutex   = nullptr;
 static TaskHandle_t             s_task        = nullptr;
 static std::atomic<bool>        s_active{false};
 static bool                     s_initialized = false;
 
-static uint32_t now_ms() { return (uint32_t)(esp_timer_get_time() / 1000); }
-
 // ---------------------------------------------------------------------------
-// One request/response transaction: send an fc=0x03 read of `win`, accumulate
-// the reply, and feed the decoded register bytes into HeatPumpState. Tolerates
-// our own echoed request frame, unrelated frames, junk, and the trailing
-// block-tag byte (all skipped by find_frame_start / parse_frame). Must be
-// called with s_bus_mutex held. Returns true if the matching response was fed.
-// ---------------------------------------------------------------------------
-static bool poll_window(const tuya_codec::RegWindow &win)
-{
-    uint8_t req[16];
-    const size_t n = tuya_codec::encode_request(req, sizeof(req),
-                                                tuya_codec::FC_READ,
-                                                win.field_a, win.field_b);
-    if (n == 0) return false;
-
-    // Bus is idle here (we hold the mutex and nothing else transmits): drop any
-    // leftover trailing-tag / late bytes from the previous transaction so they
-    // cannot desync this one.
-    s_transport.flush_rx();
-
-    if (s_transport.write(req, n) < static_cast<int>(n)) {
-        ESP_LOGW(TAG, "poll write failed (addr=%u)", (unsigned)win.field_a);
-        return false;
-    }
-
-    uint8_t acc[ACC_CAP];
-    size_t  len      = 0;
-    const uint32_t deadline = now_ms() + POLL_TXN_DEADLINE_MS;
-
-    while ((int32_t)(deadline - now_ms()) > 0) {
-        // Drain complete frames at the head of the accumulator.
-        while (len >= tuya_codec::HDR_LEN) {
-            const size_t start = tuya_codec::find_frame_start(acc, len);
-            if (start == len) {
-                // No plausible frame start: keep only a possible partial magic.
-                const size_t keep = (len < tuya_codec::HDR_LEN - 1)
-                                        ? len : tuya_codec::HDR_LEN - 1;
-                std::memmove(acc, acc + (len - keep), keep);
-                len = keep;
-                break;
-            }
-            if (start > 0) {
-                std::memmove(acc, acc + start, len - start);
-                len -= start;
-                continue;
-            }
-
-            tuya_codec::ParsedFrame pf;
-            const tuya_codec::ParseResult r =
-                tuya_codec::parse_frame(acc, len, pf);
-            if (r == tuya_codec::ParseResult::TRUNCATED) {
-                break;  // need more bytes
-            }
-            if (r == tuya_codec::ParseResult::OK) {
-                const bool match = pf.dir == tuya_codec::DIR_RESPONSE &&
-                                   pf.fc  == tuya_codec::FC_READ &&
-                                   pf.field_a == win.field_a &&
-                                   pf.field_b == win.field_b;
-                if (match) {
-                    if (pf.window && pf.payload &&
-                        pf.payload_len > pf.window->prefix_len) {
-                        arctic::feedRegisterWindow(
-                            pf.window->reg_base,
-                            pf.payload + pf.window->prefix_len,
-                            pf.payload_len - pf.window->prefix_len);
-                    }
-                    arctic::recordObservedWindow(pf.field_a, pf.field_b, 1,
-                                                 pf.payload, pf.payload_len);
-                    return true;
-                }
-                // Valid but unrelated (e.g. our echoed request) -> skip it.
-                std::memmove(acc, acc + pf.frame_len, len - pf.frame_len);
-                len -= pf.frame_len;
-                continue;
-            }
-            // Bad frame at head (checksum/etc.) -> drop one byte and resync.
-            std::memmove(acc, acc + 1, len - 1);
-            len -= 1;
-        }
-
-        if (len >= ACC_CAP) {  // overflow guard: garbage stream
-            len = 0;
-        }
-        const int remaining = (int)(deadline - now_ms());
-        if (remaining <= 0) break;
-        const int got = s_transport.read(acc + len, ACC_CAP - len,
-                                         remaining < RESP_TIMEOUT_MS
-                                             ? remaining : RESP_TIMEOUT_MS);
-        if (got < 0) {
-            ESP_LOGW(TAG, "poll read error (addr=%u)", (unsigned)win.field_a);
-            return false;
-        }
-        len += (size_t)got;   // got==0 just means this slice timed out; loop re-checks deadline
-    }
-
-    ESP_LOGW(TAG, "poll timeout: no response for addr=%u count=%u",
-             (unsigned)win.field_a, (unsigned)win.field_b);
-    return false;
-}
-
-// ---------------------------------------------------------------------------
-// Preflight: listen for PREFLIGHT_MS. If ANY valid Tuya frame is seen, another
-// master (the OEM controller) is driving the bus, so it is NOT safe for us to
-// transmit. Returns true only if the bus stayed quiet.
-// ---------------------------------------------------------------------------
-static bool preflight_bus_idle()
-{
-    uint8_t acc[ACC_CAP];
-    size_t  len = 0;
-    const uint32_t deadline = now_ms() + PREFLIGHT_MS;
-
-    while ((int32_t)(deadline - now_ms()) > 0) {
-        const int got = s_transport.read(acc + len, ACC_CAP - len, 100);
-        if (got > 0) {
-            len += (size_t)got;
-            // Scan for any valid frame.
-            while (len >= tuya_codec::HDR_LEN) {
-                const size_t start = tuya_codec::find_frame_start(acc, len);
-                if (start == len) {
-                    const size_t keep = (len < tuya_codec::HDR_LEN - 1)
-                                            ? len : tuya_codec::HDR_LEN - 1;
-                    std::memmove(acc, acc + (len - keep), keep);
-                    len = keep;
-                    break;
-                }
-                if (start > 0) {
-                    std::memmove(acc, acc + start, len - start);
-                    len -= start;
-                    continue;
-                }
-                tuya_codec::ParsedFrame pf;
-                const tuya_codec::ParseResult r =
-                    tuya_codec::parse_frame(acc, len, pf);
-                if (r == tuya_codec::ParseResult::TRUNCATED) break;
-                if (r == tuya_codec::ParseResult::OK) {
-                    ESP_LOGE(TAG,
-                             "Preflight: live bus traffic detected (dir=0x%02X addr=%u) "
-                             "- another master present. Refusing to activate.",
-                             pf.dir, (unsigned)pf.field_a);
-                    return false;
-                }
-                std::memmove(acc, acc + 1, len - 1);
-                len -= 1;
-            }
-            if (len >= ACC_CAP) len = 0;
-        }
-    }
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// Poll task
+// Poll task — serialises each window read through the bus mutex so the
+// half-duplex UART is only ever driven by one transaction at a time. The mutex
+// is held per transaction, not per cycle, so a UI/REST setpoint write waits at
+// most one in-flight transaction.
 // ---------------------------------------------------------------------------
 static void poll_task(void *)
 {
     ESP_LOGI(TAG, "Active-master poll task started");
     for (;;) {
-        if (s_bus_mutex) {
+        if (s_bus_mutex && s_master) {
             xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
-            poll_window(HOLDING_WIN);     // regs 2000.. (electrical/status/mode)
+            s_master->poll_holding();     // regs 2000.. (electrical/status/mode)
             xSemaphoreGive(s_bus_mutex);
 
             xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
-            poll_window(TELEMETRY_WIN);   // regs 2093.. (setpoint/temps/EEV)
+            s_master->poll_telemetry();   // regs 2093.. (setpoint/temps/EEV)
             xSemaphoreGive(s_bus_mutex);
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
@@ -234,8 +118,9 @@ esp_err_t init()
             return ESP_ERR_NO_MEM;
         }
     }
-    if (s_link == nullptr) {
-        s_link = new arctic::MaconLink(s_transport, RESP_TIMEOUT_MS);
+    if (s_master == nullptr) {
+        s_master = new arctic::MaconMaster(s_transport, s_clock, s_sink,
+                                           RESP_TIMEOUT_MS, POLL_TXN_DEADLINE_MS);
     }
 
     s_initialized = true;
@@ -245,14 +130,14 @@ esp_err_t init()
 
 esp_err_t start()
 {
-    if (!s_initialized) {
+    if (!s_initialized || s_master == nullptr) {
         ESP_LOGE(TAG, "start() before init()");
         return ESP_ERR_INVALID_STATE;
     }
     if (s_active.load()) return ESP_OK;
 
     ESP_LOGI(TAG, "Preflight: listening %d ms for other bus masters...", PREFLIGHT_MS);
-    if (!preflight_bus_idle()) {
+    if (!s_master->preflight_bus_idle(PREFLIGHT_MS)) {
         ESP_LOGE(TAG,
                  "Bus is NOT idle - the OEM controller appears to still be "
                  "connected. Staying passive; no telemetry or setpoint writes.");
@@ -277,50 +162,47 @@ bool is_active()
     return s_active.load();
 }
 
-static bool write_setpoint(int celsius, bool cooling)
+// Serialise a verified setpoint write through the bus mutex, then log the
+// outcome. The library master owns the RX flush before/after the write.
+static bool guarded_setpoint(arctic::MaconResult (arctic::MaconMaster::*fn)(int),
+                             int celsius, const char *what)
 {
-    if (!s_active.load() || s_link == nullptr || s_bus_mutex == nullptr) {
+    if (!s_active.load() || s_master == nullptr || s_bus_mutex == nullptr) {
         return false;
     }
     xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
-    s_transport.flush_rx();  // bus idle under the mutex: drop any stale bytes
-    const arctic::MaconResult r = cooling
-        ? s_link->set_cooling_setpoint(celsius)
-        : s_link->set_hot_water_setpoint(celsius);
-    if (r != arctic::MaconResult::Ok) {
-        s_transport.flush_rx();  // drain a possible late/partial reply to idle
-    }
+    const arctic::MaconResult r = (s_master->*fn)(celsius);
     xSemaphoreGive(s_bus_mutex);
 
     if (r == arctic::MaconResult::Ok) {
-        ESP_LOGI(TAG, "%s setpoint -> %d C (ACKed)",
-                 cooling ? "cooling" : "hot-water", celsius);
+        ESP_LOGI(TAG, "%s setpoint -> %d C (ACKed)", what, celsius);
         return true;
     }
-    ESP_LOGW(TAG, "%s setpoint write failed: %s",
-             cooling ? "cooling" : "hot-water", arctic::macon_result_name(r));
+    ESP_LOGW(TAG, "%s setpoint write failed: %s", what, arctic::macon_result_name(r));
     return false;
 }
 
-bool set_cooling_setpoint(int celsius)   { return write_setpoint(celsius, true);  }
-bool set_hot_water_setpoint(int celsius) { return write_setpoint(celsius, false); }
+bool set_cooling_setpoint(int celsius)
+{
+    return guarded_setpoint(&arctic::MaconMaster::set_cooling_setpoint, celsius, "cooling");
+}
+
+bool set_hot_water_setpoint(int celsius)
+{
+    return guarded_setpoint(&arctic::MaconMaster::set_hot_water_setpoint, celsius, "hot-water");
+}
 
 bool write_register(uint16_t address, uint8_t value)
 {
-    if (!s_active.load() || s_link == nullptr || s_bus_mutex == nullptr) {
+    if (!s_active.load() || s_master == nullptr || s_bus_mutex == nullptr) {
         return false;
     }
     xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
-    s_transport.flush_rx();
-    const arctic::MaconResult r = s_link->write_register(address, value);
-    if (r != arctic::MaconResult::Ok) {
-        s_transport.flush_rx();
-    }
+    const arctic::MaconResult r = s_master->write_register(address, value);
     xSemaphoreGive(s_bus_mutex);
 
     if (r == arctic::MaconResult::Ok) {
-        ESP_LOGI(TAG, "register %u -> %u (ACKed)",
-                 (unsigned)address, (unsigned)value);
+        ESP_LOGI(TAG, "register %u -> %u (ACKed)", (unsigned)address, (unsigned)value);
         return true;
     }
     ESP_LOGW(TAG, "register %u write failed: %s",
