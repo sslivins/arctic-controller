@@ -559,8 +559,8 @@
       const h = state.hp, r = h.readings, t = h.temperatures;
       return `<div class="page">${pageHead("Status", "Complete temperature, electrical, and mechanical telemetry.")}
         <h2>Operating state</h2><div class="grid grid-2">
-          ${metricCard("Selected mode", titleCase(h.mode || "unknown"), "Configured policy from register 2096")}
-          ${metricCard("Actual operation", titleCase(h.operation || "unknown"), "Live status from register 2129")}
+          ${metricCard("Selected mode", titleCase(h.mode || "unknown"), "Configured mode policy from the mainboard")}
+          ${metricCard("Actual operation", titleCase(h.operation || "unknown"), "Live operating status from the mainboard")}
         </div>
         <h2>Temperatures</h2><div class="grid grid-3">
           ${metricCard("Water tank", temp(t.tank))}${metricCard("Outlet water", temp(t.outlet))}${metricCard("Inlet water", temp(t.inlet))}

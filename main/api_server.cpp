@@ -3968,10 +3968,9 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     DIAG_BOOL("Defrosting",        hp.isDefrosting())
     #undef DIAG_BOOL
 
-    // --- Raw fault-register bytes (2007 + 2125-2128) ---
     // --- Raw fault-register bytes. Addresses come from the library-owned
-    // MACON_FAULT_REGS[] list (2007 + 2125-2128), in that order; the consumer
-    // hardcodes no register address. ---
+    // MACON_FAULT_REGS[] list, in that order; the consumer hardcodes no
+    // register address. ---
     {
         const char* fault_names[arctic::MACON_FAULT_REGS_COUNT] = {
             "Fault Run/State (raw)", "Fault Sensor/EE (raw)",

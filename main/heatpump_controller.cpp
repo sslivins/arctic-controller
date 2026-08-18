@@ -57,7 +57,7 @@ static bool s_prev_fan = false;
 static bool s_prev_pump = false;
 static bool s_prev_aux_heater = false;
 static bool s_prev_defrosting = false;
-static uint8_t s_prev_fault_bytes[5] = {0};  // reg 2007,2125,2126,2127,2128
+static uint8_t s_prev_fault_bytes[5] = {0};  // the five opaque Macon fault-byte groups
 static int16_t s_prev_cooling_sp = 0;
 static int16_t s_prev_heating_sp = 0;
 static int16_t s_prev_hotwater_sp = 0;
@@ -409,8 +409,8 @@ static void applyMaconMapping() {
     s_state.suction_temp         = ms.suction_c;
     s_state.outdoor_coil_temp    = ms.outdoor_coil_c;
 
-    // Setpoints (whole °C). cooling_setpoint = reg2093 byte0, decoded by the
-    // macon library; previously left unmapped so the API reported 0.
+    // Setpoints (whole °C), decoded by the macon library;
+    // previously left unmapped so the API reported 0.
     s_state.hot_water_setpoint   = ms.hot_water_setpoint;
     s_state.cooling_setpoint     = ms.cooling_setpoint;
     if (ms.aux_heat_setpoint_valid) {
@@ -420,8 +420,9 @@ static void applyMaconMapping() {
     s_inlet_valid = ms.inlet_valid;
     s_outlet_valid = ms.outlet_valid;
     s_cooling_setpoint_valid = ms.cooling_setpoint_valid;
-    // reg2094 is still not confirmed as the active heating target, so expose
-    // its value in the diagnostic UI but do not persist it as a valid target.
+    // The heating target is still not confirmed as the active target on this
+    // unit, so expose its value in the diagnostic UI but do not persist it as
+    // a valid target.
     s_heating_setpoint_valid = false;
     s_hot_water_setpoint_valid = ms.hot_water_setpoint_valid;
     s_mode_valid = ms.working_mode_valid;
@@ -448,7 +449,7 @@ static void applyMaconMapping() {
     s_state.dc_voltage          = ms.dc_voltage;
     s_state.primary_eev_opening = ms.primary_eev;
     s_state.compressor_freq     = ms.compressor_freq;
-    // Real-time power in watts, decoded by the macon library (reg2114/A9).
+    // Real-time power in watts, decoded by the macon library.
     // Preferred over the old V*I/10 estimate, which is now 10x low because the
     // library normalises ac_current to whole amps.
     s_state.realtime_power_w    = ms.realtime_power_w;
@@ -794,9 +795,9 @@ bool setCoolingSetpoint(int16_t temp) {
 bool setHeatingSetpoint(int16_t temp) {
     temp = static_cast<int16_t>(clamp_setpoint(SetpointKind::Heating, temp));
     if (macon_master::is_active()) {
-        // MaconLink deliberately has no set_heating_setpoint: reg2094 is
-        // unverified on this unit. Fail explicitly rather than guess.
-        ESP_LOGW(TAG, "Heating setpoint write unsupported in Tuya master mode (reg2094 unverified)");
+        // MaconLink deliberately has no set_heating_setpoint: the heating
+        // target is unverified on this unit. Fail explicitly rather than guess.
+        ESP_LOGW(TAG, "Heating setpoint write unsupported in Tuya master mode (heating target unverified)");
         return false;
     }
     imageLock();

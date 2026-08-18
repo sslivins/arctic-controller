@@ -43,6 +43,18 @@ FORBIDDEN_REG_SYMBOL = re.compile(r"\bREG_[A-Z][A-Z0-9_]*")
 # opaque runtime strings, never bake them in.
 FORBIDDEN_CODE_LITERAL = re.compile(r'"(?:[PE]\d{2}|r\d{2}|PC)"')
 
+# Macon wire register NUMBERS named in code/comments/strings (reg2003, reg 2094,
+# register 2096, regs 2000, ...). The controller must describe values
+# semantically and never reference a wire register address. The 2000/2100
+# ranges are the Macon holding/telemetry windows.
+FORBIDDEN_REG_NUMBER = re.compile(r"(?i)reg(?:ister)?s?\s*2[01]\d\d")
+
+# Any #include "name" / <name>; group 1 is the raw included path.
+INCLUDE_RE = re.compile(r'#\s*include\s*[<"]\s*([A-Za-z0-9_./]+)\s*[>"]')
+
+# The arctic-macon library's public headers.
+MACON_INCLUDE = ROOT / "components" / "arctic-macon" / "include"
+
 
 def _controller_sources():
     for path in MAIN.rglob("*"):
@@ -88,5 +100,58 @@ def test_controller_has_no_oem_fault_code_literals():
     violations = _scan(FORBIDDEN_CODE_LITERAL)
     assert not violations, (
         "main/ must not hardcode OEM fault-code string literals (protocol leak):\n"
+        + "\n".join(violations)
+    )
+
+
+def test_controller_has_no_register_number_references():
+    violations = _scan(FORBIDDEN_REG_NUMBER)
+    assert not violations, (
+        "main/ must not reference Macon wire register numbers in code, comments,\n"
+        "or strings (protocol leak) — describe the value semantically instead:\n"
+        + "\n".join(violations)
+    )
+
+
+def _headers_included_by_main():
+    """Header basenames directly #included by in-scope controller sources."""
+    names = set()
+    for path in _controller_sources():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for m in INCLUDE_RE.finditer(text):
+            names.add(Path(m.group(1)).name)
+    return names
+
+
+def _header_pulls_register_map(header, seen):
+    """True if `header` includes macon_registers.h, directly or transitively
+    through other arctic-macon public headers."""
+    if header in seen or not header.is_file():
+        return False
+    seen.add(header)
+    text = header.read_text(encoding="utf-8", errors="replace")
+    if FORBIDDEN_INCLUDE.search(text):
+        return True
+    for m in INCLUDE_RE.finditer(text):
+        nxt = MACON_INCLUDE / Path(m.group(1)).name
+        if _header_pulls_register_map(nxt, seen):
+            return True
+    return False
+
+
+def test_main_facing_macon_headers_do_not_pull_register_map():
+    """A `main/` source that never directly includes macon_registers.h can still
+    compile it in transitively through a public library header (e.g. an image or
+    state header). Close that compile-boundary hole too."""
+    violations = []
+    for name in sorted(_headers_included_by_main()):
+        if name == "macon_registers.h":
+            continue  # a direct include is covered by the dedicated test
+        header = MACON_INCLUDE / name
+        if header.is_file() and _header_pulls_register_map(header, set()):
+            violations.append(name)
+    assert not violations, (
+        "main/ transitively compiles the Macon register map through these "
+        "public headers — remove the macon_registers.h dependency from them:\n"
         + "\n".join(violations)
     )

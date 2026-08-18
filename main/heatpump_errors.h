@@ -90,8 +90,8 @@ bool describeFaultCode(const char* code, const char** name_out,
 // Error History Functions
 // ============================================================================
 
-// Update error history from the five raw Macon fault-register bytes
-// (reg 2007, 2125, 2126, 2127, 2128). Should be called each poll/feed cycle.
+// Update error history from the five opaque Macon fault-byte groups.
+// Should be called each poll/feed cycle.
 void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
                         uint8_t fault_elec, uint8_t fault_ref);
 
