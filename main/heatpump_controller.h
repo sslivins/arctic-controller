@@ -23,7 +23,7 @@ struct HeatPumpState {
     uint32_t last_attempt_ms = 0;
     uint8_t consecutive_failures = 0;
     
-    // Settings (from holding registers 2000-2007)
+    // Settings (decoded by the macon library)
     bool unit_on = false;
     WorkingMode working_mode = WorkingMode::COOLING;
     HeatPumpOperation operation = HeatPumpOperation::UNKNOWN;
@@ -31,7 +31,7 @@ struct HeatPumpState {
     int16_t heating_setpoint = 0;    // °C
     int16_t hot_water_setpoint = 0;  // °C
     
-    // Temperatures (from input registers 2100-2117)
+    // Temperatures (decoded by the macon library)
     int16_t water_tank_temp = 0;
     int16_t outlet_water_temp = 0;
     int16_t inlet_water_temp = 0;
@@ -44,7 +44,7 @@ struct HeatPumpState {
     
     // System readings (decoded by the macon library from the real Tuya window)
     uint16_t compressor_freq = 0;    // Hz
-    uint16_t fan_speed = 0;          // reg2003 A10 DC motor raw level (0..~72)
+    uint16_t fan_speed = 0;          // raw DC fan-motor level (0..~72), owned by macon lib
     uint16_t ac_voltage = 0;         // V
     uint16_t ac_current = 0;         // A
     uint16_t dc_voltage = 0;         // V (volts; unit conversion owned by macon lib)
@@ -68,14 +68,14 @@ struct HeatPumpState {
     bool backup_heater = false;           // no confirmed Macon register -> always false
     bool reversing_valve_cooling = false; // reversing valve energized (cooling)
 
-    // Raw Macon fault-register bytes (reg 2007, 2125, 2126, 2127, 2128) exactly
-    // as the mainboard reports them. Decoded natively via arctic-macon's
-    // macon_decode_faults(); NOT the old fictional error1/error2 masks.
-    uint8_t fault_run = 0;   // reg2007
-    uint8_t fault_ee = 0;    // reg2125
-    uint8_t fault_comp = 0;  // reg2126
-    uint8_t fault_elec = 0;  // reg2127
-    uint8_t fault_ref = 0;   // reg2128
+    // Opaque Macon fault-byte groups exactly as the mainboard reports them.
+    // Decoded natively via arctic-macon's macon_decode_faults(); the controller
+    // never interprets the bits itself.
+    uint8_t fault_run = 0;   // run/operation faults
+    uint8_t fault_ee = 0;    // EEPROM / configuration faults
+    uint8_t fault_comp = 0;  // compressor faults
+    uint8_t fault_elec = 0;  // electrical faults
+    uint8_t fault_ref = 0;   // refrigerant-circuit faults
     bool    any_fault = false; // macon_has_fault() over the five bytes (ex-RUN)
 
     // Convenience status getters (now plain accessors over the derived fields).
@@ -89,7 +89,7 @@ struct HeatPumpState {
     // DC bus voltage in volts (already converted by the macon library).
     float getDcVoltageV() const { return static_cast<float>(dc_voltage); }
 
-    // Fan UI level (0=off..3=high) bucketed from the raw reg2003 level.
+    // Fan UI level (0=off..3=high) bucketed from the raw fan-motor level.
     // TODO(fan-rework): replace with bars = round(fan_speed/fan_speed_max*N)
     // once the library exposes fan_speed + fan_speed_max.
     int getFanSpeedLevel() const {
