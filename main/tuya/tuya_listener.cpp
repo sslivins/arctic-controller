@@ -1,9 +1,12 @@
 /*
  * Passive Tuya bus listener implementation. See tuya_listener.h.
+ *
+ * This file is only the platform glue: it installs an RX-only UART on the
+ * RS485 pins and pumps the raw bytes into the arctic-macon library, which owns
+ * ALL framing/register/window decoding. The controller (and this shim) carry no
+ * Tuya/Macon wire knowledge — bytes go in, semantic state comes out.
  */
 #include "tuya_listener.h"
-
-#include <string.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -12,9 +15,8 @@
 #include "driver/uart.h"
 #include "driver/gpio.h"
 
-#include "tuya_codec.h"
 #include "macon_bus_config.h"
-#include "heatpump_controller.h"  // arctic::feedRegisterWindow
+#include "heatpump_controller.h"  // arctic::feedListenerBytes / getListenerStats
 
 static const char *TAG = "tuya_listen";
 
@@ -28,12 +30,9 @@ namespace tuya {
 static constexpr uart_port_t UART_PORT   = UART_NUM_1;
 static constexpr int         TUYA_BAUD   = 4800;
 static constexpr size_t      RX_BUF_SIZE = 2048;   // driver ring buffer
-static constexpr size_t      ACC_SIZE    = 512;    // decode accumulator
-static constexpr size_t      MAX_HEXBUF  = 200;    // hex string scratch (58 regs*3 + slack)
+static constexpr size_t      READ_CHUNK  = 256;    // per read_bytes slice
 
 static bool          s_initialized = false;
-static ListenerStats s_stats       = {};
-static portMUX_TYPE  s_mux         = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t  s_task        = nullptr;
 
 // ---------------------------------------------------------------------------
@@ -45,137 +44,16 @@ static uint32_t now_ms()
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-// Format up to `len` bytes as space-separated hex into `out`.
-static void hex_dump(const uint8_t *data, size_t len, char *out, size_t out_cap)
-{
-    size_t pos = 0;
-    for (size_t i = 0; i < len && pos + 3 < out_cap; ++i) {
-        pos += snprintf(out + pos, out_cap - pos, "%02X ", data[i]);
-    }
-    if (out_cap > 0) out[(pos > 0 && pos < out_cap) ? pos - 1 : 0] = '\0';
-}
-
-static void log_frame(const uint8_t *frame, const tuya_codec::ParsedFrame &pf)
-{
-    static char hexbuf[MAX_HEXBUF];
-    if (pf.dir == tuya_codec::DIR_REQUEST) {
-        hex_dump(frame, pf.frame_len, hexbuf, sizeof(hexbuf));
-        ESP_LOGI(TAG, "REQ  reg%u cnt%u  [%s]",
-                 (unsigned)pf.window->reg_base, (unsigned)pf.field_b, hexbuf);
-    } else {
-        // For responses show the register payload (after the window prefix).
-        const uint8_t *regs = pf.payload + pf.window->prefix_len;
-        size_t reg_len = (pf.payload_len > pf.window->prefix_len)
-                             ? pf.payload_len - pf.window->prefix_len
-                             : 0;
-        hex_dump(regs, reg_len, hexbuf, sizeof(hexbuf));
-        ESP_LOGI(TAG, "RESP reg%u cnt%u  regs[%s]",
-                 (unsigned)pf.window->reg_base, (unsigned)pf.field_b, hexbuf);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Decode accumulator drain
-// ---------------------------------------------------------------------------
-//
-// Consumes as many complete frames as possible from the front of `acc`.
-// Returns the number of bytes consumed; the caller shifts the remainder.
-//
-static size_t drain(const uint8_t *acc, size_t acc_len)
-{
-    size_t consumed = 0;
-    while (acc_len - consumed >= tuya_codec::HDR_LEN) {
-        const uint8_t *p   = acc + consumed;
-        size_t         rem = acc_len - consumed;
-
-        // Locate the next plausible frame start (validated header).
-        size_t start = tuya_codec::find_frame_start(p, rem);
-        if (start == rem) {
-            // No frame start in the buffer. Drop everything except a possible
-            // partial magic at the tail (keep last HDR_LEN-1 bytes).
-            size_t keep = (rem < tuya_codec::HDR_LEN - 1) ? rem
-                                                          : tuya_codec::HDR_LEN - 1;
-            consumed = acc_len - keep;
-            break;
-        }
-        if (start > 0) {
-            // Junk before the frame start -> resync.
-            portENTER_CRITICAL(&s_mux);
-            s_stats.resync++;
-            portEXIT_CRITICAL(&s_mux);
-            consumed += start;
-            continue;
-        }
-
-        tuya_codec::ParsedFrame pf;
-        tuya_codec::ParseResult r =
-            tuya_codec::parse_frame(acc + consumed, acc_len - consumed, pf);
-
-        if (r == tuya_codec::ParseResult::OK) {
-            portENTER_CRITICAL(&s_mux);
-            s_stats.frames_ok++;
-            if (pf.dir == tuya_codec::DIR_REQUEST) s_stats.req_frames++;
-            else                                   s_stats.resp_frames++;
-            s_stats.last_frame_ms = now_ms();
-            portEXIT_CRITICAL(&s_mux);
-            log_frame(acc + consumed, pf);
-
-            // Feed response payloads (heat pump -> controller) into the state.
-            if (pf.dir == tuya_codec::DIR_RESPONSE && pf.window &&
-                pf.payload_len > pf.window->prefix_len) {
-                arctic::feedRegisterWindow(
-                    pf.window->reg_base,
-                    pf.payload + pf.window->prefix_len,
-                    pf.payload_len - pf.window->prefix_len);
-            }
-            // Catalog the FULL payload (incl. any window prefix bytes that the
-            // feed strips) for diagnostics.
-            if (pf.dir == tuya_codec::DIR_RESPONSE) {
-                arctic::recordObservedWindow(pf.field_a, pf.field_b, 1,
-                                             pf.payload, pf.payload_len);
-            }
-            consumed += pf.frame_len;
-        } else if (r == tuya_codec::ParseResult::UNKNOWN_WINDOW) {
-            // Valid framing + checksum but a window the codec doesn't map. This
-            // is exactly how a not-yet-decoded register block (e.g. compressor
-            // frequency) shows up. Catalog it and skip the whole frame.
-            portENTER_CRITICAL(&s_mux);
-            s_stats.frames_ok++;
-            s_stats.resp_frames++;
-            s_stats.last_frame_ms = now_ms();
-            portEXIT_CRITICAL(&s_mux);
-            if (pf.dir == tuya_codec::DIR_RESPONSE) {
-                arctic::recordObservedWindow(pf.field_a, pf.field_b, 0,
-                                             pf.payload, pf.payload_len);
-            }
-            ESP_LOGW(TAG, "UNKNOWN window addr=%u count=%u (cataloged)",
-                     (unsigned)pf.field_a, (unsigned)pf.field_b);
-            consumed += pf.frame_len;
-        } else if (r == tuya_codec::ParseResult::TRUNCATED) {
-            // Wait for more bytes before this frame can be parsed.
-            break;
-        } else {
-            // Header looked valid but checksum (or length) failed. Skip past
-            // the magic and resync.
-            if (r == tuya_codec::ParseResult::BAD_CHECKSUM) {
-                portENTER_CRITICAL(&s_mux);
-                s_stats.checksum_err++;
-                portEXIT_CRITICAL(&s_mux);
-            }
-            consumed += 2;
-        }
-    }
-    return consumed;
-}
-
 // ---------------------------------------------------------------------------
 // Receive task
 // ---------------------------------------------------------------------------
-
+//
+// Reads raw bytes and hands them to the library decoder. The library owns the
+// frame accumulator, resync state machine, statistics, and register ingest.
+//
 static void rx_task(void *param)
 {
-    static uint8_t acc[ACC_SIZE];
-    size_t         acc_len       = 0;
+    static uint8_t buf[READ_CHUNK];
     uint32_t       last_idle_log = now_ms();
     uint32_t       frames_at_log = 0;
 
@@ -183,28 +61,9 @@ static void rx_task(void *param)
              TUYA_BAUD, arctic::RS485_RX_PIN, arctic::RS485_DIR_PIN);
 
     for (;;) {
-        int n = uart_read_bytes(UART_PORT, acc + acc_len, ACC_SIZE - acc_len,
-                                pdMS_TO_TICKS(50));
+        int n = uart_read_bytes(UART_PORT, buf, sizeof(buf), pdMS_TO_TICKS(50));
         if (n > 0) {
-            acc_len += (size_t)n;
-            portENTER_CRITICAL(&s_mux);
-            s_stats.bytes_rx += (uint32_t)n;
-            portEXIT_CRITICAL(&s_mux);
-
-            size_t consumed = drain(acc, acc_len);
-            if (consumed > 0 && consumed <= acc_len) {
-                memmove(acc, acc + consumed, acc_len - consumed);
-                acc_len -= consumed;
-            }
-            // Safety valve: if the accumulator is full and nothing drained,
-            // the stream is garbage -> reset.
-            if (acc_len == ACC_SIZE) {
-                ESP_LOGW(TAG, "Accumulator full with no frame; resetting");
-                acc_len = 0;
-                portENTER_CRITICAL(&s_mux);
-                s_stats.resync++;
-                portEXIT_CRITICAL(&s_mux);
-            }
+            arctic::feedListenerBytes(buf, (size_t)n);
         }
 
         // Heartbeat every 5s so we can confirm the task is alive on the bench
@@ -301,11 +160,18 @@ void listener_start()
 
 ListenerStats listener_get_stats()
 {
-    ListenerStats snap;
-    portENTER_CRITICAL(&s_mux);
-    snap = s_stats;
-    portEXIT_CRITICAL(&s_mux);
-    return snap;
+    // Delegate to the library-owned statistics; the controller carries no
+    // frame-decode state of its own.
+    const arctic::MaconListenerStats s = arctic::getListenerStats();
+    ListenerStats out;
+    out.bytes_rx      = s.bytes_rx;
+    out.frames_ok     = s.frames_ok;
+    out.req_frames    = s.req_frames;
+    out.resp_frames   = s.resp_frames;
+    out.checksum_err  = s.checksum_err;
+    out.resync        = s.resync;
+    out.last_frame_ms = s.last_frame_ms;
+    return out;
 }
 
 }  // namespace tuya

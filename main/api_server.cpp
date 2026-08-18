@@ -3317,7 +3317,7 @@ static esp_err_t heatpump_windows_handler(httpd_req_t* req)
 
     set_json_content_type(req);
 
-    static arctic::ObservedWindow wins[64];
+    static arctic::MaconObservedWindow wins[64];
     uint16_t n = arctic::getObservedWindows(wins, sizeof(wins) / sizeof(wins[0]));
 
     cJSON* root = cJSON_CreateObject();

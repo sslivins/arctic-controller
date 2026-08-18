@@ -7,12 +7,12 @@
  *
  *   * the concrete RS485 UART transport (tuya::MaconUartTransport),
  *   * a monotonic clock over esp_timer (EspClock),
- *   * a window sink that routes decoded windows into HeatPumpState
- *     (ControllerSink -> feedRegisterWindow / recordObservedWindow),
  *   * the FreeRTOS poll task and the bus mutex that serialises transactions.
  *
- * The controller carries no Tuya/Macon wire knowledge: every register/bit/frame
- * detail is behind the library API.
+ * Decoded windows are ingested into the opaque register image by the library
+ * sink returned from arctic::liveIngestSink(); a poll cycle is bracketed by
+ * arctic::liveIngestBeginCycle()/liveIngestEndCycle(). No register/bit/frame
+ * detail ever reaches this shim — it is all behind the library API.
  */
 #include "macon_master_iface.h"    // this module's public API (macon_master::)
 
@@ -25,9 +25,9 @@
 #include "esp_timer.h"
 
 #include "macon_uart_transport.h"   // tuya::MaconUartTransport
-#include "macon_master.h"           // arctic::MaconMaster / MaconClock / MaconWindowSink
+#include "macon_master.h"           // arctic::MaconMaster / MaconClock
 #include "macon_link.h"             // arctic::MaconResult / macon_result_name
-#include "heatpump_controller.h"    // feedRegisterWindow / recordObservedWindow
+#include "heatpump_controller.h"    // arctic::liveIngestSink / liveIngestBeginCycle / liveIngestEndCycle
 
 static const char *TAG = "macon_master";
 
@@ -53,25 +53,11 @@ public:
     }
 };
 
-// Routes windows decoded by the master into HeatPumpState. Keeps the library
-// free of any controller-state knowledge.
-class ControllerSink : public arctic::MaconWindowSink {
-public:
-    void on_window(uint16_t reg_base, const uint8_t *data, size_t len) override {
-        arctic::feedRegisterWindow(reg_base, data, len);
-    }
-    void on_observed(uint16_t field_a, uint16_t field_b,
-                     const uint8_t *payload, size_t payload_len) override {
-        arctic::recordObservedWindow(field_a, field_b, 1, payload, payload_len);
-    }
-};
-
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 static tuya::MaconUartTransport s_transport;   // trivial ctor; hardware set up in init()
 static EspClock                 s_clock;
-static ControllerSink           s_sink;
 static arctic::MaconMaster     *s_master      = nullptr;
 static SemaphoreHandle_t        s_bus_mutex   = nullptr;
 static TaskHandle_t             s_task        = nullptr;
@@ -89,12 +75,20 @@ static void poll_task(void *)
     ESP_LOGI(TAG, "Active-master poll task started");
     for (;;) {
         if (s_bus_mutex && s_master) {
+            // Each poll cycle is bracketed by the controller's image-lock so the
+            // library sink can ingest decoded windows internally; the bus mutex
+            // is released between polls so a UI/REST write waits at most one
+            // in-flight transaction.
             xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
-            s_master->poll_holding();     // regs 2000.. (electrical/status/mode)
+            arctic::liveIngestBeginCycle();
+            s_master->poll_holding();
+            arctic::liveIngestEndCycle();
             xSemaphoreGive(s_bus_mutex);
 
             xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
-            s_master->poll_telemetry();   // regs 2093.. (setpoint/temps/EEV)
+            arctic::liveIngestBeginCycle();
+            s_master->poll_telemetry();
+            arctic::liveIngestEndCycle();
             xSemaphoreGive(s_bus_mutex);
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
@@ -119,7 +113,8 @@ esp_err_t init()
         }
     }
     if (s_master == nullptr) {
-        s_master = new arctic::MaconMaster(s_transport, s_clock, s_sink,
+        s_master = new arctic::MaconMaster(s_transport, s_clock,
+                                           arctic::liveIngestSink(),
                                            RESP_TIMEOUT_MS, POLL_TXN_DEADLINE_MS);
     }
 
