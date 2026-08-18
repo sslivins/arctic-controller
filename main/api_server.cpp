@@ -132,8 +132,13 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_get_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req);
 static esp_err_t heatpump_status_handler(httpd_req_t* req);
+#ifdef CONFIG_TEST_ENDPOINTS
+// Protocol-debug endpoints (raw register cache / observed Tuya windows). They
+// surface raw register addresses, so they are compiled only into debug/test
+// builds and never ship in a production image.
 static esp_err_t heatpump_raw_handler(httpd_req_t* req);
 static esp_err_t heatpump_windows_handler(httpd_req_t* req);
+#endif
 static esp_err_t heatpump_advanced_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req);
@@ -823,7 +828,8 @@ bool api_server_start(void)
     };
     REGISTER_URI(heatpump_uri);
     
-    // GET /api/heatpump/raw - debug raw register cache dump
+#ifdef CONFIG_TEST_ENDPOINTS
+    // GET /api/heatpump/raw - debug raw register cache dump (debug/test only)
     httpd_uri_t heatpump_raw_uri = {
         .uri = "/api/heatpump/raw",
         .method = HTTP_GET,
@@ -832,7 +838,7 @@ bool api_server_start(void)
     };
     REGISTER_URI(heatpump_raw_uri);
 
-    // GET /api/heatpump/windows - debug observed Tuya window catalog
+    // GET /api/heatpump/windows - debug observed Tuya window catalog (debug/test only)
     httpd_uri_t heatpump_windows_uri = {
         .uri = "/api/heatpump/windows",
         .method = HTTP_GET,
@@ -840,6 +846,7 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_windows_uri);
+#endif
     
     // GET /api/heatpump/advanced - List all advanced (AP) parameters
     httpd_uri_t heatpump_advanced_uri = {
@@ -3264,9 +3271,11 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+#ifdef CONFIG_TEST_ENDPOINTS
 // GET /api/heatpump/raw - Debug: dump the raw fed Tuya register cache as a
 // flat JSON array (index 0 == register `base`). Used for calibrating the
 // ECO-600 Tuya byte->field mapping against live idle/running snapshots.
+// Compiled into debug/test builds only (exposes raw register addresses).
 static esp_err_t heatpump_raw_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -3335,6 +3344,7 @@ static esp_err_t heatpump_windows_handler(httpd_req_t* req)
 
     return ESP_OK;
 }
+#endif  // CONFIG_TEST_ENDPOINTS
 // ============================================================================
 // Heat Pump Parameters API
 // ============================================================================
@@ -3884,6 +3894,20 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     // Line buffer for CSV rows
     char line[256];
 
+    // Register-address column. Real register addresses are emitted only in
+    // debug/test builds; a production image ships an opaque CSV with the
+    // address column left blank so the Macon register map is never surfaced.
+    char addr[12];
+    auto addr_col = [&addr](arctic::MaconField f) -> const char* {
+#ifdef CONFIG_TEST_ENDPOINTS
+        snprintf(addr, sizeof(addr), "%u", (unsigned)arctic::macon_field_address(f));
+#else
+        (void)f;
+        addr[0] = '\0';
+#endif
+        return addr;
+    };
+
     // UTF-8 BOM so Excel interprets the file correctly (degree signs, accents, etc.)
     httpd_resp_send_chunk(req, "\xEF\xBB\xBF", 3);
 
@@ -3909,8 +3933,8 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     // Addresses come from the library's opaque field->address lookup; the
     // consumer never hardcodes a wire address.
     #define DIAG_TEMP(name_str, field, macon_field) \
-        snprintf(line, sizeof(line), "Temperature,%s,,%u,%d,°C\r\n", name_str, \
-                 arctic::macon_field_address(macon_field), (int)(field)); \
+        snprintf(line, sizeof(line), "Temperature,%s,,%s,%d,°C\r\n", name_str, \
+                 addr_col(macon_field), (int)(field)); \
         httpd_resp_sendstr_chunk(req, line);
 
     DIAG_TEMP("Water Tank",       hp.water_tank_temp,       arctic::MaconField::WaterTankTemp)
@@ -3925,27 +3949,27 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     #undef DIAG_TEMP
 
     // --- Setpoints (whole °C) ---
-    snprintf(line, sizeof(line), "Setpoint,Cooling,,%u,%d,°C\r\n", arctic::macon_field_address(arctic::MaconField::CoolingSetpoint), hp.cooling_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Cooling,,%s,%d,°C\r\n", addr_col(arctic::MaconField::CoolingSetpoint), hp.cooling_setpoint);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Setpoint,Heating,,%u,%d,°C\r\n", arctic::macon_field_address(arctic::MaconField::HeatingSetpoint), hp.heating_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Heating,,%s,%d,°C\r\n", addr_col(arctic::MaconField::HeatingSetpoint), hp.heating_setpoint);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Setpoint,Hot Water,,%u,%d,°C\r\n", arctic::macon_field_address(arctic::MaconField::HotWaterSetpoint), hp.hot_water_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Hot Water,,%s,%d,°C\r\n", addr_col(arctic::MaconField::HotWaterSetpoint), hp.hot_water_setpoint);
     httpd_resp_sendstr_chunk(req, line);
 
     // --- System Readings (already decoded to whole units by the macon library) ---
-    snprintf(line, sizeof(line), "Reading,Compressor Frequency,,%u,%u,Hz\r\n", arctic::macon_field_address(arctic::MaconField::CompressorFreq), hp.compressor_freq);
+    snprintf(line, sizeof(line), "Reading,Compressor Frequency,,%s,%u,Hz\r\n", addr_col(arctic::MaconField::CompressorFreq), hp.compressor_freq);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Fan Speed,,%u,%u,RPM\r\n", arctic::macon_field_address(arctic::MaconField::FanLevel), hp.fan_speed);
+    snprintf(line, sizeof(line), "Reading,Fan Speed,,%s,%u,RPM\r\n", addr_col(arctic::MaconField::FanLevel), hp.fan_speed);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,AC Voltage,,%u,%u,V\r\n", arctic::macon_field_address(arctic::MaconField::AcVoltage), hp.ac_voltage);
+    snprintf(line, sizeof(line), "Reading,AC Voltage,,%s,%u,V\r\n", addr_col(arctic::MaconField::AcVoltage), hp.ac_voltage);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,AC Current,,%u,%u,A\r\n", arctic::macon_field_address(arctic::MaconField::AcCurrent), hp.ac_current);
+    snprintf(line, sizeof(line), "Reading,AC Current,,%s,%u,A\r\n", addr_col(arctic::MaconField::AcCurrent), hp.ac_current);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,DC Voltage,,%u,%.1f,V\r\n", arctic::macon_field_address(arctic::MaconField::DcVoltage), hp.getDcVoltageV());
+    snprintf(line, sizeof(line), "Reading,DC Voltage,,%s,%.1f,V\r\n", addr_col(arctic::MaconField::DcVoltage), hp.getDcVoltageV());
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,%u,%u,steps\r\n", arctic::macon_field_address(arctic::MaconField::PrimaryEev), hp.primary_eev_opening);
+    snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,%s,%u,steps\r\n", addr_col(arctic::MaconField::PrimaryEev), hp.primary_eev_opening);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Power Consumption,,%u,%lu,W\r\n", arctic::macon_field_address(arctic::MaconField::RealtimePower), (unsigned long)hp.realtime_power_w);
+    snprintf(line, sizeof(line), "Reading,Power Consumption,,%s,%lu,W\r\n", addr_col(arctic::MaconField::RealtimePower), (unsigned long)hp.realtime_power_w);
     httpd_resp_sendstr_chunk(req, line);
     if (hp.cop_valid) {
         snprintf(line, sizeof(line), "Reading,Heat Output (est),,,%ld,W\r\n", (long)hp.thermal_w);
@@ -3970,7 +3994,9 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
 
     // --- Raw fault-register bytes. Addresses come from the library-owned
     // MACON_FAULT_REGS[] list, in that order; the consumer hardcodes no
-    // register address. ---
+    // register address. These raw register rows are a protocol-debug aid and
+    // are emitted only in debug/test builds so production stays opaque. ---
+#ifdef CONFIG_TEST_ENDPOINTS
     {
         const char* fault_names[arctic::MACON_FAULT_REGS_COUNT] = {
             "Fault Run/State (raw)", "Fault Sensor/EE (raw)",
@@ -3984,6 +4010,7 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
             httpd_resp_sendstr_chunk(req, line);
         }
     }
+#endif  // CONFIG_TEST_ENDPOINTS
 
     // --- Active Errors (natively decoded by the macon library) ---
     {

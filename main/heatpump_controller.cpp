@@ -372,6 +372,22 @@ static WorkingMode to_working_mode(const MaconState& state) {
     }
 }
 
+// Explicit controller->library working-mode translation for the write path.
+// The two enums are intentionally NOT assumed to share a numeric encoding — the
+// wire mapping is owned by the library, so keep this translation explicit
+// rather than casting one enum's integer value onto the other.
+static MaconWorkingMode to_macon_working_mode(WorkingMode mode) {
+    switch (mode) {
+        case WorkingMode::COOLING:          return MaconWorkingMode::Cooling;
+        case WorkingMode::FLOOR_HEATING:    return MaconWorkingMode::FloorHeating;
+        case WorkingMode::FAN_COIL_HEATING: return MaconWorkingMode::FanCoilHeating;
+        case WorkingMode::HEATING:          return MaconWorkingMode::FloorHeating; // generic heating -> floor heating
+        case WorkingMode::HOT_WATER:        return MaconWorkingMode::HotWater;
+        case WorkingMode::AUTO:             return MaconWorkingMode::Auto;
+        default:                            return MaconWorkingMode::Auto;
+    }
+}
+
 static HeatPumpOperation to_operation(const MaconState& state) {
     switch (decode_operation(state)) {
         case MaconOperation::Off:      return HeatPumpOperation::OFF;
@@ -760,11 +776,10 @@ bool setWorkingMode(WorkingMode mode) {
         ESP_LOGW(TAG, "Working-mode write unsupported in Tuya master mode (no verified fc06 mapping)");
         return false;
     }
-    // The controller's WorkingMode and the library's MaconWorkingMode share the
-    // same semantic encoding by construction; convert between the two enums
-    // without touching any register.
+    // Translate the controller's WorkingMode to the library's MaconWorkingMode
+    // via an explicit mapping; the controller never touches the wire encoding.
     imageLock();
-    s_image.set_working_mode(static_cast<MaconWorkingMode>(static_cast<uint8_t>(mode)));
+    s_image.set_working_mode(to_macon_working_mode(mode));
     imageUnlock();
     applyMaconMapping();
     ESP_LOGI(TAG, "Working mode set to %s", workingModeToString(mode));
@@ -969,7 +984,7 @@ bool setDemoField(const char* field, int32_t value) {
         }
     }
     if (!matched && strcmp(field, "working_mode") == 0) {
-        s_image.set_working_mode(static_cast<MaconWorkingMode>(static_cast<uint8_t>(value)));
+        s_image.set_working_mode(to_macon_working_mode(static_cast<WorkingMode>(value)));
         matched = true;
     }
     imageUnlock();
