@@ -36,3 +36,13 @@ bool advanced_param_read(uint8_t ap, int16_t* value_out);
 // A non-OK result means NOTHING was written. If the guardrail passes but the
 // bus write fails, returns REG_UNKNOWN-free failure via *bus_ok (see below).
 arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus_ok = nullptr);
+
+// Attempt to write an enum ("choice") advanced parameter AP `ap` by selecting
+// the option at opaque id `option_index` (its stable index in the parameter's
+// option list). arctic-macon maps the id to its wire code and runs the full
+// guardrail; the raw RS485 code never leaves the library / this quarantined
+// module. Returns the arctic::AdvWriteResult (NOT_IN_ENUM if the parameter has
+// no options or the index is out of range, UNKNOWN_PARAM for a bad AP). On a
+// guardrail pass, *bus_ok reports whether the live bus write succeeded.
+arctic::AdvWriteResult advanced_param_write_option(uint8_t ap, size_t option_index,
+                                                   bool* bus_ok = nullptr);

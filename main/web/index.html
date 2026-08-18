@@ -603,10 +603,10 @@
       let input;
       if (!p.writable) input = `<span class="badge">${p.value == null ? "--" : `${esc(value)} ${esc(displayUnit || "")}`}</span>`;
       else if (hasChoices) {
-        const selected = p.options.find(o => o.wire === p.value) || p.options[0];
+        const selected = p.options.find(o => o.id === p.value) || p.options[0];
         input = `<div class="choice-editor"><select name="value" class="choice-select"
           aria-label="${esc(p.name)} options">${p.options.map(o =>
-          `<option value="${o.wire}" data-description="${esc(o.en || "")}" ${o.wire === p.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
+          `<option value="${o.id}" data-description="${esc(o.en || "")}" ${o.id === p.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
           <div class="choice-description" aria-live="polite">${esc(selected.en || "")}</div></div>`;
       }
       else input = rangeEditor(value ?? min, min, max, isTemp ? 1 : (p.step || 1), displayUnit);

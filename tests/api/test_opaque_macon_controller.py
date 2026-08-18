@@ -7,8 +7,9 @@ that lives behind the arctic-macon library's typed/opaque APIs.
 Scope of the gate is the controller sources under ``main/`` only, excluding:
   * ``main/tuya/`` — the Macon master transport shim (relocated into the library
     in a later phase; not part of the opaque-consumer contract yet).
-  * ``advanced_params.{cpp,h}`` — the advanced-parameters subsystem is a
-    separate future phase and legitimately references raw registers.
+  * ``advanced_params.{cpp,h}`` — the advanced-parameters *quarantine wrapper*.
+    It is the sole controller file allowed to touch raw AP registers/wire codes,
+    translating the library's opaque option ids into wire writes (#118).
 """
 
 import re
@@ -51,6 +52,17 @@ FORBIDDEN_REG_NUMBER = re.compile(r"(?i)reg(?:ister)?s?\s*2[01]\d\d")
 
 # Any #include "name" / <name>; group 1 is the raw included path.
 INCLUDE_RE = re.compile(r'#\s*include\s*[<"]\s*([A-Za-z0-9_./]+)\s*[>"]')
+
+# Advanced-parameter wire/register metadata that must stay behind the library's
+# opaque option-id API (#118). In-scope consumers (api_server.cpp,
+# heatpump_params_screen.cpp, web/index.html handling) must consume stable option
+# ids + semantic accessors, never the raw AdvancedParam.reg register address, the
+# AdvEnumOption.wire RS485 code, the enum_vals/enum_count arrays, or the
+# ADV_REG_UNKNOWN sentinel. The advanced_params.{cpp,h} quarantine wrapper is the
+# sole excluded consumer (see EXCLUDED_FILES) — it owns the id<->wire mapping.
+FORBIDDEN_ADV_WIRE_META = re.compile(
+    r"\benum_vals\b|\benum_count\b|(?:->|\.)wire\b|(?:->|\.)reg\b|\bADV_REG_UNKNOWN\b"
+)
 
 # The arctic-macon library's public headers.
 MACON_INCLUDE = ROOT / "components" / "arctic-macon" / "include"
@@ -110,6 +122,19 @@ def test_controller_has_no_register_number_references():
         "main/ must not reference Macon wire register numbers in code, comments,\n"
         "or strings (protocol leak) — describe the value semantically instead:\n"
         + "\n".join(violations)
+    )
+
+
+def test_controller_has_no_advanced_param_wire_metadata():
+    violations = _scan(FORBIDDEN_ADV_WIRE_META)
+    assert not violations, (
+        "main/ must not read advanced-parameter wire/register metadata "
+        "(AdvancedParam.reg, AdvEnumOption.wire, enum_vals/enum_count, "
+        "ADV_REG_UNKNOWN). Consume the opaque option-id API "
+        "(advanced_enum_option_index_for_wire / advanced_param_write_option) and "
+        "semantic accessors (advanced_param_reg_known, advanced_register_address) "
+        "instead (#118). The advanced_params.{cpp,h} quarantine wrapper is the "
+        "only file allowed to touch these:\n" + "\n".join(violations)
     )
 
 

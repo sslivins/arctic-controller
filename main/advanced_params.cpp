@@ -87,3 +87,43 @@ arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus
     }
     return AdvWriteResult::OK;
 }
+
+arctic::AdvWriteResult advanced_param_write_option(uint8_t ap, size_t option_index,
+                                                   bool* bus_ok) {
+    if (bus_ok) *bus_ok = false;
+
+    // Build a validated write plan by opaque option id: arctic-macon maps the
+    // id to its wire code and runs the range/enum + register-known + unlocked
+    // guardrail. The raw wire code stays inside the library/this module.
+    AdvWritePlan plan{};
+    AdvWriteResult r = arctic::advanced_prepare_write_option(ap, option_index, &plan);
+    if (r != AdvWriteResult::OK) {
+        ESP_LOGW(TAG, "write AP%u option %u refused: %s",
+                 (unsigned)ap, (unsigned)option_index, arctic::adv_write_result_name(r));
+        return r;
+    }
+
+    // Demo mode - accept the (valid) write without touching the bus.
+    if (app_prefs_is_demo_mode()) {
+        ESP_LOGI(TAG, "[DEMO] AP%u option %u (reg%u=%u, not sent)",
+                 (unsigned)ap, (unsigned)option_index, (unsigned)plan.reg, (unsigned)plan.raw);
+        if (bus_ok) *bus_ok = true;
+        return AdvWriteResult::OK;
+    }
+
+    if (!arctic::isConnected()) {
+        ESP_LOGW(TAG, "write AP%u option: not connected", (unsigned)ap);
+        return AdvWriteResult::OK;  // guardrail passed; caller checks *bus_ok
+    }
+
+    bool ok = arctic::writeRegister(plan.reg, plan.raw);
+    if (bus_ok) *bus_ok = ok;
+    if (ok) {
+        ESP_LOGI(TAG, "Wrote AP%u option %u (reg%u = %u)",
+                 (unsigned)ap, (unsigned)option_index, (unsigned)plan.reg, (unsigned)plan.raw);
+    } else {
+        ESP_LOGE(TAG, "AP%u option guardrail OK but bus write of reg%u failed",
+                 (unsigned)ap, (unsigned)plan.reg);
+    }
+    return AdvWriteResult::OK;
+}
