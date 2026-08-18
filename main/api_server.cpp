@@ -3350,9 +3350,11 @@ static esp_err_t heatpump_windows_handler(httpd_req_t* req)
 // ============================================================================
 
 // Emit the locale-independent enum display options for `p` (if any) as an
-// "options" array: [{ wire, label, msg_id, arg_a, arg_b, en }]. The wire code
-// is the only value the UI ever PUTs back; label/msg_id/args/en drive display
-// and the UI's own localization (macon owns the code<->meaning mapping).
+// "options" array: [{ id, label, msg_id, arg_a, arg_b, en }]. `id` is the
+// opaque, stable option identifier (the option's list index) — the only value
+// the UI ever PUTs back. The library maps ids to wire codes internally, so no raw RS485
+// wire code is ever exposed here. label/msg_id/args/en drive display and the
+// UI's own localization.
 static void add_ap_enum_options(cJSON* obj, const arctic::AdvancedParam* p) {
     const size_t nopt = arctic::advanced_enum_option_count(p->ap);
     if (nopt == 0) return;
@@ -3361,7 +3363,7 @@ static void add_ap_enum_options(cJSON* obj, const arctic::AdvancedParam* p) {
         const arctic::AdvEnumOption* o = arctic::advanced_enum_option_at(p->ap, i);
         if (!o) continue;
         cJSON* io = cJSON_CreateObject();
-        cJSON_AddNumberToObject(io, "wire", o->wire);
+        cJSON_AddNumberToObject(io, "id", (double)i);   // opaque stable option id
         cJSON_AddStringToObject(io, "label", o->label ? o->label : "");
         cJSON_AddStringToObject(io, "msg_id", o->msg_id ? o->msg_id : "");
         cJSON_AddNumberToObject(io, "arg_a", o->arg_a);
@@ -3383,11 +3385,22 @@ static const char* ap_temperature_kind_name(uint8_t ap) {
     }
 }
 
+// For enum ("choice") params the API/UI works in opaque option-id space: the
+// value a client sees and PUTs back is the option's stable list index, never a
+// raw wire code. Scalar params pass their value through unchanged.
+static int16_t ap_value_to_client(uint8_t ap, int16_t read_value) {
+    if (arctic::advanced_enum_option_count(ap) > 0) {
+        int id = arctic::advanced_enum_option_index_for_wire(ap, read_value);
+        return (int16_t)(id < 0 ? 0 : id);
+    }
+    return read_value;
+}
+
 // Helper to add a single AP (advanced) parameter to a cJSON object, keyed "AP<n>".
 static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool read_ok, int16_t value) {
     char key[8];
     snprintf(key, sizeof(key), "AP%u", (unsigned)p->ap);
-    const bool reg_known = (p->reg != arctic::ADV_REG_UNKNOWN);
+    const bool reg_known = arctic::advanced_param_reg_known(p->ap);
     const bool writable  = reg_known && !p->needs_sim_confirm && !p->read_only && !p->is_trigger;
     cJSON* obj = cJSON_CreateObject();
     cJSON_AddNumberToObject(obj, "ap", p->ap);
@@ -3396,7 +3409,7 @@ static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool r
     cJSON_AddStringToObject(obj, "name_msg_id", p->name_msg_id ? p->name_msg_id : "");
     cJSON_AddStringToObject(obj, "detail_msg_id", p->detail_msg_id ? p->detail_msg_id : "");
     if (read_ok) {
-        cJSON_AddNumberToObject(obj, "value", value);
+        cJSON_AddNumberToObject(obj, "value", ap_value_to_client(p->ap, value));
     } else {
         cJSON_AddNullToObject(obj, "value");
     }
@@ -3441,7 +3454,7 @@ static esp_err_t heatpump_advanced_get_handler(httpd_req_t* req)
             const arctic::AdvancedParam* p = arctic::advanced_param_at(i);
             if (!p || !cat) continue;
             if (strcmp(p->category, cat) != 0) continue;
-            if (p->reg == arctic::ADV_REG_UNKNOWN) continue;  // hide unverified
+            if (!arctic::advanced_param_reg_known(p->ap)) continue;  // hide unverified
             int16_t value = 0;
             bool read_ok = advanced_param_read(p->ap, &value);
             add_ap_to_json(params, p, read_ok, value);
@@ -3483,7 +3496,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     }
     
     const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)ap_long);
-    if (!p || p->reg == arctic::ADV_REG_UNKNOWN) {
+    if (!p || !arctic::advanced_param_reg_known(p->ap)) {
         send_json_error(req, "404 Not Found", "Unknown advanced parameter");
         return ESP_OK;
     }
@@ -3496,7 +3509,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON* root = cJSON_CreateObject();
     char key[8];
     snprintf(key, sizeof(key), "AP%u", (unsigned)p->ap);
-    const bool writable = (p->reg != arctic::ADV_REG_UNKNOWN) && !p->needs_sim_confirm &&
+    const bool writable = arctic::advanced_param_reg_known(p->ap) && !p->needs_sim_confirm &&
                           !p->read_only && !p->is_trigger;
     cJSON_AddNumberToObject(root, "ap", p->ap);
     cJSON_AddStringToObject(root, "key", key);
@@ -3516,7 +3529,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON_AddBoolToObject(root, "writable", writable);
     add_ap_enum_options(root, p);
     if (read_ok) {
-        cJSON_AddNumberToObject(root, "value", value);
+        cJSON_AddNumberToObject(root, "value", ap_value_to_client(p->ap, value));
     } else {
         cJSON_AddNullToObject(root, "value");
     }
@@ -3566,7 +3579,7 @@ static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req)
     uint8_t ap = (uint8_t)ap_long;
     
     const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
-    if (!p || p->reg == arctic::ADV_REG_UNKNOWN) {
+    if (!p || !arctic::advanced_param_reg_known(p->ap)) {
         send_json_error(req, "404 Not Found", "Unknown advanced parameter");
         return ESP_OK;
     }
@@ -3593,8 +3606,20 @@ static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req)
     
     // Write through the arctic-macon guardrail (validates range/enum, confirmed
     // register, and write-lock) so we never blind-write an unverified/locked reg.
+    // For enum ("choice") params the body carries an opaque option id, not a
+    // wire value; the library maps the id to a wire code behind advanced_param_write_option.
     bool bus_ok = false;
-    arctic::AdvWriteResult r = advanced_param_write(ap, value, &bus_ok);
+    arctic::AdvWriteResult r;
+    if (arctic::advanced_enum_option_count(ap) > 0) {
+        if (val_long < 0) {
+            send_json_error(req, "400 Bad Request",
+                arctic::adv_write_result_name(arctic::AdvWriteResult::NOT_IN_ENUM));
+            return ESP_OK;
+        }
+        r = advanced_param_write_option(ap, (size_t)val_long, &bus_ok);
+    } else {
+        r = advanced_param_write(ap, value, &bus_ok);
+    }
     if (r != arctic::AdvWriteResult::OK) {
         send_json_error(req, "400 Bad Request", arctic::adv_write_result_name(r));
         return ESP_OK;
@@ -4031,17 +4056,27 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
         const size_t nparam = arctic::advanced_param_count();
         for (size_t i = 0; i < nparam; i++) {
             const arctic::AdvancedParam* p = arctic::advanced_param_at(i);
-            if (!p || p->reg == arctic::ADV_REG_UNKNOWN) continue;
+            if (!p || !arctic::advanced_param_reg_known(p->ap)) continue;
             int16_t value = 0;
             bool read_ok = advanced_param_read(p->ap, &value);
             const char* unit = arctic::advanced_display_unit(p->ap);
             if (!unit) unit = "";
+            // Register-address column: real addresses only in debug/test builds
+            // (see the "Register Address" gating above); blank in production so
+            // the CSV never surfaces the AP register map.
+#ifdef CONFIG_TEST_ENDPOINTS
+            char apaddr[12];
+            snprintf(apaddr, sizeof(apaddr), "%u",
+                     (unsigned)arctic::advanced_register_address(p->ap));
+#else
+            const char* apaddr = "";
+#endif
             if (read_ok) {
-                snprintf(line, sizeof(line), "Parameter,\"%s\",AP%u,%u,%d,%s\r\n",
-                         p->name, (unsigned)p->ap, p->reg, value, unit);
+                snprintf(line, sizeof(line), "Parameter,\"%s\",AP%u,%s,%d,%s\r\n",
+                         p->name, (unsigned)p->ap, apaddr, value, unit);
             } else {
-                snprintf(line, sizeof(line), "Parameter,\"%s\",AP%u,%u,READ_ERROR,%s\r\n",
-                         p->name, (unsigned)p->ap, p->reg, unit);
+                snprintf(line, sizeof(line), "Parameter,\"%s\",AP%u,%s,READ_ERROR,%s\r\n",
+                         p->name, (unsigned)p->ap, apaddr, unit);
             }
             httpd_resp_sendstr_chunk(req, line);
         }

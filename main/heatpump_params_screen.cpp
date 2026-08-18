@@ -169,8 +169,8 @@ static void show_ap_trigger_confirm(uint8_t ap);
 static void ap_trigger_run_cb(lv_event_t* e);
 static void create_ap_section(lv_obj_t* parent);
 static void ap_update_display(int slot);
-static const char* enum_option_label(uint8_t ap, int wire);
-static void enum_option_desc(uint8_t ap, int wire, char* buf, size_t n);
+static const char* enum_option_label(uint8_t ap, int index);
+static void enum_option_desc(uint8_t ap, int index, char* buf, size_t n);
 
 // ============================================================================
 // Demo Setpoints (screen-local)
@@ -794,7 +794,15 @@ static void edit_save_cb(lv_event_t* e) {
         uint8_t ap = (uint8_t)state.current_ap;
         int16_t save_val = (int16_t)roundf(state.edit_value);
         bool bus_ok = false;
-        arctic::AdvWriteResult r = advanced_param_write(ap, save_val, &bus_ok);
+        // Enum ("choice") params store an opaque option id in edit_value; the
+        // library maps the id to a wire code behind advanced_param_write_option.
+        // Scalars write their value directly. The controller never sees the wire code.
+        arctic::AdvWriteResult r;
+        if (arctic::advanced_enum_option_count(ap) > 0) {
+            r = advanced_param_write_option(ap, (size_t)save_val, &bus_ok);
+        } else {
+            r = advanced_param_write(ap, save_val, &bus_ok);
+        }
         if (r == arctic::AdvWriteResult::OK && bus_ok) {
             ESP_LOGI(TAG, "Saved AP%u = %d", (unsigned)ap, save_val);
             // Refresh the row label for this AP.
@@ -887,10 +895,10 @@ static void edit_roller_cb(lv_event_t* e) {
     if (state.current_ap < 0) return;
     const arctic::AdvancedParam* p =
         arctic::advanced_param_lookup((uint8_t)state.current_ap);
-    if (!p || !p->enum_vals) return;
+    if (!p || arctic::advanced_enum_option_count(p->ap) == 0) return;
     uint32_t idx = lv_roller_get_selected(state.edit_roller);
-    if (idx >= p->enum_count) return;
-    state.edit_value = (float)p->enum_vals[idx];
+    if (idx >= arctic::advanced_enum_option_count(p->ap)) return;
+    state.edit_value = (float)idx;  // opaque option id (list index)
     update_edit_value_display();
 }
 
@@ -916,30 +924,32 @@ static void configure_slider_editor(int min_val, int max_val, int value,
     show_configured_editor();
 }
 
-static void configure_enum_editor(const arctic::AdvancedParam* p, int value) {
-    if (!p || !p->enum_vals || p->enum_count == 0) return;
+static void configure_enum_editor(const arctic::AdvancedParam* p, int wire_value) {
+    const size_t count = arctic::advanced_enum_option_count(p->ap);
+    if (!p || count == 0) return;
 
     char options[256] = {};
     size_t used = 0;
-    uint32_t selected = 0;
-    for (uint8_t i = 0; i < p->enum_count; i++) {
+    int sel = arctic::advanced_enum_option_index_for_wire(p->ap, (int16_t)wire_value);
+    uint32_t selected = (sel >= 0) ? (uint32_t)sel : 0;
+    for (size_t i = 0; i < count; i++) {
         const arctic::AdvEnumOption* option = arctic::advanced_enum_option_at(p->ap, i);
         char numeric[16];
         const char* label = nullptr;
         if (option && option->label && option->label[0]) {
             label = i18n_get_key(option->msg_id, option->label);
         } else {
-            snprintf(numeric, sizeof(numeric), "%u", (unsigned)p->enum_vals[i]);
+            snprintf(numeric, sizeof(numeric), "%u", (unsigned)i);
             label = numeric;
         }
         int written = snprintf(options + used, sizeof(options) - used, "%s%s",
                                i == 0 ? "" : "\n", label);
         if (written < 0 || (size_t)written >= sizeof(options) - used) break;
         used += (size_t)written;
-        if ((int)p->enum_vals[i] == value) selected = i;
     }
 
     state.edit_uses_enum = true;
+    state.edit_value = (float)selected;  // opaque option id (list index)
     lv_roller_set_options(state.edit_roller, options, LV_ROLLER_MODE_NORMAL);
     lv_roller_set_selected(state.edit_roller, selected, LV_ANIM_OFF);
     show_configured_editor();
@@ -1015,7 +1025,8 @@ static void update_edit_value_display(void) {
         lv_label_set_text(state.edit_value_label, "--");
         if (state.current_ap >= 0 && state.edit_description) {
             const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
-            if (p && p->enum_vals) lv_label_set_text(state.edit_description, "");
+            if (p && arctic::advanced_enum_option_count(p->ap) > 0)
+                lv_label_set_text(state.edit_description, "");
         }
         return;
     }
@@ -1025,7 +1036,7 @@ static void update_edit_value_display(void) {
     if (state.current_ap >= 0) {
         const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
         char val_buf[32];
-        if (p && p->enum_vals) {
+        if (p && arctic::advanced_enum_option_count(p->ap) > 0) {
             const char* s = enum_option_label((uint8_t)state.current_ap, display_val);
             if (s) snprintf(val_buf, sizeof(val_buf), "%s", s);
             else   snprintf(val_buf, sizeof(val_buf), "%d", display_val);
@@ -1071,18 +1082,19 @@ static void update_edit_value_display(void) {
 // plain-language description; both come from the shared macon library so the
 // controller never hardcodes the wire-code<->meaning mapping.
 
-// Display label for an enum wire code, sourced from the macon library.
-static const char* enum_option_label(uint8_t ap, int wire) {
+// Display label for an enum option id (list index), sourced from the macon library.
+static const char* enum_option_label(uint8_t ap, int index) {
+    if (index < 0) return nullptr;
     const arctic::AdvEnumOption* o =
-        arctic::advanced_enum_option_for_wire(ap, (int16_t)wire);
+        arctic::advanced_enum_option_at(ap, (size_t)index);
     return o ? o->label : nullptr;
 }
 
-// Localized human description of an enum choice. K-ratio options use structured
-// arguments; other enums use their keyed library fallback directly.
-static void enum_option_desc(uint8_t ap, int wire, char* buf, size_t n) {
-    const arctic::AdvEnumOption* o =
-        arctic::advanced_enum_option_for_wire(ap, (int16_t)wire);
+// Localized human description of an enum choice by option id. K-ratio options use
+// structured arguments; other enums use their keyed library fallback directly.
+static void enum_option_desc(uint8_t ap, int index, char* buf, size_t n) {
+    const arctic::AdvEnumOption* o = (index < 0) ? nullptr
+        : arctic::advanced_enum_option_at(ap, (size_t)index);
     if (!o) { if (n) buf[0] = '\0'; return; }
     if (strcmp(o->msg_id, "kratio_none") == 0) {
         snprintf(buf, n, "%s", i18n_get(STR_HP_KRATIO_NONE));
@@ -1096,8 +1108,9 @@ static void enum_option_desc(uint8_t ap, int wire, char* buf, size_t n) {
 // Format a AP parameter's raw register value into a display string.
 static void format_ap_value(const arctic::AdvancedParam* p, int16_t raw,
                             char* buf, size_t n) {
-    if (p->enum_vals) {
-        const char* s = enum_option_label(p->ap, raw);
+    if (arctic::advanced_enum_option_count(p->ap) > 0) {
+        int idx = arctic::advanced_enum_option_index_for_wire(p->ap, raw);
+        const char* s = enum_option_label(p->ap, idx);
         if (s) snprintf(buf, n, "%s", s);
         else   snprintf(buf, n, "%d", raw);
     } else if (arctic::advanced_display_unit(p->ap)) {
@@ -1146,7 +1159,7 @@ static void ap_row_cb(lv_event_t* e) {
 static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
     if (state.ap_display_count >= 64) return;
     const int slot = state.ap_display_count;
-    const bool reg_known = (p->reg != arctic::ADV_REG_UNKNOWN);
+    const bool reg_known = arctic::advanced_param_reg_known(p->ap);
     // Three interactive kinds + a passive locked kind:
     //   trigger   -> tappable, fires a momentary command (confirm dialog)
     //   read_only -> reg known but purpose unclear: displayed, not tappable
@@ -1228,7 +1241,7 @@ static void create_ap_section(lv_obj_t* parent) {
             const arctic::AdvancedParam* p = arctic::advanced_param_at(i);
             if (!p || !cat) continue;
             if (strcmp(p->category, cat) != 0) continue;
-            if (p->reg == arctic::ADV_REG_UNKNOWN) continue;  // hide unverified
+            if (!arctic::advanced_param_reg_known(p->ap)) continue;  // hide unverified
             if (!header_done) {
                 create_section_header(parent, cat);
                 header_done = true;
@@ -1279,7 +1292,7 @@ static void format_detail_temps(const char* tmpl, char* out, size_t out_sz) {
 
 static void show_ap_edit_dialog(uint8_t ap) {
     const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
-    if (!p || p->reg == arctic::ADV_REG_UNKNOWN || p->needs_sim_confirm) return;
+    if (!p || !arctic::advanced_param_reg_known(ap) || p->needs_sim_confirm) return;
 
     state.current_ap = ap;
     state.current_setpoint_type = -1;
@@ -1306,7 +1319,7 @@ static void show_ap_edit_dialog(uint8_t ap) {
     edit_label_set_or_hide(state.edit_detail, detail_buf);
 
     // Enum choices have a live meaning line; numeric sliders do not.
-    if (p->enum_vals) {
+    if (arctic::advanced_enum_option_count(ap) > 0) {
         lv_obj_remove_flag(state.edit_description, LV_OBJ_FLAG_HIDDEN);
         configure_enum_editor(p, v);
     } else {
@@ -1351,7 +1364,7 @@ static void ap_trigger_run_cb(lv_event_t* e) {
 
 static void show_ap_trigger_confirm(uint8_t ap) {
     const arctic::AdvancedParam* p = arctic::advanced_param_lookup(ap);
-    if (!p || !p->is_trigger || p->reg == arctic::ADV_REG_UNKNOWN) return;
+    if (!p || !p->is_trigger || !arctic::advanced_param_reg_known(ap)) return;
     s_trigger_ap = ap;
 
     lv_obj_t* mbox = lv_msgbox_create(lv_layer_top());
