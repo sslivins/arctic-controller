@@ -1,15 +1,19 @@
 """Guard the opaque-Macon boundary in the controller (main/).
 
 The controller must carry ZERO Tuya/Macon protocol knowledge: no register-map
-header, no REG_* register symbols, and no OEM fault-code string literals. All of
-that lives behind the arctic-macon library's typed/opaque APIs.
+header, no REG_* register symbols, no OEM fault-code string literals, no wire
+register numbers, and no raw-register/frame plumbing. All of that lives behind
+the arctic-macon library's typed/opaque APIs — including the passive listener,
+the active bus-master engine, and the observed-window catalog (#123).
 
 Scope of the gate is the controller sources under ``main/`` only, excluding:
-  * ``main/tuya/`` — the Macon master transport shim (relocated into the library
-    in a later phase; not part of the opaque-consumer contract yet).
   * ``advanced_params.{cpp,h}`` — the advanced-parameters *quarantine wrapper*.
     It is the sole controller file allowed to touch raw AP registers/wire codes,
     translating the library's opaque option ids into wire writes (#118).
+
+Note: ``main/tuya/`` (the RS485 transport + master/listener shims) is now IN
+scope — after #123 relocated all frame/register/window decoding into the
+library, those files are pure platform glue and carry no wire knowledge.
 """
 
 import re
@@ -26,7 +30,7 @@ THIS_FILE = Path(__file__).resolve()
 SOURCE_SUFFIXES = {".cpp", ".h", ".hpp", ".c", ".cc"}
 
 # Directories (relative to main/) that are out of scope for the gate.
-EXCLUDED_DIR_PARTS = {"tuya"}
+EXCLUDED_DIR_PARTS = set()
 # Individual files (relative to main/) that are out of scope for the gate.
 EXCLUDED_FILES = {"advanced_params.cpp", "advanced_params.h"}
 # Generated font / image blobs — huge and never contain protocol knowledge.
@@ -62,6 +66,14 @@ INCLUDE_RE = re.compile(r'#\s*include\s*[<"]\s*([A-Za-z0-9_./]+)\s*[>"]')
 # sole excluded consumer (see EXCLUDED_FILES) — it owns the id<->wire mapping.
 FORBIDDEN_ADV_WIRE_META = re.compile(
     r"\benum_vals\b|\benum_count\b|(?:->|\.)wire\b|(?:->|\.)reg\b|\bADV_REG_UNKNOWN\b"
+)
+
+# Raw-register/frame plumbing that #123 relocated into the library. The
+# controller feeds opaque bytes (feedListenerBytes) or drives the library sink
+# (liveIngestSink); it must never name a register base, a per-window register
+# feed, or the observed-window recorder — those all imply wire knowledge.
+FORBIDDEN_RAW_REGISTER_PLUMBING = re.compile(
+    r"\bfeedRegisterWindow\b|\brecordObservedWindow\b|\breg_base\b"
 )
 
 # The arctic-macon library's public headers.
@@ -135,6 +147,17 @@ def test_controller_has_no_advanced_param_wire_metadata():
         "semantic accessors (advanced_param_reg_known, advanced_register_address) "
         "instead (#118). The advanced_params.{cpp,h} quarantine wrapper is the "
         "only file allowed to touch these:\n" + "\n".join(violations)
+    )
+
+
+def test_controller_has_no_raw_register_plumbing():
+    violations = _scan(FORBIDDEN_RAW_REGISTER_PLUMBING)
+    assert not violations, (
+        "main/ must not carry raw-register/frame plumbing (feedRegisterWindow, "
+        "recordObservedWindow, reg_base). Feed opaque bytes via "
+        "feedListenerBytes() or drive the library sink via liveIngestSink(); the "
+        "arctic-macon library owns all register/window decoding (#123):\n"
+        + "\n".join(violations)
     )
 
 

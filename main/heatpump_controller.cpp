@@ -9,6 +9,8 @@
 #include "event_log.h"
 #include "macon_state.h"
 #include "macon_image.h"
+#include "macon_listener.h"
+#include "macon_master.h"
 #include "macon_faults.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -93,6 +95,15 @@ static void ensureImageMutex() {
 
 static inline void imageLock()   { if (s_image_mutex) xSemaphoreTake(s_image_mutex, portMAX_DELAY); }
 static inline void imageUnlock() { if (s_image_mutex) xSemaphoreGive(s_image_mutex); }
+
+// Observed-window diagnostic catalog and the passive/active ingest engines all
+// live in the arctic-macon library, so the controller holds no frame, window,
+// or register knowledge. The listener drains passive-bus bytes; the image sink
+// ingests active-master poll windows. Both write s_image + s_observed under the
+// image lock (the caller serialises access).
+static MaconObservedCatalog s_observed;
+static MaconListener        s_listener(s_image, s_observed);
+static MaconImageSink       s_live_sink(s_image, s_observed);
 
 
 // Compare the freshly-updated s_state against the previous snapshot and record
@@ -506,72 +517,29 @@ uint16_t getRawRegisters(uint16_t* out, uint16_t max_count, uint16_t* base_out) 
     return n;
 }
 
-// ---------------------------------------------------------------------------
-// Observed-window diagnostic catalog
-// ---------------------------------------------------------------------------
-static constexpr uint16_t OBS_WIN_MAX = 64;
-static ObservedWindow s_obs_windows[OBS_WIN_MAX] = {};
-static uint16_t       s_obs_window_count = 0;
-static portMUX_TYPE   s_obs_mux = portMUX_INITIALIZER_UNLOCKED;
-
-void recordObservedWindow(uint16_t field_a, uint16_t field_b, uint8_t known,
-                          const uint8_t* payload, size_t len) {
-    const uint32_t now = getTimeMs();
-    const uint8_t cap = (uint8_t)sizeof(s_obs_windows[0].payload);
-    const uint8_t n = (uint8_t)((len < cap) ? len : cap);
-
-    portENTER_CRITICAL(&s_obs_mux);
-    ObservedWindow* slot = nullptr;
-    for (uint16_t i = 0; i < s_obs_window_count; ++i) {
-        if (s_obs_windows[i].field_a == field_a &&
-            s_obs_windows[i].field_b == field_b) {
-            slot = &s_obs_windows[i];
-            break;
-        }
-    }
-    if (slot == nullptr && s_obs_window_count < OBS_WIN_MAX) {
-        slot = &s_obs_windows[s_obs_window_count++];
-        slot->field_a = field_a;
-        slot->field_b = field_b;
-        slot->hits    = 0;
-    }
-    if (slot != nullptr) {
-        slot->known       = known;
-        slot->hits       += 1;
-        slot->last_ms     = now;
-        slot->payload_len = n;
-        for (uint8_t i = 0; i < n && payload != nullptr; ++i) {
-            slot->payload[i] = payload[i];
-        }
-    }
-    portEXIT_CRITICAL(&s_obs_mux);
+MaconListenerStats getListenerStats() {
+    imageLock();
+    MaconListenerStats s = s_listener.stats();
+    imageUnlock();
+    return s;
 }
 
-uint16_t getObservedWindows(ObservedWindow* out, uint16_t max_count) {
+uint16_t getObservedWindows(MaconObservedWindow* out, uint16_t max_count) {
     if (out == nullptr || max_count == 0) return 0;
-    portENTER_CRITICAL(&s_obs_mux);
-    uint16_t n = (s_obs_window_count < max_count) ? s_obs_window_count : max_count;
+    imageLock();
+    uint16_t n = (uint16_t)s_observed.count();
+    if (n > max_count) n = max_count;
     for (uint16_t i = 0; i < n; ++i) {
-        out[i] = s_obs_windows[i];
+        out[i] = *s_observed.at(i);
     }
-    portEXIT_CRITICAL(&s_obs_mux);
+    imageUnlock();
     return n;
 }
 
-void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
-    if (!s_feed_mode || regs == nullptr || count == 0) {
-        return;
-    }
-
-    const uint32_t now = getTimeMs();
-
-    // Feed the window into the opaque image; it reports which decode-relevant
-    // windows were covered (status / telemetry) without exposing any register
-    // number to the controller.
-    imageLock();
-    const MaconCoverage cov = s_image.ingest_bytes(reg_base, regs, count);
-    imageUnlock();
-
+// Re-sync HeatPumpState from the freshly-ingested image and update connection
+// bookkeeping. Shared by the passive listener and the active-master paths. The
+// caller must NOT hold the image lock (applyMaconMapping re-acquires it).
+static void applyIngestResult(const MaconCoverage& cov, uint32_t now) {
     // Map the image into HeatPumpState using the library-owned decode.
     applyMaconMapping();
 
@@ -582,7 +550,7 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
     s_state.last_successful_read_ms = now;
     s_state.last_attempt_ms = s_state.last_successful_read_ms;
     s_state.consecutive_failures = 0;
-    // Log operational transitions for the Tuya feed path.
+    // Log operational transitions for the ingest path.
     detectAndLogStateEvents();
     const uint8_t f_run  = s_state.fault_run;
     const uint8_t f_ee   = s_state.fault_ee;
@@ -594,10 +562,44 @@ void feedRegisterWindow(uint16_t reg_base, const uint8_t* regs, size_t count) {
     updateErrorHistory(f_run, f_ee, f_comp, f_elec, f_ref);
 
     if (!s_was_connected) {
-        ESP_LOGI(TAG, "Heat pump connected (passive feed)");
+        ESP_LOGI(TAG, "Heat pump connected");
         s_was_connected = true;
         event_log_record(EVENT_CONNECTED, 0);
     }
+}
+
+void feedListenerBytes(const uint8_t* data, size_t len) {
+    if (!s_feed_mode || data == nullptr || len == 0) {
+        return;
+    }
+
+    const uint32_t now = getTimeMs();
+
+    // The library drains frames and ingests decoded response windows straight
+    // into the opaque image, returning only semantic coverage — no register
+    // number ever crosses back to the controller.
+    imageLock();
+    const MaconFeedResult r = s_listener.feed_bytes(data, len, now);
+    imageUnlock();
+
+    if (!r.any_response) return;
+    applyIngestResult(r.coverage, now);
+}
+
+// --- active bus-master live ingest -----------------------------------------
+MaconWindowSink& liveIngestSink() { return s_live_sink; }
+
+void liveIngestBeginCycle() {
+    imageLock();
+    s_live_sink.set_now_ms(getTimeMs());
+}
+
+void liveIngestEndCycle() {
+    const bool any = s_live_sink.any_since_reset();
+    const MaconCoverage cov = s_live_sink.take_coverage();
+    imageUnlock();
+    if (!any) return;
+    applyIngestResult(cov, getTimeMs());
 }
 
 TelemetrySnapshot getTelemetrySnapshot() {
