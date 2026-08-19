@@ -458,17 +458,53 @@ jobs:
         run: |
           # Production routes are HTTPS-only. Retry transient TLS startup or
           # handshake failures before any authenticated setup or test traffic.
+          #
+          # If the device never answers it may be wedged/offline (e.g. a firmware
+          # panic coinciding with a runner outage — the failure that motivated
+          # this). Because the runner has a direct USB link, attempt a one-shot
+          # esptool hard-reset and re-poll before failing, so the most common
+          # overnight failure self-heals instead of leaving the board wedged for
+          # a human to reset over SSH.
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          for i in $(seq 1 12); do
-            if curl -skf --connect-timeout 5 --max-time 10 \
-              "$ARCTIC_URL_HTTPS/api/health" > /dev/null; then
-              echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> "$GITHUB_ENV"
-              echo "Mandatory HTTPS is ready after attempt $i"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "ERROR: Mandatory HTTPS did not become ready"
+
+          poll_https() {
+            local attempts="$1"
+            for i in $(seq 1 "$attempts"); do
+              if curl -skf --connect-timeout 5 --max-time 10 \
+                "$ARCTIC_URL_HTTPS/api/health" > /dev/null; then
+                echo "Mandatory HTTPS is ready (attempt $i)"
+                return 0
+              fi
+              sleep 2
+            done
+            return 1
+          }
+
+          if poll_https 12; then
+            echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "::warning::HTTPS not ready after initial poll — attempting USB hard-reset recovery"
+          if [ -z "${CONTROLLER_PORT:-}" ]; then
+            echo "::error::Device unreachable and no CONTROLLER_PORT known — cannot recover"
+            exit 1
+          fi
+
+          echo "Hard-resetting controller on $CONTROLLER_PORT via esptool..."
+          esptool.py --port "$CONTROLLER_PORT" --chip esp32p4 \
+            --before default_reset --after hard_reset run || \
+            echo "::warning::esptool reset returned non-zero (continuing to re-poll)"
+
+          # Allow time for the board to boot and rejoin WiFi before re-polling.
+          sleep 20
+          if poll_https 30; then
+            echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> "$GITHUB_ENV"
+            echo "::notice::Device recovered after USB hard-reset"
+            exit 0
+          fi
+
+          echo "::error::Mandatory HTTPS did not become ready even after USB hard-reset recovery"
           exit 1
 
       - name: Provision isolated test credentials

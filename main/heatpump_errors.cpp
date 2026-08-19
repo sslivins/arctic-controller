@@ -15,10 +15,46 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 static const char* TAG = "hp_errors";
 
 namespace arctic {
+
+// ============================================================================
+// Concurrency guard
+// ============================================================================
+// The error-history state below (s_history / s_first_seen / s_prev_regs) is
+// process-global and is written by the poll/feed path and the /api/test/*
+// handlers while it is read concurrently by the UI task and the web/API task.
+// Without synchronization an interleaved reader/writer can observe a torn
+// ring-buffer index or first-seen table and dereference a bad pointer — the
+// store-access-fault panic (MCAUSE 0x7) seen in device-tests. A single mutex
+// serializes every public read and write entry point.
+//
+// The mutex is created on first use. C++11 guarantees thread-safe
+// initialization of the function-local static, so no explicit init call is
+// required. If creation ever fails (heap exhaustion at first touch), the guard
+// degrades to a no-op rather than crashing.
+static SemaphoreHandle_t errorStateMutex() {
+    static SemaphoreHandle_t s_mutex = xSemaphoreCreateMutex();
+    return s_mutex;
+}
+
+namespace {
+struct ErrorStateLock {
+    SemaphoreHandle_t m;
+    ErrorStateLock() : m(errorStateMutex()) {
+        if (m) xSemaphoreTake(m, portMAX_DELAY);
+    }
+    ~ErrorStateLock() {
+        if (m) xSemaphoreGive(m);
+    }
+    ErrorStateLock(const ErrorStateLock&) = delete;
+    ErrorStateLock& operator=(const ErrorStateLock&) = delete;
+};
+}  // namespace
 
 // ============================================================================
 // Severity mapping (library FaultSeverity -> controller ErrorSeverity)
@@ -116,6 +152,7 @@ int getActiveErrors(ActiveError* errors, int max_errors) {
                                    state.fault_ref, faults, MAX_ACTIVE_FAULTS);
     time_t now = time(nullptr);
     int count = 0;
+    ErrorStateLock lock;
     for (size_t i = 0; i < n && count < max_errors; ++i) {
         ActiveError& e = errors[count++];
         e.code = faults[i].code;
@@ -172,6 +209,7 @@ bool describeFaultCode(const char* code, const char** name_out,
 void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
                         uint8_t fault_elec, uint8_t fault_ref) {
     time_t now = time(nullptr);
+    ErrorStateLock lock;
 
     // Decode previous and current fault bytes into opaque fault sites, then diff
     // by site id. The controller never inspects register/bit here — the library
@@ -220,6 +258,7 @@ void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
 
 int getErrorHistory(ErrorHistoryEntry* history, int max_entries) {
     int count = 0;
+    ErrorStateLock lock;
     int idx = (s_history_head - 1 + ERROR_HISTORY_SIZE) % ERROR_HISTORY_SIZE;
 
     for (int i = 0; i < s_history_count && count < max_entries; i++) {
@@ -231,6 +270,7 @@ int getErrorHistory(ErrorHistoryEntry* history, int max_entries) {
 }
 
 void clearErrorHistory() {
+    ErrorStateLock lock;
     s_history_head = 0;
     s_history_count = 0;
     ESP_LOGI(TAG, "Error history cleared");
@@ -239,6 +279,7 @@ void clearErrorHistory() {
 void populateDemoErrorHistory() {
     // Only populate once after boot
     static bool s_demo_seeded = false;
+    ErrorStateLock lock;
     if (s_demo_seeded) return;
     s_demo_seeded = true;
 
