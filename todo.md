@@ -1,5 +1,26 @@
 # Arctic Controller – TODO
 
+## Macon Protocol Opacity (completed 2026-08)
+
+The controller (`main/`) is now opaque to the Tuya/Macon wire protocol and
+register map — all wire/register/fault/scaling/bus knowledge lives behind
+`arctic-macon`. Enforced by `tests/api/test_opaque_macon_controller.py` (7/7).
+
+- [x] Register-map header, `REG_*`, OEM fault codes, and register numbers scrubbed
+      from controller code/comments/strings (#119)
+- [x] WorkingMode write-path uses an explicit opaque map, not raw wire casts (#120)
+- [x] Advanced-param wire metadata quarantined behind a library opaque-option-id
+      API; `advanced_params.{cpp,h}` is the sole id↔wire wrapper (#118)
+- [x] Production diagnostic endpoints (`/raw`, `/windows`, `/diagnostic` CSV)
+      register addresses compile-gated behind `CONFIG_TEST_ENDPOINTS`; the
+      register-map headers are no longer compiled into a production build (#121, #129)
+- [x] Tuya master/listener ingest relocated into `arctic-macon`; gate's
+      `main/tuya/` exclusion dropped (#123)
+- [x] Fan tier derived from library-provided full-scale instead of magic
+      thresholds (#122 — opacity portion; real fan-max calibration still pending)
+- [x] UART bus parameters (4800 8-E-1) owned by the library as data
+      (`MACON_BUS_PARAMS`); transports consume `arctic::macon_uart_config()` (#129)
+
 ## COP / Energy Monitoring
 
 - [ ] Add configurable water flow rate setting (default ~20 L/min, user adjusts to match their circulator pump)
