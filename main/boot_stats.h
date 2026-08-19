@@ -45,6 +45,34 @@ const char* boot_stats_reset_reason_name(esp_reset_reason_t reason);
  */
 void boot_stats_clear(void);
 
+/**
+ * @brief Number of consecutive crash-induced reboots (panic / task WDT /
+ *        interrupt WDT) recorded across boots (NVS). Reset to zero once the
+ *        device proves healthy via boot_stats_note_healthy(). A brief power
+ *        cycle or a clean software reset does not clear it — only a healthy
+ *        boot does — so a genuine crash loop is distinguishable from a one-off.
+ */
+uint32_t boot_stats_panic_streak(void);
+
+/**
+ * @brief True if this boot entered SAFE MODE because the consecutive
+ *        crash-reboot streak reached the safe-mode threshold. In safe mode the
+ *        firmware disables optional/risky subsystems (e.g. demo mode) so a
+ *        crashing optional path cannot hold the device in an unrecoverable
+ *        boot loop. The value is fixed for the duration of the current boot.
+ */
+bool boot_stats_in_safe_mode(void);
+
+/**
+ * @brief Clear the consecutive crash-reboot streak in NVS. Call once the device
+ *        has proven healthy (up for a stability window) so a later isolated
+ *        crash does not immediately re-enter safe mode. Does not change the
+ *        current boot's safe-mode state.
+ * @return true if the streak is now cleared (or was already zero); false if the
+ *         NVS persist failed and the caller should retry later.
+ */
+bool boot_stats_note_healthy(void);
+
 #ifdef __cplusplus
 }
 #endif

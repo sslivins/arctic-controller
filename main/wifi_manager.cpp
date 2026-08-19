@@ -261,7 +261,12 @@ bool wifi_mgr_connect(const char* ssid, const char* password, wifi_mgr_state_cb_
     
     ESP_LOGI(TAG, "Connecting to '%s'...", ssid);
     
-    wifi_state.state_callback = state_callback;
+    // Preserve any previously-registered state callback when the caller passes
+    // NULL (e.g. the WiFi health supervisor reconnecting in the background) so
+    // UI/status updates keep flowing to the app's handler.
+    if (state_callback != NULL) {
+        wifi_state.state_callback = state_callback;
+    }
     
     // Configure WiFi
     wifi_config_t wifi_config = {};
