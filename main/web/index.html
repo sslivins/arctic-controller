@@ -729,14 +729,20 @@
           <p><button class="btn primary" type="submit">Save and connect</button></p></form></section>`;
     }
     function firmwareSettings() {
+      const otaActive = ["downloading", "verifying"].includes(state.ota.state);
+      const showProgress = otaActive || (state.ota.progress != null && state.ota.progress > 0);
       return `<section class="card"><h2>Firmware</h2>
         <div class="kv"><span>Current version</span><strong>${esc(state.ota.current_version || state.info.version || "--")}</strong></div>
         <div class="kv"><span>Update status</span><strong>${esc(titleCase(state.ota.state || "idle"))}</strong></div>
-        ${state.ota.progress ? `<div class="kv"><span>Progress</span><strong>${state.ota.progress}%</strong></div>` : ""}
-        <div class="btn-row" style="margin-top:16px"><button class="btn" data-action="check-update">Check for updates</button>
-          ${state.release?.update_available && state.release?.download_ready ? `<button class="btn primary" data-action="install-update">Install ${esc(state.release.latest_version)}</button>` : ""}
+        ${showProgress ? `<div class="kv"><span>Progress</span><strong>${state.ota.progress || 0}%</strong></div>` : ""}
+        ${state.ota.error ? `<div class="notice bad" style="margin-top:16px">Update failed: ${esc(state.ota.error)}</div>` : ""}
+        <div class="btn-row" style="margin-top:16px">
+          ${otaActive
+            ? `<button class="btn" disabled>Installing…</button>`
+            : `<button class="btn" data-action="check-update">Check for updates</button>
+               ${state.release?.update_available && state.release?.download_ready ? `<button class="btn primary" data-action="install-update">Install ${esc(state.release.latest_version)}</button>` : ""}`}
           ${state.ota.state === "ready_to_reboot" ? `<button class="btn primary" data-action="reboot">Reboot now</button>` : ""}</div>
-        ${state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(state.release.latest_version)} is available.` : "The controller is up to date."}</div>` : ""}
+        ${!otaActive && state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(state.release.latest_version)} is available.` : "The controller is up to date."}</div>` : ""}
         <h3 style="margin-top:28px">Upload firmware</h3><form data-form="firmware"><div class="field"><label>ESP-IDF application image (.bin)</label>
           <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit">Upload and install</button></form>
       </section>`;
@@ -1087,7 +1093,10 @@
       if (action === "disconnect-wifi" && confirm("Disconnect from WiFi? This page will close.")) await mutate("/api/wifi/disconnect", { method: "POST" });
       if (action === "sync-time") { await mutate("/api/time/sync", { method: "POST" }, "Time sync started"); }
       if (action === "check-update") { state.release = await mutate("/api/ota/releases", {}, "Update check complete"); render(); }
-      if (action === "install-update" && confirm("Download and install this update?")) await mutate("/api/ota/github", { method: "POST" }, "Update started");
+      if (action === "install-update" && confirm("Download and install this update?")) {
+        await mutate("/api/ota/github", { method: "POST" }, "Update started");
+        state.ota = await api("/api/ota/status").catch(() => state.ota); render();
+      }
       if (action === "reboot" && confirm("Restart the controller now?")) await mutate("/api/ota/reboot", { method: "POST" }, "Controller restarting");
       if (action === "copy-key") { await navigator.clipboard.writeText(state.security.api_key || ""); toast("API key copied", "good"); }
       if (action === "regenerate-key" && confirm("Regenerate the API key? Existing integrations will stop working.")) {
@@ -1243,6 +1252,8 @@
             if (searchFocused) refreshEventResults();
             else render();
           } else if (["home", "status", "errors"].includes(state.route)) render();
+          else if (state.route === "settings" && state.settingsPage === "firmware"
+                   && ota && ota.state && ota.state !== "idle") render();
         } catch (_) {}
       }, 5000);
     }
