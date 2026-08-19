@@ -156,3 +156,9 @@ CONFIG_SPI_FLASH_BYPASS_BLOCK_ERASE=y
 CONFIG_SPI_FLASH_YIELD_DURING_ERASE=y
 CONFIG_ESP_INT_WDT_TIMEOUT_MS=8000
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
+# Turn a hung watched task into a recoverable reset instead of a silent warning.
+# The TWDT watches the idle tasks (and the main service loop, which subscribes
+# and feeds it) with a generous 60s window, so this only trips on a genuine
+# hang. esp_restart() from the panic handler then recovers the device
+# unattended, and the boot_stats crash-streak / safe-mode logic bounds any loop.
+CONFIG_ESP_TASK_WDT_PANIC=y

@@ -39,8 +39,10 @@
 #include "app_preferences.h"
 #include "event_log.h"
 #include "boot_stats.h"
+#include "wifi_supervisor.h"
 #include "telemetry_history.h"
 #include "log_buffer.h"
+#include "esp_task_wdt.h"
 
 static const char* TAG = "main";
 
@@ -249,12 +251,34 @@ extern "C" void app_main(void)
     boot_stats_init(reset_reason);
     event_log_record_reset_reason(reset_reason);
 
+    // Crash-loop recovery: if the device has crash-rebooted repeatedly, boot
+    // into SAFE MODE and skip optional/risky subsystems (e.g. demo mode) so a
+    // crashing optional path cannot hold the device in an unrecoverable loop.
+    const bool safe_mode = boot_stats_in_safe_mode();
+    if (safe_mode) {
+        ESP_LOGE(TAG, "*** SAFE MODE active (%lu consecutive crash reboots) — "
+                 "optional subsystems disabled this boot ***",
+                 (unsigned long)boot_stats_panic_streak());
+    }
+
     // Initialize demo state or one of the two Macon/Tuya bus modes.
+    //
+    // Safe-mode policy: safe mode disables the OPTIONAL demo subsystem (the
+    // crash-prone path) but never the bus, which is the device's core function.
+    // A demo-configured unit that enters safe mode must NOT fall through to the
+    // active bus master (a degraded demo unit must not start driving RS485), so
+    // it runs a passive, no-I/O feed instead. A production (non-demo) unit runs
+    // its bus integration normally even in safe mode.
+    bool demo_wanted = false;
 #if CONFIG_DEMO_MODE
-    if (app_prefs_is_demo_mode()) {
+    demo_wanted = app_prefs_is_demo_mode();
+    if (demo_wanted && !safe_mode) {
         mclog::tagInfo(TAG, "Demo mode enabled - initializing demo state");
         arctic::initDemoState();
         arctic::startDemoSync();
+    } else if (demo_wanted && safe_mode) {
+        mclog::tagWarn(TAG, "SAFE MODE: demo suppressed and active bus NOT started on a demo device");
+        arctic::initExternalFeed();
     } else
 #endif
     {
@@ -319,6 +343,10 @@ extern "C" void app_main(void)
     // Start WiFi initialization in background task (runs parallel to animation)
     xTaskCreate(wifi_init_task, "wifi_init", 4096, NULL, 5, NULL);
 
+    // Start the WiFi health supervisor: recovers from prolonged connection loss
+    // (reconnect, then reboot as a last resort). Passive while WiFi is healthy.
+    wifi_supervisor_start();
+
     // Start periodic heap monitor (every 60s) to detect memory leaks
     {
         esp_timer_handle_t heap_timer;
@@ -333,8 +361,31 @@ extern "C" void app_main(void)
         esp_timer_start_periodic(heap_timer, 60 * 1000000ULL);  // 60 seconds
     }
 
+    // Subscribe the main service loop to the Task Watchdog. With
+    // CONFIG_ESP_TASK_WDT_PANIC=y a hung loop (or a starved idle task) now
+    // triggers a recoverable reset instead of a silent hang. The 60s window is
+    // generous; the loop below feeds it every iteration.
+    esp_err_t twdt_add = esp_task_wdt_add(NULL);
+    if (twdt_add != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to subscribe main loop to Task Watchdog: %s",
+                 esp_err_to_name(twdt_add));
+    }
+
+    // Crash-loop health: clear the consecutive crash-reboot streak only after
+    // the device has stayed up for a stability window (not merely reached the
+    // UI). This is deliberately decoupled from OTA mark-valid: a firmware that
+    // boots but then panics a minute later (e.g. in a background subsystem, the
+    // signature of the outage this guards against) must accumulate its streak
+    // and eventually trip safe mode, which an at-UI-creation clear would defeat.
+    const int64_t boot_us = esp_timer_get_time();
+    const int64_t HEALTH_WINDOW_US = 180LL * 1000000LL;  // 3 minutes
+    bool health_marked = false;
+    int64_t next_health_attempt_us = HEALTH_WINDOW_US;
+
     // Main loop
     while (1) {
+        esp_task_wdt_reset();
+
         // Update startup animation if running
         if (startup_anim_is_running()) {
             bsp_display_lock(0);
@@ -356,6 +407,20 @@ extern "C" void app_main(void)
             if (ota_mgr_is_pending_verify()) {
                 ESP_LOGI(TAG, "Post-OTA health check passed — marking firmware valid");
                 ota_mgr_mark_valid();
+            }
+        }
+
+        // Once the device has run for the stability window, declare it healthy
+        // and clear the crash streak. On a (rare) NVS persist failure, retry at
+        // a coarse cadence rather than hammering NVS every loop iteration.
+        if (!health_marked) {
+            int64_t uptime_us = esp_timer_get_time() - boot_us;
+            if (uptime_us >= next_health_attempt_us) {
+                if (boot_stats_note_healthy()) {
+                    health_marked = true;
+                } else {
+                    next_health_attempt_us = uptime_us + 5LL * 1000000LL;  // retry in 5s
+                }
             }
         }
         
