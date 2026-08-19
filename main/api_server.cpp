@@ -278,6 +278,16 @@ static bool check_integration_auth(
         authorization + BEARER_PREFIX_LEN, generation_out);
 }
 
+// Accepts either programmatic API-key/session auth (check_api_auth) or a valid
+// integration Bearer token (check_integration_auth). Used by the OTA control
+// endpoints so the Home Assistant integration — already trusted to command the
+// heat pump over /api/v1 — can also check for and start firmware updates with
+// its integration token, not just the X-API-Key/web-session credential.
+static bool check_api_or_integration_auth(httpd_req_t* req)
+{
+    return check_api_auth(req) || check_integration_auth(req);
+}
+
 static void set_session_cookie(httpd_req_t* req, const char* token)
 {
     char cookie[160];
@@ -2598,7 +2608,7 @@ static const char* ota_state_to_string(ota_state_t state)
 
 static esp_err_t ota_status_get_handler(httpd_req_t* req)
 {
-    if (!check_api_auth(req)) {
+    if (!check_api_or_integration_auth(req)) {
         send_json_error(req, "401 Unauthorized", "API key required");
         return ESP_OK;
     }
@@ -2846,7 +2856,7 @@ static esp_err_t ota_reboot_post_handler(httpd_req_t* req)
 
 static esp_err_t ota_releases_get_handler(httpd_req_t* req)
 {
-    if (!check_api_auth(req)) {
+    if (!check_api_or_integration_auth(req)) {
         send_json_error(req, "401 Unauthorized", "API key required");
         return ESP_OK;
     }
@@ -2888,7 +2898,7 @@ static esp_err_t ota_releases_get_handler(httpd_req_t* req)
 
 static esp_err_t ota_github_update_post_handler(httpd_req_t* req)
 {
-    if (!check_api_auth(req)) {
+    if (!check_api_or_integration_auth(req)) {
         send_json_error(req, "401 Unauthorized", "API key required");
         return ESP_OK;
     }
