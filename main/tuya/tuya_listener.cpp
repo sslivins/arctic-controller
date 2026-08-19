@@ -16,6 +16,7 @@
 #include "driver/gpio.h"
 
 #include "macon_bus_config.h"
+#include "macon_uart_params.h"
 #include "heatpump_controller.h"  // arctic::feedListenerBytes / getListenerStats
 
 static const char *TAG = "tuya_listen";
@@ -26,9 +27,9 @@ namespace tuya {
 // Wire configuration
 // ---------------------------------------------------------------------------
 //
-// The real Arctic RS485 bus runs at 4800 baud 8-E-1.
+// The real Arctic RS485 bus runs at the library-owned Macon wire settings
+// (arctic::MACON_BUS_PARAMS — 4800 8-E-1).
 static constexpr uart_port_t UART_PORT   = UART_NUM_1;
-static constexpr int         TUYA_BAUD   = 4800;
 static constexpr size_t      RX_BUF_SIZE = 2048;   // driver ring buffer
 static constexpr size_t      READ_CHUNK  = 256;    // per read_bytes slice
 
@@ -58,7 +59,7 @@ static void rx_task(void *param)
     uint32_t       frames_at_log = 0;
 
     ESP_LOGI(TAG, "Listener task started (RX-only, %d baud 8E1, RX=GPIO%d, DIR=GPIO%d held low)",
-             TUYA_BAUD, arctic::RS485_RX_PIN, arctic::RS485_DIR_PIN);
+             (int)arctic::MACON_BUS_PARAMS.baud, arctic::RS485_RX_PIN, arctic::RS485_DIR_PIN);
 
     for (;;) {
         int n = uart_read_bytes(UART_PORT, buf, sizeof(buf), pdMS_TO_TICKS(50));
@@ -113,13 +114,7 @@ esp_err_t listener_init()
     }
     gpio_set_level((gpio_num_t)arctic::RS485_DIR_PIN, 0);
 
-    uart_config_t cfg = {};
-    cfg.baud_rate = TUYA_BAUD;
-    cfg.data_bits = UART_DATA_8_BITS;
-    cfg.parity    = UART_PARITY_EVEN;
-    cfg.stop_bits = UART_STOP_BITS_1;
-    cfg.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
-    cfg.source_clk = UART_SCLK_DEFAULT;
+    uart_config_t cfg = arctic::macon_uart_config();
 
     err = uart_driver_install(UART_PORT, RX_BUF_SIZE, 0 /*tx*/, 0, nullptr, 0);
     if (err != ESP_OK) {
@@ -144,7 +139,7 @@ esp_err_t listener_init()
 
     s_initialized = true;
     ESP_LOGI(TAG, "Passive Tuya listener initialized (%d baud 8E1, RX=GPIO%d)",
-             TUYA_BAUD, arctic::RS485_RX_PIN);
+             (int)arctic::MACON_BUS_PARAMS.baud, arctic::RS485_RX_PIN);
     return ESP_OK;
 }
 

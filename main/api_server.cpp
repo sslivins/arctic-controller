@@ -18,8 +18,13 @@
 #include "heatpump_types.h"
 #include "macon_master_iface.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
-#include "macon_image.h"   // arctic::MaconField / macon_field_address (opaque address lookup)
+#ifdef CONFIG_TEST_ENDPOINTS
+// Register-map headers are pulled in for the debug/test diagnostic export only
+// (the register-address column + raw fault-register rows). A production image
+// never includes them, so it carries no Macon register map at all.
+#include "macon_image.h"   // arctic::MaconField / macon_field_address
 #include "macon_faults.h"  // arctic::MACON_FAULT_REGS (fault-register addresses)
+#endif
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
 #include "event_log.h"
@@ -3921,17 +3926,18 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
 
     // Register-address column. Real register addresses are emitted only in
     // debug/test builds; a production image ships an opaque CSV with the
-    // address column left blank so the Macon register map is never surfaced.
+    // address column left blank and references no Macon field enum at all, so
+    // the register map is never surfaced (nor even compiled in).
+#ifdef CONFIG_TEST_ENDPOINTS
     char addr[12];
     auto addr_col = [&addr](arctic::MaconField f) -> const char* {
-#ifdef CONFIG_TEST_ENDPOINTS
         snprintf(addr, sizeof(addr), "%u", (unsigned)arctic::macon_field_address(f));
-#else
-        (void)f;
-        addr[0] = '\0';
-#endif
         return addr;
     };
+    #define DIAG_ADDR(field) addr_col(arctic::MaconField::field)
+#else
+    #define DIAG_ADDR(field) ""
+#endif
 
     // UTF-8 BOM so Excel interprets the file correctly (degree signs, accents, etc.)
     httpd_resp_send_chunk(req, "\xEF\xBB\xBF", 3);
@@ -3955,47 +3961,48 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     httpd_resp_sendstr_chunk(req, line);
 
     // --- Temperatures (whole °C, already decoded by the macon library) ---
-    // Addresses come from the library's opaque field->address lookup; the
-    // consumer never hardcodes a wire address.
+    // The address column is populated only in debug/test builds; in production
+    // the field name never appears (DIAG_ADDR expands to "").
     #define DIAG_TEMP(name_str, field, macon_field) \
         snprintf(line, sizeof(line), "Temperature,%s,,%s,%d,°C\r\n", name_str, \
-                 addr_col(macon_field), (int)(field)); \
+                 DIAG_ADDR(macon_field), (int)(field)); \
         httpd_resp_sendstr_chunk(req, line);
 
-    DIAG_TEMP("Water Tank",       hp.water_tank_temp,       arctic::MaconField::WaterTankTemp)
-    DIAG_TEMP("Outlet Water",     hp.outlet_water_temp,     arctic::MaconField::OutletWaterTemp)
-    DIAG_TEMP("Inlet Water",      hp.inlet_water_temp,      arctic::MaconField::InletWaterTemp)
-    DIAG_TEMP("Discharge",        hp.discharge_temp,        arctic::MaconField::DischargeTemp)
-    DIAG_TEMP("Suction",          hp.suction_temp,          arctic::MaconField::SuctionTemp)
-    DIAG_TEMP("Outdoor Coil",     hp.outdoor_coil_temp,     arctic::MaconField::OutdoorCoilTemp)
-    DIAG_TEMP("Indoor Coil",      hp.indoor_coil_temp,      arctic::MaconField::IndoorCoilTemp)
-    DIAG_TEMP("Outdoor Ambient",  hp.outdoor_ambient_temp,  arctic::MaconField::OutdoorAmbientTemp)
-    DIAG_TEMP("IPM Module",       hp.ipm_temp,              arctic::MaconField::IpmTemp)
+    DIAG_TEMP("Water Tank",       hp.water_tank_temp,       WaterTankTemp)
+    DIAG_TEMP("Outlet Water",     hp.outlet_water_temp,     OutletWaterTemp)
+    DIAG_TEMP("Inlet Water",      hp.inlet_water_temp,      InletWaterTemp)
+    DIAG_TEMP("Discharge",        hp.discharge_temp,        DischargeTemp)
+    DIAG_TEMP("Suction",          hp.suction_temp,          SuctionTemp)
+    DIAG_TEMP("Outdoor Coil",     hp.outdoor_coil_temp,     OutdoorCoilTemp)
+    DIAG_TEMP("Indoor Coil",      hp.indoor_coil_temp,      IndoorCoilTemp)
+    DIAG_TEMP("Outdoor Ambient",  hp.outdoor_ambient_temp,  OutdoorAmbientTemp)
+    DIAG_TEMP("IPM Module",       hp.ipm_temp,              IpmTemp)
     #undef DIAG_TEMP
 
     // --- Setpoints (whole °C) ---
-    snprintf(line, sizeof(line), "Setpoint,Cooling,,%s,%d,°C\r\n", addr_col(arctic::MaconField::CoolingSetpoint), hp.cooling_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Cooling,,%s,%d,°C\r\n", DIAG_ADDR(CoolingSetpoint), hp.cooling_setpoint);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Setpoint,Heating,,%s,%d,°C\r\n", addr_col(arctic::MaconField::HeatingSetpoint), hp.heating_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Heating,,%s,%d,°C\r\n", DIAG_ADDR(HeatingSetpoint), hp.heating_setpoint);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Setpoint,Hot Water,,%s,%d,°C\r\n", addr_col(arctic::MaconField::HotWaterSetpoint), hp.hot_water_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Hot Water,,%s,%d,°C\r\n", DIAG_ADDR(HotWaterSetpoint), hp.hot_water_setpoint);
     httpd_resp_sendstr_chunk(req, line);
 
     // --- System Readings (already decoded to whole units by the macon library) ---
-    snprintf(line, sizeof(line), "Reading,Compressor Frequency,,%s,%u,Hz\r\n", addr_col(arctic::MaconField::CompressorFreq), hp.compressor_freq);
+    snprintf(line, sizeof(line), "Reading,Compressor Frequency,,%s,%u,Hz\r\n", DIAG_ADDR(CompressorFreq), hp.compressor_freq);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Fan Speed,,%s,%u,RPM\r\n", addr_col(arctic::MaconField::FanLevel), hp.fan_speed);
+    snprintf(line, sizeof(line), "Reading,Fan Speed,,%s,%u,RPM\r\n", DIAG_ADDR(FanLevel), hp.fan_speed);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,AC Voltage,,%s,%u,V\r\n", addr_col(arctic::MaconField::AcVoltage), hp.ac_voltage);
+    snprintf(line, sizeof(line), "Reading,AC Voltage,,%s,%u,V\r\n", DIAG_ADDR(AcVoltage), hp.ac_voltage);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,AC Current,,%s,%u,A\r\n", addr_col(arctic::MaconField::AcCurrent), hp.ac_current);
+    snprintf(line, sizeof(line), "Reading,AC Current,,%s,%u,A\r\n", DIAG_ADDR(AcCurrent), hp.ac_current);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,DC Voltage,,%s,%.1f,V\r\n", addr_col(arctic::MaconField::DcVoltage), hp.getDcVoltageV());
+    snprintf(line, sizeof(line), "Reading,DC Voltage,,%s,%.1f,V\r\n", DIAG_ADDR(DcVoltage), hp.getDcVoltageV());
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,%s,%u,steps\r\n", addr_col(arctic::MaconField::PrimaryEev), hp.primary_eev_opening);
+    snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,%s,%u,steps\r\n", DIAG_ADDR(PrimaryEev), hp.primary_eev_opening);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Power Consumption,,%s,%lu,W\r\n", addr_col(arctic::MaconField::RealtimePower), (unsigned long)hp.realtime_power_w);
+    snprintf(line, sizeof(line), "Reading,Power Consumption,,%s,%lu,W\r\n", DIAG_ADDR(RealtimePower), (unsigned long)hp.realtime_power_w);
     httpd_resp_sendstr_chunk(req, line);
+    #undef DIAG_ADDR
     if (hp.cop_valid) {
         snprintf(line, sizeof(line), "Reading,Heat Output (est),,,%ld,W\r\n", (long)hp.thermal_w);
         httpd_resp_sendstr_chunk(req, line);
