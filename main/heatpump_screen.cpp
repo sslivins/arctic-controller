@@ -32,7 +32,7 @@ static void format_error_card_text(char* buf, size_t buf_size, const lv_font_t* 
         return;
     }
     
-    // Build first error: "P02: High pressure protection"
+    // Build first error: "<code>: <description>" (both library-provided)
     char first[128];
     snprintf(first, sizeof(first), "\xEF\x81\xB1 %s: %s", errors[0].code, errors[0].description);
     

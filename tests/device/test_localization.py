@@ -21,7 +21,7 @@ from device_client import DeviceClient
 # there is no fictional "status1" bitfield. Faults are injected by their Macon
 # code so the library owns the code->register,bit mapping.
 # ---------------------------------------------------------------------------
-FAN_MED = 45  # fan_speed byte level -> 2 bars
+FAN_MED = 450  # fan RPM (reg2003 raw ×10) -> 2 bars
 
 # Default demo fault (matches initDemoState()).
 DEMO_FAULT = "P02"
