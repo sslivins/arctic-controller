@@ -47,7 +47,7 @@ struct HeatPumpState {
     
     // System readings (decoded by the macon library from the real Tuya window)
     uint16_t compressor_freq = 0;    // Hz
-    uint16_t fan_speed = 0;          // raw DC fan-motor level (0..~72), owned by macon lib
+    uint16_t fan_speed = 0;          // fan speed in RPM (raw DC motor level ×10, ~0..720), owned by macon lib
     uint16_t ac_voltage = 0;         // V
     uint16_t ac_current = 0;         // A
     uint16_t dc_voltage = 0;         // V (volts; unit conversion owned by macon lib)
@@ -92,13 +92,13 @@ struct HeatPumpState {
     // DC bus voltage in volts (already converted by the macon library).
     float getDcVoltageV() const { return static_cast<float>(dc_voltage); }
 
-    // Fan UI level (0=off..3=high) bucketed from the raw fan-motor level.
+    // Fan UI level (0=off..3=high) bucketed from the fan RPM (raw level ×10).
     // TODO(fan-rework): replace with bars = round(fan_speed/fan_speed_max*N)
     // once the library exposes fan_speed + fan_speed_max.
     int getFanSpeedLevel() const {
         if (!fan_running || fan_speed == 0) return 0;
-        if (fan_speed >= 60) return 3;
-        if (fan_speed >= 30) return 2;
+        if (fan_speed >= 600) return 3;
+        if (fan_speed >= 300) return 2;
         return 1;
     }
 };

@@ -8,7 +8,7 @@ Component/run state is decoded natively by arctic-macon from the real Tuya
 registers, so there is no fictional "status1" bitfield. Tests drive named
 demo fields instead of raw register bits:
   compressor -> compressor_freq (>0 = running)
-  fan bars   -> fan_speed byte level (getFanSpeedLevel buckets)
+  fan bars   -> fan_speed RPM (reg2003 raw ×10; getFanSpeedLevel buckets)
   fan dot    -> fan_on
   pump       -> pump_on
 Faults are injected by their Macon code via inject_fault()/clear_all_faults().
@@ -21,10 +21,10 @@ import pytest
 from device_client import DeviceClient
 
 # ---------------------------------------------------------------------------
-# fan_speed (reg2003) byte-level values -> UI fan level (getFanSpeedLevel):
-#   0 -> 0 bars, 1..29 -> 1 bar, 30..59 -> 2 bars, >=60 -> 3 bars
+# fan_speed is the fan RPM (reg2003 raw ×10) -> UI fan level (getFanSpeedLevel):
+#   0 -> 0 bars, 1..299 -> 1 bar, 300..599 -> 2 bars, >=600 -> 3 bars
 # ---------------------------------------------------------------------------
-FAN_OFF, FAN_LOW, FAN_MED, FAN_HIGH = 0, 20, 45, 80
+FAN_OFF, FAN_LOW, FAN_MED, FAN_HIGH = 0, 200, 450, 700
 
 # Working modes
 MODE_COOLING       = 0
@@ -292,18 +292,17 @@ class TestPerformanceStrip:
     """Verify performance strip values update from demo state."""
 
     def test_fan_rpm_displayed(self, device: DeviceClient):
-        """Fan speed should show its value when the fan is running.
+        """Fan speed should show its RPM value when the fan is running.
 
-        NOTE: fan_speed is now the Macon byte-level fan value (reg2003), not a
-        true RPM; the label still reads "<value> RPM" pending the fan-level
-        rework (see sun-peaks TODO).
+        fan_speed is the fan RPM (reg2003 raw ×10); the label reads
+        "<value> RPM".
         """
         device.clear_all_faults()
-        _running(device, fan_speed=45)
+        _running(device, fan_speed=450)
         _wait_for_update()
         fan = device.find_widget(tag="perf_fan")
         assert fan is not None, "perf_fan widget not found"
-        assert "45" in fan.text, f"Expected '45' in fan text, got '{fan.text}'"
+        assert "450" in fan.text, f"Expected '450' in fan text, got '{fan.text}'"
         assert "RPM" in fan.text, f"Expected 'RPM' in fan text, got '{fan.text}'"
 
     def test_fan_rpm_dashes_when_stopped(self, device: DeviceClient):

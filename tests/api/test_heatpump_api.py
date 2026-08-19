@@ -263,14 +263,14 @@ class TestDemoModeInjection:
         assert temps["outdoor"] == 22
 
     def test_inject_compressor_readings(self):
-        """Inject compressor freq and fan level and verify in readings."""
-        # fan_speed is now the Macon byte-level fan value (reg2003), reported
-        # as fan_rpm; it is not an actual RPM. 45 falls in the "medium" bucket.
-        _inject_demo({"compressor_freq": 75, "fan_speed": 45})
+        """Inject compressor freq and fan speed and verify in readings."""
+        # fan_speed is the fan RPM (reg2003 raw ×10). 450 RPM falls in the
+        # "medium" bucket (300..599 => 2 bars).
+        _inject_demo({"compressor_freq": 75, "fan_speed": 450})
         time.sleep(1.0)
         data = _get("/api/heatpump/status").json()
         assert data["readings"]["compressor_freq"] == 75
-        assert data["readings"]["fan_rpm"] == 45
+        assert data["readings"]["fan_rpm"] == 450
 
     def test_inject_electrical_readings(self):
         """Inject voltage/current and verify they are reflected in status."""
@@ -426,9 +426,9 @@ class TestDemoFaultControlViaDemoEndpoint:
 #   aux_heater -> not currently mapped from any Tuya register (always false)
 # We drive each via the named demo fields so tests never touch raw bit layout.
 
-# fan_speed (reg2003) byte-level thresholds -> UI level (getFanSpeedLevel):
-#   0 -> 0, 1..29 -> 1, 30..59 -> 2, >=60 -> 3
-_FAN_OFF, _FAN_LOW, _FAN_MED, _FAN_HIGH = 0, 20, 45, 80
+# fan_speed is the fan RPM (reg2003 raw ×10) -> UI level (getFanSpeedLevel):
+#   0 -> 0, 1..299 -> 1, 300..599 -> 2, >=600 -> 3
+_FAN_OFF, _FAN_LOW, _FAN_MED, _FAN_HIGH = 0, 200, 450, 700
 
 
 class TestComponentStateManipulation:
