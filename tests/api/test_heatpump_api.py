@@ -426,8 +426,9 @@ class TestDemoFaultControlViaDemoEndpoint:
 #   aux_heater -> not currently mapped from any Tuya register (always false)
 # We drive each via the named demo fields so tests never touch raw bit layout.
 
-# fan_speed is the fan RPM (reg2003 raw ×10) -> UI level (getFanSpeedLevel):
-#   0 -> 0, 1..299 -> 1, 300..599 -> 2, >=600 -> 3
+# fan_speed is the fan RPM (reg2003 raw ×10). getFanSpeedLevel buckets it as a
+# percentage of the library-provided max (fan_speed_max = 1000 RPM):
+#   0 -> 0, <33% -> 1, 33..65% -> 2, >=66% -> 3. Demo values below are RPM.
 _FAN_OFF, _FAN_LOW, _FAN_MED, _FAN_HIGH = 0, 200, 450, 700
 
 

@@ -21,8 +21,9 @@ import pytest
 from device_client import DeviceClient
 
 # ---------------------------------------------------------------------------
-# fan_speed is the fan RPM (reg2003 raw ×10) -> UI fan level (getFanSpeedLevel):
-#   0 -> 0 bars, 1..299 -> 1 bar, 300..599 -> 2 bars, >=600 -> 3 bars
+# fan_speed is the fan RPM (reg2003 raw ×10). getFanSpeedLevel buckets it as a
+# percentage of the library-provided max (fan_speed_max = 1000 RPM):
+#   0 -> 0 bars, <33% -> 1 bar, 33..65% -> 2 bars, >=66% -> 3 bars
 # ---------------------------------------------------------------------------
 FAN_OFF, FAN_LOW, FAN_MED, FAN_HIGH = 0, 200, 450, 700
 

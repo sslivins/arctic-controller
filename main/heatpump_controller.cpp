@@ -467,6 +467,7 @@ static void applyMaconMapping() {
     s_state.working_mode    = to_working_mode(ms);
     s_state.operation       = to_operation(ms);
     s_state.fan_speed       = ms.fan_level;
+    s_state.fan_speed_max   = ms.fan_speed_max;
 
     // Electrical readings.
     s_state.ac_current          = ms.ac_current;
