@@ -30,7 +30,7 @@ struct HeatPumpState {
     bool unit_on = false;
     WorkingMode working_mode = WorkingMode::COOLING;
     HeatPumpOperation operation = HeatPumpOperation::UNKNOWN;
-    int16_t cooling_setpoint = 0;    // °C (raw value, may need /10)
+    int16_t cooling_setpoint = 0;    // °C
     int16_t heating_setpoint = 0;    // °C
     int16_t hot_water_setpoint = 0;  // °C
     
@@ -47,7 +47,7 @@ struct HeatPumpState {
     
     // System readings (decoded by the macon library from the real Tuya window)
     uint16_t compressor_freq = 0;    // Hz
-    uint16_t fan_speed = 0;          // fan speed in RPM (raw DC motor level ×10, ~0..720), owned by macon lib
+    uint16_t fan_speed = 0;          // fan speed in RPM (decoded by the macon library)
     uint16_t fan_speed_max = 0;      // full-scale fan speed in RPM (from macon lib); 0 until first read
     uint16_t ac_voltage = 0;         // V
     uint16_t ac_current = 0;         // A
@@ -205,7 +205,7 @@ bool setDemoField(const char* field, int32_t value);
 // controller — the arctic-macon library owns the code namespace).
 // Delegates the code -> (register, bit) mapping to the arctic-macon library so
 // no bit positions are hardcoded here. Returns the number of register-bit sites
-// written (a code such as E28/E05 maps to two sites), or 0 if the code is
+// written (some codes map to two register-bit sites), or 0 if the code is
 // unknown. Demo mode only; re-decodes the register cache before returning.
 int injectDemoFault(const char* code, bool active);
 

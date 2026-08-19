@@ -291,7 +291,7 @@ void initDemoState() {
     s_image.set_value(MaconField::AcCurrent, 5);        // A
     s_image.set_value(MaconField::AcVoltage, 230);      // V
     s_image.set_value(MaconField::DcVoltage, 380);      // V
-    s_image.set_value(MaconField::FanLevel, 400);      // RPM (raw DC motor level ×10)
+    s_image.set_value(MaconField::FanLevel, 400);      // RPM
     s_image.set_value(MaconField::PrimaryEev, 200);     // EEV steps
     s_image.set_value(MaconField::CompressorFreq, 60);  // Hz
     s_image.set_value(MaconField::RealtimePower, 1200); // W
