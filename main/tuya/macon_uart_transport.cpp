@@ -10,6 +10,7 @@
 #include "esp_log.h"
 
 #include "macon_bus_config.h"
+#include "macon_uart_params.h"
 
 static const char *TAG = "macon_tx";
 
@@ -18,7 +19,6 @@ namespace tuya {
 // Master shares the passive listener's port and wire settings. Only one of the
 // two runs (the bus mode is a Kconfig choice), so there is no UART1 conflict.
 static constexpr uart_port_t UART_PORT   = UART_NUM_1;
-static constexpr int         TUYA_BAUD   = 4800;
 static constexpr size_t      RX_BUF_SIZE = 2048;
 static constexpr size_t      TX_BUF_SIZE = 512;
 
@@ -47,13 +47,7 @@ esp_err_t MaconUartTransport::init()
     }
     gpio_set_level((gpio_num_t)arctic::RS485_DIR_PIN, 0);
 
-    uart_config_t cfg = {};
-    cfg.baud_rate  = TUYA_BAUD;
-    cfg.data_bits  = UART_DATA_8_BITS;
-    cfg.parity     = UART_PARITY_EVEN;
-    cfg.stop_bits  = UART_STOP_BITS_1;
-    cfg.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
-    cfg.source_clk = UART_SCLK_DEFAULT;
+    uart_config_t cfg = arctic::macon_uart_config();
 
     err = uart_driver_install(UART_PORT, RX_BUF_SIZE, TX_BUF_SIZE, 0, nullptr, 0);
     if (err != ESP_OK) {
@@ -85,7 +79,7 @@ esp_err_t MaconUartTransport::init()
     initialized_ = true;
     ESP_LOGI(TAG,
              "RS485 half-duplex master UART ready (%d 8E1, TX=GPIO%d RX=GPIO%d DE=GPIO%d)",
-             TUYA_BAUD, arctic::RS485_TX_PIN, arctic::RS485_RX_PIN,
+             (int)arctic::MACON_BUS_PARAMS.baud, arctic::RS485_TX_PIN, arctic::RS485_RX_PIN,
              arctic::RS485_DIR_PIN);
     return ESP_OK;
 }
