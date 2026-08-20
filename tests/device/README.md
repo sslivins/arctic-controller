@@ -138,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (266 UI tests + 9 screenshot API tests + 10 HTTPS tests + 286 REST API tests + 55 web tests + API contract tests)
+### Test Files (267 UI tests + 9 screenshot API tests + 10 HTTPS tests + 286 REST API tests + 55 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|

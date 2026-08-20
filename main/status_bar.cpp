@@ -513,6 +513,11 @@ static void close_dropdown(void)
     }
 }
 
+void status_bar_close_notifications(void)
+{
+    close_dropdown();
+}
+
 static void show_dropdown(void)
 {
     // Close if already open (toggle behavior)
@@ -535,6 +540,7 @@ static void show_dropdown(void)
     
     // Create overlay container that fills the screen (for click-outside-to-close)
     bar_state.notify_dropdown = lv_obj_create(screen);
+    lv_obj_set_user_data(bar_state.notify_dropdown, (void*)"notification_dropdown");
     lv_obj_set_size(bar_state.notify_dropdown, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(bar_state.notify_dropdown, 0, 0);
     lv_obj_set_style_bg_opa(bar_state.notify_dropdown, LV_OPA_50, LV_PART_MAIN);

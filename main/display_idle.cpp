@@ -1,6 +1,7 @@
 #include "display_idle.h"
 #include "app_navigation.h"
 #include "settings/settings_display_screen.h"
+#include "status_bar.h"
 #include <bsp/display.h>
 #include <esp_log.h>
 #include <lvgl.h>
@@ -75,6 +76,9 @@ void display_idle_force_dim(void)
 
 void display_idle_force_off(void)
 {
+    // Dismiss any expanded notification dropdown so the user does not wake the
+    // screen to a stale open panel.
+    status_bar_close_notifications();
     app_navigation_return_home();
     esp_err_t err = bsp_display_brightness_set(0);
     if (err == ESP_OK) {

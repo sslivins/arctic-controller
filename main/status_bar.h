@@ -110,6 +110,15 @@ uint8_t status_bar_get_notify_count(void);
 void status_bar_update_time(void);
 
 /**
+ * @brief Close the notification dropdown if it is open
+ *
+ * Safe to call when the dropdown is already closed. Used to dismiss the
+ * expanded notification panel when the display turns off, so the user does
+ * not wake the screen to a stale open dropdown.
+ */
+void status_bar_close_notifications(void);
+
+/**
  * @brief Delete the status bar and stop its timer
  */
 void status_bar_delete(void);
