@@ -544,8 +544,17 @@ paths:
       tags:
         - OTA
       summary: OTA update status
-      description: Returns current OTA update status, progress, and partition information.
+      description: |
+        Returns current OTA update status, progress, and partition information.
+
+        Also served on the Home Assistant integration server (port 8443); the
+        integration bearer token is accepted in addition to the API key or
+        session cookie.
       operationId: getOtaStatus
+      security:
+        - apiKey: []
+        - sessionCookie: []
+        - integrationBearer: []
       responses:
         '200':
           description: OTA status
@@ -615,10 +624,16 @@ paths:
       description: |
         Queries the controller's configured GitHub releases feed and compares the
         latest release with the currently running firmware.
+
+        Also served on the Home Assistant integration server (port 8443); the
+        integration bearer token is accepted in addition to the API key or
+        session cookie. This is the endpoint the Home Assistant `update` entity
+        polls to detect available firmware.
       operationId: getOtaReleases
       security:
         - apiKey: []
         - sessionCookie: []
+        - integrationBearer: []
       responses:
         '200':
           description: Latest release information
@@ -661,10 +676,16 @@ paths:
       description: |
         Starts an OTA update using the release discovered by
         `GET /api/ota/releases`. Poll `/api/ota/status` for progress.
+
+        Also served on the Home Assistant integration server (port 8443); the
+        integration bearer token is accepted in addition to the API key or
+        session cookie. This is the endpoint the Home Assistant `update` entity
+        calls to install firmware.
       operationId: startGithubOtaUpdate
       security:
         - apiKey: []
         - sessionCookie: []
+        - integrationBearer: []
       responses:
         '200':
           description: GitHub OTA update started
