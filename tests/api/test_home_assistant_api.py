@@ -190,7 +190,23 @@ def test_capabilities_exclude_advanced_and_raw_controls():
     assert data["capabilities"]["raw_registers"] is False
 
 
-def test_state_identity_and_revision_are_ordered():
+def test_capabilities_report_network_identity():
+    token = _issue_test_token()
+    response = _session.get(
+        f"{HA_URL}/api/v1/capabilities",
+        headers=_headers(token),
+        timeout=10,
+    )
+    response.raise_for_status()
+    data = response.json()
+
+    network = data["network"]
+    assert set(network) == {"ip_address", "local_hostname"}
+    assert network["local_hostname"].endswith(".local")
+    assert network["local_hostname"].startswith("arctic-")
+    assert network["ip_address"] is None or (
+        isinstance(network["ip_address"], str) and network["ip_address"]
+    )
     token = _issue_test_token()
     first = _session.get(
         f"{HA_URL}/api/v1/state",
