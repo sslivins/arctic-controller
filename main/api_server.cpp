@@ -514,7 +514,10 @@ bool api_server_start(void)
         httpd_ssl_config_t integration_config = HTTPD_SSL_CONFIG_DEFAULT();
         integration_config.port_secure = 8443;
         integration_config.httpd.ctrl_port = 32771;
-        integration_config.httpd.max_uri_handlers = 8;
+        // 8 core HA handlers (pair, capabilities, state, events/WSS, power,
+        // mode, setpoint + WSS worker) plus the 3 OTA control endpoints the
+        // integration drives (status, releases, github) plus headroom.
+        integration_config.httpd.max_uri_handlers = 12;
         integration_config.httpd.max_open_sockets = 5;
         integration_config.httpd.stack_size = 12288;
         // Reject surplus connections instead of evicting established WSS
@@ -1208,6 +1211,60 @@ bool api_server_start(void)
             api_server_stop();
             return false;
         }
+
+        // OTA control endpoints on the integration server. The Home Assistant
+        // integration connects ONLY to port 8443 with its integration token,
+        // so the firmware "update" entity's check/status/install calls land
+        // here, not on the main server where the OTA routes also live. These
+        // handlers accept the integration Bearer token via
+        // check_api_or_integration_auth. Registered independently of the WPS
+        // websocket since OTA does not depend on it. The raw upload endpoint
+        // (/api/ota/update) is intentionally NOT exposed here.
+        httpd_uri_t ha_ota_status_uri = {
+            .uri = "/api/ota/status",
+            .method = HTTP_GET,
+            .handler = ota_status_get_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(
+            server_integration, &ha_ota_status_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA OTA status: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
+        httpd_uri_t ha_ota_releases_uri = {
+            .uri = "/api/ota/releases",
+            .method = HTTP_GET,
+            .handler = ota_releases_get_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(
+            server_integration, &ha_ota_releases_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA OTA releases: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
+        httpd_uri_t ha_ota_github_uri = {
+            .uri = "/api/ota/github",
+            .method = HTTP_POST,
+            .handler = ota_github_update_post_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(
+            server_integration, &ha_ota_github_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA OTA github: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
         if (!ha_websocket_start(server_integration)) {
             ESP_LOGE(TAG, "Home Assistant WebSocket push unavailable");
             httpd_ssl_stop(server_integration);
