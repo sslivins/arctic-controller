@@ -2,7 +2,7 @@
  * Home Assistant integration identity and versioned state serialization.
  */
 #include "ha_integration.h"
-
+#include "api_server.h"
 #include "heatpump_controller.h"
 #include "heatpump_errors.h"
 #include "macon_state.h"
@@ -304,6 +304,24 @@ cJSON* createCapabilities()
 
     cJSON* limits = cJSON_AddObjectToObject(root, "setpoint_limits_c");
     addSetpointLimits(limits);
+
+    // Network identity so Home Assistant can surface how it reaches the
+    // controller. Served on the integration server (port 8443), which is the
+    // only server the HA integration talks to. ip_address reflects the current
+    // DHCP lease (null when WiFi is down); local_hostname is the stable mDNS
+    // name (e.g. "arctic-e540.local").
+    cJSON* network = cJSON_AddObjectToObject(root, "network");
+    char ip[16];
+    if (wifi_mgr_get_ip_addr(ip, sizeof(ip))) {
+        cJSON_AddStringToObject(network, "ip_address", ip);
+    } else {
+        cJSON_AddNullToObject(network, "ip_address");
+    }
+    char local_hostname[40];
+    snprintf(local_hostname, sizeof(local_hostname), "%s.local",
+             api_server_get_hostname());
+    cJSON_AddStringToObject(network, "local_hostname", local_hostname);
+
     return root;
 }
 

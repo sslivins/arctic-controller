@@ -2609,8 +2609,9 @@ paths:
       summary: Home Assistant integration capabilities
       description: |
         Returns the stable device identity, protocol version, supported
-        transports, read/control capabilities, and setpoint limits. Production
-        firmware exposes this endpoint only over HTTPS.
+        transports, read/control capabilities, setpoint limits, and network
+        identity (IP address and mDNS hostname). Production firmware exposes
+        this endpoint only over HTTPS.
       operationId: getHomeAssistantCapabilities
       security:
         - integrationBearer: []
@@ -2956,6 +2957,23 @@ components:
                   type: boolean
         setpoint_limits_c:
           type: object
+        network:
+          type: object
+          description: |
+            Network identity so Home Assistant can show how it reaches the
+            controller. Present on firmware that supports it; served on the
+            integration server (port 8443).
+          required: [ip_address, local_hostname]
+          properties:
+            ip_address:
+              type: string
+              nullable: true
+              description: Current IPv4 address, or null when WiFi is down.
+              example: "192.168.1.21"
+            local_hostname:
+              type: string
+              description: Stable mDNS hostname (ends in .local).
+              example: "arctic-e540.local"
 
     HomeAssistantCommandAccepted:
       type: object
