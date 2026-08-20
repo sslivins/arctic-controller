@@ -4,6 +4,13 @@ requests>=2.28
 aiohttp>=3.11
 cryptography>=42
 schemathesis>=3.0
+# Pin jsonschema-rs below 0.50: 0.50.0 (released 2026-08-20) removed the
+# CanonicalSchema.is_satisfiable API that schemathesis's transitive
+# hypothesis-jsonschema (0.23.1) depends on, which breaks schema collection
+# in tests/api/test_api_schema.py with:
+#   AttributeError: 'builtins.CanonicalSchema' object has no attribute 'is_satisfiable'
+# Remove this pin once schemathesis/hypothesis-jsonschema support jsonschema-rs 0.50+.
+jsonschema-rs<0.50
 pyyaml>=6.0
 esptool>=4.0
 pyserial>=3.5
