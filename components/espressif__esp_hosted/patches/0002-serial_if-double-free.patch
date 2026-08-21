@@ -1,0 +1,49 @@
+diff --git a/host/drivers/virtual_serial_if/serial_if.c b/host/drivers/virtual_serial_if/serial_if.c
+index 569b099..17d77f5 100644
+--- a/host/drivers/virtual_serial_if/serial_if.c
++++ b/host/drivers/virtual_serial_if/serial_if.c
+@@ -185,30 +185,38 @@ int transport_pserial_send(uint8_t* data, uint16_t data_length)
+ 	buf_len = SIZE_OF_TYPE + SIZE_OF_LENGTH + strlen(ep_name) +
+ 		SIZE_OF_TYPE + SIZE_OF_LENGTH + data_length;
+ 
+-	HOSTED_CALLOC(uint8_t,write_buf,buf_len,free_bufs);
++	HOSTED_CALLOC(uint8_t,write_buf,buf_len,free_bufs2);
+ 
+ 	if (!serial_handle) {
+ 		ESP_LOGE(TAG, "Serial connection closed?\n");
+-		goto free_bufs;
++		goto free_bufs1;
+ 	}
+ 
+ 	count = compose_tlv(write_buf, data, data_length);
+ 	if (!count) {
+ 		ESP_LOGE(TAG, "Failed to compose TX data\n");
+-		goto free_bufs;
++		goto free_bufs1;
+ 	}
+ 
+ 	ret = serial_drv_write(serial_handle, write_buf, count, &count);
+ 	if (ret != SUCCESS) {
+ 		ESP_LOGE(TAG, "Failed to write TX data\n");
+-		goto free_bufs;
++		/* Local backport of the upstream esp-hosted-mcu free_bufs1/free_bufs2
++		 * split. Once write_buf is handed to serial_drv_write() its ownership
++		 * passes to esp_hosted_tx(), which frees it on every path -- including
++		 * the !transport_up error branch (sdio_drv.c). Freeing it again here
++		 * double-frees the same block -> tlsf_free "block already marked as
++		 * free" assert -> panic/crash-loop when the C6 link is down. So on a
++		 * write failure we must NOT free write_buf. */
++		goto free_bufs2;
+ 	}
+ 	return SUCCESS;
+-free_bufs:
++free_bufs1:
+ 	if (write_buf) {
+ 		g_h.funcs->_h_free(write_buf);
+ 	}
+-
++free_bufs2:
++	/* write_buf is supposed to be freed by serial_drv_write() */
+ 	return FAILURE;
+ }
+ 
