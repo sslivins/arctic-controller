@@ -1,0 +1,41 @@
+diff --git a/host/port/include/os_wrapper.h b/host/port/include/os_wrapper.h
+index 19d5fe2..fb14fdf 100644
+--- a/host/port/include/os_wrapper.h
++++ b/host/port/include/os_wrapper.h
+@@ -101,17 +101,29 @@ enum {
+ /* without alignment */
+ #define MALLOC(x)                        malloc(x)
+ 
+-/* This is [malloc + aligned DMA] */
++/* This is [malloc + aligned DMA].
++ * ESP32-P4 GDMA can DMA to/from PSRAM through the cache path, so prefer PSRAM
++ * (MALLOC_CAP_SPIRAM) and fall back to internal DMA-capable SRAM. This keeps the
++ * dynamically-grown streaming SDIO RX buffer (up to ~32KB under sustained inbound,
++ * e.g. a ~2MB OTA download) OFF the scarce internal DMA SRAM pool. Under OTA heap
++ * pressure that pool otherwise fails to satisfy the contiguous DMA allocation,
++ * esp_dma_capable_malloc returns "Not enough heap", MEM_ALLOC yields NULL and the
++ * streaming path trips assert(*buf) in sdio_rx_get_buffer (sdio_drv.c:670) -> panic.
++ * Host-side backport of esp-hosted-mcu 2.12.8 (MEMPOOL_PREFER_SPIRAM); no C6 reflash. */
+ #define MEM_ALLOC(x)       ({                                       \
++	void *tmp_buf = NULL;                                           \
++	size_t actual_size = 0;                                         \
+ 	esp_dma_mem_info_t dma_mem_info = {                             \
+-		.extra_heap_caps = 0,                                       \
++		.extra_heap_caps = MALLOC_CAP_SPIRAM,                       \
+ 		.dma_alignment_bytes = 64,                                  \
+ 	};                                                              \
+-	void *tmp_buf = NULL;                                           \
+-	size_t actual_size = 0;                                         \
+-	esp_err_t err = ESP_OK;                                         \
+-	err = esp_dma_capable_malloc((x), &dma_mem_info, &tmp_buf, &actual_size);\
+-	if (err) tmp_buf = NULL;                                        \
++	if (esp_dma_capable_malloc((x), &dma_mem_info, &tmp_buf, &actual_size) != ESP_OK) \
++		tmp_buf = NULL;                                             \
++	if (!tmp_buf) {                                                 \
++		dma_mem_info.extra_heap_caps = 0;                          \
++		if (esp_dma_capable_malloc((x), &dma_mem_info, &tmp_buf, &actual_size) != ESP_OK) \
++			tmp_buf = NULL;                                         \
++	}                                                               \
+ 	tmp_buf;})
+ 
+ #define FREE(x)                          free(x);

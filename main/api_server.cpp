@@ -2623,6 +2623,15 @@ static esp_err_t info_get_handler(httpd_req_t* req)
     cJSON_AddStringToObject(root, "hostname", hostname);
     cJSON_AddStringToObject(root, "platform", "ESP32-P4");
     cJSON_AddStringToObject(root, "wifi_module", "ESP32-C6");
+
+    // ESP32-C6 co-processor ESP-Hosted firmware version (read at init over RPC).
+    uint32_t c6_maj = 0, c6_min = 0, c6_pat = 0;
+    if (wifi_mgr_get_coprocessor_version(&c6_maj, &c6_min, &c6_pat)) {
+        char c6_ver_str[24];
+        snprintf(c6_ver_str, sizeof(c6_ver_str), "%u.%u.%u",
+                 (unsigned)c6_maj, (unsigned)c6_min, (unsigned)c6_pat);
+        cJSON_AddStringToObject(root, "wifi_module_fw_version", c6_ver_str);
+    }
     
     // Get version from app description
     const esp_app_desc_t* app_desc = esp_app_get_description();

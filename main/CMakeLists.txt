@@ -108,6 +108,7 @@ idf_component_register(
         smooth_ui_toolkit
         esp_wifi
         esp_event
+        esp_hosted
         nvs_flash
         esp_netif
         mdns
