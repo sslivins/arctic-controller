@@ -15,6 +15,7 @@
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
 #include <bsp/m5stack_tab5.h>
+#include <esp_hosted.h>
 
 static const char* TAG = "wifi_mgr";
 
@@ -44,7 +45,13 @@ static struct {
     
     // Connection state callback
     wifi_mgr_state_cb_t state_callback;
-    
+
+    // ESP32-C6 co-processor ESP-Hosted firmware version, read once at init.
+    bool coproc_ver_valid;
+    uint32_t coproc_ver_major;
+    uint32_t coproc_ver_minor;
+    uint32_t coproc_ver_patch;
+
 } wifi_state = {};
 
 static TaskHandle_t api_start_task_handle = NULL;
@@ -168,7 +175,25 @@ bool wifi_mgr_init(void)
     // The co-processor needs time to complete internal initialization
     ESP_LOGI(TAG, "WiFi STA started, waiting for RPC to stabilize...");
     vTaskDelay(pdMS_TO_TICKS(1500));
-    
+
+    // Read the ESP32-C6 co-processor's ESP-Hosted firmware version once, now that
+    // the RPC link is up. Exposed via GET /api/info (wifi_module_fw_version) so the
+    // host/slave ESP-Hosted version compatibility can be checked across the fleet.
+    esp_hosted_coprocessor_fwver_t c6_ver = {};
+    esp_err_t c6_ver_err = esp_hosted_get_coprocessor_fwversion(&c6_ver);
+    if (c6_ver_err == ESP_OK) {
+        wifi_state.coproc_ver_valid = true;
+        wifi_state.coproc_ver_major = c6_ver.major1;
+        wifi_state.coproc_ver_minor = c6_ver.minor1;
+        wifi_state.coproc_ver_patch = c6_ver.patch1;
+        ESP_LOGI(TAG, "ESP32-C6 ESP-Hosted co-processor FW version: %u.%u.%u",
+                 (unsigned)c6_ver.major1, (unsigned)c6_ver.minor1, (unsigned)c6_ver.patch1);
+    } else {
+        wifi_state.coproc_ver_valid = false;
+        ESP_LOGW(TAG, "Could not read ESP32-C6 co-processor FW version: %s",
+                 esp_err_to_name(c6_ver_err));
+    }
+
     wifi_state.initialized = true;
     wifi_state.state = WIFI_MGR_STATE_DISCONNECTED;
     
@@ -596,4 +621,15 @@ bool wifi_mgr_get_mac_addr(uint8_t* mac)
     // For now, return the station MAC
     esp_err_t err = esp_wifi_get_mac(WIFI_IF_STA, mac);
     return (err == ESP_OK);
+}
+
+bool wifi_mgr_get_coprocessor_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
+{
+    if (!wifi_state.coproc_ver_valid) {
+        return false;
+    }
+    if (major) *major = wifi_state.coproc_ver_major;
+    if (minor) *minor = wifi_state.coproc_ver_minor;
+    if (patch) *patch = wifi_state.coproc_ver_patch;
+    return true;
 }

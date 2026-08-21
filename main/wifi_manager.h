@@ -149,6 +149,20 @@ void wifi_mgr_clear_credentials(void);
  */
 bool wifi_mgr_get_mac_addr(uint8_t* mac);
 
+/**
+ * @brief Get the ESP32-C6 co-processor's ESP-Hosted firmware version.
+ *
+ * The version is read once from the co-processor over the ESP-Hosted RPC link
+ * during wifi_mgr_init(). Useful for confirming host/slave ESP-Hosted version
+ * compatibility.
+ *
+ * @param major Out: major version (may be NULL)
+ * @param minor Out: minor version (may be NULL)
+ * @param patch Out: patch version (may be NULL)
+ * @return true if a version was successfully read, false otherwise
+ */
+bool wifi_mgr_get_coprocessor_version(uint32_t* major, uint32_t* minor, uint32_t* patch);
+
 #ifdef __cplusplus
 }
 #endif
