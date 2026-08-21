@@ -1,0 +1,4 @@
+# Reference patch files must keep LF endings so `git apply` works on any
+# platform. Without this, autocrlf would rewrite them to CRLF on checkout and
+# the patches would fail to apply.
+*.patch -text
