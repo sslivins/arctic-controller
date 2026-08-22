@@ -45,8 +45,10 @@ class TestTemperatureHistoryWeb:
         _seed_history(base_url)
         _open_history(dashboard_page)
 
-        labels = dashboard_page.locator(".hist-chart text.hist-axis").all_inner_texts()
-        clock_labels = [t for t in labels if ":" in t]
+        # SVG <text> nodes support textContent (not innerText), so use
+        # all_text_contents() which reads textContent.
+        labels = dashboard_page.locator(".hist-chart text.hist-axis").all_text_contents()
+        clock_labels = [t for t in labels if t and ":" in t]
         assert clock_labels, "expected time labels on the x-axis"
         # Every x-axis time label is rounded to a whole hour (:00).
         assert all(t.endswith(":00") for t in clock_labels)
