@@ -205,6 +205,16 @@
     .btn.danger { color: var(--cp-danger); border-color: var(--cp-danger); }
     .btn:disabled { opacity: .5; cursor: not-allowed; }
     .btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .hist-muted { color: var(--cp-text-muted); margin: 8px 0; }
+    .hist-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .hist-range { font-weight: 600; }
+    .hist-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--cp-text-muted); }
+    .hist-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .hist-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+    .hist-chart-wrap { width: 100%; }
+    .hist-chart { width: 100%; height: auto; display: block; }
+    .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
+    .hist-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
     .field { display: grid; gap: 6px; margin-bottom: 14px; }
     .field label { color: var(--cp-text-muted); font-size: 13px; font-weight: 600; }
     input, select, textarea {
@@ -394,7 +404,8 @@
       ["UTC", "UTC0"]
     ];
     const nav = [
-      ["home", "⌂", "Home"], ["status", "▥", "Status"], ["control", "◉", "Control"], ["events", "≡", "Events"]
+      ["home", "⌂", "Home"], ["status", "▥", "Status"], ["control", "◉", "Control"],
+      ["history", "📈", "History"], ["events", "≡", "Events"]
     ];
     const settingsNav = [
       ["wifi", "WiFi"], ["firmware", "Firmware"], ["time", "Time"], ["display", "Display"],
@@ -411,6 +422,7 @@
       },
       preferences: { temp_unit: "celsius", language_code: "en", brightness: 80 },
       errors: { active: [], history: [] }, params: {}, events: [], eventTotal: 0,
+      tempHistory: { loading: false, error: "", data: null, end: null },
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
       ha: {}, haTimer: null,
@@ -858,6 +870,143 @@
         <div class="field"><label>Confirm password</label><input name="confirm_password" type="password" minlength="12" autocomplete="new-password" required></div>
         <button class="btn primary" type="submit">Save credentials</button></form></div>`;
     }
+    function fmtHistClock(epoch, withDate) {
+      const d = new Date(epoch * 1000);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      if (!withDate) return `${hh}:${mm}`;
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return `${months[d.getMonth()]} ${d.getDate()}, ${hh}:${mm}`;
+    }
+    // Convert raw deci-Celsius to tenths of the user's preferred unit.
+    function histDeciToDisplay(deciC) {
+      return state.preferences.temp_unit === "fahrenheit" ? (deciC * 9 / 5 + 320) : deciC;
+    }
+    async function loadHistory() {
+      state.tempHistory.loading = true; state.tempHistory.error = "";
+      try {
+        const q = state.tempHistory.end ? `?end=${state.tempHistory.end}` : "";
+        state.tempHistory.data = await api(`/api/heatpump/temperature-history${q}`);
+      } catch (error) {
+        state.tempHistory.error = error.message || "Failed to load temperature history";
+      } finally {
+        state.tempHistory.loading = false;
+      }
+    }
+    function historyChartSvg(data) {
+      const samples = data.samples || [];
+      const W = 960, H = 360, L = 58, R = 16, T = 16, B = 34;
+      const plotL = L, plotR = W - R, plotT = T, plotB = H - B;
+      const plotW = plotR - plotL, plotH = plotB - plotT;
+      const start = data.start, end = data.end, span = Math.max(1, end - start);
+      const mapX = t => plotL + (Math.min(Math.max(t, start), end) - start) / span * plotW;
+
+      let lo = Infinity, hi = -Infinity;
+      for (const s of samples) {
+        for (const v of [s.in, s.out, s.set]) {
+          if (v === null || v === undefined) continue;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+      }
+      if (!isFinite(lo)) { lo = 0; hi = 400; }
+      if (hi - lo < 20) { const mid = (hi + lo) / 2; lo = mid - 10; hi = mid + 10; }
+      const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+      const mapY = v => plotB - (v - lo) / (hi - lo) * plotH;
+
+      let svg = `<svg class="hist-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Temperature history chart">`;
+
+      // Mode bands: contiguous running periods tinted by operating mode.
+      const bandColor = { 1: "#ef4444", 2: "#3b82f6", 3: "#fbbf24" };
+      const interval = data.sample_interval_sec || 30;
+      let i = 0;
+      while (i < samples.length) {
+        const s = samples[i];
+        if (!s.run || !(s.mode >= 1 && s.mode <= 3)) { i++; continue; }
+        let j = i + 1;
+        while (j < samples.length && samples[j].run && samples[j].mode === s.mode) j++;
+        const x1 = mapX(s.t), x2 = mapX(samples[j - 1].t + interval);
+        svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${Math.max(1, x2 - x1).toFixed(1)}" height="${plotH}" fill="${bandColor[s.mode]}" opacity="0.13"/>`;
+        i = j;
+      }
+
+      // Horizontal gridlines + y-axis temperature labels.
+      for (let g = 0; g <= 5; g++) {
+        const y = plotB - g / 5 * plotH;
+        svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
+        const val = lo + g / 5 * (hi - lo);
+        svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${(histDeciToDisplay(val) / 10).toFixed(1)}°</text>`;
+      }
+
+      // Vertical gridlines snapped to whole even-hour marks (matches device).
+      const startDate = new Date(start * 1000);
+      const tick = new Date(startDate);
+      tick.setMinutes(0, 0, 0);
+      if (startDate.getMinutes() !== 0 || startDate.getSeconds() !== 0) tick.setHours(tick.getHours() + 1);
+      while (tick.getHours() % 2 !== 0) tick.setHours(tick.getHours() + 1);
+      for (let ts = Math.floor(tick.getTime() / 1000); ts <= end; ts += 2 * 3600) {
+        if (ts < start) continue;
+        const x = mapX(ts);
+        svg += `<line x1="${x.toFixed(1)}" y1="${plotT}" x2="${x.toFixed(1)}" y2="${plotB}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
+        svg += `<text x="${x.toFixed(1)}" y="${plotB + 20}" text-anchor="middle" class="hist-axis">${fmtHistClock(ts, false)}</text>`;
+      }
+
+      // Series paths (setpoint is a step line, temps are smooth polylines).
+      const line = (key, color, step) => {
+        let d = "", pen = false;
+        for (const s of samples) {
+          const v = s[key];
+          if (v === null || v === undefined) { pen = false; continue; }
+          const x = mapX(s.t), y = mapY(v);
+          if (!pen) { d += `M${x.toFixed(1)} ${y.toFixed(1)}`; pen = true; }
+          else if (step) { d += `H${x.toFixed(1)}V${y.toFixed(1)}`; }
+          else { d += `L${x.toFixed(1)} ${y.toFixed(1)}`; }
+        }
+        return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
+      };
+      svg += line("set", "#4ade80", true);
+      svg += line("out", "#fb7185", false);
+      svg += line("in", "#38bdf8", false);
+
+      svg += `</svg>`;
+      return svg;
+    }
+    function historyPage() {
+      const th = state.tempHistory, data = th.data;
+      let body;
+      if (th.loading && !data) {
+        body = `<section class="card"><div class="login" style="min-height:320px"><div class="spinner"></div></div></section>`;
+      } else if (th.error && !data) {
+        body = `<section class="card"><p class="hist-muted">${esc(th.error)}</p></section>`;
+      } else if (!data || !(data.samples && data.samples.length)) {
+        const interval = data ? data.sample_interval_sec : 30;
+        body = `<section class="card"><p class="hist-muted">No temperature history recorded yet. Samples are captured every ${interval}s while the heat pump is connected.</p></section>`;
+      } else {
+        const atLatest = data.end >= data.latest_end;
+        const atOldest = data.start <= data.earliest;
+        const rangeText = `${fmtHistClock(data.start, true)} — ${fmtHistClock(data.end, true)}`;
+        body = `<section class="card">
+          <div class="hist-toolbar">
+            <div class="hist-range">${esc(rangeText)}</div>
+            <div class="hist-legend">
+              <span><i style="background:#38bdf8"></i>Inlet</span>
+              <span><i style="background:#fb7185"></i>Outlet</span>
+              <span><i style="background:#4ade80"></i>Setpoint</span>
+            </div>
+          </div>
+          <div class="hist-chart-wrap">${historyChartSvg(data)}</div>
+          <div class="hist-nav">
+            <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ Earlier</button>
+            <button class="btn" data-action="history-latest" ${atLatest ? "disabled" : ""}>Latest</button>
+            <button class="btn" data-action="history-next" ${atLatest ? "disabled" : ""}>Later ›</button>
+          </div>
+        </section>`;
+      }
+      return `<div class="page">
+        ${pageHead("Temperature history", "Inlet, outlet, and setpoint over the last 8 hours.", `<button class="btn" data-action="history-refresh">Refresh</button>`)}
+        ${body}
+      </div>`;
+    }
     function render() {
       if (!state.auth.checked) {
         $("#app").innerHTML = `<div class="login"><div class="spinner"></div></div>`;
@@ -870,7 +1019,7 @@
         $("#app").innerHTML = credentialChangePage(); return;
       }
       const pages = { home: homePage, status: statusPage, control: controlPage, events: eventsPage,
-        errors: errorsPage, settings: settingsPage };
+        history: historyPage, errors: errorsPage, settings: settingsPage };
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
       if (state.settingsPage === "diagnostics") {
         const logs = $("#log-container"); if (logs) logs.scrollTop = logs.scrollHeight;
@@ -961,11 +1110,13 @@
       stopHaPolling();
       state.route = route;
       if (settingsPage) state.settingsPage = settingsPage;
+      if (route === "history" && !state.tempHistory.data) state.tempHistory.loading = true;
       const targetHash = route === "settings" ? `#/settings/${state.settingsPage}` : `#/${route}`;
       if (location.hash !== targetHash) history.pushState(null, "", targetHash);
       render();
       try {
         if (route === "control" && !Object.keys(state.params).length) await loadParams();
+        if (route === "history") await loadHistory();
         if (route === "events" && !state.events.length) await loadEvents(true);
         if (route === "settings") {
           await ensureSettings();
@@ -1075,6 +1226,20 @@
         state.hp.mode = data.mode || el.dataset.value; render();
       }
       if (action === "reload-params") { await loadParams(); render(); }
+      if (action === "history-refresh") { await loadHistory(); render(); }
+      if (action === "history-latest") { state.tempHistory.end = null; await loadHistory(); render(); }
+      if (action === "history-prev") {
+        const d = state.tempHistory.data;
+        if (d) { state.tempHistory.end = d.start; await loadHistory(); render(); }
+      }
+      if (action === "history-next") {
+        const d = state.tempHistory.data;
+        if (d) {
+          const next = d.end + d.window_seconds;
+          state.tempHistory.end = next >= d.latest_end ? null : next;
+          await loadHistory(); render();
+        }
+      }
       if (action === "load-more-events") { await loadEvents(false); render(); }
       if (action === "clear-events" && confirm("Clear all operational events?")) {
         await mutate("/api/events", { method: "DELETE" }, "Events cleared"); await loadEvents(true); render();
@@ -1224,6 +1389,7 @@
           render();
           await loadCore();
           if (state.route === "control") await loadParams();
+          if (state.route === "history") await loadHistory();
           if (state.route === "events") await loadEvents(true);
           if (state.route === "settings") await ensureSettings();
         }

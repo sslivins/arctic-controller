@@ -1881,6 +1881,102 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/heatpump/temperature-history:
+    get:
+      tags:
+        - HeatPump
+      summary: Get temperature history timeline
+      description: |
+        Returns up to an eight-hour window of telemetry samples (inlet, outlet,
+        and setpoint temperatures plus operating mode and compressor state),
+        mirroring the on-device history graph. Samples are captured every 30
+        seconds and retained for 14 days.
+
+        Temperatures are raw deci-Celsius integers (tenths of a degree), or null
+        when the reading was invalid at capture time; clients convert to the
+        preferred unit. The window ends at `end` (or "now" when omitted) and the
+        axis on the device/web chart is rounded to whole hours for readability.
+        All timestamps are Unix epoch seconds.
+      operationId: getTemperatureHistory
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      parameters:
+        - name: end
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: |
+            Unix epoch seconds for the end of the window. Defaults to the latest
+            aligned sample. Clamped to [window_seconds, latest_end].
+      responses:
+        '200':
+          description: Telemetry timeline
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  start:
+                    type: integer
+                    description: Window start (Unix epoch seconds)
+                  end:
+                    type: integer
+                    description: Window end (Unix epoch seconds)
+                  latest_end:
+                    type: integer
+                    description: Most recent aligned sample timestamp
+                  earliest:
+                    type: integer
+                    description: Oldest timestamp still within retention
+                  window_seconds:
+                    type: integer
+                    description: Window length in seconds (28800 = 8 hours)
+                  sample_interval_sec:
+                    type: integer
+                    description: Seconds between samples (30)
+                  retention_days:
+                    type: integer
+                    description: Days of history retained (14)
+                  samples:
+                    type: array
+                    description: Samples in ascending time order
+                    items:
+                      type: object
+                      properties:
+                        t:
+                          type: integer
+                          description: Sample timestamp (Unix epoch seconds)
+                        in:
+                          type: integer
+                          nullable: true
+                          description: Inlet water temperature (deci-Celsius) or null
+                        out:
+                          type: integer
+                          nullable: true
+                          description: Outlet water temperature (deci-Celsius) or null
+                        set:
+                          type: integer
+                          nullable: true
+                          description: Active setpoint (deci-Celsius) or null
+                        mode:
+                          type: integer
+                          enum: [0, 1, 2, 3]
+                          description: '0=unknown, 1=heating, 2=cooling, 3=hot water'
+                        run:
+                          type: boolean
+                          description: Whether the compressor was running
+                        conn:
+                          type: boolean
+                          description: Whether the heat pump was connected
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/heatpump/errors:
     get:
       tags:

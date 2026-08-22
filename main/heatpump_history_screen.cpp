@@ -227,14 +227,35 @@ static void chart_draw_cb(lv_event_t* event) {
         draw_label(layer, label_area, label, UI_COLOR_TEXT_DIM,
                    LV_TEXT_ALIGN_RIGHT);
     }
-    for (int tick = 0; tick <= 4; tick++) {
-        uint32_t timestamp =
-            state.window_start + (WINDOW_SECONDS * tick / 4);
-        int32_t x = map_x(timestamp, plot);
+    // X-axis gridlines/labels are anchored to whole-hour boundaries in local
+    // time (rounded up to the next even-hour multiple) rather than to the
+    // ragged window edges, so the axis always reads in clean hours
+    // (e.g. 08:00, 10:00, 12:00) regardless of the current minute. The data
+    // window itself still ends at "now" so the last 8 hours stay visible.
+    static constexpr int TICK_STEP_HOURS = 2;
+    time_t tick_time;
+    {
+        time_t start = state.window_start;
+        struct tm t0 = {};
+        localtime_r(&start, &t0);
+        if (t0.tm_min != 0 || t0.tm_sec != 0) {
+            t0.tm_hour += 1;
+        }
+        t0.tm_min = 0;
+        t0.tm_sec = 0;
+        // Snap up to the next multiple of TICK_STEP_HOURS for even spacing.
+        t0.tm_hour +=
+            (TICK_STEP_HOURS - (t0.tm_hour % TICK_STEP_HOURS)) % TICK_STEP_HOURS;
+        t0.tm_isdst = -1;
+        tick_time = mktime(&t0);
+    }
+    for (; tick_time > 0 && (uint32_t)tick_time <= state.window_end;
+         tick_time += TICK_STEP_HOURS * 3600) {
+        if ((uint32_t)tick_time < state.window_start) continue;
+        int32_t x = map_x((uint32_t)tick_time, plot);
         draw_line(layer, {x, plot.y1}, {x, plot.y2}, COLOR_GRID, 1);
-        time_t local_timestamp = timestamp;
         struct tm local = {};
-        localtime_r(&local_timestamp, &local);
+        localtime_r(&tick_time, &local);
         char label[12];
         strftime(label, sizeof(label), "%H:%M", &local);
         lv_area_t label_area = {x - 40, plot.y2 + 10, x + 40, coords.y2};

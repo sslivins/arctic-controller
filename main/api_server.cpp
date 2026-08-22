@@ -27,6 +27,7 @@
 #endif
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
+#include "history_storage.h"
 #include "event_log.h"
 #include "factory_reset.h"
 #include "boot_stats.h"
@@ -156,6 +157,7 @@ static esp_err_t heatpump_errors_clear_handler(httpd_req_t* req);
 static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 #endif
 static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
+static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
 static esp_err_t brownout_clear_handler(httpd_req_t* req);
@@ -937,6 +939,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_errors_clear_uri);
+    
+    // GET /api/heatpump/temperature-history - Telemetry timeline for the web chart
+    httpd_uri_t heatpump_temperature_history_uri = {
+        .uri = "/api/heatpump/temperature-history",
+        .method = HTTP_GET,
+        .handler = heatpump_temperature_history_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_temperature_history_uri);
     
     // GET /api/heatpump/diagnostic - Download diagnostic CSV dump
     httpd_uri_t heatpump_diagnostic_uri = {
@@ -4329,6 +4340,127 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
     return ESP_OK;
 }
 #endif  // CONFIG_DEMO_MODE
+
+// ============================================================================
+// Temperature history API
+// ============================================================================
+
+// GET /api/heatpump/temperature-history[?end=<unix_seconds>]
+// Returns up to an 8-hour window of telemetry samples ending at `end`
+// (default: now), mirroring the on-device history screen. Temperatures are raw
+// deci-Celsius (or null when the reading is invalid); the client converts to
+// the user's preferred unit. The JSON is streamed in chunks so we never build
+// a multi-hundred-KB buffer in RAM for ~960 samples.
+static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    constexpr uint32_t kWindowSeconds = 8 * 60 * 60;
+    constexpr uint32_t kRetentionSeconds =
+        (uint32_t)HISTORY_TELEMETRY_RETENTION_DAYS * 24 * 60 * 60;
+
+    // Latest sample-aligned timestamp ("now" snapped to the sample grid), so
+    // the web window lines up with the on-device chart.
+    uint32_t latest_end = 0;
+    time_t now = 0;
+    time(&now);
+    if (time_mgr_is_synced() && now > 0) {
+        latest_end = ((uint32_t)now + HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC - 1) /
+                     HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC *
+                     HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+    } else {
+        history_storage_latest_telemetry_timestamp(&latest_end);
+        if (latest_end > 0) latest_end += HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+    }
+    if (latest_end == 0) latest_end = kWindowSeconds;
+
+    // Resolve the requested window end, clamped to [kWindowSeconds, latest_end].
+    uint32_t end = latest_end;
+    char query[64];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char param[16];
+        if (httpd_query_key_value(query, "end", param, sizeof(param)) == ESP_OK) {
+            long requested = atol(param);
+            if (requested > 0) end = (uint32_t)requested;
+        }
+    }
+    if (end > latest_end) end = latest_end;
+    if (end < kWindowSeconds) end = kWindowSeconds;
+    uint32_t start = end - kWindowSeconds;
+    uint32_t earliest =
+        latest_end > kRetentionSeconds ? latest_end - kRetentionSeconds : 0;
+
+    history_telemetry_sample_t* samples =
+        (history_telemetry_sample_t*)heap_caps_malloc(
+            sizeof(history_telemetry_sample_t) * HISTORY_TELEMETRY_PAGE_CAPACITY,
+            MALLOC_CAP_SPIRAM);
+    if (!samples) {
+        samples = (history_telemetry_sample_t*)malloc(
+            sizeof(history_telemetry_sample_t) * HISTORY_TELEMETRY_PAGE_CAPACITY);
+    }
+    if (!samples) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+
+    size_t count = 0;
+    esp_err_t err = history_storage_query_telemetry(
+        start, end, samples, HISTORY_TELEMETRY_PAGE_CAPACITY, &count);
+    if (err != ESP_OK) {
+        free(samples);
+        send_json_error(req, "500 Internal Server Error",
+                        "Failed to query telemetry history");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    char line[256];
+    snprintf(line, sizeof(line),
+             "{\"start\":%u,\"end\":%u,\"latest_end\":%u,\"earliest\":%u,"
+             "\"window_seconds\":%u,\"sample_interval_sec\":%u,"
+             "\"retention_days\":%u,\"samples\":[",
+             (unsigned)start, (unsigned)end, (unsigned)latest_end,
+             (unsigned)earliest, (unsigned)kWindowSeconds,
+             (unsigned)HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC,
+             (unsigned)HISTORY_TELEMETRY_RETENTION_DAYS);
+    httpd_resp_sendstr_chunk(req, line);
+
+    for (size_t i = 0; i < count; i++) {
+        const history_telemetry_sample_t& s = samples[i];
+        char in_buf[12], out_buf[12], set_buf[12];
+        if (s.flags & HISTORY_TELEMETRY_INLET_VALID)
+            snprintf(in_buf, sizeof(in_buf), "%d", (int)s.inlet_deci_c);
+        else
+            strcpy(in_buf, "null");
+        if (s.flags & HISTORY_TELEMETRY_OUTLET_VALID)
+            snprintf(out_buf, sizeof(out_buf), "%d", (int)s.outlet_deci_c);
+        else
+            strcpy(out_buf, "null");
+        if (s.flags & HISTORY_TELEMETRY_SETPOINT_VALID)
+            snprintf(set_buf, sizeof(set_buf), "%d", (int)s.setpoint_deci_c);
+        else
+            strcpy(set_buf, "null");
+        bool running = (s.flags & HISTORY_TELEMETRY_COMPRESSOR_VALID) &&
+                       (s.flags & HISTORY_TELEMETRY_COMPRESSOR_RUNNING);
+        bool conn = (s.flags & HISTORY_TELEMETRY_CONNECTED) != 0;
+        snprintf(line, sizeof(line),
+                 "%s{\"t\":%u,\"in\":%s,\"out\":%s,\"set\":%s,"
+                 "\"mode\":%u,\"run\":%s,\"conn\":%s}",
+                 i == 0 ? "" : ",", (unsigned)s.timestamp, in_buf, out_buf,
+                 set_buf, (unsigned)s.mode, running ? "true" : "false",
+                 conn ? "true" : "false");
+        httpd_resp_sendstr_chunk(req, line);
+    }
+    free(samples);
+
+    httpd_resp_sendstr_chunk(req, "]}");
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
 
 // ============================================================================
 // Events API
