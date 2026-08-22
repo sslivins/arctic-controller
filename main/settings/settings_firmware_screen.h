@@ -49,6 +49,20 @@ typedef void (*firmware_update_check_cb_t)(bool update_available, const char* ne
 void firmware_screen_check_for_updates_async(firmware_update_check_cb_t callback);
 
 /**
+ * @brief Publish or clear the firmware-update status-bar notification badge.
+ *
+ * Adds the STATUS_BAR_NOTIFY_FIRMWARE_UPDATE badge (with a
+ * "Firmware vX available" message) when @p update_available is true, or
+ * clears it otherwise. Shared by the automatic check, the manual "Check for
+ * Updates" button, and the mock path so the badge logic can't drift (issue #145).
+ *
+ * @note The caller MUST hold the LVGL/display lock (bsp_display_lock).
+ * @param update_available True if a newer version is available
+ * @param new_version      Version string of the new release (may be NULL/empty)
+ */
+void firmware_screen_apply_update_notification(bool update_available, const char* new_version);
+
+/**
  * @brief Inject a mock firmware check result (for testing).
  * 
  * Sets the latest version and UI state directly, bypassing the GitHub check.

@@ -170,3 +170,62 @@ def test_mock_update_button_not_clicked(device: DeviceClient):
     assert btn.w > 0 and btn.h > 0, "Button should have non-zero size"
 
     device.firmware_mock_reset()
+
+
+# ── notification badge (issue #145) ──────────────────────────────────────
+
+def _firmware_back_to_main(device: DeviceClient):
+    """Return main from the firmware screen without resetting the mock."""
+    device.click(tag="firmware_back")
+    assert device.wait_for_screen("settings", timeout=5.0)
+    time.sleep(0.3)
+    device.click(tag="settings_close")
+    assert device.wait_for_screen("main", timeout=5.0)
+    time.sleep(0.3)
+
+
+def _firmware_badge_present(device: DeviceClient) -> bool:
+    """Open the notification dropdown, report whether the firmware item is
+    present, then close it. An empty dropdown never opens (toggle is a no-op),
+    so clicking twice is safe whether or not a notification exists."""
+    device.click(tag="notifications")
+    time.sleep(0.5)
+    present = device.has_widget(tag="notify_item_firmware")
+    device.click(tag="notifications")
+    time.sleep(0.3)
+    return present
+
+
+def test_manual_check_sets_and_clears_notification_badge(device: DeviceClient):
+    """A manual (mock) check that finds an update must set the status-bar
+    notification badge so it isn't forgotten after leaving the screen, and a
+    later 'up to date' result must clear it (issue #145)."""
+    device.notification_mock_reset()
+
+    # Update available → badge appears.
+    _open_firmware_screen(device)
+    assert _wait_for_check_complete(device, timeout=60.0), \
+        "Firmware check must complete before injecting mock"
+    device.firmware_mock(version="99.0.0", update_available=True)
+    time.sleep(0.5)
+    _firmware_back_to_main(device)
+
+    assert _firmware_badge_present(device), \
+        "Firmware badge should be set after a manual check finds an update"
+
+    # Up to date → badge clears.
+    _open_firmware_screen(device)
+    cur = device.find_widget(tag="firmware_current_version")
+    assert cur is not None
+    m = _VERSION_RE.search(cur.text)
+    assert m, f"Could not extract version from '{cur.text}'"
+    device.firmware_mock(version=m.group(0), update_available=False)
+    time.sleep(0.5)
+    device.firmware_mock_reset()
+    _firmware_back_to_main(device)
+
+    assert not _firmware_badge_present(device), \
+        "Firmware badge should be cleared when a check finds no update"
+
+    device.notification_mock_reset()
+

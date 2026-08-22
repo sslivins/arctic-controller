@@ -585,8 +585,17 @@ static void show_dropdown(void)
         lv_obj_set_style_radius(item, 8, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(item, 0, LV_PART_MAIN);
         lv_obj_add_event_cb(item, notify_item_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
-        
-        // Icon for the notification type
+
+        // Tag the item for language-independent test addressability.
+        const char* item_tag = "notify_item";
+        switch (i) {
+            case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE: item_tag = "notify_item_firmware"; break;
+            case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:   item_tag = "notify_item_wifi";     break;
+            case STATUS_BAR_NOTIFY_LOW_BATTERY:     item_tag = "notify_item_battery";  break;
+            default: break;
+        }
+        lv_obj_set_user_data(item, (void*)item_tag);
+
         lv_obj_t* icon = lv_label_create(item);
         const char* icon_text = LV_SYMBOL_BELL;
         switch (i) {

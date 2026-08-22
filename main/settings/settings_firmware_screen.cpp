@@ -9,8 +9,10 @@
 #include "settings_menu.h"
 #include "settings_common.h"
 #include "ota_manager.h"
+#include "status_bar.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
+#include <bsp/m5stack_tab5.h>
 #include <esp_log.h>
 #include <esp_http_client.h>
 #include <esp_crt_bundle.h>
@@ -513,7 +515,13 @@ static void check_for_updates_task(void* arg)
             update_available = true;
         }
     }
-    
+
+    // Publish/clear the status-bar badge so a manually-found update is
+    // remembered even if the user navigates away without updating (issue #145).
+    bsp_display_lock(0);
+    firmware_screen_apply_update_notification(update_available, latest_ver);
+    bsp_display_unlock();
+
     if (s_state.visible) {
         if (update_available) {
             pending_state = FW_STATE_UPDATE_AVAILABLE;
@@ -600,6 +608,10 @@ void firmware_screen_set_mock_result(const char* latest_version, bool update_ava
     } else {
         update_ui_state(FW_STATE_NO_UPDATE);
     }
+    // Mirror the manual/auto check: a found update sets the badge so it's not
+    // forgotten after leaving the screen (issue #145). Called under the display
+    // lock held by the mock endpoint handler.
+    firmware_screen_apply_update_notification(update_available, latest_version);
     ESP_LOGI(TAG, "Mock firmware result: latest=%s update_available=%d", latest_version, update_available);
 }
 
@@ -607,7 +619,21 @@ void firmware_screen_clear_mock(void)
 {
     if (!s_state.visible) return;
     update_ui_state(FW_STATE_IDLE);
+    // Clear any badge left by a prior mock so tests start pristine.
+    firmware_screen_apply_update_notification(false, NULL);
     ESP_LOGI(TAG, "Mock firmware state cleared");
+}
+
+void firmware_screen_apply_update_notification(bool update_available, const char* new_version)
+{
+    if (update_available) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Firmware v%s available",
+                 (new_version && new_version[0]) ? new_version : "?");
+        status_bar_add_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE, msg);
+    } else {
+        status_bar_clear_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE);
+    }
 }
 
 // ============================================================================
