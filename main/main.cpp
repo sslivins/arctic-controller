@@ -210,6 +210,11 @@ extern "C" void app_main(void)
         }
     };
     display_cfg.lvgl_port_cfg.task_priority = 5;
+    // LVGL 9.5's roller/label draw pipeline (layer-based draw descriptors +
+    // lv_text_get_size_attributes) is noticeably deeper than 9.2's and overflows
+    // the esp_lvgl_port default 7168-byte task stack when the enum-roller editor
+    // opens, panicking taskLVGL with a "Stack protection fault". Give it headroom.
+    display_cfg.lvgl_port_cfg.task_stack = 16384;
     
     lv_display_t* display = bsp_display_start_with_config(&display_cfg);
     if (display == NULL) {
