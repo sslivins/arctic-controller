@@ -79,3 +79,30 @@ def test_temperature_history_strings_exist_in_all_languages():
         "STR_HISTORY_NO_DATA",
     ):
         assert len(re.findall(rf"\[{name}\]\s*=", source)) == 3
+
+
+def test_web_api_exposes_temperature_history_endpoint():
+    source = (MAIN / "api_server.cpp").read_text(encoding="utf-8")
+    assert '"/api/heatpump/temperature-history"' in source
+    assert "heatpump_temperature_history_get_handler" in source
+    # Serves the data straight from the persistent telemetry store.
+    assert "history_storage_query_telemetry" in source
+    # Streamed in chunks so ~960 samples never build a huge in-RAM buffer.
+    assert "httpd_resp_sendstr_chunk" in source
+    # Guarded by the same API auth as the rest of the heatpump API.
+    assert "check_api_auth" in source
+
+
+def test_web_dashboard_has_temperature_history_view():
+    web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
+    # Registered as a first-class nav route and page.
+    assert '["history", ' in web
+    assert "history: historyPage" in web
+    assert "function historyPage" in web
+    assert "function loadHistory" in web
+    assert "function historyChartSvg" in web
+    # Fetches from the streaming endpoint above.
+    assert "/api/heatpump/temperature-history" in web
+    # Same 8-hour window / whole-hour axis rounding as the device chart.
+    assert "getHours() % 2 !== 0" in web
+
