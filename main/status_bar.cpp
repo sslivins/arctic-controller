@@ -390,6 +390,24 @@ uint8_t status_bar_get_notify_count(void)
     return count_active_notifications();
 }
 
+uint8_t status_bar_get_notifications(status_bar_notification_snapshot_t* out, uint8_t max)
+{
+    uint8_t written = 0;
+    for (int i = 0; i < STATUS_BAR_NOTIFY_MAX; i++) {
+        if (!bar_state.notifications[i].active) {
+            continue;
+        }
+        if (out && written < max) {
+            out[written].type = (status_bar_notify_type_t)i;
+            strncpy(out[written].message, bar_state.notifications[i].message,
+                    sizeof(out[written].message) - 1);
+            out[written].message[sizeof(out[written].message) - 1] = '\0';
+            written++;
+        }
+    }
+    return written;
+}
+
 void status_bar_set_wifi_connecting(bool connecting)
 {
     if (connecting == bar_state.wifi_connecting) {

@@ -539,6 +539,56 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/notifications:
+    get:
+      tags:
+        - Status
+      summary: Active status-bar notifications
+      description: |
+        Returns the notifications currently shown on the on-device status-bar
+        bell (firmware update available, unstable WiFi, low battery). The web
+        dashboard uses this to mirror the device notification bell.
+      operationId: getNotifications
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Active notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    description: Number of active notifications
+                    example: 1
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: integer
+                          description: Numeric notification type (0=firmware, 1=wifi, 2=battery)
+                          example: 0
+                        key:
+                          type: string
+                          enum: [firmware_update, wifi_unstable, low_battery, unknown]
+                          description: Stable, language-independent notification key
+                          example: firmware_update
+                        message:
+                          type: string
+                          description: Human-readable notification message
+                          example: Firmware v2.11.13 available
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/ota/status:
     get:
       tags:
