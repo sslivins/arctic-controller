@@ -788,18 +788,13 @@ static void on_update_check_complete(bool update_available, const char* new_vers
 {
     if (update_available) {
         mclog::tagInfo(TAG, "Firmware update available: {}", new_version ? new_version : "?");
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Firmware v%s available", new_version ? new_version : "?");
-        bsp_display_lock(0);
-        status_bar_add_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE, msg);
-        bsp_display_unlock();
     } else {
         mclog::tagInfo(TAG, "Firmware is up to date");
-        // Clear any existing firmware notification
-        bsp_display_lock(0);
-        status_bar_clear_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE);
-        bsp_display_unlock();
     }
+    // Shared helper keeps the auto/manual/mock badge logic in one place (issue #145).
+    bsp_display_lock(0);
+    firmware_screen_apply_update_notification(update_available, new_version);
+    bsp_display_unlock();
 }
 
 // Background task to initialize WiFi during startup animation
