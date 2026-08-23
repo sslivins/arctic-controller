@@ -79,3 +79,32 @@ class TestNotificationBellWeb:
             ).to_be_visible()
         finally:
             _reset_notifications(base_url)
+
+    def test_brownout_notification_reported_and_acknowledged(self, dashboard_page: Page, base_url: str):
+        _reset_notifications(base_url)
+        try:
+            # Type 3 == STATUS_BAR_NOTIFY_BROWNOUT.
+            _add_notification(base_url, ntype=3, message="Brownout detected (2) - check power supply")
+
+            data = dashboard_page.evaluate(
+                "() => fetch('/api/notifications').then(r => r.json())"
+            )
+            keys = [n["key"] for n in data["notifications"]]
+            assert "brownout" in keys
+
+            # Reload so the bell reflects the seeded brownout, then acknowledge it.
+            dashboard_page.reload(wait_until="domcontentloaded")
+            dashboard_page.wait_for_selector(".rail", timeout=10000)
+            dashboard_page.locator(".notif-btn").click()
+            dashboard_page.locator(".notif-item", has_text="Brownout").click()
+
+            # Tapping a brownout notification navigates to the Events log...
+            expect(dashboard_page.locator("#event-search")).to_be_visible()
+
+            # ...and acknowledges it: /api/brownout/clear cleared the badge.
+            after = dashboard_page.evaluate(
+                "() => fetch('/api/notifications').then(r => r.json())"
+            )
+            assert "brownout" not in [n["key"] for n in after["notifications"]]
+        finally:
+            _reset_notifications(base_url)

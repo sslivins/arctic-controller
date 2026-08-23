@@ -610,6 +610,7 @@ static void show_dropdown(void)
             case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE: item_tag = "notify_item_firmware"; break;
             case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:   item_tag = "notify_item_wifi";     break;
             case STATUS_BAR_NOTIFY_LOW_BATTERY:     item_tag = "notify_item_battery";  break;
+            case STATUS_BAR_NOTIFY_BROWNOUT:        item_tag = "notify_item_brownout"; break;
             default: break;
         }
         lv_obj_set_user_data(item, (void*)item_tag);
@@ -625,6 +626,9 @@ static void show_dropdown(void)
                 break;
             case STATUS_BAR_NOTIFY_LOW_BATTERY:
                 icon_text = LV_SYMBOL_BATTERY_EMPTY;
+                break;
+            case STATUS_BAR_NOTIFY_BROWNOUT:
+                icon_text = LV_SYMBOL_CHARGE;
                 break;
             default:
                 break;
@@ -648,6 +652,9 @@ static void show_dropdown(void)
                     break;
                 case STATUS_BAR_NOTIFY_LOW_BATTERY:
                     msg = "Low battery warning";
+                    break;
+                case STATUS_BAR_NOTIFY_BROWNOUT:
+                    msg = "Brownout detected - check power supply";
                     break;
                 default:
                     msg = "Notification";

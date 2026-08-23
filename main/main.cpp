@@ -467,6 +467,18 @@ void create_ui(void)
     if (wifi_init_complete && wifi_mgr_get_state() == WIFI_MGR_STATE_CONNECTED) {
         status_bar_set_wifi_state(true, wifi_mgr_get_connected_ssid());
     }
+
+    // Surface a brownout warning in the notification bell. The brownout counter
+    // is persisted in NVS (boot_stats), so a supply sag survives the reboot it
+    // causes and stays visible until the user acknowledges it (which clears the
+    // counter). Called with the display lock already held by the caller.
+    uint32_t brownouts = boot_stats_brownout_count();
+    if (brownouts > 0) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Brownout detected (%lu) - check power supply",
+                 (unsigned long)brownouts);
+        status_bar_add_notification(STATUS_BAR_NOTIFY_BROWNOUT, msg);
+    }
 }
 
 // ============================================================================
@@ -776,7 +788,14 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
         case STATUS_BAR_NOTIFY_LOW_BATTERY:
             // Just clear (already done above) - no additional action
             break;
-        
+
+        case STATUS_BAR_NOTIFY_BROWNOUT:
+            // Acknowledge the power warning: clear the persistent brownout
+            // counter so it does not re-raise on the next boot. (RAM
+            // notification already cleared above.)
+            boot_stats_clear();
+            break;
+
         default:
             mclog::tagWarn(TAG, "Unknown notification type: {}", (int)type);
             break;

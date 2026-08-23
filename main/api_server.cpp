@@ -4200,6 +4200,7 @@ static const char* notify_type_key(status_bar_notify_type_t type)
         case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE: return "firmware_update";
         case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:   return "wifi_unstable";
         case STATUS_BAR_NOTIFY_LOW_BATTERY:     return "low_battery";
+        case STATUS_BAR_NOTIFY_BROWNOUT:        return "brownout";
         default:                                return "unknown";
     }
 }
@@ -4609,6 +4610,11 @@ static esp_err_t brownout_clear_handler(httpd_req_t* req)
     set_json_content_type(req);
     
     boot_stats_clear();
+    // Also clear the brownout notification badge so acknowledging the counter
+    // from the web/API dismisses the bell everywhere.
+    bsp_display_lock(0);
+    status_bar_clear_notification(STATUS_BAR_NOTIFY_BROWNOUT);
+    bsp_display_unlock();
     httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;
 }
