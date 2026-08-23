@@ -28,6 +28,7 @@
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
 #include "history_storage.h"
+#include "status_bar.h"        // status_bar_get_notifications() for /api/notifications
 #include "event_log.h"
 #include "factory_reset.h"
 #include "boot_stats.h"
@@ -158,6 +159,7 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 #endif
 static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req);
+static esp_err_t notifications_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
 static esp_err_t brownout_clear_handler(httpd_req_t* req);
@@ -948,6 +950,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_temperature_history_uri);
+
+    // GET /api/notifications - Active status-bar notifications (mirrors the device bell)
+    httpd_uri_t notifications_uri = {
+        .uri = "/api/notifications",
+        .method = HTTP_GET,
+        .handler = notifications_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(notifications_uri);
     
     // GET /api/heatpump/diagnostic - Download diagnostic CSV dump
     httpd_uri_t heatpump_diagnostic_uri = {
@@ -4178,6 +4189,55 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
 
     // Terminate chunked response
     httpd_resp_sendstr_chunk(req, NULL);
+    return ESP_OK;
+}
+
+// Stable, language-independent key for each notification type so the web bell
+// can pick an icon / navigation target without parsing the message text.
+static const char* notify_type_key(status_bar_notify_type_t type)
+{
+    switch (type) {
+        case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE: return "firmware_update";
+        case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:   return "wifi_unstable";
+        case STATUS_BAR_NOTIFY_LOW_BATTERY:     return "low_battery";
+        default:                                return "unknown";
+    }
+}
+
+// GET /api/notifications - Active status-bar notifications (mirrors the device bell)
+static esp_err_t notifications_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    status_bar_notification_snapshot_t items[STATUS_BAR_NOTIFY_MAX];
+    bsp_display_lock(0);
+    uint8_t count = status_bar_get_notifications(items, STATUS_BAR_NOTIFY_MAX);
+    bsp_display_unlock();
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "count", count);
+    cJSON* arr = cJSON_AddArrayToObject(root, "notifications");
+    for (uint8_t i = 0; i < count; i++) {
+        cJSON* n = cJSON_CreateObject();
+        cJSON_AddNumberToObject(n, "type", (double)items[i].type);
+        cJSON_AddStringToObject(n, "key", notify_type_key(items[i].type));
+        cJSON_AddStringToObject(n, "message", items[i].message);
+        cJSON_AddItemToArray(arr, n);
+    }
+
+    char* json = cJSON_PrintUnformatted(root);
+    if (json) {
+        httpd_resp_sendstr(req, json);
+        free(json);
+    } else {
+        httpd_resp_sendstr(req, "{\"count\":0,\"notifications\":[]}");
+    }
+    cJSON_Delete(root);
     return ESP_OK;
 }
 

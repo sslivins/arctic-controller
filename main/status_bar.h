@@ -104,6 +104,25 @@ bool status_bar_has_notification(status_bar_notify_type_t type);
 uint8_t status_bar_get_notify_count(void);
 
 /**
+ * @brief A snapshot of one active notification (for the web API / diagnostics).
+ */
+typedef struct {
+    status_bar_notify_type_t type;  // Notification type
+    char message[64];               // Human-readable message
+} status_bar_notification_snapshot_t;
+
+/**
+ * @brief Copy the currently-active notifications into caller-provided storage.
+ *
+ * Lets non-UI code (e.g. the web API) mirror the on-device notification bell.
+ *
+ * @param out Destination array (may be NULL when @p max is 0)
+ * @param max Capacity of @p out
+ * @return Number of active notifications written into @p out (<= max)
+ */
+uint8_t status_bar_get_notifications(status_bar_notification_snapshot_t* out, uint8_t max);
+
+/**
  * @brief Update time display
  *        Call this periodically or it will auto-update via timer
  */

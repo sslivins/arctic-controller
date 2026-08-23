@@ -137,6 +137,31 @@
       border-radius: 10px; background: var(--cp-surface); color: var(--cp-text);
       display: grid; place-items: center; text-decoration: none;
     }
+    .notif-wrap { position: relative; }
+    .notif-btn { position: relative; cursor: pointer; font-size: 17px; }
+    .notif-badge {
+      position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px;
+      padding: 0 5px; border-radius: 9px; background: var(--cp-danger); color: #fff;
+      font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+    }
+    .notif-panel {
+      position: absolute; top: 46px; right: 0; width: 320px; max-width: 82vw; z-index: 50;
+      background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(0,0,0,.35); overflow: hidden;
+    }
+    .notif-panel h3 { margin: 0; padding: 12px 14px; font-size: 13px; border-bottom: 1px solid var(--cp-border); color: var(--cp-text-muted); }
+    .notif-item {
+      display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+      padding: 12px 14px; border: 0; border-bottom: 1px solid var(--cp-border);
+      background: transparent; color: var(--cp-text); font-size: 14px; cursor: pointer;
+    }
+    .notif-item:last-child { border-bottom: 0; }
+    .notif-item:hover { background: var(--cp-surface-soft); }
+    .notif-item .ni-icon { font-size: 18px; flex: 0 0 auto; }
+    .notif-empty { padding: 18px 14px; color: var(--cp-text-muted); font-size: 13px; text-align: center; }
+    .ota-indeterminate { margin: 12px 0 6px; height: 6px; border-radius: 3px; background: var(--cp-border); overflow: hidden; }
+    .ota-indeterminate-bar { width: 40%; height: 100%; border-radius: 3px; background: var(--cp-accent, #2f81f7); animation: ota-slide 1.3s ease-in-out infinite; }
+    @keyframes ota-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
     .layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: calc(100vh - 64px); }
     .rail {
       position: sticky; top: 64px; align-self: start; height: calc(100vh - 64px);
@@ -425,6 +450,7 @@
       tempHistory: { loading: false, error: "", data: null, end: null },
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
+      notifications: [], notifOpen: false,
       ha: {}, haTimer: null,
       settingsLoaded: false, settingsPromise: null,
       logs: [], logSeq: 0, logLevel: "V", logTimer: null, pollTimer: null,
@@ -502,6 +528,28 @@
       if (state.route === "settings") state.settingsPage = parts[1] || "wifi";
       if (![...nav.map(n => n[0]), "settings", "errors"].includes(state.route)) state.route = "home";
     }
+    const NOTIF_META = {
+      firmware_update: { icon: "⬇️", route: ["settings", "firmware"] },
+      wifi_unstable:   { icon: "📶", route: ["settings", "wifi"] },
+      low_battery:     { icon: "🔋", route: null },
+      unknown:         { icon: "🔔", route: null },
+    };
+    function notifBell() {
+      const items = state.notifications || [];
+      const badge = items.length ? `<span class="notif-badge">${items.length}</span>` : "";
+      const panel = state.notifOpen ? `
+        <div class="notif-panel" data-notif-panel>
+          <h3>Notifications</h3>
+          ${items.length ? items.map((n, i) => {
+            const meta = NOTIF_META[n.key] || NOTIF_META.unknown;
+            return `<button class="notif-item" data-action="notif-open" data-index="${i}">
+              <span class="ni-icon">${meta.icon}</span><span>${esc(n.message || n.key)}</span></button>`;
+          }).join("") : `<div class="notif-empty">No notifications</div>`}
+        </div>` : "";
+      return `<div class="notif-wrap">
+        <button class="icon-btn notif-btn" data-action="notif-toggle" aria-label="Notifications">🔔${badge}</button>
+        ${panel}</div>`;
+    }
     function shell(content) {
       const connected = !!state.hp.connected;
       return `<div class="app">
@@ -511,6 +559,7 @@
             <span class="status-item"><span class="dot ${connected ? "good" : "bad"}"></span>${connected ? "Heat pump online" : "Heat pump offline"}</span>
             <span class="status-item">${esc(state.wifi.ssid || "WiFi disconnected")}</span>
             <span class="status-item">${esc(state.status.time?.local || "--:--")}</span>
+            ${notifBell()}
             <button class="icon-btn" data-route="settings" aria-label="Settings">⚙</button>
             ${state.auth.required ? `<button class="btn" data-action="logout" style="padding:6px 12px;font-size:13px" aria-label="Sign out">Sign out</button>` : ""}
           </div>
@@ -741,20 +790,31 @@
           <p><button class="btn primary" type="submit">Save and connect</button></p></form></section>`;
     }
     function firmwareSettings() {
-      const otaActive = ["downloading", "verifying"].includes(state.ota.state);
-      const showProgress = otaActive || (state.ota.progress != null && state.ota.progress > 0);
+      const inst = state.otaInstall;
+      const installing = inst && inst.active;
+      const installDone = inst && !inst.active && inst.phase === "done";
+      const installFailed = inst && !inst.active && (inst.phase === "failed" || inst.phase === "timeout");
+      const indeterminate = installing && ["starting", "applying", "rebooting"].includes(inst.phase);
+      const otaActive = installing || ["downloading", "verifying"].includes(state.ota.state);
+      const showProgress = !inst && (["downloading", "verifying"].includes(state.ota.state) || (state.ota.progress != null && state.ota.progress > 0));
       return `<section class="card"><h2>Firmware</h2>
-        <div class="kv"><span>Current version</span><strong>${esc(state.ota.current_version || state.info.version || "--")}</strong></div>
-        <div class="kv"><span>Update status</span><strong>${esc(titleCase(state.ota.state || "idle"))}</strong></div>
+        <div class="kv"><span>Current version</span><strong>${esc((installDone && inst.newVersion) || state.ota.current_version || state.info.version || "--")}</strong></div>
+        <div class="kv"><span>Update status</span><strong>${esc(inst ? OTA_PHASE_LABEL[inst.phase] : titleCase(state.ota.state || "idle"))}</strong></div>
+        ${installing && inst.phase === "downloading" ? `<div class="kv"><span>Progress</span><strong>${inst.progress || 0}%</strong></div>` : ""}
+        ${indeterminate ? `<div class="ota-indeterminate"><div class="ota-indeterminate-bar"></div></div>
+          <div class="metric-sub">The controller is writing the new firmware and will reboot. This can take a couple of minutes and the connection will drop briefly — that's expected.</div>` : ""}
         ${showProgress ? `<div class="kv"><span>Progress</span><strong>${state.ota.progress || 0}%</strong></div>` : ""}
-        ${state.ota.error ? `<div class="notice bad" style="margin-top:16px">Update failed: ${esc(state.ota.error)}</div>` : ""}
+        ${installDone ? `<div class="notice good" style="margin-top:16px">Updated to ${esc(inst.newVersion || inst.target || "the latest version")} ✓</div>` : ""}
+        ${installFailed ? `<div class="notice bad" style="margin-top:16px">${inst.phase === "timeout" ? "The device is taking longer than expected. Reload the page to check its status." : "Update failed: " + esc(inst.error || "unknown error")}</div>` : ""}
+        ${!inst && state.ota.error ? `<div class="notice bad" style="margin-top:16px">Update failed: ${esc(state.ota.error)}</div>` : ""}
         <div class="btn-row" style="margin-top:16px">
-          ${otaActive
-            ? `<button class="btn" disabled>Installing…</button>`
+          ${installing
+            ? `<button class="btn" disabled>${indeterminate ? "Applying…" : "Installing…"}</button>`
             : `<button class="btn" data-action="check-update">Check for updates</button>
-               ${state.release?.update_available && state.release?.download_ready ? `<button class="btn primary" data-action="install-update">Install ${esc(state.release.latest_version)}</button>` : ""}`}
-          ${state.ota.state === "ready_to_reboot" ? `<button class="btn primary" data-action="reboot">Reboot now</button>` : ""}</div>
-        ${!otaActive && state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(state.release.latest_version)} is available.` : "The controller is up to date."}</div>` : ""}
+               ${state.release?.update_available && state.release?.download_ready ? `<button class="btn primary" data-action="install-update">Install ${esc(state.release.latest_version)}</button>` : ""}
+               ${(installDone || installFailed) ? `<button class="btn" data-action="ota-dismiss">Dismiss</button>` : ""}`}
+          ${!installing && state.ota.state === "ready_to_reboot" ? `<button class="btn primary" data-action="reboot">Reboot now</button>` : ""}</div>
+        ${!otaActive && !inst && state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(state.release.latest_version)} is available.` : "The controller is up to date."}</div>` : ""}
         <h3 style="margin-top:28px">Upload firmware</h3><form data-form="firmware"><div class="field"><label>ESP-IDF application image (.bin)</label>
           <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit">Upload and install</button></form>
       </section>`;
@@ -1029,10 +1089,11 @@
     async function loadCore() {
       const results = await Promise.allSettled([
         api("/api/info"), api("/api/status"), api("/api/wifi"), api("/api/heatpump/status"),
-        api("/api/preferences"), api("/api/heatpump/errors"), api("/api/ota/status")
+        api("/api/preferences"), api("/api/heatpump/errors"), api("/api/ota/status"), api("/api/notifications")
       ]);
       const values = results.map(r => r.status === "fulfilled" ? r.value : {});
       [state.info, state.status, state.wifi, state.hp, state.preferences, state.errors, state.ota] = values;
+      state.notifications = values[7].notifications || [];
     }
     async function loadParams() { const data = await api("/api/heatpump/advanced"); state.params = data.params || {}; }
     async function loadEvents(reset = false) {
@@ -1220,7 +1281,75 @@
         xhr.send(file);
       }
     }
+    const OTA_PHASE_LABEL = {
+      starting: "Starting update…",
+      downloading: "Downloading firmware…",
+      applying: "Applying update & rebooting…",
+      rebooting: "Applying update & rebooting…",
+      done: "Update complete",
+      failed: "Update failed",
+      timeout: "Still finishing…",
+    };
+
+    // Drives the OTA install UI through its full lifecycle. The device stops its
+    // web server before erasing/writing flash (to avoid a C6 SDIO wedge), so the
+    // browser loses connection mid-install — we treat that loss as "applying &
+    // rebooting" and wait for the device to come back on the new version.
+    async function startInstallWatch() {
+      const startVersion = state.ota.current_version || state.info.version || "";
+      state.otaInstall = {
+        active: true, phase: "starting", startVersion,
+        target: state.release?.latest_version || "", progress: 0,
+        error: "", newVersion: "", started: Date.now(),
+      };
+      render();
+      const TIMEOUT_MS = 5 * 60 * 1000;
+      const tick = async () => {
+        const inst = state.otaInstall;
+        if (!inst || !inst.active) return;
+        if (Date.now() - inst.started > TIMEOUT_MS) {
+          inst.phase = "timeout"; inst.active = false; render(); return;
+        }
+        let ota = null;
+        try { ota = await api("/api/ota/status"); } catch (_) { ota = null; }
+        if (ota) {
+          state.ota = ota;
+          if (ota.state === "downloading") {
+            inst.phase = "downloading"; inst.progress = ota.progress || 0;
+          } else if (ota.state === "verifying") {
+            inst.phase = "applying"; inst.progress = 100;
+          } else if (ota.state === "ready_to_reboot") {
+            inst.phase = "rebooting"; inst.progress = 100;
+          } else if (ota.state === "failed") {
+            inst.phase = "failed"; inst.error = ota.error || "Update failed";
+            inst.active = false; render(); return;
+          } else if (ota.state === "idle") {
+            const advanced = ota.current_version && ota.current_version !== inst.startVersion;
+            if (advanced || ["applying", "rebooting"].includes(inst.phase)) {
+              inst.phase = "done"; inst.active = false;
+              inst.newVersion = ota.current_version || inst.target; render(); return;
+            }
+          }
+        } else if (["starting", "downloading", "applying", "rebooting"].includes(inst.phase)) {
+          // Server unreachable: expected while the device flashes and reboots.
+          inst.phase = "rebooting";
+        }
+        render();
+        setTimeout(tick, 2000);
+      };
+      setTimeout(tick, 1500);
+    }
+
     async function handleAction(action, el) {
+      if (action === "notif-toggle") { state.notifOpen = !state.notifOpen; render(); return; }
+      if (action === "notif-open") {
+        const n = state.notifications[parseInt(el.dataset.index, 10)];
+        state.notifOpen = false;
+        const meta = n && (NOTIF_META[n.key] || NOTIF_META.unknown);
+        if (meta && meta.route) await navigate(meta.route[0], meta.route[1]);
+        else render();
+        return;
+      }
       if (action === "mode") {
         const data = await mutate("/api/heatpump/mode", jsonOptions("PUT", { mode: el.dataset.value }), "Mode changed");
         state.hp.mode = data.mode || el.dataset.value; render();
@@ -1260,8 +1389,9 @@
       if (action === "check-update") { state.release = await mutate("/api/ota/releases", {}, "Update check complete"); render(); }
       if (action === "install-update" && confirm("Download and install this update?")) {
         await mutate("/api/ota/github", { method: "POST" }, "Update started");
-        state.ota = await api("/api/ota/status").catch(() => state.ota); render();
+        startInstallWatch();
       }
+      if (action === "ota-dismiss") { state.otaInstall = null; render(); }
       if (action === "reboot" && confirm("Restart the controller now?")) await mutate("/api/ota/reboot", { method: "POST" }, "Controller restarting");
       if (action === "copy-key") { await navigator.clipboard.writeText(state.security.api_key || ""); toast("API key copied", "good"); }
       if (action === "regenerate-key" && confirm("Regenerate the API key? Existing integrations will stop working.")) {
@@ -1318,6 +1448,11 @@
     }
 
     document.addEventListener("click", async event => {
+      // Close the notification panel when clicking outside it (but still let the
+      // click perform its normal action below).
+      if (state.notifOpen && !event.target.closest(".notif-wrap")) {
+        state.notifOpen = false; render();
+      }
       const route = event.target.closest("[data-route]");
       if (route) { event.preventDefault(); await navigate(route.dataset.route); return; }
       const settings = event.target.closest("[data-settings]");
@@ -1408,16 +1543,19 @@
       state.pollTimer = setInterval(async () => {
         if (!state.auth.loggedIn || state.auth.changeRequired) return;
         try {
-          const [status, hp, wifi, ota, errors] = await Promise.all([
-            api("/api/status"), api("/api/heatpump/status"), api("/api/wifi"), api("/api/ota/status"), api("/api/heatpump/errors")
+          const [status, hp, wifi, ota, errors, notif] = await Promise.all([
+            api("/api/status"), api("/api/heatpump/status"), api("/api/wifi"), api("/api/ota/status"), api("/api/heatpump/errors"), api("/api/notifications")
           ]);
           Object.assign(state, { status, hp, wifi, ota, errors });
+          const prevNotifCount = (state.notifications || []).length;
+          state.notifications = notif.notifications || [];
           if (state.route === "events") {
             const searchFocused = document.activeElement?.id === "event-search";
             await loadEvents(true);
             if (searchFocused) refreshEventResults();
             else render();
           } else if (["home", "status", "errors"].includes(state.route)) render();
+          else if (state.notifications.length !== prevNotifCount) render();
           else if (state.route === "settings" && state.settingsPage === "firmware"
                    && ota && ota.state && ota.state !== "idle") render();
         } catch (_) {}
