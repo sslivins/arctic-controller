@@ -28,13 +28,15 @@ def _reset_notifications(base_url: str):
 
 
 class TestNotificationBellWeb:
-    def test_notifications_endpoint_reports_active(self, base_url: str):
+    def test_notifications_endpoint_reports_active(self, dashboard_page: Page, base_url: str):
         _reset_notifications(base_url)
         try:
             _add_notification(base_url)
-            r = requests.get(f"{base_url}/api/notifications", timeout=10, verify=False)
-            r.raise_for_status()
-            data = r.json()
+            # Fetch through the browser's own authenticated context (same path
+            # the dashboard uses), so the auth-guarded endpoint is reachable.
+            data = dashboard_page.evaluate(
+                "() => fetch('/api/notifications').then(r => r.json())"
+            )
             assert data["count"] >= 1
             keys = [n["key"] for n in data["notifications"]]
             assert "firmware_update" in keys
@@ -71,9 +73,9 @@ class TestNotificationBellWeb:
             dashboard_page.locator(".notif-btn").click()
             dashboard_page.locator(".notif-item", has_text="Firmware").click()
 
-            # Firmware settings page renders its heading.
+            # Firmware settings page renders its unique "Check for updates" control.
             expect(
-                dashboard_page.get_by_role("heading", name="Firmware")
+                dashboard_page.get_by_role("button", name="Check for updates")
             ).to_be_visible()
         finally:
             _reset_notifications(base_url)
