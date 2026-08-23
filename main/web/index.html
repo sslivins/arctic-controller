@@ -532,6 +532,7 @@
       firmware_update: { icon: "⬇️", route: ["settings", "firmware"] },
       wifi_unstable:   { icon: "📶", route: ["settings", "wifi"] },
       low_battery:     { icon: "🔋", route: null },
+      brownout:        { icon: "⚡", route: ["events", null] },
       unknown:         { icon: "🔔", route: null },
     };
     function notifBell() {
@@ -1345,6 +1346,12 @@
       if (action === "notif-open") {
         const n = state.notifications[parseInt(el.dataset.index, 10)];
         state.notifOpen = false;
+        if (n && n.key === "brownout") {
+          // Acknowledge the power warning: clear the persistent counter so it
+          // does not re-raise, and drop it from the current list immediately.
+          await api("/api/brownout/clear", { method: "POST" }).catch(() => {});
+          state.notifications = state.notifications.filter(x => x.key !== "brownout");
+        }
         const meta = n && (NOTIF_META[n.key] || NOTIF_META.unknown);
         if (meta && meta.route) await navigate(meta.route[0], meta.route[1]);
         else render();

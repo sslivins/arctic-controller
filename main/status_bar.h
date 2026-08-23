@@ -32,6 +32,7 @@ typedef enum {
     STATUS_BAR_NOTIFY_FIRMWARE_UPDATE = 0,  // Firmware update available
     STATUS_BAR_NOTIFY_WIFI_UNSTABLE,        // WiFi connection is unstable
     STATUS_BAR_NOTIFY_LOW_BATTERY,          // Low battery warning
+    STATUS_BAR_NOTIFY_BROWNOUT,             // Brownout reset detected (power sag)
     STATUS_BAR_NOTIFY_MAX
 } status_bar_notify_type_t;
 

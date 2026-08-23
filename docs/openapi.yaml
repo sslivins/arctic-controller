@@ -575,7 +575,7 @@ paths:
                           example: 0
                         key:
                           type: string
-                          enum: [firmware_update, wifi_unstable, low_battery, unknown]
+                          enum: [firmware_update, wifi_unstable, low_battery, brownout, unknown]
                           description: Stable, language-independent notification key
                           example: firmware_update
                         message:
