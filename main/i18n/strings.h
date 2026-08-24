@@ -95,6 +95,7 @@ typedef enum {
     // ========================================================================
     // Status Bar / Notifications
     // ========================================================================
+    STR_NOTIFY_TITLE,
     STR_NOTIFY_UPDATE_AVAILABLE,
     STR_NOTIFY_WIFI_UNSTABLE,
     STR_NOTIFY_LOW_BATTERY,

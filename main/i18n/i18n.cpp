@@ -88,6 +88,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_LANG_RESTART_REQUIRED] = "Restart may be required for full effect",
     
     // Status Bar / Notifications
+    [STR_NOTIFY_TITLE] = "Notifications",
     [STR_NOTIFY_UPDATE_AVAILABLE] = "Update available",
     [STR_NOTIFY_WIFI_UNSTABLE] = "WiFi connection unstable",
     [STR_NOTIFY_LOW_BATTERY] = "Low battery",
@@ -476,6 +477,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_LANG_RESTART_REQUIRED] = "Un redémarrage peut être nécessaire",
     
     // Status Bar / Notifications
+    [STR_NOTIFY_TITLE] = "Notifications",
     [STR_NOTIFY_UPDATE_AVAILABLE] = "Mise à jour disponible",
     [STR_NOTIFY_WIFI_UNSTABLE] = "Connexion WiFi instable",
     [STR_NOTIFY_LOW_BATTERY] = "Batterie faible",
@@ -864,6 +866,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_LANG_RESTART_REQUIRED] = "Puede ser necesario reiniciar",
     
     // Status Bar / Notifications
+    [STR_NOTIFY_TITLE] = "Notificaciones",
     [STR_NOTIFY_UPDATE_AVAILABLE] = "Actualización disponible",
     [STR_NOTIFY_WIFI_UNSTABLE] = "Conexión WiFi inestable",
     [STR_NOTIFY_LOW_BATTERY] = "Batería baja",
