@@ -73,8 +73,11 @@ def test_notification_dropdown_shows_heading(device: DeviceClient):
         assert device.wait_for_widget(tag="notify_title", timeout=3.0), \
             "Expected a 'notify_title' heading in the notification dropdown"
         title = device.find_widget(tag="notify_title")
-        assert title is not None and title.text_en == "Notifications", \
-            f"Expected heading text 'Notifications', got '{getattr(title, 'text_en', None)}'"
+        assert title is not None, "notify_title heading widget should exist"
+        # In English the visible text is the heading; text_en is only populated
+        # when a translated (non-English) string is shown.
+        assert "Notifications" in (title.text, title.text_en), \
+            f"Expected heading text 'Notifications', got text='{title.text}' text_en='{title.text_en}'"
     finally:
         # Close the dropdown and clean up
         device.click(tag="notifications")
