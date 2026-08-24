@@ -6,6 +6,7 @@
 #include "time_manager.h"
 #include "settings/settings_time_screen.h"
 #include "wifi_manager.h"
+#include "i18n/i18n.h"
 #include <esp_log.h>
 #include <string.h>
 
@@ -570,7 +571,7 @@ static void show_dropdown(void)
     
     // Create the dropdown panel inside the overlay
     lv_obj_t* panel = lv_obj_create(bar_state.notify_dropdown);
-    lv_obj_set_size(panel, 500, count * 90 + 30);  // 90px per item + padding
+    lv_obj_set_size(panel, 500, count * 90 + 30 + 44);  // heading + 90px per item + padding
     lv_obj_align(panel, LV_ALIGN_TOP_RIGHT, -25, STATUS_BAR_HEIGHT + 10);
     lv_obj_set_style_bg_color(panel, lv_color_hex(COLOR_DROPDOWN_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
@@ -586,7 +587,21 @@ static void show_dropdown(void)
     lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
     // Stop click events from propagating to overlay
     lv_obj_add_flag(panel, LV_OBJ_FLAG_CLICKABLE);
-    
+
+    // Panel heading ("Notifications"), mirroring the web dashboard bell panel.
+    lv_obj_t* title = lv_label_create(panel);
+    lv_obj_set_user_data(title, (void*)"notify_title");
+    lv_label_set_text(title, i18n_get(STR_NOTIFY_TITLE));
+    lv_obj_set_width(title, LV_PCT(100));
+    lv_obj_set_style_text_font(title, FONT_DROPDOWN_TEXT, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, lv_color_hex(0x8b949e), LV_PART_MAIN);
+    lv_obj_set_style_pad_left(title, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(title, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_bottom(title, 8, LV_PART_MAIN);
+    lv_obj_set_style_border_side(title, LV_BORDER_SIDE_BOTTOM, LV_PART_MAIN);
+    lv_obj_set_style_border_width(title, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(title, lv_color_hex(0x30363d), LV_PART_MAIN);
+
     // Add notification items
     for (int i = 0; i < STATUS_BAR_NOTIFY_MAX; i++) {
         if (!bar_state.notifications[i].active) {

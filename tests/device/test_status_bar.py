@@ -51,6 +51,37 @@ def test_notification_badge_appears_with_update(device: DeviceClient):
     # Clean up
     device.notification_mock_reset()
 
+def test_notification_dropdown_shows_heading(device: DeviceClient):
+    """The notification dropdown should show a 'Notifications' heading.
+
+    Mirrors the web dashboard bell panel, which has a "Notifications" title at
+    the top of the popover. The heading is tagged 'notify_title' for
+    language-independent addressability.
+    """
+    device.notification_mock_reset()
+    time.sleep(0.5)
+
+    device.notification_mock(notification_type=0, message="Firmware v99.0.0 available")
+    time.sleep(0.5)
+
+    # Open the dropdown
+    device.click(tag="notifications")
+    time.sleep(0.5)
+
+    try:
+        # The heading should be present in the dropdown overlay
+        assert device.wait_for_widget(tag="notify_title", timeout=3.0), \
+            "Expected a 'notify_title' heading in the notification dropdown"
+        title = device.find_widget(tag="notify_title")
+        assert title is not None and title.text_en == "Notifications", \
+            f"Expected heading text 'Notifications', got '{getattr(title, 'text_en', None)}'"
+    finally:
+        # Close the dropdown and clean up
+        device.click(tag="notifications")
+        time.sleep(0.3)
+        device.notification_mock_reset()
+
+
 def test_notification_icon_shows_dropdown(device: DeviceClient):
     """Clicking the notification icon should show the dropdown with notifications.
     
