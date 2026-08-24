@@ -48,7 +48,67 @@ permissions:
   checks: write
 
 jobs:
+  # Fast pre-flight (never touches the device). On a push to main, check whether
+  # this exact source tree was already validated by the physical suite in an
+  # earlier same-repo run (e.g. the PR run that produced this squash-merge). The
+  # suite validates a *tree*, not a commit — PROJECT_VER lives in the tree, so a
+  # version bump changes tree_sha and correctly forces a real run. On a hit we
+  # skip the ~40-minute hardware suite and re-emit the attestation for the new
+  # commit SHA (see the reuse-attestation job). On PR / merge_group / schedule we
+  # never dedup: the physical suite always runs so required checks and the merge
+  # gate stay real.
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      dedup: ${{ steps.check.outputs.dedup }}
+      tree_sha: ${{ steps.tree.outputs.tree_sha }}
+      artifact_name: ${{ steps.tree.outputs.artifact_name }}
+      source_run_id: ${{ steps.check.outputs.source_run_id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Compute source tree SHA
+        id: tree
+        run: |
+          set -euo pipefail
+          TREE_SHA=$(git rev-parse "HEAD^{tree}")
+          echo "tree_sha=$TREE_SHA" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=arctic-tree-attestation-$TREE_SHA" >> "$GITHUB_OUTPUT"
+          echo "Source tree: $TREE_SHA"
+      - name: Look for a prior validation of this tree
+        id: check
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_NAME: ${{ steps.tree.outputs.artifact_name }}
+          REPO_ID: ${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+          # Find a non-expired reusable attestation for this tree, produced by a
+          # same-repo run (head_repository_id == this repo) so a fork PR can never
+          # inject a forged "already validated" attestation.
+          gh api "repos/${{ github.repository }}/actions/artifacts?name=${ARTIFACT_NAME}&per_page=100" > arts.json
+          SEL=$(jq -c --argjson repo "${REPO_ID}" '
+            [ .artifacts[]
+              | select(.expired == false)
+              | select(.workflow_run.head_repository_id == $repo) ]
+            | sort_by(.created_at) | last // empty' arts.json)
+          if [ -z "$SEL" ]; then
+            echo "dedup=false" >> "$GITHUB_OUTPUT"
+            echo "No prior same-repo validation for this tree — running the physical suite."
+            exit 0
+          fi
+          RUN_ID=$(echo "$SEL" | jq -r '.workflow_run.id')
+          echo "dedup=true" >> "$GITHUB_OUTPUT"
+          echo "source_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Tree already validated by run ${RUN_ID}; reusing its attestation and skipping the physical suite."
+
   build:
+    needs: preflight
+    if: needs.preflight.outputs.dedup != 'true'
     runs-on: ubuntu-latest
     permissions:
       # contents:write is needed only on the nightly (schedule) run to publish
@@ -152,7 +212,8 @@ jobs:
           echo "Published build/arctic_controller.bin to the ci-nightly prerelease."
 
   device-tests:
-    needs: build
+    needs: [preflight, build]
+    if: needs.preflight.outputs.dedup != 'true'
     runs-on: [self-hosted, vm-mi]
     timeout-minutes: 120
     env:
@@ -812,13 +873,18 @@ jobs:
       - name: Record release validation attestation
         id: attestation
         if: >-
-          github.event_name == 'push' &&
-          github.ref == 'refs/heads/main' &&
           steps.ui_tests.outcome == 'success' &&
           steps.api_tests.outcome == 'success' &&
-          steps.web_tests.outcome == 'success'
+          steps.web_tests.outcome == 'success' &&
+          (
+            (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+            github.event_name == 'merge_group' ||
+            (github.event_name == 'pull_request' &&
+             github.event.pull_request.head.repo.full_name == github.repository)
+          )
         env:
           COMMIT_SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           REPOSITORY: ${{ github.repository }}
@@ -834,6 +900,7 @@ jobs:
           # the ~40-minute hardware suite.
           TREE_SHA=$(git rev-parse "HEAD^{tree}")
           FW_DIGEST=$(sha256sum build/arctic_controller.bin | awk '{print $1}')
+          echo "tree_sha=$TREE_SHA" >> "$GITHUB_OUTPUT"
           export TREE_SHA FW_DIGEST
           python3 - <<'PY'
           import json, os, datetime
@@ -845,7 +912,7 @@ jobs:
               "commit_sha": os.environ["COMMIT_SHA"],
               "tree_sha": os.environ["TREE_SHA"],
               "workflow": "device-tests.yml",
-              "event": "push",
+              "event": os.environ["EVENT"],
               "run_id": os.environ["RUN_ID"],
               "run_attempt": os.environ["RUN_ATTEMPT"],
               "suites": {
@@ -873,10 +940,21 @@ jobs:
           PY
 
       - name: Upload release validation attestation
-        if: steps.attestation.outcome == 'success'
+        if: steps.attestation.outcome == 'success' && github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: release-attestation-${{ github.sha }}
+          path: release-attestation.json
+          retention-days: 90
+
+      - name: Upload reusable tree attestation
+        # Deposited on push, same-repo PR and merge_group successes so a later
+        # push whose tree matches can reuse it and skip the physical suite. Keyed
+        # by tree SHA (not commit) because the suite validates a tree.
+        if: steps.attestation.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: arctic-tree-attestation-${{ steps.attestation.outputs.tree_sha }}
           path: release-attestation.json
           retention-days: 90
 
@@ -895,3 +973,64 @@ jobs:
             exit 1
           fi
           echo "All test suites passed"
+
+  # On a dedup hit (push to main whose tree an earlier same-repo run already
+  # validated) re-emit that validation attestation under the new commit SHA, so
+  # create-release.yml finds a successful push run with release-attestation-<sha>
+  # — the exact existing release contract, minus the ~40-minute physical suite.
+  # create-release.yml is intentionally unchanged.
+  reuse-attestation:
+    needs: preflight
+    if: needs.preflight.outputs.dedup == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Download prior tree attestation
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.preflight.outputs.artifact_name }}
+          run-id: ${{ needs.preflight.outputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: prior
+      - name: Re-emit attestation for this commit
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          TREE_SHA: ${{ needs.preflight.outputs.tree_sha }}
+          SOURCE_RUN_ID: ${{ needs.preflight.outputs.source_run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, datetime
+          with open("prior/release-attestation.json", encoding="utf-8") as fh:
+              att = json.load(fh)
+          # Defence in depth: the reused record must describe this exact tree and
+          # record passing suites before we relabel it to this commit, so a
+          # mismatched artifact can never be laundered into a release approval.
+          if att.get("tree_sha") != os.environ["TREE_SHA"]:
+              raise SystemExit(
+                  "tree_sha mismatch: artifact %s != %s"
+                  % (att.get("tree_sha"), os.environ["TREE_SHA"])
+              )
+          for suite in ("ui", "api", "web"):
+              if att.get("suites", {}).get(suite) != "success":
+                  raise SystemExit("reused attestation records a non-passing suite")
+          att["commit_sha"] = os.environ["COMMIT_SHA"]
+          att["event"] = "push"
+          att["reused_from_run_id"] = os.environ["SOURCE_RUN_ID"]
+          att["reused_by_run_id"] = os.environ["RUN_ID"]
+          att["reused_at"] = datetime.datetime.now(
+              datetime.timezone.utc
+          ).isoformat()
+          with open("release-attestation.json", "w", encoding="utf-8") as fh:
+              json.dump(att, fh, indent=2, sort_keys=True)
+          print(json.dumps(att, indent=2, sort_keys=True))
+          PY
+      - name: Upload release validation attestation
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-attestation-${{ github.sha }}
+          path: release-attestation.json
+          retention-days: 90
