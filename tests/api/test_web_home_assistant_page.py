@@ -8,6 +8,7 @@ the pairing code must never leak into a status/read response.
 """
 
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -68,5 +69,20 @@ def test_routes_registered_and_handler_budget_bumped() -> None:
     source = _api_server()
     for uri in ('"/api/ha/status"', '"/api/ha/pair"', '"/api/ha/revoke"'):
         assert uri in source, uri
-    # Four new routes were added; the handler budget must cover them.
-    assert "const int uri_handlers = 111;" in source
+    # The httpd URI-handler budget must stay comfortably above the number of
+    # handlers registered on a single server. In CONFIG_TEST_ENDPOINTS builds
+    # the port-443 server registers ~61 production handlers plus ~53
+    # /api/test/* instrumentation handlers (~114 total); if the budget drops
+    # back near that count the tail registrations silently overflow the table
+    # and those routes answer 404 (see the slot-exhaustion fix). Assert a floor
+    # with headroom rather than pinning an exact literal, so a legitimate bump
+    # does not break this test while a regression below the safe floor does.
+    match = re.search(r"const int uri_handlers = (\d+);", source)
+    assert match, "uri_handlers declaration not found in api_server.cpp"
+    uri_handlers = int(match.group(1))
+    assert uri_handlers >= 130, (
+        f"uri_handlers={uri_handlers} is too low: the CONFIG_TEST_ENDPOINTS "
+        "build registers ~114 handlers on one server and needs headroom to "
+        "avoid silently overflowing the httpd URI-handler table"
+    )
+

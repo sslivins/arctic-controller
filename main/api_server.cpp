@@ -417,7 +417,16 @@ bool api_server_start(void)
         return false;
     }
 
-    const int uri_handlers = 111;
+    // URI-handler table size for the port-80 and port-443 servers. This must
+    // exceed the total number of handlers registered on a single server. The
+    // worst case is the CONFIG_TEST_ENDPOINTS build, where the ~61 production
+    // handlers on port 443 are joined by the ~53 /api/test/* instrumentation
+    // handlers (see test_endpoints_register), for ~114 total. The value below
+    // leaves comfortable headroom so that adding an endpoint does not silently
+    // overflow the table — an overflow makes httpd_register_uri_handler return
+    // "no slots left" and the affected route then answers 404. (Production
+    // builds register far fewer handlers, so they are unaffected either way.)
+    const int uri_handlers = 140;
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
