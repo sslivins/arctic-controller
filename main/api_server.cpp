@@ -4410,8 +4410,9 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
 // Returns up to an 8-hour window of telemetry samples ending at `end`
 // (default: now), mirroring the on-device history screen. Temperatures are raw
 // deci-Celsius (or null when the reading is invalid); the client converts to
-// the user's preferred unit. The JSON is streamed in chunks so we never build
-// a multi-hundred-KB buffer in RAM for ~960 samples.
+// the user's preferred unit. The JSON is assembled into a bounded buffer and
+// flushed in batches, so we never build a multi-hundred-KB buffer in RAM for
+// ~960 samples nor issue one TLS write per sample.
 static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
