@@ -830,6 +830,7 @@ static esp_err_t click_post_handler(httpd_req_t* req)
     cJSON_Delete(body);  // Safe to delete now — we've copied all strings
 
     if (!bsp_display_lock(1000)) {
+        ESP_LOGW(TAG, "click: display lock busy >1s (UI stalled) — returning 503");
         send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
         return ESP_OK;
     }
