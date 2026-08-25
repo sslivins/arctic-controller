@@ -456,9 +456,6 @@ bool api_server_start(void)
         // Port 80 only serves essential health/OTA bootstrap routes when
         // mandatory HTTPS is active, so two concurrent clients are sufficient.
         http_config.max_open_sockets   = 2;
-#ifdef CONFIG_TEST_ENDPOINTS
-        http_config.send_wait_timeout  = 1;
-#endif
         
         ret = httpd_start(&server, &http_config);
         if (ret != ESP_OK) {
@@ -489,9 +486,10 @@ bool api_server_start(void)
         ssl_config.httpd.max_resp_headers   = max_headers;
         ssl_config.httpd.recv_wait_timeout  = recv_timeout;
         ssl_config.httpd.max_open_sockets   = 4;      // TLS buffers in PSRAM via EXTERNAL_MEM_ALLOC
-#ifdef CONFIG_TEST_ENDPOINTS
-        ssl_config.httpd.send_wait_timeout  = 1;
-#endif
+        // Leave send_wait_timeout at its default. A very short send timeout
+        // truncates responses (empty/partial body, seen as bogus 404s) and
+        // tears down the TLS connection whenever the single-threaded server is
+        // briefly busy under test/HA load — do not shorten it.
         ssl_config.servercert    = cert;
         ssl_config.servercert_len = cert_len;
         ssl_config.prvtkey_pem   = key;
@@ -538,7 +536,11 @@ bool api_server_start(void)
         // while another TLS connection is still closing or handshaking.
         integration_config.httpd.lru_purge_enable = false;
         integration_config.httpd.recv_wait_timeout = 10;
-        integration_config.httpd.send_wait_timeout = 1;
+        // Match recv_wait_timeout. A very short send timeout truncates HA REST
+        // and WSS responses (empty/partial body) whenever the single-threaded
+        // server is briefly busy, and tears down the TLS connection — do not
+        // shorten it.
+        integration_config.httpd.send_wait_timeout = 10;
         integration_config.servercert = cert;
         integration_config.servercert_len = cert_len;
         integration_config.prvtkey_pem = key;
