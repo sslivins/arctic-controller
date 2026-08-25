@@ -19,7 +19,8 @@ def _seed_history(base_url: str) -> dict:
 
 
 def _open_history(page: Page) -> None:
-    page.locator(".rail .nav-link", has_text="History").click()
+    page.locator(".rail .nav-link", has_text="Status").click()
+    page.get_by_role("button", name="View cycle history").click()
     page.wait_for_selector(".hist-chart", timeout=10000)
 
 
@@ -29,7 +30,7 @@ class TestTemperatureHistoryWeb:
         _open_history(dashboard_page)
 
         expect(
-            dashboard_page.get_by_role("heading", name="Temperature history")
+            dashboard_page.get_by_role("heading", name="Cycle history")
         ).to_be_visible()
 
         # Inlet, outlet, and setpoint each draw a path.
