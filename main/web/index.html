@@ -1066,7 +1066,7 @@
         </section>`;
       }
       return `<div class="page">
-        ${pageHead("Cycle history", "Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.", `<button class="btn" data-action="history-refresh">Refresh</button>`)}
+        ${pageHead("Cycle history", "Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.", `<button class="btn" data-route="status">‹ Back</button><button class="btn" data-action="history-refresh">Refresh</button>`)}
         ${body}
       </div>`;
     }
