@@ -95,8 +95,8 @@ def test_web_api_exposes_temperature_history_endpoint():
 
 def test_web_dashboard_has_temperature_history_view():
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
-    # Registered as a first-class nav route and page.
-    assert '["history", ' in web
+    # Reachable from the Status screen (via a button) and registered as a page route.
+    assert 'data-route="history"' in web
     assert "history: historyPage" in web
     assert "function historyPage" in web
     assert "function loadHistory" in web
