@@ -228,16 +228,49 @@ class TestEventLogDisplay:
         assert after["total"] >= before["total"] + 1
 
     def test_clear_survives_reboot(self, device: DeviceClient):
-        """Clearing commits an empty journal bank before rebooting."""
+        """Clearing commits an empty journal bank before rebooting, so events
+        that existed before the clear must NOT be restored on the next boot.
+
+        We seed a distinctive, journaled event (application_crash), clear the
+        log, then reboot. After reboot that seeded event must be gone and a
+        single fresh system_start must be present.
+
+        We deliberately do NOT constrain the total count or the exact type
+        set: once the demo heat-pump link comes up, the firmware emits
+        `connected` plus any number of operational transition events
+        (pump_on, compressor_on, mode_changed, ...) as the decoded initial
+        state diverges from the reset defaults. Those are legitimate fresh
+        events and land nondeterministically relative to when we sample, so
+        asserting on them races. The real invariant here is only that the
+        cleared journal did not resurrect pre-clear events and that exactly
+        one boot marker replayed."""
+        # Seed a distinctive, journaled event so a failed clear is visible as
+        # its reappearance after reboot (record-reset-reason 4 => crash).
+        device.session.post(
+            f"{device.base_url}/api/test/record-reset-reason",
+            json={"reason": 4},
+        ).raise_for_status()
+        seeded = device.session.get(f"{device.base_url}/api/events").json()
+        assert "application_crash" in [e["type"] for e in seeded["events"]], \
+            "Failed to seed a distinctive event before clearing"
+
         device.session.delete(f"{device.base_url}/api/events").raise_for_status()
         device.reboot()
         assert device.wait_for_device(timeout=45.0), "Device did not return after reboot"
 
         events = device.session.get(f"{device.base_url}/api/events").json()
         types = [event["type"] for event in events["events"]]
-        assert 1 <= events["total"] <= 2
-        assert "system_start" in types
-        assert set(types) <= {"system_start", "connected"}
+
+        # A buggy clear would replay the pre-clear journal bank, resurrecting
+        # the seeded crash (and any prior events).
+        assert "application_crash" not in types, \
+            f"Cleared events resurrected after reboot: {types}"
+        # Exactly one fresh boot marker proves an empty bank was committed and
+        # replayed (accumulated system_start events would mean the clear only
+        # partially took).
+        assert "system_start" in types, f"Missing system_start after reboot: {types}"
+        assert types.count("system_start") == 1, \
+            f"Expected exactly one system_start after clear+reboot, got {types}"
 
 
 # =========================================================================
