@@ -152,6 +152,13 @@ static const char* strings_en[STR_COUNT] = {
     [STR_SECURITY_CODE_ACTIVE] = "Enter this code in the web interface to set your password.",
     [STR_SECURITY_EXPIRES_IN] = "Expires in %u:%02u",
     [STR_SECURITY_FAILED] = "Unable to start. Please try again.",
+
+    // Web Interface
+    [STR_SETTINGS_WEB] = "Web Interface",
+    [STR_WEB_TITLE] = "Web Interface",
+    [STR_WEB_SCAN_HINT] = "Scan to open the dashboard on your phone",
+    [STR_WEB_URL_LABEL] = "Or enter this address in your browser:",
+    [STR_WEB_URL_UNAVAILABLE] = "Connect to Wi-Fi to access the web interface",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Communication Error",
@@ -541,6 +548,13 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_SECURITY_CODE_ACTIVE] = "Saisissez ce code dans l'interface web pour définir votre mot de passe.",
     [STR_SECURITY_EXPIRES_IN] = "Expire dans %u:%02u",
     [STR_SECURITY_FAILED] = "Impossible de démarrer. Réessayez.",
+
+    // Web Interface
+    [STR_SETTINGS_WEB] = "Interface Web",
+    [STR_WEB_TITLE] = "Interface Web",
+    [STR_WEB_SCAN_HINT] = "Scannez pour ouvrir le tableau de bord sur votre téléphone",
+    [STR_WEB_URL_LABEL] = "Ou saisissez cette adresse dans votre navigateur :",
+    [STR_WEB_URL_UNAVAILABLE] = "Connectez-vous au Wi-Fi pour accéder à l'interface Web",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Erreur de communication",
@@ -930,6 +944,13 @@ static const char* strings_es[STR_COUNT] = {
     [STR_SECURITY_CODE_ACTIVE] = "Introduce este código en la interfaz web para establecer tu contraseña.",
     [STR_SECURITY_EXPIRES_IN] = "Caduca en %u:%02u",
     [STR_SECURITY_FAILED] = "No se pudo iniciar. Inténtalo de nuevo.",
+
+    // Web Interface
+    [STR_SETTINGS_WEB] = "Interfaz web",
+    [STR_WEB_TITLE] = "Interfaz web",
+    [STR_WEB_SCAN_HINT] = "Escanee para abrir el panel en su teléfono",
+    [STR_WEB_URL_LABEL] = "O introduzca esta dirección en su navegador:",
+    [STR_WEB_URL_UNAVAILABLE] = "Conéctese al Wi-Fi para acceder a la interfaz web",
     
     // Heat Pump - Main Screen
     [STR_HP_COMMUNICATION_ERROR] = "Error de comunicación",
