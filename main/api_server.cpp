@@ -104,6 +104,8 @@ static SemaphoreHandle_t s_ha_command_mutex = nullptr;
 static esp_err_t web_root_handler(httpd_req_t* req);
 static esp_err_t http_https_required_handler(httpd_req_t* req,
                                              httpd_err_code_t err);
+static esp_err_t https_api_not_found_handler(httpd_req_t* req,
+                                             httpd_err_code_t err);
 static esp_err_t web_login_handler(httpd_req_t* req);
 static esp_err_t web_logout_handler(httpd_req_t* req);
 static esp_err_t favicon_handler(httpd_req_t* req);
@@ -1390,6 +1392,19 @@ bool api_server_start(void)
         }
     }
 
+    // The HTTPS API server previously had no 404 handler, so a routing miss
+    // fell back to the esp_http_server default 404 whose empty-ish body was
+    // indistinguishable from a truncated response. Register an explicit JSON
+    // 404 handler so every miss is diagnosable (logs + echoes method/URI).
+    if (server_ssl != NULL) {
+        esp_err_t rerr = httpd_register_err_handler(
+            server_ssl, HTTPD_404_NOT_FOUND, https_api_not_found_handler);
+        if (rerr != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to register HTTPS 404 handler: %s",
+                     esp_err_to_name(rerr));
+        }
+    }
+
     ESP_LOGI(TAG, "HTTP server started on port 80");
     if (server_ssl != NULL) {
         ESP_LOGI(TAG, "HTTPS server started on port 443");
@@ -1484,6 +1499,33 @@ static esp_err_t http_https_required_handler(httpd_req_t* req,
 
     httpd_resp_set_status(req, "404 Not Found");
     httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// 404 handler for the HTTPS API server (port 443). Without this the port-443
+// server falls back to esp_http_server's built-in 404, whose body ("Nothing
+// matches the given URI") is unhelpful and — crucially — indistinguishable
+// from a truncated/reset response (both surface to the test client as an
+// empty-bodied 404). Emitting an explicit JSON body that echoes the requested
+// method + URI turns every real routing miss into a diagnosable failure and
+// removes that ambiguity when triaging device-test flakes.
+static esp_err_t https_api_not_found_handler(httpd_req_t* req,
+                                             httpd_err_code_t err)
+{
+    (void)err;
+
+    // The request URI is still available on the request struct here.
+    ESP_LOGW(TAG, "HTTPS 404: no handler for %s %s",
+             http_method_str((enum http_method)req->method), req->uri);
+
+    char body[256];
+    snprintf(body, sizeof(body),
+             "{\"error\":\"Not Found\",\"method\":\"%.15s\",\"uri\":\"%.160s\"}",
+             http_method_str((enum http_method)req->method), req->uri);
+
+    httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
