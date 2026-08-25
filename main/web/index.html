@@ -430,7 +430,7 @@
     ];
     const nav = [
       ["home", "⌂", "Home"], ["status", "▥", "Status"], ["control", "◉", "Control"],
-      ["history", "📈", "History"], ["events", "≡", "Events"]
+      ["events", "≡", "Events"]
     ];
     const settingsNav = [
       ["wifi", "WiFi"], ["firmware", "Firmware"], ["time", "Time"], ["display", "Display"],
@@ -526,7 +526,7 @@
       const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
       state.route = parts[0] || "home";
       if (state.route === "settings") state.settingsPage = parts[1] || "wifi";
-      if (![...nav.map(n => n[0]), "settings", "errors"].includes(state.route)) state.route = "home";
+      if (![...nav.map(n => n[0]), "settings", "errors", "history"].includes(state.route)) state.route = "home";
     }
     const NOTIF_META = {
       firmware_update: { icon: "⬇️", route: ["settings", "firmware"] },
@@ -620,6 +620,8 @@
     function statusPage() {
       const h = state.hp, r = h.readings, t = h.temperatures;
       return `<div class="page">${pageHead("Status", "Complete temperature, electrical, and mechanical telemetry.")}
+        <section class="card"><div class="card-head"><h2>Cycle history</h2><button class="btn" data-route="history">View cycle history</button></div>
+          <p class="hist-muted">Compressor run cycles with inlet, outlet, and setpoint temperatures over recent hours.</p></section>
         <h2>Operating state</h2><div class="grid grid-2">
           ${metricCard("Selected mode", titleCase(h.mode || "unknown"), "Configured mode policy from the mainboard")}
           ${metricCard("Actual operation", titleCase(h.operation || "unknown"), "Live operating status from the mainboard")}
@@ -975,7 +977,7 @@
       const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
       const mapY = v => plotB - (v - lo) / (hi - lo) * plotH;
 
-      let svg = `<svg class="hist-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Temperature history chart">`;
+      let svg = `<svg class="hist-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Cycle history chart">`;
 
       // Mode bands: contiguous running periods tinted by operating mode.
       const bandColor = { 1: "#ef4444", 2: "#3b82f6", 3: "#fbbf24" };
@@ -1041,7 +1043,7 @@
         body = `<section class="card"><p class="hist-muted">${esc(th.error)}</p></section>`;
       } else if (!data || !(data.samples && data.samples.length)) {
         const interval = data ? data.sample_interval_sec : 30;
-        body = `<section class="card"><p class="hist-muted">No temperature history recorded yet. Samples are captured every ${interval}s while the heat pump is connected.</p></section>`;
+        body = `<section class="card"><p class="hist-muted">No cycle history recorded yet. Samples are captured every ${interval}s while the heat pump is connected.</p></section>`;
       } else {
         const atLatest = data.end >= data.latest_end;
         const atOldest = data.start <= data.earliest;
@@ -1064,7 +1066,7 @@
         </section>`;
       }
       return `<div class="page">
-        ${pageHead("Temperature history", "Inlet, outlet, and setpoint over the last 8 hours.", `<button class="btn" data-action="history-refresh">Refresh</button>`)}
+        ${pageHead("Cycle history", "Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.", `<button class="btn" data-action="history-refresh">Refresh</button>`)}
         ${body}
       </div>`;
     }
