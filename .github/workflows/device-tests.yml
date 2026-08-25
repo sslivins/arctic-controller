@@ -742,6 +742,28 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Assert no httpd handler-registration failures
+        if: always()
+        run: |
+          # Catch httpd URI-handler table overflow early. When the handler
+          # table fills up, httpd_register_uri_handler silently drops the tail
+          # handlers and those routes answer 404 — which otherwise only surfaces
+          # as a confusing, intermittent failure in an unrelated UI test (e.g.
+          # test_back_from_sub_screen "Click failed (404)"). Fail loudly here,
+          # naming the root cause, regardless of whether this particular boot
+          # happened to drop a route that a test exercised.
+          if [ ! -f controller-serial.log ]; then
+            echo "No serial log captured — skipping handler-registration check."
+            exit 0
+          fi
+          HITS=$(grep -nE 'no slots left for registering handler|Failed to register test endpoint|test endpoint\(s\) FAILED to register' controller-serial.log || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::httpd URI-handler registration failed on the device — the URI-handler table overflowed. Increase uri_handlers in main/api_server.cpp. Offending serial-log lines:"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "OK: no httpd URI-handler registration failures in serial log."
+
       - name: Publish UI test results
         uses: dorny/test-reporter@v2
         if: always() && steps.ui_tests.outcome != 'skipped'
