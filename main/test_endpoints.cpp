@@ -2201,6 +2201,26 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
 // Registration
 // ============================================================================
 
+// Number of /api/test/* handlers that failed to register on the most recent
+// test_endpoints_register() call. A non-zero value means the httpd URI-handler
+// table overflowed ("no slots left"), which silently turns the affected route
+// into a 404 and makes device tests flaky. See uri_handlers in api_server.cpp.
+static int s_test_uri_reg_failures = 0;
+
+// Checked wrapper around httpd_register_uri_handler so that a table overflow is
+// logged loudly (and counted) instead of being silently ignored.
+static void reg_test_uri(httpd_handle_t server, const httpd_uri_t* uri)
+{
+    esp_err_t err = httpd_register_uri_handler(server, uri);
+    if (err != ESP_OK) {
+        s_test_uri_reg_failures++;
+        ESP_LOGE(TAG,
+                 "Failed to register test endpoint '%s': %s — increase "
+                 "uri_handlers in api_server.cpp (httpd table is full)",
+                 uri->uri, esp_err_to_name(err));
+    }
+}
+
 void test_endpoints_register_websocket(httpd_handle_t server)
 {
     httpd_uri_t websocket_feasibility_uri = {
@@ -2212,18 +2232,19 @@ void test_endpoints_register_websocket(httpd_handle_t server)
         .handle_ws_control_frames = false,
         .supported_subprotocol = NULL,
     };
-    httpd_register_uri_handler(server, &websocket_feasibility_uri);
+    reg_test_uri(server, &websocket_feasibility_uri);
 }
 
 void test_endpoints_register(httpd_handle_t server)
 {
+    s_test_uri_reg_failures = 0;
     httpd_uri_t integration_identity_uri = {
         .uri = "/api/test/ha-identity",
         .method = HTTP_GET,
         .handler = integration_identity_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &integration_identity_uri);
+    reg_test_uri(server, &integration_identity_uri);
 
     httpd_uri_t integration_token_uri = {
         .uri = "/api/test/ha-token",
@@ -2231,7 +2252,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = integration_token_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &integration_token_uri);
+    reg_test_uri(server, &integration_token_uri);
 
     httpd_uri_t integration_token_delete_uri = {
         .uri = "/api/test/ha-token",
@@ -2239,7 +2260,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = integration_token_delete_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &integration_token_delete_uri);
+    reg_test_uri(server, &integration_token_delete_uri);
 
     httpd_uri_t integration_pairing_uri = {
         .uri = "/api/test/ha-pairing-window",
@@ -2247,7 +2268,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = integration_pairing_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &integration_pairing_uri);
+    reg_test_uri(server, &integration_pairing_uri);
 
     httpd_uri_t test_credentials_uri = {
         .uri = "/api/test/credentials",
@@ -2255,7 +2276,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_credentials_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &test_credentials_uri);
+    reg_test_uri(server, &test_credentials_uri);
 
     httpd_uri_t ui_state_uri = {
         .uri = "/api/test/ui-state",
@@ -2263,7 +2284,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = ui_state_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &ui_state_uri);
+    reg_test_uri(server, &ui_state_uri);
 
     httpd_uri_t screen_uri = {
         .uri = "/api/test/screen",
@@ -2271,7 +2292,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = screen_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &screen_uri);
+    reg_test_uri(server, &screen_uri);
 
     httpd_uri_t click_uri = {
         .uri = "/api/test/click",
@@ -2279,7 +2300,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = click_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &click_uri);
+    reg_test_uri(server, &click_uri);
 
     httpd_uri_t click_options_uri = {
         .uri = "/api/test/click",
@@ -2287,7 +2308,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &click_options_uri);
+    reg_test_uri(server, &click_options_uri);
 
     httpd_uri_t set_slider_uri = {
         .uri = "/api/test/set-slider",
@@ -2295,7 +2316,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = set_slider_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &set_slider_uri);
+    reg_test_uri(server, &set_slider_uri);
 
     httpd_uri_t set_slider_options_uri = {
         .uri = "/api/test/set-slider",
@@ -2303,7 +2324,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &set_slider_options_uri);
+    reg_test_uri(server, &set_slider_options_uri);
 
     httpd_uri_t display_idle_uri = {
         .uri = "/api/test/display-idle",
@@ -2311,7 +2332,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = display_idle_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &display_idle_uri);
+    reg_test_uri(server, &display_idle_uri);
 
     httpd_uri_t display_idle_options_uri = {
         .uri = "/api/test/display-idle",
@@ -2319,7 +2340,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &display_idle_options_uri);
+    reg_test_uri(server, &display_idle_options_uri);
 
     httpd_uri_t scroll_uri = {
         .uri = "/api/test/scroll",
@@ -2327,7 +2348,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = scroll_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &scroll_uri);
+    reg_test_uri(server, &scroll_uri);
 
     httpd_uri_t scroll_options_uri = {
         .uri = "/api/test/scroll",
@@ -2335,7 +2356,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &scroll_options_uri);
+    reg_test_uri(server, &scroll_options_uri);
 
     httpd_uri_t set_roller_uri = {
         .uri = "/api/test/set-roller",
@@ -2343,7 +2364,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = set_roller_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &set_roller_uri);
+    reg_test_uri(server, &set_roller_uri);
 
     httpd_uri_t set_roller_options_uri = {
         .uri = "/api/test/set-roller",
@@ -2351,7 +2372,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &set_roller_options_uri);
+    reg_test_uri(server, &set_roller_options_uri);
 
     httpd_uri_t toggle_uri = {
         .uri = "/api/test/toggle",
@@ -2359,7 +2380,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = toggle_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &toggle_uri);
+    reg_test_uri(server, &toggle_uri);
 
     httpd_uri_t toggle_options_uri = {
         .uri = "/api/test/toggle",
@@ -2367,7 +2388,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &toggle_options_uri);
+    reg_test_uri(server, &toggle_options_uri);
 
     httpd_uri_t wifi_mock_uri = {
         .uri = "/api/test/wifi-mock",
@@ -2375,7 +2396,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = wifi_mock_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &wifi_mock_uri);
+    reg_test_uri(server, &wifi_mock_uri);
 
     httpd_uri_t wifi_mock_options_uri = {
         .uri = "/api/test/wifi-mock",
@@ -2383,7 +2404,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &wifi_mock_options_uri);
+    reg_test_uri(server, &wifi_mock_options_uri);
 
     httpd_uri_t wifi_mock_reset_uri = {
         .uri = "/api/test/wifi-mock-reset",
@@ -2391,7 +2412,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = wifi_mock_reset_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &wifi_mock_reset_uri);
+    reg_test_uri(server, &wifi_mock_reset_uri);
 
     httpd_uri_t wifi_mock_reset_options_uri = {
         .uri = "/api/test/wifi-mock-reset",
@@ -2399,7 +2420,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &wifi_mock_reset_options_uri);
+    reg_test_uri(server, &wifi_mock_reset_options_uri);
 
     httpd_uri_t type_text_uri = {
         .uri = "/api/test/type-text",
@@ -2407,7 +2428,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = type_text_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &type_text_uri);
+    reg_test_uri(server, &type_text_uri);
 
     httpd_uri_t type_text_options_uri = {
         .uri = "/api/test/type-text",
@@ -2415,7 +2436,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &type_text_options_uri);
+    reg_test_uri(server, &type_text_options_uri);
 
     httpd_uri_t firmware_mock_uri = {
         .uri = "/api/test/firmware-mock",
@@ -2423,7 +2444,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = firmware_mock_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &firmware_mock_uri);
+    reg_test_uri(server, &firmware_mock_uri);
 
     httpd_uri_t firmware_mock_options_uri = {
         .uri = "/api/test/firmware-mock",
@@ -2431,7 +2452,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &firmware_mock_options_uri);
+    reg_test_uri(server, &firmware_mock_options_uri);
 
     httpd_uri_t firmware_mock_reset_uri = {
         .uri = "/api/test/firmware-mock-reset",
@@ -2439,7 +2460,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = firmware_mock_reset_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &firmware_mock_reset_uri);
+    reg_test_uri(server, &firmware_mock_reset_uri);
 
     httpd_uri_t firmware_mock_reset_options_uri = {
         .uri = "/api/test/firmware-mock-reset",
@@ -2447,7 +2468,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &firmware_mock_reset_options_uri);
+    reg_test_uri(server, &firmware_mock_reset_options_uri);
 
     httpd_uri_t set_preference_uri = {
         .uri = "/api/test/set-preference",
@@ -2455,7 +2476,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = set_preference_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &set_preference_uri);
+    reg_test_uri(server, &set_preference_uri);
 
     httpd_uri_t set_preference_options_uri = {
         .uri = "/api/test/set-preference",
@@ -2463,7 +2484,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &set_preference_options_uri);
+    reg_test_uri(server, &set_preference_options_uri);
 
     httpd_uri_t set_demo_field_uri = {
         .uri = "/api/test/set-demo-field",
@@ -2471,7 +2492,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = set_demo_field_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &set_demo_field_uri);
+    reg_test_uri(server, &set_demo_field_uri);
 
     httpd_uri_t set_demo_field_options_uri = {
         .uri = "/api/test/set-demo-field",
@@ -2479,7 +2500,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &set_demo_field_options_uri);
+    reg_test_uri(server, &set_demo_field_options_uri);
 
     httpd_uri_t record_reset_reason_uri = {
         .uri = "/api/test/record-reset-reason",
@@ -2487,7 +2508,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = record_reset_reason_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &record_reset_reason_uri);
+    reg_test_uri(server, &record_reset_reason_uri);
 
     httpd_uri_t record_reset_reason_options_uri = {
         .uri = "/api/test/record-reset-reason",
@@ -2495,7 +2516,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &record_reset_reason_options_uri);
+    reg_test_uri(server, &record_reset_reason_options_uri);
 
     httpd_uri_t clear_error_history_uri = {
         .uri = "/api/test/clear-error-history",
@@ -2503,7 +2524,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = clear_error_history_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &clear_error_history_uri);
+    reg_test_uri(server, &clear_error_history_uri);
 
     httpd_uri_t clear_error_history_options_uri = {
         .uri = "/api/test/clear-error-history",
@@ -2511,7 +2532,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &clear_error_history_options_uri);
+    reg_test_uri(server, &clear_error_history_options_uri);
 
     httpd_uri_t inject_fault_uri = {
         .uri = "/api/test/inject-fault",
@@ -2519,7 +2540,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = inject_fault_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &inject_fault_uri);
+    reg_test_uri(server, &inject_fault_uri);
 
     httpd_uri_t inject_fault_options_uri = {
         .uri = "/api/test/inject-fault",
@@ -2527,7 +2548,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &inject_fault_options_uri);
+    reg_test_uri(server, &inject_fault_options_uri);
 
     httpd_uri_t clear_faults_uri = {
         .uri = "/api/test/clear-faults",
@@ -2535,7 +2556,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = clear_faults_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &clear_faults_uri);
+    reg_test_uri(server, &clear_faults_uri);
 
     httpd_uri_t clear_faults_options_uri = {
         .uri = "/api/test/clear-faults",
@@ -2543,7 +2564,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &clear_faults_options_uri);
+    reg_test_uri(server, &clear_faults_options_uri);
 
     httpd_uri_t populate_temperature_history_uri = {
         .uri = "/api/test/populate-temperature-history",
@@ -2551,7 +2572,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = populate_temperature_history_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &populate_temperature_history_uri);
+    reg_test_uri(server, &populate_temperature_history_uri);
 
     httpd_uri_t populate_temperature_history_options_uri = {
         .uri = "/api/test/populate-temperature-history",
@@ -2559,7 +2580,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &populate_temperature_history_options_uri);
+    reg_test_uri(server, &populate_temperature_history_options_uri);
 
     httpd_uri_t notification_mock_uri = {
         .uri = "/api/test/notification-mock",
@@ -2567,7 +2588,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = notification_mock_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &notification_mock_uri);
+    reg_test_uri(server, &notification_mock_uri);
 
     httpd_uri_t notification_mock_options_uri = {
         .uri = "/api/test/notification-mock",
@@ -2575,7 +2596,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &notification_mock_options_uri);
+    reg_test_uri(server, &notification_mock_options_uri);
 
     httpd_uri_t notification_mock_reset_uri = {
         .uri = "/api/test/notification-mock-reset",
@@ -2583,7 +2604,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = notification_mock_reset_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &notification_mock_reset_uri);
+    reg_test_uri(server, &notification_mock_reset_uri);
 
     httpd_uri_t notification_mock_reset_options_uri = {
         .uri = "/api/test/notification-mock-reset",
@@ -2591,7 +2612,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &notification_mock_reset_options_uri);
+    reg_test_uri(server, &notification_mock_reset_options_uri);
 
     // --- Session lock endpoints ---
 
@@ -2601,7 +2622,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = lock_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &lock_get_uri);
+    reg_test_uri(server, &lock_get_uri);
 
     httpd_uri_t lock_post_uri = {
         .uri = "/api/test/lock",
@@ -2609,7 +2630,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = lock_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &lock_post_uri);
+    reg_test_uri(server, &lock_post_uri);
 
     httpd_uri_t lock_options_uri = {
         .uri = "/api/test/lock",
@@ -2617,7 +2638,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &lock_options_uri);
+    reg_test_uri(server, &lock_options_uri);
 
     httpd_uri_t unlock_uri = {
         .uri = "/api/test/unlock",
@@ -2625,7 +2646,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = unlock_post_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &unlock_uri);
+    reg_test_uri(server, &unlock_uri);
 
     httpd_uri_t unlock_options_uri = {
         .uri = "/api/test/unlock",
@@ -2633,7 +2654,7 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = test_options_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &unlock_options_uri);
+    reg_test_uri(server, &unlock_options_uri);
 
     // Screenshot endpoint
     httpd_uri_t screenshot_uri = {
@@ -2642,9 +2663,17 @@ void test_endpoints_register(httpd_handle_t server)
         .handler = screenshot_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &screenshot_uri);
+    reg_test_uri(server, &screenshot_uri);
 
-    ESP_LOGI(TAG, "Test instrumentation endpoints registered");
+    if (s_test_uri_reg_failures > 0) {
+        ESP_LOGE(TAG,
+                 "%d test endpoint(s) FAILED to register (httpd URI table "
+                 "overflow) — these routes will return 404 and device tests "
+                 "will be unreliable. Increase uri_handlers in api_server.cpp.",
+                 s_test_uri_reg_failures);
+    } else {
+        ESP_LOGI(TAG, "Test instrumentation endpoints registered");
+    }
 }
 
 #endif // CONFIG_TEST_ENDPOINTS
