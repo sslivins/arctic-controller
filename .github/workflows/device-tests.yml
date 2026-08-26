@@ -764,6 +764,97 @@ jobs:
           fi
           echo "OK: no httpd URI-handler registration failures in serial log."
 
+      - name: Detect firmware crashes on device
+        if: always()
+        # Distinguish a *crash* reboot from an *intentional* reboot (OTA /
+        # cert-swap / settings tests call esp_restart(), recorded by the
+        # bootloader as a clean SW_CPU_RESET). The ONLY trustworthy crash
+        # signals are:
+        #   1. boot_stats "Crash reboot (<reason>)" — logged by the firmware on
+        #      the next boot *only* when esp_reset_reason() is PANIC or a
+        #      watchdog (see main/boot_stats.cpp is_crash_reason). This is
+        #      derived from the hardware reset reason, so it can never be
+        #      produced by a test.
+        #   2. A live "Guru Meditation" panic dump printed on the serial line.
+        #
+        # We deliberately DO NOT grep for the event-log event name
+        # "application_crash" (or watchdog_reset / brownout_reset): those are
+        # journalled *event-log entries* that device tests SEED on purpose to
+        # exercise the event-log UI (see tests/device/test_event_log_screen.py
+        # and tests/api/test_events_and_misc_api.py). Matching them produced a
+        # false positive that failed a clean run whose only "crashes" were
+        # test-seeded events with every reset a clean SW_CPU_RESET.
+        #
+        # HARD FAILURE: fails the job on any genuine crash. The latent
+        # flash-race crash (esp_restart() racing an in-flight SPI-flash op ->
+        # ROM Cache_WriteBack_All Store fault) is fixed by routing all reboots
+        # through system_safe_restart(), so a real crash here now signals a
+        # regression.
+        run: |
+          if [ ! -f controller-serial.log ]; then
+            echo "No serial log captured — skipping crash check."
+            exit 0
+          fi
+          # Trustworthy crash signals only (never produced by seeded events):
+          #  - "Crash reboot (" : boot_stats, any real crash reset reason
+          #  - "Guru Meditation": live panic dump
+          CRASH_RE='Guru Meditation|Crash reboot \('
+          HITS=$(grep -nE "$CRASH_RE" controller-serial.log || true)
+          if [ -z "$HITS" ]; then
+            echo "OK: no firmware crash signatures in serial log (test-seeded application_crash/watchdog_reset event-log entries are ignored)."
+            exit 0
+          fi
+          COUNT=$(printf '%s\n' "$HITS" | grep -cE 'Crash reboot \(|Guru Meditation' || true)
+          STREAK=$(grep -oE 'consecutive crash streak now [0-9]+' controller-serial.log | grep -oE '[0-9]+$' | sort -n | tail -1 || true)
+          echo "::warning title=Device firmware crashed::The controller crashed during the device-tests run (crash reboots: ${COUNT:-?}, peak consecutive streak: ${STREAK:-?}). This is a latent firmware bug, not a test flake. See the crash summary and the controller-serial-log artifact."
+          {
+            echo "### ⚠️ Device firmware crash detected"
+            echo ""
+            echo "Crash reboots / panics: **${COUNT:-?}**  |  peak consecutive crash streak: **${STREAK:-?}**"
+            echo ""
+            echo "Crash-signature lines from the serial log:"
+            echo '```'
+            printf '%s\n' "$HITS" | head -40
+            echo '```'
+            # If a live Guru Meditation dump was captured, surface the backtrace
+            # so it can be decoded with riscv32-esp-elf-addr2line against the ELF.
+            if grep -q 'Guru Meditation' controller-serial.log; then
+              echo "Panic backtrace excerpt (decode with riscv32-esp-elf-addr2line -pfiaC -e arctic_controller.elf):"
+              echo '```'
+              grep -nE 'Guru Meditation|Core .* register dump|MEPC|MTVAL|MCAUSE|A[0-9]+ +:|SP +:|RA +:|Backtrace|Stack memory' controller-serial.log | head -60
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$HITS" | head -40
+          # Crash detection is a hard gate now that the flash-race reboot crash
+          # is fixed (all reboots go through system_safe_restart()).
+          exit 1
+
+          STREAK=$(grep -oE 'consecutive crash streak now [0-9]+' controller-serial.log | grep -oE '[0-9]+$' | sort -n | tail -1 || true)
+          echo "::warning title=Device firmware crashed::The controller crashed during the device-tests run (crash reboots: ${COUNT:-?}, peak consecutive streak: ${STREAK:-?}). This is a latent firmware bug, not a test flake. See the crash summary and the controller-serial-log artifact."
+          {
+            echo "### ⚠️ Device firmware crash detected"
+            echo ""
+            echo "Crash reboots / panics: **${COUNT:-?}**  |  peak consecutive crash streak: **${STREAK:-?}**"
+            echo ""
+            echo "Crash-signature lines from the serial log:"
+            echo '```'
+            printf '%s\n' "$HITS" | head -40
+            echo '```'
+            # If a live Guru Meditation dump was captured, surface the backtrace
+            # so it can be decoded with riscv32-esp-elf-addr2line against the ELF.
+            if grep -q 'Guru Meditation' controller-serial.log; then
+              echo "Panic backtrace excerpt (decode with riscv32-esp-elf-addr2line -pfiaC -e arctic_controller.elf):"
+              echo '```'
+              grep -nE 'Guru Meditation|Core .* register dump|MEPC|MTVAL|MCAUSE|A[0-9]+ +:|SP +:|RA +:|Backtrace|Stack memory' controller-serial.log | head -60
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$HITS" | head -40
+          # Crash detection is a hard gate now that the flash-race reboot crash
+          # is fixed (all reboots go through system_safe_restart()).
+          exit 1
+
       - name: Publish UI test results
         uses: dorny/test-reporter@v2
         if: always() && steps.ui_tests.outcome != 'skipped'

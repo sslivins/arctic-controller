@@ -13,6 +13,7 @@
 #include <esp_heap_caps.h>
 #include <mdns.h>
 #include "api_server.h"
+#include "system_restart.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_task_wdt.h>
@@ -246,7 +247,7 @@ void ota_mgr_reboot(void)
 {
     ESP_LOGI(TAG, "Rebooting to apply OTA update...");
     vTaskDelay(pdMS_TO_TICKS(500));  // Allow log to flush
-    esp_restart();
+    system_safe_restart();
 }
 
 void ota_mgr_mark_valid(void)
@@ -615,7 +616,7 @@ static void ota_task(void* pvParameter)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s -- rebooting", esp_err_to_name(err));
         heap_caps_free(img_buf);
-        esp_restart();
+        system_safe_restart();
     }
 
     const int WRITE_CHUNK = 64 * 1024;
@@ -626,7 +627,7 @@ static void ota_task(void* pvParameter)
             ESP_LOGE(TAG, "esp_ota_write failed at %d: %s -- rebooting", off, esp_err_to_name(err));
             esp_ota_abort(ota_handle);
             heap_caps_free(img_buf);
-            esp_restart();
+            system_safe_restart();
         }
     }
     heap_caps_free(img_buf);
@@ -634,13 +635,13 @@ static void ota_task(void* pvParameter)
     err = esp_ota_end(ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s -- rebooting", esp_err_to_name(err));
-        esp_restart();
+        system_safe_restart();
     }
 
     err = esp_ota_set_boot_partition(update_partition);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s -- rebooting", esp_err_to_name(err));
-        esp_restart();
+        system_safe_restart();
     }
 
     // Success!
@@ -649,7 +650,7 @@ static void ota_task(void* pvParameter)
     ota_status.state = OTA_STATE_READY_TO_REBOOT;
     xSemaphoreGive(status_mutex);
     vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+    system_safe_restart();
 
     // Never reached
     vTaskDelete(NULL);

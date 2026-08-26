@@ -85,6 +85,15 @@ esp_err_t history_storage_latest_telemetry_timestamp(uint32_t* timestamp);
  */
 void history_storage_prepare_factory_reset(void);
 
+/**
+ * Permanently stop accepting new event/telemetry flash writes and wait for any
+ * in-flight write to complete. Call immediately before rebooting so that no
+ * esp_partition operation is running when esp_restart_noos() stalls the other
+ * core and runs Cache_WriteBack_All() (an in-flight SPI-flash op would make the
+ * cache write-back fault with a Store access fault in ROM). Not reversible.
+ */
+void history_storage_begin_reboot(void);
+
 #ifdef CONFIG_TEST_ENDPOINTS
 esp_err_t history_storage_seed_telemetry_for_test(
     const history_telemetry_sample_t* samples,
