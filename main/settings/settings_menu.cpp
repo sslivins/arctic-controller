@@ -14,6 +14,7 @@
 #include "settings_display_screen.h"
 #include "settings_home_assistant_screen.h"
 #include "settings_security_screen.h"
+#include "settings_web_screen.h"
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
@@ -59,6 +60,7 @@ typedef enum {
     SETTINGS_DISPLAY,
     SETTINGS_HOME_ASSISTANT,
     SETTINGS_SECURITY,
+    SETTINGS_WEB,
     SETTINGS_COUNT
 } settings_item_t;
 
@@ -464,6 +466,14 @@ static void row_click_cb(lv_event_t* e)
         security_screen_create(&sec_cfg);
         state.sub_screen_active = true;
         state.active_sub_screen = SETTINGS_SECURITY;
+    } else if (strcmp(tag, "settings_web") == 0) {
+        ESP_LOGI(TAG, "Opening Web Interface settings...");
+        web_screen_config_t web_cfg = {
+            .on_back = settings_menu_show,
+        };
+        web_screen_create(&web_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_WEB;
     } else if (strcmp(tag, "settings_factory_reset") == 0) {
         show_factory_reset_confirmation();
     }
@@ -694,6 +704,11 @@ static void create_menu_list(void)
         state.list_container, LV_SYMBOL_KEYBOARD,
         i18n_get(STR_SETTINGS_SECURITY),
         "settings_security");
+
+    state.rows[SETTINGS_WEB] = create_settings_row(
+        state.list_container, LV_SYMBOL_IMAGE,
+        i18n_get(STR_SETTINGS_WEB),
+        "settings_web");
     
     // Demo Mode toggle
 #if CONFIG_DEMO_MODE
@@ -843,6 +858,9 @@ void settings_menu_force_close(lv_obj_t* return_screen)
                 break;
             case SETTINGS_SECURITY:
                 security_screen_close();
+                break;
+            case SETTINGS_WEB:
+                web_screen_close();
                 break;
             default: break;
         }

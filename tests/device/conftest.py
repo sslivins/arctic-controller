@@ -94,6 +94,7 @@ def _return_to_main(device: DeviceClient):
         "language",
         "home_assistant",
         "security",
+        "web",
     ):
         if current == "wifi":
             try:

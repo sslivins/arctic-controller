@@ -167,6 +167,15 @@ typedef enum {
     STR_SECURITY_CODE_ACTIVE,
     STR_SECURITY_EXPIRES_IN,
     STR_SECURITY_FAILED,
+
+    // ========================================================================
+    // Web Interface (QR code + URL to the browser dashboard)
+    // ========================================================================
+    STR_SETTINGS_WEB,
+    STR_WEB_TITLE,
+    STR_WEB_SCAN_HINT,
+    STR_WEB_URL_LABEL,
+    STR_WEB_URL_UNAVAILABLE,
     
     // ========================================================================
     // Heat Pump - Main Screen

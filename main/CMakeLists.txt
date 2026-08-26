@@ -68,6 +68,7 @@ idf_component_register(
         "settings/settings_display_screen.cpp"
         "settings/settings_home_assistant_screen.cpp"
         "settings/settings_security_screen.cpp"
+        "settings/settings_web_screen.cpp"
         "i18n/i18n.cpp"
         "fonts/montserrat_16_latin.c"
         "fonts/montserrat_24_latin.c"

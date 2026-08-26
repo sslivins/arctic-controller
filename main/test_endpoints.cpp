@@ -25,6 +25,7 @@
 #include "settings/settings_display_screen.h"
 #include "settings/settings_home_assistant_screen.h"
 #include "settings/settings_security_screen.h"
+#include "settings/settings_web_screen.h"
 #include "settings/settings_wifi_screen.h"
 #include "settings/settings_firmware_screen.h"
 #include "settings/settings_time_screen.h"
@@ -601,6 +602,7 @@ static const char* get_screen_name(void)
     if (display_screen_is_visible()) return "display";
     if (home_assistant_screen_is_visible()) return "home_assistant";
     if (security_screen_is_visible()) return "security";
+    if (web_screen_is_visible()) return "web";
     if (wifi_screen_is_visible()) return "wifi";
     if (firmware_screen_is_visible()) return "firmware";
     if (time_screen_is_visible()) return "time";

@@ -22,6 +22,7 @@ SUB_SCREENS = [
         "home_assistant_back",
     ),
     ("settings_security", "security", "security_back"),
+    ("settings_web", "web", "web_back"),
 ]
 
 
