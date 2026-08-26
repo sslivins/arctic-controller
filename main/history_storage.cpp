@@ -1,5 +1,6 @@
 #include "history_storage.h"
 
+#include <atomic>
 #include <esp_crc.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
@@ -91,6 +92,7 @@ static uint32_t s_next_journal_sequence = 1;
 static size_t s_next_record = 0;
 static SemaphoreHandle_t s_telemetry_mutex = nullptr;
 static bool s_factory_reset_pending = false;
+static std::atomic_bool s_reboot_pending{false};
 static bool s_telemetry_initialized = false;
 static size_t s_telemetry_sector_count = 0;
 static size_t s_telemetry_active_sector = 0;
@@ -322,6 +324,7 @@ esp_err_t history_storage_load_events(event_entry_t* entries,
 
 esp_err_t history_storage_append_event(uint32_t event_id, const event_entry_t* entry) {
     if (event_id == 0 || entry == nullptr) return ESP_ERR_INVALID_ARG;
+    if (s_reboot_pending.load()) return ESP_ERR_INVALID_STATE;
     if (s_partition == nullptr || s_active_bank < 0) return ESP_ERR_INVALID_STATE;
     if (s_next_record >= EVENT_RECORDS_PER_BANK) return ESP_ERR_NO_MEM;
 
@@ -340,6 +343,7 @@ esp_err_t history_storage_replace_events(const event_entry_t* entries,
                                          size_t capacity,
                                          size_t head,
                                          size_t count) {
+    if (s_reboot_pending.load()) return ESP_ERR_INVALID_STATE;
     if (s_partition == nullptr || s_active_bank < 0) return ESP_ERR_INVALID_STATE;
     if (count > capacity || count > EVENT_RECORDS_PER_BANK ||
         (count > 0 && (entries == nullptr || event_ids == nullptr))) {
@@ -555,6 +559,7 @@ static esp_err_t telemetry_rotate_locked() {
 esp_err_t history_storage_append_telemetry(
     const history_telemetry_sample_t* sample) {
     if (sample == nullptr || sample->timestamp == 0) return ESP_ERR_INVALID_ARG;
+    if (s_reboot_pending.load()) return ESP_ERR_INVALID_STATE;
     if (s_telemetry_mutex == nullptr) {
         esp_err_t err = history_storage_init();
         if (err != ESP_OK) return err;
@@ -710,6 +715,20 @@ void history_storage_prepare_factory_reset(void) {
     xSemaphoreTake(s_telemetry_mutex, portMAX_DELAY);
     s_factory_reset_pending = true;
     xSemaphoreGive(s_telemetry_mutex);
+}
+
+void history_storage_begin_reboot(void) {
+    // Block any new event/telemetry flash write. Set the gate first so callers
+    // that check it (see the write entry points) bail before touching flash.
+    s_reboot_pending.store(true);
+    // Then wait out an in-flight telemetry write (the only path that holds the
+    // mutex across an esp_partition op) so no SPI-flash operation is running
+    // when the caller invokes esp_restart().
+    if (s_telemetry_mutex != nullptr) {
+        if (xSemaphoreTake(s_telemetry_mutex, pdMS_TO_TICKS(2000)) == pdTRUE) {
+            xSemaphoreGive(s_telemetry_mutex);
+        }
+    }
 }
 
 #ifdef CONFIG_TEST_ENDPOINTS

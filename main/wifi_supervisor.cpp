@@ -4,6 +4,7 @@
  */
 #include "wifi_supervisor.h"
 #include "wifi_manager.h"
+#include "system_restart.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -67,7 +68,7 @@ static void wifi_supervisor_task(void* param) {
             ESP_LOGE(TAG, "WiFi down %ds and unrecoverable in place - restarting to "
                      "reinitialize the network stack", disconnected_ms / 1000);
             vTaskDelay(pdMS_TO_TICKS(500));  // flush logs
-            esp_restart();
+            system_safe_restart();
         }
 
         vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));

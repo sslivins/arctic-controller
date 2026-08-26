@@ -19,6 +19,7 @@
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
 #include "../factory_reset.h"
+#include "../system_restart.h"
 #include "../heatpump_screen.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
@@ -248,7 +249,7 @@ static void reboot_confirm_cb(lv_event_t* e)
 {
     (void)e;
     ESP_LOGI(TAG, "User confirmed restart");
-    esp_restart();
+    system_safe_restart();
 }
 
 static void reboot_cancel_cb(lv_event_t* e)

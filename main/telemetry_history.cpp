@@ -95,7 +95,7 @@ esp_err_t telemetry_history_init(void) {
     return ESP_OK;
 }
 
-void telemetry_history_prepare_factory_reset(void) {
+void telemetry_history_stop(void) {
     s_stop_requested.store(true);
     TaskHandle_t task = s_task;
     if (task != nullptr) {
@@ -104,5 +104,9 @@ void telemetry_history_prepare_factory_reset(void) {
             ESP_LOGE(TAG, "Timed out waiting for telemetry recorder to stop");
         }
     }
+}
+
+void telemetry_history_prepare_factory_reset(void) {
+    telemetry_history_stop();
     history_storage_prepare_factory_reset();
 }
