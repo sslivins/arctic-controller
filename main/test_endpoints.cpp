@@ -15,6 +15,8 @@
 #include <cstring>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <cJSON.h>
 #include <lvgl.h>
 #include <lwip/sockets.h>
@@ -829,37 +831,59 @@ static esp_err_t click_post_handler(httpd_req_t* req)
 
     cJSON_Delete(body);  // Safe to delete now — we've copied all strings
 
-    if (!bsp_display_lock(1000)) {
-        ESP_LOGW(TAG, "click: display lock busy >1s (UI stalled) — returning 503");
-        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
-        return ESP_OK;
-    }
-
-    lv_obj_t* scr = lv_scr_act();
+    // Resolve the target widget, tolerating an in-flight screen-load animation.
+    // wait_for_screen (get_screen_name) reports the new screen as soon as it is
+    // *scheduled* — each screen module sets its visible flag right after calling
+    // lv_screen_load_anim — but lv_scr_act() only switches once that animation
+    // ticks on the UI task. A click that lands in that window would search the
+    // still-active previous screen and spuriously 404 (a chronic source of
+    // device-test flakiness on the wifi/firmware/time screens, which do work on
+    // open and around reboots). Retry briefly, releasing the display lock
+    // between attempts so the UI task can advance the animation. Selenium-style
+    // implicit wait; a genuinely missing widget still 404s after the ceiling.
+    const int RESOLVE_MAX_ATTEMPTS = 40;   // ~2s ceiling (40 * 50ms)
     lv_obj_t* found = NULL;
+    for (int attempt = 0; attempt < RESOLVE_MAX_ATTEMPTS; attempt++) {
+        if (!bsp_display_lock(1000)) {
+            ESP_LOGW(TAG, "click: display lock busy >1s (UI stalled) — returning 503");
+            send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+            return ESP_OK;
+        }
 
-    // Search by tag first (most specific)
-    if (has_tag) {
-        found = find_by_tag(scr, search_tag, 0);
-    }
+        lv_obj_t* scr = lv_scr_act();
 
-    // Search with translated/resolved text
-    if (!found) {
-        found = find_label_by_text(scr,
-            has_exact ? search_exact : NULL,
-            has_contains ? search_contains : NULL, 0);
-    }
+        // Search by tag first (most specific)
+        if (has_tag) {
+            found = find_by_tag(scr, search_tag, 0);
+        }
 
-    // Fallback: try original English text (for non-i18n labels)
-    if (!found && original_exact[0]) {
-        found = find_label_by_text(scr, original_exact, NULL, 0);
-    }
-    if (!found && original_contains[0]) {
-        found = find_label_by_text(scr, NULL, original_contains, 0);
-    }
+        // Search with translated/resolved text
+        if (!found) {
+            found = find_label_by_text(scr,
+                has_exact ? search_exact : NULL,
+                has_contains ? search_contains : NULL, 0);
+        }
 
-    if (!found) {
+        // Fallback: try original English text (for non-i18n labels)
+        if (!found && original_exact[0]) {
+            found = find_label_by_text(scr, original_exact, NULL, 0);
+        }
+        if (!found && original_contains[0]) {
+            found = find_label_by_text(scr, NULL, original_contains, 0);
+        }
+
+        if (found) break;  // keep the lock held for the click below
+
+        // Not found yet — release the lock so the UI task can tick any pending
+        // screen-load animation, then retry.
         bsp_display_unlock();
+        if (attempt < RESOLVE_MAX_ATTEMPTS - 1) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+
+    if (!found) {
+        // Lock already released at the tail of the final attempt.
         send_json_error(req, "404 Not Found",
                         has_exact ? search_exact : search_contains);
         return ESP_OK;
