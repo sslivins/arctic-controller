@@ -50,7 +50,7 @@ def _return_to_main(device: DeviceClient):
             return
 
     if current == "main":
-        device.wait_for_widget(tag="settings", timeout=3.0)
+        device.try_wait_widget(tag="settings", timeout=3.0)
         return
 
     # Dismiss reboot confirmation overlay if present (absorbs all taps)
@@ -68,8 +68,8 @@ def _return_to_main(device: DeviceClient):
             device.click(tag="nav_home")
         except Exception:
             pass
-        device.wait_for_screen("main", timeout=5.0)
-        device.wait_for_widget(tag="settings", timeout=3.0)
+        device.try_wait_screen("main", timeout=5.0)
+        device.try_wait_widget(tag="settings", timeout=3.0)
         return
 
     # The errors screen is still a standalone overlay opened from the Home tab.
@@ -81,8 +81,8 @@ def _return_to_main(device: DeviceClient):
                 device.click(symbol="CLOSE")
             except Exception:
                 pass
-        device.wait_for_screen("main", timeout=5.0)
-        device.wait_for_widget(tag="settings", timeout=3.0)
+        device.try_wait_screen("main", timeout=5.0)
+        device.try_wait_widget(tag="settings", timeout=3.0)
         return
 
     # If on a sub-screen, go back to settings first
@@ -113,7 +113,7 @@ def _return_to_main(device: DeviceClient):
                 device.click(symbol="LEFT")
             except Exception:
                 pass
-        device.wait_for_screen("settings", timeout=5.0)
+        device.try_wait_screen("settings", timeout=5.0)
         time.sleep(0.5)
 
     # Close settings to return to main
@@ -124,8 +124,8 @@ def _return_to_main(device: DeviceClient):
             device.click(symbol="CLOSE")
         except Exception:
             pass
-    device.wait_for_screen("main", timeout=5.0)
-    device.wait_for_widget(tag="settings", timeout=5.0)
+    device.try_wait_screen("main", timeout=5.0)
+    device.try_wait_widget(tag="settings", timeout=5.0)
 
 
 @pytest.fixture(scope="session")

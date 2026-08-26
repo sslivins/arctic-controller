@@ -225,9 +225,15 @@ def test_something(device):
 - **Use tags over labels** — tags are language-independent and don't break when
   translations change
 - **Use `wait_for_screen()` and `wait_for_widget()`** — LVGL animations need
-  time; never assert immediately after a click
-- **Use `time.sleep(0.3–0.5)`** after toggles/rollers — LVGL processes events
-  on the next tick
+  time; never assert immediately after a click. These **raise `DeviceError` on
+  timeout** (with the last observed screen + widget tags), so a missed
+  transition fails loudly instead of silently proceeding. Use the best-effort
+  `try_wait_screen()` / `try_wait_widget()` variants only in cleanup/teardown.
+- **Prefer `wait_until()` over `time.sleep()`** after toggles/rollers — instead
+  of sleeping a guessed interval, wait for the exact observable condition, e.g.
+  `device.wait_until("temp unit is fahrenheit", lambda: device.get_preferences()["temp_unit"] == "fahrenheit")`.
+  Fixed sleeps are a chronic source of flakiness; reserve them for genuinely
+  time-based behavior (e.g. an inactivity timeout).
 - **Mock, don't connect** — use `wifi_mock()`, `firmware_mock()`, etc. to inject
   controlled state rather than depending on real network services
 - **Restore state** — if your test changes a persistent setting (language,

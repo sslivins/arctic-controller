@@ -520,24 +520,89 @@ class DeviceClient:
             time.sleep(poll)
         return False
 
-    def wait_for_screen(self, name: str, timeout: float = 3.0, poll: float = 0.3) -> bool:
-        """Poll until the screen name matches, or timeout."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self.screen == name:
-                return True
-            time.sleep(poll)
-        return False
+    def wait_for_screen(self, name: str, timeout: float = 3.0, poll: float = 0.3,
+                        raise_on_timeout: bool = True) -> bool:
+        """Wait until the current screen matches ``name``.
+
+        Raises ``DeviceError`` on timeout by default (with the last observed
+        screen and widget tags for diagnostics). Pass ``raise_on_timeout=False``
+        — or use :meth:`try_wait_screen` — in cleanup/best-effort paths where a
+        miss should not fail the test.
+        """
+        return self.wait_until(
+            f"screen {name!r}",
+            lambda: self.screen == name,
+            timeout=timeout, poll=poll, raise_on_timeout=raise_on_timeout,
+        )
+
+    def try_wait_screen(self, name: str, timeout: float = 3.0, poll: float = 0.3) -> bool:
+        """Best-effort :meth:`wait_for_screen` — returns bool, never raises."""
+        return self.wait_for_screen(name, timeout=timeout, poll=poll, raise_on_timeout=False)
 
     def wait_for_widget(self, *, tag: Optional[str] = None, text: Optional[str] = None,
+                        timeout: float = 5.0, poll: float = 0.3,
+                        raise_on_timeout: bool = True) -> bool:
+        """Wait until a widget with the given tag or text appears in the tree.
+
+        Raises ``DeviceError`` on timeout by default. Use
+        :meth:`try_wait_widget` (or ``raise_on_timeout=False``) in best-effort
+        paths.
+        """
+        what = f"widget tag={tag!r}" if tag else f"widget text={text!r}"
+        return self.wait_until(
+            what,
+            lambda: self.has_widget(tag=tag, text=text),
+            timeout=timeout, poll=poll, raise_on_timeout=raise_on_timeout,
+        )
+
+    def try_wait_widget(self, *, tag: Optional[str] = None, text: Optional[str] = None,
                         timeout: float = 5.0, poll: float = 0.3) -> bool:
-        """Poll until a widget with the given tag or text appears in the tree."""
+        """Best-effort :meth:`wait_for_widget` — returns bool, never raises."""
+        return self.wait_for_widget(tag=tag, text=text, timeout=timeout, poll=poll,
+                                    raise_on_timeout=False)
+
+    def wait_until(self, description: str, predicate, timeout: float = 5.0,
+                   poll: float = 0.3, raise_on_timeout: bool = True) -> bool:
+        """Poll ``predicate()`` until it returns truthy, or ``timeout`` elapses.
+
+        This is the shared condition-based wait primitive that replaces fixed
+        ``time.sleep()`` band-aids: instead of sleeping a guessed interval, wait
+        for the exact observable condition. Exceptions raised by ``predicate``
+        (e.g. a transient HTTP error) are treated as "not yet" and retried.
+
+        On timeout, raises ``DeviceError`` including ``description`` plus a
+        best-effort snapshot of the current screen and widget tags — so a
+        failure says what it was waiting for and what the device was actually
+        showing. Pass ``raise_on_timeout=False`` to get a bool back instead
+        (for cleanup/best-effort checks).
+        """
         deadline = time.time() + timeout
-        while time.time() < deadline:
-            if self.has_widget(tag=tag, text=text):
-                return True
+        while True:
+            try:
+                if predicate():
+                    return True
+            except Exception:
+                pass
+            if time.time() >= deadline:
+                break
             time.sleep(poll)
+        if raise_on_timeout:
+            raise DeviceError(
+                f"Timed out after {timeout:.1f}s waiting for {description}. {self._diag()}"
+            )
         return False
+
+    def _diag(self) -> str:
+        """Best-effort snapshot of screen + widget tags for error messages."""
+        try:
+            screen = self.screen
+        except Exception as e:
+            return f"(device unreachable: {e})"
+        try:
+            tags = sorted(w.tag for w in self.widgets if w.tag)
+        except Exception:
+            tags = []
+        return f"Last observed screen={screen!r}, widget tags={tags}"
 
     def find_widget(self, *, tag: Optional[str] = None, text: Optional[str] = None) -> Optional[Widget]:
         """Find a widget by tag or text in the current tree."""
