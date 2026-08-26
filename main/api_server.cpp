@@ -28,6 +28,7 @@
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
 #include "history_storage.h"
+#include "system_restart.h"
 #include "status_bar.h"        // status_bar_get_notifications() for /api/notifications
 #include "event_log.h"
 #include "factory_reset.h"
@@ -2974,7 +2975,7 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     // Schedule reboot after response is sent
     ESP_LOGI(TAG, "Scheduling reboot...");
     vTaskDelay(pdMS_TO_TICKS(1000));
-    esp_restart();
+    system_safe_restart();
     
     return ESP_OK;
 }
@@ -2990,7 +2991,7 @@ static esp_err_t ota_reboot_post_handler(httpd_req_t* req)
     httpd_resp_sendstr(req, "{\"status\":\"rebooting\",\"message\":\"Device will reboot now\"}");
     
     vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
+    system_safe_restart();
     
     return ESP_OK;
 }

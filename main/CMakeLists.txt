@@ -54,6 +54,7 @@ idf_component_register(
         "event_log.cpp"
         "history_storage.cpp"
         "telemetry_history.cpp"
+        "system_restart.cpp"
         "event_log_screen.cpp"
         "boot_stats.cpp"
         "wifi_supervisor.cpp"

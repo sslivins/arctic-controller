@@ -776,10 +776,11 @@ jobs:
         # surfaced, so the suite mostly passed and nobody noticed the device was
         # crashing. This step makes every such crash loud and impossible to miss.
         #
-        # NOTE: currently NON-BLOCKING (warning only) so it doesn't brick the
-        # whole pipeline on the known-preexisting heap use-after-free while that
-        # fix is in flight. PROMOTE TO A HARD FAILURE (uncomment the `exit 1`
-        # below) in the same PR that lands the crash fix.
+        # HARD FAILURE: this step fails the job on any genuine crash signature.
+        # The latent flash-race crash (esp_restart() racing an in-flight
+        # SPI-flash op -> ROM Cache_WriteBack_All Store fault) is fixed by
+        # routing all reboots through system_safe_restart(), so a crash here now
+        # signals a real regression.
         run: |
           if [ ! -f controller-serial.log ]; then
             echo "No serial log captured — skipping crash check."
@@ -814,9 +815,9 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           printf '%s\n' "$HITS" | head -40
-          # TODO(crash-fix): promote to a hard failure once the heap
-          # use-after-free is fixed:
-          # exit 1
+          # Crash detection is a hard gate now that the flash-race reboot crash
+          # is fixed (all reboots go through system_safe_restart()).
+          exit 1
 
       - name: Publish UI test results
         uses: dorny/test-reporter@v2
