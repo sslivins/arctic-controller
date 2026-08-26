@@ -582,6 +582,44 @@ static lv_obj_t* find_by_tag(lv_obj_t* root, const char* tag, int depth)
     return NULL;
 }
 
+// Resolve a widget by tag against the active screen, tolerating an in-flight
+// screen-load animation, mirroring the implicit-wait resolver used by the click
+// handler. wait_for_screen (get_screen_name) reports the new screen as soon as
+// it is *scheduled* — each screen module sets its visible flag right after
+// calling lv_screen_load_anim — but lv_scr_act() only switches once that 300ms
+// animation ticks on the UI task. Any endpoint that resolves a widget in that
+// window against the still-active previous screen would spuriously 404 (a
+// chronic source of device-test flakiness). Retry briefly, releasing the
+// display lock between attempts so the UI task can advance the animation.
+//
+// On success returns the widget WITH the display lock HELD (caller must
+// bsp_display_unlock() once done). On failure returns NULL with the lock
+// RELEASED; *lock_timed_out is set true if a lock acquisition (not the widget
+// search) timed out, so the caller can distinguish 503 from 404.
+static lv_obj_t* resolve_tag_locked(const char* tag, bool* lock_timed_out)
+{
+    if (lock_timed_out) *lock_timed_out = false;
+    const int RESOLVE_MAX_ATTEMPTS = 40;   // ~2s ceiling (40 * 50ms)
+    for (int attempt = 0; attempt < RESOLVE_MAX_ATTEMPTS; attempt++) {
+        if (!bsp_display_lock(1000)) {
+            ESP_LOGW(TAG, "resolve_tag_locked: display lock busy >1s (UI stalled)");
+            if (lock_timed_out) *lock_timed_out = true;
+            return NULL;
+        }
+
+        lv_obj_t* found = find_by_tag(lv_scr_act(), tag, 0);
+        if (found) return found;  // keep the lock held for the caller
+
+        // Not found yet — release the lock so the UI task can tick any pending
+        // screen-load animation, then retry.
+        bsp_display_unlock();
+        if (attempt < RESOLVE_MAX_ATTEMPTS - 1) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
+    }
+    return NULL;  // lock already released at the tail of the final attempt
+}
+
 // Find the nearest clickable ancestor of a widget
 static lv_obj_t* find_clickable_parent(lv_obj_t* obj)
 {
@@ -985,16 +1023,13 @@ static esp_err_t set_slider_post_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "set-slider: tag='%s', value=%d", search_tag, value);
 
-    if (!bsp_display_lock(1000)) {
+    bool lock_timed_out = false;
+    lv_obj_t* found = resolve_tag_locked(search_tag, &lock_timed_out);
+    if (lock_timed_out) {
         send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
         return ESP_OK;
     }
-
-    lv_obj_t* scr = lv_scr_act();
-    lv_obj_t* found = find_by_tag(scr, search_tag, 0);
-
     if (!found) {
-        bsp_display_unlock();
         send_json_error(req, "404 Not Found", search_tag);
         return ESP_OK;
     }
@@ -1132,14 +1167,13 @@ static esp_err_t scroll_post_handler(httpd_req_t* req)
     int y = (int)j_y->valuedouble;
     cJSON_Delete(body);
 
-    if (!bsp_display_lock(1000)) {
+    bool lock_timed_out = false;
+    lv_obj_t* found = resolve_tag_locked(search_tag, &lock_timed_out);
+    if (lock_timed_out) {
         send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
         return ESP_OK;
     }
-
-    lv_obj_t* found = find_by_tag(lv_scr_act(), search_tag, 0);
     if (!found) {
-        bsp_display_unlock();
         send_json_error(req, "404 Not Found", search_tag);
         return ESP_OK;
     }
@@ -1206,16 +1240,13 @@ static esp_err_t set_roller_post_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "set-roller: tag='%s', index=%d", search_tag, index);
 
-    if (!bsp_display_lock(1000)) {
+    bool lock_timed_out = false;
+    lv_obj_t* found = resolve_tag_locked(search_tag, &lock_timed_out);
+    if (lock_timed_out) {
         send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
         return ESP_OK;
     }
-
-    lv_obj_t* scr = lv_scr_act();
-    lv_obj_t* found = find_by_tag(scr, search_tag, 0);
-
     if (!found) {
-        bsp_display_unlock();
         send_json_error(req, "404 Not Found", search_tag);
         return ESP_OK;
     }
@@ -1300,16 +1331,13 @@ static esp_err_t toggle_post_handler(httpd_req_t* req)
 
     ESP_LOGI(TAG, "toggle: tag='%s'", search_tag);
 
-    if (!bsp_display_lock(1000)) {
+    bool lock_timed_out = false;
+    lv_obj_t* found = resolve_tag_locked(search_tag, &lock_timed_out);
+    if (lock_timed_out) {
         send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
         return ESP_OK;
     }
-
-    lv_obj_t* scr = lv_scr_act();
-    lv_obj_t* found = find_by_tag(scr, search_tag, 0);
-
     if (!found) {
-        bsp_display_unlock();
         send_json_error(req, "404 Not Found", search_tag);
         return ESP_OK;
     }
@@ -1472,12 +1500,14 @@ static esp_err_t type_text_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    bsp_display_lock(0);
-    lv_obj_t* screen = lv_screen_active();
-    lv_obj_t* obj = find_by_tag(screen, j_tag->valuestring, 0);
-
+    bool lock_timed_out = false;
+    lv_obj_t* obj = resolve_tag_locked(j_tag->valuestring, &lock_timed_out);
+    if (lock_timed_out) {
+        cJSON_Delete(body);
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
     if (!obj) {
-        bsp_display_unlock();
         cJSON_Delete(body);
         send_json_error(req, "404 Not Found", "Widget not found");
         return ESP_OK;
