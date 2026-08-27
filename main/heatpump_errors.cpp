@@ -214,7 +214,14 @@ void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
     // Decode previous and current fault bytes into opaque fault sites, then diff
     // by site id. The controller never inspects register/bit here — the library
     // owns the bit layout; we only compare and store site tokens.
-    MaconFault prev_f[MAX_ACTIVE_FAULTS], cur_f[MAX_ACTIVE_FAULTS];
+    // Keep these large (MAX_ACTIVE_FAULTS-entry, ~1.5 KB each) decode buffers
+    // OFF the stack. updateErrorHistory runs on the demo-sync task's modest
+    // 4 KB stack, and a full fault set plus the per-fault ESP_LOG/addHistoryEntry
+    // calls below would otherwise overflow it (observed: "stack overflow in task
+    // arctic_demo_sync"). Safe as static because ErrorStateLock serializes every
+    // caller for the whole function body, so only one execution is ever here.
+    static MaconFault prev_f[MAX_ACTIVE_FAULTS];
+    static MaconFault cur_f[MAX_ACTIVE_FAULTS];
     size_t np = macon_decode_faults(s_prev_regs[0], s_prev_regs[1], s_prev_regs[2],
                                     s_prev_regs[3], s_prev_regs[4], prev_f, MAX_ACTIVE_FAULTS);
     size_t nc = macon_decode_faults(fault_run, fault_ee, fault_comp,

@@ -161,8 +161,15 @@ static void detectAndLogStateEvents() {
         // semantic sites (the library skips the RUN indicator) and diff by
         // opaque site id. The event-log payload is that site id — no register
         // or bit position is handled here.
-        MaconFault prev_f[arctic::MAX_ACTIVE_FAULTS];
-        MaconFault cur_f[arctic::MAX_ACTIVE_FAULTS];
+        // Keep these large (MAX_ACTIVE_FAULTS-entry, ~1.5 KB each) decode
+        // buffers OFF the stack. This runs on the demo-sync task's modest 4 KB
+        // stack, and a full fault set plus the event_log calls below would
+        // otherwise overflow it (observed: "stack overflow in task
+        // arctic_demo_sync"). Safe as static because every caller of
+        // detectAndLogStateEvents() holds s_state_mutex, so only one execution
+        // is ever in this region at a time.
+        static MaconFault prev_f[arctic::MAX_ACTIVE_FAULTS];
+        static MaconFault cur_f[arctic::MAX_ACTIVE_FAULTS];
         const size_t np = macon_decode_faults(
             s_prev_fault_bytes[0], s_prev_fault_bytes[1], s_prev_fault_bytes[2],
             s_prev_fault_bytes[3], s_prev_fault_bytes[4], prev_f, arctic::MAX_ACTIVE_FAULTS);
