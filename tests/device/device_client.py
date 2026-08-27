@@ -87,17 +87,33 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def _screen_payload(self) -> dict:
+        """Raw ``/api/test/screen`` JSON: ``{"screen": ..., "settled": ...}``.
+
+        ``settled`` is ``True`` only when no screen-load transition is in flight
+        (LVGL's ``scr_to_load`` cleared) — i.e. the active screen, its widget
+        tree, and the firmware's per-module visibility flags all agree. Older
+        firmware without the field is treated as always-settled for
+        backward-compatibility.
+        """
+        r = self.session.get(
+            f"{self.base_url}/api/test/screen", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json()
+
     @property
     def screen(self) -> str:
         """Current screen name (e.g. 'main', 'settings').
 
         Uses the lightweight /api/test/screen endpoint (no widget tree walk).
         """
-        r = self.session.get(
-            f"{self.base_url}/api/test/screen", timeout=self.timeout
-        )
-        r.raise_for_status()
-        return r.json()["screen"]
+        return self._screen_payload()["screen"]
+
+    @property
+    def screen_settled(self) -> bool:
+        """Whether the current screen is settled (no load animation in flight)."""
+        return bool(self._screen_payload().get("settled", True))
 
     @property
     def widgets(self) -> list[Widget]:
@@ -522,16 +538,28 @@ class DeviceClient:
 
     def wait_for_screen(self, name: str, timeout: float = 3.0, poll: float = 0.3,
                         raise_on_timeout: bool = True) -> bool:
-        """Wait until the current screen matches ``name``.
+        """Wait until the current screen matches ``name`` *and* is settled.
+
+        "Settled" means no screen-load animation is in flight, so the active
+        screen, its widget tree, and the firmware's visibility flags all agree.
+        Waiting only for the name match returned too early during the ~300ms
+        load animation — the endpoint reported the *scheduled* screen while
+        ``lv_scr_act()`` (and thus the widget tree / click targets) still
+        pointed at the previous one, so a follow-up action could 404 or hit the
+        old screen. Gating on ``settled`` closes that scheduled-vs-settled race.
 
         Raises ``DeviceError`` on timeout by default (with the last observed
         screen and widget tags for diagnostics). Pass ``raise_on_timeout=False``
         — or use :meth:`try_wait_screen` — in cleanup/best-effort paths where a
         miss should not fail the test.
         """
+        def _on_settled_screen() -> bool:
+            payload = self._screen_payload()
+            return payload.get("screen") == name and payload.get("settled", True)
+
         return self.wait_until(
-            f"screen {name!r}",
-            lambda: self.screen == name,
+            f"settled screen {name!r}",
+            _on_settled_screen,
             timeout=timeout, poll=poll, raise_on_timeout=raise_on_timeout,
         )
 
@@ -595,14 +623,16 @@ class DeviceClient:
     def _diag(self) -> str:
         """Best-effort snapshot of screen + widget tags for error messages."""
         try:
-            screen = self.screen
+            payload = self._screen_payload()
+            screen = payload.get("screen")
+            settled = payload.get("settled", True)
         except Exception as e:
             return f"(device unreachable: {e})"
         try:
             tags = sorted(w.tag for w in self.widgets if w.tag)
         except Exception:
             tags = []
-        return f"Last observed screen={screen!r}, widget tags={tags}"
+        return f"Last observed screen={screen!r} (settled={settled}), widget tags={tags}"
 
     def find_widget(self, *, tag: Optional[str] = None, text: Optional[str] = None) -> Optional[Widget]:
         """Find a widget by tag or text in the current tree."""

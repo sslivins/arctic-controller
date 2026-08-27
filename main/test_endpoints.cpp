@@ -660,6 +660,22 @@ static const char* get_screen_name(void)
     }
 }
 
+// True when no screen-load transition is in flight, i.e. the active screen
+// (lv_scr_act()), its widget tree, and the per-module visibility flags all
+// agree. Each screen module sets its visible flag immediately after calling
+// lv_screen_load_anim(), so get_screen_name() reports the *scheduled* screen
+// while lv_scr_act() still walks the previous one for the duration of the
+// ~300ms load animation (the chronic scheduled-vs-settled race). LVGL sets
+// disp->scr_to_load synchronously inside lv_screen_load_anim() (before the flag
+// flips) and clears it only when the load completes (or immediately for a
+// zero-duration/instant transition), so "scr_to_load == NULL" precisely marks a
+// settled, self-consistent UI. Tests gate wait_for_screen on this to avoid
+// acting on a screen that is merely scheduled.
+static bool screen_is_settled(void)
+{
+    return lv_display_get_screen_loading(lv_display_get_default()) == NULL;
+}
+
 // ============================================================================
 // GET /api/test/ui-state
 // Uses a pre-allocated PSRAM buffer to avoid heap fragmentation on complex screens
@@ -690,9 +706,12 @@ static esp_err_t ui_state_get_handler(httpd_req_t* req)
     }
 
     const char* screen_name = get_screen_name();
+    bool settled = screen_is_settled();
 
     int pos = 0;
-    pos += snprintf(buf + pos, BUF_SIZE - pos, "{\"screen\":\"%s\",\"widgets\":[", screen_name);
+    pos += snprintf(buf + pos, BUF_SIZE - pos,
+                    "{\"screen\":\"%s\",\"settled\":%s,\"widgets\":[",
+                    screen_name, settled ? "true" : "false");
 
     int widget_count = 0;
     lv_obj_t* scr = lv_scr_act();
@@ -724,11 +743,13 @@ static esp_err_t screen_get_handler(httpd_req_t* req)
     }
 
     const char* screen_name = get_screen_name();
+    bool settled = screen_is_settled();
 
     bsp_display_unlock();
 
     char buf[128];
-    snprintf(buf, sizeof(buf), "{\"screen\":\"%s\"}", screen_name);
+    snprintf(buf, sizeof(buf), "{\"screen\":\"%s\",\"settled\":%s}",
+             screen_name, settled ? "true" : "false");
     httpd_resp_sendstr(req, buf);
     return ESP_OK;
 }
