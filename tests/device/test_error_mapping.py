@@ -98,11 +98,22 @@ class TestFaultCardCodes:
     def test_fault_code_on_card(self, device: DeviceClient, code, label):
         device.clear_all_faults()
         device.inject_fault(code, True)
-        _wait()
+        # The error card is repainted by a ~1s main-screen timer, so a fixed
+        # sleep-then-read-once races that tick and can observe the previous
+        # test's restored default fault (P02). Poll for the card to reflect the
+        # injected code instead; expect_within keeps the normal-case settle
+        # budget visible to the latency gate.
+        ok = device.wait_until(
+            f"error card shows fault {code}",
+            lambda: (w := device.find_widget(tag="error_label")) is not None
+            and code in w.text,
+            timeout=5.0,
+            expect_within=UI_SETTLE,
+            raise_on_timeout=False,
+        )
         widget = device.find_widget(tag="error_label")
         assert widget is not None, "error_label widget not found"
-        assert code in widget.text, \
-            f"Expected '{code}' in error card, got '{widget.text}'"
+        assert ok, f"Expected '{code}' in error card, got '{widget.text}'"
 
 
 # =========================================================================
