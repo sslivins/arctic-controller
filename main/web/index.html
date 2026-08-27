@@ -1184,7 +1184,15 @@
         if (route === "events" && !state.events.length) await loadEvents(true);
         if (route === "settings") {
           await ensureSettings();
-          if (state.settingsPage === "wifi") { await api("/api/wifi/scan", { method: "POST" }).catch(() => {}); setTimeout(loadNetworks, 500); }
+          // Paint the settings content (form, buttons) as soon as the settings
+          // data is loaded, *before* any slow device round-trips below. The
+          // WiFi page in particular kicks off /api/wifi/scan, which can take
+          // several seconds on the device; awaiting it before rendering left
+          // the panel showing only a spinner (no Scan button / form) until the
+          // scan returned — bad UX, and a flaky-test trap for anything that
+          // asserts on the freshly-rendered controls.
+          render();
+          if (state.settingsPage === "wifi") { api("/api/wifi/scan", { method: "POST" }).catch(() => {}); setTimeout(loadNetworks, 500); }
           if (state.settingsPage === "diagnostics") startLogPolling();
           if (state.settingsPage === "home_assistant") { await loadHaStatus().catch(() => {}); startHaPolling(); }
         }
