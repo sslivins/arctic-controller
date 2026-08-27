@@ -725,6 +725,51 @@ jobs:
           TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
           TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 
+      - name: Reset device to baseline TLS/auth state
+        if: always()
+        run: |
+          # Safety net for finding F-12 (shared TLS/auth state across suites):
+          # regardless of how the three test suites above exited, force the
+          # device back to a known baseline — no administrator TLS cert
+          # (identity only) and web auth disabled — and confirm it. A leftover
+          # self-signed admin cert (the HTTPS suite uploads one valid for 1 day)
+          # would otherwise linger onto the *next* CI run and, once expired,
+          # break TLS handshakes before that run gets a chance to clean up.
+          set -uo pipefail
+          BASE="${ARCTIC_URL}"   # already https:// at this point
+          has_cert() {
+            curl -sk --max-time 10 -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              "${BASE}/api/tls/status" 2>/dev/null \
+              | python3 -c "import sys,json;print(json.load(sys.stdin).get('has_certs',False))" 2>/dev/null \
+              || echo Unknown
+          }
+          STATE="$(has_cert)"
+          echo "TLS status before reset: has_certs=${STATE}"
+          if [ "$STATE" = "True" ]; then
+            echo "Administrator cert present — deleting and rebooting to identity."
+            curl -sk --max-time 10 -X DELETE -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              "${BASE}/api/tls/certificate" >/dev/null 2>&1 || true
+            curl -sk --max-time 10 -X POST -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              "${BASE}/api/ota/reboot" >/dev/null 2>&1 || true
+            for _ in $(seq 1 30); do
+              sleep 2
+              curl -sk --max-time 5 "${BASE}/api/health" >/dev/null 2>&1 && break
+            done
+            STATE="$(has_cert)"
+            if [ "$STATE" = "True" ]; then
+              echo "::warning::Baseline reset could not remove the administrator TLS cert (has_certs=${STATE}); the next run may inherit it."
+            else
+              echo "Administrator cert removed — device on identity cert (has_certs=${STATE})."
+            fi
+          else
+            echo "No administrator cert to remove (has_certs=${STATE})."
+          fi
+          # Permissive web-auth baseline for the next run (best-effort).
+          curl -sk --max-time 10 -X POST -H "X-API-Key: ${ARCTIC_API_KEY}" \
+            -H "Content-Type: application/json" -d '{"web_auth_enabled": false}' \
+            "${BASE}/api/auth/config" >/dev/null 2>&1 || true
+          echo "Baseline TLS/auth reset complete."
+
       - name: Stop controller serial capture
         if: always()
         run: |
