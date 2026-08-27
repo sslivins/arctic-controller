@@ -57,3 +57,6 @@ tests/web/screenshots/
 
 # TLS certificates (embedded at build time, stored in GitHub secrets for CI)
 main/certs/*.pem
+
+# Device wait-latency telemetry (regenerated each run; see tests/api/test_latency_budget.py)
+tests/.latency-samples.json
