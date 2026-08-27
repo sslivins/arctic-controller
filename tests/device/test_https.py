@@ -111,11 +111,59 @@ def self_signed_cert() -> tuple[str, str]:
     return _generate_self_signed_cert()
 
 
+def _ensure_no_admin_cert(device: DeviceClient, verify_timeout: float = 30.0) -> bool:
+    """Delete any administrator TLS cert and reboot to the device identity.
+
+    Unlike a fire-and-forget delete, this polls ``/api/tls/status`` until
+    ``has_certs`` is *externally* observable as ``False`` — so the restored
+    baseline is confirmed, not merely requested. This matters because a leftover
+    administrator cert changes which certificate HTTPS serves and would leak
+    into later suites (api/web) sharing the same physical device in a CI run.
+
+    Returns ``True`` once the device is confirmed on the identity cert.
+    """
+    if not _tls_status().get("has_certs"):
+        return True
+    _api_delete("/api/tls/certificate")
+    device.reboot()
+    if not device.wait_for_device(timeout=verify_timeout):
+        return False
+    deadline = time.time() + verify_timeout
+    while time.time() < deadline:
+        try:
+            if not _tls_status().get("has_certs"):
+                return True
+        except Exception:
+            pass
+        time.sleep(1.0)
+    return False
+
+
+def _restore_auth_config(original: dict, verify_timeout: float = 10.0) -> None:
+    """Restore auth config to ``original`` and poll until it takes effect."""
+    want_web = original.get("web_auth_enabled", True)
+    want_api = original.get("api_auth_enabled", True)
+    _api_post(
+        "/api/auth/config",
+        json={"web_auth_enabled": want_web, "api_auth_enabled": want_api},
+    )
+    deadline = time.time() + verify_timeout
+    while time.time() < deadline:
+        try:
+            cur = _api_get("/api/auth/config").json()
+            if (cur.get("web_auth_enabled") == want_web
+                    and cur.get("api_auth_enabled") == want_api):
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+
 @pytest.fixture(scope="module")
 def auth_enabled(device: DeviceClient):
     """Ensure both web and API auth are enabled (required for cert upload).
 
-    Restores previous auth config after the module completes.
+    Restores previous auth config after the module completes, verified.
     """
     # Read current config
     r = _api_get("/api/auth/config")
@@ -130,36 +178,27 @@ def auth_enabled(device: DeviceClient):
 
     yield
 
-    # Restore original auth config
-    _api_post(
-        "/api/auth/config",
-        json={
-            "web_auth_enabled": original.get("web_auth_enabled", True),
-            "api_auth_enabled": original.get("api_auth_enabled", True),
-        },
-    )
+    # Restore original auth config (verified: poll until externally visible)
+    _restore_auth_config(original)
 
 
 @pytest.fixture(autouse=True, scope="module")
 def clean_tls_state(device: DeviceClient, auth_enabled):
     """Ensure no leftover certs before tests and clean up after."""
-    status = _tls_status()
-    if status.get("has_certs"):
-        _api_delete("/api/tls/certificate")
-        device.reboot()
-        assert device.wait_for_device(timeout=30.0), "Device did not come back after clearing certs"
+    assert _ensure_no_admin_cert(device), \
+        "Device retained an administrator TLS cert before HTTPS tests"
 
     yield
 
-    # Clean up: delete any certs left by tests
+    # Verified cleanup: a leftover admin cert would change the certificate
+    # served to later suites (api/web) in the same CI run, so confirm the
+    # identity restore rather than firing and forgetting.
     try:
-        status = _tls_status()
-        if status.get("has_certs"):
-            _api_delete("/api/tls/certificate")
-            device.reboot()
-            device.wait_for_device(timeout=30.0)
-    except Exception:
-        pass  # best effort cleanup
+        if not _ensure_no_admin_cert(device):
+            print("WARNING: HTTPS teardown could not confirm identity-cert restore; "
+                  "later suites may see a leftover administrator cert.")
+    except Exception as e:
+        print(f"WARNING: HTTPS teardown cleanup error: {e}")
 
 
 # ---------------------------------------------------------------------------

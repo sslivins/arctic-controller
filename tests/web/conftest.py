@@ -190,6 +190,46 @@ def _browser_login(page: Page):
         page.wait_for_selector(".rail", timeout=10000)
 
 
+# ---------- Session baseline enforcement ----------
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _web_auth_baseline(base_url: str):
+    """Force a known web-auth baseline (disabled) at the end of the web session.
+
+    The web suite toggles global web-auth state via cached module globals
+    (``login_page`` enables it, ``dashboard_page`` disables it). If a test errors
+    before its own fixture cleanup runs — or a transient re-disable call fails —
+    web auth can be left enabled and leak into a later suite that shares the same
+    physical device in a CI run. This session-scoped teardown resets the cached
+    flags and forces web auth back to disabled, then confirms it via
+    ``/api/auth/status`` so the baseline is verified, not merely requested.
+    """
+    yield
+    global _auth_disabled, _auth_needs_login
+    _auth_disabled = None
+    _auth_needs_login = False
+    _ensure_auth_disabled(base_url)
+
+    # Verify the baseline is externally observable (best-effort).
+    import requests
+    import time
+
+    headers = {"X-API-Key": API_KEY} if API_KEY else {}
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        try:
+            r = requests.get(f"{base_url}/api/auth/status", headers=headers,
+                             timeout=5, verify=False)
+            if r.ok and not r.json().get("web_auth_enabled"):
+                return
+        except Exception:
+            pass
+        time.sleep(0.5)
+    print("WARNING: web-auth baseline reset could not be confirmed disabled at "
+          "session end; a later suite may inherit web auth enabled.")
+
+
 # ---------- Page fixtures ----------
 
 
