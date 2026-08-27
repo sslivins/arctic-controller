@@ -6,12 +6,46 @@ Example: ARCTIC_URL=http://192.168.1.42 pytest
 
 import os
 import time
+import json
 import pytest
 from pathlib import Path
 from device_client import DeviceClient
 
 # Directory for failure screenshots
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
+
+# Where wait-latency samples are flushed at session end. The api-suite gate
+# (tests/api/test_latency_budget.py) reads this to enforce the p95 budget.
+# Overridable so a run can redirect it; defaults under tests/.
+LATENCY_SAMPLES_PATH = Path(
+    os.environ.get("ARCTIC_LATENCY_LOG",
+                   str(Path(__file__).resolve().parents[1] / ".latency-samples.json"))
+)
+
+
+def _flush_latency_samples(device: DeviceClient) -> None:
+    """Merge this session's wait-latency samples into the shared samples file.
+
+    Merge (not overwrite) so multiple pytest processes sharing the device in a
+    single CI run each contribute. Best-effort — never fail teardown over
+    telemetry.
+    """
+    try:
+        samples = device.latency_samples()
+        if not samples:
+            return
+        existing = []
+        if LATENCY_SAMPLES_PATH.exists():
+            try:
+                existing = json.loads(LATENCY_SAMPLES_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                existing = []
+        existing.extend(samples)
+        LATENCY_SAMPLES_PATH.write_text(
+            json.dumps(existing), encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"\n⚠️ Failed to flush latency samples: {e}")
 
 # Circuit breaker — abort the entire session if the device stops responding.
 # When a test can't reach the device, _consecutive_failures is incremented.
@@ -173,6 +207,9 @@ def device() -> DeviceClient:
 
     # After all tests complete, leave the device on the main screen
     _return_to_main(client)
+
+    # Flush wait-latency telemetry for the budget gate (best-effort).
+    _flush_latency_samples(client)
 
     # Release device lock
     try:

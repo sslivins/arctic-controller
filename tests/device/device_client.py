@@ -56,6 +56,13 @@ class DeviceClient:
         self.session = requests.Session()
         self._session_id: Optional[str] = None
 
+        # Latency telemetry: every successful wait_until records
+        # [description, elapsed_seconds] here. Flushed to a samples file at
+        # session teardown and checked against tests/latency_budget.json so a
+        # firmware/LVGL slowdown surfaces as a p95 regression rather than
+        # silently hiding under a generous correctness timeout.
+        self._latency_samples: list = []
+
         # Disable TLS certificate verification (wildcard cert won't match .local)
         self.session.verify = False
 
@@ -536,8 +543,9 @@ class DeviceClient:
             time.sleep(poll)
         return False
 
-    def wait_for_screen(self, name: str, timeout: float = 3.0, poll: float = 0.3,
-                        raise_on_timeout: bool = True) -> bool:
+    def wait_for_screen(self, name: str, timeout: float = 3.0, poll: float = 0.05,
+                        raise_on_timeout: bool = True,
+                        expect_within: Optional[float] = None) -> bool:
         """Wait until the current screen matches ``name`` *and* is settled.
 
         "Settled" means no screen-load animation is in flight, so the active
@@ -561,15 +569,17 @@ class DeviceClient:
             f"settled screen {name!r}",
             _on_settled_screen,
             timeout=timeout, poll=poll, raise_on_timeout=raise_on_timeout,
+            expect_within=expect_within,
         )
 
-    def try_wait_screen(self, name: str, timeout: float = 3.0, poll: float = 0.3) -> bool:
+    def try_wait_screen(self, name: str, timeout: float = 3.0, poll: float = 0.05) -> bool:
         """Best-effort :meth:`wait_for_screen` — returns bool, never raises."""
         return self.wait_for_screen(name, timeout=timeout, poll=poll, raise_on_timeout=False)
 
     def wait_for_widget(self, *, tag: Optional[str] = None, text: Optional[str] = None,
-                        timeout: float = 5.0, poll: float = 0.3,
-                        raise_on_timeout: bool = True) -> bool:
+                        timeout: float = 5.0, poll: float = 0.05,
+                        raise_on_timeout: bool = True,
+                        expect_within: Optional[float] = None) -> bool:
         """Wait until a widget with the given tag or text appears in the tree.
 
         Raises ``DeviceError`` on timeout by default. Use
@@ -581,16 +591,18 @@ class DeviceClient:
             what,
             lambda: self.has_widget(tag=tag, text=text),
             timeout=timeout, poll=poll, raise_on_timeout=raise_on_timeout,
+            expect_within=expect_within,
         )
 
     def try_wait_widget(self, *, tag: Optional[str] = None, text: Optional[str] = None,
-                        timeout: float = 5.0, poll: float = 0.3) -> bool:
+                        timeout: float = 5.0, poll: float = 0.05) -> bool:
         """Best-effort :meth:`wait_for_widget` — returns bool, never raises."""
         return self.wait_for_widget(tag=tag, text=text, timeout=timeout, poll=poll,
                                     raise_on_timeout=False)
 
     def wait_until(self, description: str, predicate, timeout: float = 5.0,
-                   poll: float = 0.3, raise_on_timeout: bool = True) -> bool:
+                   poll: float = 0.05, raise_on_timeout: bool = True,
+                   expect_within: Optional[float] = None) -> bool:
         """Poll ``predicate()`` until it returns truthy, or ``timeout`` elapses.
 
         This is the shared condition-based wait primitive that replaces fixed
@@ -603,11 +615,29 @@ class DeviceClient:
         failure says what it was waiting for and what the device was actually
         showing. Pass ``raise_on_timeout=False`` to get a bool back instead
         (for cleanup/best-effort checks).
+
+        Two thresholds, not one:
+
+        * ``timeout`` is the **correctness** deadline — kept generous so a
+          loaded CI runner doesn't fail a working feature. Exceeding it means
+          the feature is broken.
+        * ``expect_within`` (optional) is the **performance** budget — what the
+          device *should* achieve. Exceeding it is not a correctness failure
+          (the wait still succeeds up to ``timeout``); it emits a ``SLOW:``
+          note so a per-operation slowdown is visible in the log.
+
+        Regardless of ``expect_within``, every successful wait records its
+        elapsed time (see :meth:`latency_samples`); the aggregate p95 per
+        operation is enforced against ``tests/latency_budget.json`` so a broad
+        slowdown (e.g. an LVGL upgrade) trips a regression gate instead of
+        silently inflating every wait under the generous ``timeout``.
         """
-        deadline = time.time() + timeout
+        start = time.time()
+        deadline = start + timeout
         while True:
             try:
                 if predicate():
+                    self._record_latency(description, time.time() - start, expect_within)
                     return True
             except Exception:
                 pass
@@ -619,6 +649,24 @@ class DeviceClient:
                 f"Timed out after {timeout:.1f}s waiting for {description}. {self._diag()}"
             )
         return False
+
+    def _record_latency(self, description: str, elapsed: float,
+                        expect_within: Optional[float] = None) -> None:
+        """Record one successful wait's elapsed time for the latency gate.
+
+        Stores the raw description (normalized into an operation bucket at
+        aggregation time) so samples stay debuggable. When ``expect_within`` is
+        set and exceeded, print a ``SLOW:`` note — non-fatal, purely for
+        visibility; the aggregate p95 gate is what actually fails a regression.
+        """
+        self._latency_samples.append([description, round(elapsed, 4)])
+        if expect_within is not None and elapsed > expect_within:
+            print(f"\nSLOW: {description} took {elapsed:.3f}s "
+                  f"(expected <= {expect_within:.3f}s)")
+
+    def latency_samples(self) -> list:
+        """Return a copy of recorded ``[description, elapsed_seconds]`` pairs."""
+        return list(self._latency_samples)
 
     def _diag(self) -> str:
         """Best-effort snapshot of screen + widget tags for error messages."""
