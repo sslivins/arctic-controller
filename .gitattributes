@@ -1,0 +1,5 @@
+# Shell scripts must always check out with LF endings. They run on the Linux
+# self-hosted CI runner; a stray CRLF makes bash choke on the trailing \r
+# ("$'\r': command not found"), which silently broke the crash-detection gate
+# (.github/scripts/scan_crashes.sh) and let real firmware crashes ship.
+*.sh text eol=lf
