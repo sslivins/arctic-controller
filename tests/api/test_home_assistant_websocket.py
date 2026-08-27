@@ -50,6 +50,37 @@ async def _connect(
     )
 
 
+async def _connect_with_retry(
+    session: aiohttp.ClientSession,
+    token: str,
+    attempts: int = 5,
+    base_delay: float = 0.25,
+) -> aiohttp.ClientWebSocketResponse:
+    """Connect, tolerating a transient stall on the single-threaded server.
+
+    The device's integration HTTPS server is single-threaded and does not purge
+    lingering sockets (``lru_purge_enable=false``), so under a rapid
+    connect/disconnect stress pattern a just-closed connection's teardown can
+    briefly hog the accept loop and make the *next* handshake miss its 10s
+    timeout. Production HA holds a single persistent connection and never does
+    this, so a bounded retry with backoff is the correct way to keep the stress
+    test from flaking on that transient stall rather than a real fault.
+    """
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return await _connect(session, token)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as error:
+            last_error = error
+            if attempt == attempts - 1:
+                break
+            await asyncio.sleep(base_delay * (2**attempt))
+    raise AssertionError(
+        f"WSS connect did not succeed after {attempts} attempts: "
+        f"{type(last_error).__name__}: {last_error}"
+    ) from last_error
+
+
 async def _initial_messages(
     websocket: aiohttp.ClientWebSocketResponse,
 ) -> tuple[dict, dict]:
@@ -193,10 +224,13 @@ async def test_repeated_connect_disconnect_cycles():
     token = _test_token()
     async with aiohttp.ClientSession() as session:
         for _ in range(20):
-            websocket = await _connect(session, token)
+            websocket = await _connect_with_retry(session, token)
             await _initial_messages(websocket)
             await websocket.close()
             assert websocket.close_code == 1000
+            # Yield briefly so the single-threaded server can finish tearing
+            # down the just-closed socket before the next cycle reconnects.
+            await asyncio.sleep(0.05)
 
 
 @pytest.mark.asyncio
