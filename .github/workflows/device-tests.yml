@@ -865,7 +865,7 @@ jobs:
             echo "::error title=Crash gate broken::scan_crashes.sh exited $rc (expected 0=crash or 1=clean). The crash detector failed to run — failing the job rather than silently passing. Check the script for CRLF line endings or a bad checkout."
             exit 1
           fi
-          COUNT=$(printf '%s\n' "$HITS" | grep -cE 'Crash reboot \(|Guru Meditation' || true)
+          COUNT=$(printf '%s\n' "$HITS" | grep -cE 'Crash reboot \(|Guru Meditation|A stack overflow in task|abort\(\) was called|assert failed:|CORRUPT HEAP' || true)
           STREAK=$(grep -oE 'consecutive crash streak now [0-9]+' controller-serial.log | grep -oE '[0-9]+$' | sort -n | tail -1 || true)
           echo "::warning title=Device firmware crashed::The controller crashed during the device-tests run (crash reboots: ${COUNT:-?}, peak consecutive streak: ${STREAK:-?}). This is a latent firmware bug, not a test flake. See the crash summary and the controller-serial-log artifact."
           {

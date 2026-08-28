@@ -26,7 +26,20 @@ set -uo pipefail
 
 # Keep this regex in sync ONLY here. tests/api/test_crash_detection.py pins the
 # match/no-match behaviour against representative fixture lines.
-CRASH_RE='Guru Meditation|Crash reboot \('
+#
+# Signatures, and why each is safe (no test legitimately emits them):
+#   Guru Meditation          - exception panic dump header (covers Load/Store/
+#                              Illegal-instruction causes shown on that line).
+#   Crash reboot \(          - boot_stats journalling the PREVIOUS boot's crash.
+#   A stack overflow in task - FreeRTOS stack-overflow hook. NOTE: this path
+#                              prints NO "Guru Meditation" line, so without this
+#                              signature an overflow is only caught on the *next*
+#                              boot's "Crash reboot (" - and missed entirely if
+#                              the run ends first (this actually happened).
+#   abort() was called       - abort()/assert-driven panic.
+#   assert failed:           - ESP-IDF assertion panic.
+#   CORRUPT HEAP             - heap-corruption detector panic.
+CRASH_RE='Guru Meditation|Crash reboot \(|A stack overflow in task|abort\(\) was called|assert failed:|CORRUPT HEAP'
 
 log="${1:?usage: scan_crashes.sh <serial-log>}"
 [ -f "$log" ] || exit 1
