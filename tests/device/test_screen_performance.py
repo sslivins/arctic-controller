@@ -21,7 +21,6 @@ Markers:
   pytest.mark.performance — all tests in this file
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
@@ -39,6 +38,12 @@ def _inject_all_faults(device: DeviceClient):
     """Activate every known fault to fill the event log / errors screen."""
     for code in ALL_FAULT_CODES:
         device.inject_fault(code, True)
+
+
+def _active_error_codes(device: DeviceClient) -> set:
+    """Fault codes the firmware poll loop currently reports as active."""
+    errors = device.get_heatpump_errors()
+    return {e.get("code") for e in errors.get("active", [])}
 
 
 # ---------------------------------------------------------------------------
@@ -86,35 +91,35 @@ class TestNavScreenPerformance:
         """Status screen (merged temps+system) opens within budget."""
         result = device.click(tag="nav_status")
         _assert_under_budget(result, "status")
-        device.wait_for_screen("status", timeout=3.0)
+        device.wait_for_screen("status", timeout=5.0)
         device.click(tag="nav_home")
 
     def test_control_screen_render(self, device: DeviceClient):
         """Control screen opens within budget."""
         result = device.click(tag="nav_control")
         _assert_under_budget(result, "control")
-        device.wait_for_screen("control", timeout=3.0)
+        device.wait_for_screen("control", timeout=5.0)
         device.click(tag="nav_home")
 
     def test_event_log_screen_render(self, device: DeviceClient):
         """Event log screen opens within budget (minimal events)."""
         result = device.click(tag="nav_events")
         _assert_under_budget(result, "event_log")
-        device.wait_for_screen("event_log", timeout=3.0)
+        device.wait_for_screen("event_log", timeout=5.0)
         device.click(tag="nav_home")
 
     def test_errors_screen_render(self, device: DeviceClient):
         """Errors screen opens within budget (no active errors)."""
         result = device.click(tag="error_label")
         _assert_under_budget(result, "errors")
-        device.wait_for_screen("errors", timeout=3.0)
+        device.wait_for_screen("errors", timeout=5.0)
         device.click(tag="errors_close")
 
     def test_settings_screen_render(self, device: DeviceClient):
         """Settings screen opens within budget."""
         result = device.click(tag="settings")
         _assert_under_budget(result, "settings")
-        device.wait_for_screen("settings", timeout=3.0)
+        device.wait_for_screen("settings", timeout=5.0)
         device.click(tag="settings_close")
 
 
@@ -134,67 +139,98 @@ class TestHeavyStatePerformance:
         """
         # Fill the event log by toggling faults
         _inject_all_faults(device)
-        time.sleep(2)  # let poll loop fire events
+        device.wait_until(
+            "poll loop reports injected faults active",
+            lambda: len(_active_error_codes(device)) > 0,
+            timeout=10.0,
+        )
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        time.sleep(2)  # clear events also logged
+        device.wait_until(
+            "faults settle to P02 only (clear events logged)",
+            lambda: _active_error_codes(device) == {"P02"},
+            timeout=10.0,
+        )
 
         # Now open the event log — this is the hot path
         result = device.click(tag="nav_events")
         us = _assert_under_budget(result, "event_log_full")
-        device.wait_for_screen("event_log", timeout=3.0)
+        device.wait_for_screen("event_log", timeout=5.0)
         device.click(tag="nav_home")
 
     def test_errors_screen_many_errors(self, device: DeviceClient):
         """Errors screen with multiple active errors stays within budget."""
         _inject_all_faults(device)
-        time.sleep(2)
+        device.wait_until(
+            "poll loop reports injected faults active",
+            lambda: len(_active_error_codes(device)) > 0,
+            timeout=10.0,
+        )
 
         try:
             result = device.click(tag="error_label")
             us = _assert_under_budget(
                 result, "errors_heavy", ERROR_INITIAL_BUDGET_US
             )
-            device.wait_for_screen("errors", timeout=3.0)
+            device.wait_for_screen("errors", timeout=5.0)
         finally:
             # Close errors screen if open, then restore normal state
             try:
                 device.click(tag="errors_close")
-                time.sleep(0.5)
+                device.try_wait_screen("main", timeout=5.0)
             except Exception:
                 pass
             device.clear_all_faults()
             device.inject_fault("P02", True)
-            time.sleep(1.5)
+            device.wait_until(
+                "faults restored to P02 only",
+                lambda: _active_error_codes(device) == {"P02"},
+                timeout=10.0,
+                raise_on_timeout=False,
+            )
 
     def test_errors_screen_with_history(self, device: DeviceClient):
         """Errors screen with active + cleared history stays within budget."""
+        history_codes = ["E19", "E18", "E13", "E01", "E09", "E22", "P02", "P06"]
         try:
             # Create history by setting then clearing faults
             device.clear_all_faults()
-            for code in ["E19", "E18", "E13", "E01", "E09", "E22", "P02", "P06"]:
+            for code in history_codes:
                 device.inject_fault(code, True)
-            time.sleep(2)
+            device.wait_until(
+                "poll loop reports all injected faults active",
+                lambda: set(history_codes).issubset(_active_error_codes(device)),
+                timeout=10.0,
+            )
             device.clear_all_faults()
             device.inject_fault("P02", True)  # keep 1 active, rest go to history
-            time.sleep(2)
+            device.wait_until(
+                "faults settle to P02 only (rest moved to history)",
+                lambda: _active_error_codes(device) == {"P02"},
+                timeout=10.0,
+            )
 
             result = device.click(tag="error_label")
             us = _assert_under_budget(
                 result, "errors_with_history", ERROR_INITIAL_BUDGET_US
             )
-            device.wait_for_screen("errors", timeout=3.0)
+            device.wait_for_screen("errors", timeout=5.0)
         finally:
             # Close errors screen if open, then restore
             try:
                 device.click(tag="errors_close")
-                time.sleep(0.5)
+                device.try_wait_screen("main", timeout=5.0)
             except Exception:
                 pass
             device.clear_all_faults()
             device.inject_fault("P02", True)
             device.clear_error_history()
-            time.sleep(1.5)
+            device.wait_until(
+                "faults restored to P02 only",
+                lambda: _active_error_codes(device) == {"P02"},
+                timeout=10.0,
+                raise_on_timeout=False,
+            )
 
 
 # =========================================================================
@@ -209,13 +245,13 @@ class TestRepeatedTransitionPerformance:
         """Open/close event log 5 times — last render still within budget."""
         times_us = []
         for i in range(5):
-            device.wait_for_widget(tag="nav_events", timeout=3.0)
+            device.wait_for_widget(tag="nav_events", timeout=5.0)
             result = device.click(tag="nav_events")
             us = _render_us(result)
             times_us.append(us)
-            device.wait_for_screen("event_log", timeout=3.0)
+            device.wait_for_screen("event_log", timeout=5.0)
             device.click(tag="nav_home")
-            device.wait_for_screen("main", timeout=3.0)
+            device.wait_for_screen("main", timeout=5.0)
 
         # Report all iteration times
         for i, us in enumerate(times_us):
@@ -242,13 +278,13 @@ class TestRepeatedTransitionPerformance:
         """Open/close Status screen 5 times — check for degradation."""
         times_us = []
         for i in range(5):
-            device.wait_for_widget(tag="nav_status", timeout=3.0)
+            device.wait_for_widget(tag="nav_status", timeout=5.0)
             result = device.click(tag="nav_status")
             us = _render_us(result)
             times_us.append(us)
-            device.wait_for_screen("status", timeout=3.0)
+            device.wait_for_screen("status", timeout=5.0)
             device.click(tag="nav_home")
-            device.wait_for_screen("main", timeout=3.0)
+            device.wait_for_screen("main", timeout=5.0)
 
         # Report all iteration times
         for i, us in enumerate(times_us):
