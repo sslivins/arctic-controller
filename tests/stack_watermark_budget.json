@@ -1,1 +1,24 @@
-{}
+{
+  "IDLE0": 660,
+  "IDLE1": 655,
+  "Tmr Svc": 986,
+  "arctic_demo_syn": 1557,
+  "esp_timer": 1454,
+  "ha_ws_push": 4548,
+  "httpd": 4418,
+  "ipc0": 256,
+  "ipc1": 386,
+  "main": 2344,
+  "mdns": 1761,
+  "rpc_rx": 1394,
+  "rpc_tx": 2352,
+  "sdio_process_rx": 2294,
+  "sdio_read": 1838,
+  "sdio_rx_buf": 2760,
+  "sdio_write": 2517,
+  "sys_evt": 1238,
+  "taskLVGL": 5582,
+  "telemetry_histo": 1648,
+  "tiT": 1039,
+  "wifi_super": 2152
+}
