@@ -263,6 +263,20 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def get_stack_watermarks(self) -> dict:
+        """GET /api/test/stack-watermarks — {task_name: min_free_stack_bytes}.
+
+        Each value is uxTaskGetStackHighWaterMark for that task: the smallest
+        amount of stack (in bytes, on ESP-IDF) it has ever had free since
+        creation. Queried at session end to feed the stack-watermark ratchet
+        gate (tests/api/test_stack_watermark_budget.py).
+        """
+        r = self.session.get(
+            f"{self.base_url}/api/test/stack-watermarks", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.json().get("tasks", {})
+
     def set_preference(self, **prefs) -> dict:
         """POST /api/test/set-preference — set preferences directly (no UI).
 

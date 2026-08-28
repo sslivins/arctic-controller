@@ -22,6 +22,15 @@ LATENCY_SAMPLES_PATH = Path(
                    str(Path(__file__).resolve().parents[1] / ".latency-samples.json"))
 )
 
+# Where per-task stack high-water marks are flushed at session end. The api-suite
+# gate (tests/api/test_stack_watermark_budget.py) reads this to enforce a minimum
+# free-stack floor per task, turning a shrinking-headroom regression into a CI
+# failure before it becomes a stack-overflow crash. Overridable; defaults under tests/.
+STACK_WATERMARKS_PATH = Path(
+    os.environ.get("ARCTIC_STACK_WATERMARKS_LOG",
+                   str(Path(__file__).resolve().parents[1] / ".stack-watermarks.json"))
+)
+
 
 def _flush_latency_samples(device: DeviceClient) -> None:
     """Merge this session's wait-latency samples into the shared samples file.
@@ -46,6 +55,33 @@ def _flush_latency_samples(device: DeviceClient) -> None:
         )
     except Exception as e:
         print(f"\n⚠️ Failed to flush latency samples: {e}")
+
+def _flush_stack_watermarks(device: DeviceClient) -> None:
+    """Capture per-task stack high-water marks and merge into the shared file.
+
+    The watermark is monotonic (smallest-ever free stack per task), so capturing
+    once at session end reflects the worst case across everything that ran.
+    Merge across pytest processes by keeping the SMALLEST free value seen per
+    task (the true worst case). Best-effort — never fail teardown over telemetry.
+    """
+    try:
+        marks = device.get_stack_watermarks()
+        if not marks:
+            return
+        existing = {}
+        if STACK_WATERMARKS_PATH.exists():
+            try:
+                existing = json.loads(STACK_WATERMARKS_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                existing = {}
+        for task, free_bytes in marks.items():
+            prev = existing.get(task)
+            existing[task] = free_bytes if prev is None else min(prev, free_bytes)
+        STACK_WATERMARKS_PATH.write_text(
+            json.dumps(existing), encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"\n⚠️ Failed to flush stack watermarks: {e}")
 
 # Circuit breaker — abort the entire session if the device stops responding.
 # When a test can't reach the device, _consecutive_failures is incremented.
@@ -210,6 +246,9 @@ def device() -> DeviceClient:
 
     # Flush wait-latency telemetry for the budget gate (best-effort).
     _flush_latency_samples(client)
+
+    # Flush per-task stack high-water marks for the watermark gate (best-effort).
+    _flush_stack_watermarks(client)
 
     # Release device lock
     try:

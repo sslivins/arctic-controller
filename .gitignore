@@ -60,3 +60,6 @@ main/certs/*.pem
 
 # Device wait-latency telemetry (regenerated each run; see tests/api/test_latency_budget.py)
 tests/.latency-samples.json
+
+# Device stack high-water-mark snapshot (regenerated each run; see tests/api/test_stack_watermark_budget.py)
+tests/.stack-watermarks.json
