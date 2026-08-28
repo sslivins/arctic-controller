@@ -2276,6 +2276,68 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// GET /api/test/stack-watermarks — per-task minimum free stack (bytes)
+// ============================================================================
+//
+// Returns {"tasks": {"<task name>": <free_stack_bytes>, ...}} for every live
+// FreeRTOS task, where the value is uxTaskGetStackHighWaterMark — the SMALLEST
+// amount of stack that task has EVER had free since it was created (a
+// worst-case, monotonically-tightening watermark). On ESP-IDF for RISC-V,
+// StackType_t is uint8_t, so the value is already in BYTES (no word scaling).
+//
+// The test suite queries this at session end (after every screen/API path has
+// run, so each long-lived task has hit its deepest stack) and a hostside gate
+// (tests/api/test_stack_watermark_budget.py) fails CI if any task's headroom
+// drops below an absolute floor or a committed per-task baseline. This turns a
+// silent stack-overflow crash (see the arctic_demo_sync overflow) into a
+// visible "task X's headroom shrank" regression BEFORE it overflows.
+static esp_err_t stack_watermarks_get_handler(httpd_req_t* req)
+{
+    set_json_content_type(req);
+
+    // Snapshot all tasks. Allocate the status array on the heap (not the stack)
+    // so this endpoint itself can't provoke the very overflow it measures.
+    UBaseType_t num_tasks = uxTaskGetNumberOfTasks();
+    // +4 slack in case a task is created between the count and the snapshot.
+    UBaseType_t capacity = num_tasks + 4;
+    TaskStatus_t* status = (TaskStatus_t*)heap_caps_calloc(
+        capacity, sizeof(TaskStatus_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!status) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":\"Out of memory\"}");
+        return ESP_OK;
+    }
+
+    UBaseType_t got = uxTaskGetSystemState(status, capacity, nullptr);
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON* tasks = cJSON_AddObjectToObject(resp, "tasks");
+    for (UBaseType_t i = 0; i < got; i++) {
+        const char* name = status[i].pcTaskName ? status[i].pcTaskName : "?";
+        // usStackHighWaterMark is free bytes on ESP-IDF (StackType_t == uint8_t).
+        double free_bytes = (double)status[i].usStackHighWaterMark;
+        // Task names are not guaranteed unique (e.g. IDLE0/IDLE1, per-core
+        // workers). If a name repeats, keep the SMALLEST free value so the gate
+        // sees the true worst case rather than whichever happened to be last.
+        cJSON* existing = cJSON_GetObjectItem(tasks, name);
+        if (existing) {
+            if (free_bytes < existing->valuedouble) {
+                cJSON_SetNumberValue(existing, free_bytes);
+            }
+        } else {
+            cJSON_AddNumberToObject(tasks, name, free_bytes);
+        }
+    }
+    heap_caps_free(status);
+
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -2742,6 +2804,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &screenshot_uri);
+
+    httpd_uri_t stack_watermarks_uri = {
+        .uri = "/api/test/stack-watermarks",
+        .method = HTTP_GET,
+        .handler = stack_watermarks_get_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &stack_watermarks_uri);
 
     if (s_test_uri_reg_failures > 0) {
         ESP_LOGE(TAG,
