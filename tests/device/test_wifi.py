@@ -9,7 +9,6 @@ Uses mock WiFi networks to verify:
 - Tapping an open network does NOT show the password dialog
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
@@ -17,6 +16,11 @@ from device_client import DeviceClient
 LOCKED_NETWORK = {"ssid": "TestLocked", "rssi": -45, "authmode": 3}
 OPEN_NETWORK = {"ssid": "TestOpen", "rssi": -60, "authmode": 0}
 TEST_PASSWORD = "s3cret!42"
+
+
+def _pw_input(device: DeviceClient):
+    """Current WiFi password textarea widget, or None when the dialog is closed."""
+    return device.find_widget(tag="wifi_password_input")
 
 
 @pytest.fixture()
@@ -27,16 +31,14 @@ def wifi_screen(device: DeviceClient):
     """
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
 
     device.click(tag="settings_wifi")
     assert device.wait_for_screen("wifi", timeout=5.0)
-    time.sleep(0.5)
 
-    # Inject fake networks
+    # Inject fake networks, then wait for them to render in the list
     result = device.wifi_mock([LOCKED_NETWORK, OPEN_NETWORK])
     assert result["success"] is True
-    time.sleep(0.5)
+    device.wait_for_widget(text=LOCKED_NETWORK["ssid"], timeout=5.0)
 
     yield device
 
@@ -56,7 +58,7 @@ def test_locked_network_shows_password_dialog(wifi_screen: DeviceClient):
 
     # Click the locked network by its SSID label
     device.click(label=LOCKED_NETWORK["ssid"])
-    time.sleep(0.5)
+    device.wait_for_widget(tag="wifi_password_ssid", timeout=5.0)
 
     # Password dialog should be visible — check for its tagged widgets
     ssid_label = device.find_widget(tag="wifi_password_ssid")
@@ -69,7 +71,11 @@ def test_locked_network_shows_password_dialog(wifi_screen: DeviceClient):
 
     # Cancel to close
     device.click(tag="wifi_cancel_btn")
-    time.sleep(0.5)
+    device.wait_until(
+        "password dialog dismissed",
+        lambda: device.find_widget(tag="wifi_password_ssid") is None,
+        timeout=5.0,
+    )
 
 
 def test_password_masked_by_default(wifi_screen: DeviceClient):
@@ -77,7 +83,7 @@ def test_password_masked_by_default(wifi_screen: DeviceClient):
     device = wifi_screen
 
     device.click(label=LOCKED_NETWORK["ssid"])
-    time.sleep(0.5)
+    device.wait_for_widget(tag="wifi_password_input", timeout=5.0)
 
     # Type a password
     result = device.type_text("wifi_password_input", TEST_PASSWORD)
@@ -86,12 +92,21 @@ def test_password_masked_by_default(wifi_screen: DeviceClient):
     assert result["text"] == TEST_PASSWORD
 
     # The widget should report password_mode=True
-    ta = device.find_widget(tag="wifi_password_input")
+    device.wait_until(
+        "typed password reflected in widget",
+        lambda: getattr(_pw_input(device), "text", None) == TEST_PASSWORD,
+        timeout=5.0,
+    )
+    ta = _pw_input(device)
     assert ta is not None
     assert ta.password_mode is True, "Widget should report password_mode=True"
 
     device.click(tag="wifi_cancel_btn")
-    time.sleep(0.5)
+    device.wait_until(
+        "password dialog dismissed",
+        lambda: device.find_widget(tag="wifi_password_ssid") is None,
+        timeout=5.0,
+    )
 
 
 def test_show_password_toggle(wifi_screen: DeviceClient):
@@ -99,18 +114,26 @@ def test_show_password_toggle(wifi_screen: DeviceClient):
     device = wifi_screen
 
     device.click(label=LOCKED_NETWORK["ssid"])
-    time.sleep(0.5)
+    device.wait_for_widget(tag="wifi_password_input", timeout=5.0)
 
     # Type a password (starts masked)
     device.type_text("wifi_password_input", TEST_PASSWORD)
-    time.sleep(0.3)
+    device.wait_until(
+        "typed password reflected in widget",
+        lambda: getattr(_pw_input(device), "text", None) == TEST_PASSWORD,
+        timeout=5.0,
+    )
 
     # Click eye button to reveal
     device.click(tag="wifi_show_password")
-    time.sleep(0.3)
+    device.wait_until(
+        "password revealed (plaintext)",
+        lambda: getattr(_pw_input(device), "password_mode", None) is False,
+        timeout=5.0,
+    )
 
     # Now the textarea should show plaintext (password_mode off)
-    ta = device.find_widget(tag="wifi_password_input")
+    ta = _pw_input(device)
     assert ta is not None
     assert ta.password_mode is False, \
         "After clicking show, password_mode should be False"
@@ -119,15 +142,23 @@ def test_show_password_toggle(wifi_screen: DeviceClient):
 
     # Click eye button again to re-hide
     device.click(tag="wifi_show_password")
-    time.sleep(0.3)
+    device.wait_until(
+        "password re-hidden (masked)",
+        lambda: getattr(_pw_input(device), "password_mode", None) is True,
+        timeout=5.0,
+    )
 
-    ta = device.find_widget(tag="wifi_password_input")
+    ta = _pw_input(device)
     assert ta is not None
     assert ta.password_mode is True, \
         "After re-hide, password_mode should be True again"
 
     device.click(tag="wifi_cancel_btn")
-    time.sleep(0.5)
+    device.wait_until(
+        "password dialog dismissed",
+        lambda: device.find_widget(tag="wifi_password_ssid") is None,
+        timeout=5.0,
+    )
 
 
 # ── Open network test ────────────────────────────────────────────────────────
@@ -139,9 +170,9 @@ def test_open_network_no_password_dialog(wifi_screen: DeviceClient):
 
     # Click the open network
     device.click(label=OPEN_NETWORK["ssid"])
-    time.sleep(0.5)
 
-    # Password dialog should NOT appear
-    ssid_label = device.find_widget(tag="wifi_password_ssid")
-    assert ssid_label is None, \
+    # Negative assertion: the password dialog must NOT appear. try_wait_widget
+    # polls up to the timeout and returns False if it never shows (failing fast
+    # if it does), which is more robust than a fixed sleep + single check.
+    assert not device.try_wait_widget(tag="wifi_password_ssid", timeout=2.0), \
         "Password dialog should not appear for open networks"

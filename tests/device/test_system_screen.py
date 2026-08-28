@@ -8,11 +8,8 @@ are displayed with correct labels and demo-mode values.
 Demo mode uses hardcoded values (not set_demo_fields registers).
 """
 
-import time
 import pytest
 from device_client import DeviceClient
-
-UI_SETTLE = 1.5
 
 # Demo mode hardcoded system readings (from heatpump_system_screen.cpp)
 DEMO_READINGS = {
@@ -47,7 +44,6 @@ def _open_system(device: DeviceClient):
     device.click(tag="nav_status")
     assert device.wait_for_screen("status", timeout=5.0), \
         f"Expected 'status' screen, got '{device.screen}'"
-    time.sleep(0.5)
 
 
 def _close_system(device: DeviceClient):
@@ -65,6 +61,15 @@ def _has_text_containing(device: DeviceClient, substring: str) -> bool:
         if t and sub_lower in t.lower():
             return True
     return False
+
+
+def _wait_for_text(device: DeviceClient, substring: str, timeout: float = 5.0):
+    """Wait until some widget's text contains ``substring``."""
+    device.wait_until(
+        f"text containing '{substring}' visible",
+        lambda: _has_text_containing(device, substring),
+        timeout=timeout,
+    )
 
 
 # =========================================================================
@@ -105,7 +110,7 @@ class TestSystemSections:
     def test_section_header_present(self, device: DeviceClient, header):
         """Each section header should be visible on the system screen."""
         _open_system(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, header)
 
         assert _has_text_containing(device, header), \
             f"Section header '{header}' not found on screen"
@@ -124,7 +129,7 @@ class TestSystemReadings:
     def test_reading_label_present(self, device: DeviceClient, label, expected_value):
         """Each reading label should be visible."""
         _open_system(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, label)
 
         assert _has_text_containing(device, label), \
             f"Reading label '{label}' not found on screen"
@@ -135,7 +140,7 @@ class TestSystemReadings:
     def test_reading_value_present(self, device: DeviceClient, label, expected_value):
         """Each demo reading value should be displayed."""
         _open_system(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, expected_value)
 
         assert _has_text_containing(device, expected_value), \
             f"Reading value '{expected_value}' for '{label}' not found on screen"
@@ -154,7 +159,7 @@ class TestSystemSetpoints:
     def test_setpoint_present(self, device: DeviceClient, label, expected_value):
         """Each setpoint label should be visible."""
         _open_system(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, label)
 
         assert _has_text_containing(device, label), \
             f"Setpoint label '{label}' not found on screen"

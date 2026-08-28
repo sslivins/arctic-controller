@@ -11,11 +11,8 @@ The control screen shows:
 - Advanced Parameter rows (AP13, AP24, AP38, etc.)
 """
 
-import time
 import pytest
 from device_client import DeviceClient
-
-UI_SETTLE = 1.5
 
 # Working modes (must match arctic_registers.h)
 MODE_COOLING = 0
@@ -40,7 +37,6 @@ def _open_control(device: DeviceClient):
     device.click(tag="nav_control")
     assert device.wait_for_screen("control", timeout=5.0), \
         f"Expected 'control' screen, got '{device.screen}'"
-    time.sleep(0.5)
 
 
 def _close_control(device: DeviceClient):
@@ -60,6 +56,15 @@ def _has_text_containing(device: DeviceClient, substring: str) -> bool:
     return False
 
 
+def _wait_for_text(device: DeviceClient, substring: str, timeout: float = 5.0):
+    """Wait until some widget's text contains ``substring``."""
+    device.wait_until(
+        f"text containing '{substring}' visible",
+        lambda: _has_text_containing(device, substring),
+        timeout=timeout,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _restore_control_defaults(device: DeviceClient):
     """Restore demo control state after each test."""
@@ -71,7 +76,6 @@ def _restore_control_defaults(device: DeviceClient):
         heating_setpoint=45,
         hot_water_setpoint=50,
     )
-    time.sleep(UI_SETTLE)
 
 
 # =========================================================================
@@ -101,10 +105,8 @@ class TestPowerButton:
     def test_power_button_shows_on(self, device: DeviceClient):
         """When unit is ON, power button should show POWERED ON."""
         device.set_demo_fields(unit_on=1)
-        time.sleep(UI_SETTLE)
-
         _open_control(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, "POWERED ON")
 
         assert _has_text_containing(device, "POWERED ON"), \
             "POWERED ON text not found on control screen"
@@ -112,10 +114,8 @@ class TestPowerButton:
     def test_power_button_shows_off(self, device: DeviceClient):
         """When unit is OFF, power button should show POWERED OFF."""
         device.set_demo_fields(unit_on=0)
-        time.sleep(UI_SETTLE)
-
         _open_control(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, "POWERED OFF")
 
         assert _has_text_containing(device, "POWERED OFF"), \
             "POWERED OFF text not found on control screen"
@@ -132,7 +132,7 @@ class TestModeButtons:
     def test_mode_button_present(self, device: DeviceClient, mode_label):
         """Each mode button should be visible on the control screen."""
         _open_control(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, mode_label)
 
         assert _has_text_containing(device, mode_label), \
             f"Mode button '{mode_label}' not found on screen"
@@ -140,10 +140,8 @@ class TestModeButtons:
     def test_active_mode_highlighted(self, device: DeviceClient):
         """The active mode (Floor Heating) should be distinguishable."""
         device.set_demo_fields(working_mode=MODE_FLOOR_HEATING)
-        time.sleep(UI_SETTLE)
-
         _open_control(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, "FLOOR HEAT")
 
         # Just verify the mode label exists — visual highlighting
         # is difficult to test without bg_color on mode buttons
@@ -164,7 +162,7 @@ class TestSetpoints:
     def test_setpoint_label_present(self, device: DeviceClient, label, expected_value):
         """Each setpoint label should be visible."""
         _open_control(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, label)
 
         assert _has_text_containing(device, label), \
             f"Setpoint label '{label}' not found on screen"
@@ -175,7 +173,7 @@ class TestSetpoints:
     def test_setpoint_value_present(self, device: DeviceClient, label, expected_value):
         """Each setpoint value should be displayed."""
         _open_control(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, expected_value)
 
         assert _has_text_containing(device, expected_value), \
             f"Setpoint value '{expected_value}' for '{label}' not found"
@@ -280,7 +278,7 @@ class TestAdvancedParameters:
     def test_setpoints_section_header(self, device: DeviceClient):
         """The Setpoints section header should be present."""
         _open_control(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, "Setpoints")
 
         assert _has_text_containing(device, "Setpoints"), \
             "Setpoints section header not found"
@@ -288,9 +286,15 @@ class TestAdvancedParameters:
     def test_advanced_parameter_visible(self, device: DeviceClient):
         """At least one Advanced Parameter row should be visible (e.g. AP13)."""
         _open_control(device)
-        time.sleep(UI_SETTLE)
-
         # Look for any Advanced Parameter label containing "(AP"
+        device.wait_until(
+            "an Advanced Parameter (AP##) row is visible",
+            lambda: any(
+                "(AP" in (w.text_en or w.text or "") for w in device.widgets
+            ),
+            timeout=5.0,
+        )
+
         found = False
         for w in device.widgets:
             t = w.text_en or w.text
