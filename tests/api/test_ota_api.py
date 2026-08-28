@@ -406,9 +406,8 @@ class TestOtaStatusIdleState:
         then the 0xFF header check fails and unlock_upload() sets state
         back to IDLE.
         """
-        import time
         _post_raw("/api/ota/upload", data=b"\xFF")
-        time.sleep(0.5)
+        _wait_for_idle()
 
     def test_idle_state_values(self):
         """In idle state, progress and download counters should be zero."""
@@ -668,23 +667,31 @@ class TestOtaErrorState:
 #   - CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y (feat/ota-hardening)
 #   - The current firmware binary in build/arctic_controller.bin
 
-REBOOT_WAIT_SECS = 25  # Time to wait for device to reboot and reconnect
 
 
 def _wait_for_device(timeout=60):
-    """Poll until the device responds to /api/ota/status."""
+    """Poll until the device has rebooted and responds to /api/ota/status.
+
+    A freshly-issued reboot means the device is briefly *still up* serving the
+    pre-reboot firmware, so a naive "poll until it answers" would return
+    immediately against the old instance. Instead, first wait for it to go
+    offline (reboot actually started), then wait for it to come back — no fixed
+    sleep guess required.
+    """
     import time
 
     deadline = time.time() + timeout
+    seen_offline = False
     while time.time() < deadline:
         try:
             r = _get("/api/ota/status")
             if r.status_code == 200:
-                return r.json()
+                if seen_offline:
+                    return r.json()
         except requests.ConnectionError:
-            pass
+            seen_offline = True
         time.sleep(2)
-    raise TimeoutError(f"Device did not respond within {timeout}s after reboot")
+    raise TimeoutError(f"Device did not reboot+respond within {timeout}s")
 
 
 def _get_firmware_binary():
@@ -706,8 +713,6 @@ class TestOtaRoundTrip:
 
     def test_upload_same_version_round_trip(self):
         """Upload current firmware binary → reboot → device comes back healthy."""
-        import time
-
         firmware = _get_firmware_binary()
 
         # Record pre-OTA state
@@ -721,9 +726,8 @@ class TestOtaRoundTrip:
         assert data.get("success") is True
         assert data.get("bytes_received") == len(firmware)
 
-        # Device will auto-reboot — wait for it to come back
-        time.sleep(REBOOT_WAIT_SECS)
-        post = _wait_for_device(timeout=60)
+        # Device will auto-reboot — wait for it to go offline then come back
+        post = _wait_for_device(timeout=90)
 
         # Same version, idle state
         assert post["current_version"] == pre_version
@@ -806,10 +810,7 @@ class TestOtaRollback:
         # assert r.status_code == 200
 
         # Wait for crash + rollback + reboot (may take 2 cycles)
-        # time.sleep(REBOOT_WAIT_SECS * 2)
-
-        # Verify device came back on the original firmware
-        # post = _wait_for_device(timeout=90)
+        # post = _wait_for_device(timeout=120)
         # assert post["current_version"] == pre_version
         # assert post["state"] == "idle"
         # assert post["pending_verify"] is False

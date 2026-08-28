@@ -570,6 +570,32 @@ class DeviceClient:
             time.sleep(poll)
         return False
 
+    def wait_for_https_ready(self, timeout: float = 30.0, poll: float = 0.5,
+                             raise_on_timeout: bool = False) -> bool:
+        """Poll the HTTPS listener until it serves a healthy response.
+
+        After a reboot, ``wait_for_device()`` confirms the HTTP API is back, but
+        the HTTPS server on port 443 can take a moment longer to bind and start
+        serving the active certificate. Instead of a fixed ``time.sleep`` guess,
+        poll ``https://<host>/api/health`` until it answers ``ok``.
+
+        Returns ``True`` once HTTPS is serving, ``False`` on timeout (unless
+        ``raise_on_timeout`` is set).
+        """
+        https_url = self.base_url.replace("http://", "https://")
+
+        def _https_ok() -> bool:
+            r = self.session.get(f"{https_url}/api/health", timeout=5)
+            return r.status_code == 200 and r.json().get("status") == "ok"
+
+        return self.wait_until(
+            "https server ready",
+            _https_ok,
+            timeout=timeout,
+            poll=poll,
+            raise_on_timeout=raise_on_timeout,
+        )
+
     def wait_for_connected(self, timeout: float = 10.0, poll: float = 0.5) -> bool:
         """Poll /api/heatpump/status until connected=true, or timeout."""
         deadline = time.time() + timeout
