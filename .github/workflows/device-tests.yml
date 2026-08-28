@@ -846,10 +846,24 @@ jobs:
           # contract can't silently regress. Trustworthy signals only:
           #   "Crash reboot (" (boot_stats, real crash reset reason) and
           #   "Guru Meditation" (live panic dump).
-          HITS=$(bash .github/scripts/scan_crashes.sh controller-serial.log || true)
-          if [ -z "$HITS" ]; then
+          # Capture the scanner's exit code explicitly. Its contract is:
+          #   0 -> at least one crash signature found (HITS on stdout)
+          #   1 -> no crash signatures (clean run)
+          # Any OTHER exit code means the scanner itself failed to run (e.g. a
+          # CRLF-corrupted checkout made bash choke on "$'\r'"), which MUST fail
+          # the job — a broken detector silently passing is how real crashes
+          # shipped before. Do NOT swallow the failure with "|| true".
+          set +e
+          HITS=$(bash .github/scripts/scan_crashes.sh controller-serial.log)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 1 ]; then
             echo "OK: no firmware crash signatures in serial log (test-seeded application_crash/watchdog_reset event-log entries are ignored)."
             exit 0
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=Crash gate broken::scan_crashes.sh exited $rc (expected 0=crash or 1=clean). The crash detector failed to run — failing the job rather than silently passing. Check the script for CRLF line endings or a bad checkout."
+            exit 1
           fi
           COUNT=$(printf '%s\n' "$HITS" | grep -cE 'Crash reboot \(|Guru Meditation' || true)
           STREAK=$(grep -oE 'consecutive crash streak now [0-9]+' controller-serial.log | grep -oE '[0-9]+$' | sort -n | tail -1 || true)
