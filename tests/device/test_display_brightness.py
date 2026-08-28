@@ -5,7 +5,6 @@ Navigates to Settings → Display, changes the brightness slider,
 and verifies the brightness value label updates correctly.
 """
 
-import time
 from device_client import DeviceClient
 
 
@@ -29,11 +28,9 @@ def test_change_brightness(device: DeviceClient):
     # Navigate to display screen
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
 
     device.click(tag="settings_display")
     assert device.wait_for_screen("display", timeout=5.0)
-    time.sleep(0.5)
 
     # Read the current brightness slider value
     slider = device.find_widget(tag="brightness_slider")
@@ -49,8 +46,13 @@ def test_change_brightness(device: DeviceClient):
     assert result["success"] is True
     assert result["value"] == new_value
 
-    # Read the UI state again and verify the value label updated
-    time.sleep(0.5)
+    # Wait for the value label to reflect the new brightness
+    device.wait_until(
+        f"brightness label shows {new_value}%",
+        lambda: getattr(device.find_widget(tag="brightness_value"), "text", None)
+        == f"{new_value}%",
+        timeout=5.0,
+    )
     value_label = device.find_widget(tag="brightness_value")
     assert value_label is not None, "Could not find brightness value label"
     assert value_label.text == f"{new_value}%", \
@@ -73,11 +75,9 @@ def test_restore_brightness(device: DeviceClient):
     # Navigate to display screen
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
 
     device.click(tag="settings_display")
     assert device.wait_for_screen("display", timeout=5.0)
-    time.sleep(0.5)
 
     # Set back to default
     result = device.set_slider("brightness_slider", 80)
@@ -88,7 +88,12 @@ def test_restore_brightness(device: DeviceClient):
     actual = device.get_brightness()
     assert actual == 80, f"Expected device brightness 80%, got {actual}%"
 
-    time.sleep(0.5)
+    device.wait_until(
+        "brightness label shows 80%",
+        lambda: getattr(device.find_widget(tag="brightness_value"), "text", None)
+        == "80%",
+        timeout=5.0,
+    )
     value_label = device.find_widget(tag="brightness_value")
     assert value_label is not None
     assert value_label.text == "80%", \

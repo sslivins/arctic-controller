@@ -7,11 +7,8 @@ sensor readings are displayed with correct labels and demo-mode values.
 Demo mode uses hardcoded temperature values (not set_demo_fields registers).
 """
 
-import time
 import pytest
 from device_client import DeviceClient
-
-UI_SETTLE = 1.5
 
 # Demo mode hardcoded temps (from heatpump_temps_screen.cpp update_readings)
 DEMO_TEMPS = {
@@ -32,7 +29,6 @@ def _open_temps(device: DeviceClient):
     device.click(tag="nav_status")
     assert device.wait_for_screen("status", timeout=5.0), \
         f"Expected 'status' screen, got '{device.screen}'"
-    time.sleep(0.5)
 
 
 def _close_temps(device: DeviceClient):
@@ -50,6 +46,15 @@ def _has_text_containing(device: DeviceClient, substring: str) -> bool:
         if t and sub_lower in t.lower():
             return True
     return False
+
+
+def _wait_for_text(device: DeviceClient, substring: str, timeout: float = 5.0):
+    """Wait until some widget's text contains ``substring``."""
+    device.wait_until(
+        f"text containing '{substring}' visible",
+        lambda: _has_text_containing(device, substring),
+        timeout=timeout,
+    )
 
 
 # =========================================================================
@@ -91,7 +96,7 @@ class TestTempsReadings:
     def test_temp_label_present(self, device: DeviceClient, label, expected_value):
         """Each temperature sensor label should be visible on screen."""
         _open_temps(device)
-        time.sleep(UI_SETTLE)
+        _wait_for_text(device, label)
 
         assert _has_text_containing(device, label), \
             f"Temperature label '{label}' not found on screen"
@@ -101,16 +106,21 @@ class TestTempsReadings:
     def test_temp_value_present(self, device: DeviceClient, label, expected_value):
         """Each demo temperature value should be displayed (e.g. '42 °C')."""
         _open_temps(device)
-        time.sleep(UI_SETTLE)
-
         value_str = f"{expected_value} °C"
+        _wait_for_text(device, value_str)
+
         assert _has_text_containing(device, value_str), \
             f"Temperature value '{value_str}' not found on screen"
 
     def test_all_nine_temps_present(self, device: DeviceClient):
         """All 9 temperature rows should be visible."""
         _open_temps(device)
-        time.sleep(UI_SETTLE)
+        # Wait until the tree reports all nine demo temperature labels.
+        def _all_present() -> bool:
+            texts = [(w.text_en or w.text or "").lower() for w in device.widgets]
+            return all(any(label.lower() in t for t in texts) for label in DEMO_TEMPS)
+
+        device.wait_until("all nine temperature labels visible", _all_present, timeout=5.0)
 
         # Fetch widget tree once instead of 9 separate HTTP calls
         widgets = device.widgets

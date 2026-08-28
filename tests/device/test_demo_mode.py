@@ -15,7 +15,6 @@ switch itself, because the ensure_main_screen fixture returns to the
 main screen (and dismisses the reboot overlay) between tests.
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
@@ -27,15 +26,18 @@ def test_toggle_shows_reboot_panel_with_buttons(device: DeviceClient):
 
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
 
     result = device.toggle("demo_mode_switch")
     assert result["success"] is True
     expected = not initial
     assert result["checked"] == expected
-    time.sleep(0.5)
 
     # Reboot confirmation panel should appear with overlay and both buttons
+    device.wait_until(
+        "reboot overlay appears after demo-mode toggle",
+        lambda: device.has_widget(tag="reboot_overlay"),
+        timeout=5.0,
+    )
     assert device.has_widget(tag="reboot_overlay"), \
         "Reboot overlay should be visible after toggling demo mode"
     assert device.has_widget(tag="reboot_panel"), \
@@ -57,16 +59,23 @@ def test_cancel_reverts_and_dismisses(device: DeviceClient):
 
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
 
     # Toggle to bring up the reboot panel
     device.toggle("demo_mode_switch")
-    time.sleep(0.5)
+    device.wait_until(
+        "reboot overlay appears after demo-mode toggle",
+        lambda: device.has_widget(tag="reboot_overlay"),
+        timeout=5.0,
+    )
     assert device.has_widget(tag="reboot_overlay")
 
     # Click Cancel
     device.click(tag="reboot_cancel")
-    time.sleep(0.5)
+    device.wait_until(
+        "reboot overlay dismissed after Cancel",
+        lambda: not device.has_widget(tag="reboot_overlay"),
+        timeout=5.0,
+    )
 
     # Panel should be dismissed
     assert not device.has_widget(tag="reboot_overlay"), \
