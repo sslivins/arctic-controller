@@ -5,12 +5,17 @@ Verifies that changing the timezone via the roller widget:
 1. Updates the roller's selected text on the time screen
 2. Changes the time preview to reflect the new timezone
 3. Is reported correctly in the preferences API
-4. Restores the original timezone after tests
+
+Timezone is global device state, so every test that mutates it requests the
+``timezone_restore`` fixture, which captures the roller index up front and
+restores it on teardown (F-10). There is no ``set-preference`` API for the
+timezone — the firmware only exposes it through the roller — so restoration
+navigates the UI and re-sets the roller to the captured index.
 """
 
-import time
 import pytest
 from device_client import DeviceClient
+from conftest import _return_to_main
 
 
 # Timezone roller entries (must match firmware order in settings_time_screen.cpp)
@@ -22,30 +27,45 @@ TIMEZONES = [
     {"index": 20, "name": "UTC (No offset)",            "tz": "UTC0"},
 ]
 
-# Capture initial timezone so we can restore it
-_initial_timezone = None
-_initial_roller_index = None
-
 
 def _navigate_to_time_screen(device: DeviceClient):
-    """Open settings → time sub-screen."""
+    """Open settings → time sub-screen (from the main screen)."""
     device.click(tag="settings")
-    assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
+    device.wait_for_screen("settings", timeout=5.0)
 
     device.click(tag="settings_time")
-    assert device.wait_for_screen("time", timeout=5.0)
-    time.sleep(0.5)
+    device.wait_for_screen("time", timeout=5.0)
+
+
+def _roller_index(device: DeviceClient):
+    roller = device.find_widget(tag="timezone_roller")
+    return roller.value if roller is not None else None
+
+
+@pytest.fixture
+def timezone_restore(device: DeviceClient):
+    """Capture the current timezone roller index and restore it on teardown."""
+    _navigate_to_time_screen(device)
+    initial_index = _roller_index(device)
+    _return_to_main(device)
+
+    yield
+
+    if initial_index is None:
+        return
+    _return_to_main(device)
+    _navigate_to_time_screen(device)
+    if _roller_index(device) != initial_index:
+        device.set_roller("timezone_roller", initial_index)
+        device.wait_until(
+            f"timezone roller restored to index {initial_index}",
+            lambda: _roller_index(device) == initial_index,
+            timeout=5.0, raise_on_timeout=False,
+        )
 
 
 def test_roller_shows_current_timezone(device: DeviceClient):
     """The timezone roller should be visible and show the current timezone."""
-    global _initial_timezone, _initial_roller_index
-
-    # Capture initial state from API
-    prefs = device.get_preferences()
-    _initial_timezone = prefs.get("timezone")
-
     _navigate_to_time_screen(device)
 
     roller = device.find_widget(tag="timezone_roller")
@@ -55,16 +75,13 @@ def test_roller_shows_current_timezone(device: DeviceClient):
     assert roller.option_count is not None and roller.option_count > 0, \
         "Roller should have options"
 
-    _initial_roller_index = roller.value
 
-
-def test_change_timezone_updates_roller(device: DeviceClient):
+def test_change_timezone_updates_roller(device: DeviceClient, timezone_restore):
     """Changing the roller index should update the selected timezone text."""
     _navigate_to_time_screen(device)
 
     # Pick a timezone different from the current one
-    roller = device.find_widget(tag="timezone_roller")
-    current_index = roller.value
+    current_index = _roller_index(device)
 
     # Choose UTC (index 20) unless already there, then choose Eastern (0)
     target = TIMEZONES[-1] if current_index != 20 else TIMEZONES[0]
@@ -73,74 +90,56 @@ def test_change_timezone_updates_roller(device: DeviceClient):
     assert result["success"] is True
     assert result["selected_text"] == target["name"], \
         f"Expected '{target['name']}', got '{result['selected_text']}'"
-    time.sleep(0.5)
 
     # Verify the roller widget shows the new selection
+    device.wait_until(
+        f"roller settled on index {target['index']}",
+        lambda: _roller_index(device) == target["index"],
+        timeout=5.0,
+    )
     roller = device.find_widget(tag="timezone_roller")
-    assert roller.value == target["index"], \
-        f"Expected roller index {target['index']}, got {roller.value}"
     assert roller.selected_text == target["name"]
 
 
-def test_change_timezone_updates_preview(device: DeviceClient):
+def test_change_timezone_updates_preview(device: DeviceClient, timezone_restore):
     """Changing timezone should update the time preview label."""
     _navigate_to_time_screen(device)
 
     # Read current preview
     preview_before = device.find_widget(tag="time_preview")
     assert preview_before is not None
+    text_before = preview_before.text
 
     # Switch to a very different timezone to ensure the time changes
-    roller = device.find_widget(tag="timezone_roller")
-    current_index = roller.value
+    current_index = _roller_index(device)
 
     # Pick Japan (UTC+9) or US Pacific (UTC-8) — whichever is different
     target = TIMEZONES[3] if current_index != 12 else TIMEZONES[1]
 
     device.set_roller("timezone_roller", target["index"])
-    time.sleep(1)  # Give preview timer a moment
 
+    # The preview updates on the next preview-timer tick — wait for it to change.
+    device.wait_until(
+        "time preview reflects new timezone",
+        lambda: (device.find_widget(tag="time_preview") or preview_before).text != text_before,
+        timeout=5.0,
+    )
     preview_after = device.find_widget(tag="time_preview")
     assert preview_after is not None
-
-    # The time text should be different (different timezone = different hour)
-    assert preview_before.text != preview_after.text, \
-        f"Time preview should change after timezone switch, " \
-        f"but both show '{preview_before.text}'"
+    assert text_before != preview_after.text, \
+        f"Time preview should change after timezone switch, but both show '{text_before}'"
 
 
-def test_timezone_reflected_in_preferences(device: DeviceClient):
+def test_timezone_reflected_in_preferences(device: DeviceClient, timezone_restore):
     """The preferences API should report the current timezone string."""
     _navigate_to_time_screen(device)
 
     # Set to a known timezone
     target = TIMEZONES[4]  # UTC
     device.set_roller("timezone_roller", target["index"])
-    time.sleep(0.5)
 
-    prefs = device.get_preferences()
-    assert prefs["timezone"] == target["tz"], \
-        f"Expected timezone='{target['tz']}', got '{prefs['timezone']}'"
-
-
-def test_restore_timezone(device: DeviceClient):
-    """Restore the original timezone so other tests aren't affected."""
-    if _initial_roller_index is None:
-        pytest.skip("Initial timezone index not captured")
-
-    _navigate_to_time_screen(device)
-
-    roller = device.find_widget(tag="timezone_roller")
-    if roller.value != _initial_roller_index:
-        device.set_roller("timezone_roller", _initial_roller_index)
-        time.sleep(0.5)
-
-    # Verify restoration
-    roller = device.find_widget(tag="timezone_roller")
-    assert roller.value == _initial_roller_index, \
-        f"Expected roller index {_initial_roller_index}, got {roller.value}"
-
-    if _initial_timezone:
-        prefs = device.get_preferences()
-        assert prefs["timezone"] == _initial_timezone, \
-            f"Expected timezone='{_initial_timezone}' after restore, got '{prefs['timezone']}'"
+    device.wait_until(
+        f"preferences report timezone '{target['tz']}'",
+        lambda: device.get_preferences().get("timezone") == target["tz"],
+        timeout=5.0,
+    )

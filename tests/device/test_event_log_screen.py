@@ -5,15 +5,18 @@ Navigates to the event log screen and verifies empty state, title,
 close button, and clear functionality.
 
 Note: Events are generated internally by state changes — there is no
-test injection endpoint. We can test the empty state after clearing,
-and the system_start event that's always present.
+generic test injection endpoint. We drive activity through fault
+inject/clear (which logs error_appeared/error_cleared) and the
+record-reset-reason test endpoint, and gate on the resulting observable
+state (fault set, journal contents, rendered widgets) instead of sleeping.
+
+Search/filter tests request the ``reset_event_filters`` fixture so any
+active search or filter chip is cleared on teardown and cannot leak into a
+later test (F-11 state isolation).
 """
 
-import time
 import pytest
 from device_client import DeviceClient
-
-UI_SETTLE = 1.5
 
 
 def _open_event_log(device: DeviceClient):
@@ -21,7 +24,6 @@ def _open_event_log(device: DeviceClient):
     device.click(tag="nav_events")
     assert device.wait_for_screen("event_log", timeout=5.0), \
         f"Expected 'event_log' screen, got '{device.screen}'"
-    time.sleep(0.5)
 
 
 def _close_event_log(device: DeviceClient):
@@ -31,6 +33,47 @@ def _close_event_log(device: DeviceClient):
         f"Expected 'main' screen after close, got '{device.screen}'"
 
 
+def _widget_text(device: DeviceClient, tag: str) -> str:
+    """Best-effort visible text of a widget, or '' if it is not present."""
+    w = device.find_widget(tag=tag)
+    if w is None:
+        return ""
+    return w.text_en or w.text or ""
+
+
+def _active_fault_codes(device: DeviceClient) -> set:
+    return {e["code"] for e in device.get_heatpump_errors().get("active", [])}
+
+
+def _wait_faults_active(device: DeviceClient, codes):
+    """Wait until every code in ``codes`` is reported active."""
+    want = set(codes)
+    device.wait_until(
+        f"faults active: {sorted(want)}",
+        lambda: want <= _active_fault_codes(device),
+        timeout=8.0,
+    )
+
+
+def _wait_faults_cleared(device: DeviceClient):
+    """Wait until no faults are active (inject/clear transitions logged)."""
+    device.wait_until(
+        "all faults cleared",
+        lambda: len(_active_fault_codes(device)) == 0,
+        timeout=8.0,
+    )
+
+
+def _seed_fault_cycle(device: DeviceClient, *codes):
+    """Inject then clear the given faults, waiting on each transition so the
+    corresponding error_appeared/error_cleared events are logged."""
+    for code in codes:
+        device.inject_fault(code, True)
+    _wait_faults_active(device, codes)
+    device.clear_all_faults()
+    _wait_faults_cleared(device)
+
+
 def _reset_filters(device: DeviceClient):
     """Return event filtering to its default state."""
     if device.find_widget(tag="event_search_clear") is not None:
@@ -38,7 +81,12 @@ def _reset_filters(device: DeviceClient):
     device.click(tag="event_filters_open")
     device.click(tag="event_filters_reset")
     device.click(tag="event_filters_apply")
-    time.sleep(0.3)
+    # Reset clears all active-filter chips; the label drops its "(N)" suffix.
+    device.wait_until(
+        "event filters reset to default",
+        lambda: "(" not in _widget_text(device, "event_filters_label"),
+        timeout=5.0, raise_on_timeout=False,
+    )
 
 
 # =========================================================================
@@ -59,12 +107,7 @@ class TestEventLogNavigation:
 
     def test_scrolled_events_control_events_does_not_reset(self, device: DeviceClient):
         """A scrolled event list can be left and reopened repeatedly."""
-        device.inject_fault("P02", True)
-        device.inject_fault("P06", True)
-        device.inject_fault("E19", True)
-        time.sleep(1.5)
-        device.clear_all_faults()
-        time.sleep(1.5)
+        _seed_fault_cycle(device, "P02", "P06", "E19")
 
         previous_uptime = device.session.get(
             f"{device.base_url}/api/health", timeout=device.timeout
@@ -114,12 +157,6 @@ class TestEventLogTitle:
 class TestEventLogEmptyState:
     """Clear the event log and verify the empty-state message."""
 
-    @pytest.fixture(autouse=True)
-    def _restore_events(self, device: DeviceClient):
-        """Let the test run; afterwards the system_start event will
-        reappear on the next event (no explicit restore needed)."""
-        yield
-
     def test_empty_state_after_clear(self, device: DeviceClient):
         """After clearing all events, the 'No events' message should appear."""
         _open_event_log(device)
@@ -127,11 +164,11 @@ class TestEventLogEmptyState:
         # Clear events
         device.click(tag="event_log_clear")
         device.click(tag="event_log_clear_confirm")
-        time.sleep(1.0)
 
         # The empty-state label should now be visible
+        assert device.wait_for_widget(tag="event_log_empty", timeout=5.0), \
+            "Empty-state label not found after clearing"
         empty = device.find_widget(tag="event_log_empty")
-        assert empty is not None, "Empty-state label not found after clearing"
         # Text should be the i18n "No events recorded" string
         text = empty.text_en or empty.text
         assert "no events" in text.lower(), \
@@ -144,10 +181,8 @@ class TestEventLogEmptyState:
 
         device.click(tag="event_log_clear")
         device.click(tag="event_log_clear_confirm")
-        time.sleep(1.0)
 
-        empty = device.find_widget(tag="event_log_empty")
-        assert empty is not None, \
+        assert device.wait_for_widget(tag="event_log_empty", timeout=5.0), \
             "Empty-state label not shown after clearing events"
 
 
@@ -165,21 +200,17 @@ class TestEventLogDisplay:
         transition logs events) and assert content is present indirectly:
         the empty-state label must be absent."""
         # Generate events via a fault set/clear transition.
-        device.inject_fault("P02", True)
-        time.sleep(1.5)
-        device.clear_all_faults()
-        time.sleep(1.5)
+        _seed_fault_cycle(device, "P02")
 
         _open_event_log(device)
-        time.sleep(0.5)
 
-        # If events exist, the "no events" empty-state label is not rendered.
+        # Recent activity means the "no events" empty-state must not render and
+        # rows must be grouped under a date separator.
+        assert device.wait_for_widget(tag="event_date_separator", timeout=5.0), \
+            "Event rows should be grouped under a date separator"
         empty = device.find_widget(tag="event_log_empty")
         assert empty is None, \
             "Empty-state label present despite recent event activity"
-        separator = device.find_widget(tag="event_date_separator")
-        assert separator is not None, \
-            "Event rows should be grouped under a date separator"
 
     def test_events_via_api(self, device: DeviceClient):
         """The /api/events endpoint should return events matching the UI count."""
@@ -280,6 +311,15 @@ class TestEventLogDisplay:
 class TestEventLogSearchAndFilters:
     """Verify the pinned search/filter controls and filtered empty state."""
 
+    @pytest.fixture(autouse=True)
+    def reset_event_filters(self, device: DeviceClient):
+        """Reset any active search/filter state after each test so it cannot
+        leak into a later test in this class (F-11 isolation)."""
+        yield
+        if device.try_wait_screen("event_log", timeout=1.0) or \
+                device.find_widget(tag="event_filters_open") is not None:
+            _reset_filters(device)
+
     def test_filter_toolbar_is_present(self, device: DeviceClient):
         _open_event_log(device)
         _reset_filters(device)
@@ -311,27 +351,26 @@ class TestEventLogSearchAndFilters:
         device.click(tag="event_search_cancel")
 
     def test_search_filters_event_descriptions(self, device: DeviceClient):
-        device.inject_fault("P02", True)
-        time.sleep(1.0)
-        device.clear_all_faults()
-        time.sleep(1.0)
+        _seed_fault_cycle(device, "P02")
 
         _open_event_log(device)
         _reset_filters(device)
         device.click(tag="event_search_open")
         device.type_text("event_search_input", "Error")
         device.click(tag="event_search_apply")
-        time.sleep(0.5)
 
-        summary = device.find_widget(tag="event_filter_summary")
-        assert summary is not None and " of " in (summary.text_en or summary.text)
+        device.wait_until(
+            "search summary reflects a match count",
+            lambda: " of " in _widget_text(device, "event_filter_summary"),
+            timeout=5.0,
+        )
         assert device.find_widget(tag="event_log_no_matches") is None
 
         device.click(tag="event_search_open")
         device.type_text("event_search_input", "definitely-no-such-event")
         device.click(tag="event_search_apply")
-        time.sleep(0.5)
-        assert device.find_widget(tag="event_log_no_matches") is not None
+        assert device.wait_for_widget(tag="event_log_no_matches", timeout=5.0), \
+            "Expected a no-matches state for a non-existent search term"
 
         device.click(tag="event_search_clear")
 
@@ -340,12 +379,16 @@ class TestEventLogSearchAndFilters:
         _reset_filters(device)
 
         device.click(tag="event_filter_problems")
-        filters = device.find_widget(tag="event_filters_label")
-        assert filters is not None and "(1)" in (filters.text_en or filters.text)
+        device.wait_until(
+            "problem filter chip active",
+            lambda: "(1)" in _widget_text(device, "event_filters_label"),
+            timeout=5.0,
+        )
 
         device.click(tag="event_filters_open")
         device.click(tag="event_filters_reset")
         device.click(tag="event_filters_cancel")
+        # Cancel discards the reset, so the (1) problem filter is still active.
         filters = device.find_widget(tag="event_filters_label")
         assert filters is not None and "(1)" in (filters.text_en or filters.text)
 
@@ -361,10 +404,11 @@ class TestEventLogSearchAndFilters:
 
         device.click(tag="event_time_restart")
         device.click(tag="event_filters_apply")
-        filters = device.find_widget(tag="event_filters_label")
-        assert filters is not None and "(2)" in (filters.text_en or filters.text)
-
-        _reset_filters(device)
+        device.wait_until(
+            "problem + time filters both active",
+            lambda: "(2)" in _widget_text(device, "event_filters_label"),
+            timeout=5.0,
+        )
 
 
 # =========================================================================
@@ -392,11 +436,8 @@ class TestEventLogApiClear:
         _close_event_log(device)
 
         device.session.delete(f"{device.base_url}/api/events")
-        time.sleep(0.5)
 
         _open_event_log(device)
-        time.sleep(1.0)
 
-        empty = device.find_widget(tag="event_log_empty")
-        assert empty is not None, \
+        assert device.wait_for_widget(tag="event_log_empty", timeout=5.0), \
             "Empty-state label not found after API clear"
