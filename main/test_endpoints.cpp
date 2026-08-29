@@ -1713,6 +1713,44 @@ static esp_err_t notification_mock_reset_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/update-check-suppress — suppress automatic firmware checks
+// Body: {"suppress": true}  (defaults to true if omitted)
+// Stops the boot + periodic GitHub update checks from racing test-mocked
+// firmware notifications and clearing them (issue #164, F-07).
+// ============================================================================
+
+static esp_err_t update_check_suppress_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    char buf[128] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+
+    bool suppress = true;  // default: suppress
+    if (ret > 0) {
+        cJSON* body = cJSON_Parse(buf);
+        if (body) {
+            cJSON* j_suppress = cJSON_GetObjectItem(body, "suppress");
+            if (j_suppress && cJSON_IsBool(j_suppress)) {
+                suppress = cJSON_IsTrue(j_suppress);
+            }
+            cJSON_Delete(body);
+        }
+    }
+
+    firmware_screen_set_auto_check_suppressed(suppress);
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddBoolToObject(resp, "suppressed", firmware_screen_auto_check_suppressed());
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/set-preference — set app preferences directly (no UI)
 // ============================================================================
 // Body: {"demo_mode": true}
@@ -2753,6 +2791,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &notification_mock_reset_options_uri);
+
+    httpd_uri_t update_check_suppress_uri = {
+        .uri = "/api/test/update-check-suppress",
+        .method = HTTP_POST,
+        .handler = update_check_suppress_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &update_check_suppress_uri);
+
+    httpd_uri_t update_check_suppress_options_uri = {
+        .uri = "/api/test/update-check-suppress",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &update_check_suppress_options_uri);
 
     // --- Session lock endpoints ---
 

@@ -10,9 +10,7 @@ is tested only for *visibility* when an update is available.
 """
 
 import re
-import time
 import pytest
-import requests
 from device_client import DeviceClient
 
 
@@ -26,10 +24,10 @@ def _open_firmware_screen(device: DeviceClient):
     """Navigate from main → settings → firmware."""
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
+    device.wait_for_widget(tag="settings_firmware", timeout=5.0)
     device.click(tag="settings_firmware")
     assert device.wait_for_screen("firmware", timeout=5.0)
-    time.sleep(0.5)
+    device.wait_for_widget(tag="firmware_current_version", timeout=5.0)
 
 
 def _wait_for_check_complete(device: DeviceClient, timeout: float = 15.0):
@@ -39,24 +37,24 @@ def _wait_for_check_complete(device: DeviceClient, timeout: float = 15.0):
     once the real GitHub check completes (or fails due to no internet).
     We just need it to stop saying "Checking...".
 
-    While the ESP32 is performing the outbound HTTPS request to GitHub,
-    the TLS handshake can block the HTTP server for 10+ seconds.  Catch
-    ReadTimeout and keep retrying instead of letting it crash the test.
+    While the ESP32 is performing the outbound HTTPS request to GitHub the TLS
+    handshake can block the HTTP server for several seconds; wait_until treats
+    the resulting transient ReadTimeout as "not yet" and keeps polling.
     """
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            status = device.find_widget(tag="firmware_status")
-        except requests.exceptions.ReadTimeout:
-            time.sleep(0.5)
-            continue
-        if status and status.text and status.text.strip() != "":
-            # Any non-empty text that isn't the checking string means done
-            checking_words = ("checking", "comprobando", "vérification")
-            if not any(w in status.text.lower() for w in checking_words):
-                return True
-        time.sleep(0.5)
-    return False
+    checking_words = ("checking", "comprobando", "vérification")
+
+    def _done() -> bool:
+        status = device.find_widget(tag="firmware_status")
+        if status and status.text and status.text.strip():
+            return not any(w in status.text.lower() for w in checking_words)
+        return False
+
+    return device.wait_until(
+        "firmware check leaves checking state",
+        _done,
+        timeout=timeout,
+        poll=0.5,
+    )
 
 
 # ── tests ────────────────────────────────────────────────────────────────
@@ -135,9 +133,13 @@ def test_mock_no_update(device: DeviceClient):
 
     # Mock with the same version → no update
     device.firmware_mock(version=current_ver, update_available=False)
-    time.sleep(0.5)
 
     # Install button should NOT be visible
+    device.wait_until(
+        "install button hidden after no-update mock",
+        lambda: device.find_widget(tag="firmware_update_btn") is None,
+        timeout=5.0,
+    )
     btn = device.find_widget(tag="firmware_update_btn")
     assert btn is None, "Install button should be hidden when firmware is up-to-date"
 
@@ -178,10 +180,9 @@ def _firmware_back_to_main(device: DeviceClient):
     """Return main from the firmware screen without resetting the mock."""
     device.click(tag="firmware_back")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.3)
+    device.wait_for_widget(tag="settings_close", timeout=5.0)
     device.click(tag="settings_close")
     assert device.wait_for_screen("main", timeout=5.0)
-    time.sleep(0.3)
 
 
 def _firmware_badge_present(device: DeviceClient) -> bool:
@@ -189,10 +190,23 @@ def _firmware_badge_present(device: DeviceClient) -> bool:
     present, then close it. An empty dropdown never opens (toggle is a no-op),
     so clicking twice is safe whether or not a notification exists."""
     device.click(tag="notifications")
-    time.sleep(0.5)
+    # If any notification exists the dropdown opens (notify_title appears); if
+    # none exist the toggle is a no-op and it never opens. Bounded best-effort
+    # wait covers both cases without a fixed sleep.
+    device.wait_until(
+        "notification dropdown settled",
+        lambda: device.has_widget(tag="notify_title"),
+        timeout=2.0,
+        raise_on_timeout=False,
+    )
     present = device.has_widget(tag="notify_item_firmware")
     device.click(tag="notifications")
-    time.sleep(0.3)
+    device.wait_until(
+        "notification dropdown closed",
+        lambda: not device.has_widget(tag="notify_title"),
+        timeout=2.0,
+        raise_on_timeout=False,
+    )
     return present
 
 
@@ -207,7 +221,9 @@ def test_manual_check_sets_and_clears_notification_badge(device: DeviceClient):
     assert _wait_for_check_complete(device, timeout=60.0), \
         "Firmware check must complete before injecting mock"
     device.firmware_mock(version="99.0.0", update_available=True)
-    time.sleep(0.5)
+    # Confirm the mock took effect (Install button shown) before navigating away.
+    assert device.wait_for_widget(tag="firmware_update_btn", timeout=3.0), \
+        "Install button should appear after mocking an available update"
     _firmware_back_to_main(device)
 
     assert _firmware_badge_present(device), \
@@ -220,7 +236,11 @@ def test_manual_check_sets_and_clears_notification_badge(device: DeviceClient):
     m = _VERSION_RE.search(cur.text)
     assert m, f"Could not extract version from '{cur.text}'"
     device.firmware_mock(version=m.group(0), update_available=False)
-    time.sleep(0.5)
+    device.wait_until(
+        "install button hidden after no-update mock",
+        lambda: device.find_widget(tag="firmware_update_btn") is None,
+        timeout=3.0,
+    )
     device.firmware_mock_reset()
     _firmware_back_to_main(device)
 

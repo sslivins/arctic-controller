@@ -411,6 +411,32 @@ class DeviceClient:
             raise DeviceError(f"Notification mock reset failed ({r.status_code}): {msg}")
         return r.json()
 
+    def set_update_check_suppressed(self, suppressed: bool = True) -> dict:
+        """POST /api/test/update-check-suppress — suppress automatic firmware update checks.
+
+        When suppressed, the firmware's boot-time and periodic background GitHub
+        update checks become no-ops and any in-flight check's callback is
+        dropped, so the async check can't race a test-mocked firmware
+        notification and clear it (issue #164, F-07).
+
+        Args:
+            suppressed: True to suppress automatic checks, False to re-enable.
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/update-check-suppress",
+            json={"suppress": suppressed},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(
+                f"Update-check suppress failed ({r.status_code}): {msg}"
+            )
+        return r.json()
+
     def type_text(self, tag: str, text: str) -> dict:
         """POST /api/test/type-text — set text in a textarea widget.
 

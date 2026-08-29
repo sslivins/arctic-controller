@@ -49,6 +49,25 @@ typedef void (*firmware_update_check_cb_t)(bool update_available, const char* ne
 void firmware_screen_check_for_updates_async(firmware_update_check_cb_t callback);
 
 /**
+ * @brief Suppress or re-enable automatic (boot + periodic) firmware update checks.
+ *
+ * Test-only hook (issue #164, F-07). When suppressed,
+ * firmware_screen_check_for_updates_async() becomes a no-op and any check that
+ * was already in flight has its completion callback dropped, so the async
+ * GitHub check can't race a test-mocked notification and clear it. Not used in
+ * production.
+ *
+ * @param suppressed True to suppress automatic checks, false to re-enable.
+ */
+void firmware_screen_set_auto_check_suppressed(bool suppressed);
+
+/**
+ * @brief Query whether automatic firmware update checks are suppressed.
+ * @return True if suppressed (test mode), false otherwise.
+ */
+bool firmware_screen_auto_check_suppressed(void);
+
+/**
  * @brief Publish or clear the firmware-update status-bar notification badge.
  *
  * Adds the STATUS_BAR_NOTIFY_FIRMWARE_UPDATE badge (with a
