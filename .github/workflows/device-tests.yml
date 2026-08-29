@@ -531,9 +531,19 @@ jobs:
           poll_https() {
             local attempts="$1"
             for i in $(seq 1 "$attempts"); do
+              # Require BOTH a core route (/api/health) AND a test-instrumentation
+              # route (/api/test/stack-watermarks) to answer. The ~53 /api/test/*
+              # handlers register AFTER the core routes, so a device that already
+              # answers /api/health can still 404 the very next /api/test/* call.
+              # That is exactly how "Provision isolated test credentials" flaked:
+              # it POSTs to /api/test/credentials, which can 404 in the gap between
+              # core-handler readiness and test-handler registration. Gating on a
+              # test endpoint here closes that gap.
               if curl -skf --connect-timeout 5 --max-time 10 \
-                "$ARCTIC_URL_HTTPS/api/health" > /dev/null; then
-                echo "Mandatory HTTPS is ready (attempt $i)"
+                   "$ARCTIC_URL_HTTPS/api/health" > /dev/null \
+                 && curl -skf --connect-timeout 5 --max-time 10 \
+                   "$ARCTIC_URL_HTTPS/api/test/stack-watermarks" > /dev/null; then
+                echo "Mandatory HTTPS + test instrumentation ready (attempt $i)"
                 return 0
               fi
               sleep 2
@@ -568,6 +578,28 @@ jobs:
           echo "::error::Mandatory HTTPS did not become ready even after USB hard-reset recovery"
           exit 1
 
+      - name: Start controller serial capture
+        # Start capture BEFORE credential provisioning and the rollback/OTA
+        # guards so the serial console for that whole pre-test window is
+        # recorded. Previously capture started only just before the test steps,
+        # so a device-side panic/hang during provisioning (see the flake this
+        # guards) left no console log to diagnose. The USB port is free by now
+        # (flashing and any readiness hard-reset have completed).
+        run: |
+          python .github/scripts/capture_serial.py \
+            --usb-serial "$CONTROLLER_USB_SERIAL" \
+            --output controller-serial.log &
+          CAPTURE_PID=$!
+          echo "SERIAL_CAPTURE_PID=$CAPTURE_PID" >> "$GITHUB_ENV"
+          sleep 2
+          if ! kill -0 "$CAPTURE_PID" 2>/dev/null; then
+            echo "Serial capture process failed to start"
+            exit 1
+          fi
+          echo "Capturing controller serial output with PID $CAPTURE_PID"
+        env:
+          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
+
       - name: Provision isolated test credentials
         run: |
           TEST_USERNAME="arctic"
@@ -575,19 +607,25 @@ jobs:
           BODY=$(python3 -c 'import json,os; print(json.dumps({"username": os.environ["TEST_USERNAME"], "password": os.environ["TEST_PASSWORD"]}))')
 
           for i in $(seq 1 5); do
-            if curl -skf --connect-timeout 3 --max-time 10 \
+            # Capture the HTTP status so a failure is diagnosable (a bare
+            # `curl -skf ... >/dev/null` hid whether we got a 404/401/5xx or a
+            # timeout, which made the original flake impossible to triage).
+            HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" \
+              --connect-timeout 3 --max-time 10 \
               -X POST "$ARCTIC_URL/api/test/credentials" \
               -H "Content-Type: application/json" \
-              -d "$BODY" > /dev/null; then
+              -d "$BODY")
+            if [ "$HTTP_CODE" = "200" ]; then
               echo "ARCTIC_USERNAME=$TEST_USERNAME" >> "$GITHUB_ENV"
               echo "ARCTIC_PASSWORD=$TEST_PASSWORD" >> "$GITHUB_ENV"
               echo "Provisioned non-default credentials for test firmware"
               exit 0
             fi
+            echo "Attempt $i: POST /api/test/credentials returned HTTP ${HTTP_CODE:-000}"
             sleep 2
           done
 
-          echo "ERROR: Could not provision test credentials"
+          echo "::error::Could not provision test credentials (last HTTP ${HTTP_CODE:-000}). See controller-serial.log for the device console during this window."
           exit 1
         env:
           TEST_USERNAME: arctic
@@ -681,22 +719,6 @@ jobs:
         run: |
           echo "::error::Nightly /api/ota/update (pull-path OTA) FAILED. The device was recovered via USB fallback, but nightly must strictly validate the pull path. Failing the job."
           exit 1
-
-      - name: Start controller serial capture
-        run: |
-          python .github/scripts/capture_serial.py \
-            --usb-serial "$CONTROLLER_USB_SERIAL" \
-            --output controller-serial.log &
-          CAPTURE_PID=$!
-          echo "SERIAL_CAPTURE_PID=$CAPTURE_PID" >> "$GITHUB_ENV"
-          sleep 2
-          if ! kill -0 "$CAPTURE_PID" 2>/dev/null; then
-            echo "Serial capture process failed to start"
-            exit 1
-          fi
-          echo "Capturing controller serial output with PID $CAPTURE_PID"
-        env:
-          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
 
       - name: Run device UI tests
         id: ui_tests
