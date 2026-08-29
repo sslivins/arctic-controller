@@ -136,6 +136,66 @@ def _clear_faults():
             time.sleep(2)
 
 
+def _wait_until(predicate, description, timeout=5.0, poll=0.1, required=True):
+    """Poll ``predicate()`` until it returns a truthy value; return that value.
+
+    Replaces a fixed sleep after a demo/fault/auth change: rather than guessing
+    a propagation delay, wait for the observable result. Returns as soon as the
+    condition holds (faster) and is race-free (no fixed guess that can be too
+    short under load). Exceptions raised by ``predicate`` are treated as
+    "not yet". If ``required`` and the timeout elapses, raises AssertionError.
+    """
+    deadline = time.monotonic() + timeout
+    last = None
+    while True:
+        try:
+            last = predicate()
+        except Exception:
+            last = None
+        if last:
+            return last
+        if time.monotonic() >= deadline:
+            if required:
+                raise AssertionError(
+                    f"Timed out after {timeout:.1f}s waiting for {description}"
+                )
+            return last
+        time.sleep(poll)
+
+
+def _row_value_from(rows, category, name):
+    """Return the Value of the first CSV row matching (category, name), or None."""
+    for row in rows:
+        if row["Category"] == category and row["Name"] == name:
+            return row["Value"]
+    return None
+
+
+def _wait_diag_rows(predicate, description, timeout=5.0, poll=0.1, required=True):
+    """Poll the diagnostic CSV until ``predicate(rows)`` is truthy; return rows.
+
+    Fetches + parses the diagnostic CSV once per poll iteration so callers can
+    assert on the same snapshot that satisfied the predicate.
+    """
+    deadline = time.monotonic() + timeout
+    rows = None
+    while True:
+        try:
+            r = _get("/api/heatpump/diagnostic")
+            rows = _parse_csv(r.content.decode("utf-8-sig"))
+        except Exception:
+            rows = None
+        if rows is not None and predicate(rows):
+            return rows
+        if time.monotonic() >= deadline:
+            if required:
+                raise AssertionError(
+                    f"Timed out after {timeout:.1f}s waiting for {description}"
+                )
+            return rows
+        time.sleep(poll)
+
+
 @pytest.fixture(autouse=True)
 def _check_prerequisites():
     """Skip if device is unreachable or not in demo mode."""
@@ -361,35 +421,45 @@ class TestDiagnosticValues:
     def _row_value(self, category: str, name: str):
         r = _get("/api/heatpump/diagnostic")
         rows = _parse_csv(r.content.decode("utf-8-sig"))
-        for row in rows:
-            if row["Category"] == category and row["Name"] == name:
-                return row["Value"]
-        return None
+        return _row_value_from(rows, category, name)
 
     def test_temperatures_are_whole_celsius(self):
         # Raw temp registers decode 1:1 to whole degrees C.
         _inject_demo({"water_tank_temp": 42, "inlet_water_temp": 38})
-        time.sleep(1.0)
-        assert self._row_value("Temperature", "Water Tank") == "42"
-        assert self._row_value("Temperature", "Inlet Water") == "38"
+        rows = _wait_diag_rows(
+            lambda rows: _row_value_from(rows, "Temperature", "Water Tank") == "42"
+            and _row_value_from(rows, "Temperature", "Inlet Water") == "38",
+            "diagnostic temps to reflect injected values",
+        )
+        assert _row_value_from(rows, "Temperature", "Water Tank") == "42"
+        assert _row_value_from(rows, "Temperature", "Inlet Water") == "38"
 
     def test_ac_current_is_whole_amps(self):
         # AC current decodes 1:1 to whole amps (not tenths).
         _inject_demo({"ac_current": 5})
-        time.sleep(1.0)
-        assert self._row_value("Reading", "AC Current") == "5"
+        rows = _wait_diag_rows(
+            lambda rows: _row_value_from(rows, "Reading", "AC Current") == "5",
+            "diagnostic AC current to reflect injected value",
+        )
+        assert _row_value_from(rows, "Reading", "AC Current") == "5"
 
     def test_ac_voltage_natural_units(self):
         # Demo AC voltage is expressed in natural volts; it round-trips through
         # the diagnostic CSV unchanged (the library handles any wire scaling).
         _inject_demo({"ac_voltage": 230})
-        time.sleep(1.0)
-        assert self._row_value("Reading", "AC Voltage") == "230"
+        rows = _wait_diag_rows(
+            lambda rows: _row_value_from(rows, "Reading", "AC Voltage") == "230",
+            "diagnostic AC voltage to reflect injected value",
+        )
+        assert _row_value_from(rows, "Reading", "AC Voltage") == "230"
 
     def test_compressor_frequency_value(self):
         _inject_demo({"compressor_freq": 60})
-        time.sleep(1.0)
-        assert self._row_value("Reading", "Compressor Frequency") == "60"
+        rows = _wait_diag_rows(
+            lambda rows: _row_value_from(rows, "Reading", "Compressor Frequency") == "60",
+            "diagnostic compressor frequency to reflect injected value",
+        )
+        assert _row_value_from(rows, "Reading", "Compressor Frequency") == "60"
 
 
 # ── Error Injection ───────────────────────────────────────────────────────
@@ -402,12 +472,12 @@ class TestDiagnosticErrors:
         """Injecting a fault should produce Error rows in CSV."""
         _clear_faults()
         _inject_fault("E01")  # discharge temp sensor
-        time.sleep(0.5)
 
         try:
-            r = _get("/api/heatpump/diagnostic")
-            text = r.content.decode("utf-8-sig")
-            rows = _parse_csv(text)
+            rows = _wait_diag_rows(
+                lambda rows: len([r for r in rows if r["Category"] == "Error"]) >= 1,
+                "error rows to appear in diagnostic CSV",
+            )
             error_rows = [r for r in rows if r["Category"] == "Error"]
             assert len(error_rows) >= 1, "Expected at least 1 error row after injection"
 
@@ -416,16 +486,17 @@ class TestDiagnosticErrors:
             assert len(codes) >= 1, "Error rows should have Arctic error codes"
         finally:
             _clear_faults()
-            time.sleep(0.3)
+            _wait_diag_rows(
+                lambda rows: len([r for r in rows if r["Category"] == "Error"]) == 0,
+                "error rows to clear (teardown)", timeout=3, required=False)
 
     def test_no_errors_when_clear(self):
         """With no errors injected, Error category should be absent or empty."""
         _clear_faults()
-        time.sleep(0.3)
-
-        r = _get("/api/heatpump/diagnostic")
-        text = r.content.decode("utf-8-sig")
-        rows = _parse_csv(text)
+        rows = _wait_diag_rows(
+            lambda rows: len([r for r in rows if r["Category"] == "Error"]) == 0,
+            "error rows to clear",
+        )
         error_rows = [r for r in rows if r["Category"] == "Error"]
         # It's acceptable to have zero error rows when no errors active
         assert len(error_rows) == 0, (
@@ -452,7 +523,6 @@ def _auth_config_post(payload: dict):
                        json={"username": "arctic", "password": "arctic"},
                        timeout=5)
                 s.post(f"{BASE_URL}/api/auth/config", json=payload, timeout=5)
-            time.sleep(0.5)
             return
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
             if attempt == 2:
@@ -461,12 +531,29 @@ def _auth_config_post(payload: dict):
 
 
 def _enable_api_auth():
-    """Enable API auth on the device."""
+    """Ensure API auth is enforced, then wait until a keyless request is rejected.
+
+    The firmware forces web+API auth ON at every boot and never allows it to be
+    turned off (see auth_manager.cpp: "Remote administration is always
+    authenticated"), so this is effectively a readiness assertion: it confirms
+    the device is rejecting unauthenticated requests before the test proceeds.
+    """
     _auth_config_post({"web_auth_enabled": True, "api_auth_enabled": True})
+    _wait_until(
+        lambda: requests.get(
+            f"{BASE_URL}/api/heatpump/diagnostic", timeout=10
+        ).status_code == 401,
+        "API auth to be enforced (keyless request -> 401)",
+    )
 
 
 def _disable_api_auth():
-    """Disable API auth on the device."""
+    """Best-effort attempt to disable API auth (no-op on real hardware).
+
+    Web+API auth is mandatory in firmware and any disable request is rejected
+    with 403, so there is no observable state change to wait for. This is kept
+    only to express test-teardown intent symmetrically with _enable_api_auth.
+    """
     _auth_config_post({"web_auth_enabled": False, "api_auth_enabled": False})
 
 
