@@ -13,6 +13,12 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_HTTPD_WS_SUPPORT=y
 CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
 CONFIG_LWIP_MAX_SOCKETS=24
+# Shared LWIP active-TCP PCB pool. Raised 16->24 to match MAX_SOCKETS so the
+# four HTTPS/HTTP servers plus outbound clients cannot exhaust the pool under
+# the full test suite. At 16, TIME_WAIT churn from the HTTPS server's
+# lru_purge (see api_server.cpp max_open_sockets) starved this pool and took
+# every server (443/8443/web) unresponsive at once (mbedtls -0x7780 storm).
+CONFIG_LWIP_MAX_ACTIVE_TCP=24
 # Test instrumentation is enabled only by device-tests.yml.
 CONFIG_TEST_ENDPOINTS=n
 

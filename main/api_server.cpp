@@ -488,7 +488,23 @@ bool api_server_start(void)
         ssl_config.httpd.stack_size         = stack_size;
         ssl_config.httpd.max_resp_headers   = max_headers;
         ssl_config.httpd.recv_wait_timeout  = recv_timeout;
-        ssl_config.httpd.max_open_sockets   = 4;      // TLS buffers in PSRAM via EXTERNAL_MEM_ALLOC
+        // 7 concurrent TLS sessions (TLS buffers in PSRAM via
+        // EXTERNAL_MEM_ALLOC, so PSRAM headroom is not the constraint). Was 4,
+        // which was too low for the full HTTPS test suite: the web dashboard
+        // (Chromium) opens up to ~6 parallel connections while API polling
+        // runs, so lru_purge repeatedly evicted still-live keep-alive sockets.
+        // Each eviction is a server-side active close -> a TIME_WAIT PCB that
+        // lingers ~2*MSL (see CONFIG_LWIP_TCP_MSL), and forces the client's
+        // next request into a fresh, expensive handshake on the single-threaded
+        // server. Under sustained churn the resulting handshake storm
+        // (mbedtls_ssl_handshake -0x7780, aborted by clients that time out
+        // waiting) plus TIME_WAIT accumulation exhausted the shared
+        // CONFIG_LWIP_MAX_ACTIVE_TCP pool, taking every server (443/8443/web)
+        // unresponsive at once. Raising this to 7 keeps keep-alive sockets
+        // alive, cutting new-handshake and TIME_WAIT churn. Companion change:
+        // CONFIG_LWIP_MAX_ACTIVE_TCP raised 16->24 so the extra sockets plus
+        // TIME_WAIT PCBs cannot starve the shared PCB pool.
+        ssl_config.httpd.max_open_sockets   = 7;
         // Leave send_wait_timeout at its default. A very short send timeout
         // truncates responses (empty/partial body, seen as bogus 404s) and
         // tears down the TLS connection whenever the single-threaded server is

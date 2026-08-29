@@ -78,6 +78,14 @@ static firmware_screen_state_t s_state = {};
 static char* http_response_buffer = NULL;
 static int http_response_len = 0;
 
+// When true, automatic (boot + periodic) update checks are suppressed and the
+// notification side-effect of any check (background or screen-open) is skipped.
+// Test-only: lets device tests mock a firmware notification without the real
+// async GitHub check racing in and clearing it (issue #164, F-07). Never
+// enabled in production. Declared here (above check_for_updates_task) so both
+// the screen-open and background check paths can read it.
+static volatile bool s_auto_check_suppressed = false;
+
 // ============================================================================
 // Forward Declarations
 // ============================================================================
@@ -518,9 +526,16 @@ static void check_for_updates_task(void* arg)
 
     // Publish/clear the status-bar badge so a manually-found update is
     // remembered even if the user navigates away without updating (issue #145).
-    bsp_display_lock(0);
-    firmware_screen_apply_update_notification(update_available, latest_ver);
-    bsp_display_unlock();
+    // When auto-check is suppressed (test mode), skip ONLY this notification
+    // side-effect: otherwise a firmware-screen-open check started by one test
+    // can complete during a later test and clear its mocked notification
+    // (issue #164, F-07). The screen UI update below still runs, so
+    // test_firmware's screen-open checks are unaffected.
+    if (!s_auto_check_suppressed) {
+        bsp_display_lock(0);
+        firmware_screen_apply_update_notification(update_available, latest_ver);
+        bsp_display_unlock();
+    }
 
     if (s_state.visible) {
         if (update_available) {
@@ -643,6 +658,18 @@ void firmware_screen_apply_update_notification(bool update_available, const char
 static firmware_update_check_cb_t s_bg_update_callback = NULL;
 static volatile bool s_bg_check_running = false;
 
+void firmware_screen_set_auto_check_suppressed(bool suppressed)
+{
+    s_auto_check_suppressed = suppressed;
+    ESP_LOGW(TAG, "Automatic firmware update check %s",
+             suppressed ? "SUPPRESSED (test mode)" : "re-enabled");
+}
+
+bool firmware_screen_auto_check_suppressed(void)
+{
+    return s_auto_check_suppressed;
+}
+
 static void background_update_check_task(void* arg)
 {
     (void)arg;
@@ -697,9 +724,15 @@ static void background_update_check_task(void* arg)
         free(response_buffer);
     }
     
-    // Call callback
+    // Call callback (unless suppression was toggled on while this check was
+    // already in flight — dropping it prevents a stale "up to date" result
+    // from clearing a test-mocked notification).
     if (s_bg_update_callback) {
-        s_bg_update_callback(update_available, latest_ver);
+        if (s_auto_check_suppressed) {
+            ESP_LOGW(TAG, "Update check completed but auto-check suppressed; dropping callback");
+        } else {
+            s_bg_update_callback(update_available, latest_ver);
+        }
         s_bg_update_callback = NULL;
     }
     
@@ -709,6 +742,10 @@ static void background_update_check_task(void* arg)
 
 void firmware_screen_check_for_updates_async(firmware_update_check_cb_t callback)
 {
+    if (s_auto_check_suppressed) {
+        ESP_LOGW(TAG, "Auto-check suppressed (test mode); skipping update check");
+        return;
+    }
     if (s_bg_check_running) {
         ESP_LOGW(TAG, "Update check already in progress, skipping");
         return;

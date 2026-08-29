@@ -239,6 +239,18 @@ def device() -> DeviceClient:
     except Exception as e:
         pytest.exit(f"Failed to enable demo mode: {e}", returncode=1)
 
+    # Suppress the firmware's automatic (boot + periodic) GitHub update check for
+    # the whole session. Otherwise the background check's callback can clear a
+    # test-mocked firmware notification mid-test, flaking the status-bar and
+    # firmware-badge tests (issue #164, F-07). This only gates the background
+    # path; the firmware-screen-open check (test_firmware) is unaffected. The
+    # per-test _suppress_update_check fixture re-applies this after reboot tests
+    # reset the in-memory flag.
+    try:
+        client.set_update_check_suppressed(True)
+    except Exception as e:
+        print(f"\n⚠️ Could not suppress automatic update check: {e}")
+
     yield client
 
     # After all tests complete, leave the device on the main screen
@@ -273,6 +285,23 @@ def ensure_main_screen(device: DeviceClient):
     if not _device_alive(device):
         pytest.fail("Device unreachable — cannot navigate to main screen")
     _return_to_main(device)
+
+
+@pytest.fixture(autouse=True)
+def _suppress_update_check(device: DeviceClient):
+    """Keep the automatic firmware update check suppressed for every test.
+
+    The flag lives in device RAM, so any test that reboots the device (e.g.
+    test_https, test_ota_api) resets it. Re-applying before each test ensures a
+    later test (e.g. test_status_bar) can't be flaked by a background update
+    check clearing its mocked notification (issue #164, F-07). Best-effort —
+    never fail a test over telemetry/setup; the session fixture already set it
+    once, and only reboot tests can clear it.
+    """
+    try:
+        device.set_update_check_suppressed(True)
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
