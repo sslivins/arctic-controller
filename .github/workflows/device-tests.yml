@@ -787,6 +787,44 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Assert serial capture produced usable output
+        if: always()
+        run: |
+          # The crash gate ("Detect firmware crashes on device") and the httpd
+          # handler-registration gate below both draw their verdict from
+          # controller-serial.log. Both currently `exit 0` when that file is
+          # missing — so if serial capture silently produced nothing (port held
+          # by another process the whole run, capture died right after its 2s
+          # liveness check, etc.), those gates would pass with NOTHING to
+          # inspect. A detector that silently passes on no data is exactly the
+          # failure mode that let real crashes ship before. Fail loudly instead.
+          #
+          # Only enforce this when capture actually STARTED. If an earlier step
+          # failed, the "Start controller serial capture" step is skipped and
+          # SERIAL_CAPTURE_PID is unset — the job is already red for the real
+          # reason, so don't pile on a confusing second error.
+          if [ -z "${SERIAL_CAPTURE_PID:-}" ]; then
+            echo "Serial capture never started (an earlier step failed) — nothing to assert."
+            exit 0
+          fi
+          if [ ! -s controller-serial.log ]; then
+            echo "::error title=Serial capture empty::controller-serial.log is missing or empty even though capture started (PID ${SERIAL_CAPTURE_PID}). The crash gate would silently pass with no data to inspect — failing the job."
+            exit 1
+          fi
+          # capture_serial.py writes only status lines of the exact shape
+          # "--- <ISO8601> <message> ---" (connected / serial disconnected /
+          # capture stopped). Any line that is NOT such a marker is real device
+          # output. If every non-blank line is a marker, capture never read a
+          # single byte from the controller (e.g. the port was held the entire
+          # run), so the gates are blind.
+          REAL=$(grep -vE '^--- .* ---$' controller-serial.log | grep -cE '[^[:space:]]' || true)
+          if [ "${REAL:-0}" -eq 0 ]; then
+            echo "::error title=No device serial output::controller-serial.log contains only capture status markers — no bytes were ever read from the controller, so the crash/handler gates had nothing to inspect and would silently pass. This usually means the USB serial port was held by another process for the whole run. Failing the job. Capture markers:"
+            grep -nE '^--- .* ---$' controller-serial.log | head -20
+            exit 1
+          fi
+          echo "OK: serial capture produced ${REAL} lines of real device output."
+
       - name: Assert no httpd handler-registration failures
         if: always()
         run: |
