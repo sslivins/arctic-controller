@@ -61,18 +61,20 @@ def browser_context_args():
 
 # ---------- Auth helpers ----------
 
-# Track auth state to avoid repeated API calls
-_auth_disabled = None   # None = not checked yet, True = disabled, False = could not disable
-_auth_needs_login = False
+# Cache only the SUCCESS of disabling web auth. A transient failure must NEVER
+# be cached: doing so used to poison the whole web suite — once one flaky
+# /api/auth/status or /api/auth/config call failed, the cached "needs login"
+# state made every later test short-circuit to "auth still enabled" and fall
+# back to slow browser logins (or fail outright). Each test now re-attempts the
+# disable until it genuinely succeeds.
+_auth_disabled = None   # None/False = not confirmed disabled yet, True = confirmed disabled
 
 
 def _ensure_auth_disabled(base_url: str):
-    """Disable web auth once, then cache the result for the session."""
-    global _auth_disabled, _auth_needs_login
+    """Ensure web auth is disabled. Caches only success; re-attempts on failure."""
+    global _auth_disabled
     if _auth_disabled is True:
         return True
-    if _auth_disabled is False and _auth_needs_login:
-        return False
 
     import requests
     import time
@@ -113,7 +115,6 @@ def _ensure_auth_disabled(base_url: str):
                 timeout=5,
             )
             if login_r.status_code != 200 or not login_r.json().get("success"):
-                _auth_needs_login = True
                 return False
 
             r = session.post(
@@ -133,7 +134,6 @@ def _ensure_auth_disabled(base_url: str):
         except Exception:
             break  # Non-transient error, stop retrying
 
-    _auth_needs_login = True
     return False
 
 
@@ -193,22 +193,55 @@ def _browser_login(page: Page):
 # ---------- Session baseline enforcement ----------
 
 
+def _wait_for_web_ready(base_url: str, timeout: float = 45.0) -> None:
+    """Block until the device answers on its web endpoint, or fail the session.
+
+    Without this, a device whose web server never comes up makes *every* web
+    test independently time out on ``page.goto`` — turning one dead device into
+    a multi-minute (or multi-hour, across retries) suite crawl. Gate once at
+    session start and fail fast with a clear message instead. ``/api/health`` is
+    unauthenticated (the CI "Require HTTPS readiness" step polls the same route).
+    """
+    import requests
+    import time
+
+    headers = {"X-API-Key": API_KEY} if API_KEY else {}
+    deadline = time.time() + timeout
+    last_err = None
+    while time.time() < deadline:
+        try:
+            r = requests.get(f"{base_url}/api/health", headers=headers,
+                             timeout=5, verify=False)
+            if r.ok:
+                return
+            last_err = f"HTTP {r.status_code}"
+        except Exception as e:  # noqa: BLE001
+            last_err = repr(e)
+        time.sleep(1)
+    pytest.fail(
+        f"Device web endpoint at {base_url} did not become ready within "
+        f"{timeout:.0f}s (last error: {last_err}). Aborting the web suite fast "
+        f"instead of letting every test time out on page.goto.",
+        pytrace=False,
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _web_auth_baseline(base_url: str):
-    """Force a known web-auth baseline (disabled) at the end of the web session.
+    """Wait for web readiness, then force a known web-auth baseline at session end.
 
     The web suite toggles global web-auth state via cached module globals
     (``login_page`` enables it, ``dashboard_page`` disables it). If a test errors
     before its own fixture cleanup runs — or a transient re-disable call fails —
     web auth can be left enabled and leak into a later suite that shares the same
     physical device in a CI run. This session-scoped teardown resets the cached
-    flags and forces web auth back to disabled, then confirms it via
+    flag and forces web auth back to disabled, then confirms it via
     ``/api/auth/status`` so the baseline is verified, not merely requested.
     """
+    _wait_for_web_ready(base_url)
     yield
-    global _auth_disabled, _auth_needs_login
+    global _auth_disabled
     _auth_disabled = None
-    _auth_needs_login = False
     _ensure_auth_disabled(base_url)
 
     # Verify the baseline is externally observable (best-effort).
@@ -279,9 +312,8 @@ def login_page(page: Page, base_url: str) -> Page:
     page.wait_for_selector(".login-card", timeout=10000)
     yield page
     # Cleanup: disable auth so dashboard tests work without login
-    global _auth_disabled, _auth_needs_login
+    global _auth_disabled
     _auth_disabled = None
-    _auth_needs_login = False
     _ensure_auth_disabled(base_url)
 
 

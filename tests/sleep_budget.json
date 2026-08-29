@@ -28,7 +28,7 @@
   "tests/device/test_temperature_history_screen.py": 2,
   "tests/device/test_temperature_unit.py": 4,
   "tests/device/test_web_screen.py": 2,
-  "tests/web/conftest.py": 4,
+  "tests/web/conftest.py": 5,
   "tests/web/test_change_password.py": 2,
   "tests/web/test_dashboard.py": 1,
   "tests/web/test_navigation.py": 2
