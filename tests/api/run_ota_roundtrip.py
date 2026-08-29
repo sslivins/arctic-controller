@@ -46,16 +46,18 @@ def main():
         print("UPLOAD FAILED")
         return 1
 
-    # Wait for reboot
-    print("\nWaiting 25s for device to reboot...")
-    time.sleep(25)
-
-    # Poll until device responds
-    print("Polling for device...")
-    for i in range(30):
+    # Wait for reboot: first observe the device go offline (so we don't read the
+    # pre-reboot instance), then poll until it serves again.
+    print("\nWaiting for device to reboot (offline -> online)...")
+    seen_offline = False
+    for i in range(45):
         try:
             r = requests.get(f"{BASE_URL}/api/ota/status", headers=headers(), timeout=5)
             if r.status_code == 200:
+                if not seen_offline:
+                    print(f"  attempt {i+1}/45 (still on pre-reboot instance)...")
+                    time.sleep(2)
+                    continue
                 post = r.json()
                 print(f"\nDevice is back!")
                 print(f"  version: {post['current_version']}")
@@ -78,8 +80,8 @@ def main():
                     print("\n❌ ROUND-TRIP TEST FAILED")
                     return 1
         except requests.ConnectionError:
-            pass
-        print(f"  attempt {i+1}/30...")
+            seen_offline = True
+        print(f"  attempt {i+1}/45...")
         time.sleep(2)
 
     print("\n❌ TIMEOUT: Device did not come back")

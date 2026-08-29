@@ -128,15 +128,12 @@ def _ensure_no_admin_cert(device: DeviceClient, verify_timeout: float = 30.0) ->
     device.reboot()
     if not device.wait_for_device(timeout=verify_timeout):
         return False
-    deadline = time.time() + verify_timeout
-    while time.time() < deadline:
-        try:
-            if not _tls_status().get("has_certs"):
-                return True
-        except Exception:
-            pass
-        time.sleep(1.0)
-    return False
+    return device.wait_until(
+        "administrator tls cert cleared",
+        lambda: not _tls_status().get("has_certs"),
+        timeout=verify_timeout,
+        raise_on_timeout=False,
+    )
 
 
 def _restore_auth_config(original: dict, verify_timeout: float = 10.0) -> None:
@@ -292,7 +289,8 @@ class TestHttpsLifecycle:
 
         device.reboot()
         assert device.wait_for_device(timeout=30.0), "Device did not come back after reboot"
-        time.sleep(2)  # give HTTPS server time to start
+        assert device.wait_for_https_ready(timeout=30.0), \
+            "HTTPS server did not start serving after reboot"
 
         # HTTPS should now be active
         https_url = _https_url()
