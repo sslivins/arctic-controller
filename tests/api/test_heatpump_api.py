@@ -117,6 +117,39 @@ def _clear_faults():
     return r.json()
 
 
+def _wait_json(path, predicate, description, timeout=5.0, poll=0.1, required=True):
+    """Poll GET ``path`` until ``predicate(json)`` is truthy; return that JSON.
+
+    Replaces a fixed sleep after a demo/fault injection: rather than
+    guessing a propagation delay, wait for the observable result. Some demo
+    fields (component/setpoint values via ``setDemoField``) are applied on the
+    demo-sync task's ~500ms tick, not synchronously, which is why the old code
+    slept ~1s; polling for the expected condition is both faster (returns as
+    soon as it propagates) and race-free (no fixed guess that can be too short
+    on a loaded device). Exceptions (e.g. a transient HTTP error) are treated
+    as "not ready yet". On timeout, raises ``AssertionError`` naming what it
+    waited for and the last response — unless ``required=False`` (best-effort
+    teardown), in which case the last response is returned.
+    """
+    deadline = time.monotonic() + timeout
+    last = None
+    while True:
+        try:
+            last = _get(path).json()
+            if predicate(last):
+                return last
+        except Exception:
+            pass
+        if time.monotonic() >= deadline:
+            if required:
+                raise AssertionError(
+                    f"Timed out after {timeout:.0f}s waiting for {description}; "
+                    f"last response={last}"
+                )
+            return last
+        time.sleep(poll)
+
+
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
 
@@ -222,8 +255,8 @@ class TestHeatpumpStatus:
         """error should be null when has_error is false."""
         # Clear errors first
         _clear_faults()
-        time.sleep(0.3)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status", lambda d: d["has_error"] is False,
+                          "faults to clear")
         if not data["has_error"]:
             assert data["error"] is None
 
@@ -242,8 +275,9 @@ class TestDemoModeInjection:
     def test_inject_temperature(self):
         """Injecting water_tank_temp should be reflected in status."""
         _inject_demo({"water_tank_temp": 77})
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status",
+                          lambda d: d["temperatures"]["tank"] == 77,
+                          "tank temp to reflect 77")
         assert data["temperatures"]["tank"] == 77
 
     def test_inject_multiple_temperatures(self):
@@ -254,8 +288,9 @@ class TestDemoModeInjection:
             "inlet_water_temp": 35,
             "outdoor_ambient_temp": 22,
         })
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status",
+                          lambda d: d["temperatures"]["tank"] == 50,
+                          "injected temperatures to reflect")
         temps = data["temperatures"]
         assert temps["tank"] == 50
         assert temps["outlet"] == 48
@@ -267,8 +302,9 @@ class TestDemoModeInjection:
         # fan_speed is the fan RPM (reg2003 raw ×10). 450 RPM falls in the
         # "medium" bucket (300..599 => 2 bars).
         _inject_demo({"compressor_freq": 75, "fan_speed": 450})
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status",
+                          lambda d: d["readings"]["compressor_freq"] == 75,
+                          "compressor readings to reflect")
         assert data["readings"]["compressor_freq"] == 75
         assert data["readings"]["fan_rpm"] == 450
 
@@ -277,8 +313,9 @@ class TestDemoModeInjection:
         # Demo fields are expressed in NATURAL units; the macon library applies
         # any wire scaling internally. AC voltage is in volts, current in amps.
         _inject_demo({"ac_voltage": 230, "ac_current": 50})
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status",
+                          lambda d: d["readings"]["ac_voltage"] == 230,
+                          "electrical readings to reflect")
         assert data["readings"]["ac_voltage"] == 230
         assert data["readings"]["ac_current"] == 50
         # power_consumption is sourced from the unit's real-time power register
@@ -292,8 +329,9 @@ class TestDemoModeInjection:
             "heating_setpoint": 40,
             "hot_water_setpoint": 48,
         })
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status",
+                          lambda d: d["setpoints"]["cooling"] == 24,
+                          "setpoints to reflect")
         assert data["setpoints"]["cooling"] == 24
         assert data["setpoints"]["heating"] == 40
         assert data["setpoints"]["hot_water"] == 48
@@ -302,29 +340,29 @@ class TestDemoModeInjection:
         """Injecting a fault should set has_error and error string."""
         _clear_faults()
         _inject_fault("E19")  # inlet water temp sensor
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status", lambda d: d["has_error"] is True,
+                          "E19 fault to set has_error")
         assert data["has_error"] is True
         assert data["error"] is not None
 
     def test_clear_errors(self):
         """Clearing faults should clear error state."""
         _clear_faults()
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status", lambda d: d["has_error"] is False,
+                          "faults to clear")
         assert data["has_error"] is False
         assert data["error"] is None
 
     def test_inject_unit_on_off(self):
         """Injecting unit_on field controls power state."""
         _inject_demo({"unit_on": 1})
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status", lambda d: d["unit_on"] is True,
+                          "unit_on=1 to reflect")
         assert data["unit_on"] is True
 
         _inject_demo({"unit_on": 0})
-        time.sleep(1.0)
-        data = _get("/api/heatpump/status").json()
+        data = _wait_json("/api/heatpump/status", lambda d: d["unit_on"] is False,
+                          "unit_on=0 to reflect")
         assert data["unit_on"] is False
 
     def test_inject_working_mode(self):
@@ -333,8 +371,9 @@ class TestDemoModeInjection:
         modes = {0: "cooling", 1: "floor_heating", 2: "fan_coil_heating", 5: "hot_water", 6: "auto"}
         for mode_val, mode_name in modes.items():
             _inject_demo({"working_mode": mode_val})
-            time.sleep(1.0)
-            data = _get("/api/heatpump/status").json()
+            data = _wait_json("/api/heatpump/status",
+                              lambda d, m=mode_name: d["mode"] == m,
+                              f"working_mode {mode_val} to report {mode_name}")
             assert data["mode"] == mode_name, f"Expected {mode_name} for value {mode_val}, got {data['mode']}"
 
     def test_inject_unknown_field_fails(self):
@@ -371,34 +410,47 @@ class TestDemoFaultControlViaDemoEndpoint:
     def teardown_method(self):
         # Leave the device with no active faults for subsequent tests.
         _inject_demo({"clear_faults": 1})
-        time.sleep(0.3)
+        _wait_json("/api/heatpump/status", lambda d: d["has_error"] is False,
+                   "faults cleared (teardown)", timeout=3, required=False)
 
     def test_set_fault_by_code(self):
         """{"fault:P02": 1} activates the high-pressure fault."""
         _inject_demo({"clear_faults": 1})
         _inject_demo({"fault:P02": 1})
-        time.sleep(1.0)
+        errors = _wait_json("/api/heatpump/errors",
+                            lambda d: "P02" in [e["code"] for e in d["active"]],
+                            "P02 to appear in active errors")
         assert _get("/api/heatpump/status").json()["has_error"] is True
-        codes = [e["code"] for e in _get("/api/heatpump/errors").json()["active"]]
+        codes = [e["code"] for e in errors["active"]]
         assert "P02" in codes
 
     def test_clear_single_fault_by_code(self):
         """{"fault:P02": 0} clears only that fault, leaving others active."""
         _inject_demo({"clear_faults": 1})
         _inject_demo({"fault:P02": 1, "fault:E19": 1})
-        time.sleep(1.0)
+        _wait_json("/api/heatpump/errors",
+                   lambda d: {"P02", "E19"} <= {e["code"] for e in d["active"]},
+                   "P02+E19 to become active")
         _inject_demo({"fault:P02": 0})
-        time.sleep(1.0)
-        codes = [e["code"] for e in _get("/api/heatpump/errors").json()["active"]]
+        errors = _wait_json(
+            "/api/heatpump/errors",
+            lambda d: "P02" not in {e["code"] for e in d["active"]}
+            and "E19" in {e["code"] for e in d["active"]},
+            "P02 to clear while E19 remains",
+        )
+        codes = [e["code"] for e in errors["active"]]
         assert "P02" not in codes
         assert "E19" in codes
 
     def test_clear_all_faults(self):
         """{"clear_faults": 1} clears every active fault."""
         _inject_demo({"fault:P02": 1, "fault:E19": 1})
-        time.sleep(1.0)
+        _wait_json("/api/heatpump/errors",
+                   lambda d: {"P02", "E19"} <= {e["code"] for e in d["active"]},
+                   "P02+E19 to become active")
         _inject_demo({"clear_faults": 1})
-        time.sleep(1.0)
+        _wait_json("/api/heatpump/errors", lambda d: d["error_count"] == 0,
+                   "all faults to clear")
         assert _get("/api/heatpump/status").json()["has_error"] is False
         assert _get("/api/heatpump/errors").json()["error_count"] == 0
 
@@ -435,9 +487,14 @@ _FAN_OFF, _FAN_LOW, _FAN_MED, _FAN_HIGH = 0, 200, 450, 700
 class TestComponentStateManipulation:
     """Drive component demo fields and verify component flags in status."""
 
-    def _read(self):
-        time.sleep(1.0)
-        return _get("/api/heatpump/status").json()
+    def _read(self, predicate, description):
+        """Wait for the component status to settle to the expected condition.
+
+        Demo component fields (compressor_freq/fan_speed/pump_on/…) are applied
+        on the demo-sync task's ~500ms tick, not synchronously, so poll for the
+        expected observable state instead of sleeping a fixed interval.
+        """
+        return _wait_json("/api/heatpump/status", predicate, description)
 
     def _all_off(self):
         _inject_demo({"compressor_freq": 0, "fan_on": 0, "fan_speed": 0,
@@ -446,7 +503,11 @@ class TestComponentStateManipulation:
     def test_all_components_off(self):
         """No components driven → all flags false, fan_speed=0."""
         self._all_off()
-        data = self._read()
+        data = self._read(
+            lambda d: not d["compressor"] and not d["fans"]
+            and d["fan_speed"] == 0 and not d["pump"],
+            "all components off",
+        )
         assert data["compressor"] is False
         assert data["fans"] is False
         assert data["fan_speed"] == 0
@@ -457,7 +518,7 @@ class TestComponentStateManipulation:
         """compressor_freq>0 → compressor=true, others false."""
         self._all_off()
         _inject_demo({"compressor_freq": 60})
-        data = self._read()
+        data = self._read(lambda d: d["compressor"] is True, "compressor on")
         assert data["compressor"] is True
         assert data["fans"] is False
         assert data["pump"] is False
@@ -467,7 +528,7 @@ class TestComponentStateManipulation:
         """pump_on → pump=true, others false."""
         self._all_off()
         _inject_demo({"pump_on": 1})
-        data = self._read()
+        data = self._read(lambda d: d["pump"] is True, "pump on")
         assert data["pump"] is True
         assert data["compressor"] is False
         assert data["fans"] is False
@@ -483,7 +544,7 @@ class TestComponentStateManipulation:
         """fan_on + low fan_speed → fans=true, fan_speed=1."""
         self._all_off()
         _inject_demo({"fan_on": 1, "fan_speed": _FAN_LOW})
-        data = self._read()
+        data = self._read(lambda d: d["fans"] and d["fan_speed"] == 1, "fan low")
         assert data["fans"] is True
         assert data["fan_speed"] == 1
 
@@ -491,7 +552,7 @@ class TestComponentStateManipulation:
         """fan_on + medium fan_speed → fans=true, fan_speed=2."""
         self._all_off()
         _inject_demo({"fan_on": 1, "fan_speed": _FAN_MED})
-        data = self._read()
+        data = self._read(lambda d: d["fans"] and d["fan_speed"] == 2, "fan medium")
         assert data["fans"] is True
         assert data["fan_speed"] == 2
 
@@ -499,7 +560,7 @@ class TestComponentStateManipulation:
         """fan_on + high fan_speed → fans=true, fan_speed=3."""
         self._all_off()
         _inject_demo({"fan_on": 1, "fan_speed": _FAN_HIGH})
-        data = self._read()
+        data = self._read(lambda d: d["fans"] and d["fan_speed"] == 3, "fan high")
         assert data["fans"] is True
         assert data["fan_speed"] == 3
 
@@ -507,7 +568,11 @@ class TestComponentStateManipulation:
         """All mappable components driven on at once."""
         _inject_demo({"unit_on": 1, "compressor_freq": 60, "fan_on": 1,
                       "fan_speed": _FAN_HIGH, "pump_on": 1})
-        data = self._read()
+        data = self._read(
+            lambda d: d["compressor"] and d["fans"] and d["fan_speed"] == 3
+            and d["pump"],
+            "all components on",
+        )
         assert data["compressor"] is True
         assert data["fans"] is True
         assert data["fan_speed"] == 3
@@ -517,7 +582,11 @@ class TestComponentStateManipulation:
         """Restore the default demo running state after manipulation tests."""
         _inject_demo({"unit_on": 1, "compressor_freq": 60, "fan_on": 1,
                       "fan_speed": _FAN_MED, "pump_on": 1})
-        data = self._read()
+        data = self._read(
+            lambda d: d["compressor"] and d["fans"] and d["fan_speed"] == 2
+            and d["pump"],
+            "demo default running state",
+        )
         assert data["compressor"] is True
         assert data["fans"] is True
         assert data["fan_speed"] == 2  # medium
@@ -625,8 +694,8 @@ class TestHeatpumpErrors:
     def test_errors_with_no_active_errors(self):
         """When no errors injected, error_count should be 0."""
         _clear_faults()
-        time.sleep(0.3)
-        data = _get("/api/heatpump/errors").json()
+        data = _wait_json("/api/heatpump/errors", lambda d: d["error_count"] == 0,
+                          "error_count to reach 0")
         assert data["error_count"] == 0
         assert data["has_errors"] is False
         assert isinstance(data["active"], list)
@@ -635,13 +704,8 @@ class TestHeatpumpErrors:
         """Injecting a fault should appear in active errors."""
         _clear_faults()
         _inject_fault("E19")
-        # Poll until the error propagates (up to 3s)
-        data = None
-        for _ in range(6):
-            time.sleep(0.5)
-            data = _get("/api/heatpump/errors").json()
-            if data["has_errors"]:
-                break
+        data = _wait_json("/api/heatpump/errors", lambda d: d["has_errors"],
+                          "injected E19 to propagate")
         assert data["has_errors"] is True
         assert data["error_count"] > 0
         assert len(data["active"]) > 0
@@ -653,7 +717,8 @@ class TestHeatpumpErrors:
 
         # Clean up
         _clear_faults()
-        time.sleep(0.3)
+        _wait_json("/api/heatpump/errors", lambda d: d["error_count"] == 0,
+                   "faults cleared (cleanup)", timeout=3, required=False)
 
     def test_error_severity_values(self):
         """highest_severity should be a valid severity string."""

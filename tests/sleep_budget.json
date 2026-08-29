@@ -4,7 +4,7 @@
   "tests/api/test_auth_api.py": 2,
   "tests/api/test_diagnostic_api.py": 13,
   "tests/api/test_events_and_misc_api.py": 2,
-  "tests/api/test_heatpump_api.py": 22,
+  "tests/api/test_heatpump_api.py": 2,
   "tests/api/test_home_assistant_websocket.py": 2,
   "tests/api/test_logs_api.py": 5,
   "tests/api/test_ota_api.py": 7,
