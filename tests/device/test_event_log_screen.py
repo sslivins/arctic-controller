@@ -74,6 +74,27 @@ def _seed_fault_cycle(device: DeviceClient, *codes):
     _wait_faults_cleared(device)
 
 
+def _seed_scrollable_event_log(device: DeviceClient, max_cycles: int = 12):
+    """Guarantee the event log has enough rows to scroll.
+
+    Seeds fault cycles (each logs an error_appeared + error_cleared pair) until
+    the event-log content actually scrolls, capped at ``max_cycles``. The test
+    that needs a scrollable list must not depend on ambient events accumulated
+    earlier in the session — a prior test (TestEventLogEmptyState) clears the
+    durable log, so on a cleared/near-empty log the list would be too short to
+    scroll and the precondition would flake. Seeding to the observable outcome
+    (it scrolls) makes it deterministic regardless of prior log state.
+    """
+    for _ in range(max_cycles):
+        _open_event_log(device)
+        if device.scroll_to("event_log_content", 350)["y"] > 0:
+            return
+        _seed_fault_cycle(device, "P02", "P06", "E19")
+    _open_event_log(device)
+    assert device.scroll_to("event_log_content", 350)["y"] > 0, \
+        "Event log did not become scrollable after seeding fault cycles"
+
+
 def _reset_filters(device: DeviceClient):
     """Return event filtering to its default state."""
     if device.find_widget(tag="event_search_clear") is not None:
@@ -107,7 +128,7 @@ class TestEventLogNavigation:
 
     def test_scrolled_events_control_events_does_not_reset(self, device: DeviceClient):
         """A scrolled event list can be left and reopened repeatedly."""
-        _seed_fault_cycle(device, "P02", "P06", "E19")
+        _seed_scrollable_event_log(device)
 
         previous_uptime = device.session.get(
             f"{device.base_url}/api/health", timeout=device.timeout

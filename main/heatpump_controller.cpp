@@ -211,6 +211,34 @@ static void detectAndLogStateEvents() {
     s_prev_state_valid = true;
 }
 
+// Re-decode the image into HeatPumpState after a demo-mode mutation AND
+// synchronously record any resulting transitions, mirroring the demoSyncTask /
+// applyIngestResult post-mapping sequence.
+//
+// Without this, event logging is deferred to the demoSyncTask's 500 ms tick,
+// which diffs current-vs-previous state. A test that injects a fault and then
+// clears it faster than one tick (it only waits on /api/heatpump/errors, which
+// applyMaconMapping updates synchronously) leaves the diff loop observing no net
+// change, so neither EVENT_ERROR_APPEARED nor EVENT_ERROR_CLEARED is ever
+// recorded — the event log stays empty and test_system_start_event_present
+// flakes. Logging here makes demo fault mutations deterministic: by the time the
+// endpoint returns, the transition is in the durable log. Serialised against
+// demoSyncTask via s_state_mutex (detectAndLogStateEvents requires it held).
+static void applyDemoMutationAndLog() {
+    applyMaconMapping();
+
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    detectAndLogStateEvents();
+    const uint8_t f_run  = s_state.fault_run;
+    const uint8_t f_ee   = s_state.fault_ee;
+    const uint8_t f_comp = s_state.fault_comp;
+    const uint8_t f_elec = s_state.fault_elec;
+    const uint8_t f_ref  = s_state.fault_ref;
+    xSemaphoreGive(s_state_mutex);
+
+    updateErrorHistory(f_run, f_ee, f_comp, f_elec, f_ref);
+}
+
 // Periodically decode the register cache into HeatPumpState and emit events.
 #if CONFIG_DEMO_MODE
 static void demoSyncTask(void*) {
@@ -1014,7 +1042,7 @@ int injectDemoFault(const char* code, bool active) {
     int sites = s_image.set_fault_by_code(code, active);
     imageUnlock();
     if (sites > 0) {
-        applyMaconMapping();
+        applyDemoMutationAndLog();
         ESP_LOGI(TAG, "[DEMO] Fault '%s' %s (%d site%s)",
                  code, active ? "set" : "cleared", sites, sites == 1 ? "" : "s");
     }
@@ -1026,7 +1054,7 @@ void clearDemoFaults() {
     imageLock();
     s_image.clear_faults();
     imageUnlock();
-    applyMaconMapping();
+    applyDemoMutationAndLog();
     ESP_LOGI(TAG, "[DEMO] All faults cleared");
 }
 #endif  // CONFIG_DEMO_MODE
