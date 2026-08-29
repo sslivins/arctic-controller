@@ -60,6 +60,34 @@ def _delete(path):
     return _session.delete(f"{BASE_URL}{path}", headers=_headers(), timeout=10)
 
 
+def _wait_json(path, predicate, description, timeout=5.0, poll=0.1, required=True, **kwargs):
+    """Poll GET ``path`` until ``predicate(json)`` is truthy; return that JSON.
+
+    Replaces a fixed sleep after an action (log activity / buffer clear): rather
+    than guessing how long the async log pipeline takes to reflect the change,
+    wait for the observable result. ``kwargs`` are forwarded to ``_get`` (e.g.
+    ``params``). Exceptions are treated as "not yet". When ``required`` is False
+    and the timeout elapses, the last-seen JSON is returned instead of raising —
+    used where the test only asserts a lenient/structural condition.
+    """
+    deadline = time.monotonic() + timeout
+    data = None
+    while True:
+        try:
+            data = _get(path, **kwargs).json()
+        except Exception:
+            data = None
+        if data is not None and predicate(data):
+            return data
+        if time.monotonic() >= deadline:
+            if required:
+                raise AssertionError(
+                    f"Timed out after {timeout:.1f}s waiting for {description}"
+                )
+            return data
+        time.sleep(poll)
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _check_prerequisites():
     if not API_KEY:
@@ -200,9 +228,13 @@ class TestLogsGet:
 
         # Generate some activity (this API call itself produces logs)
         _get("/api/health")
-        time.sleep(0.5)
-
-        second = _get("/api/logs", params={"since": latest}).json()
+        second = _wait_json(
+            "/api/logs",
+            lambda d: d["latest_seq"] > latest,
+            "a new log entry to appear after activity",
+            required=False,
+            params={"since": latest},
+        )
         # We can't guarantee logs were generated, but structure should be valid
         assert isinstance(second["entries"], list)
         assert second["latest_seq"] >= latest
@@ -224,10 +256,10 @@ class TestLogsClear:
     def test_logs_empty_after_clear(self):
         """After clearing, GET should return 0 or very few entries."""
         _delete("/api/logs")
-        time.sleep(0.3)
-        data = _get("/api/logs").json()
         # There might be a few new entries from the clear operation itself
-        # but total should be small
+        # but total should settle small; wait for the buffer to reflect the clear.
+        data = _wait_json("/api/logs", lambda d: d["total"] < 10,
+                          "log buffer total to drop below 10 after clear")
         assert data["total"] < 10
 
     def test_seq_continues_after_clear(self):
@@ -238,13 +270,16 @@ class TestLogsClear:
 
         # Clear
         _delete("/api/logs")
-        time.sleep(0.3)
 
         # Generate new log entries
         _get("/api/health")
-        time.sleep(0.5)
 
-        after = _get("/api/logs").json()
+        after = _wait_json(
+            "/api/logs",
+            lambda d: d["entries"] and d["entries"][0]["seq"] > before_seq,
+            "a new log entry with seq beyond the pre-clear latest",
+            required=False,
+        )
         # New entries should have seq > before_seq
         if len(after["entries"]) > 0:
             assert after["entries"][0]["seq"] > before_seq, \
