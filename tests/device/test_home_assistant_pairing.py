@@ -1,7 +1,6 @@
 """Physical Home Assistant pairing-screen tests."""
 
 import re
-import time
 from urllib.parse import urlsplit
 
 import pytest
@@ -29,7 +28,7 @@ def _open_pairing_screen(device: DeviceClient) -> None:
     assert device.wait_for_screen("settings", timeout=5.0)
     device.click(tag="settings_home_assistant")
     assert device.wait_for_screen("home_assistant", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="home_assistant_device_name", timeout=5.0)
 
 
 def test_pairing_screen_shows_identity_and_one_time_code(
@@ -88,7 +87,12 @@ def test_controller_code_completes_pairing(device: DeviceClient):
     response.raise_for_status()
     assert len(response.json()["token"]) == 64
 
-    time.sleep(1.5)
+    device.wait_until(
+        "home_assistant status shows Paired",
+        lambda: (w := device.find_widget(tag="home_assistant_status")) is not None
+        and w.text == "Paired",
+        timeout=5.0,
+    )
     status = device.find_widget(tag="home_assistant_status")
     assert status is not None
     assert status.text == "Paired"
@@ -105,7 +109,7 @@ def test_revoke_button_hidden_until_paired(device: DeviceClient):
     assert device.wait_for_screen("settings", timeout=5.0)
     device.click(tag="settings_home_assistant")
     assert device.wait_for_screen("home_assistant", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="home_assistant_revoke", timeout=5.0)
     assert device.find_widget(tag="home_assistant_revoke") is not None
 
 
@@ -115,7 +119,7 @@ def test_revoke_modal_confirm_label_is_concise(device: DeviceClient):
     device.session.post(f"{device.base_url}/api/test/ha-token", timeout=10)
     _open_pairing_screen(device)
     device.click(tag="home_assistant_revoke")
-    time.sleep(0.5)
+    assert device.wait_for_widget(text="Revoke", timeout=5.0)
     # The full "Revoke Home Assistant" wording remains on the background
     # screen button; the modal confirm button must be the concise action.
     assert device.find_widget(text="Revoke") is not None
