@@ -16,7 +16,6 @@
   "tests/device/test_localization.py": 1,
   "tests/device/test_main_screen.py": 1,
   "tests/device/test_screenshot_api.py": 1,
-  "tests/device/test_security_screen.py": 1,
   "tests/web/conftest.py": 5,
   "tests/web/test_change_password.py": 2,
   "tests/web/test_dashboard.py": 1,
