@@ -13,7 +13,6 @@
   "tests/device/device_client.py": 4,
   "tests/device/test_error_history_duration.py": 1,
   "tests/device/test_https.py": 1,
-  "tests/device/test_main_screen.py": 1,
   "tests/device/test_screenshot_api.py": 1,
   "tests/web/conftest.py": 5,
   "tests/web/test_change_password.py": 2,

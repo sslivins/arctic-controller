@@ -16,7 +16,6 @@ Faults are injected by their Macon code via inject_fault()/clear_all_faults().
 The device must be running in demo mode for these tests to work.
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
@@ -42,9 +41,40 @@ DEMO_FAULT = "P02"
 UI_SETTLE = 1.5
 
 
-def _wait_for_update():
-    """Wait for the main screen 1-second timer to pick up demo state changes."""
-    time.sleep(UI_SETTLE)
+def _wait(device: DeviceClient, predicate, description: str):
+    """Wait for the main screen 1-second timer to render demo-state changes.
+
+    Polls the actual observable (a live widget fetch) instead of sleeping a
+    fixed interval, so the test is robust to timer/render jitter. Falls back
+    after the timeout (raise_on_timeout=False) to let the following
+    authoritative assert report the real rendered value.
+    """
+    device.wait_until(description, predicate, timeout=5.0,
+                      expect_within=UI_SETTLE, raise_on_timeout=False)
+
+
+def _hero_text(device: DeviceClient, expected: str) -> bool:
+    w = device.find_widget(tag="hero_state")
+    return w is not None and (w.text_en or w.text) == expected
+
+
+def _text_has(device: DeviceClient, tag: str, needle: str) -> bool:
+    w = device.find_widget(tag=tag)
+    return w is not None and w.text is not None and needle in w.text
+
+
+def _dot_active(device: DeviceClient, tag: str) -> bool:
+    w = device.find_widget(tag=tag)
+    return w is not None and w.bg_color != COLOR_INACTIVE
+
+
+def _dot_inactive(device: DeviceClient, tag: str) -> bool:
+    w = device.find_widget(tag=tag)
+    return w is not None and w.bg_color == COLOR_INACTIVE
+
+
+def _present(device: DeviceClient, tag: str) -> bool:
+    return device.find_widget(tag=tag) is not None
 
 
 def _running(device: DeviceClient, **overrides):
@@ -80,7 +110,6 @@ def _ensure_demo_defaults(device: DeviceClient):
         inlet_water_temp=38,
         outlet_water_temp=45,
     )
-    _wait_for_update()
 
 
 # =========================================================================
@@ -93,7 +122,8 @@ class TestHeroState:
     def test_hero_shows_fault_with_error(self, device: DeviceClient):
         """With an active fault, hero should show FAULT."""
         # Default demo state has the P02 fault active, so hero = FAULT
-        _wait_for_update()
+        _wait(device, lambda: _hero_text(device, "FAULT"),
+              "hero_state == FAULT")
         hero = device.find_widget(tag="hero_state")
         assert hero is not None, "hero_state widget not found"
         label = hero.text_en or hero.text
@@ -103,7 +133,8 @@ class TestHeroState:
         """A running heating cycle should show the actual HEATING operation."""
         device.clear_all_faults()
         _running(device)
-        _wait_for_update()
+        _wait(device, lambda: _hero_text(device, "HEATING"),
+              "hero_state == HEATING (floor heat)")
         hero = device.find_widget(tag="hero_state")
         assert hero is not None
         label = hero.text_en or hero.text
@@ -115,7 +146,8 @@ class TestHeroState:
         # Cooling operation is decoded from the reversing-valve bit (reg2129
         # bit2 = cooling_on), not the selected working_mode, so set both.
         _running(device, working_mode=MODE_COOLING, cooling_on=1)
-        _wait_for_update()
+        _wait(device, lambda: _hero_text(device, "COOLING"),
+              "hero_state == COOLING")
         hero = device.find_widget(tag="hero_state")
         assert hero is not None
         label = hero.text_en or hero.text
@@ -125,7 +157,8 @@ class TestHeroState:
         """Hot-water selection still reports the actual heating operation."""
         device.clear_all_faults()
         _running(device, working_mode=MODE_HOT_WATER)
-        _wait_for_update()
+        _wait(device, lambda: _hero_text(device, "HEATING"),
+              "hero_state == HEATING (hot water)")
         hero = device.find_widget(tag="hero_state")
         assert hero is not None
         label = hero.text_en or hero.text
@@ -136,7 +169,8 @@ class TestHeroState:
         device.clear_all_faults()
         device.set_demo_fields(unit_on=1, compressor_freq=0, fan_on=0,
                                fan_speed=FAN_OFF, pump_on=1)
-        _wait_for_update()
+        _wait(device, lambda: _hero_text(device, "IDLE"),
+              "hero_state == IDLE")
         hero = device.find_widget(tag="hero_state")
         assert hero is not None
         label = hero.text_en or hero.text
@@ -147,7 +181,8 @@ class TestHeroState:
         device.clear_all_faults()
         device.set_demo_fields(unit_on=0, compressor_freq=0, fan_on=0,
                                fan_speed=FAN_OFF, pump_on=0)
-        _wait_for_update()
+        _wait(device, lambda: _hero_text(device, "STANDBY"),
+              "hero_state == STANDBY")
         hero = device.find_widget(tag="hero_state")
         assert hero is not None
         label = hero.text_en or hero.text
@@ -165,7 +200,8 @@ class TestHeroTankTemp:
         """Tank temp should be shown as a number with unit."""
         device.clear_all_faults()
         device.set_demo_fields(water_tank_temp=50)
-        _wait_for_update()
+        _wait(device, lambda: _text_has(device, "hero_tank_temp", "50"),
+              "hero_tank_temp shows 50")
         tank = device.find_widget(tag="hero_tank_temp")
         assert tank is not None, "hero_tank_temp widget not found"
         assert "50" in tank.text, f"Expected '50' in tank text, got '{tank.text}'"
@@ -182,7 +218,8 @@ class TestComponentDots:
         """Compressor running should light the compressor dot."""
         device.clear_all_faults()
         _running(device)
-        _wait_for_update()
+        _wait(device, lambda: _dot_active(device, "comp_dot"),
+              "comp_dot active")
         dot = device.find_widget(tag="comp_dot")
         assert dot is not None, "comp_dot widget not found"
         assert dot.bg_color != COLOR_INACTIVE, \
@@ -193,7 +230,8 @@ class TestComponentDots:
         device.clear_all_faults()
         device.set_demo_fields(unit_on=1, compressor_freq=0, fan_on=0,
                                fan_speed=FAN_OFF, pump_on=1)
-        _wait_for_update()
+        _wait(device, lambda: _dot_inactive(device, "comp_dot"),
+              "comp_dot inactive")
         dot = device.find_widget(tag="comp_dot")
         assert dot is not None
         assert dot.bg_color == COLOR_INACTIVE, \
@@ -203,7 +241,10 @@ class TestComponentDots:
         """FAN_MED — bars 1 and 2 should be green, bar 3 gray."""
         device.clear_all_faults()
         _running(device, fan_speed=FAN_MED)
-        _wait_for_update()
+        _wait(device, lambda: _dot_active(device, "fan_bar_1")
+              and _dot_active(device, "fan_bar_2")
+              and _dot_inactive(device, "fan_bar_3"),
+              "fan bars = medium (1,2 on / 3 off)")
         bar1 = device.find_widget(tag="fan_bar_1")
         bar2 = device.find_widget(tag="fan_bar_2")
         bar3 = device.find_widget(tag="fan_bar_3")
@@ -216,7 +257,10 @@ class TestComponentDots:
         """FAN_HIGH — all 3 bars should be green."""
         device.clear_all_faults()
         _running(device, fan_speed=FAN_HIGH)
-        _wait_for_update()
+        _wait(device, lambda: _dot_active(device, "fan_bar_1")
+              and _dot_active(device, "fan_bar_2")
+              and _dot_active(device, "fan_bar_3"),
+              "fan bars = high (all on)")
         bar1 = device.find_widget(tag="fan_bar_1")
         bar2 = device.find_widget(tag="fan_bar_2")
         bar3 = device.find_widget(tag="fan_bar_3")
@@ -228,7 +272,10 @@ class TestComponentDots:
         """FAN_LOW — only bar 1 should be green."""
         device.clear_all_faults()
         _running(device, fan_speed=FAN_LOW)
-        _wait_for_update()
+        _wait(device, lambda: _dot_active(device, "fan_bar_1")
+              and _dot_inactive(device, "fan_bar_2")
+              and _dot_inactive(device, "fan_bar_3"),
+              "fan bars = low (1 on / 2,3 off)")
         bar1 = device.find_widget(tag="fan_bar_1")
         bar2 = device.find_widget(tag="fan_bar_2")
         bar3 = device.find_widget(tag="fan_bar_3")
@@ -240,7 +287,10 @@ class TestComponentDots:
         """No fan speed — all 3 bars should be gray."""
         device.clear_all_faults()
         _running(device, fan_on=0, fan_speed=FAN_OFF)
-        _wait_for_update()
+        _wait(device, lambda: _dot_inactive(device, "fan_bar_1")
+              and _dot_inactive(device, "fan_bar_2")
+              and _dot_inactive(device, "fan_bar_3"),
+              "fan bars = off (all off)")
         bar1 = device.find_widget(tag="fan_bar_1")
         bar2 = device.find_widget(tag="fan_bar_2")
         bar3 = device.find_widget(tag="fan_bar_3")
@@ -252,7 +302,8 @@ class TestComponentDots:
         """Water pump running should light the pump dot."""
         device.clear_all_faults()
         _running(device)
-        _wait_for_update()
+        _wait(device, lambda: _dot_active(device, "pump_dot"),
+              "pump_dot active")
         dot = device.find_widget(tag="pump_dot")
         assert dot is not None, "pump_dot widget not found"
         assert dot.bg_color != COLOR_INACTIVE, \
@@ -262,7 +313,8 @@ class TestComponentDots:
         """Water pump stopped should grey out the pump dot."""
         device.clear_all_faults()
         _running(device, pump_on=0)
-        _wait_for_update()
+        _wait(device, lambda: _dot_inactive(device, "pump_dot"),
+              "pump_dot inactive")
         dot = device.find_widget(tag="pump_dot")
         assert dot is not None
         assert dot.bg_color == COLOR_INACTIVE, \
@@ -272,7 +324,8 @@ class TestComponentDots:
         """Aux heater should be off in default demo state."""
         device.clear_all_faults()
         _running(device)
-        _wait_for_update()
+        _wait(device, lambda: _dot_inactive(device, "heater_dot"),
+              "heater_dot inactive")
         dot = device.find_widget(tag="heater_dot")
         assert dot is not None, "heater_dot widget not found"
         assert dot.bg_color == COLOR_INACTIVE, \
@@ -300,7 +353,8 @@ class TestPerformanceStrip:
         """
         device.clear_all_faults()
         _running(device, fan_speed=450)
-        _wait_for_update()
+        _wait(device, lambda: _text_has(device, "perf_fan", "450"),
+              "perf_fan shows 450 RPM")
         fan = device.find_widget(tag="perf_fan")
         assert fan is not None, "perf_fan widget not found"
         assert "450" in fan.text, f"Expected '450' in fan text, got '{fan.text}'"
@@ -310,7 +364,8 @@ class TestPerformanceStrip:
         """Fan speed should show '--' when the fan is not running."""
         device.clear_all_faults()
         _running(device, fan_on=0, fan_speed=0)
-        _wait_for_update()
+        _wait(device, lambda: _text_has(device, "perf_fan", "--"),
+              "perf_fan shows -- when stopped")
         fan = device.find_widget(tag="perf_fan")
         assert fan is not None
         assert "--" in fan.text, f"Expected '--' in fan text, got '{fan.text}'"
@@ -319,7 +374,8 @@ class TestPerformanceStrip:
         """Power consumption should be displayed when compressor is running."""
         device.clear_all_faults()
         _running(device, ac_voltage=230, ac_current=52)
-        _wait_for_update()
+        _wait(device, lambda: _present(device, "perf_power"),
+              "perf_power present")
         power = device.find_widget(tag="perf_power")
         assert power is not None, "perf_power widget not found"
 
@@ -334,7 +390,8 @@ class TestErrorCard:
     def test_no_errors_shows_system_ok(self, device: DeviceClient):
         """With no faults, error card should show 'No active errors'."""
         device.clear_all_faults()
-        _wait_for_update()
+        _wait(device, lambda: _present(device, "error_label"),
+              "error_label present (no faults)")
         err = device.find_widget(tag="error_label")
         assert err is not None
 
@@ -342,7 +399,8 @@ class TestErrorCard:
         """With an active fault, error card should display the error code."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        _wait_for_update()
+        _wait(device, lambda: _text_has(device, "error_label", "P02"),
+              "error_label shows P02")
         err = device.find_widget(tag="error_label")
         assert err is not None
         # P02 is the high pressure error code
