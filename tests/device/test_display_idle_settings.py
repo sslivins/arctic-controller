@@ -1,5 +1,3 @@
-import time
-
 from device_client import DeviceClient
 
 
@@ -8,7 +6,7 @@ def _open_display(device: DeviceClient):
     assert device.wait_for_screen("settings", timeout=5.0)
     device.click(tag="settings_display")
     assert device.wait_for_screen("display", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="display_dim_timeout", timeout=5.0)
 
 
 def test_configure_staged_display_timeouts(device: DeviceClient):
@@ -54,7 +52,17 @@ def test_off_timeout_runs_when_dimming_is_never(device: DeviceClient):
     device.click(tag="settings_close")
     assert device.wait_for_screen("main", timeout=5.0)
 
-    time.sleep(65)
+    # The off timeout is set to 1 minute with dimming Never, so the screen
+    # turns off after ~60s of inactivity. Poll the idle status (the "status"
+    # action does not register activity, so it will not reset the timer)
+    # until the off timeout fires, instead of a fixed sleep that could flake
+    # on timing jitter.
+    device.wait_until(
+        "display off timeout fires after ~1 minute idle",
+        lambda: device.set_display_idle("status").get("off") is True,
+        timeout=90.0,
+        poll=3.0,
+    )
     status = device.set_display_idle("status")
     assert status["dimmed"] is False
     assert status["off"] is True
