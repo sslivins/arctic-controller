@@ -6,7 +6,6 @@ menu changes between Celsius and Fahrenheit, confirmed by the
 preferences API.
 """
 
-import time
 from device_client import DeviceClient
 
 
@@ -19,16 +18,20 @@ def test_toggle_temp_unit(device: DeviceClient):
     # Open settings
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="temp_unit_switch", timeout=5.0)
 
     # Toggle the switch
+    expected = "fahrenheit" if initial_unit == "celsius" else "celsius"
     result = device.toggle("temp_unit_switch")
     assert result["success"] is True
-    time.sleep(0.3)
+    device.wait_until(
+        f"temp_unit preference is {expected}",
+        lambda: device.get_preferences().get("temp_unit") == expected,
+        timeout=5.0,
+    )
 
     # Verify via preferences API
     prefs = device.get_preferences()
-    expected = "fahrenheit" if initial_unit == "celsius" else "celsius"
     assert prefs["temp_unit"] == expected, \
         f"Expected temp_unit='{expected}', got '{prefs['temp_unit']}'"
 
@@ -47,11 +50,15 @@ def test_restore_temp_unit(device: DeviceClient):
         # Open settings and toggle back
         device.click(tag="settings")
         assert device.wait_for_screen("settings", timeout=5.0)
-        time.sleep(0.5)
+        assert device.wait_for_widget(tag="temp_unit_switch", timeout=5.0)
 
         result = device.toggle("temp_unit_switch")
         assert result["success"] is True
-        time.sleep(0.3)
+        device.wait_until(
+            "temp_unit preference is celsius",
+            lambda: device.get_preferences().get("temp_unit") == "celsius",
+            timeout=5.0,
+        )
 
     prefs = device.get_preferences()
     assert prefs["temp_unit"] == "celsius", \
