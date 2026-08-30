@@ -19,7 +19,7 @@
   "tests/device/test_home_assistant_pairing.py": 4,
   "tests/device/test_https.py": 1,
   "tests/device/test_language.py": 4,
-  "tests/device/test_localization.py": 19,
+  "tests/device/test_localization.py": 1,
   "tests/device/test_main_screen.py": 1,
   "tests/device/test_navigation.py": 3,
   "tests/device/test_screenshot_api.py": 1,
