@@ -5,8 +5,6 @@ Verifies that pressing the settings button opens the settings menu
 and that the settings screen contains the expected UI elements.
 """
 
-import time
-
 from device_client import DeviceClient
 
 
@@ -25,8 +23,7 @@ def test_open_settings_menu(device: DeviceClient):
 
 def test_settings_menu_has_close_button(device: DeviceClient):
     """The settings screen should have a close (X) button."""
-    import time
-    time.sleep(0.5)  # Give device time to settle
+    assert device.wait_for_widget(tag="settings", timeout=5.0)
 
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0), \
@@ -60,7 +57,7 @@ def test_factory_reset_requires_confirmation_and_can_be_cancelled(
     assert device.wait_for_screen("settings", timeout=3.0)
 
     device.click(tag="settings_factory_reset")
-    time.sleep(0.4)
+    assert device.wait_for_widget(tag="factory_reset_overlay", timeout=5.0)
 
     assert device.has_widget(tag="factory_reset_overlay")
     assert device.has_widget(tag="factory_reset_panel")
@@ -68,6 +65,10 @@ def test_factory_reset_requires_confirmation_and_can_be_cancelled(
     assert device.has_widget(tag="factory_reset_cancel")
 
     device.click(tag="factory_reset_cancel")
-    time.sleep(0.3)
+    device.wait_until(
+        "factory reset overlay dismissed",
+        lambda: not device.has_widget(tag="factory_reset_overlay"),
+        timeout=5.0,
+    )
     assert not device.has_widget(tag="factory_reset_overlay")
     assert device.screen == "settings"
