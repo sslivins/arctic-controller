@@ -11,18 +11,13 @@ never hardcodes register bit positions — the library owns that mapping.
 Tests run with all other faults cleared so each code is isolated.
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
 # ---------------------------------------------------------------------------
 # Timing
 # ---------------------------------------------------------------------------
-UI_SETTLE = 1.5  # seconds — wait for the 1-second main screen timer
-
-
-def _wait():
-    time.sleep(UI_SETTLE)
+UI_SETTLE = 1.5  # seconds — performance budget for a main-screen settle
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +75,6 @@ def _restore_demo_faults(device: DeviceClient):
     device.clear_all_faults()
     device.inject_fault(DEMO_DEFAULT_FAULT, True)
     device.set_demo_fields(unit_on=1)
-    _wait()
 
 
 # =========================================================================
@@ -128,12 +122,25 @@ class TestFaultPanel:
         device.clear_all_faults()
         for code, _label in FAULT_DEFS:
             device.inject_fault(code, True)
-        _wait()
 
-        # Click the error card to open the errors panel
+        # The error card is repainted by a ~1s main-screen timer; wait for it to
+        # exist before clicking rather than sleeping a fixed settle.
+        device.wait_for_widget(tag="error_label", timeout=5.0,
+                               expect_within=UI_SETTLE, raise_on_timeout=False)
         device.click(tag="error_label")
-        time.sleep(1.0)  # panel animation
+        assert device.wait_for_screen("errors", timeout=5.0), \
+            f"Expected 'errors' screen, got '{device.screen}'"
 
+        # Panel cards render asynchronously after the screen settles, so poll for
+        # every code to appear before the authoritative assert below.
+        device.wait_until(
+            "all fault codes present in panel",
+            lambda: all(
+                code in " ".join(w.text or "" for w in device.widgets)
+                for code, _ in FAULT_DEFS
+            ),
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
         all_text = " ".join(w.text or "" for w in device.widgets)
 
         for code, _label in FAULT_DEFS:
@@ -142,18 +149,28 @@ class TestFaultPanel:
 
         # Close panel
         device.click(symbol="CLOSE")
-        time.sleep(0.5)
+        device.wait_for_screen("main", timeout=5.0, raise_on_timeout=False)
 
     def test_all_descriptions_in_panel(self, device: DeviceClient):
         """Each fault description fragment should appear in the panel."""
         device.clear_all_faults()
         for code, _label in FAULT_DEFS:
             device.inject_fault(code, True)
-        _wait()
 
+        device.wait_for_widget(tag="error_label", timeout=5.0,
+                               expect_within=UI_SETTLE, raise_on_timeout=False)
         device.click(tag="error_label")
-        time.sleep(1.0)
+        assert device.wait_for_screen("errors", timeout=5.0), \
+            f"Expected 'errors' screen, got '{device.screen}'"
 
+        device.wait_until(
+            "all fault descriptions present in panel",
+            lambda: all(
+                label in " ".join(w.text or "" for w in device.widgets)
+                for _code, label in FAULT_DEFS
+            ),
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
         all_text = " ".join(w.text or "" for w in device.widgets)
 
         for code, label in FAULT_DEFS:
@@ -161,4 +178,4 @@ class TestFaultPanel:
                 f"Description '{label}' for {code} not found in panel"
 
         device.click(symbol="CLOSE")
-        time.sleep(0.5)
+        device.wait_for_screen("main", timeout=5.0, raise_on_timeout=False)
