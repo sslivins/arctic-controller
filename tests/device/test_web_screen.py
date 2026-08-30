@@ -1,17 +1,15 @@
 """Physical Web Interface settings-screen tests (QR code + dashboard URL)."""
 
-import time
-
 from device_client import DeviceClient
 
 
 def _open_web_screen(device: DeviceClient) -> None:
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="settings_web", timeout=5.0)
     device.click(tag="settings_web")
     assert device.wait_for_screen("web", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="web_url", timeout=5.0)
 
 
 def test_web_screen_shows_url(device: DeviceClient):
