@@ -122,6 +122,7 @@ idf_component_register(
         esp_http_client
         esp-tls
         mbedtls
+        spi_flash
         arctic-macon
 )
 
