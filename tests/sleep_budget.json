@@ -14,7 +14,6 @@
   "tests/device/test_display_idle_settings.py": 2,
   "tests/device/test_error_history_duration.py": 1,
   "tests/device/test_https.py": 1,
-  "tests/device/test_language.py": 4,
   "tests/device/test_localization.py": 1,
   "tests/device/test_main_screen.py": 1,
   "tests/device/test_navigation.py": 3,
