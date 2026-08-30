@@ -12,7 +12,7 @@
   "tests/device/conftest.py": 3,
   "tests/device/device_client.py": 4,
   "tests/device/test_display_idle_settings.py": 2,
-  "tests/device/test_error_history_duration.py": 7,
+  "tests/device/test_error_history_duration.py": 1,
   "tests/device/test_error_mapping.py": 5,
   "tests/device/test_home_assistant_pairing.py": 4,
   "tests/device/test_https.py": 1,
