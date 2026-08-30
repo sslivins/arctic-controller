@@ -26,7 +26,6 @@ Cleanup: An autouse fixture restores Celsius after every test.
 The conftest ensure_main_screen fixture returns to main between tests.
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
@@ -59,6 +58,41 @@ def _has_text_containing(device: DeviceClient, substring: str) -> bool:
         if t and sub_lower in t.lower():
             return True
     return False
+
+
+def _wait_widget_contains(device: DeviceClient, tag: str, substring: str,
+                          timeout: float = 5.0):
+    """Wait until widget ``tag`` renders text containing ``substring``.
+
+    Temperature displays re-render asynchronously after a unit toggle or a
+    demo-field update, so poll for the expected value instead of a fixed
+    UI_SETTLE guess. Best-effort - the caller's assert is authoritative.
+    """
+    def _ready():
+        w = device.find_widget(tag=tag)
+        return w is not None and w.text is not None and substring in w.text
+    device.wait_until(
+        f"widget {tag!r} to contain {substring!r}", _ready,
+        timeout=timeout, expect_within=UI_SETTLE, raise_on_timeout=False,
+    )
+
+
+def _wait_screen_text(device: DeviceClient, substring: str, timeout: float = 5.0):
+    """Wait until any widget on the current screen contains ``substring``."""
+    device.wait_until(
+        f"screen text containing {substring!r}",
+        lambda: _has_text_containing(device, substring),
+        timeout=timeout, expect_within=UI_SETTLE, raise_on_timeout=False,
+    )
+
+
+def _wait_temp_unit(device: DeviceClient, unit: str, timeout: float = 5.0):
+    """Wait until the preferences API reports ``temp_unit == unit``."""
+    device.wait_until(
+        f"temp_unit == {unit!r}",
+        lambda: device.get_preferences().get("temp_unit") == unit,
+        timeout=timeout, poll=0.1, raise_on_timeout=False,
+    )
 
 
 # =========================================================================
@@ -94,9 +128,8 @@ def _restore_celsius(device: DeviceClient):
         if prefs["temp_unit"] == "fahrenheit":
             device.click(tag="settings")
             device.wait_for_screen("settings", timeout=5.0)
-            time.sleep(0.3)
             device.toggle("temp_unit_switch")
-            time.sleep(0.3)
+            _wait_temp_unit(device, "celsius")
             device.click(tag="settings_close")
             device.wait_for_screen("main", timeout=5.0)
     except Exception:
@@ -110,7 +143,6 @@ def _reset_demo_temps(device: DeviceClient):
         outdoor_ambient_temp=22, discharge_temp=85, suction_temp=12,
         outdoor_coil_temp=35, indoor_coil_temp=40, ipm_temp=55,
     )
-    time.sleep(0.5)
 
 
 def _switch_to_celsius(device: DeviceClient):
@@ -122,13 +154,11 @@ def _switch_to_celsius(device: DeviceClient):
     if prefs["temp_unit"] == "fahrenheit":
         device.click(tag="settings")
         device.wait_for_screen("settings", timeout=5.0)
-        time.sleep(0.3)
         device.toggle("temp_unit_switch")
-        time.sleep(0.3)
+        _wait_temp_unit(device, "celsius")
         device.click(tag="settings_close")
         device.wait_for_screen("main", timeout=5.0)
         device.wait_for_widget(tag="settings", timeout=3.0)
-    time.sleep(0.5)
 
 
 def _switch_to_fahrenheit(device: DeviceClient):
@@ -141,14 +171,12 @@ def _switch_to_fahrenheit(device: DeviceClient):
     if prefs["temp_unit"] == "celsius":
         device.click(tag="settings")
         assert device.wait_for_screen("settings", timeout=5.0)
-        time.sleep(0.3)
         device.toggle("temp_unit_switch")
-        time.sleep(0.3)
+        _wait_temp_unit(device, "fahrenheit")
         assert device.get_preferences()["temp_unit"] == "fahrenheit"
         device.click(tag="settings_close")
         device.wait_for_screen("main", timeout=5.0)
         device.wait_for_widget(tag="settings", timeout=3.0)
-    time.sleep(0.5)
 
 
 # =========================================================================
@@ -162,7 +190,7 @@ class TestHeroTankFahrenheit:
         """After switching to °F, hero card shows converted temperature."""
         _reset_demo_temps(device)
         _switch_to_fahrenheit(device)
-        time.sleep(UI_SETTLE)
+        _wait_widget_contains(device, "hero_tank_temp", str(_c_to_f(42)))
 
         tank = device.find_widget(tag="hero_tank_temp")
         assert tank is not None, "hero_tank_temp widget not found"
@@ -173,7 +201,7 @@ class TestHeroTankFahrenheit:
     def test_hero_tank_shows_f_unit(self, device: DeviceClient):
         """Hero card should show °F unit symbol."""
         _switch_to_fahrenheit(device)
-        time.sleep(UI_SETTLE)
+        _wait_widget_contains(device, "hero_tank_temp", "°F")
 
         tank = device.find_widget(tag="hero_tank_temp")
         assert tank is not None, "hero_tank_temp widget not found"
@@ -185,7 +213,7 @@ class TestHeroTankFahrenheit:
         _reset_demo_temps(device)
         _switch_to_fahrenheit(device)
         _switch_to_celsius(device)
-        time.sleep(UI_SETTLE)
+        _wait_widget_contains(device, "hero_tank_temp", "°C")
 
         tank = device.find_widget(tag="hero_tank_temp")
         assert tank is not None, "hero_tank_temp widget not found"
@@ -215,9 +243,9 @@ class TestTempsScreenFahrenheit:
         device.wait_for_widget(tag="nav_status", timeout=3.0)
         device.click(tag="nav_status")
         assert device.wait_for_screen("status", timeout=5.0)
-        time.sleep(UI_SETTLE)
 
         expected_f = _c_to_f(celsius)
+        _wait_screen_text(device, f"{expected_f} °F")
         # Temps screen uses "value °F" format (with space)
         assert _has_text_containing(device, f"{expected_f} °F"), \
             f"Expected '{expected_f} °F' for {label}, not found on screen"
@@ -228,7 +256,8 @@ class TestTempsScreenFahrenheit:
         device.wait_for_widget(tag="nav_status", timeout=3.0)
         device.click(tag="nav_status")
         assert device.wait_for_screen("status", timeout=5.0)
-        time.sleep(UI_SETTLE)
+        # Wait for the temps to render in °F before asserting no °C remains
+        _wait_screen_text(device, "°F")
 
         for w in device.widgets:
             t = w.text_en or w.text
