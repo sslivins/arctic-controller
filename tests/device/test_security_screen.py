@@ -1,7 +1,6 @@
 """Physical Security-screen tests (Home-Assistant-independent securing)."""
 
 import re
-import time
 
 from device_client import DeviceClient
 
@@ -11,7 +10,7 @@ def _open_security_screen(device: DeviceClient) -> None:
     assert device.wait_for_screen("settings", timeout=5.0)
     device.click(tag="settings_security")
     assert device.wait_for_screen("security", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="security_status", timeout=5.0)
 
 
 def test_security_screen_shows_status_without_home_assistant(
