@@ -14,7 +14,6 @@
   "tests/device/test_display_idle_settings.py": 2,
   "tests/device/test_error_history_duration.py": 7,
   "tests/device/test_error_mapping.py": 5,
-  "tests/device/test_errors_screen.py": 16,
   "tests/device/test_fahrenheit.py": 14,
   "tests/device/test_home_assistant_pairing.py": 4,
   "tests/device/test_https.py": 1,
