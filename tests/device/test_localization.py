@@ -10,7 +10,6 @@ panel headers) are set at screen creation and do NOT refresh on language
 change. Those are excluded from this test and tracked as a known issue.
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
@@ -155,10 +154,14 @@ def _switch_language(device: DeviceClient, lang_name: str):
     assert device.wait_for_screen("language", timeout=5.0)
 
     device.click(tag=LANG_TAGS[lang_name])
-    # No screen transition here, so there is no settled-screen signal to wait
-    # on; give the language-change preference a beat to apply before we
-    # navigate away and re-render the (now translated) screens.
-    time.sleep(0.3)
+    # No screen transition here, so wait on the real observable: the API
+    # preference reflecting the newly selected language, before we navigate
+    # away and re-render the (now translated) screens.
+    device.wait_until(
+        f"language preference is {lang_name}",
+        lambda: device.get_preferences().get("language") == lang_name,
+        timeout=5.0,
+    )
 
     # Navigate back: language → settings → main
     device.click(tag="language_back")
