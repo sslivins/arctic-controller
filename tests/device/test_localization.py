@@ -124,27 +124,48 @@ FOOTER_NAV = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _wait_widget_text(device: DeviceClient, tag: str, expected: str, *,
+                      contains: bool = False, timeout: float = 5.0):
+    """Wait for widget ``tag`` to display ``expected`` before asserting.
+
+    Dynamically-refreshed labels (hero state, error card) update asynchronously
+    after a demo-state or language change. Rather than sleep a fixed UI_SETTLE
+    guess and hope the refresh landed, poll for the exact text. Best-effort
+    (never raises): the caller's own asserts make the final authoritative check
+    with a clear message, so a genuine mismatch still fails loudly.
+    """
+    def _ready() -> bool:
+        w = device.find_widget(tag=tag)
+        if w is None or w.text is None:
+            return False
+        return (expected in w.text) if contains else (w.text == expected)
+
+    op = "contains" if contains else "=="
+    device.wait_until(f"{tag} text {op} {expected!r}", _ready,
+                      timeout=timeout, expect_within=UI_SETTLE,
+                      raise_on_timeout=False)
+
+
 def _switch_language(device: DeviceClient, lang_name: str):
     """Navigate to Settings → Language → select language → return to main."""
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.3)
 
     device.click(tag="settings_language")
     assert device.wait_for_screen("language", timeout=5.0)
-    time.sleep(0.3)
 
     device.click(tag=LANG_TAGS[lang_name])
+    # No screen transition here, so there is no settled-screen signal to wait
+    # on; give the language-change preference a beat to apply before we
+    # navigate away and re-render the (now translated) screens.
     time.sleep(0.3)
 
     # Navigate back: language → settings → main
     device.click(tag="language_back")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.3)
 
     device.click(tag="settings_close")
     assert device.wait_for_screen("main", timeout=5.0)
-    time.sleep(UI_SETTLE)
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +204,7 @@ class TestFrenchHeroStates:
         """IDLE → INACTIF in French."""
         device.clear_all_faults()
         _set_idle(device, working_mode=MODE_FLOOR_HEATING)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["IDLE"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Français"]["IDLE"]
@@ -192,7 +213,7 @@ class TestFrenchHeroStates:
         """FAULT → PANNE in French."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["FAULT"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Français"]["FAULT"]
@@ -201,7 +222,7 @@ class TestFrenchHeroStates:
         """STANDBY → EN VEILLE in French."""
         device.clear_all_faults()
         device.set_demo_fields(unit_on=0)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["STANDBY"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Français"]["STANDBY"]
@@ -210,7 +231,7 @@ class TestFrenchHeroStates:
         """Floor-heat selection still reports the actual heating operation."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_FLOOR_HEATING)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["HEATING"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Français"]["HEATING"]
@@ -219,7 +240,7 @@ class TestFrenchHeroStates:
         """COOLING → REFROIDISSEMENT in French."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_COOLING, cooling_on=1)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_MODES["Français"][MODE_COOLING])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_MODES["Français"][MODE_COOLING]
@@ -228,7 +249,7 @@ class TestFrenchHeroStates:
         """Hot-water selection still reports the actual heating operation."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_HOT_WATER)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["HEATING"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Français"]["HEATING"]
@@ -259,7 +280,8 @@ class TestFrenchMainLabels:
     def test_error_card_no_errors_french(self, device: DeviceClient):
         """Error card shows French 'no errors' text."""
         device.clear_all_faults()
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "error_label", ERROR_CARD_NO_ERRORS["Français"],
+                          contains=True)
         w = device.find_widget(tag="error_label")
         assert w is not None
         assert ERROR_CARD_NO_ERRORS["Français"] in w.text, \
@@ -281,7 +303,7 @@ class TestSpanishHeroStates:
         """IDLE → INACTIVO in Spanish."""
         device.clear_all_faults()
         _set_idle(device, working_mode=MODE_FLOOR_HEATING)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["IDLE"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Español"]["IDLE"]
@@ -290,7 +312,7 @@ class TestSpanishHeroStates:
         """FAULT → FALLO in Spanish."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["FAULT"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Español"]["FAULT"]
@@ -299,7 +321,7 @@ class TestSpanishHeroStates:
         """STANDBY → EN ESPERA in Spanish."""
         device.clear_all_faults()
         device.set_demo_fields(unit_on=0)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["STANDBY"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Español"]["STANDBY"]
@@ -308,7 +330,7 @@ class TestSpanishHeroStates:
         """Floor-heat selection still reports the actual heating operation."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_FLOOR_HEATING)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["HEATING"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Español"]["HEATING"]
@@ -317,7 +339,7 @@ class TestSpanishHeroStates:
         """COOLING → ENFRIAMIENTO in Spanish."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_COOLING, cooling_on=1)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_MODES["Español"][MODE_COOLING])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_MODES["Español"][MODE_COOLING]
@@ -326,7 +348,7 @@ class TestSpanishHeroStates:
         """Hot-water selection still reports the actual heating operation."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_HOT_WATER)
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["HEATING"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
         assert w.text == HERO_STATES["Español"]["HEATING"]
@@ -357,7 +379,8 @@ class TestSpanishMainLabels:
     def test_error_card_no_errors_spanish(self, device: DeviceClient):
         """Error card shows Spanish 'no errors' text."""
         device.clear_all_faults()
-        time.sleep(UI_SETTLE)
+        _wait_widget_text(device, "error_label", ERROR_CARD_NO_ERRORS["Español"],
+                          contains=True)
         w = device.find_widget(tag="error_label")
         assert w is not None
         assert ERROR_CARD_NO_ERRORS["Español"] in w.text, \
