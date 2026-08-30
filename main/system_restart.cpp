@@ -2,6 +2,7 @@
 
 #include <esp_log.h>
 #include <esp_system.h>
+#include <esp_rom_sys.h>   // esp_rom_software_reset_system()
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -23,30 +24,47 @@ void system_safe_restart(void) {
     // in-flight write. After this returns, none of our writers will touch flash.
     history_storage_begin_reboot();
 
-    // The real hazard is esp_restart_noos(): on this dual-core, SPIRAM-enabled
-    // target it stalls the *other* core and then executes the ROM routine
-    // Cache_WriteBack_All(). If that other core happened to be in the middle of
-    // a SPI-flash operation at the moment it was stalled, the cache is disabled
-    // and in an inconsistent state, so the ROM cache write-back dereferences an
-    // invalid address and panics (Store access fault, MCAUSE 0x7, inside
-    // Cache_WriteBack_All at ROM 0x4fc10a60). Gating only *our* partition
-    // writers above is not enough, because arbitrary NVS commits (timezone on
-    // NTP sync, TLS certs, Wi-Fi creds, app prefs, boot_stats, ...) can still be
-    // mid-flight and are not under our control.
-    //
-    // Every flash operation - legacy spi_flash and the esp_flash/NVS path alike
-    // - must first acquire spi_flash_op_lock() before it disables the cache
-    // (see spi_flash_disable_interrupts_caches_and_other_cpu()). By taking that
-    // same lock here and never releasing it, we deterministically guarantee that
-    // once we proceed, no core is inside a flash op with the cache disabled:
-    //   - any in-flight op has completed and released the mutex before we
-    //     acquire it, and
-    //   - any new op blocks on the mutex *before* touching the cache.
-    // esp_restart() then runs with the cache in a normal, enabled state and the
-    // ROM write-back can no longer fault. We intentionally never unlock - the
-    // chip is about to reset.
+    // Take (and never release) the global SPI-flash op lock. Every flash
+    // operation - legacy spi_flash and the esp_flash/NVS path alike - must
+    // acquire this mutex before it programs/erases flash, so once we hold it:
+    //   - any in-flight op has already completed and released the mutex, and
+    //   - any new op (arbitrary NVS commit: timezone, TLS certs, Wi-Fi creds,
+    //     app prefs, boot_stats, ...) blocks on the mutex before touching flash.
+    // That guarantees no flash program/erase is in progress when we pull the
+    // trigger below, so the hard reset cannot corrupt a half-written sector.
     spi_flash_op_lock();
 
+    // Why not simply call esp_restart()? On this dual-core, SPIRAM-enabled P4,
+    // esp_restart() -> esp_restart_noos() stalls the *other* core and then runs
+    // the ROM routine Cache_WriteBack_All(CACHE_MAP_L1_DCACHE) (compiled in only
+    // because CONFIG_SPIRAM=y). Intermittently (~5% of reboots under load) that
+    // write-back faults with a Store access fault to an unmapped address
+    // (MCAUSE 0x7, MTVAL 0x3ff100a0, PC inside Cache_WriteBack_All at ROM
+    // 0x4fc10a60): a dirty L1 data-cache line carries a bogus tag and the ROM
+    // dutifully tries to write it back to invalid memory and panics. Holding the
+    // flash-op lock does NOT prevent it (proven on hardware) - the faulting line
+    // is not associated with a flash operation.
+    //
+    // We do not need any dirty PSRAM data to survive a reboot, so instead of
+    // asking the ROM to write the cache back, we skip that step entirely and
+    // trigger a full HP-digital-domain reset directly via the ROM's
+    // software_reset primitive. This resets the CPUs and peripherals (incl. DMA)
+    // in hardware - no cache maintenance, no core-stall dance - and reports a
+    // clean RESET_REASON_CORE_SW -> ESP_RST_SW ("SOFTWARE") reset, so boot_stats
+    // does not misclassify the reboot as a crash.
     ESP_LOGW(TAG, "Flash writers quiesced - restarting now");
-    esp_restart();
+
+    // Stop task switching and mask interrupts so nothing runs (and nothing can
+    // start a new flash/cache access) between here and the reset. Neither call
+    // returns meaningfully on this path; the chip is about to reset.
+    vTaskSuspendAll();
+    portDISABLE_INTERRUPTS();
+
+    // Full software system reset. Does not run the ROM cache write-back, so it
+    // cannot hit the Cache_WriteBack_All fault above.
+    esp_rom_software_reset_system();
+
+    // Not reached - the reset takes effect immediately.
+    while (true) {
+    }
 }
