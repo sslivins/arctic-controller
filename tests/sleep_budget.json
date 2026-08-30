@@ -8,7 +8,7 @@
   "tests/api/test_home_assistant_websocket.py": 2,
   "tests/api/test_logs_api.py": 2,
   "tests/api/test_ota_api.py": 7,
-  "tests/api/test_session_api.py": 3,
+  "tests/api/test_session_api.py": 2,
   "tests/device/conftest.py": 3,
   "tests/device/device_client.py": 4,
   "tests/device/test_error_history_duration.py": 1,

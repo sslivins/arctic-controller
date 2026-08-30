@@ -49,16 +49,41 @@ def _api_headers():
     return h
 
 
+_RETRY_BACKOFF_S = 2
+
+
+def _request_with_retry(do_request, *, attempts: int = 3):
+    """Call ``do_request`` (a Response-returning thunk), retrying only on
+    transient transport errors (ConnectionError / Timeout), never on an HTTP
+    status code.
+
+    Credential and auth-config mutations trigger a synchronous NVS flash write
+    plus a session-table rebuild on the device's single-threaded httpd, which
+    can occasionally exceed one 5s read window under CI load and raise
+    ReadTimeout. A real HTTP response (200/401/403/…) returns immediately
+    without retry, so status-code assertions are unaffected; only a genuine
+    device stall is retried. Mirrors the resilience already used by
+    _auth_config_post / _restore_credentials.
+    """
+    for attempt in range(attempts):
+        try:
+            return do_request()
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == attempts - 1:
+                raise
+            time.sleep(_RETRY_BACKOFF_S)
+
+
 def _login(session: requests.Session, username=None, password=None):
     """POST /login and return the response.  Cookies are stored in *session*."""
-    return session.post(
+    return _request_with_retry(lambda: session.post(
         f"{BASE_URL}/login",
         json={
             "username": username or USERNAME,
             "password": password or PASSWORD,
         },
         timeout=5,
-    )
+    ))
 
 
 def _admin_session(username=None, password=None):
@@ -74,26 +99,22 @@ def _admin_session(username=None, password=None):
 
 def _auth_config_post(payload: dict):
     """POST /api/auth/config, falling back to a session login on 401."""
-    for attempt in range(3):
-        try:
-            r = requests.post(
-                f"{BASE_URL}/api/auth/config",
-                json=payload,
-                headers=_api_headers(),
-                timeout=5,
-            )
-            if r.status_code == 403:
+    def _once():
+        r = requests.post(
+            f"{BASE_URL}/api/auth/config",
+            json=payload,
+            headers=_api_headers(),
+            timeout=5,
+        )
+        if r.status_code == 403:
+            return False
+        if r.status_code == 401:
+            s = _admin_session()
+            r2 = s.post(f"{BASE_URL}/api/auth/config", json=payload, timeout=5)
+            if r2.status_code == 403:
                 return False
-            if r.status_code == 401:
-                s = _admin_session()
-                r2 = s.post(f"{BASE_URL}/api/auth/config", json=payload, timeout=5)
-                if r2.status_code == 403:
-                    return False
-            return True
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            if attempt == 2:
-                raise
-            time.sleep(2)
+        return True
+    return _request_with_retry(_once)
 
 
 def _enable_web_auth():
@@ -108,28 +129,23 @@ def _disable_web_auth():
 
 def _restore_credentials():
     """Reset username/password back to the CI-known values."""
-    for attempt in range(3):
-        try:
-            # Try API-key first (works when web auth is off)
-            r = requests.post(
+    def _once():
+        # Try API-key first (works when web auth is off)
+        r = requests.post(
+            f"{BASE_URL}/api/auth/credentials",
+            json={"username": USERNAME, "password": PASSWORD},
+            headers=_api_headers(),
+            timeout=5,
+        )
+        if r.status_code == 401:
+            # Web auth is on — use a session
+            s = _admin_session()
+            s.post(
                 f"{BASE_URL}/api/auth/credentials",
                 json={"username": USERNAME, "password": PASSWORD},
-                headers=_api_headers(),
                 timeout=5,
             )
-            if r.status_code == 401:
-                # Web auth is on — use a session
-                s = _admin_session()
-                s.post(
-                    f"{BASE_URL}/api/auth/credentials",
-                    json={"username": USERNAME, "password": PASSWORD},
-                    timeout=5,
-                )
-            return
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            if attempt == 2:
-                raise
-            time.sleep(2)
+    _request_with_retry(_once)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
@@ -345,11 +361,11 @@ class TestCredentialChange:
         try:
             # Change password via session (admin endpoints require session auth)
             s = _admin_session()
-            r = s.post(
+            r = _request_with_retry(lambda: s.post(
                 f"{BASE_URL}/api/auth/credentials",
                 json={"username": USERNAME, "password": new_password},
                 timeout=5,
-            )
+            ))
             assert r.status_code == 200
 
             # Old password should fail
@@ -365,11 +381,11 @@ class TestCredentialChange:
             # Restore creds using whatever password is currently active
             for pw in (new_password, PASSWORD):
                 s_fix = _admin_session(password=pw)
-                s_fix.post(
+                _request_with_retry(lambda s=s_fix: s.post(
                     f"{BASE_URL}/api/auth/credentials",
                     json={"username": USERNAME, "password": PASSWORD},
                     timeout=5,
-                )
+                ))
 
     def test_change_username_invalidates_old_login(self):
         """After changing the username, logging in with the old one should fail."""
@@ -379,11 +395,11 @@ class TestCredentialChange:
         try:
             # Change username via session
             s = _admin_session()
-            s.post(
+            _request_with_retry(lambda: s.post(
                 f"{BASE_URL}/api/auth/credentials",
                 json={"username": new_user, "password": PASSWORD},
                 timeout=5,
-            )
+            ))
 
             # Old username should fail
             s2 = requests.Session()
@@ -398,11 +414,11 @@ class TestCredentialChange:
             # Restore username using whatever is currently active
             for user in (new_user, USERNAME):
                 s_fix = _admin_session(username=user)
-                s_fix.post(
+                _request_with_retry(lambda s=s_fix: s.post(
                     f"{BASE_URL}/api/auth/credentials",
                     json={"username": USERNAME, "password": PASSWORD},
                     timeout=5,
-                )
+                ))
 
     def test_credential_change_with_session_auth(self):
         """Credentials can be changed using session auth (not just API key)."""
@@ -412,19 +428,19 @@ class TestCredentialChange:
 
         new_pw = "TempPass123!"
         try:
-            r = s.post(
+            r = _request_with_retry(lambda: s.post(
                 f"{BASE_URL}/api/auth/credentials",
                 json={"username": USERNAME, "password": new_pw},
                 timeout=5,
-            )
+            ))
             assert r.status_code == 200
         finally:
             s_fix = _admin_session(password=new_pw)
-            s_fix.post(
+            _request_with_retry(lambda: s_fix.post(
                 f"{BASE_URL}/api/auth/credentials",
                 json={"username": USERNAME, "password": PASSWORD},
                 timeout=5,
-            )
+            ))
 
 
 # =========================================================================
