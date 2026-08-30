@@ -6,7 +6,6 @@ the UI text on the language screen itself and on the settings menu.
 Confirms the active language via the preferences API.
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
@@ -35,18 +34,22 @@ def _navigate_to_language_screen(device: DeviceClient):
     """Open settings → language sub-screen."""
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="settings_language", timeout=5.0)
 
     device.click(tag="settings_language")
     assert device.wait_for_screen("language", timeout=5.0)
-    time.sleep(0.5)
+    assert device.wait_for_widget(tag="lang_english", timeout=5.0)
 
 
 def _select_language(device: DeviceClient, lang_name: str):
     """Click a language button on the language screen by its tag."""
     tag = LANG_TAGS[lang_name]
     device.click(tag=tag)
-    time.sleep(0.5)
+    device.wait_until(
+        f"language preference is {lang_name}",
+        lambda: device.get_preferences().get("language") == lang_name,
+        timeout=5.0,
+    )
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
@@ -72,10 +75,15 @@ def test_switch_language_and_verify_settings_menu(device: DeviceClient, lang_nam
     # Go back to settings menu
     device.click(tag="language_back")
     assert device.wait_for_screen("settings", timeout=5.0)
-    time.sleep(0.5)
 
     # Check that every expected translated label appears somewhere on screen
     expected_labels = SETTINGS_LABELS[lang_name]
+    device.wait_until(
+        f"settings menu translated to {lang_name}",
+        lambda: all(device.has_widget(text=t) for t in expected_labels),
+        timeout=5.0,
+        raise_on_timeout=False,
+    )
     for expected_text in expected_labels:
         assert device.has_widget(text=expected_text), \
             f"[{lang_name}] Expected label '{expected_text}' not found on settings screen"
