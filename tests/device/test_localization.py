@@ -170,6 +170,20 @@ def _switch_language(device: DeviceClient, lang_name: str):
     device.click(tag="settings_close")
     assert device.wait_for_screen("main", timeout=5.0)
 
+    # wait_for_screen only gates on the screen being *settled* — the main
+    # screen's translated labels (tank description, footer nav) are refreshed
+    # separately on the ~1s state timer, so they can lag the settle. Gate on
+    # the tank description actually showing the target language before
+    # returning, so callers never race the re-render. Best-effort (never
+    # raises): each test's own assert still makes the authoritative check with
+    # a clear message if a label genuinely fails to translate.
+    device.wait_until(
+        f"main screen tank description in {lang_name}",
+        lambda: device.has_widget(text=TANK_DESCRIPTION[lang_name]),
+        timeout=5.0,
+        raise_on_timeout=False,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
