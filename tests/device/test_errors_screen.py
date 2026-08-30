@@ -10,7 +10,6 @@ lets the arctic-macon library own the code->register,bit mapping. The errors
 screen reads from getActiveErrors() which decodes the raw fault registers.
 """
 
-import time
 import pytest
 from device_client import DeviceClient
 
@@ -27,7 +26,6 @@ def _restore_error_state(device: DeviceClient):
     device.clear_all_faults()
     device.inject_fault(DEMO_FAULT, True)  # restore default demo fault
     device.clear_error_history()
-    time.sleep(UI_SETTLE)
 
 
 def _open_errors(device: DeviceClient):
@@ -35,7 +33,6 @@ def _open_errors(device: DeviceClient):
     device.click(tag="error_label")
     assert device.wait_for_screen("errors", timeout=5.0), \
         f"Expected 'errors' screen, got '{device.screen}'"
-    time.sleep(0.5)
 
 
 def _close_errors(device: DeviceClient):
@@ -53,6 +50,35 @@ def _has_text_containing(device: DeviceClient, substring: str) -> bool:
         if t and sub_lower in t.lower():
             return True
     return False
+
+
+def _wait_screen_text(device: DeviceClient, substring: str, timeout: float = 5.0):
+    """Wait until some widget on the current screen contains ``substring``.
+
+    Error cards render asynchronously after the errors screen settles, so poll
+    for the expected text instead of sleeping a fixed UI_SETTLE guess.
+    Best-effort: the caller's own assert makes the final authoritative check.
+    """
+    device.wait_until(
+        f"screen text containing {substring!r}",
+        lambda: _has_text_containing(device, substring),
+        timeout=timeout, expect_within=UI_SETTLE, raise_on_timeout=False,
+    )
+
+
+def _errors_json(device: DeviceClient) -> dict:
+    """GET /api/heatpump/errors as JSON."""
+    r = device.session.get(f"{device.base_url}/api/heatpump/errors",
+                           timeout=device.timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def _active_codes(device: DeviceClient) -> list:
+    """Active error codes from /api/heatpump/errors."""
+    data = _errors_json(device)
+    active = data.get("active", data.get("errors", []))
+    return [e.get("code", "") for e in active if isinstance(e, dict)]
 
 
 # =========================================================================
@@ -101,11 +127,14 @@ class TestNoErrorsState:
         # Clear all faults and history
         device.clear_all_faults()
         device.clear_error_history()
-        time.sleep(UI_SETTLE)
 
         # Error card is always clickable (shows "System OK" when no errors)
         _open_errors(device)
-        time.sleep(UI_SETTLE)
+        device.wait_until(
+            "no-errors message to appear",
+            lambda: device.find_widget(tag="errors_no_errors") is not None,
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
 
         # The no-errors label should be visible
         no_errors = device.find_widget(tag="errors_no_errors")
@@ -126,10 +155,9 @@ class TestActiveErrors:
         """Injecting P02 (High Pressure) shows the error card."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        time.sleep(UI_SETTLE)
 
         _open_errors(device)
-        time.sleep(UI_SETTLE)
+        _wait_screen_text(device, "P02")
 
         # Should show P02 error code
         assert _has_text_containing(device, "P02"), \
@@ -139,10 +167,9 @@ class TestActiveErrors:
         """Active errors should show a description."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        time.sleep(UI_SETTLE)
 
         _open_errors(device)
-        time.sleep(UI_SETTLE)
+        _wait_screen_text(device, "high pressure")
 
         # P02 description contains "high pressure"
         assert _has_text_containing(device, "high pressure"), \
@@ -154,10 +181,13 @@ class TestActiveErrors:
         device.clear_all_faults()
         device.inject_fault("P02", True)
         device.inject_fault("P06", True)
-        time.sleep(UI_SETTLE)
 
         _open_errors(device)
-        time.sleep(UI_SETTLE)
+        device.wait_until(
+            "P02 and P06 error cards to appear",
+            lambda: _has_text_containing(device, "P02") and _has_text_containing(device, "P06"),
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
 
         assert _has_text_containing(device, "P02"), \
             "P02 error not found"
@@ -168,10 +198,9 @@ class TestActiveErrors:
         """A sensor fault (reg2125) should also show error cards."""
         device.clear_all_faults()
         device.inject_fault("E19", True)
-        time.sleep(UI_SETTLE)
 
         _open_errors(device)
-        time.sleep(UI_SETTLE)
+        _wait_screen_text(device, "E19")
 
         assert _has_text_containing(device, "E19"), \
             "E19 sensor fault not found"
@@ -187,7 +216,6 @@ class TestClearHistory:
     def test_clear_history_button_visible(self, device: DeviceClient):
         """The clear history button should be visible when there's history."""
         _open_errors(device)
-        time.sleep(UI_SETTLE)
 
         clear_btn = device.find_widget(tag="errors_clear")
         # Button may or may not be visible depending on whether there's history
@@ -200,7 +228,12 @@ class TestClearHistory:
     def test_clear_history_via_api(self, device: DeviceClient):
         """POST /api/test/clear-error-history should clear history."""
         device.clear_error_history()
-        time.sleep(0.5)
+        device.wait_until(
+            "error history to clear",
+            lambda: _errors_json(device).get("history_count", 0) == 0
+            or len(_errors_json(device).get("history", [])) == 0,
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
 
         resp = device.session.get(f"{device.base_url}/api/heatpump/errors")
         assert resp.status_code == 200
@@ -222,7 +255,11 @@ class TestErrorsApi:
         """GET /api/heatpump/errors should return error data."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        time.sleep(UI_SETTLE)
+        device.wait_until(
+            "errors endpoint to report an active error",
+            lambda: len(_active_codes(device)) > 0,
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
 
         resp = device.session.get(f"{device.base_url}/api/heatpump/errors")
         assert resp.status_code == 200
@@ -234,7 +271,11 @@ class TestErrorsApi:
         """Injected errors should appear in the API response."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        time.sleep(UI_SETTLE)
+        device.wait_until(
+            "P02 to appear in errors endpoint",
+            lambda: "P02" in _active_codes(device),
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
 
         resp = device.session.get(f"{device.base_url}/api/heatpump/errors")
         assert resp.status_code == 200
