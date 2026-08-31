@@ -42,6 +42,7 @@
 #include "wifi_supervisor.h"
 #include "telemetry_history.h"
 #include "log_buffer.h"
+#include "log_persist.h"
 #include "esp_task_wdt.h"
 
 static const char* TAG = "main";
@@ -248,6 +249,13 @@ extern "C" void app_main(void)
     // Initialize the persistent event log.
     event_log_init();
 
+    // Initialize the persistent debug log: mounts the dbglog flash region and
+    // loads the previous boot's log tail (available via GET /api/logs/persisted)
+    // BEFORE anything else this boot can overwrite it. This is the run-up to any
+    // wedge/crash from the prior boot. The background snapshot task is started
+    // later, once the network stack is up.
+    log_persist_init();
+
     // Persistent boot/reset stats: count brownouts across reboots (NVS) and
     // drop a durable event-log entry when THIS boot was caused by a brownout,
     // so supply sags (e.g. the Tab5 running off the heat-pump RS485 rail) are
@@ -351,6 +359,12 @@ extern "C" void app_main(void)
     // Start the WiFi health supervisor: recovers from prolonged connection loss
     // (reconnect, then reboot as a last resort). Passive while WiFi is healthy.
     wifi_supervisor_start();
+
+    // Start the persistent debug-log task now that the network stack is up: it
+    // periodically snapshots the log tail to flash and emits netdiag lines
+    // (heap + lwIP TCP PCB counts) so a load-induced network wedge leaves a
+    // durable trail across the reboot used to recover it.
+    log_persist_start();
 
     // Start periodic heap monitor (every 60s) to detect memory leaks
     {

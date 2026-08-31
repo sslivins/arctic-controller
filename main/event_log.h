@@ -44,6 +44,8 @@ typedef enum {
     EVENT_BROWNOUT_RESET,       // Last boot was caused by a brownout (supply sag)
     EVENT_APPLICATION_CRASH,    // Previous boot ended in an unhandled panic
     EVENT_WATCHDOG_RESET,       // Previous boot was reset by a watchdog
+    EVENT_NETWORK_UNREACHABLE,  // Gateway unreachable while WiFi still associated (network-stack wedge)
+    EVENT_NETWORK_RECOVERED,    // Network auto-recovery ran (payload: 0=self/keepalive, 1=WiFi bounce, 2=reboot)
     EVENT_TYPE_COUNT
 } event_type_t;
 

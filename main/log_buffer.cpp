@@ -223,6 +223,24 @@ uint32_t log_buffer_get_latest_seq(void)
     return seq;
 }
 
+uint32_t log_buffer_latest_seq_at_level(esp_log_level_t min_level)
+{
+    if (!s_mutex) return 0;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    uint32_t best = 0;
+    for (int i = 0; i < s_count; i++) {
+        int idx = (s_head - 1 - i);
+        while (idx < 0) idx += LOG_BUFFER_MAX_ENTRIES;
+        idx %= LOG_BUFFER_MAX_ENTRIES;
+        const log_entry_t* e = &s_buffer[idx];
+        if (e->level > 0 && e->level <= min_level && e->seq > best) {
+            best = e->seq;
+        }
+    }
+    xSemaphoreGive(s_mutex);
+    return best;
+}
+
 void log_buffer_clear(void)
 {
     if (!s_mutex) return;

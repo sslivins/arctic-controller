@@ -34,6 +34,7 @@
 #include "factory_reset.h"
 #include "boot_stats.h"
 #include "log_buffer.h"
+#include "log_persist.h"
 #include "app_preferences.h"
 #include "test_endpoints.h"
 #include "tls_manager.h"
@@ -173,6 +174,7 @@ static esp_err_t preferences_patch_handler(httpd_req_t* req);
 static esp_err_t factory_reset_post_handler(httpd_req_t* req);
 static esp_err_t logs_get_handler(httpd_req_t* req);
 static esp_err_t logs_clear_handler(httpd_req_t* req);
+static esp_err_t logs_persisted_get_handler(httpd_req_t* req);
 static esp_err_t screenshot_get_handler(httpd_req_t* req);
 
 // TLS management handlers
@@ -459,6 +461,18 @@ bool api_server_start(void)
         // Port 80 only serves essential health/OTA bootstrap routes when
         // mandatory HTTPS is active, so two concurrent clients are sufficient.
         http_config.max_open_sockets   = 2;
+        // TCP keepalive reaps dead ESTABLISHED sockets left behind when a
+        // client vanishes mid-request (e.g. slow TLS clients that abandon a
+        // handshake, or the test suite's connection storm). Without this the
+        // stuck PCBs are never freed on the single-threaded server, leaking
+        // heap + sockets until the whole network stack wedges (associated but
+        // unreachable, no watchdog). ~10s idle + 3x5s probes => dead peers are
+        // dropped in ~25s. Harmless to live-but-idle clients: their TCP stack
+        // auto-ACKs the keepalive probes.
+        http_config.keep_alive_enable   = true;
+        http_config.keep_alive_idle     = 10;
+        http_config.keep_alive_interval = 5;
+        http_config.keep_alive_count    = 3;
         
         ret = httpd_start(&server, &http_config);
         if (ret != ESP_OK) {
@@ -488,6 +502,12 @@ bool api_server_start(void)
         ssl_config.httpd.stack_size         = stack_size;
         ssl_config.httpd.max_resp_headers   = max_headers;
         ssl_config.httpd.recv_wait_timeout  = recv_timeout;
+        // TCP keepalive: reap dead TLS sockets abandoned mid-handshake/session
+        // so they can't accumulate and wedge the stack (see port 80 note).
+        ssl_config.httpd.keep_alive_enable   = true;
+        ssl_config.httpd.keep_alive_idle     = 10;
+        ssl_config.httpd.keep_alive_interval = 5;
+        ssl_config.httpd.keep_alive_count    = 3;
         // 7 concurrent TLS sessions (TLS buffers in PSRAM via
         // EXTERNAL_MEM_ALLOC, so PSRAM headroom is not the constraint). Was 4,
         // which was too low for the full HTTPS test suite: the web dashboard
@@ -560,6 +580,13 @@ bool api_server_start(void)
         // server is briefly busy, and tears down the TLS connection — do not
         // shorten it.
         integration_config.httpd.send_wait_timeout = 10;
+        // TCP keepalive: reap dead WSS/REST sockets (see port 80 note). Extra
+        // important here since lru_purge is off — dead ESTABLISHED sockets are
+        // never evicted, so keepalive is the only thing that frees them.
+        integration_config.httpd.keep_alive_enable   = true;
+        integration_config.httpd.keep_alive_idle     = 10;
+        integration_config.httpd.keep_alive_interval = 5;
+        integration_config.httpd.keep_alive_count    = 3;
         integration_config.servercert = cert;
         integration_config.servercert_len = cert_len;
         integration_config.prvtkey_pem = key;
@@ -1096,6 +1123,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(logs_clear_uri);
+
+    // GET /api/logs/persisted - Previous-boot log tail snapshotted to flash
+    httpd_uri_t logs_persisted_uri = {
+        .uri = "/api/logs/persisted",
+        .method = HTTP_GET,
+        .handler = logs_persisted_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(logs_persisted_uri);
 
     // GET /api/screenshot - Capture live screen as uncompressed PNG
     httpd_uri_t screenshot_uri = {
@@ -5004,6 +5040,53 @@ static esp_err_t logs_clear_handler(httpd_req_t* req)
 
     log_buffer_clear();
     httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// GET /api/logs/persisted - Return the debug-log tail snapshotted to flash on
+// the PREVIOUS boot. This is the run-up to any wedge/crash that was recovered by
+// a reboot (the RAM ring in /api/logs only covers the CURRENT boot). Served as
+// text/plain for easy reading; a short metadata preamble precedes the log.
+static esp_err_t logs_persisted_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+
+    log_persist_prev_info_t info;
+    log_persist_get_previous_info(&info);
+
+    if (!info.present) {
+        httpd_resp_sendstr(req,
+            "# no persisted debug-log snapshot from a previous boot\n");
+        return ESP_OK;
+    }
+
+    const char* reason_str =
+        (info.reason == LOG_PERSIST_REASON_SEVERITY)  ? "severity" :
+        (info.reason == LOG_PERSIST_REASON_MANUAL)    ? "manual"   : "heartbeat";
+
+    char hdr[192];
+    int hn = snprintf(hdr, sizeof(hdr),
+        "# persisted debug log (previous boot)\n"
+        "# seq=%lu boot_id=%08lx len=%lu reason=%s\n\n",
+        (unsigned long)info.seq, (unsigned long)info.boot_id,
+        (unsigned long)info.len, reason_str);
+    if (hn > 0) httpd_resp_send_chunk(req, hdr, hn);
+
+    char* buf = (char*)malloc(info.len + 1);
+    if (!buf) {
+        httpd_resp_send_chunk(req, "# (out of memory reading snapshot)\n", 34);
+        httpd_resp_send_chunk(req, NULL, 0);
+        return ESP_OK;
+    }
+    size_t n = log_persist_get_previous(buf, info.len + 1);
+    if (n > 0) httpd_resp_send_chunk(req, buf, n < info.len ? n : info.len);
+    free(buf);
+
+    httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 
