@@ -27,6 +27,11 @@ LV_FONT_DECLARE(montserrat_24_misc);
 LV_FONT_DECLARE(montserrat_32_misc);
 LV_FONT_DECLARE(montserrat_40_misc);
 
+// Weather icons (FontAwesome subset: sun, cloud, rain, snow, fog, bolt, ...)
+// used by the status-bar weather display. See main/weather.cpp for the
+// WMO-code -> glyph mapping.
+LV_FONT_DECLARE(weather_icons_32);
+
 // FontAwesome symbols included in the fonts above
 // Lock icon (U+F023 = 61475)
 #define FA_SYMBOL_LOCK "\xEF\x80\xA3"

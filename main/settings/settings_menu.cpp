@@ -18,6 +18,7 @@
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../app_preferences.h"
+#include "../status_bar.h"
 #include "../factory_reset.h"
 #include "../system_restart.h"
 #include "../heatpump_screen.h"
@@ -374,6 +375,9 @@ static void temp_unit_switch_cb(lv_event_t* e)
     lv_obj_t* sw = (lv_obj_t*)lv_event_get_target(e);
     bool fahrenheit = lv_obj_has_state(sw, LV_STATE_CHECKED);
     app_prefs_set_temp_unit(fahrenheit ? TEMP_UNIT_FAHRENHEIT : TEMP_UNIT_CELSIUS);
+    
+    // Re-render the status-bar weather in the newly-selected unit immediately.
+    status_bar_refresh_weather();
     
     // Update the label colors to show which is active
     if (state.celsius_label && state.fahrenheit_label) {

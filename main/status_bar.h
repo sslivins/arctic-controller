@@ -130,6 +130,24 @@ uint8_t status_bar_get_notifications(status_bar_notification_snapshot_t* out, ui
 void status_bar_update_time(void);
 
 /**
+ * @brief Set the current weather shown next to the time.
+ * @param valid        false hides the weather display (no data / no location).
+ * @param temp_c       Current temperature in degrees Celsius.
+ * @param weather_code WMO weather interpretation code (selects the icon).
+ *
+ * The temperature is cached in Celsius and rendered in the user-selected unit
+ * (°C/°F per app_prefs_get_temp_unit()), so a unit change re-renders instantly
+ * from the cached value without a network refetch.
+ */
+void status_bar_set_weather(bool valid, float temp_c, int weather_code);
+
+/**
+ * @brief Re-render the cached weather in the currently-selected temperature
+ *        unit. Call after the °C/°F preference changes.
+ */
+void status_bar_refresh_weather(void);
+
+/**
  * @brief Close the notification dropdown if it is open
  *
  * Safe to call when the dropdown is already closed. Used to dismiss the

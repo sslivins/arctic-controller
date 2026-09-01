@@ -10,6 +10,7 @@
 #include "settings_common.h"
 #include "time_manager.h"
 #include "location_manager.h"
+#include "weather.h"
 #include "geocoding.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
@@ -860,6 +861,9 @@ static void result_selected_cb(lv_event_t* e)
     update_tz_display();
     update_preview();
     close_search_dialog();
+
+    // The location drives the weather query; refresh now that it changed.
+    weather_service_refresh();
 }
 
 // ============================================================================
