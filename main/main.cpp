@@ -15,6 +15,7 @@
 #include "time_manager.h"
 #include "location_manager.h"
 #include "status_bar.h"
+#include "weather.h"
 #include "ota_manager.h"
 #include "settings/settings_menu.h"
 #include "settings/settings_wifi_screen.h"
@@ -477,6 +478,11 @@ void create_ui(void)
     };
     status_bar_create(&bar_config);
     
+    // Start the status-bar weather service. The periodic timer and the
+    // on-WiFi-connect trigger (see the WIFI_MGR_STATE_CONNECTED handler) drive
+    // the actual fetches; this just arms the refresh timer.
+    weather_service_init();
+    
     // Build the single-screen tab shell (Home / Status / Control / Events) with
     // the persistent top status bar already in place and the persistent bottom
     // nav bar. Home is shown initially.
@@ -586,6 +592,9 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
             }
             // Clear WiFi unstable notification since we're connected now
             // (but keep tracking - it will reappear if we keep disconnecting)
+
+            // Refresh the status-bar weather now that we have connectivity.
+            weather_service_refresh();
             break;
         }
             

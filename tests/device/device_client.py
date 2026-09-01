@@ -476,6 +476,56 @@ class DeviceClient:
             raise DeviceError(f"Geocoding mock reset failed ({r.status_code}): {msg}")
         return r.json()
 
+    def weather_mock(self, temp_c: float, weather_code: int) -> dict:
+        """POST /api/test/weather-mock — install a canned Open-Meteo forecast.
+
+        Makes the status-bar weather resolve deterministically without a network
+        call and triggers a refresh so the status bar updates promptly.
+
+        Args:
+            temp_c: Current temperature in degrees Celsius.
+            weather_code: WMO weather interpretation code (selects the icon).
+        """
+        body = {"current": {"temperature_2m": temp_c, "weather_code": weather_code}}
+        r = self.session.post(
+            f"{self.base_url}/api/test/weather-mock",
+            json=body,
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Weather mock failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def weather_mock_error(self) -> dict:
+        """POST /api/test/weather-mock — make the next weather fetch report a failure."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/weather-mock",
+            json={"__error__": True},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            raise DeviceError(f"Weather mock error failed ({r.status_code}): {r.text}")
+        return r.json()
+
+    def weather_mock_reset(self) -> dict:
+        """POST /api/test/weather-mock-reset — clear the canned weather response."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/weather-mock-reset",
+            json={},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Weather mock reset failed ({r.status_code}): {msg}")
+        return r.json()
+
     def set_update_check_suppressed(self, suppressed: bool = True) -> dict:
         """POST /api/test/update-check-suppress — suppress automatic firmware update checks.
 

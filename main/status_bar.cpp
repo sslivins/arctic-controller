@@ -6,9 +6,14 @@
 #include "time_manager.h"
 #include "settings/settings_time_screen.h"
 #include "wifi_manager.h"
+#include "weather.h"
+#include "app_preferences.h"
+#include "fonts/fonts.h"
 #include "i18n/i18n.h"
 #include <esp_log.h>
 #include <string.h>
+#include <stdio.h>
+#include <math.h>
 
 static const char* TAG = "status_bar";
 
@@ -27,6 +32,8 @@ static const char* TAG = "status_bar";
 // Fonts
 #define FONT_STATUS_BAR_ICON  (&lv_font_montserrat_32)  // Icons in status bar (WiFi, settings, bell)
 #define FONT_STATUS_BAR_TIME  (&lv_font_montserrat_32)  // Time display
+#define FONT_STATUS_BAR_WEATHER (&montserrat_32_latin)  // Weather temperature (needs the ° glyph)
+#define FONT_WEATHER_ICON     (&weather_icons_32)       // Weather condition glyph
 #define FONT_DROPDOWN_ICON    (&lv_font_montserrat_32)  // Icons in dropdown
 #define FONT_DROPDOWN_TEXT    (&lv_font_montserrat_24)  // Text in dropdown
 
@@ -44,6 +51,8 @@ static struct {
     lv_obj_t* container;
     lv_obj_t* time_btn;
     lv_obj_t* time_label;
+    lv_obj_t* weather_icon;   // weather condition glyph (left cluster)
+    lv_obj_t* weather_label;  // temperature text, e.g. "-5°C"
     lv_obj_t* settings_btn;
     lv_obj_t* settings_icon;
     lv_obj_t* notify_btn;
@@ -62,6 +71,11 @@ static struct {
     bool wifi_connected;
     bool wifi_connecting;  // Connecting animation active
     uint8_t wifi_anim_step;  // Animation step counter
+    // Cached weather (temperature always stored in Celsius; converted to the
+    // user's unit at render time so a unit toggle updates instantly).
+    bool weather_valid;
+    float weather_temp_c;
+    int weather_code;
 } bar_state = {};
 
 // Forward declarations
@@ -124,6 +138,25 @@ lv_obj_t* status_bar_create(const status_bar_config_t* config)
     lv_obj_set_style_text_font(bar_state.time_label, FONT_STATUS_BAR_TIME, LV_PART_MAIN);
     lv_obj_set_style_text_color(bar_state.time_label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
     lv_obj_align(bar_state.time_label, LV_ALIGN_LEFT_MID, 10, 0);
+    
+    // Weather condition icon (to the right of the time button, left cluster).
+    // Hidden until a weather fetch succeeds.
+    bar_state.weather_icon = lv_label_create(bar_state.container);
+    lv_label_set_text(bar_state.weather_icon, "");
+    lv_obj_set_style_text_font(bar_state.weather_icon, FONT_WEATHER_ICON, LV_PART_MAIN);
+    lv_obj_set_style_text_color(bar_state.weather_icon, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+    lv_obj_align_to(bar_state.weather_icon, bar_state.time_btn, LV_ALIGN_OUT_RIGHT_MID, -5, 0);
+    lv_obj_set_user_data(bar_state.weather_icon, (void*)"weather_icon");
+    lv_obj_add_flag(bar_state.weather_icon, LV_OBJ_FLAG_HIDDEN);
+    
+    // Weather temperature text (right of the icon).
+    bar_state.weather_label = lv_label_create(bar_state.container);
+    lv_label_set_text(bar_state.weather_label, "");
+    lv_obj_set_style_text_font(bar_state.weather_label, FONT_STATUS_BAR_WEATHER, LV_PART_MAIN);
+    lv_obj_set_style_text_color(bar_state.weather_label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+    lv_obj_align_to(bar_state.weather_label, bar_state.weather_icon, LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+    lv_obj_set_user_data(bar_state.weather_label, (void*)"weather_value");
+    lv_obj_add_flag(bar_state.weather_label, LV_OBJ_FLAG_HIDDEN);
     
     // WiFi button (right side) - larger touch target
     bar_state.wifi_btn = lv_btn_create(bar_state.container);
@@ -266,6 +299,48 @@ void status_bar_update_time(void)
     }
 }
 
+// Convert cached Celsius to the user's unit and render temp + icon. Hides the
+// weather elements when there is no valid data.
+static void render_weather(void)
+{
+    if (!bar_state.weather_label || !bar_state.weather_icon) {
+        return;
+    }
+    if (!bar_state.weather_valid) {
+        lv_obj_add_flag(bar_state.weather_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(bar_state.weather_icon, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    float shown = bar_state.weather_temp_c;
+    if (app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT) {
+        shown = bar_state.weather_temp_c * 9.0f / 5.0f + 32.0f;
+    }
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d%s", (int)lroundf(shown), app_prefs_temp_unit_str());
+
+    lv_label_set_text(bar_state.weather_icon, weather_code_icon(bar_state.weather_code));
+    lv_label_set_text(bar_state.weather_label, buf);
+    lv_obj_clear_flag(bar_state.weather_icon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(bar_state.weather_label, LV_OBJ_FLAG_HIDDEN);
+    // The icon glyph width varies by condition, so keep the value label anchored.
+    lv_obj_align_to(bar_state.weather_label, bar_state.weather_icon,
+                    LV_ALIGN_OUT_RIGHT_MID, 8, 0);
+}
+
+void status_bar_set_weather(bool valid, float temp_c, int weather_code)
+{
+    bar_state.weather_valid = valid;
+    bar_state.weather_temp_c = temp_c;
+    bar_state.weather_code = weather_code;
+    render_weather();
+}
+
+void status_bar_refresh_weather(void)
+{
+    render_weather();
+}
+
 void status_bar_delete(void)
 {
     close_dropdown();
@@ -287,6 +362,8 @@ void status_bar_delete(void)
     
     bar_state.time_btn = NULL;
     bar_state.time_label = NULL;
+    bar_state.weather_icon = NULL;
+    bar_state.weather_label = NULL;
     bar_state.settings_btn = NULL;
     bar_state.settings_icon = NULL;
     bar_state.notify_btn = NULL;
@@ -697,6 +774,10 @@ static void timer_update_cb(lv_timer_t* timer)
 {
     (void)timer;
     status_bar_update_time();
+    
+    // Re-render cached weather so a °C/°F change made via the web API (which
+    // does not call status_bar_refresh_weather directly) is reflected.
+    render_weather();
     
     // Also update WiFi state
     status_bar_set_wifi_state(
