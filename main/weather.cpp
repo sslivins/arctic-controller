@@ -13,7 +13,6 @@
 #include <esp_http_client.h>
 #include <esp_crt_bundle.h>
 #include <esp_log.h>
-#include <esp_timer.h>
 #include <esp_heap_caps.h>
 
 #include <freertos/FreeRTOS.h>
@@ -30,11 +29,6 @@ static const char* TAG = "weather";
 #define WX_HOST "https://api.open-meteo.com/v1/forecast"
 #define WX_TIMEOUT_MS 12000
 #define WX_REFRESH_INTERVAL_MS (15 * 60 * 1000)  // 15 minutes
-// Coalesce bursts of refresh triggers (e.g. rapidly changing the location in
-// settings) so we don't spawn back-to-back network fetches. Each fetch is a
-// TLS handshake; hammering them adds needless load. The periodic timer still
-// guarantees the display stays fresh.
-#define WX_DEBOUNCE_MS 30000  // 30 seconds
 
 // UTF-8 glyphs from the weather_icons_32 font (FontAwesome subset).
 #define WX_ICON_SUN            "\xEF\x86\x85"  // U+F185 sun
@@ -275,7 +269,6 @@ static weather_data_t s_worker_result;   // written by worker, read on UI task
 static TaskHandle_t   s_worker_task = NULL;
 static double         s_pending_lat = 0.0;
 static double         s_pending_lon = 0.0;
-static int64_t        s_last_fetch_us = 0;  // esp_timer time of last fetch trigger
 
 // Runs on the LVGL/UI task via lv_async_call: push the fetched weather to the
 // status bar (or leave it unchanged on failure).
@@ -325,14 +318,6 @@ void weather_service_refresh(void)
     if (!loc || !loc->valid) {
         return;  // no location to query
     }
-
-    // Debounce: coalesce rapid triggers into a single fetch.
-    int64_t now_us = esp_timer_get_time();
-    if (s_last_fetch_us != 0 &&
-        (now_us - s_last_fetch_us) < (int64_t)WX_DEBOUNCE_MS * 1000) {
-        return;
-    }
-    s_last_fetch_us = now_us;
 
     s_pending_lat = loc->latitude;
     s_pending_lon = loc->longitude;
