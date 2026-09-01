@@ -176,6 +176,11 @@ def _return_to_main(device: DeviceClient):
                 device.firmware_mock_reset()
             except Exception:
                 pass
+        if current == "time":
+            try:
+                device.geocoding_mock_reset()
+            except Exception:
+                pass
         try:
             device.click(tag=f"{current}_back")
         except Exception:

@@ -13,6 +13,7 @@
 #include "startup_anim.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
+#include "location_manager.h"
 #include "status_bar.h"
 #include "ota_manager.h"
 #include "settings/settings_menu.h"
@@ -241,6 +242,10 @@ extern "C" void app_main(void)
 
     // Initialize time manager (NTP will start when WiFi connects)
     time_mgr_init();
+
+    // Initialize location manager (seeds default location; applies automatic
+    // timezone derived from the location when auto-mode is enabled).
+    location_mgr_init();
 
     // Initialize app preferences (demo mode, temp units, etc.)
     app_prefs_init();
