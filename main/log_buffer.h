@@ -78,6 +78,19 @@ int log_buffer_count(void);
 uint32_t log_buffer_get_latest_seq(void);
 
 /**
+ * @brief Get the sequence number of the most-recent entry at or above a
+ *        severity, without copying any entries.
+ *
+ * Walks the ring and returns the highest seq among entries whose level is at
+ * least as severe as @p min_level (i.e. entry.level <= min_level, matching the
+ * filter in log_buffer_get). Cheap poll for "has a new WARN/ERROR appeared?".
+ *
+ * @param min_level  Severity threshold (ESP_LOG_WARN catches warnings+errors).
+ * @return Highest matching seq, or 0 if no entry matches.
+ */
+uint32_t log_buffer_latest_seq_at_level(esp_log_level_t min_level);
+
+/**
  * @brief Clear all entries from the buffer
  */
 void log_buffer_clear(void);

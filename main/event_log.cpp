@@ -66,6 +66,8 @@ static const char* s_event_names[] = {
     "brownout_reset",
     "application_crash",
     "watchdog_reset",
+    "network_unreachable",
+    "network_recovered",
 };
 
 _Static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
@@ -298,6 +300,8 @@ event_category_t event_type_category(event_type_t type) {
         case EVENT_BROWNOUT_RESET:
         case EVENT_APPLICATION_CRASH:
         case EVENT_WATCHDOG_RESET:
+        case EVENT_NETWORK_UNREACHABLE:
+        case EVENT_NETWORK_RECOVERED:
             return EVENT_CATEGORY_PROBLEMS;
 
         case EVENT_COMPRESSOR_ON:

@@ -81,6 +81,13 @@ void wifi_screen_trigger_scan(void);
 void wifi_screen_set_mock_mode(bool enable);
 
 /**
+ * @brief Query whether the WiFi screen is currently in mock mode
+ * @return True when mock mode is active (injected networks must not be
+ *         overwritten by a real scan-completion update)
+ */
+bool wifi_screen_is_mock_mode(void);
+
+/**
  * @brief Check if the password dialog is currently visible
  * @return True if password dialog is shown
  */

@@ -62,6 +62,8 @@ idf_component_register(
         "boot_stats.cpp"
         "wifi_supervisor.cpp"
         "log_buffer.cpp"
+        "log_persist.cpp"
+        "net_diag.cpp"
         "settings/settings_menu.cpp"
         "settings/settings_wifi_screen.cpp"
         "settings/keyboard_maps.c"
@@ -127,6 +129,8 @@ idf_component_register(
         mbedtls
         spi_flash
         arctic-macon
+        lwip
+        espcoredump
 )
 
 # Build-time: re-gzip whenever the source HTML or the gzip script changes, so
