@@ -13,6 +13,7 @@
 #include <esp_http_client.h>
 #include <esp_crt_bundle.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -27,6 +28,11 @@ static const char* TAG = "weather";
 #define WX_HOST "https://api.open-meteo.com/v1/forecast"
 #define WX_TIMEOUT_MS 12000
 #define WX_REFRESH_INTERVAL_MS (15 * 60 * 1000)  // 15 minutes
+// Coalesce bursts of refresh triggers (e.g. rapidly changing the location in
+// settings) so we don't spawn back-to-back network fetches. Each fetch is a
+// TLS handshake; hammering them adds needless load. The periodic timer still
+// guarantees the display stays fresh.
+#define WX_DEBOUNCE_MS 30000  // 30 seconds
 
 // UTF-8 glyphs from the weather_icons_32 font (FontAwesome subset).
 #define WX_ICON_SUN            "\xEF\x86\x85"  // U+F185 sun
@@ -243,9 +249,23 @@ int weather_fetch(double lat, double lon, weather_data_t* out)
 
 // ---------------------------------------------------------------------------
 // Status-bar weather service
+//
+// A single, long-lived worker task performs the blocking HTTPS fetch. It is
+// created ONCE at init and then parked on a task notification. This is
+// deliberate: creating a fresh task per refresh means allocating and freeing a
+// ~12 KB FreeRTOS stack (internal RAM) on every fetch, which fragments the
+// internal heap over time. Because the on-device HTTPS server draws its
+// per-session TLS bookkeeping from that same internal heap, the fragmentation
+// eventually starves it (mbedtls returns SSL_ALLOC_FAILED / -0x7780 even with
+// tens of KB free-but-non-contiguous). Allocating the stack once avoids the
+// churn entirely.
 // ---------------------------------------------------------------------------
 static volatile bool s_refresh_busy = false;
-static weather_data_t s_worker_result;  // written by worker, read on UI task
+static weather_data_t s_worker_result;   // written by worker, read on UI task
+static TaskHandle_t   s_worker_task = NULL;
+static double         s_pending_lat = 0.0;
+static double         s_pending_lon = 0.0;
+static int64_t        s_last_fetch_us = 0;  // esp_timer time of last fetch trigger
 
 // Runs on the LVGL/UI task via lv_async_call: push the fetched weather to the
 // status bar (or leave it unchanged on failure).
@@ -258,28 +278,35 @@ static void apply_result_cb(void* arg)
     s_refresh_busy = false;
 }
 
-// Blocking HTTPS fetch on a dedicated worker task (12 KB stack: the TLS
-// handshake via the ESP certificate bundle is heavy). Never touch LVGL here.
+// Long-lived worker: park on a notification, fetch when signalled, marshal the
+// result back to the LVGL task, then park again. Never touch LVGL here.
 static void weather_worker(void* arg)
 {
-    double lat = ((double*)arg)[0];
-    double lon = ((double*)arg)[1];
-    free(arg);
+    (void)arg;
+    for (;;) {
+        // Block until weather_service_refresh() signals a fetch is wanted.
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    weather_data_t data = {};
-    if (weather_fetch(lat, lon, &data) == 0) {
-        s_worker_result = data;
-    } else {
-        s_worker_result.valid = false;
+        double lat = s_pending_lat;
+        double lon = s_pending_lon;
+
+        weather_data_t data = {};
+        if (weather_fetch(lat, lon, &data) == 0) {
+            s_worker_result = data;
+        } else {
+            s_worker_result.valid = false;
+        }
+        lv_async_call(apply_result_cb, NULL);
     }
-    lv_async_call(apply_result_cb, NULL);
-    vTaskDelete(NULL);
 }
 
 void weather_service_refresh(void)
 {
     if (s_refresh_busy) {
         return;  // a fetch is already in flight
+    }
+    if (s_worker_task == NULL) {
+        return;  // service not initialised yet
     }
     if (wifi_mgr_get_state() != WIFI_MGR_STATE_CONNECTED) {
         return;  // no network
@@ -289,19 +316,19 @@ void weather_service_refresh(void)
         return;  // no location to query
     }
 
-    double* coords = (double*)malloc(2 * sizeof(double));
-    if (!coords) {
+    // Debounce: coalesce rapid triggers into a single fetch.
+    int64_t now_us = esp_timer_get_time();
+    if (s_last_fetch_us != 0 &&
+        (now_us - s_last_fetch_us) < (int64_t)WX_DEBOUNCE_MS * 1000) {
         return;
     }
-    coords[0] = loc->latitude;
-    coords[1] = loc->longitude;
+    s_last_fetch_us = now_us;
+
+    s_pending_lat = loc->latitude;
+    s_pending_lon = loc->longitude;
 
     s_refresh_busy = true;
-    if (xTaskCreate(weather_worker, "weather", 12288, coords, 5, NULL) != pdPASS) {
-        s_refresh_busy = false;
-        free(coords);
-        ESP_LOGW(TAG, "Failed to spawn weather worker");
-    }
+    xTaskNotifyGive(s_worker_task);
 }
 
 static void refresh_timer_cb(lv_timer_t* timer)
@@ -312,6 +339,16 @@ static void refresh_timer_cb(lv_timer_t* timer)
 
 void weather_service_init(void)
 {
+    // Create the persistent worker ONCE. Priority 4 keeps it below the LVGL
+    // render task and the HTTPS server (both priority 5) so a background
+    // weather fetch never preempts the UI or the web server.
+    if (s_worker_task == NULL) {
+        if (xTaskCreate(weather_worker, "weather", 12288, NULL, 4, &s_worker_task) != pdPASS) {
+            ESP_LOGW(TAG, "Failed to create weather worker task");
+            s_worker_task = NULL;
+        }
+    }
+
     // Periodic refresh; the first fetch is also triggered on WiFi connect.
     lv_timer_create(refresh_timer_cb, WX_REFRESH_INTERVAL_MS, NULL);
     ESP_LOGI(TAG, "Weather service started (refresh every %d min)",
