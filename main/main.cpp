@@ -516,9 +516,11 @@ static void on_scan_done(const wifi_mgr_ap_info_t* ap_list, uint16_t count)
         networks[i].authmode = ap_list[i].authmode;
     }
     
-    // Update WiFi screen if visible
+    // Update WiFi screen if visible.
+    // Skip when mock mode is active: a test has injected fake networks and a
+    // real scan completing here would clobber them (device-test race, #wifi-mock).
     bsp_display_lock(0);
-    if (wifi_screen_is_visible()) {
+    if (wifi_screen_is_visible() && !wifi_screen_is_mock_mode()) {
         wifi_screen_set_scanning(false);
         wifi_screen_update_networks(networks, count);
     }

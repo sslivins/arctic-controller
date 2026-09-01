@@ -977,6 +977,11 @@ void wifi_screen_set_mock_mode(bool enable)
     }
 }
 
+bool wifi_screen_is_mock_mode(void)
+{
+    return s_state.mock_mode;
+}
+
 bool wifi_screen_is_password_dialog_visible(void)
 {
     if (!s_state.password_dialog) return false;
