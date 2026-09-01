@@ -1,11 +1,32 @@
-# Name,   Type, SubType, Offset,  Size, Flags
+# Name,           Type, SubType,  Offset,    Size,  Flags
 # Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap
-# OTA partition layout for 16MB flash
+#
+# OTA partition layout for 16MB flash (forward-looking, revised 2026).
+#
+# Design goal: reserve generous, NAMED headroom now so future features never
+# require another partition-table change (which forces a full USB re-flash and
+# is impractical once devices are in the field). Everything through ota_1 keeps
+# its historical offset so the OTA app slots are unchanged; the space after the
+# app slots was reorganized:
+#   - the unused "human_face_det" (face-detect vestige) and "storage" (never
+#     mounted) SPIFFS partitions were reclaimed;
+#   - a "coredump" partition was added so panics/WDT resets capture a backtrace;
+#   - "dbglog" is a dedicated persistent debug-log ring (log_persist.cpp);
+#   - "reserved" carves out the remaining ~4.9MB of previously-unallocated tail
+#     as named scratch space for future use (config blobs, larger telemetry,
+#     etc.) WITHOUT needing another table change.
+#
+# NOTE for already-fielded devices that only receive an app OTA (not a full
+# flash): their on-flash table still has the OLD layout. log_persist looks up
+# "dbglog" and falls back to the legacy "human_face_det" label, and coredump
+# simply stays inactive until the device is next full-flashed. No re-flash is
+# required to pick up the persistent-log improvement.
 nvs,data,nvs,0x9000,256K,
 otadata,data,ota,0x49000,8K,
 phy_init,data,phy,0x4B000,4K,
 ota_0,app,ota_0,0x50000,4M,
 ota_1,app,ota_1,0x450000,4M,
-human_face_det,data,spiffs,0x850000,400K,
-storage,data,spiffs,0x8B4000,2M,
-history,data,0x40,0xAB4000,2M,
+coredump,data,coredump,0x850000,256K,
+dbglog,data,0x40,0x890000,512K,
+history,data,0x40,0x910000,2M,
+reserved,data,0x40,0xB10000,5056K,

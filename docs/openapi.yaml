@@ -2709,6 +2709,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/logs/persisted:
+    get:
+      tags:
+        - Logs
+      summary: Get the previous boot's persisted debug-log tail
+      description: |
+        Returns the debug-log tail snapshotted to a dedicated flash region
+        (`dbglog`) on the **previous** boot. Unlike `/api/logs` (the current-boot
+        RAM ring), this survives a reboot and captures the run-up to a
+        wedge/crash that was recovered by rebooting or power-cycling the device.
+
+        The response is `text/plain`: a short metadata preamble (snapshot reason
+        and timing) followed by the captured log lines, or a
+        `# no persisted ...` comment when the device has no snapshot from a
+        prior boot.
+      operationId: getPersistedLogs
+      security:
+        - apiKey: []
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Persisted log tail (or a comment when none is available)
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/screenshot:
     get:
       tags:

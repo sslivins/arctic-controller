@@ -156,6 +156,21 @@ bool wifi_mgr_init(void)
         ESP_LOGE(TAG, "esp_wifi_start failed: %s", esp_err_to_name(ret));
         return false;
     }
+
+    // Disable WiFi modem-sleep power save. This is a mains-powered, always-on
+    // wall controller that must stay promptly reachable for CMS/HA polling and
+    // OTA. The IDF default (WIFI_PS_MIN_MODEM) parks the C6 radio between DTIM
+    // beacons, which on a marginal link shows up as ~100ms+ ICMP latency,
+    // heavy packet loss, and TLS handshakes timing out (the device looks
+    // "unreachable" while the local stack is perfectly healthy). WIFI_PS_NONE
+    // keeps the radio awake so downlink frames are delivered immediately.
+    ret = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_set_ps(WIFI_PS_NONE) failed: %s",
+                 esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "WiFi power save disabled (WIFI_PS_NONE)");
+    }
     
     // Wait for WIFI_EVENT_STA_START before considering init complete
     // ESP-Hosted needs time to establish RPC communication with C6

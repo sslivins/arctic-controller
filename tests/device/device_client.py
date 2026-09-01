@@ -263,6 +263,22 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def get_persisted_logs(self) -> str:
+        """GET /api/logs/persisted — the debug-log tail saved to flash on the
+        PREVIOUS boot.
+
+        Unlike ``/api/logs`` (the current-boot RAM ring), this survives a reboot
+        and captures the run-up to a wedge/crash that was recovered by rebooting
+        or power-cycling. Returns text/plain (a short metadata preamble followed
+        by the log lines), or a ``# no persisted ...`` comment when the device
+        has no snapshot from a prior boot.
+        """
+        r = self.session.get(
+            f"{self.base_url}/api/logs/persisted", timeout=self.timeout
+        )
+        r.raise_for_status()
+        return r.text
+
     def get_stack_watermarks(self) -> dict:
         """GET /api/test/stack-watermarks — {task_name: min_free_stack_bytes}.
 

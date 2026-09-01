@@ -43,8 +43,15 @@ def test_partition_layout_is_non_overlapping_and_leaves_reserve():
     assert by_name["nvs"]["size"] == 256 * 1024
     assert by_name["ota_0"]["size"] == 4 * 1024 * 1024
     assert by_name["ota_1"]["size"] == 4 * 1024 * 1024
-    assert by_name["history"]["offset"] == 0xAB4000
+    assert by_name["history"]["offset"] == 0x910000
     assert by_name["history"]["size"] == 2 * 1024 * 1024
 
+    # Everything must fit within the flash device.
     used_end = max(p["offset"] + p["size"] for p in partitions)
-    assert FLASH_SIZE - used_end >= 3 * 1024 * 1024
+    assert used_end <= FLASH_SIZE
+
+    # Headroom is now an explicit, named "reserved" partition (named scratch space
+    # so future features don't require another partition-table change / re-flash)
+    # plus any still-unallocated tail — rather than unallocated space alone.
+    reserve = by_name.get("reserved", {}).get("size", 0) + (FLASH_SIZE - used_end)
+    assert reserve >= 3 * 1024 * 1024
