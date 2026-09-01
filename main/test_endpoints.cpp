@@ -49,6 +49,7 @@
 #include "display_idle.h"
 #include <esp_timer.h>
 #include "png_encoder.h"
+#include "geocoding.h"
 #include <time.h>
 
 static const char* TAG = "test_api";
@@ -1633,6 +1634,83 @@ static esp_err_t firmware_mock_reset_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/geocoding-mock — install a canned Open-Meteo geocoding body so
+// the location-search UI resolves deterministically without hitting the network.
+// Body: the raw Open-Meteo response, e.g.
+//   {"results":[{"name":"Kamloops","admin1":"British Columbia",
+//                "country_code":"CA","timezone":"America/Vancouver",
+//                "latitude":50.6745,"longitude":-120.3273}]}
+// A body containing "__error__" makes the next search report a failure.
+// ============================================================================
+
+static esp_err_t geocoding_mock_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+
+    int total = req->content_len;
+    if (total <= 0 || total > 8192) {
+        send_json_error(req, "400 Bad Request", "Missing or oversized body");
+        return ESP_OK;
+    }
+    char* buf = (char*)malloc(total + 1);
+    if (!buf) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    int received = 0;
+    while (received < total) {
+        int r = httpd_req_recv(req, buf + received, total - received);
+        if (r <= 0) {
+            free(buf);
+            send_json_error(req, "400 Bad Request", "Failed to read body");
+            return ESP_OK;
+        }
+        received += r;
+    }
+    buf[received] = '\0';
+
+    // Validate it parses as JSON before installing it.
+    cJSON* check = cJSON_Parse(buf);
+    if (!check) {
+        free(buf);
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    cJSON_Delete(check);
+
+    geocoding_set_mock_json(buf);
+    free(buf);
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/geocoding-mock-reset — clear the canned geocoding response.
+// ============================================================================
+
+static esp_err_t geocoding_mock_reset_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    geocoding_clear_mock();
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/notification-mock — add a notification to the status bar
 // Body: {"type": 0, "message": "Firmware update available"}
 // type: 0=firmware update, 1=wifi unstable, 2=low battery
@@ -2647,6 +2725,38 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &firmware_mock_reset_options_uri);
+
+    httpd_uri_t geocoding_mock_uri = {
+        .uri = "/api/test/geocoding-mock",
+        .method = HTTP_POST,
+        .handler = geocoding_mock_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &geocoding_mock_uri);
+
+    httpd_uri_t geocoding_mock_options_uri = {
+        .uri = "/api/test/geocoding-mock",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &geocoding_mock_options_uri);
+
+    httpd_uri_t geocoding_mock_reset_uri = {
+        .uri = "/api/test/geocoding-mock-reset",
+        .method = HTTP_POST,
+        .handler = geocoding_mock_reset_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &geocoding_mock_reset_uri);
+
+    httpd_uri_t geocoding_mock_reset_options_uri = {
+        .uri = "/api/test/geocoding-mock-reset",
+        .method = HTTP_OPTIONS,
+        .handler = test_options_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &geocoding_mock_reset_options_uri);
 
     httpd_uri_t set_preference_uri = {
         .uri = "/api/test/set-preference",

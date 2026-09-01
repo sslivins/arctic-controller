@@ -427,6 +427,55 @@ class DeviceClient:
             raise DeviceError(f"Notification mock reset failed ({r.status_code}): {msg}")
         return r.json()
 
+    def geocoding_mock(self, results: list) -> dict:
+        """POST /api/test/geocoding-mock — install a canned Open-Meteo response.
+
+        Makes the location-search UI resolve deterministically without a network
+        call. ``results`` is a list of dicts shaped like Open-Meteo entries, e.g.
+        ``[{"name": "Kamloops", "admin1": "British Columbia",
+            "country_code": "CA", "timezone": "America/Vancouver",
+            "latitude": 50.6745, "longitude": -120.3273}]``.
+        Pass an empty list to simulate "no matches".
+        """
+        r = self.session.post(
+            f"{self.base_url}/api/test/geocoding-mock",
+            json={"results": results},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Geocoding mock failed ({r.status_code}): {msg}")
+        return r.json()
+
+    def geocoding_mock_error(self) -> dict:
+        """POST /api/test/geocoding-mock — make the next search report a failure."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/geocoding-mock",
+            json={"__error__": True},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            raise DeviceError(f"Geocoding mock error failed ({r.status_code}): {r.text}")
+        return r.json()
+
+    def geocoding_mock_reset(self) -> dict:
+        """POST /api/test/geocoding-mock-reset — clear the canned geocoding response."""
+        r = self.session.post(
+            f"{self.base_url}/api/test/geocoding-mock-reset",
+            json={},
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Geocoding mock reset failed ({r.status_code}): {msg}")
+        return r.json()
+
     def set_update_check_suppressed(self, suppressed: bool = True) -> dict:
         """POST /api/test/update-check-suppress — suppress automatic firmware update checks.
 

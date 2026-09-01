@@ -37,6 +37,29 @@ def _navigate_to_time_screen(device: DeviceClient):
     device.wait_for_screen("time", timeout=5.0)
 
 
+def _tz_auto_checked(device: DeviceClient):
+    """Return the automatic-timezone switch state (True/False), or None if absent."""
+    sw = device.find_widget(tag="tz_auto_switch")
+    return sw.checked if sw is not None else None
+
+
+def _ensure_manual_tz(device: DeviceClient):
+    """Switch the timezone card into manual mode so the roller is visible.
+
+    Timezone is derived automatically from the selected location by default
+    (``tz_auto`` on), which hides the manual roller. Every roller-based test
+    must turn automatic mode off first.
+    """
+    if _tz_auto_checked(device):
+        device.toggle("tz_auto_switch")
+        device.wait_until(
+            "manual timezone roller is visible",
+            lambda: device.find_widget(tag="timezone_roller") is not None
+            and _tz_auto_checked(device) is False,
+            timeout=5.0,
+        )
+
+
 def _roller_index(device: DeviceClient):
     roller = device.find_widget(tag="timezone_roller")
     return roller.value if roller is not None else None
@@ -44,29 +67,46 @@ def _roller_index(device: DeviceClient):
 
 @pytest.fixture
 def timezone_restore(device: DeviceClient):
-    """Capture the current timezone roller index and restore it on teardown."""
+    """Capture the timezone state (auto flag + roller index) and restore it.
+
+    Timezone is global device state. Tests here force manual mode and set an
+    explicit zone, so teardown restores both the original automatic-vs-manual
+    choice and, when originally manual, the roller index (F-10).
+    """
     _navigate_to_time_screen(device)
+    initial_auto = _tz_auto_checked(device)
+    _ensure_manual_tz(device)
     initial_index = _roller_index(device)
     _return_to_main(device)
 
     yield
 
-    if initial_index is None:
-        return
     _return_to_main(device)
     _navigate_to_time_screen(device)
-    if _roller_index(device) != initial_index:
-        device.set_roller("timezone_roller", initial_index)
-        device.wait_until(
-            f"timezone roller restored to index {initial_index}",
-            lambda: _roller_index(device) == initial_index,
-            timeout=5.0, raise_on_timeout=False,
-        )
+    if initial_auto:
+        # Originally automatic — turning it back on re-derives the zone.
+        if _tz_auto_checked(device) is False:
+            device.toggle("tz_auto_switch")
+            device.wait_until(
+                "automatic timezone restored",
+                lambda: _tz_auto_checked(device) is True,
+                timeout=5.0, raise_on_timeout=False,
+            )
+    else:
+        _ensure_manual_tz(device)
+        if initial_index is not None and _roller_index(device) != initial_index:
+            device.set_roller("timezone_roller", initial_index)
+            device.wait_until(
+                f"timezone roller restored to index {initial_index}",
+                lambda: _roller_index(device) == initial_index,
+                timeout=5.0, raise_on_timeout=False,
+            )
 
 
 def test_roller_shows_current_timezone(device: DeviceClient):
     """The timezone roller should be visible and show the current timezone."""
     _navigate_to_time_screen(device)
+    _ensure_manual_tz(device)
 
     roller = device.find_widget(tag="timezone_roller")
     assert roller is not None, "Could not find timezone_roller widget"
@@ -79,6 +119,7 @@ def test_roller_shows_current_timezone(device: DeviceClient):
 def test_change_timezone_updates_roller(device: DeviceClient, timezone_restore):
     """Changing the roller index should update the selected timezone text."""
     _navigate_to_time_screen(device)
+    _ensure_manual_tz(device)
 
     # Pick a timezone different from the current one
     current_index = _roller_index(device)
@@ -104,6 +145,7 @@ def test_change_timezone_updates_roller(device: DeviceClient, timezone_restore):
 def test_change_timezone_updates_preview(device: DeviceClient, timezone_restore):
     """Changing timezone should update the time preview label."""
     _navigate_to_time_screen(device)
+    _ensure_manual_tz(device)
 
     # Read current preview
     preview_before = device.find_widget(tag="time_preview")
@@ -133,6 +175,7 @@ def test_change_timezone_updates_preview(device: DeviceClient, timezone_restore)
 def test_timezone_reflected_in_preferences(device: DeviceClient, timezone_restore):
     """The preferences API should report the current timezone string."""
     _navigate_to_time_screen(device)
+    _ensure_manual_tz(device)
 
     # Set to a known timezone
     target = TIMEZONES[4]  # UTC

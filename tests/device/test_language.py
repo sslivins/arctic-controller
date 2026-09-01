@@ -22,9 +22,9 @@ LANG_TAGS = {
 # Expected translations for settings menu labels per language
 # These are the text strings that should appear on-screen
 SETTINGS_LABELS = {
-    "English":  ["WiFi", "Update", "Language", "Time", "Display"],
-    "Français": ["WiFi", "Mise à jour", "Langue", "Heure", "Affichage"],
-    "Español":  ["WiFi", "Actualizar", "Idioma", "Hora", "Pantalla"],
+    "English":  ["WiFi", "Update", "Language", "Time & Location", "Display"],
+    "Français": ["WiFi", "Mise à jour", "Langue", "Heure et lieu", "Affichage"],
+    "Español":  ["WiFi", "Actualizar", "Idioma", "Hora y ubicación", "Pantalla"],
 }
 
 

@@ -108,11 +108,24 @@ typedef enum {
     STR_TIME_TIMEZONE,
     STR_TIME_FORMAT_12H,
     STR_TIME_FORMAT_24H,
+    STR_TIME_24H_FORMAT,
     STR_TIME_DISPLAY_FORMAT,
     STR_TIME_FORMAT_INFO,
     STR_TIME_SYNCED,
     STR_TIME_NOT_SYNCED,
     STR_SETTINGS_TIME,
+
+    // Location + auto-timezone
+    STR_LOCATION_TITLE,
+    STR_LOCATION_CHANGE,
+    STR_LOCATION_NONE,
+    STR_LOCATION_SEARCH_HINT,
+    STR_LOCATION_SEARCHING,
+    STR_LOCATION_SEARCH_FAILED,
+    STR_LOCATION_NO_MATCHES,
+    STR_LOCATION_SELECT,
+    STR_TIME_TZ_AUTOMATIC,
+    STR_TIME_TZ_UNMAPPED,
     
     // ========================================================================
     // Display Panel
