@@ -14,9 +14,11 @@
 #include <esp_crt_bundle.h>
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_heap_caps.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/idf_additions.h>
 
 #include <lvgl.h>
 #include "status_bar.h"
@@ -251,14 +253,22 @@ int weather_fetch(double lat, double lon, weather_data_t* out)
 // Status-bar weather service
 //
 // A single, long-lived worker task performs the blocking HTTPS fetch. It is
-// created ONCE at init and then parked on a task notification. This is
-// deliberate: creating a fresh task per refresh means allocating and freeing a
-// ~12 KB FreeRTOS stack (internal RAM) on every fetch, which fragments the
-// internal heap over time. Because the on-device HTTPS server draws its
-// per-session TLS bookkeeping from that same internal heap, the fragmentation
-// eventually starves it (mbedtls returns SSL_ALLOC_FAILED / -0x7780 even with
-// tens of KB free-but-non-contiguous). Allocating the stack once avoids the
-// churn entirely.
+// created ONCE at init with its stack in PSRAM and then parked on a task
+// notification. Two reasons for this design:
+//
+//  1. Persistent (not per-fetch): creating a fresh task per refresh means
+//     allocating and freeing a ~12 KB FreeRTOS stack on every fetch, adding
+//     needless churn.
+//  2. PSRAM stack (MALLOC_CAP_SPIRAM): FreeRTOS task stacks default to
+//     internal RAM, which on this board is scarce and shared with the on-
+//     device HTTPS servers' per-session TLS bookkeeping and httpd task
+//     stacks. A resident 12 KB internal-RAM weather stack was enough to (a)
+//     fragment the internal heap so late-run TLS handshakes failed with
+//     SSL_ALLOC_FAILED (-0x7780), and (b) starve the 4th httpd server of a
+//     task stack on a post-reboot restart (ESP_ERR_HTTPD_TASK), taking the
+//     whole API server down. Placing the stack in the 27 MB PSRAM removes all
+//     internal-RAM pressure. The worker only does networking + heap work
+//     (never flash/NVS writes), so running on a PSRAM stack is safe.
 // ---------------------------------------------------------------------------
 static volatile bool s_refresh_busy = false;
 static weather_data_t s_worker_result;   // written by worker, read on UI task
@@ -339,11 +349,14 @@ static void refresh_timer_cb(lv_timer_t* timer)
 
 void weather_service_init(void)
 {
-    // Create the persistent worker ONCE. Priority 4 keeps it below the LVGL
-    // render task and the HTTPS server (both priority 5) so a background
-    // weather fetch never preempts the UI or the web server.
+    // Create the persistent worker ONCE, with its stack in PSRAM so it never
+    // competes with the HTTPS servers for internal RAM. Priority 4 keeps it
+    // below the LVGL render task and the HTTPS server (both priority 5) so a
+    // background weather fetch never preempts the UI or the web server.
     if (s_worker_task == NULL) {
-        if (xTaskCreate(weather_worker, "weather", 12288, NULL, 4, &s_worker_task) != pdPASS) {
+        if (xTaskCreateWithCaps(weather_worker, "weather", 12288, NULL, 4,
+                                &s_worker_task,
+                                MALLOC_CAP_SPIRAM) != pdPASS) {
             ESP_LOGW(TAG, "Failed to create weather worker task");
             s_worker_task = NULL;
         }
