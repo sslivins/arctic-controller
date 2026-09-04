@@ -150,12 +150,9 @@ jobs:
       - name: ESP-IDF Build (test firmware)
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.2
+          esp_idf_version: v6.1
           target: esp32p4
           path: '.'
-          # Applies patches/esp-idf-5.5.2-read_otadata-race-fix.patch (see
-          # patches/README.md, issue #210) before building.
-          command: bash -c "patch -p1 -d \"$IDF_PATH\" < patches/esp-idf-5.5.2-read_otadata-race-fix.patch && idf.py build"
 
       - name: Verify test instrumentation was compiled
         run: grep -q '^#define CONFIG_TEST_ENDPOINTS 1$' build/config/sdkconfig.h
@@ -1102,7 +1099,7 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
           REPOSITORY: ${{ github.repository }}
           RUNNER_NAME: ${{ runner.name }}
-          ESP_IDF_VERSION: v5.5.2
+          ESP_IDF_VERSION: v6.1
           UI_OUTCOME: ${{ steps.ui_tests.outcome }}
           API_OUTCOME: ${{ steps.api_tests.outcome }}
           WEB_OUTCOME: ${{ steps.web_tests.outcome }}

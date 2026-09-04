@@ -17,4 +17,7 @@ set(EXTRA_COMPONENT_DIRS
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
+# LVGL 9.5 trips -Werror=attributes on GCC 15.2 (shipped with ESP-IDF 6.1).
+idf_build_set_property(COMPILE_OPTIONS "-Wno-error=attributes" APPEND)
+
 project(arctic_controller)

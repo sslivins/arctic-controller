@@ -8,4 +8,7 @@ repository_info:
   commit_sha: 6040085eefe908de68fcd3438bf10b8ecd6de0c6
   path: .
 url: https://github.com/espressif/esp-hosted-mcu
-version: 1.4.0
+## Declared as 2.11.0 to satisfy esp_wifi_remote >=2.11's dependency bound.
+## The code is still upstream 1.4.0 (commit_sha above) plus our PSRAM MEM_ALLOC
+## backport; only the version string is raised.
+version: 2.11.0

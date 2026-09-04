@@ -110,7 +110,7 @@ idf_component_register(
     EMBED_FILES
         "web/index.html.gz"
     REQUIRES
-        m5stack_tab5
+        espressif__m5stack_tab5
         lvgl
         mooncake
         mooncake_log
@@ -123,7 +123,7 @@ idf_component_register(
         mdns
         esp_http_server
         esp_https_server
-        json
+        cjson
         esp_https_ota
         app_update
         esp_http_client

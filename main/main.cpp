@@ -4,6 +4,9 @@
  */
 #include <stdio.h>
 #include <bsp/m5stack_tab5.h>
+#include <driver/gpio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <lvgl.h>
 #include <esp_log.h>
 #include <esp_timer.h>
@@ -190,11 +193,20 @@ extern "C" void app_main(void)
 
     // Initialize IO expander (required for display control)
     mclog::tagInfo(TAG, "Initializing IO expander...");
-    i2c_master_bus_handle_t i2c_bus_handle = bsp_i2c_get_handle();
-    bsp_io_expander_pi4ioe_init(i2c_bus_handle);
+    bsp_io_expander_init();
 
-    // Reset touch panel
-    bsp_reset_tp();
+    // Reset touch panel.
+    // Upstream BSP has no bsp_reset_tp(); replicate the vendored pulse exactly:
+    // it drove IO-expander pins 4 and 5 low, waited 100 ms, then drove them high.
+    // Those pins are BSP_LCD_EN (4) and BSP_TOUCH_EN (5), so this is an LCD+touch
+    // rail power-cycle, not merely a touch enable.
+    gpio_reset_pin(GPIO_NUM_23);
+    bsp_feature_enable(BSP_FEATURE_LCD, false);
+    bsp_feature_enable(BSP_FEATURE_TOUCH, false);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    bsp_feature_enable(BSP_FEATURE_LCD, true);
+    bsp_feature_enable(BSP_FEATURE_TOUCH, true);
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     // Initialize Tab5 BSP (display, touch, etc.)
     // NOTE: sw_rotate is disabled because it causes visible tearing during scrolling.

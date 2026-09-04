@@ -160,12 +160,9 @@ jobs:
       - name: ESP-IDF Production Build (no test endpoints)
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.2
+          esp_idf_version: v6.1
           target: esp32p4
           path: '.'
-          # Applies patches/esp-idf-5.5.2-read_otadata-race-fix.patch (see
-          # patches/README.md, issue #210) before building.
-          command: bash -c "patch -p1 -d \"$IDF_PATH\" < patches/esp-idf-5.5.2-read_otadata-race-fix.patch && idf.py build"
 
       - name: Record production firmware provenance
         env:

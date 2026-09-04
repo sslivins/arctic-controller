@@ -88,13 +88,9 @@ jobs:
       - name: ESP-IDF Build
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.2
+          esp_idf_version: v6.1
           target: ${{ env.TARGET }}
           path: '.'
-          # Applies patches/esp-idf-5.5.2-read_otadata-race-fix.patch (see
-          # patches/README.md, issue #210) before building, then builds
-          # normally.
-          command: bash -c "patch -p1 -d \"$IDF_PATH\" < patches/esp-idf-5.5.2-read_otadata-race-fix.patch && idf.py build"
 
       - name: Verify OTA rollback protection is enabled
         # P0 tripwire: assert the EFFECTIVE compiled config (not what
@@ -131,7 +127,7 @@ jobs:
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Target | ${{ env.TARGET }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ESP-IDF | v5.5.2 |" >> $GITHUB_STEP_SUMMARY
+          echo "| ESP-IDF | v6.1 |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "- \`arctic_controller.bin\` - Main firmware (for OTA)" >> $GITHUB_STEP_SUMMARY
@@ -171,11 +167,9 @@ jobs:
       - name: ESP-IDF Build (demo disabled)
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.2
+          esp_idf_version: v6.1
           target: ${{ env.TARGET }}
           path: '.'
-          # See patches/README.md (issue #210).
-          command: bash -c "patch -p1 -d \"$IDF_PATH\" < patches/esp-idf-5.5.2-read_otadata-race-fix.patch && idf.py build"
 
       - name: Verify demo mode is compiled out
         run: |

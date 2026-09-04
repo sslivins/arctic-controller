@@ -96,9 +96,9 @@ bool wifi_mgr_init(void)
     // discharge, then bring it back up so every boot starts the C6 from a
     // clean power-on state (mimics a hardware power cycle).
     ESP_LOGI(TAG, "Power-cycling ESP32-C6 WiFi module...");
-    bsp_set_wifi_power_enable(false);
+    bsp_feature_enable(BSP_FEATURE_WIFI, false);
     vTaskDelay(pdMS_TO_TICKS(500));   // Hold power off long enough for the rail to discharge
-    bsp_set_wifi_power_enable(true);
+    bsp_feature_enable(BSP_FEATURE_WIFI, true);
     // ESP-Hosted requires adequate time for C6 to boot and initialize SDIO
     vTaskDelay(pdMS_TO_TICKS(1500));  // Give C6 time to boot
     
@@ -234,7 +234,7 @@ void wifi_mgr_deinit(void)
     }
     
     // Power off C6
-    bsp_set_wifi_power_enable(false);
+    bsp_feature_enable(BSP_FEATURE_WIFI, false);
     
     wifi_state.initialized = false;
     wifi_state.state = WIFI_MGR_STATE_NOT_INITIALIZED;

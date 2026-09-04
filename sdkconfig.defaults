@@ -1,6 +1,11 @@
 # Arctic Heat Pump Controller - ESP32-P4 Tab5 Configuration
 
 CONFIG_IDF_TARGET="esp32p4"
+# ESP-IDF 6.x defaults to requiring P4 silicon rev >= v3.1; the Tab5 hardware is
+# rev v1.3, so target the pre-v3 silicon family explicitly. Note Espressif treats
+# rev <3.0 and >=3.0 as mutually exclusive - one binary cannot serve both.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
