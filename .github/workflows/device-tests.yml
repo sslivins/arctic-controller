@@ -20,6 +20,7 @@ on:
       - 'fetch_repos.py'
       - 'tests/**'
       - '!tests/**/*.md'
+      - 'patches/**'
       - '.github/workflows/device-tests.yml'
   push:
     # Authoritative post-merge validation of the exact main commit SHA. The
@@ -152,6 +153,9 @@ jobs:
           esp_idf_version: v5.5.2
           target: esp32p4
           path: '.'
+          # Applies patches/esp-idf-5.5.2-read_otadata-race-fix.patch (see
+          # patches/README.md, issue #210) before building.
+          command: bash -c "patch -p1 -d \"$IDF_PATH\" < patches/esp-idf-5.5.2-read_otadata-race-fix.patch && idf.py build"
 
       - name: Verify test instrumentation was compiled
         run: grep -q '^#define CONFIG_TEST_ENDPOINTS 1$' build/config/sdkconfig.h
