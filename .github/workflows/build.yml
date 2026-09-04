@@ -15,6 +15,7 @@ on:
       - 'lv_conf.h'
       - 'repos.json'
       - 'fetch_repos.py'
+      - 'patches/**'
       - '.github/workflows/build.yml'
   pull_request:
     branches:
@@ -30,6 +31,7 @@ on:
       - 'lv_conf.h'
       - 'repos.json'
       - 'fetch_repos.py'
+      - 'patches/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
@@ -89,6 +91,10 @@ jobs:
           esp_idf_version: v5.5.2
           target: ${{ env.TARGET }}
           path: '.'
+          # Applies patches/esp-idf-5.5.2-read_otadata-race-fix.patch (see
+          # patches/README.md, issue #210) before building, then builds
+          # normally.
+          command: bash -c "patch -p1 -d \"$IDF_PATH\" < patches/esp-idf-5.5.2-read_otadata-race-fix.patch && idf.py build"
 
       - name: Verify OTA rollback protection is enabled
         # P0 tripwire: assert the EFFECTIVE compiled config (not what
@@ -168,6 +174,8 @@ jobs:
           esp_idf_version: v5.5.2
           target: ${{ env.TARGET }}
           path: '.'
+          # See patches/README.md (issue #210).
+          command: bash -c "patch -p1 -d \"$IDF_PATH\" < patches/esp-idf-5.5.2-read_otadata-race-fix.patch && idf.py build"
 
       - name: Verify demo mode is compiled out
         run: |
