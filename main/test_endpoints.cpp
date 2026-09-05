@@ -594,6 +594,11 @@ static lv_obj_t* find_by_tag(lv_obj_t* root, const char* tag, int depth)
 // chronic source of device-test flakiness). Retry briefly, releasing the
 // display lock between attempts so the UI task can advance the animation.
 //
+// The search covers the active screen AND lv_layer_top(): modal dialogs
+// (ui_dialog_create) are parented to the top layer so they float above the tab
+// shell, and a resolver that only walked lv_scr_act() could not see — and so
+// could never click — any dialog action button.
+//
 // On success returns the widget WITH the display lock HELD (caller must
 // bsp_display_unlock() once done). On failure returns NULL with the lock
 // RELEASED; *lock_timed_out is set true if a lock acquisition (not the widget
@@ -610,6 +615,10 @@ static lv_obj_t* resolve_tag_locked(const char* tag, bool* lock_timed_out)
         }
 
         lv_obj_t* found = find_by_tag(lv_scr_act(), tag, 0);
+        if (!found) {
+            // Modal dialogs live on the top layer, not the active screen.
+            found = find_by_tag(lv_layer_top(), tag, 0);
+        }
         if (found) return found;  // keep the lock held for the caller
 
         // Not found yet — release the lock so the UI task can tick any pending
@@ -718,6 +727,9 @@ static esp_err_t ui_state_get_handler(httpd_req_t* req)
     int widget_count = 0;
     lv_obj_t* scr = lv_scr_act();
     walk_tree_iterative(scr, buf, &pos, BUF_SIZE, &widget_count);
+    // Modal dialogs are parented to the top layer, so they would otherwise be
+    // invisible to find_widget/has_widget/wait_for_widget. Normally empty.
+    walk_tree_iterative(lv_layer_top(), buf, &pos, BUF_SIZE, &widget_count);
 
     bsp_display_unlock();
 
@@ -912,10 +924,12 @@ static esp_err_t click_post_handler(httpd_req_t* req)
         }
 
         lv_obj_t* scr = lv_scr_act();
+        lv_obj_t* top = lv_layer_top();
 
         // Search by tag first (most specific)
         if (has_tag) {
             found = find_by_tag(scr, search_tag, 0);
+            if (!found) found = find_by_tag(top, search_tag, 0);
         }
 
         // Search with translated/resolved text
@@ -924,13 +938,20 @@ static esp_err_t click_post_handler(httpd_req_t* req)
                 has_exact ? search_exact : NULL,
                 has_contains ? search_contains : NULL, 0);
         }
+        if (!found) {
+            found = find_label_by_text(top,
+                has_exact ? search_exact : NULL,
+                has_contains ? search_contains : NULL, 0);
+        }
 
         // Fallback: try original English text (for non-i18n labels)
         if (!found && original_exact[0]) {
             found = find_label_by_text(scr, original_exact, NULL, 0);
+            if (!found) found = find_label_by_text(top, original_exact, NULL, 0);
         }
         if (!found && original_contains[0]) {
             found = find_label_by_text(scr, NULL, original_contains, 0);
+            if (!found) found = find_label_by_text(top, NULL, original_contains, 0);
         }
 
         if (found) break;  // keep the lock held for the click below
