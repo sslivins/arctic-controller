@@ -101,6 +101,8 @@ SKIP_ENTIRELY = {
     "/api/brownout/clear",          # clears persistent boot statistics
     "/api/ha/pair",                 # opens/cancels a Home Assistant pairing window
     "/api/ha/revoke",               # revokes the Home Assistant integration token
+    "/api/tls/certificate",         # POST persists certs to NVS, DELETE erases them —
+                                    # either can break the HTTPS the test run depends on
     "/login",                       # session management
     "/logout",                      # session management
 }
@@ -152,6 +154,26 @@ def _setup_auth():
 _setup_auth()
 
 
+def _probe_device() -> bool:
+    """Was the device reachable at module load?
+
+    Used to tell a genuinely absent device (legitimate skip) apart from a
+    transport fault that appears mid-run (a real failure worth surfacing).
+    """
+    try:
+        _auth_session.get(f"{BASE_URL}/api/health", timeout=5)
+        return True
+    except Exception:
+        return False
+
+
+_DEVICE_REACHABLE = _probe_device()
+
+# Number of generated cases actually dispatched to the device. Guarded by
+# test_schema_fuzz_actually_ran below — see that test for why.
+_CASES_EXECUTED = 0
+
+
 # ── Tier 1: Automatic schema validation ──────────────────────────────────
 # Schemathesis generates test cases for every endpoint × method combination
 # and validates that responses conform to the documented OpenAPI schema.
@@ -183,13 +205,27 @@ def test_production_api_schema(case):
         case.headers["X-API-Key"] = API_KEY
 
     time.sleep(0.1)  # be gentle on the ESP32
+    global _CASES_EXECUTED
+    _CASES_EXECUTED += 1
     try:
         case.call_and_validate(
             base_url=BASE_URL,
             session=_auth_session,
             excluded_checks=_EXCLUDED_PROBES,
+            # The device serves a self-signed certificate. Schemathesis issues
+            # its requests with the per-request default (verify=True), which
+            # overrides _auth_session.verify, so this must be passed explicitly.
+            verify=False,
         )
+    except requests.exceptions.SSLError as exc:
+        # Must precede ConnectionError: SSLError is a subclass of it. Silently
+        # skipping here is what disabled this entire suite in CI.
+        pytest.fail(f"TLS verification failed against {BASE_URL}: {exc}")
     except requests.exceptions.ConnectionError:
+        if _DEVICE_REACHABLE:
+            # The device answered at module load, so losing it mid-run is a
+            # real fault (crash/reset), not an absent fixture.
+            raise
         pytest.skip(f"Device unreachable at {BASE_URL}")
     except BaseException as exc:
         # Schemathesis generates probe requests that strip auth. The device
@@ -204,6 +240,31 @@ def test_production_api_schema(case):
         ):
             pytest.skip("Undocumented 401 — auth probe, not a schema issue")
         raise
+
+
+# ── Coverage guard ───────────────────────────────────────────────────────
+
+
+# The schema fuzz silently disabled itself in CI: the device's self-signed
+# certificate made every generated case raise SSLError, which subclasses
+# requests.ConnectionError and so was swallowed by the "Device unreachable"
+# skip. All 67 cases reported SKIPPED and the job stayed green for months.
+# A suite that can quietly reduce itself to zero coverage needs an explicit
+# floor, so failure to run is a failure rather than a silent pass.
+MIN_EXECUTED_CASES = 20
+
+
+def test_schema_fuzz_actually_ran(request):
+    """Guard: the fuzz must dispatch real cases, not skip its way to green."""
+    if request.config.option.keyword or request.config.option.markexpr:
+        pytest.skip("filtered run (-k/-m) — case count is not meaningful")
+    if not _DEVICE_REACHABLE:
+        pytest.skip(f"Device unreachable at {BASE_URL}")
+    assert _CASES_EXECUTED >= MIN_EXECUTED_CASES, (
+        f"Only {_CASES_EXECUTED} schema case(s) reached the device "
+        f"(expected >= {MIN_EXECUTED_CASES}). The fuzz is not actually "
+        f"exercising the API — check auth and TLS setup, not this threshold."
+    )
 
 
 # ── Tier 2: Targeted smoke tests ─────────────────────────────────────────
