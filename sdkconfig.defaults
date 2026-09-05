@@ -1,6 +1,11 @@
 # Arctic Heat Pump Controller - ESP32-P4 Tab5 Configuration
 
 CONFIG_IDF_TARGET="esp32p4"
+# ESP-IDF 6.x defaults to requiring P4 silicon rev >= v3.1; the Tab5 hardware is
+# rev v1.3, so target the pre-v3 silicon family explicitly. Note Espressif treats
+# rev <3.0 and >=3.0 as mutually exclusive - one binary cannot serve both.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
@@ -12,6 +17,10 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # Home Assistant local-push transport and device feasibility tests
 CONFIG_HTTPD_WS_SUPPORT=y
 CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
+
+# ESP-IDF 6.1 no longer invokes the WebSocket URI handler for the handshake
+# request itself, so client registration moved to ws_post_handshake_cb.
+CONFIG_HTTPD_WS_POST_HANDSHAKE_CB_SUPPORT=y
 CONFIG_LWIP_MAX_SOCKETS=24
 # Shared LWIP active-TCP PCB pool. Raised 16->24 to match MAX_SOCKETS so the
 # four HTTPS/HTTP servers plus outbound clients cannot exhaust the pool under
@@ -107,8 +116,22 @@ CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
 CONFIG_LV_USE_LOG=y
 CONFIG_LV_LOG_PRINTF=y
 CONFIG_LV_USE_PERF_MONITOR=y
-# Enable IRAM for LVGL fast memory - device is always-on, optimize for smooth UI
-CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+# Keep LVGL out of IRAM. Under ESP-IDF 5.5 this symbol did not resolve, so the
+# setting was silently ignored. Under 6.1 it takes effect and moves ~56 KB of
+# LVGL .text into the 431 KB DIRAM pool, which starves the internal heap: the
+# 16 KB httpd task stack no longer fits in L2MEM and heap_caps silently falls
+# back to LP-SRAM (0x5010_0000). LP-SRAM costs ~400 CPU cycles per access from
+# the HP core, so every stack touch on the httpd task ran ~50x slow and screen
+# renders went from ~50 ms to 1-3 s. Measured: volatile loop 1,026,754 us/1M
+# with this on vs 19,862 us/1M with it off.
+# CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM is not set
+
+# Never let LP-SRAM (RTC fast memory) back a general heap allocation. It is
+# valid memory but roughly 400 cycles per access from the HP core, so a task
+# stack that lands there is a silent ~50x performance cliff rather than an
+# out-of-memory error. Excluding it turns internal RAM exhaustion into a loud
+# ESP_ERR_HTTPD_TASK failure at startup instead.
+CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=n
 # LVGL uses a custom allocator (main/lv_mem_psram.c) that draws widget memory
 # from PSRAM instead of the ~180 KB internal RAM. Needed because the persistent
 # tab shell keeps all four tab trees resident, which overflowed the internal
@@ -170,3 +193,50 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
 # hang. esp_restart() from the panic handler then recovers the device
 # unattended, and the boot_stats crash-streak / safe-mode logic bounds any loop.
 CONFIG_ESP_TASK_WDT_PANIC=y
+
+# ESP-IDF 6.x: X.509 certificate creation defaults to off. The controller
+# generates its own self-signed HTTPS identity certificate at runtime.
+CONFIG_MBEDTLS_X509_CREATE_C=y
+CONFIG_MBEDTLS_X509_CRT_WRITE_C=y
+
+# Do not offer Curve25519 for ECDHE.
+#
+# The ESP32-P4 ECC peripheral accelerates SECP192R1/SECP256R1 only;
+# Curve25519 is a Montgomery curve and runs entirely in software (the
+# fixed-point ECP optimisation does not apply to it either). Mbed TLS 4.0
+# changed the default group preference to put X25519 first, so under
+# ESP-IDF 6.1 every inbound TLS handshake silently moved onto the software
+# path.
+#
+# Measured on hardware, one HTTPS handshake to /api/health:
+#   X25519 (6.1 default) : ~4.5 s
+#   SECP256R1 (hardware) : ~0.43 s
+#
+# That is not merely slow: device-tests provisions credentials with
+# `curl --connect-timeout 3`, which for HTTPS covers the TLS handshake, so
+# every request failed with curl exit 28 and the suite could not start.
+#
+# The PSA primitives themselves are fine (ECDSA sign 12 ms, ECDH 5 ms,
+# keygen 0.6 ms), which is what ruled out crypto in general and pointed at
+# the negotiated group specifically.
+#
+# Dropping the curve makes both the server and outbound client connections
+# negotiate SECP256R1. TLS 1.3 peers that offer only an X25519 key share
+# simply get a HelloRetryRequest for P-256; P-256 is universally supported.
+CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED=n
+
+# ESP32-P4 revisions below v3.0 have no ECDSA peripheral; the PSA hardware
+# ECDSA driver defaults on and logs errors on every verify before falling
+# back to software.
+CONFIG_MBEDTLS_HARDWARE_ECDSA_VERIFY=n
+
+# ESP-IDF 6.1 has a higher internal-SRAM baseline than 5.5.2, and the
+# default 16 KB always-internal threshold forces almost every allocation into
+# internal RAM. With the threshold at 16384 the mandatory HTTPS server cannot
+# obtain its contiguous 16 KB task stack (measured: free=33235,
+# largest_block=12800). Allocations larger than 512 bytes now go to PSRAM by
+# default; smaller objects and anything requesting MALLOC_CAP_INTERNAL/DMA are
+# unaffected. Still required after the LVGL-IRAM fix below.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+
+

@@ -16,6 +16,9 @@
 /** Includes **/
 #include "string.h"
 #include "sdio_drv.h"
+#if __has_include("esp_wifi_remote_version.h")
+#include "esp_wifi_remote_version.h"
+#endif
 #include "sdio_reg.h"
 #include "serial_drv.h"
 #include "stats.h"
@@ -982,8 +985,19 @@ static void sdio_process_rx_task(void const* pvParameters)
 
 				ret = chan_arr[buf_handle->if_type]->rx(chan_arr[buf_handle->if_type]->api_chan,
 						copy_payload, copy_payload, buf_handle->payload_len);
+				/* esp-wifi-remote >= 1.3.0 always takes ownership of the buffer passed
+				 * as buff_to_free and releases it via esp_wifi_internal_free_rx_buffer(),
+				 * including on the failure path. Freeing it again here is a double free.
+				 * Backport of the ESP_WIFI_REMOTE_VERSION guard from upstream
+				 * esp-hosted-mcu 2.x; this vendored host driver is 1.4.x, which predates
+				 * the guard while ESP-IDF 6.1 pulls in esp_wifi_remote 1.6.x. */
+#if !defined(ESP_WIFI_REMOTE_VERSION) || \
+	(ESP_WIFI_REMOTE_VERSION < ESP_WIFI_REMOTE_VERSION_VAL(1, 3, 1))
 				if (unlikely(ret))
 					HOSTED_FREE(copy_payload);
+#else
+				(void)ret;
+#endif
 			}
 #else
 			if (chan_arr[buf_handle->if_type] && chan_arr[buf_handle->if_type]->rx) {

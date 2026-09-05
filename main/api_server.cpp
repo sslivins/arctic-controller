@@ -435,6 +435,26 @@ bool api_server_start(void)
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
+
+    // Port 80 serves exactly one route (/api/health) plus the "HTTPS required"
+    // 404 notice -- in test builds too, since test endpoints are registered on
+    // the HTTPS server only. It therefore needs neither the full handler table
+    // nor a 16 KB stack.
+    //
+    // The handler table is trimmed, but the stack deliberately is NOT:
+    // esp_http_server gives every server task the name "httpd" (httpd_config_t
+    // has no task_name field, still true in 6.1), so
+    // tests/api/test_stack_watermark_budget.py collapses all four servers into
+    // a single "httpd" key and reports the smallest headroom among them.
+    // Right-sizing this one silently retargets the guard at port 80 and stops
+    // it protecting the servers that actually run handlers. The RAM saved is
+    // not needed now that the real internal-RAM shortfall (LVGL being placed
+    // in IRAM) has been fixed.
+    //
+    // httpd task stacks must live in internal RAM: handlers write NVS, and a
+    // PSRAM stack trips esp_task_stack_is_sane_cache_disabled() while the
+    // flash cache is disabled.
+    const int http_uri_handlers = 8;
     
     esp_err_t ret;
 
@@ -454,7 +474,7 @@ bool api_server_start(void)
         httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
         http_config.lru_purge_enable   = true;
         http_config.uri_match_fn       = httpd_uri_match_wildcard;
-        http_config.max_uri_handlers   = uri_handlers;
+        http_config.max_uri_handlers   = http_uri_handlers;
         http_config.stack_size         = stack_size;
         http_config.max_resp_headers   = max_headers;
         http_config.recv_wait_timeout  = recv_timeout;
@@ -546,6 +566,17 @@ bool api_server_start(void)
             ESP_LOGE(
                 TAG, "Failed to start mandatory HTTPS server: %s",
                 esp_err_to_name(ret));
+            // ESP_ERR_HTTPD_TASK means the server task stack allocation
+            // failed. That needs a CONTIGUOUS block, so report the largest
+            // free block, not just the total.
+            ESP_LOGE(
+                TAG,
+                "  internal heap: free=%u largest_block=%u (needed %d for stack)",
+                (unsigned)heap_caps_get_free_size(
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                stack_size);
             api_server_stop();
             return false;
         }
@@ -599,6 +630,16 @@ bool api_server_start(void)
                      "Failed to start integration HTTPS server: %s "
                      "(HTTP remains available on port 80)",
                      esp_err_to_name(ret));
+            // ESP_ERR_HTTPD_TASK means the task stack allocation failed, which
+            // needs a CONTIGUOUS block -- report the largest free block too.
+            ESP_LOGE(
+                TAG,
+                "  internal heap: free=%u largest_block=%u (needed %d for stack)",
+                (unsigned)heap_caps_get_free_size(
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                integration_config.httpd.stack_size);
         } else {
             ESP_LOGI(TAG, "Integration HTTPS server started on port 8443");
         }
@@ -1210,12 +1251,28 @@ bool api_server_start(void)
     REGISTER_URI(ha_manage_revoke_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
-    // Test endpoints need HTTP for CI (no TLS on test runner)
-    test_endpoints_register(server);
+    // Test endpoints are registered on the HTTPS server only.
+    //
+    // They used to also be registered on the port-80 server ("no TLS on test
+    // runner"), but that is stale: device-tests.yml provisions credentials and
+    // then rewrites ARCTIC_URL to https:// before any suite runs, so every
+    // /api/test/* request already goes over TLS. The only plain-HTTP calls CI
+    // makes are liveness probes against /api/heatpump/status, a production
+    // route.
+    //
+    // Registering ~53 test handlers on port 80 was expensive: it forced that
+    // server to carry the full 140-slot handler table and a 16 KB task stack,
+    // consuming the contiguous internal SRAM that the HTTPS servers need for
+    // their own stacks. Under ESP-IDF 6.1 that was the difference between the
+    // servers starting and failing with ESP_ERR_HTTPD_TASK.
     if (server_ssl != NULL) {
         test_endpoints_register(server_ssl);
+        ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
+    } else {
+        ESP_LOGE(TAG,
+                 "No HTTPS server: test instrumentation endpoints NOT "
+                 "registered");
     }
-    ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
 
     httpd_config_t websocket_config = HTTPD_DEFAULT_CONFIG();
     websocket_config.server_port = 81;
@@ -1223,6 +1280,19 @@ bool api_server_start(void)
     websocket_config.max_uri_handlers = 1;
     websocket_config.max_open_sockets = 2;
     websocket_config.stack_size = 8192;
+    // This server exists only in CONFIG_TEST_ENDPOINTS builds and its single
+    // handler (/api/test/ws-feasibility) does only socket and RAM work -- no
+    // NVS, no flash -- so a PSRAM stack is safe:
+    // esp_task_stack_is_sane_cache_disabled() only inspects the *current*
+    // task stack pointer, so a PSRAM stack is a problem only for a task that
+    // itself initiates a flash operation. Being preempted while another core
+    // disables the cache is fine.
+    //
+    // Still required under ESP-IDF 6.1 even after the LVGL-IRAM fix: with an
+    // internal stack this server is the one that fails
+    // (ESP_ERR_HTTPD_TASK), because the three production servers above have
+    // already taken the large contiguous internal blocks by this point.
+    websocket_config.task_caps = MALLOC_CAP_SPIRAM;
     websocket_config.lru_purge_enable = true;
     websocket_config.recv_wait_timeout = 10;
     websocket_config.send_wait_timeout = 1;
@@ -1290,6 +1360,7 @@ bool api_server_start(void)
             .handle_ws_control_frames = true,
             .supported_subprotocol = NULL,
             .ws_pre_handshake_cb = ha_websocket_pre_handshake,
+            .ws_post_handshake_cb = ha_websocket_post_handshake,
         };
         ret = httpd_register_uri_handler(
             server_integration, &ha_events_uri);

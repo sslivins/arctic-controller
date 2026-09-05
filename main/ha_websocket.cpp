@@ -3,6 +3,8 @@
  * Home Assistant production WebSocket push transport
  */
 #include "ha_websocket.h"
+#include "freertos/idf_additions.h"
+#include "esp_heap_caps.h"
 
 #include "auth_manager.h"
 #include "ha_integration.h"
@@ -357,7 +359,8 @@ void pushTask(void* argument)
     closeAllClients();
     s_task = nullptr;
     xSemaphoreGive(s_task_done);
-    vTaskDelete(nullptr);
+    // Must match xTaskCreateWithCaps() so the PSRAM stack is freed.
+    vTaskDeleteWithCaps(nullptr);
 }
 
 size_t activeClientCount()
@@ -458,13 +461,24 @@ bool ha_websocket_start(httpd_handle_t server)
     }
     s_server = server;
     s_running = true;
-    if (xTaskCreate(
+    // Stack lives in PSRAM: internal SRAM is under real pressure during
+    // startup (the three httpd servers reserve their internal stacks just
+    // before this point), and under ESP-IDF 6.1 this 8 KB internal request
+    // fails outright. This is safe because a PSRAM stack is only a problem
+    // for a task that *itself* initiates a flash operation --
+    // spi_flash_disable_interrupts_caches_and_other_cpu() asserts on the
+    // current stack pointer only. pushTask does no NVS/flash/OTA work; it
+    // reads in-RAM state and writes WebSocket frames. (The httpd task
+    // stacks, by contrast, must stay internal because their handlers do
+    // write NVS.)
+    if (xTaskCreateWithCaps(
             pushTask,
             "ha_ws_push",
             8192,
             nullptr,
             5,
-            &s_task) != pdPASS) {
+            &s_task,
+            MALLOC_CAP_SPIRAM) != pdPASS) {
         s_running = false;
         s_server = nullptr;
         ESP_LOGE(TAG, "Unable to start WebSocket push task");
@@ -512,36 +526,49 @@ esp_err_t ha_websocket_pre_handshake(httpd_req_t* req)
     return ESP_OK;
 }
 
+// Called by esp_http_server immediately after it has written the 101 Switching
+// Protocols response. Registering the client has to happen here rather than in
+// ha_websocket_handler(): up to ESP-IDF 5.5 the URI handler was still invoked
+// once with req->method == HTTP_GET for the handshake request, and that call
+// was where the client got registered. ESP-IDF 6.1 deliberately stopped doing
+// that ("If the request is websocket handshake, then do not call the
+// uri->handler" -- components/esp_http_server/src/httpd_uri.c) and added
+// ws_post_handshake_cb for exactly this purpose. Without this the socket
+// upgraded successfully but was never added to s_clients, so the push task had
+// no client to send the hello/snapshot to and every consumer timed out.
+esp_err_t ha_websocket_post_handshake(httpd_req_t* req)
+{
+    const int fd = httpd_req_to_sockfd(req);
+    char token[AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
+    uint32_t generation = 0;
+    const bool valid =
+        extractBearerToken(req, token) &&
+        auth_mgr_validate_integration_token_with_generation(
+            token, &generation);
+    memset(token, 0, sizeof(token));
+    if (!valid) {
+        return ESP_FAIL;
+    }
+
+    const timeval send_timeout = {
+        .tv_sec = 0,
+        .tv_usec = SEND_TIMEOUT_US,
+    };
+    if (setsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &send_timeout,
+            sizeof(send_timeout)) != 0) {
+        ESP_LOGE(TAG, "Unable to set send timeout fd=%d", fd);
+        return ESP_FAIL;
+    }
+    return registerClient(fd, generation) ? ESP_OK : ESP_FAIL;
+}
+
 esp_err_t ha_websocket_handler(httpd_req_t* req)
 {
     const int fd = httpd_req_to_sockfd(req);
-    if (req->method == HTTP_GET) {
-        char token[AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
-        uint32_t generation = 0;
-        const bool valid =
-            extractBearerToken(req, token) &&
-            auth_mgr_validate_integration_token_with_generation(
-                token, &generation);
-        memset(token, 0, sizeof(token));
-        if (!valid) {
-            return ESP_FAIL;
-        }
-
-        const timeval send_timeout = {
-            .tv_sec = 0,
-            .tv_usec = SEND_TIMEOUT_US,
-        };
-        if (setsockopt(
-                fd,
-                SOL_SOCKET,
-                SO_SNDTIMEO,
-                &send_timeout,
-                sizeof(send_timeout)) != 0) {
-            ESP_LOGE(TAG, "Unable to set send timeout fd=%d", fd);
-            return ESP_FAIL;
-        }
-        return registerClient(fd, generation) ? ESP_OK : ESP_FAIL;
-    }
 
     httpd_ws_frame_t frame = {};
     esp_err_t result = httpd_ws_recv_frame(req, &frame, 0);

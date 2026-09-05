@@ -7,7 +7,7 @@
 #include <esp_random.h>
 #include <nvs_flash.h>
 #include <nvs.h>
-#include <mbedtls/sha256.h>
+#include <psa/crypto.h>
 #include <mbedtls/platform_util.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -66,12 +66,16 @@ static void generate_random_hex(char* buffer, size_t len)
 
 static void hash_password(const char* password, uint8_t* hash_out)
 {
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0);  // 0 = SHA-256 (not SHA-224)
-    mbedtls_sha256_update(&ctx, (const unsigned char*)password, strlen(password));
-    mbedtls_sha256_finish(&ctx, hash_out);
-    mbedtls_sha256_free(&ctx);
+    size_t hash_len = 0;
+    const psa_status_t status = psa_hash_compute(
+        PSA_ALG_SHA_256, (const uint8_t*)password, strlen(password),
+        hash_out, PSA_HASH_LENGTH(PSA_ALG_SHA_256), &hash_len);
+    if (status != PSA_SUCCESS) {
+        // Never leave a caller-visible digest that could compare equal to a
+        // stored hash; zeroing cannot match a real SHA-256 of a password.
+        ESP_LOGE(TAG, "psa_hash_compute failed: %d", (int)status);
+        memset(hash_out, 0, PSA_HASH_LENGTH(PSA_ALG_SHA_256));
+    }
 }
 
 static bool constant_time_equal(const uint8_t* lhs, const uint8_t* rhs, size_t len)
