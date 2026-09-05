@@ -33,7 +33,7 @@ Arctic Controller is a heat pump controller running on an **ESP32-P4** (M5Stack 
 It communicates with an ECO-600 heat pump via Macon/Tuya 55AA over RS485 and exposes a
 REST API + WebSocket dashboard for monitoring and control.
 
-- **Framework**: ESP-IDF v5.5.2
+- **Framework**: ESP-IDF v6.1
 - **UI**: LVGL 9.2 with `esp_lvgl_port`
 - **Display**: 720×1280 IPS (Tab5 built-in)
 - **Languages**: C++ (firmware), Python (tests), HTML/JS (web dashboard)

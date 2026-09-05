@@ -161,6 +161,11 @@ extern "C" void app_main(void)
         case ESP_RST_DEEPSLEEP:reason_str = "DEEP_SLEEP"; break;
         case ESP_RST_BROWNOUT: reason_str = "BROWNOUT"; break;
         case ESP_RST_SDIO:     reason_str = "SDIO"; break;
+        case ESP_RST_USB:      reason_str = "USB"; break;
+        case ESP_RST_JTAG:     reason_str = "JTAG"; break;
+        case ESP_RST_EFUSE:    reason_str = "EFUSE_ERROR"; break;
+        case ESP_RST_PWR_GLITCH: reason_str = "POWER_GLITCH"; break;
+        case ESP_RST_CPU_LOCKUP: reason_str = "CPU_LOCKUP (crash)"; break;
         default: break;
     }
     ESP_LOGW(TAG, "========================================");

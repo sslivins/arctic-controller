@@ -455,6 +455,9 @@ bool api_server_start(void)
         http_config.lru_purge_enable   = true;
         http_config.uri_match_fn       = httpd_uri_match_wildcard;
         http_config.max_uri_handlers   = uri_handlers;
+        // IDF 6.x defaults httpd task stacks to internal RAM, which is too
+        // scarce here once the SDIO/WiFi driver is up; keep them in PSRAM.
+        http_config.task_caps          = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         http_config.stack_size         = stack_size;
         http_config.max_resp_headers   = max_headers;
         http_config.recv_wait_timeout  = recv_timeout;
@@ -499,6 +502,9 @@ bool api_server_start(void)
         ssl_config.httpd.lru_purge_enable   = true;
         ssl_config.httpd.uri_match_fn       = httpd_uri_match_wildcard;
         ssl_config.httpd.max_uri_handlers   = uri_handlers;
+        // IDF 6.x defaults httpd task stacks to internal RAM, which is too
+        // scarce here once the SDIO/WiFi driver is up; keep them in PSRAM.
+        ssl_config.httpd.task_caps          = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         ssl_config.httpd.stack_size         = stack_size;
         ssl_config.httpd.max_resp_headers   = max_headers;
         ssl_config.httpd.recv_wait_timeout  = recv_timeout;
@@ -569,6 +575,7 @@ bool api_server_start(void)
         // integration drives (status, releases, github) plus headroom.
         integration_config.httpd.max_uri_handlers = 12;
         integration_config.httpd.max_open_sockets = 5;
+        integration_config.httpd.task_caps = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         integration_config.httpd.stack_size = 12288;
         // Reject surplus connections instead of evicting established WSS
         // clients. Three WSS slots leave capacity for REST reconciliation
@@ -1222,6 +1229,7 @@ bool api_server_start(void)
     websocket_config.ctrl_port = 32770;
     websocket_config.max_uri_handlers = 1;
     websocket_config.max_open_sockets = 2;
+    websocket_config.task_caps = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     websocket_config.stack_size = 8192;
     websocket_config.lru_purge_enable = true;
     websocket_config.recv_wait_timeout = 10;

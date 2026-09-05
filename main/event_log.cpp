@@ -11,6 +11,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <string.h>
+#include <time.h>
 
 static const char* TAG = "event_log";
 
@@ -178,6 +179,7 @@ void event_log_record_reset_reason(esp_reset_reason_t reason) {
             event_log_record(EVENT_BROWNOUT_RESET, 0);
             break;
         case ESP_RST_PANIC:
+        case ESP_RST_CPU_LOCKUP:
             event_log_record(EVENT_APPLICATION_CRASH, 0);
             break;
         case ESP_RST_INT_WDT:

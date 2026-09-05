@@ -5,6 +5,7 @@
 #define __OS_WRAPPER_H
 
 #include "os_header.h"
+#include "esp_heap_caps.h"
 #include "esp_task.h"
 #include <signal.h>
 #include <unistd.h>
@@ -111,19 +112,11 @@ enum {
  * streaming path trips assert(*buf) in sdio_rx_get_buffer (sdio_drv.c:670) -> panic.
  * Host-side backport of esp-hosted-mcu 2.12.8 (MEMPOOL_PREFER_SPIRAM); no C6 reflash. */
 #define MEM_ALLOC(x)       ({                                       \
-	void *tmp_buf = NULL;                                           \
-	size_t actual_size = 0;                                         \
-	esp_dma_mem_info_t dma_mem_info = {                             \
-		.extra_heap_caps = MALLOC_CAP_SPIRAM,                       \
-		.dma_alignment_bytes = 64,                                  \
-	};                                                              \
-	if (esp_dma_capable_malloc((x), &dma_mem_info, &tmp_buf, &actual_size) != ESP_OK) \
-		tmp_buf = NULL;                                             \
-	if (!tmp_buf) {                                                 \
-		dma_mem_info.extra_heap_caps = 0;                          \
-		if (esp_dma_capable_malloc((x), &dma_mem_info, &tmp_buf, &actual_size) != ESP_OK) \
-			tmp_buf = NULL;                                         \
-	}                                                               \
+	void *tmp_buf = heap_caps_malloc((x),                            \
+		MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SPIRAM); \
+	if (!tmp_buf)                                                    \
+		tmp_buf = heap_caps_malloc((x),                                \
+			MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED);                  \
 	tmp_buf;})
 
 #define FREE(x)                          free(x);

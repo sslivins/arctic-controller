@@ -175,3 +175,13 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
 # hang. esp_restart() from the panic handler then recovers the device
 # unattended, and the boot_stats crash-streak / safe-mode logic bounds any loop.
 CONFIG_ESP_TASK_WDT_PANIC=y
+
+# ESP-IDF 6.x: X.509 certificate creation defaults to off. The controller
+# generates its own self-signed HTTPS identity certificate at runtime.
+CONFIG_MBEDTLS_X509_CREATE_C=y
+CONFIG_MBEDTLS_X509_CRT_WRITE_C=y
+
+# ESP32-P4 revisions below v3.0 have no ECDSA peripheral; the PSA hardware
+# ECDSA driver defaults on and logs errors on every verify before falling
+# back to software.
+CONFIG_MBEDTLS_HARDWARE_ECDSA_VERIFY=n

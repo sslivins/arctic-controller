@@ -1,0 +1,128 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7054dfc..240e1db 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -73,6 +73,7 @@ if(CONFIG_ESP_HOSTED_ENABLED)
+ endif()
+ 
+ idf_component_register(SRCS ${COMPONENT_SRCS}
++	REQUIRES esp_driver_sdmmc
+ 	PRIV_REQUIRES soc esp_event esp_netif esp_timer driver esp_wifi bt esp_http_client
+ 	EXCLUDE_SRCS ${EXCLUDE_COMPONENT_SRCS}
+ 	INCLUDE_DIRS ${COMPONENT_ADD_PUBLIC_INCLUDEDIRS}
+diff --git a/host/drivers/rpc/core/rpc_req.c b/host/drivers/rpc/core/rpc_req.c
+index 80bb6c6..5fd6eab 100644
+--- a/host/drivers/rpc/core/rpc_req.c
++++ b/host/drivers/rpc/core/rpc_req.c
+@@ -248,7 +248,8 @@ int compose_rpc_req(Rpc *req, ctrl_cmd_t *app_req, int32_t *failure_status)
+ 			if (p_a_sta->transition_disable)
+ 				H_SET_BIT(STA_TRASITION_DISABLED_BIT, p_c_sta->bitmask);
+ 
+-			WIFI_CONFIG_STA_SET_RESERVED_VAL(p_a_sta->reserved, p_c_sta->bitmask);
++			/* IDF 6.x renamed reserved->reserved1 and carved real feature bits out of it; send 0 (reserved bits must be zero on the wire). */
++			WIFI_CONFIG_STA_SET_RESERVED_VAL(0, p_c_sta->bitmask);
+ 
+ 			p_c_sta->sae_pwe_h2e = p_a_sta->sae_pwe_h2e;
+ 			p_c_sta->failure_retry_cnt = p_a_sta->failure_retry_cnt;
+@@ -279,7 +280,8 @@ int compose_rpc_req(Rpc *req, ctrl_cmd_t *app_req, int32_t *failure_status)
+ 			if (p_a_sta->he_trig_cqi_feedback_disabled)
+ 				H_SET_BIT(WIFI_HE_STA_CONFIG_he_trig_cqi_feedback_disabled_BIT, p_c_sta->he_bitmask);
+ 
+-			WIFI_HE_STA_SET_RESERVED_VAL(p_a_sta->he_reserved, p_c_sta->he_bitmask);
++			/* IDF 6.x renamed he_reserved->reserved2 and carved VHT bits out of it; send 0. */
++			WIFI_HE_STA_SET_RESERVED_VAL(0, p_c_sta->he_bitmask);
+ 
+ 			RPC_REQ_COPY_BYTES(p_c_sta->sae_h2e_identifier, p_a_sta->sae_h2e_identifier, SAE_H2E_IDENTIFIER_LEN);
+ 			break;
+diff --git a/host/drivers/rpc/core/rpc_rsp.c b/host/drivers/rpc/core/rpc_rsp.c
+index cc47f0a..763cdb3 100644
+--- a/host/drivers/rpc/core/rpc_rsp.c
++++ b/host/drivers/rpc/core/rpc_rsp.c
+@@ -265,7 +265,7 @@ int rpc_parse_rsp(Rpc *rpc_msg, ctrl_cmd_t *app_resp)
+ 			p_a_sta->ft_enabled = H_GET_BIT(STA_FT_ENABLED_BIT, p_c_sta->bitmask);
+ 			p_a_sta->owe_enabled = H_GET_BIT(STA_OWE_ENABLED_BIT, p_c_sta->bitmask);
+ 			p_a_sta->transition_disable = H_GET_BIT(STA_TRASITION_DISABLED_BIT, p_c_sta->bitmask);
+-			p_a_sta->reserved = WIFI_CONFIG_STA_GET_RESERVED_VAL(p_c_sta->bitmask);
++			/* Reserved bits intentionally not written back: IDF 6.x reserved1 is narrower than the old reserved field. */
+ 
+ 			p_a_sta->sae_pwe_h2e = p_c_sta->sae_pwe_h2e;
+ 			p_a_sta->failure_retry_cnt = p_c_sta->failure_retry_cnt;
+diff --git a/host/drivers/rpc/wrap/rpc_wrap.c b/host/drivers/rpc/wrap/rpc_wrap.c
+index 2a2b59e..a322b57 100644
+--- a/host/drivers/rpc/wrap/rpc_wrap.c
++++ b/host/drivers/rpc/wrap/rpc_wrap.c
+@@ -917,6 +917,9 @@ static esp_err_t http_client_event_handler(esp_http_client_event_t *evt)
+ 	case HTTP_EVENT_DISCONNECTED:
+ 		ESP_LOGI(OTA_TAG, "HTTP_EVENT_DISCONNECTED");
+ 		break;
++	default:
++		/* IDF 6.x adds HTTP_EVENT_ON_STATUS_CODE and HTTP_EVENT_ON_HEADERS_COMPLETE; ignore unhandled events. */
++		break;
+ 	case HTTP_EVENT_REDIRECT:
+ 		ESP_LOGW(TAG, "HTTP_EVENT_REDIRECT");
+ 		break;
+diff --git a/host/port/include/os_wrapper.h b/host/port/include/os_wrapper.h
+index fb14fdf..6b38e82 100644
+--- a/host/port/include/os_wrapper.h
++++ b/host/port/include/os_wrapper.h
+@@ -5,6 +5,7 @@
+ #define __OS_WRAPPER_H
+ 
+ #include "os_header.h"
++#include "esp_heap_caps.h"
+ #include "esp_task.h"
+ #include <signal.h>
+ #include <unistd.h>
+@@ -111,19 +112,11 @@ enum {
+  * streaming path trips assert(*buf) in sdio_rx_get_buffer (sdio_drv.c:670) -> panic.
+  * Host-side backport of esp-hosted-mcu 2.12.8 (MEMPOOL_PREFER_SPIRAM); no C6 reflash. */
+ #define MEM_ALLOC(x)       ({                                       \
+-	void *tmp_buf = NULL;                                           \
+-	size_t actual_size = 0;                                         \
+-	esp_dma_mem_info_t dma_mem_info = {                             \
+-		.extra_heap_caps = MALLOC_CAP_SPIRAM,                       \
+-		.dma_alignment_bytes = 64,                                  \
+-	};                                                              \
+-	if (esp_dma_capable_malloc((x), &dma_mem_info, &tmp_buf, &actual_size) != ESP_OK) \
+-		tmp_buf = NULL;                                             \
+-	if (!tmp_buf) {                                                 \
+-		dma_mem_info.extra_heap_caps = 0;                          \
+-		if (esp_dma_capable_malloc((x), &dma_mem_info, &tmp_buf, &actual_size) != ESP_OK) \
+-			tmp_buf = NULL;                                         \
+-	}                                                               \
++	void *tmp_buf = heap_caps_malloc((x),                            \
++		MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SPIRAM); \
++	if (!tmp_buf)                                                    \
++		tmp_buf = heap_caps_malloc((x),                                \
++			MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED);                  \
+ 	tmp_buf;})
+ 
+ #define FREE(x)                          free(x);
+diff --git a/host/port/src/os_wrapper.c b/host/port/src/os_wrapper.c
+index 8506d53..7dc8295 100644
+--- a/host/port/src/os_wrapper.c
++++ b/host/port/src/os_wrapper.c
+@@ -129,18 +129,11 @@ void *hosted_realloc(void *mem, size_t newsize)
+ 
+ void *hosted_malloc_align(size_t size, size_t align)
+ {
+-	esp_dma_mem_info_t dma_mem_info = {
+-		.extra_heap_caps = 0,
+-		.dma_alignment_bytes = align,
+-	};
+-	void *tmp_buf = NULL;
+-	size_t actual_size = 0;
+-	esp_err_t err = ESP_OK;
+-
+-	err = esp_dma_capable_malloc((size), &dma_mem_info, &tmp_buf, &actual_size);
+-	if (err) tmp_buf = NULL;
+-
+-	return tmp_buf;
++	/* IDF 6.x removed esp_dma_capable_malloc(); the documented replacement is the
++	 * aligned heap API with DMA + cache-aligned caps. See
++	 * docs/en/migration-guides/release-6.x/6.0/peripherals.rst (DMA Driver). */
++	return heap_caps_aligned_alloc(align, size,
++		MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED);
+ }
+ 
+ void hosted_free_align(void* ptr)

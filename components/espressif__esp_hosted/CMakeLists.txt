@@ -73,6 +73,7 @@ if(CONFIG_ESP_HOSTED_ENABLED)
 endif()
 
 idf_component_register(SRCS ${COMPONENT_SRCS}
+	REQUIRES esp_driver_sdmmc
 	PRIV_REQUIRES soc esp_event esp_netif esp_timer driver esp_wifi bt esp_http_client
 	EXCLUDE_SRCS ${EXCLUDE_COMPONENT_SRCS}
 	INCLUDE_DIRS ${COMPONENT_ADD_PUBLIC_INCLUDEDIRS}

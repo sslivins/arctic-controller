@@ -15,7 +15,7 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
-#include <mbedtls/sha256.h>
+#include <psa/crypto.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -168,11 +168,12 @@ bool calculateHash(const cJSON* value, uint8_t* hash)
         return false;
     }
 
-    mbedtls_sha256(
-        reinterpret_cast<const unsigned char*>(serialized),
-        strlen(serialized), hash, 0);
+    size_t hash_len = 0;
+    const psa_status_t status = psa_hash_compute(
+        PSA_ALG_SHA_256, reinterpret_cast<const uint8_t*>(serialized),
+        strlen(serialized), hash, SHA256_LEN, &hash_len);
     cJSON_free(serialized);
-    return true;
+    return status == PSA_SUCCESS;
 }
 
 bool assignRevision(const cJSON* state, uint64_t* revision)

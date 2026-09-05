@@ -917,6 +917,9 @@ static esp_err_t http_client_event_handler(esp_http_client_event_t *evt)
 	case HTTP_EVENT_DISCONNECTED:
 		ESP_LOGI(OTA_TAG, "HTTP_EVENT_DISCONNECTED");
 		break;
+	default:
+		/* IDF 6.x adds HTTP_EVENT_ON_STATUS_CODE and HTTP_EVENT_ON_HEADERS_COMPLETE; ignore unhandled events. */
+		break;
 	case HTTP_EVENT_REDIRECT:
 		ESP_LOGW(TAG, "HTTP_EVENT_REDIRECT");
 		break;

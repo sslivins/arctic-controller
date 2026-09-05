@@ -1,13 +1,19 @@
 # ESP-IDF patches
 
-Patches applied to the vendored ESP-IDF toolchain (`v5.5.2`) inside the
-`espressif/esp-idf-ci-action` Docker container before building. Applied via
-the action's `command:` override — see `.github/workflows/build.yml`,
-`create-release.yml`, and `device-tests.yml` for the exact invocation.
+> **Status: historical. Nothing here is applied by the build any more.**
+>
+> This patch existed to fix a `read_otadata()` race in ESP-IDF **v5.5.2**. The
+> project now builds against **ESP-IDF v6.1**, which does not exhibit the race,
+> so the `command:` overrides that applied this patch have been removed from
+> `.github/workflows/build.yml`, `create-release.yml`, and `device-tests.yml`.
+>
+> The file is retained as the record of the root-cause investigation and as the
+> validated remedy for anyone who must stay on the 5.5 LTS line — the fix was
+> **never backported** to `release/v5.5`.
 
 ## esp-idf-5.5.2-read_otadata-race-fix.patch
 
-Fixes a race condition in `components/app_update/esp_ota_ops.c`'s
+Fixed a race condition in `components/app_update/esp_ota_ops.c`'s
 `read_otadata()` that causes a fatal, unrecoverable
 `HP_SYS_HP_WDT_RESET` crash on ESP32-P4 (frozen core, `PC=0x4FF00000`).
 
@@ -40,3 +46,20 @@ https://github.com/sslivins/arctic-controller/issues/210
 This patch should be dropped once we upgrade to an ESP-IDF release that
 includes an equivalent upstream fix for `read_otadata()` specifically (the
 `789ce684` mechanism does not appear to cover this call site as of v5.5.2).
+
+## Resolution
+
+Measured on real hardware with a minimal reproducer (all three ingredients:
+`esp_partition_mmap` churn, a concurrent flash erase/write, and
+`CONFIG_SPIRAM_XIP_FROM_PSRAM=y`):
+
+| ESP-IDF | WDT resets | panics |
+|---|---|---|
+| v5.5.2 | 44 | 22 |
+| v5.5.5 | 34 | 0 |
+| v5.5.2 + this patch | 0 | 0 |
+| **v6.1** | **0** | **0** |
+| master (6.2-dev) | 0 | 0 |
+
+Upgrading to v6.1 resolves the crash without any local patch, which is why the
+project moved to v6.1 rather than continuing to carry this file.

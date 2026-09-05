@@ -6,11 +6,8 @@
 #include <esp_log.h>
 #include <nvs_flash.h>
 #include <nvs.h>
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/ecp.h>
-#include <mbedtls/entropy.h>
 #include <mbedtls/pk.h>
-#include <mbedtls/sha256.h>
+#include <psa/crypto.h>
 #include <mbedtls/x509_crt.h>
 #include <mbedtls/x509.h>
 #include <string.h>
@@ -53,9 +50,16 @@ static bool calculate_identity_fingerprint(void)
         return false;
     }
 
-    mbedtls_sha256(
-        cert.raw.p, cert.raw.len, state.identity_fingerprint, 0);
+    size_t fingerprint_len = 0;
+    const psa_status_t status = psa_hash_compute(
+        PSA_ALG_SHA_256, cert.raw.p, cert.raw.len,
+        state.identity_fingerprint, sizeof(state.identity_fingerprint),
+        &fingerprint_len);
     mbedtls_x509_crt_free(&cert);
+    if (status != PSA_SUCCESS) {
+        ESP_LOGE(TAG, "Failed to hash identity certificate: %d", (int)status);
+        return false;
+    }
     return true;
 }
 
@@ -90,45 +94,50 @@ static bool store_identity(void)
 static bool generate_identity(void)
 {
     int ret = 0;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
+    // Mbed TLS 4.x (ESP-IDF 6.x) makes entropy/ctr_drbg/ecp private; PSA Crypto
+    // now provides both the RNG and key generation. PSA is initialized by
+    // ESP-IDF during startup, so no psa_crypto_init() call is needed here.
+    psa_status_t status = PSA_SUCCESS;
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    mbedtls_svc_key_id_t key_id = MBEDTLS_SVC_KEY_ID_INIT;
     mbedtls_pk_context key;
     mbedtls_x509write_cert cert;
     uint8_t serial[16];
-    static const char* PERSONALIZATION = "arctic-ha-identity";
     static const char* NAME = "CN=Arctic Controller Integration";
 
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
     mbedtls_pk_init(&key);
     mbedtls_x509write_crt_init(&cert);
 
-    ret = mbedtls_ctr_drbg_seed(
-        &ctr_drbg, mbedtls_entropy_func, &entropy,
-        reinterpret_cast<const unsigned char*>(PERSONALIZATION),
-        strlen(PERSONALIZATION));
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Identity RNG initialization failed: -0x%04x", -ret);
+    // secp256r1 ECDSA-SHA256, matching the previous mbedtls_ecp_gen_key() key.
+    // EXPORT is required so the private key can be written out as PEM below.
+    psa_set_key_usage_flags(
+        &attributes,
+        PSA_KEY_USAGE_SIGN_HASH | PSA_KEY_USAGE_VERIFY_HASH |
+            PSA_KEY_USAGE_EXPORT);
+    psa_set_key_algorithm(&attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+    psa_set_key_type(
+        &attributes, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attributes, 256);
+
+    status = psa_generate_key(&attributes, &key_id);
+    if (status != PSA_SUCCESS) {
+        ESP_LOGE(TAG, "Identity key generation failed: %d", (int)status);
+        ret = -1;
         goto cleanup;
     }
 
-    ret = mbedtls_pk_setup(
-        &key, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
+    // Copy the key material out of PSA; the PK context then owns an
+    // independent copy that can be exported as PEM.
+    ret = mbedtls_pk_copy_from_psa(key_id, &key);
     if (ret != 0) {
-        ESP_LOGE(TAG, "Identity key setup failed: -0x%04x", -ret);
-        goto cleanup;
-    }
-    ret = mbedtls_ecp_gen_key(
-        MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(key),
-        mbedtls_ctr_drbg_random, &ctr_drbg);
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Identity key generation failed: -0x%04x", -ret);
+        ESP_LOGE(TAG, "Identity key import failed: -0x%04x", -ret);
         goto cleanup;
     }
 
-    ret = mbedtls_ctr_drbg_random(&ctr_drbg, serial, sizeof(serial));
-    if (ret != 0) {
-        ESP_LOGE(TAG, "Identity serial generation failed: -0x%04x", -ret);
+    status = psa_generate_random(serial, sizeof(serial));
+    if (status != PSA_SUCCESS) {
+        ESP_LOGE(TAG, "Identity serial generation failed: %d", (int)status);
+        ret = -1;
         goto cleanup;
     }
     serial[0] &= 0x7f;
@@ -157,8 +166,7 @@ static bool generate_identity(void)
 
     memset(state.identity_cert, 0, sizeof(state.identity_cert));
     ret = mbedtls_x509write_crt_pem(
-        &cert, state.identity_cert, sizeof(state.identity_cert),
-        mbedtls_ctr_drbg_random, &ctr_drbg);
+        &cert, state.identity_cert, sizeof(state.identity_cert));
     if (ret != 0) {
         ESP_LOGE(TAG, "Identity certificate encoding failed: -0x%04x", -ret);
         goto cleanup;
@@ -187,8 +195,7 @@ static bool generate_identity(void)
 cleanup:
     mbedtls_x509write_crt_free(&cert);
     mbedtls_pk_free(&key);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
+    psa_destroy_key(key_id);
     if (ret != 0) {
         memset(state.identity_cert, 0, sizeof(state.identity_cert));
         memset(state.identity_key, 0, sizeof(state.identity_key));
