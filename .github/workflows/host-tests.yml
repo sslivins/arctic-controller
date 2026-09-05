@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -57,3 +59,51 @@ jobs:
           path: host-test-results.xml
           reporter: java-junit
           use-actions-summary: 'false'
+
+  # The arctic-macon submodule ships 11 native (host) unit-test binaries and its
+  # own native-tests.yml -- but that workflow only gates the SUBMODULE's repo.
+  # Nothing here ran them, so a submodule bump could land in this repo entirely
+  # unverified, despite arctic-macon owning the Tuya/Modbus codec, fault
+  # identity and MaconLink framing that the controller depends on.
+  #
+  # The tests build against the library's non-ESP (native) CMake branch, so they
+  # need no toolchain and finish in seconds on a hosted runner.
+  macon-native-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+
+      - name: Guard against an unpopulated submodule
+        # A silently-empty submodule would make cmake fail in a confusing way,
+        # or worse, let a future refactor turn this job into a no-op that still
+        # reports success.
+        run: |
+          if [ ! -f components/arctic-macon/tests/CMakeLists.txt ]; then
+            echo "::error::components/arctic-macon was not checked out — the native test suite cannot run."
+            exit 1
+          fi
+
+      - name: Configure native test build
+        run: cmake -S components/arctic-macon/tests -B build-macon-tests
+
+      - name: Build native tests
+        run: cmake --build build-macon-tests --parallel
+
+      - name: Run native tests
+        run: ctest --test-dir build-macon-tests --output-on-failure
+
+      - name: Assert the suite actually executed tests
+        # ctest exits 0 when it runs zero tests. Without a floor, dropping or
+        # renaming the add_test() calls would leave this job green while
+        # testing nothing.
+        run: |
+          COUNT=$(ctest --test-dir build-macon-tests -N | sed -n 's/^Total Tests: //p')
+          echo "ctest reports ${COUNT:-0} registered tests"
+          if [ -z "${COUNT}" ] || [ "${COUNT}" -lt 8 ]; then
+            echo "::error::Only ${COUNT:-0} arctic-macon native tests were registered (expected at least 8). Tests were dropped, or the suite failed to configure."
+            exit 1
+          fi
+
