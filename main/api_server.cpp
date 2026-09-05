@@ -439,14 +439,21 @@ bool api_server_start(void)
     // Port 80 serves exactly one route (/api/health) plus the "HTTPS required"
     // 404 notice -- in test builds too, since test endpoints are registered on
     // the HTTPS server only. It therefore needs neither the full handler table
-    // nor a 16 KB stack. Sizing it like the HTTPS server consumed ~12 KB of
-    // contiguous internal SRAM for nothing, which under ESP-IDF 6.1 is exactly
-    // the headroom the HTTPS servers need for their own stacks.
+    // nor a 16 KB stack.
+    //
+    // The handler table is trimmed, but the stack deliberately is NOT:
+    // esp_http_server gives every server task the name "httpd" (httpd_config_t
+    // has no task_name field, still true in 6.1), so
+    // tests/api/test_stack_watermark_budget.py collapses all four servers into
+    // a single "httpd" key and reports the smallest headroom among them.
+    // Right-sizing this one silently retargets the guard at port 80 and stops
+    // it protecting the servers that actually run handlers. The RAM saved is
+    // not needed now that the real internal-RAM shortfall (LVGL being placed
+    // in IRAM) has been fixed.
     //
     // httpd task stacks must live in internal RAM: handlers write NVS, and a
     // PSRAM stack trips esp_task_stack_is_sane_cache_disabled() while the
     // flash cache is disabled.
-    const int http_stack_size   = 4096;
     const int http_uri_handlers = 8;
     
     esp_err_t ret;
@@ -468,7 +475,7 @@ bool api_server_start(void)
         http_config.lru_purge_enable   = true;
         http_config.uri_match_fn       = httpd_uri_match_wildcard;
         http_config.max_uri_handlers   = http_uri_handlers;
-        http_config.stack_size         = http_stack_size;
+        http_config.stack_size         = stack_size;
         http_config.max_resp_headers   = max_headers;
         http_config.recv_wait_timeout  = recv_timeout;
         // Port 80 only serves essential health/OTA bootstrap routes when
@@ -1273,16 +1280,18 @@ bool api_server_start(void)
     websocket_config.max_uri_handlers = 1;
     websocket_config.max_open_sockets = 2;
     websocket_config.stack_size = 8192;
-    // This server's single handler (/api/test/ws-feasibility) does only socket
-    // and RAM work -- no NVS, no flash. That makes a PSRAM stack safe here:
+    // This server exists only in CONFIG_TEST_ENDPOINTS builds and its single
+    // handler (/api/test/ws-feasibility) does only socket and RAM work -- no
+    // NVS, no flash -- so a PSRAM stack is safe:
     // esp_task_stack_is_sane_cache_disabled() only inspects the *current*
-    // task's stack pointer, so a PSRAM stack is a problem only for a task that
+    // task stack pointer, so a PSRAM stack is a problem only for a task that
     // itself initiates a flash operation. Being preempted while another core
     // disables the cache is fine.
     //
-    // Keeping this stack out of internal RAM matters because the three
-    // production servers above have already consumed the large contiguous
-    // internal blocks by this point.
+    // Still required under ESP-IDF 6.1 even after the LVGL-IRAM fix: with an
+    // internal stack this server is the one that fails
+    // (ESP_ERR_HTTPD_TASK), because the three production servers above have
+    // already taken the large contiguous internal blocks by this point.
     websocket_config.task_caps = MALLOC_CAP_SPIRAM;
     websocket_config.lru_purge_enable = true;
     websocket_config.recv_wait_timeout = 10;
@@ -1351,6 +1360,7 @@ bool api_server_start(void)
             .handle_ws_control_frames = true,
             .supported_subprotocol = NULL,
             .ws_pre_handshake_cb = ha_websocket_pre_handshake,
+            .ws_post_handshake_cb = ha_websocket_post_handshake,
         };
         ret = httpd_register_uri_handler(
             server_integration, &ha_events_uri);

@@ -526,36 +526,49 @@ esp_err_t ha_websocket_pre_handshake(httpd_req_t* req)
     return ESP_OK;
 }
 
+// Called by esp_http_server immediately after it has written the 101 Switching
+// Protocols response. Registering the client has to happen here rather than in
+// ha_websocket_handler(): up to ESP-IDF 5.5 the URI handler was still invoked
+// once with req->method == HTTP_GET for the handshake request, and that call
+// was where the client got registered. ESP-IDF 6.1 deliberately stopped doing
+// that ("If the request is websocket handshake, then do not call the
+// uri->handler" -- components/esp_http_server/src/httpd_uri.c) and added
+// ws_post_handshake_cb for exactly this purpose. Without this the socket
+// upgraded successfully but was never added to s_clients, so the push task had
+// no client to send the hello/snapshot to and every consumer timed out.
+esp_err_t ha_websocket_post_handshake(httpd_req_t* req)
+{
+    const int fd = httpd_req_to_sockfd(req);
+    char token[AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
+    uint32_t generation = 0;
+    const bool valid =
+        extractBearerToken(req, token) &&
+        auth_mgr_validate_integration_token_with_generation(
+            token, &generation);
+    memset(token, 0, sizeof(token));
+    if (!valid) {
+        return ESP_FAIL;
+    }
+
+    const timeval send_timeout = {
+        .tv_sec = 0,
+        .tv_usec = SEND_TIMEOUT_US,
+    };
+    if (setsockopt(
+            fd,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &send_timeout,
+            sizeof(send_timeout)) != 0) {
+        ESP_LOGE(TAG, "Unable to set send timeout fd=%d", fd);
+        return ESP_FAIL;
+    }
+    return registerClient(fd, generation) ? ESP_OK : ESP_FAIL;
+}
+
 esp_err_t ha_websocket_handler(httpd_req_t* req)
 {
     const int fd = httpd_req_to_sockfd(req);
-    if (req->method == HTTP_GET) {
-        char token[AUTH_INTEGRATION_TOKEN_LEN + 1] = {};
-        uint32_t generation = 0;
-        const bool valid =
-            extractBearerToken(req, token) &&
-            auth_mgr_validate_integration_token_with_generation(
-                token, &generation);
-        memset(token, 0, sizeof(token));
-        if (!valid) {
-            return ESP_FAIL;
-        }
-
-        const timeval send_timeout = {
-            .tv_sec = 0,
-            .tv_usec = SEND_TIMEOUT_US,
-        };
-        if (setsockopt(
-                fd,
-                SOL_SOCKET,
-                SO_SNDTIMEO,
-                &send_timeout,
-                sizeof(send_timeout)) != 0) {
-            ESP_LOGE(TAG, "Unable to set send timeout fd=%d", fd);
-            return ESP_FAIL;
-        }
-        return registerClient(fd, generation) ? ESP_OK : ESP_FAIL;
-    }
 
     httpd_ws_frame_t frame = {};
     esp_err_t result = httpd_ws_recv_frame(req, &frame, 0);
