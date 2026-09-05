@@ -435,6 +435,17 @@ bool api_server_start(void)
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
+
+    // Port 80 serves exactly one route (/api/health) plus the HTTPS-required
+    // 404 notice, so it does not need the stack or handler table of the
+    // full HTTPS API server. Sizing it identically wasted ~12 KB of
+    // contiguous internal SRAM, which under ESP-IDF 6.1 is exactly the
+    // headroom the HTTPS server needs for its own stack. httpd task
+    // stacks must live in internal RAM: handlers write NVS, and a PSRAM
+    // stack trips esp_task_stack_is_sane_cache_disabled() while the
+    // flash cache is disabled.
+    const int http_stack_size   = 4096;
+    const int http_uri_handlers = 8;
     
     esp_err_t ret;
 
@@ -454,11 +465,8 @@ bool api_server_start(void)
         httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
         http_config.lru_purge_enable   = true;
         http_config.uri_match_fn       = httpd_uri_match_wildcard;
-        http_config.max_uri_handlers   = uri_handlers;
-        // IDF 6.x defaults httpd task stacks to internal RAM, which is too
-        // scarce here once the SDIO/WiFi driver is up; keep them in PSRAM.
-        http_config.task_caps          = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        http_config.stack_size         = stack_size;
+        http_config.max_uri_handlers   = http_uri_handlers;
+        http_config.stack_size         = http_stack_size;
         http_config.max_resp_headers   = max_headers;
         http_config.recv_wait_timeout  = recv_timeout;
         // Port 80 only serves essential health/OTA bootstrap routes when
@@ -502,9 +510,6 @@ bool api_server_start(void)
         ssl_config.httpd.lru_purge_enable   = true;
         ssl_config.httpd.uri_match_fn       = httpd_uri_match_wildcard;
         ssl_config.httpd.max_uri_handlers   = uri_handlers;
-        // IDF 6.x defaults httpd task stacks to internal RAM, which is too
-        // scarce here once the SDIO/WiFi driver is up; keep them in PSRAM.
-        ssl_config.httpd.task_caps          = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         ssl_config.httpd.stack_size         = stack_size;
         ssl_config.httpd.max_resp_headers   = max_headers;
         ssl_config.httpd.recv_wait_timeout  = recv_timeout;
@@ -552,6 +557,17 @@ bool api_server_start(void)
             ESP_LOGE(
                 TAG, "Failed to start mandatory HTTPS server: %s",
                 esp_err_to_name(ret));
+            // ESP_ERR_HTTPD_TASK means the server task stack allocation
+            // failed. That needs a CONTIGUOUS block, so report the largest
+            // free block, not just the total.
+            ESP_LOGE(
+                TAG,
+                "  internal heap: free=%u largest_block=%u (needed %d for stack)",
+                (unsigned)heap_caps_get_free_size(
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                stack_size);
             api_server_stop();
             return false;
         }
@@ -575,7 +591,6 @@ bool api_server_start(void)
         // integration drives (status, releases, github) plus headroom.
         integration_config.httpd.max_uri_handlers = 12;
         integration_config.httpd.max_open_sockets = 5;
-        integration_config.httpd.task_caps = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         integration_config.httpd.stack_size = 12288;
         // Reject surplus connections instead of evicting established WSS
         // clients. Three WSS slots leave capacity for REST reconciliation
@@ -1229,7 +1244,6 @@ bool api_server_start(void)
     websocket_config.ctrl_port = 32770;
     websocket_config.max_uri_handlers = 1;
     websocket_config.max_open_sockets = 2;
-    websocket_config.task_caps = (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     websocket_config.stack_size = 8192;
     websocket_config.lru_purge_enable = true;
     websocket_config.recv_wait_timeout = 10;

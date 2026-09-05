@@ -185,3 +185,12 @@ CONFIG_MBEDTLS_X509_CRT_WRITE_C=y
 # ECDSA driver defaults on and logs errors on every verify before falling
 # back to software.
 CONFIG_MBEDTLS_HARDWARE_ECDSA_VERIFY=n
+
+# ESP-IDF 6.1 consumes noticeably more internal SRAM than 5.5.2. The
+# default 16 KB always-internal threshold forces almost every allocation
+# into internal RAM, exhausting and fragmenting it: the HTTPS server
+# cannot obtain a contiguous 16 KB task stack, and later allocations fail
+# outright (even FreeRTOS semaphores, which must be internal). Allocations
+# larger than 4 KB now go to PSRAM by default; smaller objects and anything
+# requesting MALLOC_CAP_INTERNAL/DMA are unaffected.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096

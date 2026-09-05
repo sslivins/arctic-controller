@@ -62,7 +62,7 @@ index 2a2b59e..a322b57 100644
  		ESP_LOGW(TAG, "HTTP_EVENT_REDIRECT");
  		break;
 diff --git a/host/port/include/os_wrapper.h b/host/port/include/os_wrapper.h
-index fb14fdf..6b38e82 100644
+index fb14fdf..df50d95 100644
 --- a/host/port/include/os_wrapper.h
 +++ b/host/port/include/os_wrapper.h
 @@ -5,6 +5,7 @@
@@ -91,7 +91,7 @@ index fb14fdf..6b38e82 100644
 -			tmp_buf = NULL;                                         \
 -	}                                                               \
 +	void *tmp_buf = heap_caps_malloc((x),                            \
-+		MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SPIRAM); \
++		MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_8BIT); \
 +	if (!tmp_buf)                                                    \
 +		tmp_buf = heap_caps_malloc((x),                                \
 +			MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED);                  \

@@ -113,7 +113,7 @@ enum {
  * Host-side backport of esp-hosted-mcu 2.12.8 (MEMPOOL_PREFER_SPIRAM); no C6 reflash. */
 #define MEM_ALLOC(x)       ({                                       \
 	void *tmp_buf = heap_caps_malloc((x),                            \
-		MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_SPIRAM); \
+		MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED | MALLOC_CAP_8BIT); \
 	if (!tmp_buf)                                                    \
 		tmp_buf = heap_caps_malloc((x),                                \
 			MALLOC_CAP_DMA | MALLOC_CAP_CACHE_ALIGNED);                  \

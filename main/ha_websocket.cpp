@@ -3,6 +3,8 @@
  * Home Assistant production WebSocket push transport
  */
 #include "ha_websocket.h"
+#include "freertos/idf_additions.h"
+#include "esp_heap_caps.h"
 
 #include "auth_manager.h"
 #include "ha_integration.h"
@@ -357,7 +359,8 @@ void pushTask(void* argument)
     closeAllClients();
     s_task = nullptr;
     xSemaphoreGive(s_task_done);
-    vTaskDelete(nullptr);
+    // Must match xTaskCreateWithCaps() so the PSRAM stack is freed.
+    vTaskDeleteWithCaps(nullptr);
 }
 
 size_t activeClientCount()
@@ -458,13 +461,24 @@ bool ha_websocket_start(httpd_handle_t server)
     }
     s_server = server;
     s_running = true;
-    if (xTaskCreate(
+    // Stack lives in PSRAM: internal SRAM is under real pressure during
+    // startup (the three httpd servers reserve their internal stacks just
+    // before this point), and under ESP-IDF 6.1 this 8 KB internal request
+    // fails outright. This is safe because a PSRAM stack is only a problem
+    // for a task that *itself* initiates a flash operation --
+    // spi_flash_disable_interrupts_caches_and_other_cpu() asserts on the
+    // current stack pointer only. pushTask does no NVS/flash/OTA work; it
+    // reads in-RAM state and writes WebSocket frames. (The httpd task
+    // stacks, by contrast, must stay internal because their handlers do
+    // write NVS.)
+    if (xTaskCreateWithCaps(
             pushTask,
             "ha_ws_push",
             8192,
             nullptr,
             5,
-            &s_task) != pdPASS) {
+            &s_task,
+            MALLOC_CAP_SPIRAM) != pdPASS) {
         s_running = false;
         s_server = nullptr;
         ESP_LOGE(TAG, "Unable to start WebSocket push task");
