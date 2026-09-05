@@ -50,6 +50,11 @@ typedef enum {
     UI_DIALOG_ACTION_DANGER,
 } ui_dialog_action_style_t;
 
+typedef enum {
+    UI_DIALOG_LAYOUT_CENTER,  // Centred card, sized to its content
+    UI_DIALOG_LAYOUT_SHEET,   // Full-width sheet that slides up from the bottom
+} ui_dialog_layout_t;
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -61,6 +66,29 @@ typedef enum {
  * that overlay through lv_event_get_user_data().
  */
 lv_obj_t* ui_dialog_create(const char* title, const char* message);
+
+/**
+ * @brief Create a styled modal dialog, choosing its layout and test tags.
+ *
+ * @param overlay_tag Test-API tag for the overlay, or NULL for none. Must be a
+ *                    string with static storage duration.
+ * @param panel_tag   Test-API tag for the dialog panel, or NULL for none.
+ */
+lv_obj_t* ui_dialog_create_ex(const char* title,
+                              const char* message,
+                              ui_dialog_layout_t layout,
+                              const char* overlay_tag,
+                              const char* panel_tag);
+
+/**
+ * @brief Append an extra body line below the dialog message.
+ */
+lv_obj_t* ui_dialog_add_text(lv_obj_t* dialog, const char* text);
+
+/**
+ * @brief Override the dialog title colour (e.g. to flag a destructive action).
+ */
+void ui_dialog_set_title_color(lv_obj_t* dialog, lv_color_t color);
 
 /**
  * @brief Add an action button to a styled modal dialog.

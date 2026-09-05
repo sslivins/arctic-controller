@@ -280,94 +280,17 @@ static void show_reboot_confirmation(void)
     // Clean up previous overlay if any
     dismiss_reboot_overlay();
 
-    // --- Semi-transparent overlay covering the entire screen ---
-    lv_obj_t* overlay = lv_obj_create(state.screen);
-    lv_obj_remove_style_all(overlay);
-    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);   // absorb taps
-    lv_obj_remove_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_user_data(overlay, (void*)"reboot_overlay");
-    state.reboot_overlay = overlay;
+    state.reboot_overlay = ui_dialog_create_ex(
+        i18n_get(STR_DEMO_MODE_CHANGED), i18n_get(STR_RESTART_REQUIRED),
+        UI_DIALOG_LAYOUT_SHEET, "reboot_overlay", "reboot_panel");
+    if (!state.reboot_overlay) return;
 
-    // --- Bottom panel ---
-    lv_obj_t* panel = lv_obj_create(overlay);
-    lv_obj_remove_style_all(panel);
-    lv_obj_set_size(panel, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_color(panel, COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(panel, 24, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(panel, 32, LV_PART_MAIN);
-    lv_obj_set_style_pad_bottom(panel, 48, LV_PART_MAIN);
-    lv_obj_remove_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(panel, 12, LV_PART_MAIN);
-    lv_obj_set_user_data(panel, (void*)"reboot_panel");
-
-    // "Demo mode changed."
-    lv_obj_t* line1 = lv_label_create(panel);
-    lv_label_set_text(line1, i18n_get(STR_DEMO_MODE_CHANGED));
-    lv_obj_set_style_text_font(line1, FONT_LARGE, LV_PART_MAIN);
-    lv_obj_set_style_text_color(line1, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_set_style_text_align(line1, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-
-    // "Restart required to take effect."
-    lv_obj_t* line2 = lv_label_create(panel);
-    lv_label_set_text(line2, i18n_get(STR_RESTART_REQUIRED));
-    lv_obj_set_style_text_font(line2, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(line2, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_set_style_text_align(line2, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-
-    // Button row
-    lv_obj_t* btn_row = lv_obj_create(panel);
-    lv_obj_remove_style_all(btn_row);
-    lv_obj_set_size(btn_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(btn_row, 24, LV_PART_MAIN);
-    lv_obj_set_style_pad_top(btn_row, 12, LV_PART_MAIN);
-    lv_obj_remove_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Cancel button
-    lv_obj_t* cancel_btn = lv_button_create(btn_row);
-    lv_obj_set_size(cancel_btn, 200, 64);
-    lv_obj_set_style_bg_color(cancel_btn, COLOR_ROW, LV_PART_MAIN);
-    lv_obj_set_style_radius(cancel_btn, 12, LV_PART_MAIN);
-    lv_obj_set_user_data(cancel_btn, (void*)"reboot_cancel");
-    lv_obj_add_event_cb(cancel_btn, reboot_cancel_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* cancel_lbl = lv_label_create(cancel_btn);
-    lv_label_set_text(cancel_lbl, i18n_get(STR_CANCEL));
-    lv_obj_set_style_text_font(cancel_lbl, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(cancel_lbl, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(cancel_lbl);
-
-    // Restart button
-    lv_obj_t* restart_btn = lv_button_create(btn_row);
-    lv_obj_set_size(restart_btn, 200, 64);
-    lv_obj_set_style_bg_color(restart_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_radius(restart_btn, 12, LV_PART_MAIN);
-    lv_obj_set_user_data(restart_btn, (void*)"reboot_confirm");
-    lv_obj_add_event_cb(restart_btn, reboot_confirm_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* restart_lbl = lv_label_create(restart_btn);
-    lv_label_set_text(restart_lbl, i18n_get(STR_RESTART));
-    lv_obj_set_style_text_font(restart_lbl, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(restart_lbl, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_center(restart_lbl);
-
-    // Position panel at the bottom and animate it sliding up
-    lv_obj_align(panel, LV_ALIGN_BOTTOM_MID, 0, 300);  // start off-screen
-    lv_anim_t anim;
-    lv_anim_init(&anim);
-    lv_anim_set_var(&anim, panel);
-    lv_anim_set_values(&anim, 300, 0);
-    lv_anim_set_duration(&anim, 300);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
-    lv_anim_set_exec_cb(&anim, [](void* obj, int32_t v) {
-        lv_obj_align((lv_obj_t*)obj, LV_ALIGN_BOTTOM_MID, 0, v);
-    });
-    lv_anim_start(&anim);
+    ui_dialog_add_action(state.reboot_overlay, i18n_get(STR_CANCEL),
+                         "reboot_cancel", UI_DIALOG_ACTION_SECONDARY,
+                         reboot_cancel_cb);
+    ui_dialog_add_action(state.reboot_overlay, i18n_get(STR_RESTART),
+                         "reboot_confirm", UI_DIALOG_ACTION_PRIMARY,
+                         reboot_confirm_cb);
 }
 
 static void temp_unit_switch_cb(lv_event_t* e)
@@ -528,99 +451,26 @@ static void show_factory_reset_confirmation(void)
     if (!state.screen) return;
     dismiss_factory_reset_overlay();
 
-    lv_obj_t* overlay = lv_obj_create(state.screen);
-    lv_obj_remove_style_all(overlay);
-    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_70, LV_PART_MAIN);
-    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_remove_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_user_data(overlay, (void*)"factory_reset_overlay");
-    state.factory_reset_overlay = overlay;
+    state.factory_reset_overlay = ui_dialog_create_ex(
+        i18n_get(STR_FACTORY_RESET_TITLE),
+        i18n_get(STR_FACTORY_RESET_DESCRIPTION),
+        UI_DIALOG_LAYOUT_SHEET, "factory_reset_overlay", "factory_reset_panel");
+    if (!state.factory_reset_overlay) return;
 
-    lv_obj_t* panel = lv_obj_create(overlay);
-    lv_obj_remove_style_all(panel);
-    lv_obj_set_size(panel, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_color(panel, COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(panel, 24, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(panel, 32, LV_PART_MAIN);
-    lv_obj_set_style_pad_bottom(panel, 48, LV_PART_MAIN);
-    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(panel, 14, LV_PART_MAIN);
-    lv_obj_remove_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_user_data(panel, (void*)"factory_reset_panel");
+    ui_dialog_set_title_color(state.factory_reset_overlay, lv_color_hex(0xff5a5f));
+    ui_dialog_add_text(state.factory_reset_overlay,
+                       i18n_get(STR_FACTORY_RESET_WARNING));
 
-    lv_obj_t* title = lv_label_create(panel);
-    lv_label_set_text(title, i18n_get(STR_FACTORY_RESET_TITLE));
-    lv_obj_set_style_text_font(title, FONT_LARGE, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xff5a5f), LV_PART_MAIN);
-    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-
-    lv_obj_t* description = lv_label_create(panel);
-    lv_obj_set_width(description, LV_PCT(100));
-    lv_label_set_long_mode(description, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(description, i18n_get(STR_FACTORY_RESET_DESCRIPTION));
-    lv_obj_set_style_text_font(description, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(description, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_set_style_text_align(description, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-
-    lv_obj_t* warning = lv_label_create(panel);
-    lv_label_set_text(warning, i18n_get(STR_FACTORY_RESET_WARNING));
-    lv_obj_set_style_text_font(warning, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(warning, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_set_style_text_align(warning, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-
-    lv_obj_t* btn_row = lv_obj_create(panel);
-    lv_obj_remove_style_all(btn_row);
-    lv_obj_set_size(btn_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(btn_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(btn_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(btn_row, 24, LV_PART_MAIN);
-    lv_obj_set_style_pad_top(btn_row, 12, LV_PART_MAIN);
-    lv_obj_remove_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t* cancel_btn = lv_button_create(btn_row);
-    lv_obj_set_size(cancel_btn, 200, 64);
-    lv_obj_set_style_bg_color(cancel_btn, COLOR_ROW, LV_PART_MAIN);
-    lv_obj_set_style_radius(cancel_btn, 12, LV_PART_MAIN);
-    lv_obj_set_user_data(cancel_btn, (void*)"factory_reset_cancel");
-    lv_obj_add_event_cb(cancel_btn, factory_reset_cancel_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* cancel_label = lv_label_create(cancel_btn);
-    lv_label_set_text(cancel_label, i18n_get(STR_CANCEL));
-    lv_obj_set_style_text_font(cancel_label, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(cancel_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(cancel_label);
-
-    lv_obj_t* confirm_btn = lv_button_create(btn_row);
-    lv_obj_set_size(confirm_btn, 260, 64);
-    lv_obj_set_style_bg_color(confirm_btn, lv_color_hex(0xd32f2f), LV_PART_MAIN);
-    lv_obj_set_style_radius(confirm_btn, 12, LV_PART_MAIN);
-    lv_obj_set_user_data(confirm_btn, (void*)"factory_reset_confirm");
-    lv_obj_add_event_cb(confirm_btn, factory_reset_confirm_cb, LV_EVENT_CLICKED, NULL);
+    ui_dialog_add_action(state.factory_reset_overlay, i18n_get(STR_CANCEL),
+                         "factory_reset_cancel", UI_DIALOG_ACTION_SECONDARY,
+                         factory_reset_cancel_cb);
+    lv_obj_t* confirm_btn = ui_dialog_add_action(
+        state.factory_reset_overlay, i18n_get(STR_FACTORY_RESET_CONFIRM),
+        "factory_reset_confirm", UI_DIALOG_ACTION_DANGER,
+        factory_reset_confirm_cb);
     state.factory_reset_confirm_btn = confirm_btn;
-
-    lv_obj_t* confirm_label = lv_label_create(confirm_btn);
-    lv_label_set_text(confirm_label, i18n_get(STR_FACTORY_RESET_CONFIRM));
-    lv_obj_set_style_text_font(confirm_label, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(confirm_label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(confirm_label);
-    state.factory_reset_confirm_label = confirm_label;
-
-    lv_obj_align(panel, LV_ALIGN_BOTTOM_MID, 0, 300);
-    lv_anim_t anim;
-    lv_anim_init(&anim);
-    lv_anim_set_var(&anim, panel);
-    lv_anim_set_values(&anim, 300, 0);
-    lv_anim_set_duration(&anim, 300);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
-    lv_anim_set_exec_cb(&anim, [](void* obj, int32_t v) {
-        lv_obj_align((lv_obj_t*)obj, LV_ALIGN_BOTTOM_MID, 0, v);
-    });
-    lv_anim_start(&anim);
+    state.factory_reset_confirm_label =
+        confirm_btn ? lv_obj_get_child(confirm_btn, 0) : NULL;
 }
 
 // ============================================================================
@@ -869,6 +719,11 @@ void settings_menu_force_close(lv_obj_t* return_screen)
             default: break;
         }
     }
+
+    // The confirmation dialogs live on the top layer, so deleting the settings
+    // screen no longer takes them with it.
+    dismiss_reboot_overlay();
+    dismiss_factory_reset_overlay();
 
     // A settings sub-screen leaves the settings root allocated but hidden.
     if (state.screen && state.screen != active_screen) {
