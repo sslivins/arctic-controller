@@ -7,6 +7,9 @@ unstyled default look, so assert the codebase stays free of direct msgbox use.
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.hostside
 
 ROOT = Path(__file__).resolve().parents[2]
 MAIN = ROOT / "main"

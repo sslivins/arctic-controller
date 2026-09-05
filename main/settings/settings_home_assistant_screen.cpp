@@ -201,6 +201,12 @@ static void revoke_cancel_cb(lv_event_t* event)
     dismiss_revoke_overlay();
 }
 
+static void revoke_overlay_deleted_cb(lv_event_t* event)
+{
+    (void)event;
+    state.revoke_overlay = NULL;
+}
+
 static void revoke_btn_cb(lv_event_t* event)
 {
     (void)event;
@@ -208,57 +214,22 @@ static void revoke_btn_cb(lv_event_t* event)
         return;
     }
 
-    state.revoke_overlay = lv_obj_create(state.screen);
-    lv_obj_set_size(state.revoke_overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(
-        state.revoke_overlay, lv_color_hex(0x000000), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(
-        state.revoke_overlay, LV_OPA_70, LV_PART_MAIN);
-    lv_obj_set_style_border_width(state.revoke_overlay, 0, LV_PART_MAIN);
-    disable_scrolling(state.revoke_overlay);
+    state.revoke_overlay = ui_dialog_create(
+        i18n_get(STR_HA_REVOKE_CONFIRM), i18n_get(STR_HA_REVOKE_DESCRIPTION));
+    if (!state.revoke_overlay) {
+        return;
+    }
+    // The dialog lives on the top layer, so it can also be torn down by the
+    // shell's lv_obj_clean(lv_layer_top()); clear our handle either way.
+    lv_obj_add_event_cb(
+        state.revoke_overlay, revoke_overlay_deleted_cb, LV_EVENT_DELETE, NULL);
 
-    lv_obj_t* panel = lv_obj_create(state.revoke_overlay);
-    lv_obj_set_size(panel, 620, 330);
-    lv_obj_center(panel);
-    lv_obj_set_style_bg_color(panel, COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_border_width(panel, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(panel, 16, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(panel, 25, LV_PART_MAIN);
-    disable_scrolling(panel);
-
-    lv_obj_t* title = lv_label_create(panel);
-    lv_label_set_text(title, i18n_get(STR_HA_REVOKE_CONFIRM));
-    lv_obj_set_style_text_font(title, FONT_LARGE, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
-
-    lv_obj_t* description = lv_label_create(panel);
-    lv_label_set_text(description, i18n_get(STR_HA_REVOKE_DESCRIPTION));
-    lv_obj_set_width(description, 540);
-    lv_label_set_long_mode(description, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(description, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(description, COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_set_style_text_align(description, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_obj_align(description, LV_ALIGN_CENTER, 0, -15);
-
-    lv_obj_t* cancel = lv_btn_create(panel);
-    lv_obj_set_size(cancel, 250, 65);
-    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_obj_add_event_cb(cancel, revoke_cancel_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* cancel_label = lv_label_create(cancel);
-    lv_label_set_text(cancel_label, i18n_get(STR_CANCEL));
-    lv_obj_set_style_text_font(cancel_label, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_center(cancel_label);
-
-    lv_obj_t* confirm = lv_btn_create(panel);
-    lv_obj_set_size(confirm, 250, 65);
-    lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    lv_obj_set_style_bg_color(confirm, COLOR_ERROR, LV_PART_MAIN);
-    lv_obj_add_event_cb(confirm, revoke_confirm_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t* confirm_label = lv_label_create(confirm);
-    lv_label_set_text(confirm_label, i18n_get(STR_HA_REVOKE_ACTION));
-    lv_obj_set_style_text_font(confirm_label, FONT_NORMAL, LV_PART_MAIN);
-    lv_obj_center(confirm_label);
+    ui_dialog_add_action(state.revoke_overlay, i18n_get(STR_CANCEL),
+                         "ha_revoke_cancel", UI_DIALOG_ACTION_SECONDARY,
+                         revoke_cancel_cb);
+    ui_dialog_add_action(state.revoke_overlay, i18n_get(STR_HA_REVOKE_ACTION),
+                         "ha_revoke_confirm", UI_DIALOG_ACTION_DANGER,
+                         revoke_confirm_cb);
 }
 
 void home_assistant_screen_create(
@@ -427,6 +398,9 @@ void home_assistant_screen_close(void)
     if (state.pairing_started) {
         setup_pairing_cancel();
     }
+    // The confirm dialog lives on the top layer, so it would outlive this
+    // screen unless it is dismissed explicitly.
+    dismiss_revoke_overlay();
     mbedtls_platform_zeroize(
         state.pairing_code, sizeof(state.pairing_code));
     state.visible = false;
