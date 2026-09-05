@@ -44,9 +44,37 @@ extern "C" {
 #define UI_FONT_ICON          (&montserrat_32_latin)  // Match status bar icons
 #define UI_FONT_ICON_LARGE    (&montserrat_32_latin)
 
+typedef enum {
+    UI_DIALOG_ACTION_SECONDARY,
+    UI_DIALOG_ACTION_PRIMARY,
+    UI_DIALOG_ACTION_DANGER,
+} ui_dialog_action_style_t;
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * @brief Create a styled modal dialog on the active top layer.
+ *
+ * The returned object is the full-screen overlay. Action callbacks receive
+ * that overlay through lv_event_get_user_data().
+ */
+lv_obj_t* ui_dialog_create(const char* title, const char* message);
+
+/**
+ * @brief Add an action button to a styled modal dialog.
+ */
+lv_obj_t* ui_dialog_add_action(lv_obj_t* dialog,
+                               const char* label,
+                               const char* tag,
+                               ui_dialog_action_style_t style,
+                               lv_event_cb_t event_cb);
+
+/**
+ * @brief Close a dialog passed as an event callback's user data.
+ */
+void ui_dialog_dismiss_cb(lv_event_t* event);
 
 /**
  * @brief Create a standard close button (X icon)

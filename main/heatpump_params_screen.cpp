@@ -204,12 +204,10 @@ static void set_demo_setpoint(int setpoint_type, int16_t value) {
 
 // Helper: show error popup for write failures
 static void show_settings_write_error(const char* message) {
-    lv_obj_t* msgbox = lv_msgbox_create(lv_layer_top());
-    lv_msgbox_add_title(msgbox, i18n_get(STR_HP_COMMUNICATION_ERROR));
-    lv_msgbox_add_text(msgbox, message);
-    lv_msgbox_add_close_button(msgbox);
-    lv_obj_center(msgbox);
-    lv_obj_set_width(msgbox, 400);
+    lv_obj_t* dialog = ui_dialog_create(
+        i18n_get(STR_HP_COMMUNICATION_ERROR), message);
+    ui_dialog_add_action(dialog, i18n_get(STR_CLOSE), "hp_error_close",
+                         UI_DIALOG_ACTION_PRIMARY, ui_dialog_dismiss_cb);
 }
 
 // ============================================================================
@@ -1348,7 +1346,7 @@ static void show_ap_edit_dialog(uint8_t ap) {
 static uint8_t s_trigger_ap = 0;
 
 static void ap_trigger_run_cb(lv_event_t* e) {
-    lv_obj_t* mbox = (lv_obj_t*)lv_event_get_user_data(e);
+    lv_obj_t* dialog = (lv_obj_t*)lv_event_get_user_data(e);
     uint8_t ap = s_trigger_ap;
     bool bus_ok = false;
     arctic::AdvWriteResult r = advanced_param_write(ap, 1, &bus_ok);
@@ -1359,7 +1357,7 @@ static void ap_trigger_run_cb(lv_event_t* e) {
     } else {
         ESP_LOGI(TAG, "Triggered AP%u (momentary command)", (unsigned)ap);
     }
-    if (mbox) lv_msgbox_close(mbox);
+    if (dialog) lv_obj_delete(dialog);
 }
 
 static void show_ap_trigger_confirm(uint8_t ap) {
@@ -1367,18 +1365,13 @@ static void show_ap_trigger_confirm(uint8_t ap) {
     if (!p || !p->is_trigger || !arctic::advanced_param_reg_known(ap)) return;
     s_trigger_ap = ap;
 
-    lv_obj_t* mbox = lv_msgbox_create(lv_layer_top());
     char title[80];
     snprintf(title, sizeof(title), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)ap);
-    lv_msgbox_add_title(mbox, title);
-    lv_msgbox_add_text(mbox,
-        "Run this momentary command now? It starts immediately and does not "
-        "store a value.");
-    lv_obj_t* run_btn = lv_msgbox_add_footer_button(mbox, "Run");
-    lv_obj_add_event_cb(run_btn, ap_trigger_run_cb, LV_EVENT_CLICKED, mbox);
-    lv_msgbox_add_close_button(mbox);  // X acts as Cancel
-    lv_obj_center(mbox);
-    lv_obj_set_width(mbox, 460);
+    lv_obj_t* dialog = ui_dialog_create(title, i18n_get(STR_HP_AP_TRIGGER_PROMPT));
+    ui_dialog_add_action(dialog, i18n_get(STR_CANCEL), "ap_trigger_cancel",
+                         UI_DIALOG_ACTION_SECONDARY, ui_dialog_dismiss_cb);
+    ui_dialog_add_action(dialog, i18n_get(STR_HP_AP_TRIGGER_RUN), "ap_trigger_run",
+                         UI_DIALOG_ACTION_PRIMARY, ap_trigger_run_cb);
 }
 
 // ============================================================================

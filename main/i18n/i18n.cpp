@@ -294,6 +294,9 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HP_HOT_WATER_SETPOINT] = "Hot Water Setpoint",
     [STR_HP_CANNOT_SAVE] = "Cannot save setting: Heat pump not connected",
     [STR_HP_CANNOT_SAVE_SETPOINT] = "Cannot save setpoint: Heat pump not connected",
+    [STR_HP_AP_TRIGGER_PROMPT] =
+        "Run this momentary command now? It starts immediately and does not store a value.",
+    [STR_HP_AP_TRIGGER_RUN] = "Run",
     [STR_HP_CAT_EEV] = "EEV",
     [STR_HP_CAT_DEFROST] = "Defrost",
     [STR_HP_CAT_PROTECTION] = "Protection",
@@ -701,6 +704,10 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HP_HOT_WATER_SETPOINT] = "Consigne eau chaude",
     [STR_HP_CANNOT_SAVE] = "Impossible d'enregistrer : PAC non connectée",
     [STR_HP_CANNOT_SAVE_SETPOINT] = "Impossible d'enregistrer la consigne : PAC non connectée",
+    [STR_HP_AP_TRIGGER_PROMPT] =
+        "Exécuter cette commande momentanée maintenant ? Elle démarre immédiatement et "
+        "n'enregistre aucune valeur.",
+    [STR_HP_AP_TRIGGER_RUN] = "Exécuter",
     [STR_HP_CAT_EEV] = "Détendeur (EEV)",
     [STR_HP_CAT_DEFROST] = "Dégivrage",
     [STR_HP_CAT_PROTECTION] = "Protection",
@@ -1108,6 +1115,10 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_HOT_WATER_SETPOINT] = "Consigna agua caliente",
     [STR_HP_CANNOT_SAVE] = "No se puede guardar: bomba de calor no conectada",
     [STR_HP_CANNOT_SAVE_SETPOINT] = "No se puede guardar la consigna: bomba de calor no conectada",
+    [STR_HP_AP_TRIGGER_PROMPT] =
+        "¿Ejecutar este comando momentáneo ahora? Se inicia de inmediato y no guarda "
+        "ningún valor.",
+    [STR_HP_AP_TRIGGER_RUN] = "Ejecutar",
     [STR_HP_CAT_EEV] = "Válvula (EEV)",
     [STR_HP_CAT_DEFROST] = "Descongelación",
     [STR_HP_CAT_PROTECTION] = "Protección",
