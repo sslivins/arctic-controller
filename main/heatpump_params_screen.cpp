@@ -1367,13 +1367,10 @@ static void show_ap_trigger_confirm(uint8_t ap) {
 
     char title[80];
     snprintf(title, sizeof(title), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)ap);
-    lv_obj_t* dialog = ui_dialog_create(
-        title,
-        "Run this momentary command now? It starts immediately and does not "
-        "store a value.");
+    lv_obj_t* dialog = ui_dialog_create(title, i18n_get(STR_HP_AP_TRIGGER_PROMPT));
     ui_dialog_add_action(dialog, i18n_get(STR_CANCEL), "ap_trigger_cancel",
                          UI_DIALOG_ACTION_SECONDARY, ui_dialog_dismiss_cb);
-    ui_dialog_add_action(dialog, "Run", "ap_trigger_run",
+    ui_dialog_add_action(dialog, i18n_get(STR_HP_AP_TRIGGER_RUN), "ap_trigger_run",
                          UI_DIALOG_ACTION_PRIMARY, ap_trigger_run_cb);
 }
 
