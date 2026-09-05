@@ -191,6 +191,19 @@ CONFIG_MBEDTLS_HARDWARE_ECDSA_VERIFY=n
 # into internal RAM, exhausting and fragmenting it: the HTTPS server
 # cannot obtain a contiguous 16 KB task stack, and later allocations fail
 # outright (even FreeRTOS semaphores, which must be internal). Allocations
-# larger than 4 KB now go to PSRAM by default; smaller objects and anything
-# requesting MALLOC_CAP_INTERNAL/DMA are unaffected.
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# larger than 512 bytes now go to PSRAM by default; smaller objects and
+# anything requesting MALLOC_CAP_INTERNAL/DMA are unaffected.
+#
+# 512 is not arbitrary -- it was measured on hardware against the
+# CONFIG_TEST_ENDPOINTS build, which is the tightest case (test-endpoint
+# code enlarges .bss/.data, leaving ~13 KB less internal RAM than a
+# production build):
+#   4096 -> integration HTTPS server (8443) fails: ESP_ERR_HTTPD_TASK
+#   2048 -> WebSocket test server (81) fails: ESP_ERR_HTTPD_ALLOC_MEM
+#   512  -> all four servers start, 55 KB internal free beforehand
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
+
+# Run the mDNS service task from PSRAM. mDNS does no flash work, so it does
+# not need an internal stack, and reclaiming it leaves more contiguous
+# internal SRAM for the httpd task stacks, which do.
+CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y

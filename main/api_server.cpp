@@ -436,13 +436,15 @@ bool api_server_start(void)
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
 
-    // Port 80 serves exactly one route (/api/health) plus the HTTPS-required
-    // 404 notice, so it does not need the stack or handler table of the
-    // full HTTPS API server. Sizing it identically wasted ~12 KB of
-    // contiguous internal SRAM, which under ESP-IDF 6.1 is exactly the
-    // headroom the HTTPS server needs for its own stack. httpd task
-    // stacks must live in internal RAM: handlers write NVS, and a PSRAM
-    // stack trips esp_task_stack_is_sane_cache_disabled() while the
+    // Port 80 serves exactly one route (/api/health) plus the "HTTPS required"
+    // 404 notice -- in test builds too, since test endpoints are registered on
+    // the HTTPS server only. It therefore needs neither the full handler table
+    // nor a 16 KB stack. Sizing it like the HTTPS server consumed ~12 KB of
+    // contiguous internal SRAM for nothing, which under ESP-IDF 6.1 is exactly
+    // the headroom the HTTPS servers need for their own stacks.
+    //
+    // httpd task stacks must live in internal RAM: handlers write NVS, and a
+    // PSRAM stack trips esp_task_stack_is_sane_cache_disabled() while the
     // flash cache is disabled.
     const int http_stack_size   = 4096;
     const int http_uri_handlers = 8;
@@ -621,6 +623,16 @@ bool api_server_start(void)
                      "Failed to start integration HTTPS server: %s "
                      "(HTTP remains available on port 80)",
                      esp_err_to_name(ret));
+            // ESP_ERR_HTTPD_TASK means the task stack allocation failed, which
+            // needs a CONTIGUOUS block -- report the largest free block too.
+            ESP_LOGE(
+                TAG,
+                "  internal heap: free=%u largest_block=%u (needed %d for stack)",
+                (unsigned)heap_caps_get_free_size(
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                integration_config.httpd.stack_size);
         } else {
             ESP_LOGI(TAG, "Integration HTTPS server started on port 8443");
         }
@@ -1232,12 +1244,28 @@ bool api_server_start(void)
     REGISTER_URI(ha_manage_revoke_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
-    // Test endpoints need HTTP for CI (no TLS on test runner)
-    test_endpoints_register(server);
+    // Test endpoints are registered on the HTTPS server only.
+    //
+    // They used to also be registered on the port-80 server ("no TLS on test
+    // runner"), but that is stale: device-tests.yml provisions credentials and
+    // then rewrites ARCTIC_URL to https:// before any suite runs, so every
+    // /api/test/* request already goes over TLS. The only plain-HTTP calls CI
+    // makes are liveness probes against /api/heatpump/status, a production
+    // route.
+    //
+    // Registering ~53 test handlers on port 80 was expensive: it forced that
+    // server to carry the full 140-slot handler table and a 16 KB task stack,
+    // consuming the contiguous internal SRAM that the HTTPS servers need for
+    // their own stacks. Under ESP-IDF 6.1 that was the difference between the
+    // servers starting and failing with ESP_ERR_HTTPD_TASK.
     if (server_ssl != NULL) {
         test_endpoints_register(server_ssl);
+        ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
+    } else {
+        ESP_LOGE(TAG,
+                 "No HTTPS server: test instrumentation endpoints NOT "
+                 "registered");
     }
-    ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
 
     httpd_config_t websocket_config = HTTPD_DEFAULT_CONFIG();
     websocket_config.server_port = 81;
@@ -1245,6 +1273,17 @@ bool api_server_start(void)
     websocket_config.max_uri_handlers = 1;
     websocket_config.max_open_sockets = 2;
     websocket_config.stack_size = 8192;
+    // This server's single handler (/api/test/ws-feasibility) does only socket
+    // and RAM work -- no NVS, no flash. That makes a PSRAM stack safe here:
+    // esp_task_stack_is_sane_cache_disabled() only inspects the *current*
+    // task's stack pointer, so a PSRAM stack is a problem only for a task that
+    // itself initiates a flash operation. Being preempted while another core
+    // disables the cache is fine.
+    //
+    // Keeping this stack out of internal RAM matters because the three
+    // production servers above have already consumed the large contiguous
+    // internal blocks by this point.
+    websocket_config.task_caps = MALLOC_CAP_SPIRAM;
     websocket_config.lru_purge_enable = true;
     websocket_config.recv_wait_timeout = 10;
     websocket_config.send_wait_timeout = 1;
