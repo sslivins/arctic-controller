@@ -32,7 +32,10 @@ on:
       - 'repos.json'
       - 'fetch_repos.py'
       - 'patches/**'
-      - '.github/workflows/build.yml'
+      # See the note in device-tests.yml: `build` is a required status
+      # check, and an `on:`-level paths skip creates no check run at all,
+      # which blocks the PR permanently. Trigger on any workflow change.
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       target:

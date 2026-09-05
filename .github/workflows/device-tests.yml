@@ -21,7 +21,16 @@ on:
       - 'tests/**'
       - '!tests/**/*.md'
       - 'patches/**'
-      - '.github/workflows/device-tests.yml'
+      # Any workflow change can alter how this suite is built, gated or
+      # reported, so trigger on all of them rather than just this file.
+      # `device-tests` is a required status check, and an `on:`-level paths
+      # skip creates NO check run at all (unlike a job-level `if:`, which
+      # reports `skipped` and is accepted by branch protection). A required
+      # context that never reports blocks the PR permanently, and a
+      # workflow_dispatch run cannot rescue it: dispatched job check runs
+      # attach to the commit but are not associated with the pull request.
+      # Erring towards over-triggering is therefore fail-closed on purpose.
+      - '.github/workflows/**'
   push:
     # Authoritative post-merge validation of the exact main commit SHA. The
     # release workflow consumes the attestation produced by these runs instead
