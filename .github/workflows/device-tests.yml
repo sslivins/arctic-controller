@@ -4,33 +4,17 @@ on:
   schedule:
     # Run daily at 6 AM UTC
     - cron: '0 6 * * *'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'main/**'
-      - 'components/**'
-      - 'managed_components/**'
-      - 'dependencies/**'
-      - 'CMakeLists.txt'
-      - 'sdkconfig*'
-      - 'partitions.csv'
-      - 'lv_conf.h'
-      - 'repos.json'
-      - 'fetch_repos.py'
-      - 'tests/**'
-      - '!tests/**/*.md'
-      - 'patches/**'
-      # Any workflow change can alter how this suite is built, gated or
-      # reported, so trigger on all of them rather than just this file.
-      # `device-tests` is a required status check, and an `on:`-level paths
-      # skip creates NO check run at all (unlike a job-level `if:`, which
-      # reports `skipped` and is accepted by branch protection). A required
-      # context that never reports blocks the PR permanently, and a
-      # workflow_dispatch run cannot rescue it: dispatched job check runs
-      # attach to the commit but are not associated with the pull request.
-      # Erring towards over-triggering is therefore fail-closed on purpose.
-      - '.github/workflows/**'
+  # NOTE: there is deliberately no `pull_request` trigger here any more.
+  #
+  # The PR path now runs through ci.yml, which has NO paths filter and calls
+  # this workflow via `workflow_call`. That change exists because an
+  # `on:`-level paths filter creates NO check run at all, so a required
+  # context never reports and the PR is blocked forever. ci.yml always
+  # reports, and decides whether the hardware suite is relevant.
+  #
+  # Adding `pull_request` back here would ALSO double-run the suite: the
+  # concurrency group below is global and there is one physical device, so a
+  # duplicate run serialises into ~80 minutes.
   push:
     # Authoritative post-merge validation of the exact main commit SHA. The
     # release workflow consumes the attestation produced by these runs instead
@@ -43,10 +27,8 @@ on:
   workflow_call:
   workflow_dispatch:
 
-  # Validate the prospective merged state when a PR is queued via the merge
-  # queue. No paths filter: a skipped required check would stall the queue, so
-  # the physical suite always runs for merge groups.
-  merge_group:
+  # NOTE: `merge_group` is likewise driven by ci.yml, so that the merge queue
+  # sees exactly one always-reporting required context.
 
 # Only one device-test run at a time (single device on the network)
 concurrency:
@@ -73,7 +55,11 @@ jobs:
       contents: read
       actions: read
     outputs:
-      dedup: ${{ steps.check.outputs.dedup }}
+      # Always an explicit literal 'true' or 'false' -- never empty. An empty
+      # value cannot participate in a fail-closed policy, because it is
+      # indistinguishable from broken output plumbing, a renamed step or a
+      # missing output. See the `normalize` step below.
+      dedup: ${{ steps.normalize.outputs.dedup }}
       tree_sha: ${{ steps.tree.outputs.tree_sha }}
       artifact_name: ${{ steps.tree.outputs.artifact_name }}
       source_run_id: ${{ steps.check.outputs.source_run_id }}
@@ -116,7 +102,39 @@ jobs:
           echo "source_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "Tree already validated by run ${RUN_ID}; reusing its attestation and skipping the physical suite."
 
-  build:
+      - name: Normalize the dedup decision
+        id: normalize
+        # The `check` step above only runs for push-to-main, so on every other
+        # event its output is the empty string. Collapse that to an explicit
+        # literal here so downstream gates can enumerate exact values rather
+        # than treating "empty" as an implicit false -- an empty value is
+        # indistinguishable from a plumbing failure, and silently trusting it
+        # is precisely the fail-open behaviour these gates exist to prevent.
+        env:
+          RAW: ${{ steps.check.outputs.dedup }}
+        run: |
+          set -euo pipefail
+          VALUE="${RAW:-false}"
+          if [ "$VALUE" != "true" ] && [ "$VALUE" != "false" ]; then
+            echo "::error::preflight produced a non-literal dedup value '${VALUE}'. Refusing to continue."
+            exit 1
+          fi
+          echo "dedup=$VALUE" >> "$GITHUB_OUTPUT"
+          echo "dedup=$VALUE (event=${GITHUB_EVENT_NAME}, ref=${GITHUB_REF})"
+
+  # Renamed from `build`. A job named `build` also exists in build.yml, and two
+  # check runs sharing one name make a required context ambiguous: GitHub can
+  # resolve it against either producer, so a failed firmware build could be
+  # masked by a passing one from the other workflow.
+  #
+  # This rename was NOT safe to make in isolation. device-tests.yml used to
+  # trigger on a superset of build.yml's paths (it added tests/**), so on a
+  # tests-only PR build.yml never ran and THIS job was the sole producer of the
+  # required `build` context. Verified on PR #214 (one file, tests/api/
+  # test_api_schema.py): build.yml had 0 runs, and the only `build` check run
+  # came from Device Tests. Renaming before ci.yml existed would have blocked
+  # every tests-only PR permanently.
+  device-firmware-build:
     needs: preflight
     if: needs.preflight.outputs.dedup != 'true'
     runs-on: ubuntu-latest
@@ -222,7 +240,7 @@ jobs:
           echo "Published build/arctic_controller.bin to the ci-nightly prerelease."
 
   device-tests:
-    needs: [preflight, build]
+    needs: [preflight, device-firmware-build]
     if: needs.preflight.outputs.dedup != 'true'
     runs-on: [self-hosted, vm-mi]
     timeout-minutes: 120
@@ -1263,3 +1281,70 @@ jobs:
           name: release-attestation-${{ github.sha }}
           path: release-attestation.json
           retention-days: 90
+
+  # Terminal gate for THIS workflow's own job graph.
+  #
+  # Closes the vacuous-pass hole (H1): `device-tests` needs
+  # [preflight, device-firmware-build], so if either of those FAILS then
+  # `device-tests` is reported as `skipped` -- and branch protection accepts
+  # `skipped` as passing. The hardware gate could therefore go green having
+  # tested nothing at all.
+  #
+  # This gate lives inside device-tests.yml rather than only in ci.yml so the
+  # direct push-to-main path is covered too. That path never goes through
+  # ci.yml, and it is the path create-release.yml consumes to authorise a
+  # release, so it is the one that must not be fakeable.
+  #
+  # The policy ENUMERATES the acceptable combinations. Anything not listed --
+  # including any unexpected, empty or cancelled state -- fails.
+  device-gate:
+    needs: [preflight, device-firmware-build, device-tests, reuse-attestation]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce an acceptable job-graph outcome
+        env:
+          PREFLIGHT: ${{ needs.preflight.result }}
+          BUILD: ${{ needs.device-firmware-build.result }}
+          DEVICE: ${{ needs.device-tests.result }}
+          REUSE: ${{ needs.reuse-attestation.result }}
+          DEDUP: ${{ needs.preflight.outputs.dedup }}
+        run: |
+          set -euo pipefail
+
+          echo "preflight=${PREFLIGHT} dedup=${DEDUP}"
+          echo "device-firmware-build=${BUILD}"
+          echo "device-tests=${DEVICE}"
+          echo "reuse-attestation=${REUSE}"
+
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+
+          # preflight always runs and always decides; nothing else is valid.
+          if [ "$PREFLIGHT" != "success" ]; then
+            fail "preflight did not succeed (got '${PREFLIGHT}'), so no validation decision can be trusted."
+          fi
+
+          # dedup is normalized to an explicit literal by preflight.
+          case "$DEDUP" in
+            true|false) ;;
+            *) fail "dedup is '${DEDUP}', expected the literal 'true' or 'false'." ;;
+          esac
+
+          if [ "$DEDUP" = "true" ]; then
+            # Reuse path: the physical suite is intentionally skipped and the
+            # prior attestation is re-emitted for this commit.
+            [ "$BUILD" = "skipped" ] || fail "dedup=true but device-firmware-build is '${BUILD}', expected skipped."
+            [ "$DEVICE" = "skipped" ] || fail "dedup=true but device-tests is '${DEVICE}', expected skipped."
+            [ "$REUSE" = "success" ] || fail "dedup=true but reuse-attestation is '${REUSE}', expected success."
+            echo "Accepted: validated tree reused, attestation re-emitted."
+            exit 0
+          fi
+
+          # Normal path: everything must actually have run and passed.
+          [ "$BUILD" = "success" ] || fail "device-firmware-build is '${BUILD}', expected success. A skipped build must never be read as a pass."
+          [ "$DEVICE" = "success" ] || fail "device-tests is '${DEVICE}', expected success. A skipped hardware suite must never be read as a pass."
+          [ "$REUSE" = "skipped" ] || fail "reuse-attestation is '${REUSE}', expected skipped when dedup=false."
+          echo "Accepted: physical device suite ran and passed."

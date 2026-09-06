@@ -17,25 +17,12 @@ on:
       - 'fetch_repos.py'
       - 'patches/**'
       - '.github/workflows/build.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'main/**'
-      - 'components/**'
-      - 'managed_components/**'
-      - 'dependencies/**'
-      - 'CMakeLists.txt'
-      - 'sdkconfig*'
-      - 'partitions.csv'
-      - 'lv_conf.h'
-      - 'repos.json'
-      - 'fetch_repos.py'
-      - 'patches/**'
-      # See the note in device-tests.yml: `build` is a required status
-      # check, and an `on:`-level paths skip creates no check run at all,
-      # which blocks the PR permanently. Trigger on any workflow change.
-      - '.github/workflows/**'
+  # No `pull_request` trigger: the PR path runs through ci.yml, which has no
+  # paths filter and calls this workflow. An `on:`-level paths filter creates
+  # NO check run, so a required context never reports and the PR blocks
+  # forever; ci.yml always reports instead. `merge_group` is driven by ci.yml
+  # for the same reason.
+  workflow_call:
   workflow_dispatch:
     inputs:
       target:
@@ -45,11 +32,6 @@ on:
         type: choice
         options:
           - esp32p4
-
-  # Run against the prospective merged state when a PR is queued via the merge
-  # queue. No paths filter here: skipping a required check in the queue would
-  # stall it, so build always runs for merge groups.
-  merge_group:
 
 permissions:
   contents: read

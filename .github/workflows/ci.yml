@@ -1,0 +1,223 @@
+name: CI
+
+# Single always-reporting entry point for pull requests and the merge queue.
+#
+# WHY THIS EXISTS
+#
+# An `on:`-level `paths:` filter creates NO check run at all. A required status
+# check that never reports leaves the PR permanently BLOCKED, with every
+# visible check green and nothing in flight. A job-level `if:` skip behaves
+# completely differently: it DOES create a check run, with conclusion
+# `skipped`, which branch protection ACCEPTS as passing.
+#
+# That asymmetry produced two opposite failure modes in this repo:
+#
+#   * DEADLOCK - build.yml and device-tests.yml were both paths-filtered, so a
+#     PR touching only docs/**, web/** or a *.md file triggered neither, and
+#     the required `build` and `device-tests` contexts never reported.
+#     A workflow_dispatch run CANNOT rescue this: dispatched job check runs
+#     attach to the commit but are not associated with the pull request, so
+#     they never satisfy protection (verified on PR #219).
+#
+#   * VACUOUS PASS - `device-tests` depends on preflight and the firmware
+#     build, so a FAILURE upstream turned it into `skipped`, which protection
+#     accepted as a pass. The hardware gate could go green having tested
+#     nothing.
+#
+# THE FIX
+#
+# This workflow has no paths filter, so it always reports. It decides what is
+# relevant, calls the heavy suites via `workflow_call`, and ends in `ci-gate`,
+# which ENUMERATES the acceptable outcome combinations and fails on anything
+# else. `ci-gate` is intended to be the ONLY required status check.
+#
+# The called workflows deliberately no longer carry `pull_request` triggers.
+# Restoring one would double-run the physical suite: device-tests.yml has a
+# global concurrency group and there is a single physical controller, so a
+# duplicate run serialises into ~80 minutes.
+#
+# NOT ROUTED THROUGH HERE: device-tests.yml keeps its DIRECT `push` trigger.
+# create-release.yml resolves release attestations via
+# `actions/workflows/device-tests.yml/runs?event=push`, and a workflow_call
+# invocation produces no top-level run entry for that query to find.
+
+on:
+  pull_request:
+    branches:
+      - main
+  # Kept in step with the PR path so enabling a merge queue later cannot
+  # deadlock on a context that only pull requests produce.
+  merge_group:
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      # Always an explicit literal 'true' or 'false'.
+      hw_relevant: ${{ steps.decide.outputs.hw_relevant }}
+      is_fork: ${{ steps.decide.outputs.is_fork }}
+    steps:
+      - name: Decide whether the physical device suite is relevant
+        id: decide
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Merge-queue runs validate the prospective merged state and have no
+          # PR file list to inspect. Always run the full suite there.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "hw_relevant=true" >> "$GITHUB_OUTPUT"
+            echo "is_fork=false" >> "$GITHUB_OUTPUT"
+            echo "event=${EVENT}: forcing hw_relevant=true"
+            exit 0
+          fi
+
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "::error::pull_request event with no PR number; refusing to guess relevance."
+            exit 1
+          fi
+
+          # --paginate matters: a large PR would otherwise be truncated at 30
+          # files and could be misclassified as documentation-only.
+          gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
+            --jq '.[].filename' > changed.txt
+
+          if [ ! -s changed.txt ]; then
+            echo "::error::Could not determine the changed files for PR #${PR_NUMBER}. Failing closed rather than assuming the hardware suite is unnecessary."
+            exit 1
+          fi
+
+          echo "Changed files:"
+          sed 's/^/  /' changed.txt
+
+          # EXCLUSION list, not an inclusion list. Anything not recognised as
+          # inert documentation/metadata counts as hardware-relevant, so a new
+          # source directory is covered automatically instead of silently
+          # bypassing the device suite.
+          NON_HW='^(docs/|\.github/ISSUE_TEMPLATE/|\.github/PULL_REQUEST_TEMPLATE)|(^|/)[^/]*\.md$|^LICENSE$|^\.gitignore$|^\.gitattributes$|^\.editorconfig$|^\.github/dependabot\.yml$'
+
+          RELEVANT=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            if echo "$f" | grep -Eq "$NON_HW"; then
+              echo "  inert:    $f"
+            else
+              echo "  relevant: $f"
+              RELEVANT=true
+            fi
+          done < changed.txt
+
+          FORK=false
+          if [ "${IS_FORK:-false}" = "true" ]; then
+            FORK=true
+          fi
+
+          echo "hw_relevant=$RELEVANT" >> "$GITHUB_OUTPUT"
+          echo "is_fork=$FORK" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### CI classification"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| event | \`${EVENT}\` |"
+            echo "| changed files | $(wc -l < changed.txt) |"
+            echo "| hardware relevant | \`${RELEVANT}\` |"
+            echo "| fork PR | \`${FORK}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  call-build:
+    needs: classify
+    uses: ./.github/workflows/build.yml
+    secrets: inherit
+
+  call-host-tests:
+    needs: classify
+    uses: ./.github/workflows/host-tests.yml
+    secrets: inherit
+
+  call-device-tests:
+    needs: classify
+    # Fork PRs are excluded deliberately, NOT as an oversight: the device suite
+    # runs on a self-hosted runner with physical access to the controller, so
+    # executing fork-authored code there would be a host, network and hardware
+    # exposure. Fork PRs also receive no repository secrets and cannot write
+    # check runs. ci-gate turns a hardware-relevant fork PR into an explicit
+    # FAILURE with instructions, rather than letting the skip read as a pass.
+    if: needs.classify.outputs.hw_relevant == 'true' && needs.classify.outputs.is_fork == 'false'
+    uses: ./.github/workflows/device-tests.yml
+    secrets: inherit
+
+  # The ONLY status check that should be required on main.
+  ci-gate:
+    needs: [classify, call-build, call-host-tests, call-device-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce an acceptable CI outcome
+        env:
+          CLASSIFY: ${{ needs.classify.result }}
+          HW: ${{ needs.classify.outputs.hw_relevant }}
+          FORK: ${{ needs.classify.outputs.is_fork }}
+          BUILD: ${{ needs.call-build.result }}
+          HOST: ${{ needs.call-host-tests.result }}
+          DEVICE: ${{ needs.call-device-tests.result }}
+        run: |
+          set -euo pipefail
+
+          echo "classify=${CLASSIFY} hw_relevant=${HW} is_fork=${FORK}"
+          echo "call-build=${BUILD}"
+          echo "call-host-tests=${HOST}"
+          echo "call-device-tests=${DEVICE}"
+
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+
+          # Everything downstream is meaningless if the classifier did not
+          # produce a trustworthy decision.
+          if [ "$CLASSIFY" != "success" ]; then
+            fail "classify did not succeed (got '${CLASSIFY}'), so the relevance decision cannot be trusted."
+          fi
+
+          case "$HW" in
+            true|false) ;;
+            *) fail "hw_relevant is '${HW}', expected the literal 'true' or 'false'." ;;
+          esac
+          case "$FORK" in
+            true|false) ;;
+            *) fail "is_fork is '${FORK}', expected the literal 'true' or 'false'." ;;
+          esac
+
+          # These two always run unconditionally; a skip means something is
+          # structurally wrong and must never be read as a pass.
+          [ "$BUILD" = "success" ] || fail "call-build is '${BUILD}', expected success."
+          [ "$HOST" = "success" ] || fail "call-host-tests is '${HOST}', expected success."
+
+          if [ "$HW" = "true" ] && [ "$FORK" = "true" ]; then
+            fail "This fork PR changes hardware-relevant files, but the physical device suite cannot run on fork code. A maintainer must re-push the commit to a branch in this repository so the device suite can validate it. Refusing to pass without hardware validation."
+          fi
+
+          if [ "$HW" = "true" ]; then
+            [ "$DEVICE" = "success" ] || fail "call-device-tests is '${DEVICE}', expected success. A skipped or failed hardware suite must never be read as a pass."
+            echo "Accepted: hardware-relevant change, physical device suite ran and passed."
+            exit 0
+          fi
+
+          # Documentation-only change: the suite must be skipped, and must not
+          # have run unexpectedly (which would mean the classifier and the job
+          # condition disagree).
+          [ "$DEVICE" = "skipped" ] || fail "Change classified as documentation-only, but call-device-tests is '${DEVICE}', expected skipped. The classifier and the job condition disagree."
+          echo "Accepted: documentation-only change, physical device suite correctly skipped."
