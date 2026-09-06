@@ -49,10 +49,23 @@ struct HeatPumpState {
     uint16_t compressor_freq = 0;    // Hz
     uint16_t fan_speed = 0;          // fan speed in RPM (decoded by the macon library)
     uint16_t fan_speed_max = 0;      // full-scale fan speed in RPM (from macon lib); 0 until first read
+    // Electrical readings. Each carries a validity flag because 0 is a
+    // legitimate value for every one of them, so consumers must be able to
+    // distinguish "measured zero" from "never read / stale".
     uint16_t ac_voltage = 0;         // V
+    bool     ac_voltage_valid = false;
     uint16_t ac_current = 0;         // A
+    bool     ac_current_valid = false;
     uint16_t dc_voltage = 0;         // V (volts; unit conversion owned by macon lib)
+    bool     dc_voltage_valid = false;
+    // Primary electronic expansion valve opening, in raw steps. 0 steps is a
+    // REAL and alarming state (valve fully closed), so "unknown" must never be
+    // reported as 0 - consult primary_eev_valid and surface null/unavailable
+    // instead. Note the mainboard exposes no full-scale step count (there is
+    // no max-steps register and no EEV advanced parameter for it), so this
+    // value cannot be converted to a percentage on the device.
     uint16_t primary_eev_opening = 0;   // steps
+    bool     primary_eev_valid = false;
     uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
 
     // Estimated performance (owned by the macon library; flow is an outside

@@ -84,6 +84,12 @@ The initial exposed snapshot includes:
 - Temperatures.
 - Setpoints and setpoint limits.
 - Compressor frequency, power, thermal output, and COP when valid.
+- Primary EEV opening in raw steps, and AC/DC electrical readings. Each is
+  `null` when the underlying register has not been read, because 0 is a
+  legitimate measured value for all of them (0 EEV steps means the valve is
+  fully closed, not unknown). The mainboard publishes no full-scale EEV step
+  count, so the opening is raw steps only and is never expressed as a
+  percentage.
 - Current error state.
 - Firmware, protocol, and capability metadata.
 

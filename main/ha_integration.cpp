@@ -111,6 +111,40 @@ cJSON* createStateObject(const HeatPumpState& hp)
     cJSON_AddNumberToObject(
         readings, "compressor_frequency_hz", hp.compressor_freq);
     cJSON_AddNumberToObject(readings, "fan_rpm", hp.fan_speed);
+    // Primary EEV opening, in raw steps.
+    //
+    // Emitted as null rather than 0 when the reading is invalid. 0 steps means
+    // the valve is fully CLOSED, which is a real and alarming state, so
+    // collapsing "unknown" onto 0 would make consumers confidently display a
+    // fault that is not occurring.
+    //
+    // The key name matches the device's own /api/heatpump/status payload so the
+    // two representations stay consistent. Note this is raw steps only: the
+    // mainboard exposes no full-scale step count (no max-steps register, and no
+    // EEV advanced parameter carries one), so the device cannot convert this to
+    // a percentage and deliberately does not guess at one.
+    if (hp.primary_eev_valid) {
+        cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
+    } else {
+        cJSON_AddNullToObject(readings, "primary_eev");
+    }
+    // Electrical readings follow the same null-when-invalid rule: 0 V / 0 A are
+    // all legitimate measured values, so they must not double as "unknown".
+    if (hp.ac_voltage_valid) {
+        cJSON_AddNumberToObject(readings, "ac_voltage", hp.ac_voltage);
+    } else {
+        cJSON_AddNullToObject(readings, "ac_voltage");
+    }
+    if (hp.ac_current_valid) {
+        cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
+    } else {
+        cJSON_AddNullToObject(readings, "ac_current");
+    }
+    if (hp.dc_voltage_valid) {
+        cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
+    } else {
+        cJSON_AddNullToObject(readings, "dc_voltage");
+    }
     cJSON_AddNumberToObject(readings, "power_w", hp.realtime_power_w);
     cJSON_AddNumberToObject(readings, "thermal_w", hp.thermal_w);
     if (hp.cop_valid) {
