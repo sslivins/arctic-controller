@@ -9,15 +9,15 @@ name: Host Tests
 # Intentionally has NO `paths:` filter: a required check that gets skipped by a
 # path filter stays pending forever and blocks the merge queue. Keeping this
 # always-on guarantees it reports a conclusion on every PR and merge group.
+#
+# The PR and merge-queue paths now arrive via ci.yml (`workflow_call`), which
+# is itself unfiltered, so that property is preserved.
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
-  merge_group:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
