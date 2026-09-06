@@ -195,8 +195,14 @@ static lv_color_t get_temp_color(int16_t temp) {
 static void update_readings() {
     if (!state.shown) return;
     
+    // Demo mode needs no special case here. initDemoState() seeds the full
+    // shadow register image and marks the state connected, so getState()
+    // already returns the demo values. This screen previously carried its own
+    // block of hardcoded demo literals, which silently drifted from those
+    // seeds (850 vs 400 RPM, 350 vs 200 EEV steps, 20 vs 18 C cooling
+    // setpoint) and disagreed with the home screen. Render from getState()
+    // only, so there is exactly one source of truth.
     arctic::HeatPumpState hp = arctic::getState();
-    bool demo_mode = app_prefs_is_demo_mode();
     char buf[32];
     
     // Helper to format temperature with unit conversion
@@ -204,62 +210,6 @@ static void update_readings() {
         snprintf(buf, sizeof(buf), "%d %s", 
                  app_prefs_convert_temp(temp_c), app_prefs_temp_unit_str());
     };
-    
-    if (demo_mode) {
-        // Demo mode - show simulated temperatures
-        format_temp(42);  // Tank
-        lv_label_set_text(state.tank_temp, buf);
-        lv_obj_set_style_text_color(state.tank_temp, get_temp_color(42), LV_PART_MAIN);
-        
-        format_temp(45);  // Outlet
-        lv_label_set_text(state.outlet_temp, buf);
-        lv_obj_set_style_text_color(state.outlet_temp, get_temp_color(45), LV_PART_MAIN);
-        
-        format_temp(38);  // Inlet
-        lv_label_set_text(state.inlet_temp, buf);
-        lv_obj_set_style_text_color(state.inlet_temp, get_temp_color(38), LV_PART_MAIN);
-        
-        format_temp(22);  // Outdoor ambient
-        lv_label_set_text(state.outdoor_temp, buf);
-        lv_obj_set_style_text_color(state.outdoor_temp, get_temp_color(22), LV_PART_MAIN);
-        
-        format_temp(85);  // Discharge
-        lv_label_set_text(state.discharge_temp, buf);
-        lv_obj_set_style_text_color(state.discharge_temp, get_temp_color(85), LV_PART_MAIN);
-        
-        format_temp(12);  // Suction
-        lv_label_set_text(state.suction_temp, buf);
-        lv_obj_set_style_text_color(state.suction_temp, get_temp_color(12), LV_PART_MAIN);
-        
-        format_temp(35);  // Outdoor coil
-        lv_label_set_text(state.outdoor_coil_temp, buf);
-        lv_obj_set_style_text_color(state.outdoor_coil_temp, get_temp_color(35), LV_PART_MAIN);
-        
-        format_temp(40);  // Indoor coil
-        lv_label_set_text(state.indoor_coil_temp, buf);
-        lv_obj_set_style_text_color(state.indoor_coil_temp, get_temp_color(40), LV_PART_MAIN);
-        
-        format_temp(55);  // IPM
-        lv_label_set_text(state.ipm_temp, buf);
-        lv_obj_set_style_text_color(state.ipm_temp, get_temp_color(55), LV_PART_MAIN);
-
-        // System - demo values
-        lv_label_set_text(state.compressor_freq, "60 Hz");
-        lv_obj_set_style_text_color(state.compressor_freq, COLOR_SUCCESS, LV_PART_MAIN);
-        lv_label_set_text(state.fan_speed, "850 RPM");
-        lv_obj_set_style_text_color(state.fan_speed, COLOR_SUCCESS, LV_PART_MAIN);
-        lv_label_set_text(state.ac_voltage, "230 V");
-        lv_label_set_text(state.ac_current, "5 A");
-        lv_label_set_text(state.dc_voltage, "380.0 V");
-        lv_label_set_text(state.primary_eev, "350 steps");
-        snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(20), app_prefs_temp_unit_str());
-        lv_label_set_text(state.cooling_setpoint, buf);
-        snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(45), app_prefs_temp_unit_str());
-        lv_label_set_text(state.heating_setpoint, buf);
-        snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(50), app_prefs_temp_unit_str());
-        lv_label_set_text(state.hotwater_setpoint, buf);
-        return;
-    }
     
     if (!hp.connected) {
         // Disconnected - show placeholders
