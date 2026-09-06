@@ -506,11 +506,15 @@ static void applyMaconMapping() {
 
     // Electrical readings.
     s_state.ac_current          = ms.ac_current;
+    s_state.ac_current_valid    = ms.ac_current_valid;
     s_state.ac_voltage          = ms.ac_voltage;
+    s_state.ac_voltage_valid    = ms.ac_voltage_valid;
     // The macon library owns raw->unit conversion and reports dc_voltage in
     // VOLTS. Store it as-is; no re-scaling in the consumer.
     s_state.dc_voltage          = ms.dc_voltage;
+    s_state.dc_voltage_valid    = ms.dc_voltage_valid;
     s_state.primary_eev_opening = ms.primary_eev;
+    s_state.primary_eev_valid   = ms.primary_eev_valid;
     s_state.compressor_freq     = ms.compressor_freq;
     // Real-time power in watts, decoded by the macon library.
     // Preferred over the old V*I/10 estimate, which is now 10x low because the
