@@ -156,6 +156,17 @@ jobs:
     # check runs. ci-gate turns a hardware-relevant fork PR into an explicit
     # FAILURE with instructions, rather than letting the skip read as a pass.
     if: needs.classify.outputs.hw_relevant == 'true' && needs.classify.outputs.is_fork == 'false'
+    # A caller can only ever GRANT DOWNWARD, so these must cover the highest
+    # permission any job in device-tests.yml declares, or the run is rejected
+    # before it starts. `contents: write` is required by device-firmware-build
+    # solely to publish the nightly OTA prerelease; that step is gated on
+    # `github.event_name == 'schedule'` and so can never fire from this path.
+    # Scoping the grant to this one job keeps call-build and call-host-tests
+    # read-only rather than elevating the whole workflow.
+    permissions:
+      contents: write
+      actions: read
+      checks: write
     uses: ./.github/workflows/device-tests.yml
     secrets: inherit
 

@@ -143,6 +143,42 @@ def test_no_duplicate_check_run_names_across_workflows():
     assert not duplicates, "duplicate job/check-run names: " + "; ".join(duplicates)
 
 
+def test_caller_grants_at_least_the_permissions_the_callee_declares():
+    """A caller can only grant downward.
+
+    If a called workflow declares a permission the caller does not hold, the
+    entire run is rejected with a `startup_failure` before any job is created
+    -- and that produces no check run at all, which is precisely the
+    never-reports condition this migration exists to eliminate.
+    """
+    ci = _workflow("ci.yml")
+    rank = {"none": 0, "read": 1, "write": 2}
+    calls = {
+        job["uses"].rsplit("/", 1)[-1]: (name, job)
+        for name, job in ci["jobs"].items()
+        if "uses" in job
+    }
+    assert calls, "ci.yml must call the heavy suites as reusable workflows"
+
+    problems = []
+    for wf_name, (caller_job, job) in calls.items():
+        granted = {**(ci.get("permissions") or {}), **(job.get("permissions") or {})}
+        callee = _workflow(wf_name)
+        # The callee's requirement is the highest level any of its jobs asks for.
+        required: dict[str, str] = dict(callee.get("permissions") or {})
+        for inner in (callee.get("jobs") or {}).values():
+            for scope, level in (inner.get("permissions") or {}).items():
+                if rank.get(level, 0) > rank.get(required.get(scope, "none"), 0):
+                    required[scope] = level
+        for scope, level in required.items():
+            have = granted.get(scope, "none")
+            if rank.get(have, 0) < rank.get(level, 0):
+                problems.append(
+                    f"{caller_job} -> {wf_name}: needs {scope}:{level}, caller grants {scope}:{have}"
+                )
+    assert not problems, "insufficient permissions: " + "; ".join(problems)
+
+
 def test_ci_gate_depends_on_every_other_job():
     """A gate that does not observe a job cannot enforce anything about it."""
     jobs = _workflow("ci.yml")["jobs"]
