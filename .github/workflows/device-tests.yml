@@ -620,11 +620,21 @@ jobs:
             # Capture the HTTP status so a failure is diagnosable (a bare
             # `curl -skf ... >/dev/null` hid whether we got a 404/401/5xx or a
             # timeout, which made the original flake impossible to triage).
+            #
+            # The `|| HTTP_CODE="000"` is load-bearing. Steps default to
+            # `bash -e`, so an unguarded assignment from a command
+            # substitution aborts the whole step the moment curl exits
+            # non-zero (28 timeout, 7 connection refused, ...). That killed
+            # this loop on attempt 1 and made the retries dead code: it only
+            # ever retried when curl SUCCEEDED but returned a non-200 status,
+            # which is the one case least likely to be transient. Guarding
+            # the assignment turns a transport error into a retryable "000",
+            # matching the `|| true` idiom used by the sibling curl steps.
             HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" \
               --connect-timeout 3 --max-time 10 \
               -X POST "$ARCTIC_URL/api/test/credentials" \
               -H "Content-Type: application/json" \
-              -d "$BODY")
+              -d "$BODY") || HTTP_CODE="000"
             if [ "$HTTP_CODE" = "200" ]; then
               echo "ARCTIC_USERNAME=$TEST_USERNAME" >> "$GITHUB_ENV"
               echo "ARCTIC_PASSWORD=$TEST_PASSWORD" >> "$GITHUB_ENV"
