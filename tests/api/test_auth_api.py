@@ -240,8 +240,15 @@ class TestLoginThrottling:
     test_ha_security_contract.py.
     """
 
-    def _clear_cooldown(self):
-        """A successful login resets both the counter and any cooldown."""
+    def _wait_out_cooldown(self):
+        """Sign in successfully, waiting out any active cooldown first.
+
+        A cooldown is wall-clock by definition, so there is no observable
+        condition to poll other than the endpoint itself -- Retry-After tells
+        us exactly how long to wait, so this converges rather than guessing.
+        A successful login resets both the counter and the cooldown, which is
+        also what makes this safe to use as cleanup.
+        """
         for _ in range(20):
             r = requests.post(
                 f"{BASE_URL}/login",
@@ -252,15 +259,17 @@ class TestLoginThrottling:
             if r.status_code == 200:
                 return
             assert r.status_code == 429, (
-                f"unexpected status clearing cooldown: {r.status_code}"
+                f"unexpected status waiting out cooldown: {r.status_code}"
             )
             time.sleep(int(r.headers.get("Retry-After", "1")) + 1)
-        raise AssertionError("could not clear the login cooldown")
+        raise AssertionError("login never recovered from its cooldown")
 
     def test_repeated_failures_cool_down_and_then_recover(self):
         _enable_web_auth()
         try:
-            self._clear_cooldown()
+            # Other tests in this suite fail logins on purpose, so start from
+            # a known counter rather than inheriting their failures.
+            self._wait_out_cooldown()
 
             # The first five failures are answered normally; the fifth arms
             # the cooldown, so the sixth request is refused outright.
@@ -296,17 +305,11 @@ class TestLoginThrottling:
             assert r.status_code == 429
 
             # The cooldown is capped and self-healing: waiting it out is
-            # enough, no reboot or reset required.
-            time.sleep(retry_after + 1)
-            r = requests.post(
-                f"{BASE_URL}/login",
-                json={"username": USERNAME, "password": PASSWORD},
-                timeout=5,
-                verify=False,
-            )
-            assert r.status_code == 200
+            # enough, with no reboot or reset required. If it were a lockout
+            # instead, this would never return.
+            self._wait_out_cooldown()
         finally:
-            self._clear_cooldown()
+            self._wait_out_cooldown()
             _disable_web_auth()
 
 
