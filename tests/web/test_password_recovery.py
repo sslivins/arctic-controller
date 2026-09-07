@@ -66,12 +66,96 @@ def cleanup():
     restore_password()
 
 
+@pytest.fixture
+def mobile_page(playwright, browser, base_url):
+    """A page in a touch-emulating phone context.
+
+    Uses a real device descriptor rather than just a small viewport so that
+    `(pointer: coarse)` matches and `tap()` is available -- a narrow desktop
+    window would silently keep the fine-pointer styling and prove nothing
+    about the phone experience.
+    """
+    from conftest import _enable_web_auth, _ensure_auth_disabled
+
+    _enable_web_auth(base_url)
+    context = browser.new_context(
+        **playwright.devices["iPhone 13"], ignore_https_errors=True
+    )
+    page = context.new_page()
+    page.goto(base_url, wait_until="domcontentloaded")
+    page.wait_for_selector(".login-card", timeout=10000)
+    yield page
+    context.close()
+    _ensure_auth_disabled(base_url)
+
+
 class TestPasswordRecovery:
     def test_forgot_password_opens_the_recovery_form(self, login_page: Page):
         login_page.locator('[data-action="forgot-password"]').click()
         form = login_page.locator('form[data-form="change-credentials"]')
         expect(form).to_be_visible()
         expect(form.locator('input[name="pairing_code"]')).to_be_visible()
+
+    def test_code_help_is_collapsed_until_the_info_icon_is_tapped(
+        self, login_page: Page
+    ):
+        """The instructions live behind (i) so the form stays short on a phone."""
+        login_page.locator('[data-action="forgot-password"]').click()
+        info = login_page.locator('[data-action="toggle-code-help"]')
+        panel = login_page.locator("#code-help")
+
+        expect(info).to_be_visible()
+        expect(panel).to_be_hidden()
+        expect(info).to_have_attribute("aria-expanded", "false")
+
+        info.click()
+        expect(panel).to_be_visible()
+        expect(info).to_have_attribute("aria-expanded", "true")
+        expect(panel).to_contain_text("Show One-Time Code")
+
+        info.click()
+        expect(panel).to_be_hidden()
+        expect(info).to_have_attribute("aria-expanded", "false")
+
+    def test_code_help_does_not_discard_what_was_already_typed(
+        self, login_page: Page
+    ):
+        """Toggling help must not go through render(), which rebuilds the form."""
+        login_page.locator('[data-action="forgot-password"]').click()
+        form = login_page.locator('form[data-form="change-credentials"]')
+        form.locator('input[name="password"]').fill("part-way-through")
+
+        login_page.locator('[data-action="toggle-code-help"]').click()
+        expect(login_page.locator("#code-help")).to_be_visible()
+        expect(form.locator('input[name="password"]')).to_have_value(
+            "part-way-through"
+        )
+
+    def test_code_help_is_tappable_on_a_phone_viewport(self, mobile_page: Page):
+        """A phone has no hover, so the control must work by tap alone.
+
+        This runs in a real touch-emulating context rather than just a narrow
+        window, so the `(pointer: coarse)` rule that enlarges the icon to a
+        finger-sized target is actually exercised.
+        """
+        mobile_page.locator('[data-action="forgot-password"]').click()
+
+        info = mobile_page.locator('[data-action="toggle-code-help"]')
+        box = info.bounding_box()
+        assert box is not None, "info icon is not laid out"
+        assert box["width"] >= 24 and box["height"] >= 24, (
+            f"touch target is only {box['width']}x{box['height']}"
+        )
+
+        info.tap()
+        expect(mobile_page.locator("#code-help")).to_be_visible()
+
+        # The panel must not force the page sideways on a narrow screen.
+        overflow = mobile_page.evaluate(
+            "() => document.documentElement.scrollWidth"
+            " - document.documentElement.clientWidth"
+        )
+        assert overflow <= 1, f"page overflows horizontally by {overflow}px"
 
     def test_cancel_returns_to_sign_in(self, login_page: Page):
         login_page.locator('[data-action="forgot-password"]').click()
