@@ -242,6 +242,36 @@
     .hist-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
     .field { display: grid; gap: 6px; margin-bottom: 14px; }
     .field label { color: var(--cp-text-muted); font-size: 13px; font-weight: 600; }
+    /* Inline help disclosure. Toggled by click rather than hover so the same
+       control works with a mouse, a keyboard and a touchscreen -- hover has no
+       equivalent on a phone. The panel sits in normal flow instead of floating,
+       which keeps it from being clipped or pushed off-screen on narrow
+       viewports. */
+    .field-label { display: flex; align-items: center; gap: 6px; }
+    .info-btn {
+      flex: none; width: 18px; height: 18px; padding: 0; line-height: 1;
+      border-radius: 50%; border: 1px solid var(--cp-border-strong);
+      background: transparent; color: var(--cp-text-muted);
+      font-size: 12px; font-weight: 700; font-family: inherit;
+      cursor: pointer; display: inline-flex; align-items: center;
+      justify-content: center;
+    }
+    .info-btn:hover { color: var(--cp-text); border-color: var(--cp-accent); }
+    .info-btn:focus-visible { outline: none; border-color: var(--cp-accent); box-shadow: 0 0 0 3px var(--cp-accent-soft); }
+    .info-btn[aria-expanded="true"] { background: var(--cp-accent); border-color: var(--cp-accent); color: var(--cp-accent-fg); }
+    /* Touch targets must stay finger-sized even though the glyph is small. */
+    @media (pointer: coarse) {
+      .info-btn { width: 28px; height: 28px; font-size: 14px; }
+    }
+    .info-panel {
+      margin: 0 0 8px; padding: 10px 12px; border-radius: 10px;
+      background: var(--cp-surface-soft);
+      border: 1px solid var(--cp-border-strong);
+      color: var(--cp-text-soft); font-size: 13px; line-height: 1.5;
+    }
+    .info-panel[hidden] { display: none; }
+    .info-panel ol { margin: 0; padding-left: 18px; }
+    .info-panel li + li { margin-top: 4px; }
     input, select, textarea {
       width: 100%; border: 1px solid var(--cp-border-strong);
       background: var(--cp-surface); color: var(--cp-text);
@@ -932,9 +962,21 @@
       return `<div class="login"><form class="card login-card" data-form="change-credentials">
         <div class="brand" style="margin-bottom:20px"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
         <h1>${recovering ? "Reset your password" : "Secure this controller"}</h1>
-        <p class="metric-sub">On the controller's screen open Settings → Security, tap Show One-Time Code, and enter the six-digit code below${recovering ? " to choose a new username and password." : " to set your own password."}</p>
+        <p class="metric-sub">Enter the six-digit code from the controller's screen${recovering ? " to choose a new username and password." : " to set your own password."}</p>
         ${state.auth.recoveryError ? `<div class="notice bad" style="margin:0 0 16px">${esc(state.auth.recoveryError)}</div>` : ""}
-        <div class="field"><label>One-time code</label><input name="pairing_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></div>
+        <div class="field">
+          <div class="field-label"><label for="pairing_code">One-time code</label>
+            <button class="info-btn" type="button" data-action="toggle-code-help" aria-expanded="false" aria-controls="code-help" aria-label="Where do I find the one-time code?">i</button></div>
+          <div class="info-panel" id="code-help" hidden>
+            <ol>
+              <li>Go to the controller itself and wake its screen.</li>
+              <li>Open <strong>Settings</strong>, then <strong>Security</strong>.</li>
+              <li>Tap <strong>Show One-Time Code</strong> and type the six digits here.</li>
+            </ol>
+            <p style="margin:8px 0 0">The code is only shown on the controller, so you have to be standing at it. It expires after five minutes &mdash; if it runs out, just tap the button again for a fresh one.</p>
+          </div>
+          <input id="pairing_code" name="pairing_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
+        </div>
         <div class="field"><label>Username</label><input name="username" value="arctic" autocomplete="username" required></div>
         <div class="field"><label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required></div>
         <div class="field"><label>Confirm password</label><input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></div>
@@ -1384,6 +1426,19 @@
         const meta = n && (NOTIF_META[n.key] || NOTIF_META.unknown);
         if (meta && meta.route) await navigate(meta.route[0], meta.route[1]);
         else render();
+        return;
+      }
+      if (action === "toggle-code-help") {
+        // Toggled directly in the DOM rather than through render(): a
+        // re-render rebuilds the form and would discard whatever the user has
+        // already typed, and opening a help panel has no business clearing a
+        // half-entered password.
+        const panel = $("#" + el.getAttribute("aria-controls"));
+        if (panel) {
+          const willOpen = panel.hidden;
+          panel.hidden = !willOpen;
+          el.setAttribute("aria-expanded", willOpen ? "true" : "false");
+        }
         return;
       }
       if (action === "forgot-password") {

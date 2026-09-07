@@ -33,7 +33,7 @@ pytest tests/web/ -v --headed
 | File | Tests | Coverage |
 |------|-------|----------|
 | `test_login.py` | 4 | Login form, success, failure, nav hidden before login |
-| `test_password_recovery.py` | 4 | Forgot password, cancel, bad code rejected, recovery with a one-time code |
+| `test_password_recovery.py` | 7 | Forgot password, one-time code help disclosure (desktop + phone), cancel, bad code rejected, recovery with a one-time code |
 | `test_change_password.py` | 2 | Credentials form, change password then sign in again |
 | `test_dashboard.py` | 9 | Hero card, dots, perf strip, panels, polling |
 | `test_navigation.py` | 9 | 6-page nav, logs page, events page, params page |
@@ -43,7 +43,7 @@ pytest tests/web/ -v --headed
 | `test_i18n.py` | 3 | Language selector, EN→FR→ES switching, persistence |
 | `test_tls.py` | 3 | TLS auth prerequisite, cert install/delete, PEM validation |
 
-**Total: 49 tests**
+**Total: 52 tests**
 
 ## Architecture
 
