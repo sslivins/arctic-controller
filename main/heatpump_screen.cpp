@@ -879,12 +879,17 @@ void heatpump_screen_update(void) {
         lv_obj_set_style_text_color(state.perf_cop_value, COLOR_TEXT_DIM, LV_PART_MAIN);
     }
     
-    // Fan speed
-    if (hp.connected && hp.fan_speed > 0) {
+    // Fan speed. "--" is reserved for "no data" (disconnected); a genuine
+    // 0 RPM is data, so it renders as "0 RPM" dimmed to convey idle -- the
+    // same convention the power reading already uses ("0 W"), and the one the
+    // Status screen has always used.
+    if (hp.connected) {
         char fan_buf[16];
         snprintf(fan_buf, sizeof(fan_buf), "%u RPM", hp.fan_speed);
         lv_label_set_text(state.perf_fan_value, fan_buf);
-        lv_obj_set_style_text_color(state.perf_fan_value, COLOR_TEXT, LV_PART_MAIN);
+        lv_obj_set_style_text_color(state.perf_fan_value,
+                                    hp.fan_speed > 0 ? COLOR_TEXT : COLOR_TEXT_DIM,
+                                    LV_PART_MAIN);
     } else {
         lv_label_set_text(state.perf_fan_value, "--");
         lv_obj_set_style_text_color(state.perf_fan_value, COLOR_TEXT_DIM, LV_PART_MAIN);

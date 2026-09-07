@@ -360,15 +360,22 @@ class TestPerformanceStrip:
         assert "450" in fan.text, f"Expected '450' in fan text, got '{fan.text}'"
         assert "RPM" in fan.text, f"Expected 'RPM' in fan text, got '{fan.text}'"
 
-    def test_fan_rpm_dashes_when_stopped(self, device: DeviceClient):
-        """Fan speed should show '--' when the fan is not running."""
+    def test_fan_rpm_zero_when_stopped(self, device: DeviceClient):
+        """A stopped fan shows '0 RPM', not '--'.
+
+        '--' means "no data" (disconnected or invalid); a genuine 0 RPM is
+        data, so conflating the two would lose information. This matches the
+        Status screen and the power reading, which already shows '0 W'.
+        """
         device.clear_all_faults()
         _running(device, fan_on=0, fan_speed=0)
-        _wait(device, lambda: _text_has(device, "perf_fan", "--"),
-              "perf_fan shows -- when stopped")
+        _wait(device, lambda: _text_has(device, "perf_fan", "0 RPM"),
+              "perf_fan shows 0 RPM when stopped")
         fan = device.find_widget(tag="perf_fan")
         assert fan is not None
-        assert "--" in fan.text, f"Expected '--' in fan text, got '{fan.text}'"
+        assert "0 RPM" in fan.text, f"Expected '0 RPM' in fan text, got '{fan.text}'"
+        assert "--" not in fan.text, \
+            f"'--' is reserved for no-data, got '{fan.text}'"
 
     def test_power_displayed(self, device: DeviceClient):
         """Power consumption should be displayed when compressor is running."""
