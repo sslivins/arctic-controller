@@ -160,7 +160,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_time_format.py`](test_time_format.py) | 5 | 12h/24h toggle, status bar display |
 | [`test_wifi.py`](test_wifi.py) | 4 | Password dialog, show/hide toggle, open network bypass |
 | [`test_demo_mode.py`](test_demo_mode.py) | 3 | Demo mode toggle, reboot confirmation panel, cancel revert |
-| [`test_settings_menu.py`](test_settings_menu.py) | 3 | Open/close settings, close button |
+| [`test_settings_menu.py`](test_settings_menu.py) | 6 | Open/close settings, close button, web password reset |
 | [`test_display_brightness.py`](test_display_brightness.py) | 3 | Brightness slider control and label |
 | [`test_temperature_unit.py`](test_temperature_unit.py) | 2 | °C/°F toggle and preferences |
 | [`test_error_history_duration.py`](test_error_history_duration.py) | 1 | Error history duration format ("3s") |

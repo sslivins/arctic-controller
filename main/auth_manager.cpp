@@ -3,6 +3,7 @@
  * Authentication Manager - Session and API Key Implementation
  */
 #include "auth_manager.h"
+#include "setup_pairing.h"
 #include <esp_log.h>
 #include <esp_random.h>
 #include <nvs_flash.h>
@@ -164,24 +165,39 @@ static bool save_to_nvs(void)
     ESP_LOGI(TAG, "Saving to NVS: web_auth=%d, api_auth=%d", 
              state.web_auth_enabled ? 1 : 0, state.api_auth_enabled ? 1 : 0);
     
-    nvs_set_u8(nvs, NVS_KEY_WEB_ENABLED, state.web_auth_enabled ? 1 : 0);
-    nvs_set_u8(nvs, NVS_KEY_API_ENABLED, state.api_auth_enabled ? 1 : 0);
+    // Track every write: a silent failure here would leave the running config
+    // and the persisted config disagreeing, so a reboot would resurrect
+    // credentials the user believes they have already replaced.
+    esp_err_t first_err = ESP_OK;
+    auto record = [&first_err](const char* what, esp_err_t e) {
+        if (e != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to persist %s: %s", what, esp_err_to_name(e));
+            if (first_err == ESP_OK) first_err = e;
+        }
+    };
+
+    record("web_auth_enabled",
+           nvs_set_u8(nvs, NVS_KEY_WEB_ENABLED, state.web_auth_enabled ? 1 : 0));
+    record("api_auth_enabled",
+           nvs_set_u8(nvs, NVS_KEY_API_ENABLED, state.api_auth_enabled ? 1 : 0));
     
     if (state.username[0] != '\0') {
-        nvs_set_str(nvs, NVS_KEY_USERNAME, state.username);
+        record("username", nvs_set_str(nvs, NVS_KEY_USERNAME, state.username));
     }
     
     if (state.password_set) {
-        nvs_set_blob(nvs, NVS_KEY_PASS_HASH, state.password_hash, sizeof(state.password_hash));
+        record("password hash",
+               nvs_set_blob(nvs, NVS_KEY_PASS_HASH, state.password_hash,
+                            sizeof(state.password_hash)));
     }
     
     if (state.api_key[0] != '\0') {
-        nvs_set_str(nvs, NVS_KEY_API_KEY, state.api_key);
+        record("api key", nvs_set_str(nvs, NVS_KEY_API_KEY, state.api_key));
     }
     
-    nvs_commit(nvs);
+    record("commit", nvs_commit(nvs));
     nvs_close(nvs);
-    return true;
+    return first_err == ESP_OK;
 }
 
 static session_t* find_session(const char* token)
@@ -255,9 +271,9 @@ void auth_mgr_init(void)
     // This ensures we don't overwrite user-set credentials
     if (!loaded || (!state.password_set && state.username[0] == '\0')) {
         ESP_LOGI(TAG, "No credentials found in NVS, setting defaults (arctic/arctic)");
-        strncpy(state.username, "arctic", sizeof(state.username) - 1);
+        strncpy(state.username, AUTH_FACTORY_USERNAME, sizeof(state.username) - 1);
         state.username[sizeof(state.username) - 1] = '\0';
-        hash_password("arctic", state.password_hash);
+        hash_password(AUTH_FACTORY_PASSWORD, state.password_hash);
         state.password_set = true;
         save_to_nvs();
     } else {
@@ -343,6 +359,7 @@ bool auth_mgr_set_credentials(const char* username, const char* password)
         // Invalidate all sessions when credentials change for security
         auth_mgr_logout_all();
         ESP_LOGI(TAG, "All sessions invalidated due to credential change");
+        return saved;
     } else {
         ESP_LOGW(TAG, "No credential changes to save");
     }
@@ -353,13 +370,30 @@ bool auth_mgr_set_credentials(const char* username, const char* password)
 bool auth_mgr_credentials_change_required(void)
 {
     uint8_t default_hash[32];
-    hash_password("arctic", default_hash);
+    hash_password(AUTH_FACTORY_PASSWORD, default_hash);
     const bool factory_credentials =
         state.password_set &&
         constant_time_equal(
             state.password_hash, default_hash, sizeof(default_hash));
     mbedtls_platform_zeroize(default_hash, sizeof(default_hash));
     return factory_credentials;
+}
+
+bool auth_mgr_reset_credentials_to_factory(void)
+{
+    ESP_LOGW(TAG, "Resetting web credentials to the factory sign-in");
+
+    // Any setup/pairing window opened before the reset must not survive it.
+    // The same six-digit code authorises replacing the administrator
+    // credentials, so leaving one open would let a party who held access
+    // *before* the reset re-secure the controller afterwards.
+    setup_pairing_cancel();
+
+    // Routed through set_credentials() on purpose: it writes the hash,
+    // persists to NVS and invalidates every session, so this recovery path
+    // stays identical to an ordinary password change rather than becoming a
+    // second implementation that can drift.
+    return auth_mgr_set_credentials(AUTH_FACTORY_USERNAME, AUTH_FACTORY_PASSWORD);
 }
 
 const char* auth_mgr_get_username(void)

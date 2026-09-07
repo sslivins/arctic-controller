@@ -20,6 +20,7 @@
 #include "../app_preferences.h"
 #include "../status_bar.h"
 #include "../factory_reset.h"
+#include "../auth_manager.h"
 #include "../system_restart.h"
 #include "../heatpump_screen.h"
 #include "i18n/i18n.h"
@@ -89,6 +90,12 @@ typedef struct {
     lv_obj_t* factory_reset_overlay;
     lv_obj_t* factory_reset_confirm_btn;
     lv_obj_t* factory_reset_confirm_label;
+
+    // Web password reset confirmation overlay
+    lv_obj_t* password_reset_overlay;
+    lv_obj_t* password_reset_confirm_btn;
+    lv_obj_t* password_reset_confirm_label;
+    lv_obj_t* password_reset_cancel_label;
     
     // Track which sub-screen is active
     settings_item_t active_sub_screen;
@@ -115,6 +122,10 @@ static void reboot_cancel_cb(lv_event_t* e);
 static void show_factory_reset_confirmation(void);
 static void factory_reset_confirm_cb(lv_event_t* e);
 static void factory_reset_cancel_cb(lv_event_t* e);
+static void show_password_reset_confirmation(void);
+static void password_reset_confirm_cb(lv_event_t* e);
+static void password_reset_cancel_cb(lv_event_t* e);
+static void dismiss_password_reset_overlay(void);
 
 // ============================================================================
 // Helper Functions
@@ -401,6 +412,8 @@ static void row_click_cb(lv_event_t* e)
         web_screen_create(&web_cfg);
         state.sub_screen_active = true;
         state.active_sub_screen = SETTINGS_WEB;
+    } else if (strcmp(tag, "settings_password_reset") == 0) {
+        show_password_reset_confirmation();
     } else if (strcmp(tag, "settings_factory_reset") == 0) {
         show_factory_reset_confirmation();
     }
@@ -470,6 +483,86 @@ static void show_factory_reset_confirmation(void)
         factory_reset_confirm_cb);
     state.factory_reset_confirm_btn = confirm_btn;
     state.factory_reset_confirm_label =
+        confirm_btn ? lv_obj_get_child(confirm_btn, 0) : NULL;
+}
+
+static void dismiss_password_reset_overlay(void)
+{
+    if (state.password_reset_overlay) {
+        lv_obj_delete(state.password_reset_overlay);
+        state.password_reset_overlay = NULL;
+        state.password_reset_confirm_btn = NULL;
+        state.password_reset_confirm_label = NULL;
+        state.password_reset_cancel_label = NULL;
+    }
+}
+
+static void password_reset_cancel_cb(lv_event_t* e)
+{
+    (void)e;
+    dismiss_password_reset_overlay();
+}
+
+static void password_reset_confirm_cb(lv_event_t* e)
+{
+    (void)e;
+    if (!state.password_reset_confirm_btn) return;
+
+    // Physical presence at the touchscreen is the authorization, exactly as
+    // it is for the factory-reset button above.
+    const bool persisted = auth_mgr_reset_credentials_to_factory();
+
+    if (!persisted) {
+        // The running config now accepts the factory sign-in but NVS rejected
+        // the write, so a reboot would resurrect the unknown password. Leave
+        // the button live so the user can retry rather than walk away
+        // believing the controller is recovered.
+        if (state.password_reset_confirm_label) {
+            lv_label_set_text(state.password_reset_confirm_label,
+                              i18n_get(STR_PASSWORD_RESET_FAILED));
+        }
+        return;
+    }
+
+    lv_obj_add_state(state.password_reset_confirm_btn, LV_STATE_DISABLED);
+    if (state.password_reset_confirm_label) {
+        lv_label_set_text(state.password_reset_confirm_label,
+                          i18n_get(STR_PASSWORD_RESET_DONE));
+    }
+    // The reset has already happened, so "Cancel" would be a lie -- the button
+    // now only dismisses the dialog.
+    if (state.password_reset_cancel_label) {
+        lv_label_set_text(state.password_reset_cancel_label, i18n_get(STR_CLOSE));
+    }
+}
+
+static void show_password_reset_confirmation(void)
+{
+    if (!state.screen) return;
+    dismiss_password_reset_overlay();
+
+    state.password_reset_overlay = ui_dialog_create_ex(
+        i18n_get(STR_PASSWORD_RESET_TITLE),
+        i18n_get(STR_PASSWORD_RESET_DESCRIPTION),
+        UI_DIALOG_LAYOUT_SHEET, "password_reset_overlay", "password_reset_panel");
+    if (!state.password_reset_overlay) return;
+
+    ui_dialog_set_title_color(state.password_reset_overlay, lv_color_hex(0xff5a5f));
+    ui_dialog_add_text(state.password_reset_overlay,
+                       i18n_get(STR_PASSWORD_RESET_WARNING));
+
+    lv_obj_t* cancel_btn = ui_dialog_add_action(
+        state.password_reset_overlay, i18n_get(STR_CANCEL),
+        "password_reset_cancel", UI_DIALOG_ACTION_SECONDARY,
+        password_reset_cancel_cb);
+    state.password_reset_cancel_label =
+        cancel_btn ? lv_obj_get_child(cancel_btn, 0) : NULL;
+    lv_obj_t* confirm_btn = ui_dialog_add_action(
+        state.password_reset_overlay, i18n_get(STR_PASSWORD_RESET_CONFIRM),
+        "password_reset_confirm", UI_DIALOG_ACTION_DANGER,
+        password_reset_confirm_cb);
+    state.password_reset_confirm_btn = confirm_btn;
+    state.password_reset_confirm_label =
         confirm_btn ? lv_obj_get_child(confirm_btn, 0) : NULL;
 }
 
@@ -635,6 +728,11 @@ static void create_menu_list(void)
         state.temp_unit_switch = sw;
     }
 
+    lv_obj_t* password_row = create_settings_row(
+        state.list_container, LV_SYMBOL_KEYBOARD,
+        i18n_get(STR_SETTINGS_PASSWORD_RESET), "settings_password_reset");
+    (void)password_row;
+
     lv_obj_t* reset_row = create_settings_row(
         state.list_container, LV_SYMBOL_WARNING,
         i18n_get(STR_SETTINGS_FACTORY_RESET), "settings_factory_reset");
@@ -724,6 +822,7 @@ void settings_menu_force_close(lv_obj_t* return_screen)
     // screen no longer takes them with it.
     dismiss_reboot_overlay();
     dismiss_factory_reset_overlay();
+    dismiss_password_reset_overlay();
 
     // A settings sub-screen leaves the settings root allocated but hidden.
     if (state.screen && state.screen != active_screen) {
@@ -737,6 +836,10 @@ void settings_menu_force_close(lv_obj_t* return_screen)
     state.factory_reset_overlay = NULL;
     state.factory_reset_confirm_btn = NULL;
     state.factory_reset_confirm_label = NULL;
+    state.password_reset_overlay = NULL;
+    state.password_reset_confirm_btn = NULL;
+    state.password_reset_confirm_label = NULL;
+    state.password_reset_cancel_label = NULL;
 
     if (return_screen && active_screen != return_screen) {
         lv_screen_load_anim(return_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);

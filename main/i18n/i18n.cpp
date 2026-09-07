@@ -429,6 +429,14 @@ static const char* strings_en[STR_COUNT] = {
     [STR_FACTORY_RESET_CONFIRM] = "Erase & Reset",
     [STR_FACTORY_RESET_ERASING] = "Erasing...",
     [STR_FACTORY_RESET_START_FAILED] = "Unable to start reset. Please try again.",
+
+    [STR_SETTINGS_PASSWORD_RESET] = "Reset web password",
+    [STR_PASSWORD_RESET_TITLE] = "Reset web password",
+    [STR_PASSWORD_RESET_DESCRIPTION] = "Restores the factory sign-in (arctic / arctic).",
+    [STR_PASSWORD_RESET_WARNING] = "Anyone on this network can claim the controller until you set a new password. WiFi, Home Assistant pairing, certificates and history are kept.",
+    [STR_PASSWORD_RESET_CONFIRM] = "Reset password",
+    [STR_PASSWORD_RESET_DONE] = "Password reset. Sign in with arctic / arctic.",
+    [STR_PASSWORD_RESET_FAILED] = "Could not save the reset. Try again.",
 };
 
 // French strings
@@ -840,6 +848,14 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_FACTORY_RESET_CONFIRM] = "Effacer et réinitialiser",
     [STR_FACTORY_RESET_ERASING] = "Effacement...",
     [STR_FACTORY_RESET_START_FAILED] = "Impossible de démarrer la réinitialisation. Réessayez.",
+
+    [STR_SETTINGS_PASSWORD_RESET] = "Réinitialiser le mot de passe web",
+    [STR_PASSWORD_RESET_TITLE] = "Réinitialiser le mot de passe web",
+    [STR_PASSWORD_RESET_DESCRIPTION] = "Rétablit la connexion d'usine (arctic / arctic).",
+    [STR_PASSWORD_RESET_WARNING] = "Toute personne sur ce réseau peut s'approprier le contrôleur tant qu'aucun nouveau mot de passe n'est défini. Le WiFi, l'association Home Assistant, les certificats et l'historique sont conservés.",
+    [STR_PASSWORD_RESET_CONFIRM] = "Réinitialiser",
+    [STR_PASSWORD_RESET_DONE] = "Mot de passe réinitialisé. Connectez-vous avec arctic / arctic.",
+    [STR_PASSWORD_RESET_FAILED] = "Impossible d'enregistrer la réinitialisation. Réessayez.",
 };
 
 // Spanish strings
@@ -1251,6 +1267,14 @@ static const char* strings_es[STR_COUNT] = {
     [STR_FACTORY_RESET_CONFIRM] = "Borrar y restablecer",
     [STR_FACTORY_RESET_ERASING] = "Borrando...",
     [STR_FACTORY_RESET_START_FAILED] = "No se pudo iniciar el restablecimiento. Inténtelo de nuevo.",
+
+    [STR_SETTINGS_PASSWORD_RESET] = "Restablecer la contraseña web",
+    [STR_PASSWORD_RESET_TITLE] = "Restablecer la contraseña web",
+    [STR_PASSWORD_RESET_DESCRIPTION] = "Restaura el inicio de sesión de fábrica (arctic / arctic).",
+    [STR_PASSWORD_RESET_WARNING] = "Cualquier persona en esta red puede reclamar el controlador hasta que establezca una nueva contraseña. Se conservan el WiFi, la vinculación con Home Assistant, los certificados y el historial.",
+    [STR_PASSWORD_RESET_CONFIRM] = "Restablecer",
+    [STR_PASSWORD_RESET_DONE] = "Contraseña restablecida. Inicie sesión con arctic / arctic.",
+    [STR_PASSWORD_RESET_FAILED] = "No se pudo guardar el restablecimiento. Inténtelo de nuevo.",
 };
 
 // Language names in their own language (native names)

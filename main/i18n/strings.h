@@ -466,6 +466,18 @@ typedef enum {
     STR_FACTORY_RESET_START_FAILED,
 
     // ========================================================================
+    // Web password reset (far less destructive than a factory reset: keeps
+    // WiFi, Home Assistant pairing, certificates and history)
+    // ========================================================================
+    STR_SETTINGS_PASSWORD_RESET,
+    STR_PASSWORD_RESET_TITLE,
+    STR_PASSWORD_RESET_DESCRIPTION,
+    STR_PASSWORD_RESET_WARNING,
+    STR_PASSWORD_RESET_CONFIRM,
+    STR_PASSWORD_RESET_DONE,
+    STR_PASSWORD_RESET_FAILED,
+
+    // ========================================================================
     // Must be last - used for array sizing
     // ========================================================================
     STR_COUNT
