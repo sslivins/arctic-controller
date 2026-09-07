@@ -232,6 +232,87 @@ class TestLoginLogout:
             _disable_web_auth()
 
 
+class TestLoginThrottling:
+    """POST /login — exponential cooldown after repeated failures.
+
+    This is what makes an 8-character minimum password defensible, so it is
+    worth asserting on real hardware rather than trusting the source scan in
+    test_ha_security_contract.py.
+    """
+
+    def _wait_out_cooldown(self):
+        """Sign in successfully, waiting out any active cooldown first.
+
+        A cooldown is wall-clock by definition, so there is no observable
+        condition to poll other than the endpoint itself -- Retry-After tells
+        us exactly how long to wait, so this converges rather than guessing.
+        A successful login resets both the counter and the cooldown, which is
+        also what makes this safe to use as cleanup.
+        """
+        for _ in range(20):
+            r = requests.post(
+                f"{BASE_URL}/login",
+                json={"username": USERNAME, "password": PASSWORD},
+                timeout=5,
+                verify=False,
+            )
+            if r.status_code == 200:
+                return
+            assert r.status_code == 429, (
+                f"unexpected status waiting out cooldown: {r.status_code}"
+            )
+            time.sleep(int(r.headers.get("Retry-After", "1")) + 1)
+        raise AssertionError("login never recovered from its cooldown")
+
+    def test_repeated_failures_cool_down_and_then_recover(self):
+        _enable_web_auth()
+        try:
+            # Other tests in this suite fail logins on purpose, so start from
+            # a known counter rather than inheriting their failures.
+            self._wait_out_cooldown()
+
+            # The first five failures are answered normally; the fifth arms
+            # the cooldown, so the sixth request is refused outright.
+            for attempt in range(5):
+                r = requests.post(
+                    f"{BASE_URL}/login",
+                    json={"username": USERNAME, "password": "definitely-wrong"},
+                    timeout=5,
+                    verify=False,
+                )
+                assert r.status_code == 401, (
+                    f"attempt {attempt} returned {r.status_code}"
+                )
+
+            r = requests.post(
+                f"{BASE_URL}/login",
+                json={"username": USERNAME, "password": "definitely-wrong"},
+                timeout=5,
+                verify=False,
+            )
+            assert r.status_code == 429
+            retry_after = int(r.headers["Retry-After"])
+            assert 1 <= retry_after <= 30, f"Retry-After was {retry_after}"
+
+            # Even the correct password is refused while cooling down --
+            # otherwise the throttle would be trivially bypassed.
+            r = requests.post(
+                f"{BASE_URL}/login",
+                json={"username": USERNAME, "password": PASSWORD},
+                timeout=5,
+                verify=False,
+            )
+            assert r.status_code == 429
+
+            # The cooldown is capped and self-healing: waiting it out is
+            # enough, with no reboot or reset required. If it were a lockout
+            # instead, this would never return.
+            self._wait_out_cooldown()
+        finally:
+            self._wait_out_cooldown()
+            _disable_web_auth()
+
+
 # ── API Key ───────────────────────────────────────────────────────────────
 
 

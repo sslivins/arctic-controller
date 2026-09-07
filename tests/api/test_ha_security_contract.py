@@ -104,6 +104,56 @@ def test_factory_credential_replacement_requires_physical_tls_flow() -> None:
     assert "setup_pairing_authorize" in pairing
 
 
+def test_credential_change_without_a_session_requires_a_one_time_code() -> None:
+    """A sessionless caller must never be able to set credentials.
+
+    /api/auth/credentials deliberately accepts "valid session OR one-time
+    code" so a locked-out owner can recover, which means the code check is
+    the only thing standing between an unauthenticated LAN client and a
+    controller takeover. Pin the gate so the ``|| !has_session`` half cannot
+    be dropped -- without it, recovery would become an open endpoint.
+    """
+    api = (ROOT / "main" / "api_server.cpp").read_text(encoding="utf-8")
+
+    handler = api[
+        api.index("static esp_err_t auth_credentials_post_handler(httpd_req_t* req)\n{"):
+    ]
+    handler = handler[: handler.index("\n}\n")]
+
+    assert "const bool has_session = check_web_auth(req);" in handler
+    assert (
+        "if (auth_mgr_credentials_change_required() || !has_session) {"
+        in handler
+    )
+    assert "setup_pairing_authorize(code)" in handler
+    # The code must be verified before the credentials are written, not after.
+    assert handler.index("setup_pairing_authorize(code)") < handler.index(
+        "auth_mgr_set_credentials"
+    )
+
+
+def test_login_is_throttled_after_repeated_failures() -> None:
+    """Short passwords are only safe because online guessing is throttled.
+
+    AUTH_MIN_PASSWORD_LEN is 8 on the explicit assumption that /login applies
+    an exponential cooldown. If the cooldown is ever removed, the minimum
+    length has to be revisited at the same time -- so tie them together here.
+    """
+    api = (ROOT / "main" / "api_server.cpp").read_text(encoding="utf-8")
+    auth_header = (ROOT / "main" / "auth_manager.h").read_text(encoding="utf-8")
+
+    assert "#define AUTH_MIN_PASSWORD_LEN 8" in auth_header
+    assert "LOGIN_FAILURES_BEFORE_COOLDOWN" in api
+    assert "login_note_failure()" in api
+    assert "login_note_success()" in api
+
+    handler = api[api.index("static esp_err_t web_login_handler(httpd_req_t* req)\n{"):]
+    handler = handler[: handler.index("\n}\n")]
+    assert "login_cooldown_remaining()" in handler
+    assert "429 Too Many Requests" in handler
+    assert "Retry-After" in handler
+
+
 def test_device_test_build_explicitly_overrides_production_config() -> None:
     workflow = (
         ROOT / ".github" / "workflows" / "device-tests.yml"

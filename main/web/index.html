@@ -440,7 +440,7 @@
     const modes = ["cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto"];
 
     const state = {
-      auth: { checked: false, required: true, loggedIn: false, changeRequired: false, loginError: "" },
+      auth: { checked: false, required: true, loggedIn: false, changeRequired: false, loginError: "", recovering: false, recoveryError: "" },
       route: "home", settingsPage: "wifi", busy: false,
       info: {}, status: { time: {} }, wifi: {}, hp: {
         temperatures: {}, setpoints: {}, setpoint_limits: {}, readings: {}
@@ -849,7 +849,7 @@
       return `<div class="grid"><section class="card"><h2>Authentication</h2>
         <div class="notice">Web login and API-key authentication are always required.</div>
         <h3 style="margin-top:24px">Credentials</h3><form data-form="credentials"><div class="field"><label>Username</label><input name="username" value="${esc(state.security.username || "arctic")}"></div>
-          <div class="field"><label>New password</label><input name="password" type="password" minlength="12" autocomplete="new-password"></div><button class="btn" type="submit">Save credentials</button></form>
+          <div class="field"><label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password"></div><button class="btn" type="submit">Save credentials</button></form>
         <h3 style="margin-top:24px">API key</h3><div class="field"><input readonly value="${esc(state.security.api_key || "")}"></div>
         <div class="btn-row"><button class="btn" data-action="copy-key">Copy</button><button class="btn danger" data-action="regenerate-key">Regenerate</button></div></section>
         <section class="card"><div class="card-head"><h2>TLS certificate</h2><span class="badge ${state.tls.https_active?"good":""}">${state.tls.https_active?"HTTPS active":state.tls.has_certs?"Reboot required":"HTTP only"}</span></div>
@@ -920,18 +920,26 @@
         ${state.auth.loginError ? `<div class="notice bad" style="margin:0 0 16px">${esc(state.auth.loginError)}</div>` : ""}
         <div class="field"><label>Username</label><input name="username" autocomplete="username" required></div>
         <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
-        <button class="btn primary" type="submit">Sign in</button></form></div>`;
+        <button class="btn primary" type="submit">Sign in</button>
+        <p style="margin:16px 0 0;text-align:center"><button class="btn" type="button" data-action="forgot-password">Forgot password?</button></p></form></div>`;
     }
     function credentialChangePage() {
+      // Two callers: first-time setup (the controller still holds the factory
+      // sign-in) and password recovery (the owner is locked out). Both are
+      // authorised the same way -- by a code that only someone standing at the
+      // controller can read -- so they share one form.
+      const recovering = state.auth.recovering && !state.auth.changeRequired;
       return `<div class="login"><form class="card login-card" data-form="change-credentials">
         <div class="brand" style="margin-bottom:20px"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
-        <h1>Secure this controller</h1>
-        <p class="metric-sub">Open Settings → Security on the controller's screen, tap Show Setup Code, and enter the six-digit code below to set your own password.</p>
-        <div class="field"><label>Setup code</label><input name="pairing_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></div>
+        <h1>${recovering ? "Reset your password" : "Secure this controller"}</h1>
+        <p class="metric-sub">On the controller's screen open Settings → Security, tap Show One-Time Code, and enter the six-digit code below${recovering ? " to choose a new username and password." : " to set your own password."}</p>
+        ${state.auth.recoveryError ? `<div class="notice bad" style="margin:0 0 16px">${esc(state.auth.recoveryError)}</div>` : ""}
+        <div class="field"><label>One-time code</label><input name="pairing_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required></div>
         <div class="field"><label>Username</label><input name="username" value="arctic" autocomplete="username" required></div>
-        <div class="field"><label>New password</label><input name="password" type="password" minlength="12" autocomplete="new-password" required></div>
-        <div class="field"><label>Confirm password</label><input name="confirm_password" type="password" minlength="12" autocomplete="new-password" required></div>
-        <button class="btn primary" type="submit">Save credentials</button></form></div>`;
+        <div class="field"><label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required></div>
+        <div class="field"><label>Confirm password</label><input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></div>
+        <button class="btn primary" type="submit">Save credentials</button>
+        ${recovering ? `<p style="margin:16px 0 0;text-align:center"><button class="btn" type="button" data-action="cancel-recovery">Back to sign in</button></p>` : ""}</form></div>`;
     }
     function fmtHistClock(epoch, withDate) {
       const d = new Date(epoch * 1000);
@@ -1075,10 +1083,10 @@
         $("#app").innerHTML = `<div class="login"><div class="spinner"></div></div>`;
         return;
       }
-      if (state.auth.required && !state.auth.loggedIn) {
+      if (state.auth.required && !state.auth.loggedIn && !state.auth.recovering) {
         $("#app").innerHTML = loginPage(); return;
       }
-      if (state.auth.changeRequired) {
+      if (state.auth.changeRequired || state.auth.recovering) {
         $("#app").innerHTML = credentialChangePage(); return;
       }
       const pages = { home: homePage, status: statusPage, control: controlPage, events: eventsPage,
@@ -1232,12 +1240,23 @@
         if (password !== data.get("confirm_password")) {
           throw new Error("Passwords do not match");
         }
-        await mutate("/api/auth/credentials", jsonOptions("POST", {
-          username: data.get("username"), password,
-          pairing_code: data.get("pairing_code")
-        }), "Credentials changed. Sign in again.");
+        try {
+          await mutate("/api/auth/credentials", jsonOptions("POST", {
+            username: data.get("username"), password,
+            pairing_code: data.get("pairing_code")
+          }), "Credentials changed. Sign in again.");
+        } catch (error) {
+          // Keep the user on the recovery form with their place intact; a
+          // rejected or expired code is the common case and they need to be
+          // able to fetch a fresh one and retry.
+          state.auth.recoveryError = error.message;
+          render();
+          throw error;
+        }
         state.auth.loggedIn = false;
         state.auth.changeRequired = false;
+        state.auth.recovering = false;
+        state.auth.recoveryError = "";
         render();
       }
       if (type === "setpoint") {
@@ -1365,6 +1384,19 @@
         const meta = n && (NOTIF_META[n.key] || NOTIF_META.unknown);
         if (meta && meta.route) await navigate(meta.route[0], meta.route[1]);
         else render();
+        return;
+      }
+      if (action === "forgot-password") {
+        state.auth.recovering = true;
+        state.auth.recoveryError = "";
+        state.auth.loginError = "";
+        render();
+        return;
+      }
+      if (action === "cancel-recovery") {
+        state.auth.recovering = false;
+        state.auth.recoveryError = "";
+        render();
         return;
       }
       if (action === "mode") {
