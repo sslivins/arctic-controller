@@ -5,27 +5,33 @@ Navigates to the system readings sub-screen and verifies that all sensor
 categories (compressor, electrical, pressures, expansion valves, setpoints)
 are displayed with correct labels and demo-mode values.
 
-Demo mode uses hardcoded values (not set_demo_fields registers).
+Demo-mode values come from the seeded shadow register image
+(initDemoState() in main/heatpump_controller.cpp), the same source the home
+screen renders from. They are asserted here so the two screens cannot drift
+apart again -- this screen used to carry its own hardcoded literals, which
+had diverged (850 vs 400 RPM, 350 vs 200 EEV steps, 20 vs 18 C cooling).
 """
 
 import pytest
 from device_client import DeviceClient
 
-# Demo mode hardcoded system readings (from heatpump_system_screen.cpp)
+# Demo system readings, derived from the initDemoState() seeds. Keep in step
+# with main/heatpump_controller.cpp; a mismatch here means the screen has
+# stopped rendering from getState().
 DEMO_READINGS = {
     # Compressor section
     "Frequency": "60 Hz",
-    "Fan Speed": "850 RPM",
+    "Fan Speed": "400 RPM",
     # Electrical section
     "AC Voltage": "230 V",
     "AC Current": "5 A",
-    "DC Voltage": "380.0 V",
+    "DC Voltage": "380 V",
     # Expansion valves section
-    "Primary EEV": "350 steps",
+    "Primary EEV": "200 steps",
 }
 
 DEMO_SETPOINTS = {
-    "Cooling": "20 °C",
+    "Cooling": "18 °C",
     "Heating": "45 °C",
     "Hot Water": "50 °C",
 }
@@ -37,6 +43,37 @@ DEMO_SETPOINTS = {
 SECTION_HEADERS = [
     "System",
 ]
+
+# The demo shadow image is shared process-wide, and other modules write to it
+# (test_main_screen leaves fan_speed=450 and ac_current=52 behind). The old
+# hardcoded literals made this screen immune to that; now that it renders from
+# getState() it honestly reflects those writes, so this module must establish
+# the state it asserts instead of assuming the pristine initDemoState() seeds.
+# Values must match DEMO_READINGS/DEMO_SETPOINTS above.
+DEMO_FIELD_SEEDS = {
+    "compressor_freq": 60,
+    "fan_on": 1,
+    "fan_speed": 400,
+    "ac_voltage": 230,
+    "ac_current": 5,
+    "dc_voltage": 380,
+    "primary_eev_opening": 200,
+    "cooling_setpoint": 18,
+    "heating_setpoint": 45,
+    "hot_water_setpoint": 50,
+}
+
+
+@pytest.fixture(autouse=True)
+def _seed_demo_readings(device: DeviceClient):
+    """Seed the asserted demo values before each test, and restore after.
+
+    Restoring on teardown keeps a probe value (see TestCrossScreenAgreement)
+    from leaking into modules that run later.
+    """
+    device.set_demo_fields(**DEMO_FIELD_SEEDS)
+    yield
+    device.set_demo_fields(**DEMO_FIELD_SEEDS)
 
 
 def _open_system(device: DeviceClient):
@@ -163,3 +200,46 @@ class TestSystemSetpoints:
 
         assert _has_text_containing(device, label), \
             f"Setpoint label '{label}' not found on screen"
+
+
+# =========================================================================
+# Cross-screen consistency
+# =========================================================================
+
+class TestCrossScreenAgreement:
+    """The home and Status screens must never disagree about a reading.
+
+    Both render from arctic::getState(), so a divergence means one of them has
+    reintroduced a private data source. That is exactly the bug this guards:
+    the Status screen used to hold its own hardcoded demo literals and showed
+    850 RPM while the home screen showed the seeded 400.
+    """
+
+    # Distinct from every default (400 seeded, 450 FAN_MED) so a stale label
+    # cannot accidentally satisfy the assertion. reg2003 is raw x10, so this
+    # must stay a multiple of 10.
+    PROBE_RPM = 640
+
+    def test_fan_speed_agrees_between_home_and_status(self, device: DeviceClient):
+        device.set_demo_fields(fan_on=1, fan_speed=self.PROBE_RPM)
+        expected = f"{self.PROBE_RPM} RPM"
+
+        device.click(tag="nav_home")
+        assert device.wait_for_screen("main", timeout=5.0), \
+            f"Expected 'main' screen, got '{device.screen}'"
+        device.wait_until(
+            f"home screen fan shows {expected}",
+            lambda: (lambda w: w is not None and w.text is not None
+                     and expected in w.text)(device.find_widget(tag="perf_fan")),
+            timeout=5.0,
+        )
+        home = device.find_widget(tag="perf_fan")
+        assert expected in home.text, \
+            f"Home screen fan shows '{home.text}', expected '{expected}'"
+
+        _open_system(device)
+        _wait_for_text(device, expected)
+        assert _has_text_containing(device, expected), \
+            (f"Status screen does not show '{expected}' while the home screen "
+             f"does; the two screens have diverged.")
+
