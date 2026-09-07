@@ -44,6 +44,37 @@ SECTION_HEADERS = [
     "System",
 ]
 
+# The demo shadow image is shared process-wide, and other modules write to it
+# (test_main_screen leaves fan_speed=450 and ac_current=52 behind). The old
+# hardcoded literals made this screen immune to that; now that it renders from
+# getState() it honestly reflects those writes, so this module must establish
+# the state it asserts instead of assuming the pristine initDemoState() seeds.
+# Values must match DEMO_READINGS/DEMO_SETPOINTS above.
+DEMO_FIELD_SEEDS = {
+    "compressor_freq": 60,
+    "fan_on": 1,
+    "fan_speed": 400,
+    "ac_voltage": 230,
+    "ac_current": 5,
+    "dc_voltage": 380,
+    "primary_eev_opening": 200,
+    "cooling_setpoint": 18,
+    "heating_setpoint": 45,
+    "hot_water_setpoint": 50,
+}
+
+
+@pytest.fixture(autouse=True)
+def _seed_demo_readings(device: DeviceClient):
+    """Seed the asserted demo values before each test, and restore after.
+
+    Restoring on teardown keeps a probe value (see TestCrossScreenAgreement)
+    from leaking into modules that run later.
+    """
+    device.set_demo_fields(**DEMO_FIELD_SEEDS)
+    yield
+    device.set_demo_fields(**DEMO_FIELD_SEEDS)
+
 
 def _open_system(device: DeviceClient):
     """Navigate from main to the Status screen (System section)."""
@@ -188,11 +219,6 @@ class TestCrossScreenAgreement:
     # cannot accidentally satisfy the assertion. reg2003 is raw x10, so this
     # must stay a multiple of 10.
     PROBE_RPM = 640
-
-    @pytest.fixture(autouse=True)
-    def _restore_seeded_fan(self, device: DeviceClient):
-        yield
-        device.set_demo_fields(fan_speed=400)
 
     def test_fan_speed_agrees_between_home_and_status(self, device: DeviceClient):
         device.set_demo_fields(fan_on=1, fan_speed=self.PROBE_RPM)
