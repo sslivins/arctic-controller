@@ -265,6 +265,7 @@ int weather_fetch(double lat, double lon, weather_data_t* out)
 //     (never flash/NVS writes), so running on a PSRAM stack is safe.
 // ---------------------------------------------------------------------------
 static volatile bool s_refresh_busy = false;
+static volatile bool s_refresh_pending = false;
 static weather_data_t s_worker_result;   // written by worker, read anywhere
 static TaskHandle_t   s_worker_task = NULL;
 static double         s_pending_lat = 0.0;
@@ -312,8 +313,10 @@ static void weather_worker(void* arg)
         // Block until weather_service_refresh() signals a fetch is wanted.
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        double lat = s_pending_lat;
-        double lon = s_pending_lon;
+        portENTER_CRITICAL(&s_result_lock);
+        const double lat = s_pending_lat;
+        const double lon = s_pending_lon;
+        portEXIT_CRITICAL(&s_result_lock);
 
         weather_data_t data = {};
         const bool ok = (weather_fetch(lat, lon, &data) == 0);
@@ -326,16 +329,22 @@ static void weather_worker(void* arg)
             // last drew; only new readings replace it.
             s_worker_result.valid = false;
         }
+        const bool again = s_refresh_pending;
+        s_refresh_pending = false;
         portEXIT_CRITICAL(&s_result_lock);
         lv_async_call(apply_result_cb, NULL);
+
+        // A refresh asked for while this fetch was running - almost always a
+        // location change - would otherwise be dropped, leaving the previous
+        // city's weather on screen and in the API until the next hourly tick.
+        if (again) {
+            xTaskNotifyGive(s_worker_task);
+        }
     }
 }
 
 void weather_service_refresh(void)
 {
-    if (s_refresh_busy) {
-        return;  // a fetch is already in flight
-    }
     if (s_worker_task == NULL) {
         return;  // service not initialised yet
     }
@@ -347,11 +356,22 @@ void weather_service_refresh(void)
         return;  // no location to query
     }
 
+    portENTER_CRITICAL(&s_result_lock);
     s_pending_lat = loc->latitude;
     s_pending_lon = loc->longitude;
+    const bool busy = s_refresh_busy;
+    if (busy) {
+        // Coalesce rather than drop: the caller wants the weather for what is
+        // now the current location, and the in-flight fetch is for the old one.
+        s_refresh_pending = true;
+    } else {
+        s_refresh_busy = true;
+    }
+    portEXIT_CRITICAL(&s_result_lock);
 
-    s_refresh_busy = true;
-    xTaskNotifyGive(s_worker_task);
+    if (!busy) {
+        xTaskNotifyGive(s_worker_task);
+    }
 }
 
 static void refresh_timer_cb(lv_timer_t* timer)

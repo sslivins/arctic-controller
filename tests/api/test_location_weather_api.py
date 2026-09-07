@@ -49,6 +49,12 @@ _retry = Retry(total=3, backoff_factor=1, allowed_methods=None,
 _session.mount("http://", HTTPAdapter(max_retries=_retry))
 _session.mount("https://", HTTPAdapter(max_retries=_retry))
 
+# /api/location/search answers 502 when the geocoding service is unreachable,
+# which is a real result here rather than a transport hiccup. The retrying
+# session above would swallow it and raise RetryError instead, so assertions
+# about that status go through a session that takes the first answer.
+_no_retry_session = requests.Session()
+
 # A geocoding response with two distinguishable hits, so tests can assert on
 # ordering and on the full label rather than just "something came back".
 GEOCODING_BODY = {
@@ -253,7 +259,9 @@ class TestLocationSearch:
 
     def test_network_failure_reports_bad_gateway(self):
         assert _post("/api/test/geocoding-mock", {"__error__": True}).status_code == 200
-        r = _get("/api/location/search", params={"q": "kamloops"})
+        r = _no_retry_session.get(f"{BASE_URL}/api/location/search",
+                                  headers=_headers(), params={"q": "kamloops"},
+                                  timeout=20)
         assert r.status_code == 502
 
     def test_requires_api_key(self):
@@ -265,11 +273,13 @@ class TestWeather:
     """GET /api/weather."""
 
     @staticmethod
-    def _await_weather(predicate, timeout=15.0):
+    def _await_weather(predicate, timeout=45.0):
         """Poll /api/weather until predicate holds.
 
         The mock endpoint kicks off a refresh on a worker task, so the new
-        reading lands a moment after the POST returns.
+        reading lands a moment after the POST returns. If an unmocked fetch was
+        already in flight the firmware coalesces the request and runs a second
+        one behind it, so allow for two sequential network round trips.
         """
         deadline = time.monotonic() + timeout
         latest = None
