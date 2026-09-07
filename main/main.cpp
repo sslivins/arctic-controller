@@ -69,9 +69,9 @@ void app_navigation_return_home(void)
         heatpump_errors_hide();
     }
 
-    // Message boxes use the top layer rather than the active screen.
-    lv_obj_clean(lv_layer_top());
-
+    // Owners of top-layer dialogs get to tear their own down first: they hold
+    // raw pointers to those objects, so sweeping the top layer before they run
+    // would leave them deleting dangling pointers.
     if (settings_menu_is_visible()) {
         settings_menu_force_close(main_screen);
     } else {
@@ -84,6 +84,9 @@ void app_navigation_return_home(void)
             lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
         }
     }
+
+    // Anything left on the top layer has no owner to close it.
+    lv_obj_clean(lv_layer_top());
 
     tab_shell_select(NAV_TAB_HOME);
 }

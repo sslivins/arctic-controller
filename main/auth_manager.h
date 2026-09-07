@@ -25,6 +25,11 @@ extern "C" {
 #define AUTH_MAX_USERNAME_LEN 32
 // Maximum password length
 #define AUTH_MAX_PASSWORD_LEN 64
+// Factory sign-in. Shipping units boot with these, and
+// auth_mgr_credentials_change_required() reports true while they are in place
+// so the web UI forces a replacement before anything else can be done.
+#define AUTH_FACTORY_USERNAME "arctic"
+#define AUTH_FACTORY_PASSWORD "arctic"
 
 /**
  * @brief Initialize authentication manager
@@ -55,6 +60,28 @@ void auth_mgr_set_web_auth_enabled(bool enabled);
  * @return true on success
  */
 bool auth_mgr_set_credentials(const char* username, const char* password);
+
+/**
+ * @brief Restore the factory sign-in (arctic/arctic).
+ *
+ * Recovery path for a controller whose web password has been lost. Physical
+ * presence at the touchscreen is the authorization, exactly as it is for the
+ * factory-reset button that sits beside it in the settings menu -- so this
+ * deliberately adds no HTTP endpoint and does not relax the authentication on
+ * the existing credentials endpoint.
+ *
+ * Far less destructive than a factory reset: WiFi, Home Assistant pairing,
+ * TLS certificates and event history are all preserved. All sessions are
+ * invalidated, and auth_mgr_credentials_change_required() becomes true again,
+ * which re-arms the web "Secure this controller" flow. Any outstanding
+ * setup/pairing window is cancelled, since the code it issued would otherwise
+ * authorise re-securing the controller after the reset.
+ *
+ * @return true if the factory credentials were persisted to NVS. On false the
+ *         running configuration has changed but a reboot would restore the
+ *         previous (unknown) password, so the caller must not report success.
+ */
+bool auth_mgr_reset_credentials_to_factory(void);
 
 /**
  * @brief Check whether the factory credentials still need replacement.
