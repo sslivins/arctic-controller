@@ -85,9 +85,19 @@ def test_factory_credential_replacement_requires_physical_tls_flow() -> None:
     pairing = (ROOT / "main" / "setup_pairing.cpp").read_text(
         encoding="utf-8"
     )
+    auth_header = (ROOT / "main" / "auth_manager.h").read_text(
+        encoding="utf-8"
+    )
 
-    assert 'hash_password("arctic", default_hash)' in auth
+    # The factory sign-in is detected by hashing the factory password, never
+    # by comparing the username. The password itself now lives in a single
+    # named constant, so pin the constant's value as well -- otherwise the
+    # indirection would let the factory password change without this contract
+    # noticing.
+    assert '#define AUTH_FACTORY_PASSWORD "arctic"' in auth_header
+    assert "hash_password(AUTH_FACTORY_PASSWORD, default_hash)" in auth
     assert 'strcmp(state.username, "arctic")' not in auth
+    assert "strcmp(state.username, AUTH_FACTORY_USERNAME)" not in auth
     assert "setup_pairing_authorize(code)" in api
     assert "persistent device identity" in api
     assert "Failed to start mandatory HTTPS server" in api
