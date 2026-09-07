@@ -39,11 +39,12 @@ pytest tests/web/ -v --headed
 | `test_navigation.py` | 9 | 6-page nav, logs page, events page, params page |
 | `test_notifications.py` | 4 | Notification tray, badge, dismissal |
 | `test_settings.py` | 8 | Settings cards, toggles, buttons, file upload, security tab |
+| `test_location_weather.py` | 10 | Location card, place search, automatic timezone, status-bar weather |
 | `test_temperature_history.py` | 3 | History chart, range paging, refresh |
 | `test_i18n.py` | 3 | Language selector, EN→FR→ES switching, persistence |
 | `test_tls.py` | 3 | TLS auth prerequisite, cert install/delete, PEM validation |
 
-**Total: 49 tests**
+**Total: 59 tests**
 
 ## Architecture
 
@@ -51,7 +52,9 @@ pytest tests/web/ -v --headed
 - **Target**: Real device dashboard at `ARCTIC_URL`
 - **Auth handling**: Tests toggle web auth on/off via the REST API as needed
 - **Failure screenshots**: Saved to `tests/web/screenshots/` on test failure
-- **No mocking**: All tests run against the real device — data comes from the device API
+- **No mocking**: All tests run against the real device — data comes from the device API.
+  Where a test needs a deterministic outdoor condition or geocoding result it uses the
+  device's own `/api/test/*-mock` endpoints, so the firmware under test is still the real one.
 
 ## Fixtures (`conftest.py`)
 

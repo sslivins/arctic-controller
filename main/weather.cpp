@@ -265,18 +265,40 @@ int weather_fetch(double lat, double lon, weather_data_t* out)
 //     (never flash/NVS writes), so running on a PSRAM stack is safe.
 // ---------------------------------------------------------------------------
 static volatile bool s_refresh_busy = false;
-static weather_data_t s_worker_result;   // written by worker, read on UI task
+static weather_data_t s_worker_result;   // written by worker, read anywhere
 static TaskHandle_t   s_worker_task = NULL;
 static double         s_pending_lat = 0.0;
 static double         s_pending_lon = 0.0;
+
+// s_worker_result is written by the worker task and read by both the LVGL task
+// and the HTTPS server, so every access copies the whole struct under this
+// spinlock. Without it a reader could pair a temperature from one fetch with a
+// weather code from the next, and report snow at +20C.
+static portMUX_TYPE s_result_lock = portMUX_INITIALIZER_UNLOCKED;
+
+bool weather_service_get(weather_data_t* out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    portENTER_CRITICAL(&s_result_lock);
+    const weather_data_t snapshot = s_worker_result;
+    portEXIT_CRITICAL(&s_result_lock);
+    if (!snapshot.valid) {
+        return false;
+    }
+    *out = snapshot;
+    return true;
+}
 
 // Runs on the LVGL/UI task via lv_async_call: push the fetched weather to the
 // status bar (or leave it unchanged on failure).
 static void apply_result_cb(void* arg)
 {
     (void)arg;
-    if (s_worker_result.valid) {
-        status_bar_set_weather(true, s_worker_result.temp_c, s_worker_result.weather_code);
+    weather_data_t snapshot;
+    if (weather_service_get(&snapshot)) {
+        status_bar_set_weather(true, snapshot.temp_c, snapshot.weather_code);
     }
     s_refresh_busy = false;
 }
@@ -294,11 +316,17 @@ static void weather_worker(void* arg)
         double lon = s_pending_lon;
 
         weather_data_t data = {};
-        if (weather_fetch(lat, lon, &data) == 0) {
+        const bool ok = (weather_fetch(lat, lon, &data) == 0);
+        portENTER_CRITICAL(&s_result_lock);
+        if (ok) {
             s_worker_result = data;
         } else {
+            // A failed fetch invalidates the cache rather than leaving a stale
+            // reading to be served as current. The status bar keeps whatever it
+            // last drew; only new readings replace it.
             s_worker_result.valid = false;
         }
+        portEXIT_CRITICAL(&s_result_lock);
         lv_async_call(apply_result_cb, NULL);
     }
 }

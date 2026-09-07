@@ -129,6 +129,16 @@
     }
     .top-status { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 16px; min-width: 0; }
     .status-item { display: flex; align-items: center; gap: 7px; color: var(--cp-text-muted); font-size: 13px; white-space: nowrap; }
+    .wx-icon { width: 18px; height: 20px; flex: none; }
+    .status-item.wx { gap: 5px; }
+    .loc-current { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+    .loc-coords { color: var(--cp-text-muted); font-size: 13px; }
+    .loc-results { list-style: none; margin: 10px 0 0; padding: 0; border: 1px solid var(--cp-border); border-radius: 10px; overflow: hidden; }
+    .loc-results li + li { border-top: 1px solid var(--cp-border); }
+    .loc-result { display: block; width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
+      padding: 11px 12px; font: inherit; color: inherit; min-height: 44px; }
+    .loc-result:hover, .loc-result:focus-visible { background: var(--cp-surface-soft); }
+    .loc-result small { display: block; color: var(--cp-text-muted); font-size: 12px; }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--cp-border-strong); }
     .dot.good { background: var(--cp-success); }
     .dot.bad { background: var(--cp-danger); }
@@ -375,7 +385,7 @@
       .mobile-nav .nav-link { justify-content: center; flex-direction: column; gap: 2px; padding: 7px; font-size: 11px; }
       .brand { min-width: 0; }
       .brand span:last-child { display: none; }
-      .top-status .status-item:nth-child(2), .top-status .status-item:nth-child(3) { display: none; }
+      .top-status .status-item.wifi, .top-status .status-item.clock { display: none; }
       .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .settings-layout { grid-template-columns: 1fr; }
@@ -450,6 +460,8 @@
       tempHistory: { loading: false, error: "", data: null, end: null },
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
+      weather: {}, location: {},
+      locationSearch: { query: "", busy: false, error: "", results: null },
       notifications: [], notifOpen: false,
       ha: {}, haTimer: null,
       settingsLoaded: false, settingsPromise: null,
@@ -517,6 +529,42 @@
       return state.preferences.temp_unit === "fahrenheit"
         ? (kind === "differential" ? "Δ°F" : "°F") : "°C";
     }
+    // WMO weather interpretation code -> one of eight pictograms. The device
+    // draws these from a bundled LVGL font that a browser has no access to, so
+    // the same buckets as weather_code_icon() are redrawn here as inline SVG.
+    function weatherIconKind(code) {
+      if (code === 0) return "sun";
+      if (code === 1 || code === 2) return "cloud-sun";
+      if (code === 45 || code === 48) return "fog";
+      if (code === 95 || code === 96 || code === 99) return "thunder";
+      if (code === 71 || code === 73 || code === 75 || code === 77 || code === 85 || code === 86) return "snow";
+      if (code === 65 || code === 66 || code === 67 || code === 82) return "heavy-rain";
+      if ((code >= 51 && code <= 63) || code === 80 || code === 81) return "rain";
+      return "cloud";
+    }
+    function weatherIcon(code) {
+      const kind = weatherIconKind(code);
+      const cloud = `<path d="M7 17h9.5a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6 1.2A3.2 3.2 0 0 0 7 17Z"/>`;
+      const sun = `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5 1.5"/>`;
+      const shapes = {
+        "sun": sun,
+        "cloud": cloud,
+        "cloud-sun": `<circle cx="8.5" cy="7.5" r="3"/><path d="M8.5 1.5v1.5M2 7.5h1.5M4 3l1 1M13 3l-1 1"/>${cloud}`,
+        "fog": `${cloud}<path d="M5 20h9M8 22.5h9"/>`,
+        "rain": `${cloud}<path d="M9 19.5l-1 2.5M13 19.5l-1 2.5M17 19.5l-1 2.5"/>`,
+        "heavy-rain": `${cloud}<path d="M8 19l-2 4M12 19l-2 4M16 19l-2 4M20 19l-2 4"/>`,
+        "snow": `${cloud}<path d="M8 21h2M9 20v2M14 21h2M15 20v2M11 23.5h2M12 22.5v2"/>`,
+        "thunder": `${cloud}<path d="M13 19l-4 3 2 0.5-2 2.5"/>`
+      };
+      return `<svg class="wx-icon" viewBox="0 0 24 26" fill="none" stroke="currentColor" stroke-width="1.6"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shapes[kind]}</svg>`;
+    }
+    function weatherStatus() {
+      const w = state.weather;
+      if (!w || !w.valid) return "";
+      return `<span class="status-item wx" title="${esc(w.description || "")}" data-wx-code="${esc(String(w.weather_code))}">
+        ${weatherIcon(w.weather_code)}<span>${temp(w.temp_c)}</span></span>`;
+    }
     function navButton(item, mobile = false) {
       const [route, icon, label] = item;
       return `<button class="nav-link ${state.route === route ? "active" : ""}" data-route="${route}">
@@ -558,8 +606,9 @@
           <div class="brand"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
           <div class="top-status">
             <span class="status-item"><span class="dot ${connected ? "good" : "bad"}"></span>${connected ? "Heat pump online" : "Heat pump offline"}</span>
-            <span class="status-item">${esc(state.wifi.ssid || "WiFi disconnected")}</span>
-            <span class="status-item">${esc(state.status.time?.local || "--:--")}</span>
+            <span class="status-item wifi">${esc(state.wifi.ssid || "WiFi disconnected")}</span>
+            ${weatherStatus()}
+            <span class="status-item clock">${esc(state.status.time?.local || "--:--")}</span>
             ${notifBell()}
             <button class="icon-btn" data-route="settings" aria-label="Settings">⚙</button>
             ${state.auth.required ? `<button class="btn" data-action="logout" style="padding:6px 12px;font-size:13px" aria-label="Sign out">Sign out</button>` : ""}
@@ -823,12 +872,39 @@
       </section>`;
     }
     function timeSettings() {
+      // The device derives the zone from the location when auto-mode is on, so
+      // the manual roller is inert there; mirror that here rather than letting
+      // a save silently get overwritten.
+      const tzAuto = !!(state.location && state.location.tz_auto);
       return `<section class="card"><div class="card-head"><h2>Time</h2><span class="badge ${state.timeConfig.synced ? "good" : "warn"}">${state.timeConfig.synced ? "Synced" : "Not synced"}</span></div>
-        <form data-form="time"><div class="field"><label>Timezone</label><select name="timezone">${timezones.map(([name,value]) =>
-          `<option value="${esc(value)}" ${state.timeConfig.timezone===value?"selected":""}>${esc(name)}</option>`).join("")}</select></div>
+        <form data-form="time"><div class="field"><label>Timezone</label><select name="timezone" ${tzAuto ? "disabled" : ""}>${timezones.map(([name,value]) =>
+          `<option value="${esc(value)}" ${state.timeConfig.timezone===value?"selected":""}>${esc(name)}</option>`).join("")}</select>
+          ${tzAuto ? `<p class="metric-sub">The timezone follows the location below. Turn off automatic timezone to choose one manually.</p>` : ""}</div>
           <div class="field"><label>Clock format</label><select name="format"><option value="24" ${state.timeConfig.format_24h?"selected":""}>24 hour</option>
             <option value="12" ${!state.timeConfig.format_24h?"selected":""}>12 hour</option></select></div>
-          <div class="btn-row"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-action="sync-time">Sync now</button></div></form></section>`;
+          <div class="btn-row"><button class="btn primary" type="submit">Save</button><button class="btn" type="button" data-action="sync-time">Sync now</button></div></form></section>
+        ${locationCard()}`;
+    }
+    function locationCard() {
+      const loc = state.location || {};
+      const search = state.locationSearch;
+      const coords = loc.valid
+        ? `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}${loc.iana_tz ? ` · ${esc(loc.iana_tz)}` : ""}`
+        : "Set a location to derive the timezone automatically and show local weather.";
+      return `<section class="card" style="margin-top:16px"><h2>Location</h2>
+        <div class="loc-current"><strong id="loc-name">${loc.valid ? esc(loc.name || "Unnamed location") : "No location set"}</strong>
+          <span class="loc-coords">${loc.valid ? coords : esc(coords)}</span></div>
+        <div class="field"><label><input style="width:auto" type="checkbox" data-action="toggle-tz-auto" ${loc.tz_auto ? "checked" : ""}>
+          Set the timezone automatically from this location</label></div>
+        <form data-form="location-search"><div class="field"><label for="loc-query">Search for a place</label>
+          <input id="loc-query" name="q" type="search" autocomplete="off" placeholder="City or town" value="${esc(search.query)}"></div>
+          <button class="btn primary" type="submit" ${search.busy ? "disabled" : ""}>${search.busy ? "Searching…" : "Search"}</button></form>
+        ${search.error ? `<div class="notice bad" style="margin-top:12px">${esc(search.error)}</div>` : ""}
+        ${search.results && !search.results.length ? `<div class="notice" style="margin-top:12px">No matching places found.</div>` : ""}
+        ${search.results && search.results.length ? `<ul class="loc-results">${search.results.map((r, i) =>
+          `<li><button type="button" class="loc-result" data-action="pick-location" data-index="${i}">${esc(r.label || r.name)}
+            <small>${Number(r.latitude).toFixed(4)}, ${Number(r.longitude).toFixed(4)}${r.iana_tz ? ` · ${esc(r.iana_tz)}` : ""}</small></button></li>`).join("")}</ul>` : ""}
+      </section>`;
     }
     function displaySettings() {
       return `<section class="card"><h2>Display</h2><form data-form="brightness"><div class="field"><label>Saved brightness · <span id="brightness-value">${state.preferences.brightness}%</span></label>
@@ -1100,11 +1176,13 @@
     async function loadCore() {
       const results = await Promise.allSettled([
         api("/api/info"), api("/api/status"), api("/api/wifi"), api("/api/heatpump/status"),
-        api("/api/preferences"), api("/api/heatpump/errors"), api("/api/ota/status"), api("/api/notifications")
+        api("/api/preferences"), api("/api/heatpump/errors"), api("/api/ota/status"), api("/api/notifications"),
+        api("/api/weather")
       ]);
       const values = results.map(r => r.status === "fulfilled" ? r.value : {});
       [state.info, state.status, state.wifi, state.hp, state.preferences, state.errors, state.ota] = values;
       state.notifications = values[7].notifications || [];
+      state.weather = values[8];
     }
     async function loadParams() { const data = await api("/api/heatpump/advanced"); state.params = data.params || {}; }
     async function loadEvents(reset = false) {
@@ -1115,12 +1193,14 @@
     }
     async function loadSettings() {
       const results = await Promise.allSettled([
-        api("/api/time/config"), api("/api/auth/config"), api("/api/auth/apikey"), api("/api/tls/status")
+        api("/api/time/config"), api("/api/auth/config"), api("/api/auth/apikey"), api("/api/tls/status"),
+        api("/api/location")
       ]);
       if (results[0].status === "fulfilled") state.timeConfig = results[0].value;
       if (results[1].status === "fulfilled") state.security = results[1].value;
       if (results[2].status === "fulfilled") state.security.api_key = results[2].value.api_key;
       if (results[3].status === "fulfilled") state.tls = results[3].value;
+      if (results[4].status === "fulfilled") state.location = results[4].value;
       state.settingsLoaded = true;
     }
     async function ensureSettings() {
@@ -1272,8 +1352,31 @@
       }
       if (type === "wifi") await mutate("/api/wifi/connect", jsonOptions("POST", { ssid: data.get("ssid"), password: data.get("password") }), "Connection started");
       if (type === "time") {
-        await mutate("/api/time/config", jsonOptions("POST", { timezone: data.get("timezone"), format_24h: data.get("format") === "24" }), "Time settings saved");
+        // A disabled select submits nothing, so in auto-timezone mode only the
+        // clock format is ours to change.
+        const body = { format_24h: data.get("format") === "24" };
+        const timezone = data.get("timezone");
+        if (timezone !== null) body.timezone = timezone;
+        await mutate("/api/time/config", jsonOptions("POST", body), "Time settings saved");
         state.timeConfig = await api("/api/time/config"); render();
+      }
+      if (type === "location-search") {
+        const query = String(data.get("q") || "").trim();
+        state.locationSearch.query = query;
+        state.locationSearch.error = "";
+        if (!query) { state.locationSearch.results = null; render(); return; }
+        state.locationSearch.busy = true;
+        state.locationSearch.results = null;
+        render();
+        try {
+          const found = await api(`/api/location/search?q=${encodeURIComponent(query)}`);
+          state.locationSearch.results = found.results || [];
+        } catch (error) {
+          state.locationSearch.error = error.message;
+        } finally {
+          state.locationSearch.busy = false;
+          render();
+        }
       }
       if (type === "brightness") {
         const brightness = Number(data.get("brightness"));
@@ -1435,6 +1538,32 @@
       if (action === "scan-wifi") { await mutate("/api/wifi/scan", { method: "POST" }, "WiFi scan started"); setTimeout(loadNetworks, 500); }
       if (action === "disconnect-wifi" && confirm("Disconnect from WiFi? This page will close.")) await mutate("/api/wifi/disconnect", { method: "POST" });
       if (action === "sync-time") { await mutate("/api/time/sync", { method: "POST" }, "Time sync started"); }
+      if (action === "toggle-tz-auto") {
+        // Derive from state rather than el.checked: the delegated click handler
+        // calls preventDefault(), which reverts the checkbox's own toggle.
+        const next = !(state.location && state.location.tz_auto);
+        const response = await mutate("/api/location", jsonOptions("POST", { tz_auto: next }), "Timezone mode saved");
+        state.location = response;
+        state.timeConfig = await api("/api/time/config");
+        render();
+      }
+      if (action === "pick-location") {
+        const choice = (state.locationSearch.results || [])[Number(el.dataset.index)];
+        if (!choice) return;
+        const response = await mutate("/api/location", jsonOptions("POST", {
+          latitude: choice.latitude, longitude: choice.longitude,
+          name: choice.label || choice.name, iana_tz: choice.iana_tz || ""
+        }), "Location saved");
+        state.location = response;
+        state.locationSearch = { query: "", busy: false, error: "", results: null };
+        state.timeConfig = await api("/api/time/config");
+        // The device kicks off a fetch for the new coordinates; give it a
+        // moment before asking, rather than showing the old city's weather.
+        setTimeout(async () => {
+          try { state.weather = await api("/api/weather"); render(); } catch (_) { /* keep the last reading */ }
+        }, 4000);
+        render();
+      }
       if (action === "check-update") { state.release = await mutate("/api/ota/releases", {}, "Update check complete"); render(); }
       if (action === "install-update" && confirm("Download and install this update?")) {
         await mutate("/api/ota/github", { method: "POST" }, "Update started");
@@ -1592,10 +1721,11 @@
       state.pollTimer = setInterval(async () => {
         if (!state.auth.loggedIn || state.auth.changeRequired) return;
         try {
-          const [status, hp, wifi, ota, errors, notif] = await Promise.all([
-            api("/api/status"), api("/api/heatpump/status"), api("/api/wifi"), api("/api/ota/status"), api("/api/heatpump/errors"), api("/api/notifications")
+          const [status, hp, wifi, ota, errors, notif, weather] = await Promise.all([
+            api("/api/status"), api("/api/heatpump/status"), api("/api/wifi"), api("/api/ota/status"), api("/api/heatpump/errors"), api("/api/notifications"),
+            api("/api/weather")
           ]);
-          Object.assign(state, { status, hp, wifi, ota, errors });
+          Object.assign(state, { status, hp, wifi, ota, errors, weather });
           const prevNotifCount = (state.notifications || []).length;
           state.notifications = notif.notifications || [];
           if (state.route === "events") {

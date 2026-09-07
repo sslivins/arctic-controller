@@ -9,6 +9,9 @@
 #include "i18n/i18n.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
+#include "location_manager.h"
+#include "geocoding.h"
+#include "weather.h"
 #include "ota_manager.h"
 #include "auth_manager.h"
 #include "ha_integration.h"
@@ -118,6 +121,9 @@ static esp_err_t status_get_handler(httpd_req_t* req);
 static esp_err_t time_get_handler(httpd_req_t* req);
 static esp_err_t time_config_handler(httpd_req_t* req);
 static esp_err_t time_sync_handler(httpd_req_t* req);
+static esp_err_t location_handler(httpd_req_t* req);
+static esp_err_t location_search_get_handler(httpd_req_t* req);
+static esp_err_t weather_get_handler(httpd_req_t* req);
 static esp_err_t wifi_get_handler(httpd_req_t* req);
 static esp_err_t wifi_scan_post_handler(httpd_req_t* req);
 static esp_err_t wifi_networks_get_handler(httpd_req_t* req);
@@ -780,6 +786,41 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(time_sync_uri);
+
+    // GET/POST /api/location
+    httpd_uri_t location_get_uri = {
+        .uri = "/api/location",
+        .method = HTTP_GET,
+        .handler = location_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(location_get_uri);
+
+    httpd_uri_t location_post_uri = {
+        .uri = "/api/location",
+        .method = HTTP_POST,
+        .handler = location_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(location_post_uri);
+
+    // GET /api/location/search?q=
+    httpd_uri_t location_search_uri = {
+        .uri = "/api/location/search",
+        .method = HTTP_GET,
+        .handler = location_search_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(location_search_uri);
+
+    // GET /api/weather
+    httpd_uri_t weather_uri = {
+        .uri = "/api/weather",
+        .method = HTTP_GET,
+        .handler = weather_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(weather_uri);
     
     // GET /api/wifi
     httpd_uri_t wifi_uri = {
@@ -2028,6 +2069,226 @@ static esp_err_t time_sync_handler(httpd_req_t* req)
     free(json_str);
     cJSON_Delete(root);
     
+    return ESP_OK;
+}
+
+// ---------------------------------------------------------------------------
+// Location + weather
+//
+// The touchscreen has had a location picker, automatic timezone and a weather
+// readout for a while, but none of it was reachable over HTTP, so the web UI
+// could not show or change any of it. These endpoints expose the same
+// location_manager/geocoding/weather state the Settings > Time screen drives.
+// ---------------------------------------------------------------------------
+
+// Serialize the current location and timezone mode into an existing object.
+static void location_add_json(cJSON* root)
+{
+    const location_t* loc = location_mgr_get();
+    cJSON_AddBoolToObject(root, "valid", loc && loc->valid);
+    cJSON_AddNumberToObject(root, "latitude", loc ? loc->latitude : 0.0);
+    cJSON_AddNumberToObject(root, "longitude", loc ? loc->longitude : 0.0);
+    cJSON_AddStringToObject(root, "name", loc ? loc->name : "");
+    cJSON_AddStringToObject(root, "iana_tz", loc ? loc->iana_tz : "");
+    cJSON_AddBoolToObject(root, "tz_auto", location_mgr_get_tz_auto());
+    const char* derived = location_mgr_derived_posix();
+    cJSON_AddStringToObject(root, "derived_posix", derived ? derived : "");
+}
+
+static esp_err_t location_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    if (req->method == HTTP_GET) {
+        cJSON* root = cJSON_CreateObject();
+        location_add_json(root);
+        char* json_str = cJSON_PrintUnformatted(root);
+        httpd_resp_sendstr(req, json_str);
+        free(json_str);
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+
+    // POST - set the location, the timezone mode, or both.
+    char content[384];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) {
+        send_json_error(req, "400 Bad Request", "No body");
+        return ESP_OK;
+    }
+    content[ret] = '\0';
+
+    cJSON* root = cJSON_Parse(content);
+    if (!root) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+
+    cJSON* lat_json = cJSON_GetObjectItem(root, "latitude");
+    cJSON* lon_json = cJSON_GetObjectItem(root, "longitude");
+    cJSON* name_json = cJSON_GetObjectItem(root, "name");
+    cJSON* tz_json = cJSON_GetObjectItem(root, "iana_tz");
+    cJSON* auto_json = cJSON_GetObjectItem(root, "tz_auto");
+
+    const bool has_coords = cJSON_IsNumber(lat_json) && cJSON_IsNumber(lon_json);
+    const bool has_auto = cJSON_IsBool(auto_json);
+
+    if (!has_coords && !has_auto) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "400 Bad Request",
+            "Provide latitude and longitude, tz_auto, or both");
+        return ESP_OK;
+    }
+
+    if (has_coords) {
+        const double lat = lat_json->valuedouble;
+        const double lon = lon_json->valuedouble;
+        if (lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0) {
+            cJSON_Delete(root);
+            send_json_error(
+                req, "400 Bad Request",
+                "Latitude must be -90..90 and longitude -180..180");
+            return ESP_OK;
+        }
+        const char* name =
+            (cJSON_IsString(name_json) && name_json->valuestring)
+                ? name_json->valuestring : "";
+        const char* iana =
+            (cJSON_IsString(tz_json) && tz_json->valuestring)
+                ? tz_json->valuestring : "";
+        // Set tz_auto first when it was sent alongside coordinates, so the
+        // location change is applied under the mode the caller asked for
+        // rather than the previous one.
+        if (has_auto) {
+            location_mgr_set_tz_auto(cJSON_IsTrue(auto_json));
+        }
+        location_mgr_set(lat, lon, name, iana);
+        // A new location makes the cached weather wrong, not just stale.
+        weather_service_refresh();
+    } else {
+        location_mgr_set_tz_auto(cJSON_IsTrue(auto_json));
+    }
+
+    cJSON_Delete(root);
+
+    cJSON* response = cJSON_CreateObject();
+    cJSON_AddBoolToObject(response, "success", true);
+    location_add_json(response);
+    char* json_str = cJSON_PrintUnformatted(response);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(response);
+    return ESP_OK;
+}
+
+// Number of geocoding candidates offered. Matches the touchscreen picker so
+// both surfaces show the same shortlist.
+#define LOCATION_SEARCH_MAX_RESULTS 8
+
+static esp_err_t location_search_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    char query[160];
+    char raw[128];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "q", raw, sizeof(raw)) != ESP_OK ||
+        raw[0] == '\0') {
+        send_json_error(req, "400 Bad Request", "Query parameter 'q' is required");
+        return ESP_OK;
+    }
+
+    // httpd hands back the percent-encoded form; geocoding_search re-encodes,
+    // so decode the one level of escaping here first.
+    char decoded[128];
+    size_t out = 0;
+    for (size_t i = 0; raw[i] != '\0' && out + 1 < sizeof(decoded); i++) {
+        if (raw[i] == '+') {
+            decoded[out++] = ' ';
+        } else if (raw[i] == '%' && isxdigit((unsigned char)raw[i + 1]) &&
+                   isxdigit((unsigned char)raw[i + 2])) {
+            const char hex[3] = { raw[i + 1], raw[i + 2], '\0' };
+            decoded[out++] = (char)strtol(hex, NULL, 16);
+            i += 2;
+        } else {
+            decoded[out++] = raw[i];
+        }
+    }
+    decoded[out] = '\0';
+
+    geo_result_t results[LOCATION_SEARCH_MAX_RESULTS];
+    const int found =
+        geocoding_search(decoded, results, LOCATION_SEARCH_MAX_RESULTS);
+    if (found < 0) {
+        send_json_error(
+            req, "502 Bad Gateway",
+            "Could not reach the geocoding service");
+        return ESP_OK;
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON* array = cJSON_AddArrayToObject(root, "results");
+    for (int i = 0; i < found; i++) {
+        char label[160];
+        geocoding_format_label(&results[i], label, sizeof(label));
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "label", label);
+        cJSON_AddStringToObject(item, "name", results[i].name);
+        cJSON_AddStringToObject(item, "admin1", results[i].admin1);
+        cJSON_AddStringToObject(item, "country", results[i].country);
+        cJSON_AddStringToObject(item, "country_code", results[i].country_code);
+        cJSON_AddStringToObject(item, "iana_tz", results[i].timezone);
+        cJSON_AddNumberToObject(item, "latitude", results[i].latitude);
+        cJSON_AddNumberToObject(item, "longitude", results[i].longitude);
+        cJSON_AddItemToArray(array, item);
+    }
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t weather_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+
+    weather_data_t data = {};
+    const bool have = weather_service_get(&data);
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "valid", have);
+    if (have) {
+        cJSON_AddNumberToObject(root, "temp_c", data.temp_c);
+        cJSON_AddNumberToObject(root, "weather_code", data.weather_code);
+        cJSON_AddStringToObject(root, "description",
+                                weather_code_desc(data.weather_code));
+    }
+    // The device renders its icon from a bundled LVGL font that a browser
+    // cannot use, so the WMO code is deliberately what goes over the wire and
+    // each client picks its own artwork.
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 
