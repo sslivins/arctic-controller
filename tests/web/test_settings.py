@@ -7,6 +7,13 @@ def open_settings(page: Page, section: str):
     page.locator('button[aria-label="Settings"]').click()
     page.locator(".settings-nav .nav-link", has_text=section).click()
     page.locator(".settings-nav .nav-link.active", has_text=section).wait_for()
+    # settingsPage() renders the nav immediately but shows only a spinner in
+    # the panel body until state.settingsLoaded flips (see main/web/index.html).
+    # Waiting on the nav link alone therefore races the async load, and the
+    # 5s default expect() timeout would intermittently fire against a panel
+    # that was still spinning rather than one that was genuinely missing.
+    page.locator(".settings-layout .spinner").wait_for(state="detached",
+                                                       timeout=30000)
 
 
 class TestSettingsWorkspace:
