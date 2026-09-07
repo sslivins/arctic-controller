@@ -3,7 +3,6 @@
  * Authentication Manager - Session and API Key Implementation
  */
 #include "auth_manager.h"
-#include "setup_pairing.h"
 #include <esp_log.h>
 #include <esp_random.h>
 #include <nvs_flash.h>
@@ -377,23 +376,6 @@ bool auth_mgr_credentials_change_required(void)
             state.password_hash, default_hash, sizeof(default_hash));
     mbedtls_platform_zeroize(default_hash, sizeof(default_hash));
     return factory_credentials;
-}
-
-bool auth_mgr_reset_credentials_to_factory(void)
-{
-    ESP_LOGW(TAG, "Resetting web credentials to the factory sign-in");
-
-    // Any setup/pairing window opened before the reset must not survive it.
-    // The same six-digit code authorises replacing the administrator
-    // credentials, so leaving one open would let a party who held access
-    // *before* the reset re-secure the controller afterwards.
-    setup_pairing_cancel();
-
-    // Routed through set_credentials() on purpose: it writes the hash,
-    // persists to NVS and invalidates every session, so this recovery path
-    // stays identical to an ordinary password change rather than becoming a
-    // second implementation that can drift.
-    return auth_mgr_set_credentials(AUTH_FACTORY_USERNAME, AUTH_FACTORY_PASSWORD);
 }
 
 const char* auth_mgr_get_username(void)

@@ -192,12 +192,13 @@ static esp_err_t test_credentials_post_handler(httpd_req_t* req)
         username->valuestring[0] != '\0' &&
         strlen(username->valuestring) <= AUTH_MAX_USERNAME_LEN &&
         cJSON_IsString(password) && password->valuestring != NULL &&
-        strlen(password->valuestring) >= 12;
+        strlen(password->valuestring) >= AUTH_MIN_PASSWORD_LEN;
     if (!valid) {
         cJSON_Delete(root);
         send_json_error(
             req, "400 Bad Request",
-            "A username and password of at least 12 characters are required");
+            "A username and password of at least "
+            AUTH_STRINGIFY(AUTH_MIN_PASSWORD_LEN) " characters are required");
         return ESP_OK;
     }
 

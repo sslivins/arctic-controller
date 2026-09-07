@@ -136,6 +136,25 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: Invalid credentials
+        '429':
+          description: |
+            Too many failed attempts. After five consecutive failures the
+            endpoint refuses further attempts for an exponentially growing
+            cooldown (2s, 4s, 8s, ... capped at 30s). The cooldown clears on
+            the next successful login, and also when a password is
+            successfully recovered via `/api/auth/credentials`.
+          headers:
+            Retry-After:
+              description: Seconds remaining in the current cooldown.
+              schema:
+                type: integer
+                example: 4
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: Too many failed login attempts
 
   /logout:
     post:
@@ -1037,30 +1056,66 @@ paths:
     post:
       tags:
         - Authentication
-      summary: Update login credentials
+      summary: Set login credentials
       description: |
-        Updates username and/or password. 
-        
-        **Note**: Changing credentials invalidates all active sessions.
+        Replaces the username and password.
+
+        Authorization is **a valid session OR a one-time code**, not both:
+
+        * With a session, an already signed-in user can change the password
+          freely.
+        * Without a session, `pairing_code` is required. This is the password
+          recovery path used by "Forgot password?" on the login page and the
+          first-time setup that follows a factory reset. The six-digit code is
+          shown only on the controller's own screen (Settings > Security >
+          Show One-Time Code), so recovery requires physical presence.
+
+        A one-time code is also required *even with a session* while the
+        controller still holds its factory sign-in, so a network client that
+        found the factory password cannot claim the controller on its own.
+
+        The code is valid for five minutes and allows five attempts. It is
+        checked before anything is written, so a rejected request leaves the
+        stored credentials untouched.
+
+        **Note**: Changing credentials invalidates all active sessions, and
+        clears any active `/login` cooldown.
       operationId: setCredentials
       security:
         - sessionCookie: []
+        - {}
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - username
+                - password
               properties:
                 username:
                   type: string
-                  description: New username (omit to keep current)
+                  maxLength: 32
+                  description: New username.
                   example: admin
                 password:
                   type: string
                   format: password
-                  description: New password (omit or empty to keep current)
-                  example: newpassword123
+                  minLength: 8
+                  maxLength: 64
+                  description: |
+                    New password. Must not be the factory `arctic`/`arctic`
+                    combination.
+                  example: newpassword
+                pairing_code:
+                  type: string
+                  pattern: '^[0-9]{6}$'
+                  description: |
+                    Six-digit one-time code from the controller's screen.
+                    Required when the caller has no session, or while the
+                    factory credentials are still in place.
+                  example: '482913'
       responses:
         '200':
           description: Credentials updated
@@ -1072,8 +1127,24 @@ paths:
                   success:
                     type: boolean
                     example: true
-        '401':
-          description: Login required
+        '400':
+          description: |
+            Missing username, or a password that is too short, too long, or
+            still the factory password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: One-time code missing, expired, or rejected.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: One-time code was rejected
+        '500':
+          description: The new credentials could not be written to storage.
           content:
             application/json:
               schema:

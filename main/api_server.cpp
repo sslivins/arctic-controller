@@ -1672,9 +1672,74 @@ static esp_err_t web_root_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+// Login throttling.
+//
+// Nothing else in the auth path limits guessing, so without this a short
+// password is only as strong as the number of requests the TLS stack will
+// serve. A cooldown -- rather than a lockout -- is used deliberately: an
+// attacker must never be able to permanently deny the owner access, so the
+// delay is capped and always self-heals. Recovery via the setup code is a
+// different endpoint with its own attempt limit, so a throttled owner can
+// still get back in.
+#define LOGIN_FAILURES_BEFORE_COOLDOWN 5
+#define LOGIN_COOLDOWN_BASE_SEC 2
+#define LOGIN_COOLDOWN_MAX_SEC 30
+
+static uint32_t login_failure_count = 0;
+static int64_t login_cooldown_until_us = 0;
+
+// Remaining cooldown in seconds, or 0 when logins are currently allowed.
+static uint32_t login_cooldown_remaining(void)
+{
+    const int64_t now = esp_timer_get_time();
+    if (login_cooldown_until_us <= now) {
+        return 0;
+    }
+    return (uint32_t)((login_cooldown_until_us - now + 999999) / 1000000);
+}
+
+static void login_note_failure(void)
+{
+    if (login_failure_count < UINT32_MAX) {
+        login_failure_count++;
+    }
+    if (login_failure_count < LOGIN_FAILURES_BEFORE_COOLDOWN) {
+        return;
+    }
+    const uint32_t steps = login_failure_count - LOGIN_FAILURES_BEFORE_COOLDOWN;
+    uint32_t seconds = LOGIN_COOLDOWN_BASE_SEC;
+    for (uint32_t i = 0; i < steps && seconds < LOGIN_COOLDOWN_MAX_SEC; i++) {
+        seconds *= 2;
+    }
+    if (seconds > LOGIN_COOLDOWN_MAX_SEC) {
+        seconds = LOGIN_COOLDOWN_MAX_SEC;
+    }
+    login_cooldown_until_us =
+        esp_timer_get_time() + (int64_t)seconds * 1000000;
+    ESP_LOGW(TAG, "Login throttled for %lu s after %lu failed attempts",
+             (unsigned long)seconds, (unsigned long)login_failure_count);
+}
+
+static void login_note_success(void)
+{
+    login_failure_count = 0;
+    login_cooldown_until_us = 0;
+}
+
 static esp_err_t web_login_handler(httpd_req_t* req)
 {
     set_json_content_type(req);
+
+    const uint32_t cooldown = login_cooldown_remaining();
+    if (cooldown > 0) {
+        char retry[16];
+        snprintf(retry, sizeof(retry), "%lu", (unsigned long)cooldown);
+        httpd_resp_set_hdr(req, "Retry-After", retry);
+        send_json_error(
+            req, "429 Too Many Requests",
+            "Too many failed sign-in attempts. Try again shortly.");
+        return ESP_OK;
+    }
     
     // Read body
     char content[256];
@@ -1711,9 +1776,12 @@ static esp_err_t web_login_handler(httpd_req_t* req)
     cJSON_Delete(root);
     
     if (!success) {
+        login_note_failure();
         send_json_error(req, "401 Unauthorized", "Invalid credentials");
         return ESP_OK;
     }
+
+    login_note_success();
     
     // Set session cookie
     set_session_cookie(req, session_token);
@@ -3316,11 +3384,14 @@ static esp_err_t auth_config_post_handler(httpd_req_t* req)
 
 static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
 {
-    if (!check_web_auth(req)) {
-        send_json_error(req, "401 Unauthorized", "Login required");
-        return ESP_OK;
-    }
-    
+    // Authorization here is "a valid session OR proof of physical presence",
+    // not both. A locked-out owner has no session by definition, so demanding
+    // one would make the controller unrecoverable without a factory reset --
+    // the setup code shown on the controller's own screen is what authorises
+    // the change for them. The session check is deferred until the body has
+    // been parsed so that a malformed request cannot burn a code attempt.
+    const bool has_session = check_web_auth(req);
+
     set_json_content_type(req);
     
     char content[256];
@@ -3346,23 +3417,29 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
 
     if (u == NULL || u[0] == '\0' ||
         strlen(u) > AUTH_MAX_USERNAME_LEN ||
-        p == NULL || strlen(p) < 12 ||
+        p == NULL || strlen(p) < AUTH_MIN_PASSWORD_LEN ||
         strlen(p) > AUTH_MAX_PASSWORD_LEN ||
-        (strcmp(u, "arctic") == 0 && strcmp(p, "arctic") == 0)) {
+        (strcmp(u, AUTH_FACTORY_USERNAME) == 0 &&
+         strcmp(p, AUTH_FACTORY_PASSWORD) == 0)) {
         cJSON_Delete(root);
         send_json_error(
             req, "400 Bad Request",
-            "A username and a non-default password of at least 12 characters are required");
+            "A username and a non-default password of at least "
+            AUTH_STRINGIFY(AUTH_MIN_PASSWORD_LEN) " characters are required");
         return ESP_OK;
     }
 
-    if (auth_mgr_credentials_change_required()) {
+    if (auth_mgr_credentials_change_required() || !has_session) {
+        // A code is required when the controller still holds the factory
+        // sign-in (first-time setup) and when the caller has no session at
+        // all (password recovery). Both are cases where presence at the
+        // controller is the only thing that can authorise the change.
         if (!cJSON_IsString(pairing_code) ||
             pairing_code->valuestring == NULL) {
             cJSON_Delete(root);
             send_json_error(
                 req, "403 Forbidden",
-                "Physical setup code required");
+                "One-time code required");
             return ESP_OK;
         }
         char code[SETUP_PAIRING_CODE_LEN + 1] = {};
@@ -3376,7 +3453,7 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
             cJSON_Delete(root);
             send_json_error(
                 req, "403 Forbidden",
-                "Physical setup code was rejected");
+                "One-time code was rejected");
             return ESP_OK;
         }
     }
@@ -3384,7 +3461,18 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req)
     ESP_LOGI(TAG, "Credential update request: username='%s', password=%s", 
              u ? u : "(null)", p ? (p[0] ? "(provided)" : "(empty)") : "(null)");
     
-    auth_mgr_set_credentials(u, p);
+    if (!auth_mgr_set_credentials(u, p)) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "500 Internal Server Error",
+            "The new credentials could not be saved");
+        return ESP_OK;
+    }
+
+    // Recovering the password clears any throttle an attacker built up, so
+    // guessing at /login can never keep the rightful owner out once they have
+    // proven presence at the controller.
+    login_note_success();
     
     cJSON_Delete(root);
     
