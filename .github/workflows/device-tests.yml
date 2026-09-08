@@ -992,6 +992,11 @@ jobs:
       - name: Publish UI test results
         uses: dorny/test-reporter@v2
         if: always() && steps.ui_tests.outcome != 'skipped'
+        # Cosmetic, like the other two publishers below: the "Fail the job if
+        # any suite failed" step reads the test steps' own outcomes, so test
+        # failures are gated regardless of whether publishing succeeds. A
+        # transient check-run API error must not block a merge on its own.
+        continue-on-error: true
         with:
           name: Device UI Test Results
           path: test-results.xml
@@ -1001,6 +1006,7 @@ jobs:
       - name: Publish API contract test results
         uses: dorny/test-reporter@v2
         if: always() && steps.api_tests.outcome != 'skipped'
+        continue-on-error: true
         with:
           name: API Contract Test Results
           path: api-test-results.xml
@@ -1010,6 +1016,7 @@ jobs:
       - name: Publish web test results
         uses: dorny/test-reporter@v2
         if: always() && steps.web_tests.outcome != 'skipped'
+        continue-on-error: true
         with:
           name: Web Dashboard Test Results
           path: web-test-results.xml
@@ -1018,7 +1025,16 @@ jobs:
 
       - name: Upload failure screenshots
         uses: actions/upload-artifact@v7
-        if: failure()
+        # NOT `failure()`. The three test steps are continue-on-error, and the
+        # publishers below are too, so at this point the job is not yet marked
+        # failed even when a suite failed -- it only fails later, at the
+        # explicit "fail the job" gate. Screenshots must key off the test
+        # outcomes directly or they silently stop being collected exactly when
+        # they are needed.
+        if: >-
+          always() && (steps.ui_tests.outcome == 'failure'
+          || steps.api_tests.outcome == 'failure'
+          || steps.web_tests.outcome == 'failure')
         with:
           name: failure-screenshots
           path: |
