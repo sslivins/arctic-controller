@@ -20,7 +20,7 @@ class TestSettingsWorkspace:
     def test_all_sections_present(self, dashboard_page: Page):
         dashboard_page.locator('button[aria-label="Settings"]').click()
         labels = dashboard_page.locator(".settings-nav .nav-link").all_inner_texts()
-        assert labels == ["WiFi", "Firmware", "Time", "Display", "Preferences",
+        assert labels == ["WiFi", "Firmware", "Time & Location", "Display", "Preferences",
                           "Security", "Home Assistant", "Diagnostics", "System"]
 
     def test_wifi_controls(self, dashboard_page: Page):
