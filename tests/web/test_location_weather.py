@@ -8,6 +8,8 @@ Geocoding and weather are driven through the test-only mock endpoints so the
 assertions do not depend on outbound internet access or on the actual weather.
 """
 
+import time
+
 import pytest
 import requests
 import urllib3
@@ -47,6 +49,33 @@ def _set_weather(base_url: str, temp_c: float, code: int):
 
 def _reset_weather(base_url: str):
     requests.post(f"{base_url}/api/test/weather-mock-reset", json={}, timeout=10, verify=False)
+
+
+def _apply_weather(page: Page, base_url: str, temp_c: float, code: int, timeout: float = 40.0):
+    """Set the weather mock and wait until the device actually reports it.
+
+    Posting the mock only *queues* a refresh.  A real fetch that was already
+    in flight -- for instance one started by an earlier test that moved the
+    device -- completes afterwards and overwrites the cache with the live
+    reading, so a page reloaded immediately can show the wrong weather.  Poll
+    until the device serves the mocked values, re-posting if a stray fetch
+    lands, and only then let the caller assert against the UI.
+    """
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        _set_weather(base_url, temp_c, code)
+        for _ in range(10):
+            time.sleep(1.0)
+            last = page.evaluate("() => fetch('/api/weather').then(r => r.json())")
+            if (last.get("valid")
+                    and last.get("weather_code") == code
+                    and abs(float(last.get("temp_c", 0)) - temp_c) < 0.05):
+                return
+            if time.time() >= deadline:
+                break
+    raise AssertionError(
+        f"device never reported the mocked weather {temp_c}C/{code}; last was {last}")
 
 
 def _read_location(page: Page):
@@ -95,7 +124,7 @@ class TestLocationCard:
 
     def test_card_is_present_with_search_and_auto_timezone(self, dashboard_page: Page):
         open_time_settings(dashboard_page)
-        expect(dashboard_page.locator("section.card", has_text="Location")).to_be_visible()
+        expect(dashboard_page.locator("section.card.loc-card")).to_be_visible()
         expect(dashboard_page.locator('form[data-form="location-search"]')).to_be_visible()
         expect(dashboard_page.locator('input[data-action="toggle-tz-auto"]')).to_be_visible()
 
@@ -181,7 +210,7 @@ class TestStatusBarWeather:
 
     def test_weather_appears_with_icon_and_temperature(self, dashboard_page: Page, base_url: str):
         try:
-            _set_weather(base_url, -5.0, 71)  # snow
+            _apply_weather(dashboard_page, base_url, -5.0, 71)  # snow
             dashboard_page.reload(wait_until="domcontentloaded")
             dashboard_page.wait_for_selector(".rail", timeout=10000)
 
@@ -196,11 +225,11 @@ class TestStatusBarWeather:
 
     def test_icon_changes_with_the_weather_code(self, dashboard_page: Page, base_url: str):
         try:
-            _set_weather(base_url, -5.0, 71)  # snow
+            _apply_weather(dashboard_page, base_url, -5.0, 71)  # snow
             dashboard_page.reload(wait_until="domcontentloaded")
             snowy = dashboard_page.locator(".status-item.wx svg.wx-icon").inner_html()
 
-            _set_weather(base_url, 22.0, 0)  # clear
+            _apply_weather(dashboard_page, base_url, 22.0, 0)  # clear
             dashboard_page.reload(wait_until="domcontentloaded")
             clear = dashboard_page.locator(".status-item.wx svg.wx-icon").inner_html()
 
@@ -214,7 +243,7 @@ class TestStatusBarWeather:
         original = dashboard_page.evaluate(
             "() => fetch('/api/preferences').then(r => r.json())")
         try:
-            _set_weather(base_url, -5.0, 71)
+            _apply_weather(dashboard_page, base_url, -5.0, 71)
             dashboard_page.evaluate(
                 """() => fetch('/api/preferences', {
                      method: 'PATCH',

@@ -18,5 +18,6 @@
   "tests/web/conftest.py": 5,
   "tests/web/test_change_password.py": 2,
   "tests/web/test_dashboard.py": 1,
+  "tests/web/test_location_weather.py": 1,
   "tests/web/test_navigation.py": 2
 }

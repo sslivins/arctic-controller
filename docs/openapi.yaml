@@ -447,6 +447,9 @@ paths:
                   type: boolean
                   description: Derive the timezone from the location.
                   example: true
+              anyOf:
+                - required: [latitude, longitude]
+                - required: [tz_auto]
       responses:
         '200':
           description: Location updated
@@ -487,9 +490,10 @@ paths:
         - name: q
           in: query
           required: true
-          description: Free-text place name.
+          description: Free-text place name. Must not be empty.
           schema:
             type: string
+            minLength: 1
             example: sun peaks
       responses:
         '200':

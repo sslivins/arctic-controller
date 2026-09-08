@@ -921,7 +921,7 @@
       const coords = loc.valid
         ? `${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)}${loc.iana_tz ? ` · ${esc(loc.iana_tz)}` : ""}`
         : "Set a location to derive the timezone automatically and show local weather.";
-      return `<section class="card" style="margin-top:16px"><h2>Location</h2>
+      return `<section class="card loc-card" style="margin-top:16px"><h2>Location</h2>
         <div class="loc-current"><strong id="loc-name">${loc.valid ? esc(loc.name || "Unnamed location") : "No location set"}</strong>
           <span class="loc-coords">${loc.valid ? coords : esc(coords)}</span></div>
         <div class="field"><label><input style="width:auto" type="checkbox" data-action="toggle-tz-auto" ${loc.tz_auto ? "checked" : ""}>
