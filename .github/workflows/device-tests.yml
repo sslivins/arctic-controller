@@ -924,6 +924,44 @@ jobs:
           fi
           echo "OK: no httpd URI-handler registration failures in serial log."
 
+      - name: Check internal heap headroom
+        if: always()
+        # Internal (non-PSRAM) RAM is the controller's scarcest resource:
+        # steady-state free internal heap is ~30-40 KB, while PSRAM sits at
+        # ~23 MB. That asymmetry is what makes this failure mode deceptive -- a
+        # 176-byte allocation can fail while any "free heap" number in the log
+        # still reads in the tens of megabytes, because the caller needed
+        # internal memory specifically (lwIP PCBs, TLS state, DMA, task stacks).
+        #
+        # When internal RAM runs out the device does not crash and does not
+        # report a fault; it simply stops completing TCP handshakes. To the
+        # suite that looks like ConnectTimeout, ConnectionError,
+        # ChunkedEncodingError and websocket TimeoutError spread across
+        # unrelated suites, plus (seen once) a bogus "brute-force throttling is
+        # broken" assertion that was really a dropped 5th connection. All of it
+        # is indistinguishable from runner flake and was dismissed as flake more
+        # than once. This gate is less about the threshold than about
+        # attribution: it names the cause so those symptoms cannot be waved off.
+        #
+        # NOTE the gate deliberately reads the INSTANTANEOUS figure
+        # ("heap int=N"), not netdiag's since-boot low-water ("(min M)"). The
+        # low-water never resets, so one early transient pins it near zero: it
+        # reads 16 bytes on every run observed so far, healthy and wedged alike,
+        # and gating on it would fail 100% of runs while distinguishing nothing.
+        # The instantaneous figure separates cleanly -- healthy runs stay above
+        # ~24 KB, wedged runs collapse to 23 bytes. See issue #234 and
+        # tests/api/test_heap_floor.py.
+        #
+        # HARD FAILURE, and fails closed when there is no netdiag data at all:
+        # absence of evidence is not evidence of headroom.
+        env:
+          # Healthy runs bottom out around 24-33 KB, so 8 KB is a wide margin.
+          # This is a "the device is wedged" alarm, not a regression tripwire.
+          HEAP_FLOOR_BYTES: "8192"
+        run: |
+          set -euo pipefail
+          bash .github/scripts/scan_heap_floor.sh controller-serial.log "$HEAP_FLOOR_BYTES"
+
       - name: Detect firmware crashes on device
         if: always()
         # Distinguish a *crash* reboot from an *intentional* reboot (OTA /
