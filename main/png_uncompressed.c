@@ -1,5 +1,5 @@
 /*
- * Minimal uncompressed PNG encoder — streaming, zero-allocation.
+ * Minimal uncompressed PNG encoder — streaming.
  *
  * PNG structure emitted:
  *   [8-byte signature]
@@ -11,10 +11,18 @@
  * (compression method 0).  Each stored block carries one scanline
  * (filter byte 0x00 + w*3 pixel bytes).  This avoids all compression
  * work — the CPU cost is just CRC32 + Adler32 over the raw data.
+ *
+ * Output is coalesced through a PSRAM staging buffer before reaching the write
+ * callback; see the note above png_buf_writer_t for why that matters so much
+ * when the callback is an HTTPS chunked-response writer.
  */
 
 #include "png_uncompressed.h"
 #include <string.h>
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+
+static const char *PNG_TAG = "png_enc";
 
 /* ── CRC-32 (ISO 3309 / PNG spec) ─────────────────────────────────────── */
 
@@ -109,18 +117,78 @@ static void put_le16(uint8_t *p, uint16_t v)
     p[1] = (uint8_t)(v >> 8);
 }
 
+/* ── Buffered output ───────────────────────────────────────────────────
+ *
+ * The encoder naturally emits many small pieces: per scanline it produces a
+ * 5-byte DEFLATE stored-block header, a 1-byte filter byte, and the row
+ * pixels. Passing each of those straight to the write callback is
+ * catastrophic over HTTPS, because the callback is httpd_resp_send_chunk()
+ * and every call becomes its own HTTP chunk *and* its own TLS record (each
+ * with chunk-size header, CRLF, TLS header, MAC and padding, plus the
+ * internal-RAM buffers mbedTLS needs to build it).
+ *
+ * For a 720x1280 screen that was 1280*3 = 3840 callback invocations, 2560 of
+ * them carrying 1 to 5 bytes. Measured cost: ~40 s to stream one screenshot,
+ * while holding an httpd worker and a socket, and applying sustained pressure
+ * to the scarce internal heap. That correlated with device-wide TCP wedges in
+ * CI (issue #234).
+ *
+ * Coalescing into a single staging buffer turns those thousands of tiny
+ * records into a few hundred full-size ones. The buffer lives in PSRAM: it is
+ * only a memcpy source for the TLS layer, so it does not need to be internal,
+ * and internal RAM is exactly the resource under pressure.
+ */
+#define PNG_OUT_BUF_SIZE 16384
+
+typedef struct {
+    png_write_fn_t fn;
+    void          *ctx;
+    uint8_t       *buf;
+    size_t         cap;
+    size_t         len;
+} png_buf_writer_t;
+
+static esp_err_t bw_flush(png_buf_writer_t *bw)
+{
+    if (bw->len == 0) return ESP_OK;
+    esp_err_t ret = bw->fn(bw->ctx, bw->buf, bw->len);
+    bw->len = 0;
+    return ret;
+}
+
+static esp_err_t bw_write(png_buf_writer_t *bw, const uint8_t *data, size_t len)
+{
+    /* No staging buffer (allocation failed): fall back to direct writes so the
+     * screenshot still works, just as slowly as it did before. */
+    if (!bw->buf) return bw->fn(bw->ctx, data, len);
+
+    while (len > 0) {
+        if (bw->len == bw->cap) {
+            esp_err_t ret = bw_flush(bw);
+            if (ret != ESP_OK) return ret;
+        }
+        size_t n = bw->cap - bw->len;
+        if (n > len) n = len;
+        memcpy(bw->buf + bw->len, data, n);
+        bw->len += n;
+        data += n;
+        len  -= n;
+    }
+    return ESP_OK;
+}
+
 /**
  * Write a complete PNG chunk: length(4) + type(4) + data(len) + crc(4).
  * For small chunks (IHDR, IEND) where the data fits in a single buffer.
  */
-static esp_err_t write_chunk(png_write_fn_t fn, void *ctx,
+static esp_err_t write_chunk(png_buf_writer_t *bw,
                               const char type[4], const uint8_t *data, uint32_t len)
 {
     uint8_t header[8];
     put_be32(header, len);
     memcpy(header + 4, type, 4);
 
-    esp_err_t ret = fn(ctx, header, 8);
+    esp_err_t ret = bw_write(bw, header, 8);
     if (ret != ESP_OK) return ret;
 
     /* CRC covers type + data */
@@ -129,13 +197,13 @@ static esp_err_t write_chunk(png_write_fn_t fn, void *ctx,
 
     if (len > 0) {
         crc = crc32_update(crc, data, len);
-        ret = fn(ctx, data, len);
+        ret = bw_write(bw, data, len);
         if (ret != ESP_OK) return ret;
     }
 
     uint8_t crc_buf[4];
     put_be32(crc_buf, ~crc);
-    return fn(ctx, crc_buf, 4);
+    return bw_write(bw, crc_buf, 4);
 }
 
 /* ── Public API ────────────────────────────────────────────────────────── */
@@ -149,10 +217,27 @@ esp_err_t png_encode_uncompressed_rgb888(const uint8_t *pixels, uint32_t w, uint
 
     esp_err_t ret;
 
+    /* Staging buffer so the many small pieces below coalesce into a few large
+     * writes. Allocation failure is non-fatal: bw_write() then falls back to
+     * unbuffered behaviour. */
+    png_buf_writer_t bw = {
+        .fn  = write_fn,
+        .ctx = ctx,
+        .buf = (uint8_t *)heap_caps_malloc(PNG_OUT_BUF_SIZE, MALLOC_CAP_SPIRAM),
+        .cap = PNG_OUT_BUF_SIZE,
+        .len = 0,
+    };
+    if (!bw.buf) {
+        ESP_LOGW(PNG_TAG, "no PSRAM for PNG staging buffer; streaming unbuffered (slow)");
+    }
+
+/* Every exit past this point must release the staging buffer. */
+#define PNG_RETURN(r) do { esp_err_t _r = (r); heap_caps_free(bw.buf); return _r; } while (0)
+
     /* ── 1. PNG signature ──────────────────────────────────────────────── */
     static const uint8_t png_sig[8] = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
-    ret = write_fn(ctx, png_sig, 8);
-    if (ret != ESP_OK) return ret;
+    ret = bw_write(&bw, png_sig, 8);
+    if (ret != ESP_OK) PNG_RETURN(ret);
 
     /* ── 2. IHDR chunk ─────────────────────────────────────────────────── */
     uint8_t ihdr[13];
@@ -163,8 +248,8 @@ esp_err_t png_encode_uncompressed_rgb888(const uint8_t *pixels, uint32_t w, uint
     ihdr[10] = 0;               /* compression: deflate */
     ihdr[11] = 0;               /* filter: adaptive */
     ihdr[12] = 0;               /* interlace: none */
-    ret = write_chunk(write_fn, ctx, "IHDR", ihdr, 13);
-    if (ret != ESP_OK) return ret;
+    ret = write_chunk(&bw, "IHDR", ihdr, 13);
+    if (ret != ESP_OK) PNG_RETURN(ret);
 
     /* ── 3. IDAT chunk — streamed ──────────────────────────────────────
      *
@@ -190,8 +275,8 @@ esp_err_t png_encode_uncompressed_rgb888(const uint8_t *pixels, uint32_t w, uint
     uint8_t idat_hdr[8];
     put_be32(idat_hdr, (uint32_t)idat_data_size);
     memcpy(idat_hdr + 4, "IDAT", 4);
-    ret = write_fn(ctx, idat_hdr, 8);
-    if (ret != ESP_OK) return ret;
+    ret = bw_write(&bw, idat_hdr, 8);
+    if (ret != ESP_OK) PNG_RETURN(ret);
 
     /* Running CRC over "IDAT" + all IDAT data */
     uint32_t idat_crc = 0xFFFFFFFF;
@@ -203,8 +288,8 @@ esp_err_t png_encode_uncompressed_rgb888(const uint8_t *pixels, uint32_t w, uint
     /* Zlib header: CMF=0x78 (deflate, 32K window), FLG=0x01 (no dict, check bits) */
     uint8_t zlib_hdr[2] = { 0x78, 0x01 };
     idat_crc = crc32_update(idat_crc, zlib_hdr, 2);
-    ret = write_fn(ctx, zlib_hdr, 2);
-    if (ret != ESP_OK) return ret;
+    ret = bw_write(&bw, zlib_hdr, 2);
+    if (ret != ESP_OK) PNG_RETURN(ret);
 
     /* ── Emit one DEFLATE stored block per scanline ───────────────────
      *
@@ -223,14 +308,14 @@ esp_err_t png_encode_uncompressed_rgb888(const uint8_t *pixels, uint32_t w, uint
         put_le16(blk + 3, (uint16_t)~scanline);
 
         idat_crc = crc32_update(idat_crc, blk, 5);
-        ret = write_fn(ctx, blk, 5);
-        if (ret != ESP_OK) return ret;
+        ret = bw_write(&bw, blk, 5);
+        if (ret != ESP_OK) PNG_RETURN(ret);
 
         /* Filter byte (0x00 = None) */
         idat_crc = crc32_update(idat_crc, &filter_byte, 1);
         adler = adler32_update(adler, &filter_byte, 1);
-        ret = write_fn(ctx, &filter_byte, 1);
-        if (ret != ESP_OK) return ret;
+        ret = bw_write(&bw, &filter_byte, 1);
+        if (ret != ESP_OK) PNG_RETURN(ret);
 
         /* Pixel data for this row */
         const uint8_t *row = pixels + (uint64_t)y * w * 3;
@@ -238,23 +323,29 @@ esp_err_t png_encode_uncompressed_rgb888(const uint8_t *pixels, uint32_t w, uint
 
         idat_crc = crc32_update(idat_crc, row, row_bytes);
         adler = adler32_update(adler, row, row_bytes);
-        ret = write_fn(ctx, row, row_bytes);
-        if (ret != ESP_OK) return ret;
+        ret = bw_write(&bw, row, row_bytes);
+        if (ret != ESP_OK) PNG_RETURN(ret);
     }
 
     /* Adler-32 checksum (big-endian, per zlib spec) */
     uint8_t adler_buf[4];
     put_be32(adler_buf, adler);
     idat_crc = crc32_update(idat_crc, adler_buf, 4);
-    ret = write_fn(ctx, adler_buf, 4);
-    if (ret != ESP_OK) return ret;
+    ret = bw_write(&bw, adler_buf, 4);
+    if (ret != ESP_OK) PNG_RETURN(ret);
 
     /* IDAT CRC */
     uint8_t idat_crc_buf[4];
     put_be32(idat_crc_buf, ~idat_crc);
-    ret = write_fn(ctx, idat_crc_buf, 4);
-    if (ret != ESP_OK) return ret;
+    ret = bw_write(&bw, idat_crc_buf, 4);
+    if (ret != ESP_OK) PNG_RETURN(ret);
 
     /* ── 4. IEND chunk ─────────────────────────────────────────────────── */
-    return write_chunk(write_fn, ctx, "IEND", NULL, 0);
+    ret = write_chunk(&bw, "IEND", NULL, 0);
+    if (ret != ESP_OK) PNG_RETURN(ret);
+
+    /* Nothing may remain buffered once the image is complete. */
+    PNG_RETURN(bw_flush(&bw));
 }
+
+#undef PNG_RETURN

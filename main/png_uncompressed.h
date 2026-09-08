@@ -8,7 +8,14 @@
  * several seconds.
  *
  * Designed for streaming over HTTP chunked transfer — the write callback
- * is invoked incrementally so no second buffer allocation is needed.
+ * is invoked incrementally so no second copy of the image is needed.
+ *
+ * Output is coalesced through a ~16 KB PSRAM staging buffer so that the many
+ * small pieces the format requires (a 5-byte block header and a 1-byte filter
+ * byte per scanline) do not each become their own HTTP chunk and TLS record.
+ * Without it a 720x1280 screenshot cost ~3840 write callbacks and ~40 s over
+ * HTTPS, and the resulting internal-RAM pressure was implicated in device-wide
+ * TCP wedges (issue #234).
  */
 
 #pragma once
@@ -37,8 +44,9 @@ typedef esp_err_t (*png_write_fn_t)(void *ctx, const void *buf, size_t len);
  * Pixels must be row-major, no stride padding, 3 bytes per pixel (R,G,B).
  * The write callback is called multiple times with chunks of the PNG file.
  *
- * Memory usage: only a small stack buffer (~16 bytes) beyond the input
- * pixel buffer — no heap allocation.
+ * Memory usage: a single ~16 KB staging buffer allocated from PSRAM for the
+ * duration of the call (plus a few bytes of stack). If that allocation fails
+ * the encoder still succeeds, falling back to unbuffered writes.
  *
  * @param pixels    w×h×3 bytes of RGB888 data
  * @param w         Image width in pixels
