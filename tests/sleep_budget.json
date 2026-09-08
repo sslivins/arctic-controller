@@ -6,6 +6,7 @@
   "tests/api/test_events_and_misc_api.py": 2,
   "tests/api/test_heatpump_api.py": 2,
   "tests/api/test_home_assistant_websocket.py": 2,
+  "tests/api/test_location_weather_api.py": 2,
   "tests/api/test_logs_api.py": 2,
   "tests/api/test_ota_api.py": 7,
   "tests/api/test_session_api.py": 2,
@@ -17,5 +18,6 @@
   "tests/web/conftest.py": 5,
   "tests/web/test_change_password.py": 2,
   "tests/web/test_dashboard.py": 1,
+  "tests/web/test_location_weather.py": 1,
   "tests/web/test_navigation.py": 2
 }

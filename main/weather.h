@@ -75,6 +75,19 @@ void weather_service_init(void);
  */
 void weather_service_refresh(void);
 
+/**
+ * @brief Copy the most recently fetched weather.
+ *
+ * Safe to call from any task, including the HTTPS server: the shared result is
+ * copied under a spinlock rather than read field by field, so a caller can
+ * never observe a temperature from one fetch alongside a code from the next.
+ *
+ * @param out Receives the cached reading. Untouched when this returns false.
+ * @return true when a fetch has succeeded since boot, false when there is
+ *         nothing to report (no location, no network, or no fetch yet).
+ */
+bool weather_service_get(weather_data_t* out);
+
 #ifdef CONFIG_TEST_ENDPOINTS
 /**
  * @brief Test-only: install a canned Open-Meteo forecast body so weather_fetch()

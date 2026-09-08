@@ -69,6 +69,10 @@ tags:
     description: WiFi connection information
   - name: Time
     description: Time and NTP configuration
+  - name: Location
+    description: Device location and automatic timezone
+  - name: Weather
+    description: Outdoor weather for the device location
   - name: Info
     description: Device information
   - name: OTA
@@ -378,6 +382,222 @@ paths:
                   message:
                     type: string
                     example: NTP sync initiated
+
+  /api/location:
+    get:
+      tags:
+        - Location
+      summary: Get device location and timezone mode
+      description: |
+        Returns the persisted device location plus whether the timezone is
+        derived automatically from it. `valid` is false until a location has
+        ever been set.
+      operationId: getLocation
+      responses:
+        '200':
+          description: Current location
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Location'
+        '401':
+          description: API key required (when API auth is enabled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+        - Location
+      summary: Set device location and/or timezone mode
+      description: |
+        Sets the device location, the automatic-timezone preference, or both.
+        Supply `latitude` and `longitude` together to change the location, and
+        `tz_auto` to change the timezone mode. At least one of the two must be
+        present. Changing the location triggers a weather refresh.
+      operationId: setLocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                latitude:
+                  type: number
+                  format: double
+                  minimum: -90
+                  maximum: 90
+                  example: 50.8836
+                longitude:
+                  type: number
+                  format: double
+                  minimum: -180
+                  maximum: 180
+                  example: -119.8869
+                name:
+                  type: string
+                  description: Display label for the location.
+                  example: Sun Peaks, British Columbia, CA
+                iana_tz:
+                  type: string
+                  description: IANA timezone name for the location.
+                  example: America/Vancouver
+                tz_auto:
+                  type: boolean
+                  description: Derive the timezone from the location.
+                  example: true
+              anyOf:
+                - required: [latitude, longitude]
+                - required: [tz_auto]
+      responses:
+        '200':
+          description: Location updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - type: object
+                    properties:
+                      success:
+                        type: boolean
+                        example: true
+                  - $ref: '#/components/schemas/Location'
+        '400':
+          description: Missing or invalid fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required (when API auth is enabled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/location/search:
+    get:
+      tags:
+        - Location
+      summary: Search for a location by name
+      description: |
+        Resolves a free-text place name to candidate locations using the
+        Open-Meteo geocoding service. This performs a blocking outbound HTTPS
+        request and can take several seconds.
+      operationId: searchLocation
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Free-text place name. Must not be empty.
+          schema:
+            type: string
+            minLength: 1
+            example: sun peaks
+      responses:
+        '200':
+          description: Matching locations, most relevant first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label:
+                          type: string
+                          description: Human-readable "city, region, country" label.
+                          example: Sun Peaks, British Columbia, CA
+                        name:
+                          type: string
+                          example: Sun Peaks
+                        admin1:
+                          type: string
+                          example: British Columbia
+                        country:
+                          type: string
+                          example: Canada
+                        country_code:
+                          type: string
+                          example: CA
+                        iana_tz:
+                          type: string
+                          example: America/Vancouver
+                        latitude:
+                          type: number
+                          format: double
+                          example: 50.8836
+                        longitude:
+                          type: number
+                          format: double
+                          example: -119.8869
+        '400':
+          description: The 'q' query parameter is missing or empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required (when API auth is enabled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: The geocoding service could not be reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/weather:
+    get:
+      tags:
+        - Weather
+      summary: Current outdoor weather
+      description: |
+        Returns the most recent weather reading for the device location. The
+        temperature and code fields are present only when `valid` is true,
+        which requires a location to be set and at least one successful fetch.
+
+        `weather_code` is a WMO weather interpretation code. The device renders
+        its icon from a bundled font that a browser cannot use, so clients are
+        expected to map the code to their own artwork; `description` is the
+        matching English text.
+      operationId: getWeather
+      responses:
+        '200':
+          description: Current weather
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                    example: true
+                  temp_c:
+                    type: number
+                    format: float
+                    description: Outdoor temperature in degrees Celsius.
+                    example: -4.2
+                  weather_code:
+                    type: integer
+                    description: WMO weather interpretation code.
+                    example: 71
+                  description:
+                    type: string
+                    example: Light snow
+        '401':
+          description: API key required (when API auth is enabled)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/wifi:
     get:
@@ -3128,6 +3348,37 @@ components:
         flow. Existing web/API authentication settings never bypass it.
 
   schemas:
+    Location:
+      type: object
+      properties:
+        valid:
+          type: boolean
+          description: False until a location has ever been set.
+          example: true
+        latitude:
+          type: number
+          format: double
+          example: 50.8836
+        longitude:
+          type: number
+          format: double
+          example: -119.8869
+        name:
+          type: string
+          example: Sun Peaks, British Columbia, CA
+        iana_tz:
+          type: string
+          example: America/Vancouver
+        tz_auto:
+          type: boolean
+          description: Whether the timezone is derived from the location.
+          example: true
+        derived_posix:
+          type: string
+          description: |
+            POSIX TZ string derived from the location's IANA zone, or empty if
+            there is no location or the zone is unmapped.
+          example: PST8PDT,M3.2.0,M11.1.0
     Error:
       type: object
       properties:

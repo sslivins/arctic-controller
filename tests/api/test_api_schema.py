@@ -87,6 +87,7 @@ schema = schemathesis.openapi.from_dict(raw_spec)
 
 SKIP_ENTIRELY = {
     "/api/ota/releases",            # depends on live GitHub connectivity; covered by targeted tests
+    "/api/location/search",         # depends on live geocoding connectivity; covered by targeted tests
     "/api/ota/update",              # triggers firmware download
     "/api/ota/upload",              # writes firmware to flash
     "/api/ota/reboot",              # reboots the device
@@ -121,6 +122,7 @@ SKIP_NON_GET = {
     "/api/display/brightness",      # PUT changes persistent display settings
     "/api/preferences",             # PATCH changes persistent preferences
     "/api/wifi/scan",               # POST starts radio scan
+    "/api/location",                # POST moves the device and its weather
 }
 
 
