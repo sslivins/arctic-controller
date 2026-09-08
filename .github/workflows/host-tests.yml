@@ -54,6 +54,13 @@ jobs:
       - name: Publish host-side test results
         uses: dorny/test-reporter@v2
         if: always()
+        # Publishing is cosmetic: it turns the JUnit XML into a check run.
+        # The pytest step above has no continue-on-error, so a real test
+        # failure already fails this job on its own. Without this, a transient
+        # check-run API error (a bare HttpError from the action's top-level
+        # catch, which `fail-on-error` does not suppress) fails a job in which
+        # every test passed, fails ci-gate, and blocks the merge.
+        continue-on-error: true
         with:
           name: Host-Side Test Results
           path: host-test-results.xml

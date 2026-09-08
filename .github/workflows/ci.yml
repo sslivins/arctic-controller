@@ -40,6 +40,29 @@ name: CI
 # create-release.yml resolves release attestations via
 # `actions/workflows/device-tests.yml/runs?event=push`, and a workflow_call
 # invocation produces no top-level run entry for that query to find.
+#
+# OTHER WAYS A PR STALLS WITH NOTHING VISIBLY WRONG
+#
+# The paths-filter trap above is not the only way to end up blocked by a check
+# that will never report. Two more were observed on PRs #231 and #232:
+#
+#   * CONFLICTED HEAD - a `pull_request` workflow needs a mergeable ref to
+#     build, so a PR that conflicts with main (`mergeStateStatus: DIRTY`)
+#     schedules NO runs at all and `statusCheckRollup` comes back EMPTY.
+#     `ci-gate` never reports and the PR is unmergeable with nothing failing
+#     and nothing in flight. This one is inherent to GitHub and cannot be
+#     configured away: merge main into the branch and the runs appear.
+#     A watcher that treats "no failing checks" as "still healthy" will poll
+#     this state until it times out, so watchers must test for DIRTY exactly.
+#
+#   * PUBLISHING FAILURES GATING A GREEN RUN - the dorny/test-reporter steps
+#     that turn JUnit XML into check runs talk to the check-runs API, which
+#     can fail transiently (a bare HttpError, which the action's `fail-on-error`
+#     input does NOT suppress because it is raised from the top-level catch).
+#     That failed a job in which all 100 tests had passed, which failed
+#     ci-gate, which blocked the merge. Every publisher therefore carries
+#     `continue-on-error: true`. Test outcomes are gated by the test steps
+#     themselves, never by whether their results could be published.
 
 on:
   pull_request:
