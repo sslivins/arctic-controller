@@ -30,10 +30,27 @@ on:
   # NOTE: `merge_group` is likewise driven by ci.yml, so that the merge queue
   # sees exactly one always-reporting required context.
 
-# Only one device-test run at a time (single device on the network)
 concurrency:
-  group: device-tests
-  cancel-in-progress: false  # queue new runs rather than cancelling in-progress
+  # Serialising physical-device access is NOT this group's job. `ghr-mi` is the
+  # repository's only [self-hosted, vm-mi] runner and it is the only runner that
+  # touches the controller (see the single `runs-on: [self-hosted, vm-mi]` job
+  # below). A runner executes one job at a time, so two hardware jobs can never
+  # overlap no matter how these runs are grouped.
+  #
+  # What the group actually does is collapse superseded pull-request runs. Even
+  # with `cancel-in-progress: false`, GitHub cancels any previously *pending* run
+  # when a newer one joins the same group, so pushing repeatedly to a PR discards
+  # the stale queued runs instead of executing a ~40-minute hardware suite for
+  # every intermediate commit.
+  #
+  # The key detail is that the group is keyed by event and PR number. A
+  # `merge_group` or `push` run lands in a group of its own and therefore cannot
+  # be evicted by later pull-request activity. That matters because a cancelled
+  # `ci-gate` ejects the entry from the merge queue, which is the same class of
+  # silent stall documented at the top of ci.yml. Those runs queue at the runner
+  # instead of cancelling one another.
+  group: device-tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
