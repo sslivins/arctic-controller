@@ -275,10 +275,31 @@ static void log_persist_task(void* arg)
     // not immediately trigger a "new severity" flush.
     last_flushed_warn_seq = log_buffer_latest_seq_at_level(ESP_LOG_WARN);
 
+    // The 5s cadence below is far too coarse to catch the transient internal
+    // heap dips seen in #234 (they last under 100ms), so that job belongs to a
+    // dedicated fast poller which reports them on its own LOW HEAP lines.
+    net_diag_start_low_heap_watch();
+
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(LP_TASK_PERIOD_MS));
         tick++;
 
+        // Netdiag keeps its fixed 30s cadence. Making it adaptive - sampling
+        // whenever internal heap was low - was tried and reverted, because it
+        // was wrong twice over:
+        //
+        //   1. net_diag_log_snapshot() asks the tcpip thread to walk the PCB
+        //      lists. Triggering that *because* internal RAM is nearly gone
+        //      schedules the most expensive diagnostic at the one moment the
+        //      network stack can least afford it, and duly produced "PCB walk
+        //      TIMED OUT" - a symptom manufactured by the instrumentation.
+        //   2. It biases the sample set toward dip moments, so the heap-floor
+        //      gate (which reads exactly these lines) sees a floor no
+        //      unbiased run would report, and fails runs that are no less
+        //      healthy than the ones that pass.
+        //
+        // A fixed cadence keeps this log comparable with every historical run
+        // and with main. Dip resolution is the fast poller's job.
         if ((tick % LP_NETDIAG_EVERY) == 0) {
             net_diag_log_snapshot();
         }
@@ -342,7 +363,12 @@ bool log_persist_init(void)
 void log_persist_start(void)
 {
     if (!s_part) return;
-    xTaskCreate(log_persist_task, "log_persist", 4096, NULL, 2, NULL);
+    // Internal stack: this task writes the log partition, and a task that
+    // initiates flash operations must not run from PSRAM.
+    if (xTaskCreate(log_persist_task, "log_persist", 4096, NULL, 2, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create log_persist task (largest free internal block=%u)",
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    }
 }
 
 void log_persist_flush_now(uint8_t reason)

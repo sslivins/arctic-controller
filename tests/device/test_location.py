@@ -73,8 +73,16 @@ def _open_search(device: DeviceClient):
     device.wait_for_widget(tag="location_search_input", timeout=5.0)
 
 
-def _search(device: DeviceClient, query: str):
-    """Type a query and wait for the debounced (mocked) search to populate."""
+def _search(device: DeviceClient, query: str, expect_failure: bool = False):
+    """Type a query and wait for the debounced (mocked) search to settle.
+
+    The search UI reports an out-of-memory worker-launch failure with the same
+    "Search failed. Check network." status it uses for a real network error.
+    When that happened under memory pressure, every caller of this helper failed
+    much later with a misleading message ("Expected two search results"), and
+    diagnosing it needed the serial log. Unless a test is explicitly exercising
+    the failure path, treat that status as the failure it is and say so here.
+    """
     device.type_text("location_search_input", query)
     # Debounce (~450ms) + mocked worker → results or a status message.
     device.wait_until(
@@ -85,6 +93,13 @@ def _search(device: DeviceClient, query: str):
         ),
         timeout=8.0,
     )
+    if not expect_failure and _search_status(device) == "Search failed. Check network.":
+        raise AssertionError(
+            f"The device reported a failed geocoding search for '{query}' while "
+            "a mock was installed, so no network call was involved. The search "
+            "worker most likely could not be started -- check controller-serial.log "
+            "for 'Failed to create geocoding worker'."
+        )
 
 
 def _search_status(device: DeviceClient) -> str:
@@ -252,7 +267,7 @@ def test_search_failure_shows_status(device: DeviceClient, location_restore):
     _navigate_to_time_screen(device)
     device.geocoding_mock_error()
     _open_search(device)
-    _search(device, "kamloops")
+    _search(device, "kamloops", expect_failure=True)
 
     assert device.find_widget(tag="loc_result_0") is None
     assert _search_status(device) == "Search failed. Check network."

@@ -51,6 +51,7 @@
 #include <freertos/task.h>
 #include <freertos/semphr.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <esp_netif.h>
@@ -334,6 +335,12 @@ static void wifi_supervisor_task(void* param) {
 void wifi_supervisor_start(void) {
     // 5 KB stack: the recovery path calls wifi_mgr_connect()/disconnect() and
     // event_log_record() inline; the ICMP ping runs in its own esp_ping task.
-    xTaskCreate(wifi_supervisor_task, "wifi_super", 5120, nullptr, 4, nullptr);
+    if (xTaskCreate(wifi_supervisor_task, "wifi_super", 5120, nullptr, 4, nullptr) != pdPASS) {
+        // Silent failure disables WiFi wedge recovery entirely, which only
+        // shows up much later as an unexplained unreachable device.
+        ESP_LOGE(TAG, "Failed to create WiFi supervisor task (largest free internal block=%u)",
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        return;
+    }
     ESP_LOGI(TAG, "WiFi health supervisor started");
 }
