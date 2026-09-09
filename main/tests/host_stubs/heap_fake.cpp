@@ -73,6 +73,16 @@ size_t heap_caps_get_minimum_free_size(uint32_t caps) {
     return 100 * 1024;
 }
 
+// Only ever reached on a failure path, to report how much contiguous memory
+// was available when an allocation lost. Nothing host-tested branches on it,
+// so a fixed value is enough -- but it is deliberately smaller than the free
+// size above, because a largest-free-block larger than the total free heap
+// would be nonsense if anything ever did start asserting on it.
+size_t heap_caps_get_largest_free_block(uint32_t caps) {
+    (void)caps;
+    return 64 * 1024;
+}
+
 }  // extern "C"
 
 namespace heap_fake {
