@@ -89,20 +89,46 @@ BENIGN_SKIP_PATTERNS = [
     r"download failed too quickly",
     r"poison firmware binary not yet available",
     r"live weather reading",
+    # Self-invalidating by design: the call under test destroys the credential
+    # the rest of the run depends on, so it can only be exercised in isolation.
+    r"invalidates arctic_api_key",
+]
+
+# Deliberate, tracked gaps: the test is skipped because the feature or the
+# harness capability genuinely does not exist yet, not because anything broke.
+# Separated from BENIGN because these are debts with an owner -- each one is
+# referenced from an issue -- whereas a benign skip is permanent by design.
+#
+# Evidence for the entries below (device run 34306377818, the first run to
+# publish the skip itemisation): 48 API skips, of which 0 were infra.
+DEFERRED_SKIP_PATTERNS = [
+    # OTA rollback Tiers 2/3 -- #217 T05/T06. The runner does in fact have USB
+    # serial access to the controller, so "not available on CI" understates it:
+    # the harness has not been built. Tracked rather than silently tolerated.
+    r"requires serial connection",
+    # Aux/backup heater has no Tuya register mapping yet, so the reading is
+    # hardcoded false; the test is real and will matter once it is mapped.
+    r"not mapped from any tuya register yet",
 ]
 
 _INFRA_RE = [re.compile(p, re.I) for p in INFRA_SKIP_PATTERNS]
 _BENIGN_RE = [re.compile(p, re.I) for p in BENIGN_SKIP_PATTERNS]
+_DEFERRED_RE = [re.compile(p, re.I) for p in DEFERRED_SKIP_PATTERNS]
 
 
 def classify_skip(message: str) -> str:
-    """Return 'infra', 'benign' or 'unknown' for a skip message."""
+    """Return 'infra', 'deferred', 'benign' or 'unknown' for a skip message."""
     text = (message or "").strip()
     if not text:
         return "unknown"
     for rx in _INFRA_RE:
         if rx.search(text):
             return "infra"
+    # Checked before benign: a deferred reason is the more specific statement
+    # and must not be absorbed by a broader benign pattern.
+    for rx in _DEFERRED_RE:
+        if rx.search(text):
+            return "deferred"
     for rx in _BENIGN_RE:
         if rx.search(text):
             return "benign"
@@ -126,6 +152,10 @@ class SuiteResult:
     @property
     def unknown_skips(self) -> list[str]:
         return [m for m in self.skip_messages if classify_skip(m) == "unknown"]
+
+    @property
+    def deferred_skips(self) -> list[str]:
+        return [m for m in self.skip_messages if classify_skip(m) == "deferred"]
 
 
 def parse_suite(name: str, path: Path) -> SuiteResult:
@@ -197,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
             "failures": res.failures,
             "floor": floor,
             "infra_skips": res.infra_skips,
+            "deferred_skips": res.deferred_skips,
             "unknown_skips": res.unknown_skips,
         }
 

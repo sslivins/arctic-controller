@@ -135,6 +135,51 @@ def test_benign_skip_never_fails_even_when_enforcing(tmp_path):
     assert mod.main([f"api={xml}", "--floors", str(floors), "--enforce-infra-skips"]) == 0
 
 
+def test_deferred_skip_never_fails_even_when_enforcing(tmp_path):
+    # A tracked debt must not block main; it is visible in the report instead.
+    xml = tmp_path / "api.xml"
+    _write_xml(
+        xml,
+        tests=454,
+        skipped=1,
+        skip_messages=["Requires serial connection and device reboot"],
+    )
+    floors = tmp_path / "floors.json"
+    floors.write_text(json.dumps({"api": 380}), encoding="utf-8")
+    assert mod.main([f"api={xml}", "--floors", str(floors), "--enforce-infra-skips"]) == 0
+
+
+def test_report_separates_deferred_from_benign(tmp_path):
+    # The whole point of the third class is that debts stay countable rather
+    # than blending into the permanent-by-design pile.
+    xml = tmp_path / "api.xml"
+    _write_xml(
+        xml,
+        tests=454,
+        skipped=2,
+        skip_messages=[
+            "Requires serial connection and device reboot",
+            "dangerous endpoint: /login",
+        ],
+    )
+    floors = tmp_path / "floors.json"
+    floors.write_text(json.dumps({"api": 380}), encoding="utf-8")
+    report = tmp_path / "report.json"
+    assert mod.main([f"api={xml}", "--floors", str(floors), "--report", str(report)]) == 0
+
+    data = json.loads(report.read_text(encoding="utf-8"))["api"]
+    assert len(data["deferred_skips"]) == 1
+    assert data["infra_skips"] == []
+    assert data["unknown_skips"] == []
+
+
+def test_deferred_takes_precedence_over_a_broader_benign_pattern():
+    # Ordering inside classify_skip is load-bearing: if benign were checked
+    # first, a debt could be absorbed by a more general pattern and disappear.
+    assert mod.classify_skip("Requires serial connection and device reboot") == "deferred"
+    assert mod.DEFERRED_SKIP_PATTERNS, "the deferred class has been emptied"
+
+
 @pytest.mark.parametrize(
     "message,expected",
     [
@@ -149,6 +194,10 @@ def test_benign_skip_never_fails_even_when_enforcing(tmp_path):
         ("No events on device", "benign"),
         ("Another OTA operation in progress - cannot test error state", "benign"),
         ("Need at least 2 entries to test ordering", "benign"),
+        ("Regenerating the API key invalidates ARCTIC_API_KEY for the rest of the run", "benign"),
+        ("Requires serial connection and device reboot", "deferred"),
+        ("Requires serial connection, poison firmware, and manual recovery", "deferred"),
+        ("Backup/aux heater is not mapped from any Tuya register yet", "deferred"),
         ("some brand new reason nobody classified", "unknown"),
         ("", "unknown"),
     ],

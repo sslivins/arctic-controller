@@ -1112,13 +1112,16 @@ jobs:
         # margin for the genuinely data-dependent skips.
         #
         # Infrastructure-precondition skips ("Device not reachable",
-        # "ARCTIC_API_KEY not set", "Demo mode not enabled") are reported as
-        # warnings for now rather than hard failures: the API suite currently
-        # reports 47 skips per run and they have never been itemised, so
-        # enforcing blind would risk blocking main on a pre-existing condition.
-        # The `-rs` flag added to the pytest steps above now itemises them, and
-        # --enforce-infra-skips flips this to a hard failure once that list has
-        # been reviewed. See issue #217 (T19).
+        # "ARCTIC_API_KEY not set", "Demo mode not enabled") are now HARD
+        # failures. That list has been reviewed: run 34306377818 published the
+        # first itemisation and showed 48 API skips of which **zero** were
+        # infrastructure. Nearly all are the schema fuzzer declining to call
+        # mutating or dangerous endpoints, which is benign by design.
+        #
+        # Two reasons were reclassified as `deferred` rather than benign -- the
+        # OTA rollback tests that need a serial harness (#217 T05/T06) and the
+        # unmapped aux-heater reading -- so that real debts stay visible instead
+        # of blending into the permanent-by-design pile. See issue #217 (T19).
         run: |
           set -euo pipefail
           python3 .github/scripts/check_test_floor.py \
@@ -1126,6 +1129,7 @@ jobs:
             api=api-test-results.xml \
             web=web-test-results.xml \
             --floors tests/executed_floor.json \
+            --enforce-infra-skips \
             --report executed-floor-report.json
 
       - name: Upload JUnit results
