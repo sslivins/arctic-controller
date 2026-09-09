@@ -275,11 +275,28 @@ static void log_persist_task(void* arg)
     // not immediately trigger a "new severity" flush.
     last_flushed_warn_seq = log_buffer_latest_seq_at_level(ESP_LOG_WARN);
 
+    // The 5s cadence below is still too coarse to catch the transient internal
+    // heap dips seen in #234, so hand that job to a dedicated fast poller.
+    net_diag_start_low_heap_watch();
+
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(LP_TASK_PERIOD_MS));
         tick++;
 
-        if ((tick % LP_NETDIAG_EVERY) == 0) {
+        // Netdiag cadence is adaptive. At the normal 30s spacing a heap
+        // collapse and its recovery can both fall between two samples, which
+        // is exactly what happened while investigating #234: consecutive
+        // samples read 34415 then 23 then 33959, showing the floor but not the
+        // descent. Once internal heap drops below the attribution threshold we
+        // sample every tick (5s) so the ramp is visible.
+        //
+        // heap_caps_get_free_size is cheap and lock-free enough to poll each
+        // tick; the expensive part of a snapshot is the tcpip PCB walk, which
+        // still only happens when we actually log.
+        const bool heap_low =
+            heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < NET_DIAG_LOW_HEAP_BYTES;
+
+        if (heap_low || (tick % LP_NETDIAG_EVERY) == 0) {
             net_diag_log_snapshot();
         }
 
