@@ -21,6 +21,7 @@
 #include <cJSON.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/idf_additions.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -159,7 +160,20 @@ void firmware_screen_create(const firmware_screen_config_t* config)
     
     // Start checking for updates
     update_ui_state(FW_STATE_CHECKING);
-    xTaskCreate(check_for_updates_task, "fw_check", 8192, NULL, 5, NULL);
+    // PSRAM stack: see background_update_check_task for the rationale.
+    if (xTaskCreateWithCaps(check_for_updates_task, "fw_check", 8192, NULL, 5,
+                            NULL, MALLOC_CAP_SPIRAM) != pdPASS) {
+        // Was silent, and the screen had already been put into CHECKING, so a
+        // failed launch left the user staring at a spinner that would never
+        // resolve.
+        ESP_LOGE(TAG,
+                 "Failed to create update-check task "
+                 "(free psram=%u internal=%u largest internal block=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        update_ui_state(FW_STATE_FAILED);
+    }
 }
 
 void firmware_screen_close(void)
@@ -548,7 +562,8 @@ static void check_for_updates_task(void* arg)
         lv_async_call(async_update_ui_cb, NULL);
     }
     
-    vTaskDelete(NULL);
+    // Must match xTaskCreateWithCaps() so the PSRAM stack is freed.
+    vTaskDeleteWithCaps(NULL);
 }
 
 static void progress_timer_cb(lv_timer_t* timer)
@@ -737,7 +752,8 @@ static void background_update_check_task(void* arg)
     }
     
     s_bg_check_running = false;
-    vTaskDelete(NULL);
+    // Must match xTaskCreateWithCaps() so the PSRAM stack is freed.
+    vTaskDeleteWithCaps(NULL);
 }
 
 void firmware_screen_check_for_updates_async(firmware_update_check_cb_t callback)
@@ -752,5 +768,22 @@ void firmware_screen_check_for_updates_async(firmware_update_check_cb_t callback
     }
     
     s_bg_update_callback = callback;
-    xTaskCreate(background_update_check_task, "bg_fw_check", 8192, NULL, 5, NULL);
+    // PSRAM stack: an HTTPS/TLS fetch through the certificate bundle needs 8 KB,
+    // and internal RAM is scarce and shared with the HTTPS servers (free internal
+    // heap has been observed at 16 bytes on this board). This task only fetches
+    // and parses, handing results to LVGL via lv_async_call, so it never touches
+    // flash from this stack.
+    if (xTaskCreateWithCaps(background_update_check_task, "bg_fw_check", 8192,
+                            NULL, 5, NULL, MALLOC_CAP_SPIRAM) != pdPASS) {
+        // Was silent: the background check simply never happened and nothing
+        // recorded why, so the device would sit indefinitely without ever
+        // noticing a published update.
+        ESP_LOGE(TAG,
+                 "Failed to create background update-check task "
+                 "(free psram=%u internal=%u largest internal block=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        s_bg_update_callback = NULL;
+    }
 }
