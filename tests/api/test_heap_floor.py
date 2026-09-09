@@ -192,3 +192,38 @@ def test_floor_is_configurable(tmp_path):
     log = _write(tmp_path, "healthy.log", HEALTHY_LINES)  # lowest instantaneous 39880
     assert _run(log, "8192").returncode == 0
     assert _run(log, "50000").returncode == 1
+
+
+# The extended netdiag line, added with the 100ms low-heap profiler (issue #234),
+# reports the largest contiguous free block alongside the low-water mark. The
+# scanner's regex must tolerate BOTH forms. When it did not, every sample stopped
+# matching and the gate failed closed with "no netdiag samples" -- which reads as
+# a device fault but was really log-format drift. That cost a full CI cycle to
+# diagnose, so it is pinned here.
+EXTENDED_LINES = [
+    "I (33395) netdiag: heap int=40615 (min 12632, largest 17408) psram=23673156 | tcp active=1 tw=0 bound=0 listen=4",
+    "I (63840) netdiag: heap int=39880 (min 16, largest 11776) psram=23607152 | tcp active=1 tw=3 bound=0 listen=4",
+]
+
+
+@requires_bash
+def test_extended_netdiag_format_is_still_parsed(tmp_path):
+    r = _run(_write(tmp_path, "extended.log", EXTENDED_LINES))
+    assert r.returncode == 0, (
+        "the extended '(min M, largest L)' form must still be recognised; "
+        f"got {r.returncode}\n{r.stdout}{r.stderr}"
+    )
+    assert "netdiag samples=2" in r.stdout, r.stdout
+    assert "min-instantaneous-internal-heap=39880" in r.stdout, r.stdout
+    assert "since-boot-low-water=16" in r.stdout, r.stdout
+
+
+@requires_bash
+def test_extended_format_still_trips_the_gate_when_exhausted(tmp_path):
+    """Tolerating the new field must not accidentally stop the gate firing."""
+    lines = EXTENDED_LINES + [
+        "W (99000) netdiag: heap int=23 (min 16, largest 0) psram=23637360 | tcp active=1 tw=9 bound=0 listen=4",
+    ]
+    r = _run(_write(tmp_path, "extended_bad.log", lines))
+    assert r.returncode == 1, f"exhausted extended log should fail; got {r.returncode}\n{r.stdout}{r.stderr}"
+    assert "min-instantaneous-internal-heap=23" in r.stdout, r.stdout
