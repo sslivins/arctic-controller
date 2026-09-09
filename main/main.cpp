@@ -9,6 +9,7 @@
 #include <freertos/task.h>
 #include <lvgl.h>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <esp_system.h>
 #include <nvs_flash.h>
@@ -376,7 +377,13 @@ extern "C" void app_main(void)
     }
 
     // Start WiFi initialization in background task (runs parallel to animation)
-    xTaskCreate(wifi_init_task, "wifi_init", 4096, NULL, 5, NULL);
+    // Internal stack: wifi_init_task writes NVS.
+    if (xTaskCreate(wifi_init_task, "wifi_init", 4096, NULL, 5, NULL) != pdPASS) {
+        // Silent failure here means the device never joins WiFi and never says
+        // why - the single most confusing way for this board to come up.
+        ESP_LOGE(TAG, "Failed to create wifi_init task (largest free internal block=%u)",
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    }
 
     // Start the WiFi health supervisor: recovers from prolonged connection loss
     // (reconnect, then reboot as a last resort). Passive while WiFi is healthy.

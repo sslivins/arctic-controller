@@ -20,6 +20,8 @@
 #include <stdint.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/idf_additions.h>
+#include <esp_heap_caps.h>
 
 static const char* TAG = "time_screen";
 
@@ -773,9 +775,27 @@ static void search_debounce_cb(lv_timer_t* timer)
     lv_label_set_text(s_state.search_status_label, i18n_get(STR_LOCATION_SEARCHING));
 
     uint32_t gen = s_search_gen;
-    // 12 KB stack: HTTPS/TLS handshake via the ESP certificate bundle is heavy.
-    if (xTaskCreate(geocoding_worker, "geo_search", 12288,
-                    (void*)(intptr_t)gen, 5, NULL) != pdPASS) {
+    // 12 KB stack in PSRAM: the HTTPS/TLS handshake via the ESP certificate
+    // bundle is heavy, and internal RAM is scarce and shared with the HTTPS
+    // servers -- free internal heap has been observed at 16 bytes on this
+    // board. Allocating this stack internally made the search fail whenever
+    // the device was under memory pressure. weather.cpp's worker is the same
+    // shape (HTTPS fetch, results handed to LVGL via lv_async_call) and runs
+    // from PSRAM for exactly this reason. Safe here because the worker never
+    // touches flash/NVS itself: location_mgr_set() runs later on the LVGL
+    // task, not on this stack.
+    if (xTaskCreateWithCaps(geocoding_worker, "geo_search", 12288,
+                            (void*)(intptr_t)gen, 5, NULL,
+                            MALLOC_CAP_SPIRAM) != pdPASS) {
+        // Never fail silently: this used to surface only as "search failed"
+        // in the UI, which sent everyone looking at the network. Log what
+        // actually ran out so the serial log names the real cause.
+        ESP_LOGE(TAG,
+                 "Failed to create geocoding worker (free psram=%u internal=%u "
+                 "largest internal block=%u)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         s_geo_busy = false;
         lv_label_set_text(s_state.search_status_label, i18n_get(STR_LOCATION_SEARCH_FAILED));
     }
@@ -786,7 +806,8 @@ static void geocoding_worker(void* arg)
     uint32_t gen = (uint32_t)(intptr_t)arg;
     s_geo_count = geocoding_search(s_geo_query, s_geo_results, MAX_GEO_RESULTS);
     lv_async_call(populate_results_cb, (void*)(intptr_t)gen);
-    vTaskDelete(NULL);
+    // Must match xTaskCreateWithCaps() so the PSRAM stack is freed.
+    vTaskDeleteWithCaps(NULL);
 }
 
 static void populate_results_cb(void* arg)
