@@ -4096,9 +4096,22 @@ static int16_t ap_value_to_client(uint8_t ap, int16_t read_value) {
 }
 
 // Helper to add a single AP (advanced) parameter to a cJSON object, keyed "AP<n>".
-static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool read_ok, int16_t value) {
-    char key[8];
-    snprintf(key, sizeof(key), "AP%u", (unsigned)p->ap);
+// Sends one response chunk. Returns false once the connection has gone away so
+// that callers streaming a long response stop building the remainder of it.
+static bool send_chunk(httpd_req_t* req, const char* s, size_t n) {
+    return httpd_resp_send_chunk(req, s, n) == ESP_OK;
+}
+
+// Builds the JSON object for a single AP parameter and returns it, writing the
+// object's key ("AP13") into key_out.
+//
+// Callers stream one parameter at a time rather than assembling every parameter
+// into one tree: CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL forces sub-512-byte
+// allocations into internal RAM, and a cJSON tree is made almost entirely of
+// those, so a whole-document tree exhausts the internal heap (#234).
+static cJSON* build_ap_json(const arctic::AdvancedParam* p, bool read_ok, int16_t value,
+                            char* key_out, size_t key_len) {
+    snprintf(key_out, key_len, "AP%u", (unsigned)p->ap);
     const bool reg_known = arctic::advanced_param_reg_known(p->ap);
     const bool writable  = reg_known && !p->needs_sim_confirm && !p->read_only && !p->is_trigger;
     cJSON* obj = cJSON_CreateObject();
@@ -4123,7 +4136,7 @@ static void add_ap_to_json(cJSON* parent, const arctic::AdvancedParam* p, bool r
     cJSON_AddBoolToObject(obj, "is_trigger", p->is_trigger);
     cJSON_AddBoolToObject(obj, "writable", writable);
     add_ap_enum_options(obj, p);
-    cJSON_AddItemToObject(parent, key, obj);
+    return obj;
 }
 
 // GET /api/heatpump/advanced - List all advanced (AP) parameters (verified regs only)
@@ -4137,16 +4150,20 @@ static esp_err_t heatpump_advanced_get_handler(httpd_req_t* req)
     set_json_content_type(req);
     
     bool connected = arctic::isConnected();
-    cJSON* root = cJSON_CreateObject();
-    cJSON_AddBoolToObject(root, "connected", connected);
-    cJSON_AddBoolToObject(root, "demo_mode", arctic::isDemoMode());
     
-    cJSON* params = cJSON_AddObjectToObject(root, "params");
+    // Streamed one parameter at a time; see build_ap_json() for why the whole
+    // document is never held as a single cJSON tree (#234).
+    char head[96];
+    int hn = snprintf(head, sizeof(head), "{\"connected\":%s,\"demo_mode\":%s,\"params\":{",
+                      connected ? "true" : "false",
+                      arctic::isDemoMode() ? "true" : "false");
+    if (!send_chunk(req, head, hn)) return ESP_OK;
     
     // Iterate by display category (mirrors the Tab5 Control screen ordering),
     // skipping parameters whose register has not been change-and-capture verified.
     const size_t ncat = arctic::advanced_category_count();
     const size_t nparam = arctic::advanced_param_count();
+    bool first = true;
     for (size_t c = 0; c < ncat; c++) {
         const char* cat = arctic::advanced_category_at(c);
         for (size_t i = 0; i < nparam; i++) {
@@ -4156,14 +4173,25 @@ static esp_err_t heatpump_advanced_get_handler(httpd_req_t* req)
             if (!arctic::advanced_param_reg_known(p->ap)) continue;  // hide unverified
             int16_t value = 0;
             bool read_ok = advanced_param_read(p->ap, &value);
-            add_ap_to_json(params, p, read_ok, value);
+
+            char key[8];
+            cJSON* obj = build_ap_json(p, read_ok, value, key, sizeof(key));
+            if (!obj) continue;
+            char* obj_str = cJSON_PrintUnformatted(obj);
+            cJSON_Delete(obj);
+            if (!obj_str) continue;
+
+            char sep[16];
+            int sn = snprintf(sep, sizeof(sep), "%s\"%s\":", first ? "" : ",", key);
+            bool ok = send_chunk(req, sep, sn) && send_chunk(req, obj_str, strlen(obj_str));
+            free(obj_str);
+            if (!ok) return ESP_OK;
+            first = false;
         }
     }
     
-    char* json_str = cJSON_PrintUnformatted(root);
-    httpd_resp_sendstr(req, json_str);
-    free(json_str);
-    cJSON_Delete(root);
+    send_chunk(req, "}}", 2);
+    httpd_resp_send_chunk(req, NULL, 0);
     
     return ESP_OK;
 }
@@ -5495,27 +5523,46 @@ static esp_err_t logs_get_handler(httpd_req_t* req)
 
     int count = log_buffer_get(entries, limit, since_seq, min_level);
 
-    cJSON* root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "total", log_buffer_count());
-    cJSON_AddNumberToObject(root, "latest_seq", log_buffer_get_latest_seq());
-    cJSON* arr = cJSON_AddArrayToObject(root, "entries");
+    // Streamed one entry at a time. Building the whole document as a cJSON tree
+    // put ~1500 nodes -- every one under CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL's
+    // 512-byte threshold, so every one in internal RAM -- live simultaneously,
+    // which drove the internal heap to zero on every request (#234). Peak usage
+    // is now one entry. cJSON still does the per-entry encoding so that string
+    // escaping stays correct.
+    char head[128];
+    int hn = snprintf(head, sizeof(head), "{\"total\":%d,\"latest_seq\":%lu,\"entries\":[",
+                      log_buffer_count(), (unsigned long)log_buffer_get_latest_seq());
+    if (!send_chunk(req, head, hn)) {
+        free(entries);
+        return ESP_OK;
+    }
 
     for (int i = 0; i < count; i++) {
         cJSON* entry = cJSON_CreateObject();
+        if (!entry) continue;
         cJSON_AddNumberToObject(entry, "seq", entries[i].seq);
         cJSON_AddNumberToObject(entry, "uptime_ms", entries[i].uptime_ms);
         cJSON_AddStringToObject(entry, "level", log_level_char(entries[i].level));
         cJSON_AddStringToObject(entry, "tag", entries[i].tag);
         cJSON_AddStringToObject(entry, "message", entries[i].message);
-        cJSON_AddItemToArray(arr, entry);
+
+        char* entry_str = cJSON_PrintUnformatted(entry);
+        cJSON_Delete(entry);
+        if (!entry_str) continue;
+
+        bool ok = (i == 0 || send_chunk(req, ",", 1)) &&
+                  send_chunk(req, entry_str, strlen(entry_str));
+        free(entry_str);
+        if (!ok) {
+            free(entries);
+            return ESP_OK;
+        }
     }
 
     free(entries);
 
-    char* json_str = cJSON_PrintUnformatted(root);
-    httpd_resp_sendstr(req, json_str);
-    free(json_str);
-    cJSON_Delete(root);
+    send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, NULL, 0);
 
     return ESP_OK;
 }
