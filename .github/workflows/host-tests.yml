@@ -124,6 +124,20 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # The advanced_params suite compiles the real
+          # components/arctic-macon/src/macon_advanced_params.cpp rather than a
+          # fake, so this job needs the submodule too.
+          submodules: 'recursive'
+
+      - name: Guard against an unpopulated submodule
+        # Without this, an empty submodule surfaces as a confusing "Cannot find
+        # source file" from add_library() instead of naming the real problem.
+        run: |
+          if [ ! -f components/arctic-macon/src/macon_advanced_params.cpp ]; then
+            echo "::error::components/arctic-macon was not checked out — the main/ native test suite cannot build."
+            exit 1
+          fi
 
       - name: Configure native test build
         run: cmake -S main/tests -B build-main-tests

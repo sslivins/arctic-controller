@@ -32,7 +32,15 @@ SOURCE_SUFFIXES = {".cpp", ".h", ".hpp", ".c", ".cc"}
 # Directories (relative to main/) that are out of scope for the gate.
 EXCLUDED_DIR_PARTS = set()
 # Individual files (relative to main/) that are out of scope for the gate.
-EXCLUDED_FILES = {"advanced_params.cpp", "advanced_params.h"}
+# advanced_params.{cpp,h} is the quarantine wrapper that owns the id<->wire
+# mapping. tests/test_advanced_params.cpp is that wrapper's own unit test: it
+# asserts the mapping is correct, which it cannot do without naming the raw
+# metadata the wrapper translates. It is host-test code and is never shipped.
+EXCLUDED_FILES = {
+    "advanced_params.cpp",
+    "advanced_params.h",
+    "test_advanced_params.cpp",
+}
 # Generated font / image blobs — huge and never contain protocol knowledge.
 EXCLUDED_DIR_PARTS |= {"fonts"}
 
