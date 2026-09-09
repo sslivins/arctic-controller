@@ -27,6 +27,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(MAIN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
+set(MACON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../components/arctic-macon)
 
 # Sources from main/ compiled for the host. Keep this list small and honest:
 # a source belongs here only if the host build exercises its real logic, not a
@@ -43,10 +44,21 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/iana_tz.cpp
   ${MAIN_DIR}/location_manager.cpp
   ${MAIN_DIR}/app_preferences.cpp
+  ${MAIN_DIR}/advanced_params.cpp
+)
+
+# The macon parameter table and its guardrail are linked REAL rather than
+# faked. They are logic, not hardware: the range check, the register mapping
+# and the two's-complement decode are exactly what advanced_params.cpp is
+# trusted to apply, so faking them would test the wrapper against a fiction.
+# Only the bus underneath (host_stubs/bus_fake.cpp) is a fake.
+set(MACON_HOST_SRCS
+  ${MACON_DIR}/src/macon_advanced_params.cpp
 )
 
 add_library(arctic_main_host STATIC
   ${MAIN_HOST_SRCS}
+  ${MACON_HOST_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/nvs_fake.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_partition_fake.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_crc.cpp
@@ -59,6 +71,7 @@ add_library(arctic_main_host STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/task_fake.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/event_group_fake.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/sntp_fake.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/bus_fake.cpp
 )
 
 # host_stubs must come first so its esp_log.h/nvs.h shadow nothing real; there
@@ -67,6 +80,7 @@ target_include_directories(arctic_main_host PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs
   ${MAIN_DIR}
   ${MAIN_DIR}/i18n
+  ${MACON_DIR}/include
 )
 
 target_compile_options(arctic_main_host PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -143,3 +157,11 @@ add_test(NAME location COMMAND test_location)
 add_executable(test_app_preferences test_app_preferences.cpp)
 target_link_libraries(test_app_preferences PRIVATE arctic_main_host)
 add_test(NAME app_preferences COMMAND test_app_preferences)
+
+# The technician "AP" parameter path. The macon guardrail and parameter table
+# are linked real (see MACON_HOST_SRCS); only the RS-485 bus is faked. Each
+# scenario forks because demo mode is decided by app_prefs_init(), which is
+# single-shot per process, and a scenario needs to choose which side it is on.
+add_executable(test_advanced_params test_advanced_params.cpp)
+target_link_libraries(test_advanced_params PRIVATE arctic_main_host)
+add_test(NAME advanced_params COMMAND test_advanced_params)
