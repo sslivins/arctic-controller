@@ -60,7 +60,12 @@ fi
 # Matches both the healthy line and the "PCB walk TIMED OUT" variant, since both
 # carry the heap figures:
 #   I (33395) netdiag: heap int=40615 (min 12632) psram=23673156 | tcp active=1 ...
-NETDIAG_RE='netdiag: heap int=[0-9]+ \(min [0-9]+\)'
+# The trailing "[,)]" tolerates the extended form that also reports the largest
+# contiguous block, i.e. "(min 12632, largest 17408)". Both must keep matching:
+# older logs (and archived artifacts) still use the short form, and a regex that
+# silently stops matching makes this gate fail closed with "no samples", which
+# looks like a device fault but is really a log-format drift.
+NETDIAG_RE='netdiag: heap int=[0-9]+ \(min [0-9]+[,)]'
 
 samples="$(grep -cE "$NETDIAG_RE" "$log" || true)"
 if [ "${samples:-0}" -eq 0 ]; then
@@ -77,8 +82,8 @@ min_instant="$(grep -oE 'netdiag: heap int=[0-9]+' "$log" \
     | sort -n | head -1)"
 
 # Context only -- saturates at ~16 bytes on every run, see the note above.
-lowwater="$(grep -oE 'heap int=[0-9]+ \(min [0-9]+\)' "$log" \
-    | grep -oE '\(min [0-9]+\)' \
+lowwater="$(grep -oE 'heap int=[0-9]+ \(min [0-9]+' "$log" \
+    | grep -oE 'min [0-9]+' \
     | grep -oE '[0-9]+' \
     | sort -n | head -1)"
 
@@ -90,7 +95,36 @@ maxtw="${maxtw:-0}"
 timeouts="$(grep -cE 'netdiag: .*PCB walk TIMED OUT' "$log" || true)"
 timeouts="${timeouts:-0}"
 
+# Transient sub-sample dips, reported by the 100ms low-heap profiler (issue
+# #234). These are NOT gated on, deliberately:
+#
+#   - They are real. The profiler observes internal free heap reaching as low as
+#     23 bytes with a largest free block of 0, recovering fully within one 100ms
+#     poll. "MISSED dip" lines record excursions shorter than even that.
+#   - They are also PRE-EXISTING and, so far, present on every run including
+#     runs whose tests all pass. The 30s netdiag cadence simply never sampled
+#     them; the since-boot low-water reading 16 bytes on every historical run
+#     was this same phenomenon, seen without resolution.
+#
+# Gating on them today would therefore fail every run without distinguishing a
+# healthy run from a wedged one -- the exact property that makes the low-water
+# mark useless as a gate. Until the consumer behind the spike is identified and
+# a defensible threshold exists, these are surfaced as data, not verdicts.
+dips="$(grep -cE 'netdiag: LOW HEAP entered' "$log" || true)"
+dips="${dips:-0}"
+missed="$(grep -cE 'netdiag: MISSED dip' "$log" || true)"
+missed="${missed:-0}"
+dipfloor=""
+if [ "$dips" -gt 0 ]; then
+    dipfloor="$(grep -oE 'LOW HEAP recovered: floor=[0-9]+' "$log" \
+        | grep -oE '[0-9]+$' | sort -n | head -1)"
+fi
+
 echo "netdiag samples=${samples} min-instantaneous-internal-heap=${min_instant} bytes (floor=${floor}) since-boot-low-water=${lowwater} peak-TIME_WAIT=${maxtw} pcb-walk-timeouts=${timeouts}"
+
+if [ "$dips" -gt 0 ] || [ "$missed" -gt 0 ]; then
+    echo "::notice title=Transient internal-heap dips (not gated)::The 100ms low-heap profiler recorded ${dips} dip(s) below the watch threshold${dipfloor:+, lowest floor ${dipfloor} bytes} and ${missed} excursion(s) too short to profile. These are reported for issue #234 and do not affect this gate; see the rationale in scan_heap_floor.sh."
+fi
 
 status=0
 
