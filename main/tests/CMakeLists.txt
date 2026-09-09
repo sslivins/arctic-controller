@@ -39,6 +39,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/event_log.cpp
   ${MAIN_DIR}/log_persist.cpp
   ${MAIN_DIR}/boot_stats.cpp
+  ${MAIN_DIR}/time_manager.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -53,6 +54,8 @@ add_library(arctic_main_host STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_log_hook.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_rom_crc.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/task_fake.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/event_group_fake.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/sntp_fake.cpp
 )
 
 # host_stubs must come first so its esp_log.h/nvs.h shadow nothing real; there
@@ -112,3 +115,11 @@ add_test(NAME log_persist COMMAND test_log_persist)
 add_executable(test_boot_stats test_boot_stats.cpp)
 target_link_libraries(test_boot_stats PRIVATE arctic_main_host)
 add_test(NAME boot_stats COMMAND test_boot_stats)
+
+# time_manager needs the doctored clock for the same reason event_log does, but
+# for the opposite branch: is_synced() must be able to read a pre-2024 clock so
+# that "the RTC was reset after the sync bit was latched" is reachable. Each
+# scenario forks because time_mgr_init() is single-shot and TZ is process-wide.
+add_executable(test_time_manager test_time_manager.cpp host_stubs/time_fake.cpp)
+target_link_libraries(test_time_manager PRIVATE arctic_main_host)
+add_test(NAME time_manager COMMAND test_time_manager)

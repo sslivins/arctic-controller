@@ -98,7 +98,8 @@ static void load_timezone_from_nvs(void)
         size_t len = sizeof(time_state.timezone);
         err = nvs_get_str(nvs, NVS_KEY_TZ, time_state.timezone, &len);
         if (err == ESP_OK) {
-            ESP_LOGI(TAG, "Loaded timezone from NVS: '%s' (len=%d)", time_state.timezone, len);
+            ESP_LOGI(TAG, "Loaded timezone from NVS: '%s' (len=%u)", time_state.timezone,
+                     (unsigned)len);
         } else {
             ESP_LOGW(TAG, "nvs_get_str failed (err=%d), using default: %s", err, DEFAULT_TIMEZONE);
             strncpy(time_state.timezone, DEFAULT_TIMEZONE, sizeof(time_state.timezone) - 1);
@@ -261,8 +262,11 @@ void time_mgr_set_timezone(const char* tz_str)
     setenv("TZ", time_state.timezone, 1);
     tzset();
     
-    // Save to NVS for persistence
-    save_timezone_to_nvs(tz_str);
+    // Save the truncated copy, not the caller's string: persisting something
+    // longer than the 64-byte buffer means the value that comes back on the
+    // next boot is not the value this boot is running, and the difference only
+    // shows up as a silent timezone change after a reboot.
+    save_timezone_to_nvs(time_state.timezone);
     
     ESP_LOGI(TAG, "Timezone set to: %s", time_state.timezone);
 }
