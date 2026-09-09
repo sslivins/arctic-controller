@@ -778,12 +778,12 @@ jobs:
       - name: Run device UI tests
         id: ui_tests
         continue-on-error: true
-        run: python -m pytest tests/device/ -v --tb=short --junitxml=test-results.xml -p no:cacheprovider
+        run: python -m pytest tests/device/ -v -rs --tb=short --junitxml=test-results.xml -p no:cacheprovider
 
       - name: Run API contract tests
         id: api_tests
         continue-on-error: true
-        run: python -m pytest tests/api/ -v --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
+        run: python -m pytest tests/api/ -v -rs --tb=short --junitxml=api-test-results.xml -p no:cacheprovider
         env:
           # ARCTIC_API_KEY is set via $GITHUB_ENV by the "Sync API key" step
           HYPOTHESIS_PROFILE: ci
@@ -797,7 +797,7 @@ jobs:
       - name: Run web dashboard tests
         id: web_tests
         continue-on-error: true
-        run: python -m pytest tests/web/ -v --tb=short --junitxml=web-test-results.xml
+        run: python -m pytest tests/web/ -v -rs --tb=short --junitxml=web-test-results.xml
         env:
           TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
           TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
@@ -1096,6 +1096,51 @@ jobs:
             tests/device/screenshots/
             tests/web/screenshots/
           if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Enforce executed-test floor
+        if: always()
+        # A suite that exits 0 having executed almost nothing is the failure
+        # this catches. pytest returns 0 for a run that collected 454 tests and
+        # skipped 450 of them, and until now device-tests.yml read the JUnit XML
+        # only to paint a badge -- so such a run would pass, and mint a release
+        # attestation, having tested essentially nothing. That is the same bug
+        # #214 fixed for schemathesis; this generalises the guard.
+        #
+        # Floors live in tests/executed_floor.json and are set below the
+        # observed counts (ui 320, api 407, web 61 on the last healthy run) with
+        # margin for the genuinely data-dependent skips.
+        #
+        # Infrastructure-precondition skips ("Device not reachable",
+        # "ARCTIC_API_KEY not set", "Demo mode not enabled") are reported as
+        # warnings for now rather than hard failures: the API suite currently
+        # reports 47 skips per run and they have never been itemised, so
+        # enforcing blind would risk blocking main on a pre-existing condition.
+        # The `-rs` flag added to the pytest steps above now itemises them, and
+        # --enforce-infra-skips flips this to a hard failure once that list has
+        # been reviewed. See issue #217 (T19).
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check_test_floor.py \
+            ui=test-results.xml \
+            api=api-test-results.xml \
+            web=web-test-results.xml \
+            --floors tests/executed_floor.json \
+            --report executed-floor-report.json
+
+      - name: Upload JUnit results
+        if: always()
+        # Archived so skip reasons can be reviewed after the fact; without this
+        # the only record of which tests actually ran is the scrolling log.
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-test-results
+          path: |
+            test-results.xml
+            api-test-results.xml
+            web-test-results.xml
+            executed-floor-report.json
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Extract test results for badges
