@@ -1,5 +1,6 @@
 {
   "_comment": "Tasks that must be alive in every healthy device run. The stack-watermark budget can only judge tasks that appear in the snapshot, so a task that crashed or never launched would otherwise pass silently -- with maximal apparent headroom. Absence of any task listed here fails the run. Curated deliberately (NOT generated from a snapshot like stack_watermark_budget.json): only tasks whose absence is unambiguously a fault belong here. Tasks that exist conditionally -- ha_ws_push (needs a Home Assistant config), mdns, telemetry_histo, and transient workers such as history_query and ota_task -- are intentionally excluded so they cannot red an otherwise-healthy run.",
+  "_comment_tcpip": "The lwIP TCP/IP thread is listed as 'tcpip', not 'tiT'. ESP-IDF 5.x defined TCPIP_THREAD_NAME as \"tiT\" (components/lwip/port/include/lwipopts.h); ESP-IDF 6.1, which this project requires, names it 'tcpip'. Run 34333805616 reported a complete 24-task snapshot containing 'tcpip' and no 'tiT' while 451 tests passed over HTTPS, so the thread was alive under the new name -- this was a rename, not a dead task.",
   "tasks": [
     "IDLE0",
     "IDLE1",
@@ -14,7 +15,7 @@
     "sdio_write",
     "sys_evt",
     "taskLVGL",
-    "tiT",
+    "tcpip",
     "wifi_super"
   ]
 }
