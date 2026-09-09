@@ -34,6 +34,7 @@ set(MAIN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 set(MAIN_HOST_SRCS
   ${MAIN_DIR}/i18n/i18n.cpp
   ${MAIN_DIR}/history_storage.cpp
+  ${MAIN_DIR}/auth_manager.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -43,6 +44,8 @@ add_library(arctic_main_host STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_crc.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/heap_fake.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_err.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/psa_crypto.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_random.cpp
 )
 
 # host_stubs must come first so its esp_log.h/nvs.h shadow nothing real; there
@@ -68,3 +71,10 @@ add_test(NAME nvs_fake COMMAND test_nvs_fake)
 add_executable(test_history_storage test_history_storage.cpp)
 target_link_libraries(test_history_storage PRIVATE arctic_main_host)
 add_test(NAME history_storage COMMAND test_history_storage)
+
+# auth_manager spawns threads: its whole point is contending the integration-
+# token mutex, which a single-threaded test cannot do.
+find_package(Threads REQUIRED)
+add_executable(test_auth_manager test_auth_manager.cpp)
+target_link_libraries(test_auth_manager PRIVATE arctic_main_host Threads::Threads)
+add_test(NAME auth_manager COMMAND test_auth_manager)

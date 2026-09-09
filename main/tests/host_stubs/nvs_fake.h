@@ -14,6 +14,7 @@
 #include "nvs.h"
 
 #include <string>
+#include <vector>
 
 namespace nvs_fake {
 
@@ -31,6 +32,8 @@ enum class Op {
     SetU32,
     GetStr,
     SetStr,
+    GetBlob,
+    SetBlob,
     Commit,
     EraseKey,
 };
@@ -46,10 +49,14 @@ int call_count(Op op);
 // the key is absent.
 bool peek_u8(const std::string &ns, const std::string &key, uint8_t *out);
 bool peek_str(const std::string &ns, const std::string &key, std::string *out);
+bool peek_blob(const std::string &ns, const std::string &key,
+               std::vector<uint8_t> *out);
 
 // Seed committed state, as if a previous boot had written it.
 void seed_u8(const std::string &ns, const std::string &key, uint8_t value);
 void seed_str(const std::string &ns, const std::string &key, const std::string &value);
+void seed_blob(const std::string &ns, const std::string &key,
+               const std::vector<uint8_t> &value);
 
 // True once a handle opened for writing has been committed. Uncommitted writes
 // are visible through the same handle but are dropped by reset_volatile(),

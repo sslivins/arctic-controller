@@ -19,10 +19,11 @@ namespace {
 using Blob = std::vector<uint8_t>;
 
 struct Entry {
-    enum class Kind { U8, U32, Str } kind;
+    enum class Kind { U8, U32, Str, Blob } kind;
     uint8_t u8 = 0;
     uint32_t u32 = 0;
     std::string str;
+    std::vector<uint8_t> blob;
 };
 
 using Namespace = std::map<std::string, Entry>;
@@ -266,6 +267,53 @@ esp_err_t nvs_set_str(nvs_handle_t handle, const char *key, const char *value) {
     return ESP_OK;
 }
 
+esp_err_t nvs_get_blob(nvs_handle_t handle, const char *key, void *out_value,
+                       size_t *length) {
+    Handle *h = nullptr;
+    esp_err_t err = begin_read(handle, nvs_fake::Op::GetBlob, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+    const Entry *e = find(h, key);
+    if (!e || e->kind != Entry::Kind::Blob) {
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+    if (!length) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t needed = e->blob.size();
+    // IDF's size-query convention: out_value == NULL asks for the length only.
+    if (out_value == nullptr) {
+        *length = needed;
+        return ESP_OK;
+    }
+    if (*length < needed) {
+        *length = needed;
+        return ESP_ERR_NVS_INVALID_LENGTH;
+    }
+    std::memcpy(out_value, e->blob.data(), needed);
+    *length = needed;
+    return ESP_OK;
+}
+
+esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value,
+                       size_t length) {
+    Handle *h = nullptr;
+    esp_err_t err = begin_write(handle, nvs_fake::Op::SetBlob, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (!value && length > 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    Entry e;
+    e.kind = Entry::Kind::Blob;
+    const uint8_t *src = static_cast<const uint8_t *>(value);
+    e.blob.assign(src, src + length);
+    h->pending[key] = e;
+    return ESP_OK;
+}
+
 esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key) {
     Handle *h = nullptr;
     esp_err_t err = begin_write(handle, nvs_fake::Op::EraseKey, &h);
@@ -344,6 +392,22 @@ bool peek_u8(const std::string &ns, const std::string &key, uint8_t *out) {
     return true;
 }
 
+bool peek_blob(const std::string &ns, const std::string &key,
+               std::vector<uint8_t> *out) {
+    auto n = g_committed.find(ns);
+    if (n == g_committed.end()) {
+        return false;
+    }
+    auto e = n->second.find(key);
+    if (e == n->second.end() || e->second.kind != Entry::Kind::Blob) {
+        return false;
+    }
+    if (out) {
+        *out = e->second.blob;
+    }
+    return true;
+}
+
 bool peek_str(const std::string &ns, const std::string &key, std::string *out) {
     auto n = g_committed.find(ns);
     if (n == g_committed.end()) {
@@ -370,6 +434,14 @@ void seed_str(const std::string &ns, const std::string &key, const std::string &
     Entry e;
     e.kind = Entry::Kind::Str;
     e.str = value;
+    g_committed[ns][key] = e;
+}
+
+void seed_blob(const std::string &ns, const std::string &key,
+               const std::vector<uint8_t> &value) {
+    Entry e;
+    e.kind = Entry::Kind::Blob;
+    e.blob = value;
     g_committed[ns][key] = e;
 }
 
