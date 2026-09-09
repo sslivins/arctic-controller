@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
@@ -150,7 +151,14 @@ void listener_start()
         return;
     }
     if (s_task) return;
-    xTaskCreate(rx_task, "tuya_listen", 4096, nullptr, 5, &s_task);
+    // Internal stack: the RX task services the UART at line rate.
+    if (xTaskCreate(rx_task, "tuya_listen", 4096, nullptr, 5, &s_task) != pdPASS) {
+        // Silent failure leaves s_task null, so every later start() retries
+        // while the heat pump appears simply not to respond.
+        ESP_LOGE(TAG, "Failed to create tuya listener task (largest free internal block=%u)",
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        s_task = nullptr;
+    }
 }
 
 ListenerStats listener_get_stats()
