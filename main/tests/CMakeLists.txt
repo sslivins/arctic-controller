@@ -42,6 +42,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/time_manager.cpp
   ${MAIN_DIR}/iana_tz.cpp
   ${MAIN_DIR}/location_manager.cpp
+  ${MAIN_DIR}/app_preferences.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -133,3 +134,12 @@ add_test(NAME time_manager COMMAND test_time_manager)
 add_executable(test_location test_location.cpp)
 target_link_libraries(test_location PRIVATE arctic_main_host)
 add_test(NAME location COMMAND test_location)
+
+# The unit setting and the eight temperature conversions. Each scenario forks
+# because app_prefs_init() is single-shot per process and the cached unit is
+# process-wide -- one child is one boot. sdkconfig.h in host_stubs pins
+# CONFIG_DEMO_MODE to the value in the repository's sdkconfig; with it off the
+# demo-mode scenarios would be asserting about an #else branch.
+add_executable(test_app_preferences test_app_preferences.cpp)
+target_link_libraries(test_app_preferences PRIVATE arctic_main_host)
+add_test(NAME app_preferences COMMAND test_app_preferences)
