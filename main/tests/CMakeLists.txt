@@ -36,6 +36,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/history_storage.cpp
   ${MAIN_DIR}/auth_manager.cpp
   ${MAIN_DIR}/log_buffer.cpp
+  ${MAIN_DIR}/event_log.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -84,3 +85,11 @@ add_test(NAME auth_manager COMMAND test_auth_manager)
 add_executable(test_log_buffer test_log_buffer.cpp)
 target_link_libraries(test_log_buffer PRIVATE arctic_main_host)
 add_test(NAME log_buffer COMMAND test_log_buffer)
+
+# time_fake overrides libc's time(), so it is linked ONLY here rather than into
+# arctic_main_host: no other suite should get a doctored wall clock. event_log
+# treats a pre-2024 clock as "not synced", and that branch (plus the backfill
+# that repairs it) is unreachable with the host's real clock.
+add_executable(test_event_log test_event_log.cpp host_stubs/time_fake.cpp)
+target_link_libraries(test_event_log PRIVATE arctic_main_host)
+add_test(NAME event_log COMMAND test_event_log)
