@@ -15,6 +15,7 @@
 namespace {
 int g_fail_remaining = 0;
 int g_netdiag_calls = 0;
+int g_low_heap_watch_starts = 0;
 }  // namespace
 
 namespace task_fake {
@@ -63,6 +64,11 @@ extern "C" void net_diag_sample(net_diag_t *out) {
 
 extern "C" void net_diag_log_snapshot(void) { ++g_netdiag_calls; }
 
+// Spawns a FreeRTOS watch task on the device. There is no scheduler here, and
+// the task is a pure observer, so counting the start is a faithful stand-in.
+extern "C" void net_diag_start_low_heap_watch(void) { ++g_low_heap_watch_starts; }
+
 namespace net_diag_fake {
 int calls() { return g_netdiag_calls; }
+int watch_starts() { return g_low_heap_watch_starts; }
 }  // namespace net_diag_fake
