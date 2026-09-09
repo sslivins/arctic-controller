@@ -342,7 +342,12 @@ bool log_persist_init(void)
 void log_persist_start(void)
 {
     if (!s_part) return;
-    xTaskCreate(log_persist_task, "log_persist", 4096, NULL, 2, NULL);
+    // Internal stack: this task writes the log partition, and a task that
+    // initiates flash operations must not run from PSRAM.
+    if (xTaskCreate(log_persist_task, "log_persist", 4096, NULL, 2, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create log_persist task (largest free internal block=%u)",
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    }
 }
 
 void log_persist_flush_now(uint8_t reason)
