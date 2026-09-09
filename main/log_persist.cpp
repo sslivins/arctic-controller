@@ -275,28 +275,32 @@ static void log_persist_task(void* arg)
     // not immediately trigger a "new severity" flush.
     last_flushed_warn_seq = log_buffer_latest_seq_at_level(ESP_LOG_WARN);
 
-    // The 5s cadence below is still too coarse to catch the transient internal
-    // heap dips seen in #234, so hand that job to a dedicated fast poller.
+    // The 5s cadence below is far too coarse to catch the transient internal
+    // heap dips seen in #234 (they last under 100ms), so that job belongs to a
+    // dedicated fast poller which reports them on its own LOW HEAP lines.
     net_diag_start_low_heap_watch();
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(LP_TASK_PERIOD_MS));
         tick++;
 
-        // Netdiag cadence is adaptive. At the normal 30s spacing a heap
-        // collapse and its recovery can both fall between two samples, which
-        // is exactly what happened while investigating #234: consecutive
-        // samples read 34415 then 23 then 33959, showing the floor but not the
-        // descent. Once internal heap drops below the attribution threshold we
-        // sample every tick (5s) so the ramp is visible.
+        // Netdiag keeps its fixed 30s cadence. Making it adaptive - sampling
+        // whenever internal heap was low - was tried and reverted, because it
+        // was wrong twice over:
         //
-        // heap_caps_get_free_size is cheap and lock-free enough to poll each
-        // tick; the expensive part of a snapshot is the tcpip PCB walk, which
-        // still only happens when we actually log.
-        const bool heap_low =
-            heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < NET_DIAG_LOW_HEAP_BYTES;
-
-        if (heap_low || (tick % LP_NETDIAG_EVERY) == 0) {
+        //   1. net_diag_log_snapshot() asks the tcpip thread to walk the PCB
+        //      lists. Triggering that *because* internal RAM is nearly gone
+        //      schedules the most expensive diagnostic at the one moment the
+        //      network stack can least afford it, and duly produced "PCB walk
+        //      TIMED OUT" - a symptom manufactured by the instrumentation.
+        //   2. It biases the sample set toward dip moments, so the heap-floor
+        //      gate (which reads exactly these lines) sees a floor no
+        //      unbiased run would report, and fails runs that are no less
+        //      healthy than the ones that pass.
+        //
+        // A fixed cadence keeps this log comparable with every historical run
+        // and with main. Dip resolution is the fast poller's job.
+        if ((tick % LP_NETDIAG_EVERY) == 0) {
             net_diag_log_snapshot();
         }
 
