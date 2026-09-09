@@ -73,6 +73,21 @@ bool tls_mgr_store_certs(const char* cert, size_t cert_len,
                          const char* key, size_t key_len);
 
 /**
+ * @brief Check that a PEM certificate actually parses.
+ *
+ * Looking for the "-----BEGIN CERTIFICATE-----" marker is not enough: base64
+ * garbage between valid markers is stored happily and only fails on the next
+ * boot, when HTTPS refuses to start and the web UI is unreachable. Callers
+ * should use this to reject bad input with a 400 while the user can still see
+ * the error.
+ *
+ * @param cert      PEM certificate chain
+ * @param cert_len  length, with or without the null terminator
+ * @return true if mbedtls can parse it
+ */
+bool tls_mgr_cert_is_valid(const char* cert, size_t cert_len);
+
+/**
  * @brief Remove stored certificates from NVS
  *
  * After clearing, the next boot will fall back to HTTP.
