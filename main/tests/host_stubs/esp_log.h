@@ -33,3 +33,21 @@ typedef enum {
 #define ESP_LOGV(tag, fmt, ...) ARCTIC_HOST_LOG_SINK(tag, fmt, ##__VA_ARGS__)
 
 #define esp_log_level_set(tag, level) ((void)0)
+
+// The log-capture hook. log_buffer.cpp replaces the sink and stores what it
+// parses, so the host build needs the real signature (a test installs its own
+// sink and drives the hook directly).
+#include <stdarg.h>
+
+typedef int (*vprintf_like_t)(const char *, va_list);
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+vprintf_like_t esp_log_set_vprintf(vprintf_like_t func);
+vprintf_like_t esp_log_get_vprintf(void);
+
+#ifdef __cplusplus
+}
+#endif

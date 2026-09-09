@@ -35,6 +35,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/i18n/i18n.cpp
   ${MAIN_DIR}/history_storage.cpp
   ${MAIN_DIR}/auth_manager.cpp
+  ${MAIN_DIR}/log_buffer.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -46,6 +47,7 @@ add_library(arctic_main_host STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_err.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/psa_crypto.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_random.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_log_hook.cpp
 )
 
 # host_stubs must come first so its esp_log.h/nvs.h shadow nothing real; there
@@ -78,3 +80,7 @@ find_package(Threads REQUIRED)
 add_executable(test_auth_manager test_auth_manager.cpp)
 target_link_libraries(test_auth_manager PRIVATE arctic_main_host Threads::Threads)
 add_test(NAME auth_manager COMMAND test_auth_manager)
+
+add_executable(test_log_buffer test_log_buffer.cpp)
+target_link_libraries(test_log_buffer PRIVATE arctic_main_host)
+add_test(NAME log_buffer COMMAND test_log_buffer)
