@@ -176,20 +176,32 @@ class TestLogsGet:
             assert entry["seq"] > pivot_seq, \
                 f"Entry seq {entry['seq']} should be > {pivot_seq}"
 
-    def test_logs_since_latest_returns_empty(self):
-        """?since=latest_seq should return 0 entries (no new logs).
+    def test_logs_since_latest_never_replays_old_entries(self):
+        """?since=latest_seq must never return an entry at or below that seq.
 
-        Background tasks (e.g. periodic firmware check) may produce a log
-        entry between the two requests, so re-fetch once if we get entries.
+        This used to assert that the response contained *zero* entries, on the
+        assumption that no new log arrived between the two requests. That is a
+        property of the device being idle, not a property of the API, and the
+        device is not idle: during the schema-fuzz phase it emits mDNS
+        allocation errors several times a second (see issue #234), which
+        defeated the single retry and failed the run with `assert 1 == 0`.
+
+        The contract actually worth testing is that `latest_seq` is a truthful
+        watermark: everything the device hands back for `since=latest_seq` is
+        strictly newer than it. That holds whether or not the device logged in
+        the meantime, and it still catches the real bug -- a broken filter
+        replaying old entries -- because those would carry seq <= latest.
         """
         all_data = _get("/api/logs").json()
         latest = all_data["latest_seq"]
         filtered = _get("/api/logs", params={"since": latest}).json()
-        if len(filtered["entries"]) > 0:
-            # Background log arrived — use the new latest_seq and retry once
-            latest = filtered["entries"][-1]["seq"]
-            filtered = _get("/api/logs", params={"since": latest}).json()
-        assert len(filtered["entries"]) == 0
+
+        for entry in filtered["entries"]:
+            assert entry["seq"] > latest, (
+                f"?since={latest} returned entry seq={entry['seq']}, which is "
+                f"not strictly newer -- the since filter is replaying entries "
+                f"the caller already has"
+            )
 
     def test_logs_level_error_filter(self):
         """?level=E should return only error-level entries."""
