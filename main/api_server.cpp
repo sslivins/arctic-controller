@@ -111,6 +111,8 @@ static esp_err_t http_https_required_handler(httpd_req_t* req,
                                              httpd_err_code_t err);
 static esp_err_t https_api_not_found_handler(httpd_req_t* req,
                                              httpd_err_code_t err);
+static esp_err_t https_api_method_not_allowed_handler(httpd_req_t* req,
+                                                      httpd_err_code_t err);
 static esp_err_t web_login_handler(httpd_req_t* req);
 static esp_err_t web_logout_handler(httpd_req_t* req);
 static esp_err_t favicon_handler(httpd_req_t* req);
@@ -1570,6 +1572,30 @@ bool api_server_start(void)
         }
     }
 
+    // Keep wrong-method requests from tearing down the TLS connection. See
+    // https_api_method_not_allowed_handler for why this is load-bearing
+    // (issue #234). Registered on both TLS servers; port 80 is left alone
+    // because a plaintext close costs no handshake and mandatory HTTPS keeps
+    // that port a deliberate dead end.
+    if (server_ssl != NULL) {
+        esp_err_t rerr = httpd_register_err_handler(
+            server_ssl, HTTPD_405_METHOD_NOT_ALLOWED,
+            https_api_method_not_allowed_handler);
+        if (rerr != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to register HTTPS 405 handler: %s",
+                     esp_err_to_name(rerr));
+        }
+    }
+    if (server_integration != NULL) {
+        esp_err_t rerr = httpd_register_err_handler(
+            server_integration, HTTPD_405_METHOD_NOT_ALLOWED,
+            https_api_method_not_allowed_handler);
+        if (rerr != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to register HA 405 handler: %s",
+                     esp_err_to_name(rerr));
+        }
+    }
+
     ESP_LOGI(TAG, "HTTP server started on port 80");
     if (server_ssl != NULL) {
         ESP_LOGI(TAG, "HTTPS server started on port 443");
@@ -1690,6 +1716,50 @@ static esp_err_t https_api_not_found_handler(httpd_req_t* req,
              http_method_str((enum http_method)req->method), req->uri);
 
     httpd_resp_set_status(req, "404 Not Found");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+// 405 handler for the TLS servers. This exists for connection lifetime, not
+// for the response body.
+//
+// With no handler registered for an error code, esp_http_server's default path
+// sends the response and then deliberately closes the connection --
+// components/esp_http_server/src/httpd_txrx.c: "If no handler is registered for
+// this error default behavior is to send the HTTP error response and return
+// failure for closure of underlying socket".
+//
+// On a TLS server that makes every wrong-method request cost a full session
+// handshake for the *next* request, and leaves a device-side TIME_WAIT PCB
+// behind (the device is the active closer). The API schema fuzz walks every
+// endpoint with every method, so this ran at roughly five handshakes per second
+// for minutes. Internal (non-PSRAM) RAM is the scarce resource here, and it
+// drained until mDNS could not allocate its 176-byte receive buffer. mDNS
+// receives on the lwIP tcpip thread, so that starvation stalled the thread
+// itself ("PCB walk TIMED OUT"), at which point the device stopped completing
+// TCP handshakes and unrelated suites failed with ConnectTimeout. That is
+// issue #234.
+//
+// Returning ESP_OK keeps the connection alive, exactly as the two 404 handlers
+// above already do -- 404s never had this problem precisely because they are
+// handled. This is not only a test concern: without it any unauthenticated
+// client can force unbounded TLS renegotiation using nothing but wrong-method
+// requests, which costs the attacker far less than it costs the device.
+static esp_err_t https_api_method_not_allowed_handler(httpd_req_t* req,
+                                                      httpd_err_code_t err)
+{
+    (void)err;
+
+    ESP_LOGW(TAG, "HTTPS 405: method %d not allowed for %s",
+             req->method, req->uri);
+
+    char body[256];
+    snprintf(body, sizeof(body),
+             "{\"error\":\"Method Not Allowed\",\"uri\":\"%.160s\"}",
+             req->uri);
+
+    httpd_resp_set_status(req, "405 Method Not Allowed");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
