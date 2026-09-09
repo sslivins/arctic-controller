@@ -60,5 +60,30 @@ SUB_SCREENS: Tuple[SubScreen, ...] = (
 
 SUB_SCREENS_BY_NAME = {s.name: s for s in SUB_SCREENS}
 
-#: Settings-menu rows that do not open a sub-screen.
-NON_SUB_SCREEN_ROWS = frozenset({"settings_close"})
+#: Settings-menu rows that carry a ``settings_*`` tag but do not open a
+#: sub-screen, so they are not part of the navigate-in/back-out contract above.
+#:
+#: These are listed explicitly rather than filtered by a naming convention
+#: because the point of the registry test is that a NEW row fails loudly. A
+#: pattern like "ignore anything ending in _mode" would silently swallow the
+#: next screen someone adds, which is the exact failure this module exists to
+#: prevent. Adding a row here should be a deliberate statement that it has no
+#: sub-screen -- checked against the firmware, not assumed from the name.
+NON_SUB_SCREEN_ROWS = frozenset(
+    {
+        # Closes the settings menu.
+        "settings_close",
+        # Toggle rows: the row holds a switch (``demo_mode_switch`` /
+        # ``temp_unit_switch``) and clicking it navigates nowhere. See
+        # create_toggle_row and the temperature-units block in
+        # main/settings/settings_menu.cpp.
+        "settings_demo_mode",
+        "settings_temp_unit",
+        # Opens a modal confirmation overlay, not a screen:
+        # show_factory_reset_confirmation() in settings_menu.cpp leaves
+        # state.sub_screen_active false and never sets active_sub_screen, so
+        # there is no screen for _return_to_main to back out of. The overlay's
+        # own dismiss path is exercised by the factory-reset tests.
+        "settings_factory_reset",
+    }
+)
