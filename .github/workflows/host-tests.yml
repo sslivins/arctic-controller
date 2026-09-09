@@ -114,3 +114,50 @@ jobs:
             exit 1
           fi
 
+  main-native-tests:
+    # Compiles host-testable sources from main/ against the stubs in
+    # main/tests/host_stubs/ and runs them. This is the only place firmware
+    # code under main/ is executed outside the single physical controller:
+    # everything else that claims to test main/ is either a source lint or a
+    # black-box HTTP call to the device.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Configure native test build
+        run: cmake -S main/tests -B build-main-tests
+
+      - name: Build native tests
+        run: cmake --build build-main-tests --parallel
+
+      - name: Run native tests
+        run: ctest --test-dir build-main-tests --output-on-failure
+
+      - name: Assert the suite actually executed tests
+        # ctest exits 0 when it runs zero tests, so without a floor an empty or
+        # mis-configured suite reports success. Raise this number as sources are
+        # added to MAIN_HOST_SRCS.
+        run: |
+          COUNT=$(ctest --test-dir build-main-tests -N | sed -n 's/^Total Tests: //p')
+          echo "ctest reports ${COUNT:-0} registered tests"
+          if [ -z "${COUNT}" ] || [ "${COUNT}" -lt 3 ]; then
+            echo "::error::Only ${COUNT:-0} main/ native tests were registered (expected at least 3). Tests were dropped, or the suite failed to configure."
+            exit 1
+          fi
+
+      - name: Assert the host build really compiled main/ sources
+        # The stubs make it easy for this job to degrade into "compiled the
+        # stubs and the test file, and nothing from main/ at all", which would
+        # still link and still pass. Check the object files exist.
+        run: |
+          for OBJ in i18n.cpp.o history_storage.cpp.o; do
+            if ! find build-main-tests -name "$OBJ" | grep -q .; then
+              echo "::error::$OBJ was not compiled by the host build — MAIN_HOST_SRCS has probably been emptied."
+              find build-main-tests -name '*.o' -print
+              exit 1
+            fi
+          done
+          echo "Host build compiled:"
+          find build-main-tests -name '*.o' -printf '  %f\n'
+
