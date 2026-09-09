@@ -10,6 +10,7 @@ import json
 import pytest
 from pathlib import Path
 from device_client import DeviceClient
+from screens import SUB_SCREENS_BY_NAME
 
 # Directory for failure screenshots
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
@@ -156,33 +157,15 @@ def _return_to_main(device: DeviceClient):
         return
 
     # If on a sub-screen, go back to settings first
-    if current in (
-        "display",
-        "wifi",
-        "firmware",
-        "time",
-        "language",
-        "home_assistant",
-        "security",
-        "web",
-    ):
-        if current == "wifi":
+    if current in SUB_SCREENS_BY_NAME:
+        entry = SUB_SCREENS_BY_NAME[current]
+        if entry.cleanup:
             try:
-                device.wifi_mock_reset()
-            except Exception:
-                pass
-        if current == "firmware":
-            try:
-                device.firmware_mock_reset()
-            except Exception:
-                pass
-        if current == "time":
-            try:
-                device.geocoding_mock_reset()
+                getattr(device, entry.cleanup)()
             except Exception:
                 pass
         try:
-            device.click(tag=f"{current}_back")
+            device.click(tag=entry.back_tag)
         except Exception:
             try:
                 device.click(symbol="LEFT")
