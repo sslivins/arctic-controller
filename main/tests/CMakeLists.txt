@@ -33,11 +33,16 @@ set(MAIN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # hollowed-out version of it.
 set(MAIN_HOST_SRCS
   ${MAIN_DIR}/i18n/i18n.cpp
+  ${MAIN_DIR}/history_storage.cpp
 )
 
 add_library(arctic_main_host STATIC
   ${MAIN_HOST_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/nvs_fake.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_partition_fake.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_crc.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/heap_fake.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_err.cpp
 )
 
 # host_stubs must come first so its esp_log.h/nvs.h shadow nothing real; there
@@ -59,3 +64,7 @@ add_test(NAME i18n COMMAND test_i18n)
 add_executable(test_nvs_fake test_nvs_fake.cpp)
 target_link_libraries(test_nvs_fake PRIVATE arctic_main_host)
 add_test(NAME nvs_fake COMMAND test_nvs_fake)
+
+add_executable(test_history_storage test_history_storage.cpp)
+target_link_libraries(test_history_storage PRIVATE arctic_main_host)
+add_test(NAME history_storage COMMAND test_history_storage)
