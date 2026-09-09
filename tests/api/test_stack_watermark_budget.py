@@ -47,6 +47,12 @@ ROOT = Path(__file__).resolve().parents[2]
 TESTS_DIR = ROOT / "tests"
 BUDGET_PATH = TESTS_DIR / "stack_watermark_budget.json"
 SNAPSHOT_PATH = TESTS_DIR / ".stack-watermarks.json"
+ESSENTIAL_PATH = TESTS_DIR / "essential_tasks.json"
+
+# A real device snapshot enumerates every FreeRTOS task. Far fewer than this
+# means the snapshot was truncated or the endpoint returned a stub, in which
+# case every headroom check below is vacuously satisfied.
+MIN_PLAUSIBLE_TASK_COUNT = 12
 
 # Every live task must keep strictly more than this many bytes of stack free.
 # This is an UNCONDITIONAL danger floor (applies to every task, even system/IDLE
@@ -98,6 +104,24 @@ def check(snapshot: dict, budget: dict) -> list:
     return regressions
 
 
+def essential_tasks(path: Path = ESSENTIAL_PATH) -> list:
+    """Tasks whose absence from a run is itself a failure (see the JSON comment)."""
+    return sorted(load_json(path).get("tasks", []))
+
+
+def missing_essential(snapshot: dict, essential=None) -> list:
+    """Return essential tasks absent from ``snapshot``.
+
+    This is the counterpart to :func:`check`. ``check`` can only judge tasks it
+    can see, so a task that crashed at startup or was never created presents as
+    infinite headroom and sails through. Watching headroom without also watching
+    liveness measures the wrong thing precisely when something has gone wrong.
+    """
+    if essential is None:
+        essential = essential_tasks()
+    return [task for task in essential if task not in snapshot]
+
+
 def _write_budget(snapshot: dict, path: Path = BUDGET_PATH) -> dict:
     """Persist ``{task: floor_bytes}`` = RATCHET_FRACTION of observed free."""
     budget = {
@@ -143,12 +167,51 @@ def test_unbudgeted_task_still_held_to_absolute_floor():
 
 
 def test_missing_budgeted_task_is_not_a_failure():
-    # A budgeted task absent from this run (transient / renamed) must not fail.
+    # check() deliberately ignores absent tasks; liveness is enforced separately
+    # by missing_essential() so that transient/renamed tasks cannot red a run
+    # while a genuinely dead task still does.
     assert check({"main": 2000}, {"main": 1000, "ota_task": 1500}) == []
 
 
-def test_empty_snapshot_never_fails():
+def test_empty_snapshot_never_fails_the_headroom_check():
+    # ...but it must fail the liveness check, which is the point of T15.
     assert check({}, {"main": 1000}) == []
+    assert missing_essential({}) == essential_tasks()
+
+
+def test_missing_essential_task_is_reported():
+    essential = ["main", "taskLVGL", "httpd"]
+    snapshot = {"main": 2000, "httpd": 5000}
+    assert missing_essential(snapshot, essential) == ["taskLVGL"]
+
+
+def test_all_essential_tasks_present_passes_liveness():
+    essential = ["main", "taskLVGL"]
+    assert missing_essential({"main": 2000, "taskLVGL": 6000, "extra": 900}, essential) == []
+
+
+def test_dead_task_would_otherwise_look_perfectly_healthy():
+    """The exact failure mode this closes: absence reads as infinite headroom."""
+    essential = ["main", "arctic_demo_syn"]
+    snapshot = {"main": 2000}  # arctic_demo_syn crashed on startup
+    assert check(snapshot, {"main": 1000, "arctic_demo_syn": 1557}) == []
+    assert missing_essential(snapshot, essential) == ["arctic_demo_syn"]
+
+
+def test_essential_task_list_is_populated_and_budgeted():
+    """Guards against a typo'd or renamed task silently dropping out of scope."""
+    essential = essential_tasks()
+    assert len(essential) >= 10, (
+        f"only {len(essential)} essential task(s) listed; the liveness check has "
+        "lost most of its coverage"
+    )
+    budget = load_json(BUDGET_PATH)
+    unknown = [task for task in essential if task not in budget]
+    assert not unknown, (
+        "essential task(s) do not appear in the committed stack budget, so they "
+        "have most likely been renamed or misspelled and would report as "
+        f"permanently dead:\n  " + "\n  ".join(unknown)
+    )
 
 
 def test_write_budget_applies_ratchet_fraction(tmp_path):
@@ -178,6 +241,36 @@ def test_recorded_stack_headroom_within_budget():
             "tests/stack_watermark_budget.json.")
     assert not regressions, (
         "Stack headroom regressions detected:\n" + "\n".join(regressions) + "\n\n" + hint
+    )
+
+
+@pytest.mark.skipif(not SNAPSHOT_PATH.exists(),
+                    reason="no device stack-watermark snapshot on disk (hostside/local run)")
+def test_recorded_snapshot_is_plausibly_complete():
+    """A truncated snapshot makes every other assertion in this module vacuous."""
+    snapshot = load_json(SNAPSHOT_PATH)
+    assert len(snapshot) >= MIN_PLAUSIBLE_TASK_COUNT, (
+        f"snapshot lists only {len(snapshot)} task(s) "
+        f"(expected >= {MIN_PLAUSIBLE_TASK_COUNT}): "
+        f"{sorted(snapshot)}\nThe stack-watermark endpoint probably returned a "
+        "partial or stub response, in which case the headroom and liveness "
+        "checks below prove nothing."
+    )
+
+
+@pytest.mark.skipif(not SNAPSHOT_PATH.exists(),
+                    reason="no device stack-watermark snapshot on disk (hostside/local run)")
+def test_essential_tasks_were_alive():
+    snapshot = load_json(SNAPSHOT_PATH)
+    missing = missing_essential(snapshot)
+    assert not missing, (
+        "Task(s) that must be running were absent from the device's task list:\n  "
+        + "\n  ".join(missing)
+        + "\n\nA task that crashed at startup or was never created reports no "
+        "stack usage at all, so the headroom budget passes it. If a task was "
+        "renamed or is legitimately conditional, update "
+        f"{ESSENTIAL_PATH.relative_to(ROOT).as_posix()} deliberately.\n"
+        f"Tasks seen this run: {sorted(snapshot)}"
     )
 
 

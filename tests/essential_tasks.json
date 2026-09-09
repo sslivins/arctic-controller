@@ -1,0 +1,20 @@
+{
+  "_comment": "Tasks that must be alive in every healthy device run. The stack-watermark budget can only judge tasks that appear in the snapshot, so a task that crashed or never launched would otherwise pass silently -- with maximal apparent headroom. Absence of any task listed here fails the run. Curated deliberately (NOT generated from a snapshot like stack_watermark_budget.json): only tasks whose absence is unambiguously a fault belong here. Tasks that exist conditionally -- ha_ws_push (needs a Home Assistant config), mdns, telemetry_histo, and transient workers such as history_query and ota_task -- are intentionally excluded so they cannot red an otherwise-healthy run.",
+  "tasks": [
+    "IDLE0",
+    "IDLE1",
+    "Tmr Svc",
+    "arctic_demo_syn",
+    "esp_timer",
+    "httpd",
+    "main",
+    "rpc_rx",
+    "rpc_tx",
+    "sdio_read",
+    "sdio_write",
+    "sys_evt",
+    "taskLVGL",
+    "tiT",
+    "wifi_super"
+  ]
+}

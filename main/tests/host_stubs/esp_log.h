@@ -1,0 +1,35 @@
+/*
+ * Host stub for ESP-IDF's esp_log.h.
+ *
+ * Logging is a side effect the unit tests do not assert on, so the macros
+ * expand to nothing rather than to printf: a chatty source file would
+ * otherwise bury the one line that matters (a CHECK failure) in noise.
+ *
+ * The arguments are still consumed by a discarded sizeof expression so that a
+ * malformed ESP_LOGx call -- wrong argument count, undeclared variable -- is
+ * still a compile error on the host, which is a large part of the value of
+ * compiling these files at all.
+ */
+#pragma once
+
+#include <stdio.h>
+
+typedef enum {
+    ESP_LOG_NONE,
+    ESP_LOG_ERROR,
+    ESP_LOG_WARN,
+    ESP_LOG_INFO,
+    ESP_LOG_DEBUG,
+    ESP_LOG_VERBOSE,
+} esp_log_level_t;
+
+#define ARCTIC_HOST_LOG_SINK(tag, fmt, ...) \
+    do { (void)sizeof(tag); (void)sizeof(printf(fmt, ##__VA_ARGS__)); } while (0)
+
+#define ESP_LOGE(tag, fmt, ...) ARCTIC_HOST_LOG_SINK(tag, fmt, ##__VA_ARGS__)
+#define ESP_LOGW(tag, fmt, ...) ARCTIC_HOST_LOG_SINK(tag, fmt, ##__VA_ARGS__)
+#define ESP_LOGI(tag, fmt, ...) ARCTIC_HOST_LOG_SINK(tag, fmt, ##__VA_ARGS__)
+#define ESP_LOGD(tag, fmt, ...) ARCTIC_HOST_LOG_SINK(tag, fmt, ##__VA_ARGS__)
+#define ESP_LOGV(tag, fmt, ...) ARCTIC_HOST_LOG_SINK(tag, fmt, ##__VA_ARGS__)
+
+#define esp_log_level_set(tag, level) ((void)0)
