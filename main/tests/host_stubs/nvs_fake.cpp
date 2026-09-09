@@ -392,6 +392,21 @@ bool peek_u8(const std::string &ns, const std::string &key, uint8_t *out) {
     return true;
 }
 
+bool peek_u32(const std::string &ns, const std::string &key, uint32_t *out) {
+    auto n = g_committed.find(ns);
+    if (n == g_committed.end()) {
+        return false;
+    }
+    auto e = n->second.find(key);
+    if (e == n->second.end() || e->second.kind != Entry::Kind::U32) {
+        return false;
+    }
+    if (out) {
+        *out = e->second.u32;
+    }
+    return true;
+}
+
 bool peek_blob(const std::string &ns, const std::string &key,
                std::vector<uint8_t> *out) {
     auto n = g_committed.find(ns);
@@ -427,6 +442,13 @@ void seed_u8(const std::string &ns, const std::string &key, uint8_t value) {
     Entry e;
     e.kind = Entry::Kind::U8;
     e.u8 = value;
+    g_committed[ns][key] = e;
+}
+
+void seed_u32(const std::string &ns, const std::string &key, uint32_t value) {
+    Entry e;
+    e.kind = Entry::Kind::U32;
+    e.u32 = value;
     g_committed[ns][key] = e;
 }
 

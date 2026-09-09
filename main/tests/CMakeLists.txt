@@ -38,6 +38,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/log_buffer.cpp
   ${MAIN_DIR}/event_log.cpp
   ${MAIN_DIR}/log_persist.cpp
+  ${MAIN_DIR}/boot_stats.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -103,3 +104,11 @@ add_test(NAME event_log COMMAND test_event_log)
 add_executable(test_log_persist test_log_persist.cpp)
 target_link_libraries(test_log_persist PRIVATE arctic_main_host)
 add_test(NAME log_persist COMMAND test_log_persist)
+
+# boot_stats decides whether a crashing device keeps crashing. Each scenario
+# forks because boot_stats_init() is single-shot per process -- one child is
+# one boot -- and a "previous boot" is modelled by seeding the two NVS
+# counters, which are the only state that crosses a reboot.
+add_executable(test_boot_stats test_boot_stats.cpp)
+target_link_libraries(test_boot_stats PRIVATE arctic_main_host)
+add_test(NAME boot_stats COMMAND test_boot_stats)

@@ -48,12 +48,14 @@ int call_count(Op op);
 // Direct inspection of committed state, bypassing handles. Returns false when
 // the key is absent.
 bool peek_u8(const std::string &ns, const std::string &key, uint8_t *out);
+bool peek_u32(const std::string &ns, const std::string &key, uint32_t *out);
 bool peek_str(const std::string &ns, const std::string &key, std::string *out);
 bool peek_blob(const std::string &ns, const std::string &key,
                std::vector<uint8_t> *out);
 
 // Seed committed state, as if a previous boot had written it.
 void seed_u8(const std::string &ns, const std::string &key, uint8_t value);
+void seed_u32(const std::string &ns, const std::string &key, uint32_t value);
 void seed_str(const std::string &ns, const std::string &key, const std::string &value);
 void seed_blob(const std::string &ns, const std::string &key,
                const std::vector<uint8_t> &value);
