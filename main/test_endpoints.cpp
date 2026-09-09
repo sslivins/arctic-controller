@@ -2529,7 +2529,16 @@ static esp_err_t stack_watermarks_get_handler(httpd_req_t* req)
     UBaseType_t got = uxTaskGetSystemState(status, capacity, nullptr);
 
     cJSON* resp = cJSON_CreateObject();
-    cJSON* tasks = cJSON_AddObjectToObject(resp, "tasks");
+    cJSON* tasks = resp ? cJSON_AddObjectToObject(resp, "tasks") : nullptr;
+    if (!tasks) {
+        heap_caps_free(status);
+        cJSON_Delete(resp);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":\"Out of memory\"}");
+        return ESP_OK;
+    }
+
+    bool truncated = false;
     for (UBaseType_t i = 0; i < got; i++) {
         const char* name = status[i].pcTaskName ? status[i].pcTaskName : "?";
         // usStackHighWaterMark is free bytes on ESP-IDF (StackType_t == uint8_t).
@@ -2542,13 +2551,34 @@ static esp_err_t stack_watermarks_get_handler(httpd_req_t* req)
             if (free_bytes < existing->valuedouble) {
                 cJSON_SetNumberValue(existing, free_bytes);
             }
-        } else {
-            cJSON_AddNumberToObject(tasks, name, free_bytes);
+        } else if (!cJSON_AddNumberToObject(tasks, name, free_bytes)) {
+            // Out of internal heap mid-build. Every entry after this point is
+            // missing, and the response would still be a valid 200 with a
+            // plausible-looking object -- so the essential-task check reads it
+            // as "task X is not running" and blames the wrong thing. That is
+            // precisely the situation this endpoint exists to diagnose (see
+            // #234), so it has to fail loudly instead.
+            truncated = true;
+            break;
         }
     }
     heap_caps_free(status);
 
+    if (truncated) {
+        cJSON_Delete(resp);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req,
+                           "{\"error\":\"Out of memory building task list\"}");
+        return ESP_OK;
+    }
+
     char* json = cJSON_PrintUnformatted(resp);
+    if (!json) {
+        cJSON_Delete(resp);
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":\"Out of memory\"}");
+        return ESP_OK;
+    }
     httpd_resp_sendstr(req, json);
     free(json);
     cJSON_Delete(resp);
