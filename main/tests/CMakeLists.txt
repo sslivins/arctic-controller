@@ -40,6 +40,8 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/log_persist.cpp
   ${MAIN_DIR}/boot_stats.cpp
   ${MAIN_DIR}/time_manager.cpp
+  ${MAIN_DIR}/iana_tz.cpp
+  ${MAIN_DIR}/location_manager.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -123,3 +125,11 @@ add_test(NAME boot_stats COMMAND test_boot_stats)
 add_executable(test_time_manager test_time_manager.cpp host_stubs/time_fake.cpp)
 target_link_libraries(test_time_manager PRIVATE arctic_main_host)
 add_test(NAME time_manager COMMAND test_time_manager)
+
+# The auto-timezone path: a curated 66-entry IANA -> POSIX table, plus the
+# policy deciding when to apply it. No time_fake here on purpose -- the table
+# is checked by resolving each POSIX rule at fixed instants through the C
+# library's own parser, so a doctored clock would only obscure things.
+add_executable(test_location test_location.cpp)
+target_link_libraries(test_location PRIVATE arctic_main_host)
+add_test(NAME location COMMAND test_location)
