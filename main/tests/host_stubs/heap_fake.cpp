@@ -9,11 +9,16 @@
 
 namespace {
 int g_fail_remaining = 0;
+int g_fail_skip = 0;
 int g_allocs = 0;
 int g_frees = 0;
 
 bool should_fail() {
     if (g_fail_remaining == 0) {
+        return false;
+    }
+    if (g_fail_skip > 0) {
+        --g_fail_skip;
         return false;
     }
     if (g_fail_remaining > 0) {
@@ -72,11 +77,16 @@ size_t heap_caps_get_minimum_free_size(uint32_t caps) {
 
 namespace heap_fake {
 
-void fail_next_alloc(int count) { g_fail_remaining = count; }
-void clear_failures() { g_fail_remaining = 0; }
+void fail_next_alloc(int count) { g_fail_remaining = count; g_fail_skip = 0; }
+void fail_nth_alloc(int nth) {
+    g_fail_remaining = 1;
+    g_fail_skip = nth > 0 ? nth - 1 : 0;
+}
+void clear_failures() { g_fail_remaining = 0; g_fail_skip = 0; }
 
 void reset() {
     g_fail_remaining = 0;
+    g_fail_skip = 0;
     g_allocs = 0;
     g_frees = 0;
 }

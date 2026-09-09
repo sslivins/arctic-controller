@@ -37,6 +37,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/auth_manager.cpp
   ${MAIN_DIR}/log_buffer.cpp
   ${MAIN_DIR}/event_log.cpp
+  ${MAIN_DIR}/log_persist.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -49,6 +50,8 @@ add_library(arctic_main_host STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/psa_crypto.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_random.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_log_hook.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/esp_rom_crc.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/task_fake.cpp
 )
 
 # host_stubs must come first so its esp_log.h/nvs.h shadow nothing real; there
@@ -93,3 +96,10 @@ add_test(NAME log_buffer COMMAND test_log_buffer)
 add_executable(test_event_log test_event_log.cpp host_stubs/time_fake.cpp)
 target_link_libraries(test_event_log PRIVATE arctic_main_host)
 add_test(NAME event_log COMMAND test_event_log)
+
+# log_persist forks a child per phase to model a reboot, and the flash fake's
+# arena is a MAP_SHARED mmap so the "flash" survives the fork. The power-loss
+# sweep runs one phase per cut point.
+add_executable(test_log_persist test_log_persist.cpp)
+target_link_libraries(test_log_persist PRIVATE arctic_main_host)
+add_test(NAME log_persist COMMAND test_log_persist)
