@@ -46,6 +46,21 @@ _session.mount("http://", HTTPAdapter(max_retries=_retry))
 _session.mount("https://", HTTPAdapter(max_retries=_retry))
 _session.verify = False
 
+
+@pytest.fixture(scope="module", autouse=True)
+def _release_keepalive_socket():
+    """Close the module Session once this file is done.
+
+    requests keeps the TLS connection alive after the last test, so an unclosed
+    module-level Session holds one of the device's sockets for the whole pytest
+    run. The HTTPS server allows max_open_sockets = 7 and each live connection
+    also pins a TCP PCB in internal RAM, which is scarce and fragments (#234).
+    Leaking one here made a later test's 8 KB OTA task allocation fail.
+    """
+    yield
+    _session.close()
+
+
 ENDPOINT = "/api/tls/certificate"
 
 # PEM-shaped and completely meaningless: the markers are right, the payload is

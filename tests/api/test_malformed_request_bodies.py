@@ -45,6 +45,17 @@ _session.mount("http://", HTTPAdapter(max_retries=_retry))
 _session.mount("https://", HTTPAdapter(max_retries=_retry))
 _session.verify = False
 
+
+@pytest.fixture(scope="module", autouse=True)
+def _release_keepalive_socket():
+    """Close the module Session once this file is done — see the note in
+    test_tls_certificate_validation.py. Kept here too so the pattern does not
+    regress if these tests are switched over to _session.
+    """
+    yield
+    _session.close()
+
+
 # A POST endpoint that changes nothing when the body is unusable.
 TARGET = "/api/auth/config"
 
