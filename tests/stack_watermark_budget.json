@@ -18,7 +18,7 @@
   "sdio_write": 2517,
   "sys_evt": 1238,
   "taskLVGL": 5582,
+  "tcpip": 1039,
   "telemetry_histo": 1648,
-  "tiT": 1039,
   "wifi_super": 2152
 }
