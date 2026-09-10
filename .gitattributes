@@ -1,5 +1,26 @@
+# Normalize every text file to LF in the repository. Git detects text vs binary
+# automatically; binary assets below are pinned explicitly so detection can
+# never guess wrong on them.
+#
+# Rationale: the repo was previously mixed (355 LF / 232 CRLF / 3 genuinely
+# mixed, including CMakeLists.txt and .github/workflows/device-tests.yml)
+# because contributors edit on Windows with core.autocrlf=false, which commits
+# whatever bytes the editor wrote. That produced whole-file diffs on one-line
+# changes and repeatedly obscured real review signal. With "text=auto" the
+# clean filter normalizes on commit, so Windows editors can keep writing CRLF
+# locally without it ever reaching the index.
+* text=auto
+
 # Shell scripts must always check out with LF endings. They run on the Linux
 # self-hosted CI runner; a stray CRLF makes bash choke on the trailing \r
 # ("$'\r': command not found"), which silently broke the crash-detection gate
 # (.github/scripts/scan_crashes.sh) and let real firmware crashes ship.
 *.sh text eol=lf
+
+# Binary assets: never apply EOL conversion or textual diffing.
+*.png binary
+*.jpg binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.bin binary
