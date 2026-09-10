@@ -3351,9 +3351,21 @@ static esp_err_t ota_update_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
     
-    if (!ota_mgr_start_update(url_json->valuestring)) {
+    ota_start_result_t start = ota_mgr_start_update_ex(url_json->valuestring);
+    if (start != OTA_START_OK) {
         cJSON_Delete(root);
-        send_json_error(req, "409 Conflict", "OTA update already in progress");
+        if (start == OTA_START_NO_RESOURCES) {
+            // Not a conflict: nothing is running. The device could not allocate
+            // the OTA task's stack. Reporting this as 409 told operators to wait
+            // for an update that did not exist (#256).
+            send_json_error(req, "503 Service Unavailable",
+                            "insufficient memory to start OTA - retry shortly");
+        } else if (start == OTA_START_INVALID_URL) {
+            send_json_error(req, "403 Forbidden",
+                            "URL not allowed - must be from official GitHub repository");
+        } else {
+            send_json_error(req, "409 Conflict", "OTA update already in progress");
+        }
         return ESP_OK;
     }
     
