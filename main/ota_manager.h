@@ -57,6 +57,29 @@ bool ota_mgr_init(void);
 bool ota_mgr_is_url_allowed(const char* url);
 
 /**
+ * @brief Why an OTA could not be started.
+ *
+ * Kept distinct because the two failures need different handling: BUSY is the
+ * caller's fault and retrying later works, NO_RESOURCES means the device could
+ * not allocate the OTA task's stack and is a device-health problem. Reporting
+ * both as "already in progress" sent operators chasing an update that was not
+ * running (#256).
+ */
+typedef enum {
+    OTA_START_OK = 0,
+    OTA_START_INVALID_URL,   // Empty, malformed, or non-allowlisted URL
+    OTA_START_BUSY,          // A genuine OTA (upload, download or verify) is running
+    OTA_START_NO_RESOURCES,  // The OTA task could not be created
+} ota_start_result_t;
+
+/**
+ * @brief Start OTA update from URL, reporting why it failed
+ * @param url URL to firmware binary (http or https)
+ * @return OTA_START_OK, or the reason the update did not start
+ */
+ota_start_result_t ota_mgr_start_update_ex(const char* url);
+
+/**
  * @brief Start OTA update from URL
  * @param url URL to firmware binary (http or https)
  * @return true if update started, false if already in progress or error

@@ -1076,6 +1076,17 @@ paths:
                 $ref: '#/components/schemas/Error'
               example:
                 error: OTA already in progress
+        '503':
+          description: |
+            The device could not allocate the OTA task and no update was
+            started. Distinct from 409: nothing is running, so the request is
+            worth retrying once internal RAM is less fragmented (#256).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: insufficient memory to start OTA - retry shortly
 
   /api/ota/upload:
     post:
