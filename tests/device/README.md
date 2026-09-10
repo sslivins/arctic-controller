@@ -157,7 +157,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_status_bar.py`](test_status_bar.py) | 6 | WiFi icon, notification badge, dropdown, firmware notification |
 | [`test_firmware.py`](test_firmware.py) | 5 | Version display, GitHub check, mock update states |
 | [`test_timezone.py`](test_timezone.py) | 5 | Timezone roller, time preview, preferences |
-| [`test_time_format.py`](test_time_format.py) | 5 | 12h/24h toggle, status bar display |
+| [`test_time_format.py`](test_time_format.py) | 6 | 12h/24h toggle, status bar display, history range label |
 | [`test_wifi.py`](test_wifi.py) | 4 | Password dialog, show/hide toggle, open network bypass |
 | [`test_demo_mode.py`](test_demo_mode.py) | 3 | Demo mode toggle, reboot confirmation panel, cancel revert |
 | [`test_settings_menu.py`](test_settings_menu.py) | 4 | Open/close settings, close button |
