@@ -156,6 +156,15 @@ jobs:
             echo "::error::Production releases must not include /api/test/* endpoints"
             exit 1
           fi
+          # Fault injection (#252 T-02) deliberately crashes the device before
+          # the OTA commit point. Shipping it would brick every device that
+          # installed the release. Defaulting the Kconfig option to n is not
+          # sufficient on its own: sdkconfig is committed, so an effective
+          # value can override sdkconfig.defaults.
+          if grep -q '^CONFIG_ARCTIC_POISON_FIRMWARE=y' sdkconfig sdkconfig.defaults; then
+            echo "::error::Production releases must never enable CONFIG_ARCTIC_POISON_FIRMWARE — that image crashes on purpose before committing itself."
+            exit 1
+          fi
 
       - name: ESP-IDF Production Build (no test endpoints)
         uses: espressif/esp-idf-ci-action@v1
@@ -163,6 +172,22 @@ jobs:
           esp_idf_version: v6.1
           target: esp32p4
           path: '.'
+
+      - name: Verify effective build config excludes test-only features
+        # The source-config grep above can be defeated by a stale or overriding
+        # committed sdkconfig. This reads what the compiler was actually handed,
+        # which is the only statement that binds the artifact being published.
+        run: |
+          set -euo pipefail
+          if grep -q '^#define CONFIG_TEST_ENDPOINTS 1$' build/config/sdkconfig.h; then
+            echo "::error::Built image has CONFIG_TEST_ENDPOINTS enabled despite the source config check passing."
+            exit 1
+          fi
+          if grep -q '^#define CONFIG_ARCTIC_POISON_FIRMWARE 1$' build/config/sdkconfig.h; then
+            echo "::error::Built image has CONFIG_ARCTIC_POISON_FIRMWARE enabled — this image crashes on purpose before committing itself and must never be released."
+            exit 1
+          fi
+          echo "OK: effective build config has neither test endpoints nor poison fault injection"
 
       - name: Record production firmware provenance
         env:

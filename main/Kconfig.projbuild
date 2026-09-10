@@ -25,6 +25,27 @@ menu "Arctic Controller"
             These endpoints are intended for automated testing only
             and should be disabled in production builds.
 
+    config ARCTIC_POISON_FIRMWARE
+        bool "Build a deliberately-crashing image for OTA rollback validation"
+        default n
+        help
+            Fault injection for the OTA rollback test (#252 T-02). When set,
+            app_main() aborts deliberately, before the firmware is committed,
+            to prove that an image which boots but dies before commit is rolled
+            back by the bootloader rather than stranding the device. That is the
+            failure a field device cannot recover from, having no serial console.
+
+            The crash is gated on the running image actually being the
+            unverified OTA copy (ESP_OTA_IMG_PENDING_VERIFY). This device has no
+            factory partition, so USB recovery writes the app plus a fresh
+            ota_data_initial and boots the slot as already-valid; a poison image
+            recovered that way reports non-pending, suppresses the abort and
+            comes up normally rather than crash-looping with no rollback target.
+
+            NEVER enable this for a release. It is built by a dedicated CI job
+            into a separate artifact, and create-release.yml refuses to publish
+            an image with it set.
+
     choice ARCTIC_BUS_MODE
         prompt "Arctic RS485 bus mode"
         default ARCTIC_TUYA_LISTEN
