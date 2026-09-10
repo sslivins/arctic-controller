@@ -243,6 +243,42 @@ jobs:
         env:
           CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
 
+      - name: Sync API key from device
+        # MUST run before the preflight: /api/ota/status is auth-gated, so an
+        # unauthenticated probe returns {"error":"API key required"} and the
+        # baseline guard cannot read build_sha. Uses the same login flow as
+        # device-tests.yml (POST /login for a session cookie, then
+        # GET /api/auth/apikey) — the device's own key may differ from the
+        # secret if it was provisioned separately.
+        run: |
+          set -uo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          DEVICE_KEY=""
+          for i in $(seq 1 12); do
+            JAR=$(mktemp)
+            curl -skf -c "$JAR" --connect-timeout 5 --max-time 10 \
+              -X POST "$ARCTIC_URL_HTTPS/login" \
+              -H "Content-Type: application/json" \
+              -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
+            RESP=$(curl -skf -b "$JAR" --connect-timeout 5 --max-time 10 \
+              "$ARCTIC_URL_HTTPS/api/auth/apikey" 2>/dev/null) || true
+            rm -f "$JAR"
+            DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+            if [ -n "$DEVICE_KEY" ]; then break; fi
+            sleep 2
+          done
+
+          if [ -z "$DEVICE_KEY" ]; then
+            echo "::error::Could not read the device API key; the baseline probe and poison upload would both be rejected."
+            exit 1
+          fi
+          echo "::add-mask::$DEVICE_KEY"
+          echo "ARCTIC_API_KEY=$DEVICE_KEY" >> "$GITHUB_ENV"
+          echo "Device API key acquired."
+        env:
+          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
+          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
+
       - name: Preflight — record the known-good baseline
         # Everything downstream is asserted against this. If the device is not
         # already healthy and committed, the test cannot distinguish a rollback
@@ -252,7 +288,7 @@ jobs:
         run: |
           set -euo pipefail
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          RESP=$(curl -sk --connect-timeout 5 "$ARCTIC_URL_HTTPS/api/ota/status")
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
           echo "Baseline /api/ota/status: $RESP"
 
           BASE_SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))")
@@ -277,18 +313,6 @@ jobs:
           echo "BASELINE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
           echo "BASELINE_PARTITION=$BASE_PART" >> "$GITHUB_ENV"
           echo "Baseline: sha=$BASE_SHA partition=$BASE_PART committed"
-
-      - name: Sync API key from device
-        run: |
-          set -euo pipefail
-          KEY=$(curl -sk --connect-timeout 5 "${ARCTIC_URL/http:/https:}/api/test/api-key" |
-                python3 -c "import sys,json;print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || KEY=""
-          if [ -z "$KEY" ]; then
-            echo "::error::Could not read the device API key; the poison upload would be rejected."
-            exit 1
-          fi
-          echo "::add-mask::$KEY"
-          echo "ARCTIC_API_KEY=$KEY" >> "$GITHUB_ENV"
 
       - name: Start serial capture
         run: |
@@ -322,7 +346,7 @@ jobs:
           # boot cycles, so allow generously.
           echo "Waiting for the device to return on its previous image..."
           for i in $(seq 1 120); do
-            RESP=$(curl -sk --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
             if [ -n "$RESP" ]; then
               SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || SHA=""
               if [ -n "$SHA" ] && [ "$SHA" = "$BASELINE_SHA" ]; then
@@ -346,7 +370,7 @@ jobs:
         run: |
           set -euo pipefail
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          RESP=$(curl -sk --connect-timeout 5 "$ARCTIC_URL_HTTPS/api/ota/status")
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
           echo "Post-rollback /api/ota/status: $RESP"
           python3 - "$RESP" <<'PY'
           import json, os, sys
@@ -433,7 +457,14 @@ jobs:
         run: |
           set -uo pipefail
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          RESP=$(curl -sk --connect-timeout 5 "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+          # /api/ota/status is auth-gated. Probing it without a key returns
+          # {"error":"API key required"}, which parses to an empty build_sha and
+          # would misreport a perfectly healthy controller as unrecoverable —
+          # triggering a needless full USB reflash on every run and then
+          # declaring the rig DOWN. Fall back to the secret when the sync step
+          # never ran (this step is `if: always()`).
+          PROBE_KEY="${ARCTIC_API_KEY:-$RECOVERY_API_KEY}"
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${PROBE_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
           SHA=""
           if [ -n "$RESP" ]; then
             SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || SHA=""
@@ -488,8 +519,11 @@ jobs:
           # Restoration is not "the flash command exited 0" — verify the device
           # actually comes back, on a non-poison image, and is committed.
           echo "Waiting for the recovered controller..."
+          # After the reflash above, NVS has been regenerated with
+          # RECOVERY_API_KEY, so that — not any previously-synced device key —
+          # is the credential the device now expects.
           for i in $(seq 1 90); do
-            R=$(curl -sk --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || R=""
+            R=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${RECOVERY_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || R=""
             if [ -n "$R" ]; then
               S=$(echo "$R" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || S=""
               case "$S" in
