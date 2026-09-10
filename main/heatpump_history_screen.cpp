@@ -257,7 +257,18 @@ static void chart_draw_cb(lv_event_t* event) {
         struct tm local = {};
         localtime_r(&tick_time, &local);
         char label[12];
-        strftime(label, sizeof(label), "%H:%M", &local);
+        if (time_mgr_get_24h_format()) {
+            strftime(label, sizeof(label), "%H:%M", &local);
+        } else {
+            // Ticks are snapped to whole hours above, so the minutes carry no
+            // information in 12-hour form -- "8 AM" rather than "08:00 AM".
+            // That also keeps the label narrower than the 24-hour "08:00", so
+            // adding the suffix cannot make axis labels collide.
+            int hour12 = local.tm_hour % 12;
+            if (hour12 == 0) hour12 = 12;
+            snprintf(label, sizeof(label), "%d %s", hour12,
+                     local.tm_hour < 12 ? "AM" : "PM");
+        }
         lv_area_t label_area = {x - 40, plot.y2 + 10, x + 40, coords.y2};
         draw_label(layer, label_area, label, UI_COLOR_TEXT_DIM,
                    LV_TEXT_ALIGN_CENTER);
@@ -323,8 +334,12 @@ static void update_range_label() {
     localtime_r(&end, &end_tm);
     char start_text[32];
     char end_text[32];
-    strftime(start_text, sizeof(start_text), "%b %d, %H:%M", &start_tm);
-    strftime(end_text, sizeof(end_text), "%b %d, %H:%M", &end_tm);
+    // The window edges are ragged (the range ends at "now"), so unlike the axis
+    // ticks the minutes are meaningful here and the full form is used.
+    const char* fmt =
+        time_mgr_get_24h_format() ? "%b %d, %H:%M" : "%b %d, %I:%M %p";
+    strftime(start_text, sizeof(start_text), fmt, &start_tm);
+    strftime(end_text, sizeof(end_text), fmt, &end_tm);
     char range[80];
     snprintf(range, sizeof(range), "%s - %s", start_text, end_text);
     lv_label_set_text(state.range_label, range);
@@ -543,6 +558,8 @@ void heatpump_history_show(lv_obj_t* parent,
     lv_obj_set_style_text_color(state.range_label, UI_COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_set_style_text_align(state.range_label, LV_TEXT_ALIGN_CENTER,
                                 LV_PART_MAIN);
+    lv_obj_set_user_data(state.range_label,
+                         (void*)"temperature_history_range");
 
     lv_obj_t* legend = lv_obj_create(state.overlay);
     lv_obj_remove_style_all(legend);
