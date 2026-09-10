@@ -246,21 +246,34 @@ jobs:
       - name: Sync API key from device
         # MUST run before the preflight: /api/ota/status is auth-gated, so an
         # unauthenticated probe returns {"error":"API key required"} and the
-        # baseline guard cannot read build_sha. Uses the same login flow as
-        # device-tests.yml (POST /login for a session cookie, then
-        # GET /api/auth/apikey) — the device's own key may differ from the
-        # secret if it was provisioned separately.
+        # baseline guard cannot read build_sha.
+        #
+        # The device's credentials are NOT the ARCTIC_USERNAME/ARCTIC_PASSWORD
+        # secrets: device-tests.yml provisions isolated per-run credentials, so
+        # whatever ran last left its own. Mirror the proven "Sync API key from
+        # device (pre-OTA)" step in device-tests.yml and first reset them to
+        # known values through the unauthenticated, test-only endpoint
+        # /api/test/credentials (CONFIG_TEST_ENDPOINTS), then log in.
         run: |
           set -uo pipefail
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          TEST_USERNAME="arctic"
+          TEST_PASSWORD="ArcticTest!2026"
+          BODY="{\"username\": \"$TEST_USERNAME\", \"password\": \"$TEST_PASSWORD\"}"
           DEVICE_KEY=""
+
           for i in $(seq 1 12); do
+            curl -sk --connect-timeout 3 --max-time 8 \
+              -X POST "$ARCTIC_URL_HTTPS/api/test/credentials" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" > /dev/null 2>&1 || true
+
             JAR=$(mktemp)
-            curl -skf -c "$JAR" --connect-timeout 5 --max-time 10 \
+            curl -sk -c "$JAR" --connect-timeout 3 --max-time 8 \
               -X POST "$ARCTIC_URL_HTTPS/login" \
               -H "Content-Type: application/json" \
-              -d "{\"username\": \"$ARCTIC_USERNAME\", \"password\": \"$ARCTIC_PASSWORD\"}" > /dev/null 2>&1 || true
-            RESP=$(curl -skf -b "$JAR" --connect-timeout 5 --max-time 10 \
+              -d "$BODY" > /dev/null 2>&1 || true
+            RESP=$(curl -sk -b "$JAR" --connect-timeout 3 --max-time 8 \
               "$ARCTIC_URL_HTTPS/api/auth/apikey" 2>/dev/null) || true
             rm -f "$JAR"
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
@@ -275,9 +288,6 @@ jobs:
           echo "::add-mask::$DEVICE_KEY"
           echo "ARCTIC_API_KEY=$DEVICE_KEY" >> "$GITHUB_ENV"
           echo "Device API key acquired."
-        env:
-          ARCTIC_USERNAME: ${{ secrets.ARCTIC_USERNAME }}
-          ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
 
       - name: Preflight — record the known-good baseline
         # Everything downstream is asserted against this. If the device is not
