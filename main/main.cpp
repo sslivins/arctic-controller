@@ -21,6 +21,12 @@
 #include "status_bar.h"
 #include "weather.h"
 #include "ota_manager.h"
+#if CONFIG_ARCTIC_POISON_FIRMWARE
+#include "esp_ota_ops.h"
+#include "esp_rom_sys.h"
+#include <stdlib.h>
+#include <stdio.h>
+#endif
 #include "settings/settings_menu.h"
 #include "settings/settings_wifi_screen.h"
 #include "settings/settings_firmware_screen.h"
@@ -375,6 +381,47 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "*** First boot after OTA — firmware pending verification ***");
         ESP_LOGW(TAG, "*** Will mark valid after UI creation succeeds ***");
     }
+
+#if CONFIG_ARCTIC_POISON_FIRMWARE
+    // Deliberate fault injection, built only by the OTA rollback-validation job
+    // (#252 T-02) and never by a release. Proves that an image which boots but
+    // dies before commit is rolled back rather than bricking the device — the
+    // failure mode a field device cannot recover from, having no serial console.
+    //
+    // Crashing is gated on this image actually being the unverified OTA copy.
+    // That guard is what keeps the rig recoverable: there is no factory
+    // partition on this device (only ota_0/ota_1), so USB recovery works by
+    // writing the app plus a fresh ota_data_initial, which boots the slot as
+    // already-valid. A poison image recovered that way therefore reports
+    // non-pending, suppresses the abort and comes up normally, instead of
+    // crash-looping with no rollback target.
+    //
+    // The state is read directly rather than via ota_mgr_is_pending_verify(),
+    // which folds "query failed" into "not pending". For a safety guard that
+    // fail-open behaviour is right, but the test must be able to tell a
+    // suppressed poison from a confirmed one, so all three outcomes are
+    // reported distinctly and CI accepts only POISON_ABORT_NOW.
+    {
+        const esp_partition_t* running = esp_ota_get_running_partition();
+        esp_ota_img_states_t st = ESP_OTA_IMG_UNDEFINED;
+        esp_err_t err = running ? esp_ota_get_state_partition(running, &st)
+                                : ESP_ERR_NOT_FOUND;
+        ESP_LOGW(TAG, "POISON_BUILD_ACTIVE partition=%s state=%d err=%d",
+                 running ? running->label : "<none>", (int)st, (int)err);
+        if (err == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
+            // Paired with POISON_BUILD_ACTIVE above, this marker bounds the one
+            // panic CI is allowed to see. Flush before aborting: the panic
+            // handler reboots immediately and an unflushed marker would make a
+            // real crash indistinguishable from the intended one.
+            ESP_LOGE(TAG, "POISON_ABORT_NOW deliberate pre-commit crash for rollback validation");
+            fflush(stdout);
+            esp_rom_delay_us(200000);
+            abort();
+        }
+        ESP_LOGW(TAG, "POISON_SUPPRESSED reason=%s",
+                 (err != ESP_OK) ? "ota_state_query_failed" : "not_pending_verify");
+    }
+#endif
 
     // Start WiFi initialization in background task (runs parallel to animation)
     // Internal stack: wifi_init_task writes NVS.

@@ -1,0 +1,511 @@
+name: OTA Rollback Validation
+
+# Proves the single most dangerous OTA property (#252, F-04 / T-02): an image
+# that boots but dies BEFORE committing itself is rolled back by the bootloader,
+# leaving the device reachable on its previous firmware. A field controller has
+# no serial console, so if that property does not hold, a bad release strands
+# every device that installs it and there is no route back.
+#
+# This deliberately lives OUTSIDE device-tests.yml rather than being appended to
+# it, for three reasons:
+#
+#   1. device-tests.yml has a hard crash gate that fails the job on
+#      "abort() was called". This test's whole purpose is to produce exactly
+#      that signature. Teaching the shared gate to ignore an abort — even a
+#      narrowly bounded one — weakens the guard that caught the #234 regression
+#      on a suite where real panics must never be tolerated.
+#   2. device-tests.yml holds a long-running serial capture on the controller
+#      port for the duration of the run. Recovering the device here needs
+#      esptool, and the port has a single owner.
+#   3. It is destructive and slow. Running it on every PR would double physical
+#      device time on the repository's only controller for a property that
+#      changes rarely.
+#
+# `ghr-mi` is the only [self-hosted, vm-mi] runner and executes one job at a
+# time, so this can never overlap a device-tests run regardless of scheduling.
+
+on:
+  schedule:
+    # 03:00 UTC — clear of the 06:00 nightly device-tests run.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ota-rollback-validation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-good:
+    name: Build known-good recovery firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+
+      - name: Fetch dependencies
+        run: python3 fetch_repos.py
+
+      - name: Stamp build fingerprint
+        run: |
+          echo -n "${GITHUB_SHA}" > build_sha.txt
+          echo "Baked build_sha=${GITHUB_SHA}"
+
+      - name: Enable test endpoints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("sdkconfig")
+          disabled = "# CONFIG_TEST_ENDPOINTS is not set"
+          config = path.read_text(encoding="utf-8")
+          if disabled not in config:
+              raise SystemExit("CONFIG_TEST_ENDPOINTS is not disabled in sdkconfig")
+          path.write_text(config.replace(disabled, "CONFIG_TEST_ENDPOINTS=y", 1), encoding="utf-8")
+          PY
+          grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
+
+      - name: ESP-IDF Build (recovery firmware)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32p4
+          path: '.'
+
+      - name: Verify the recovery image is NOT poisoned
+        # This image is the rig's way back. If the poison macro leaked into it,
+        # recovery would flash a second crashing image and the controller would
+        # be left worse off than before. Built in a separate job with its own
+        # clean checkout precisely so no poison configuration can carry over.
+        run: |
+          set -euo pipefail
+          if grep -q '^#define CONFIG_ARCTIC_POISON_FIRMWARE 1$' build/config/sdkconfig.h; then
+            echo "::error::The recovery image has poison fault injection compiled in. Refusing to publish an artifact that would crash the controller it is meant to rescue."
+            exit 1
+          fi
+          echo "OK: recovery image is clean"
+
+      - name: Stage build fingerprint
+        run: sudo cp build_sha.txt build/build_sha.txt
+
+      - name: Upload recovery firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: recovery-firmware
+          path: |
+            build/arctic_controller.bin
+            build/build_sha.txt
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+          retention-days: 3
+
+  build-poison:
+    name: Build poison firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+
+      - name: Fetch dependencies
+        run: python3 fetch_repos.py
+
+      - name: Stamp a DISTINCT build fingerprint
+        # The poison image must be externally distinguishable from the good one.
+        # Both builds come from the same commit, so if both reported the same
+        # build_sha the final assertion ("the original SHA is back") would also
+        # hold when the poison image never crashed, when rollback was disabled,
+        # or when the OTA never took — i.e. the test could pass having proved
+        # nothing. The -poison suffix makes each phase separately observable.
+        run: |
+          echo -n "${GITHUB_SHA}-poison" > build_sha.txt
+          echo "Baked build_sha=${GITHUB_SHA}-poison"
+
+      - name: Enable test endpoints and poison fault injection
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("sdkconfig")
+          config = path.read_text(encoding="utf-8")
+
+          disabled = "# CONFIG_TEST_ENDPOINTS is not set"
+          if disabled not in config:
+              raise SystemExit("CONFIG_TEST_ENDPOINTS is not disabled in sdkconfig")
+          config = config.replace(disabled, "CONFIG_TEST_ENDPOINTS=y", 1)
+
+          poison_off = "# CONFIG_ARCTIC_POISON_FIRMWARE is not set"
+          if poison_off not in config:
+              raise SystemExit(
+                  "CONFIG_ARCTIC_POISON_FIRMWARE is not disabled in the committed "
+                  "sdkconfig. It must default to off so no other build can inherit it."
+              )
+          config = config.replace(poison_off, "CONFIG_ARCTIC_POISON_FIRMWARE=y", 1)
+
+          path.write_text(config, encoding="utf-8")
+          PY
+          grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
+          grep -q '^CONFIG_ARCTIC_POISON_FIRMWARE=y$' sdkconfig
+
+      - name: ESP-IDF Build (poison firmware)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32p4
+          path: '.'
+
+      - name: Verify the poison image is actually poisoned
+        # A silently-unpoisoned image would boot fine, commit itself, and the
+        # test would report a rollback that never happened. Assert the EFFECTIVE
+        # config, not the source config: a stale build directory can carry a
+        # previous value forward without reconfiguring.
+        run: |
+          set -euo pipefail
+          if ! grep -q '^#define CONFIG_ARCTIC_POISON_FIRMWARE 1$' build/config/sdkconfig.h; then
+            echo "::error::Poison build does not have CONFIG_ARCTIC_POISON_FIRMWARE compiled in — it would boot normally and the rollback test would pass without testing anything."
+            exit 1
+          fi
+          if ! grep -q '^#define CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE is OFF in the poison build — the device would crash-loop instead of rolling back."
+            exit 1
+          fi
+          # The panic handler must REBOOT. A halt or GDB-stub panic mode would
+          # leave the controller stopped at the fault with no reboot, and
+          # therefore no rollback — wedging the rig until someone intervenes.
+          if grep -q '^#define CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT 1$' build/config/sdkconfig.h ||
+             grep -q '^#define CONFIG_ESP_SYSTEM_PANIC_GDBSTUB 1$' build/config/sdkconfig.h; then
+            echo "::error::Panic mode does not reboot (HALT or GDBSTUB). The poison image would stop at the fault instead of rebooting into a rollback."
+            exit 1
+          fi
+          echo "OK: poison compiled in, rollback enabled, panic mode reboots"
+
+      - name: Stage build fingerprint
+        run: sudo cp build_sha.txt build/build_sha.txt
+
+      - name: Upload poison firmware
+        uses: actions/upload-artifact@v7
+        with:
+          # Unmistakable name. Never published to a release; create-release.yml
+          # builds its own artifact and refuses any image with the poison macro.
+          name: poison-firmware-DO-NOT-RELEASE
+          path: |
+            build/arctic_controller.bin
+            build/build_sha.txt
+          retention-days: 3
+
+  rollback-test:
+    name: Validate rollback on the device
+    needs: [build-good, build-poison]
+    runs-on: [self-hosted, vm-mi]
+    timeout-minutes: 45
+    env:
+      ARCTIC_URL: http://arctic-controller-ghr.mi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download poison firmware
+        uses: actions/download-artifact@v8
+        with:
+          name: poison-firmware-DO-NOT-RELEASE
+          path: poison/
+
+      - name: Download recovery firmware
+        uses: actions/download-artifact@v8
+        with:
+          name: recovery-firmware
+          path: recovery/
+
+      - name: Set up Python environment
+        run: |
+          python3 -m venv $HOME/test-venv
+          . $HOME/test-venv/bin/activate
+          echo "$HOME/test-venv/bin" >> $GITHUB_PATH
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Detect controller serial port
+        run: |
+          for dev in /dev/ttyACM*; do
+            [ -e "$dev" ] || continue
+            SERIAL=$(udevadm info -q property -n "$dev" | sed -n 's/^ID_SERIAL_SHORT=//p')
+            if [ "$SERIAL" = "$CONTROLLER_USB_SERIAL" ]; then
+              echo "CONTROLLER_PORT=$dev" >> "$GITHUB_ENV"
+              echo "Controller ($SERIAL) is $dev"
+            fi
+          done
+        env:
+          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
+
+      - name: Preflight — record the known-good baseline
+        # Everything downstream is asserted against this. If the device is not
+        # already healthy and committed, the test cannot distinguish a rollback
+        # from the mess it started in, so refuse to run rather than produce a
+        # meaningless result. In particular a device still in PENDING_VERIFY
+        # would have its next OTA rejected with ESP_ERR_OTA_ROLLBACK_INVALID_STATE.
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          RESP=$(curl -sk --connect-timeout 5 "$ARCTIC_URL_HTTPS/api/ota/status")
+          echo "Baseline /api/ota/status: $RESP"
+
+          BASE_SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))")
+          BASE_PART=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('running_partition',''))")
+          PENDING=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('pending_verify'))")
+
+          if [ -z "$BASE_SHA" ] || [ -z "$BASE_PART" ]; then
+            echo "::error::Device did not report build_sha/running_partition. Firmware predates the OTA install assertions; cannot validate rollback."
+            exit 1
+          fi
+          case "$BASE_SHA" in
+            *-poison)
+              echo "::error::Device is ALREADY running a poison image ($BASE_SHA). A previous run left it unrecovered — refusing to continue."
+              exit 1
+              ;;
+          esac
+          if [ "$PENDING" != "False" ]; then
+            echo "::error::Device is still PENDING_VERIFY. There is no committed image to roll back to, and the next OTA would be rejected."
+            exit 1
+          fi
+
+          echo "BASELINE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
+          echo "BASELINE_PARTITION=$BASE_PART" >> "$GITHUB_ENV"
+          echo "Baseline: sha=$BASE_SHA partition=$BASE_PART committed"
+
+      - name: Sync API key from device
+        run: |
+          set -euo pipefail
+          KEY=$(curl -sk --connect-timeout 5 "${ARCTIC_URL/http:/https:}/api/test/api-key" |
+                python3 -c "import sys,json;print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || KEY=""
+          if [ -z "$KEY" ]; then
+            echo "::error::Could not read the device API key; the poison upload would be rejected."
+            exit 1
+          fi
+          echo "::add-mask::$KEY"
+          echo "ARCTIC_API_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Start serial capture
+        run: |
+          nohup python .github/scripts/capture_serial.py \
+            --usb-serial "$CONTROLLER_USB_SERIAL" \
+            --output rollback-serial.log > capture.out 2>&1 &
+          echo "SERIAL_CAPTURE_PID=$!" >> "$GITHUB_ENV"
+          sleep 3
+        env:
+          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
+
+      - name: Upload the poison image and wait for rollback
+        id: rollback
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+
+          echo "Uploading poison image (device will crash on purpose and roll back)..."
+          CODE=$(curl -sk -o /tmp/upload.txt -w '%{http_code}' \
+            -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
+            --data-binary "@poison/arctic_controller.bin" \
+            "$ARCTIC_URL_HTTPS/api/ota/upload") || true
+          echo "Upload: HTTP $CODE — $(cat /tmp/upload.txt)"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::Poison upload was rejected (HTTP $CODE); rollback was never exercised."
+            exit 1
+          fi
+
+          # The device now reboots into the poison image, panics before commit,
+          # reboots again, and the bootloader selects the previous slot. Two
+          # boot cycles, so allow generously.
+          echo "Waiting for the device to return on its previous image..."
+          for i in $(seq 1 120); do
+            RESP=$(curl -sk --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            if [ -n "$RESP" ]; then
+              SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || SHA=""
+              if [ -n "$SHA" ] && [ "$SHA" = "$BASELINE_SHA" ]; then
+                echo "Device returned on the baseline image after ${i}s"
+                echo "final=$RESP" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              case "$SHA" in
+                *-poison)
+                  echo "::error::Device is serving the API from the POISON image ($SHA). It did not crash before committing, so rollback never triggered. A release with this defect would be unrecoverable in the field."
+                  exit 1
+                  ;;
+              esac
+            fi
+            sleep 2
+          done
+          echo "::error::Device did not return on its previous image within 240s. Rollback did not occur — this is the brick scenario."
+          exit 1
+
+      - name: Assert the rollback is complete and durable
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          RESP=$(curl -sk --connect-timeout 5 "$ARCTIC_URL_HTTPS/api/ota/status")
+          echo "Post-rollback /api/ota/status: $RESP"
+          python3 - "$RESP" <<'PY'
+          import json, os, sys
+          d = json.loads(sys.argv[1])
+          base_sha = os.environ["BASELINE_SHA"]
+          base_part = os.environ["BASELINE_PARTITION"]
+          errs = []
+          if d.get("build_sha") != base_sha:
+              errs.append(f"build_sha is {d.get('build_sha')!r}, expected the baseline {base_sha!r}")
+          if d.get("running_partition") != base_part:
+              errs.append(f"running_partition is {d.get('running_partition')!r}, expected {base_part!r}")
+          if d.get("pending_verify") is not False:
+              errs.append("device is PENDING_VERIFY after rollback; it should be running its committed image")
+          if d.get("state") != "idle":
+              errs.append(f"OTA state is {d.get('state')!r}, expected 'idle'")
+          if errs:
+              print("::error::Rollback did not land cleanly: " + "; ".join(errs))
+              sys.exit(1)
+          print(f"OK: back on {base_sha} in {base_part}, committed and idle")
+          PY
+
+      - name: Stop serial capture
+        # Must happen before esptool: the controller port has a single owner and
+        # a live capture would make any recovery flash fail.
+        if: always()
+        run: |
+          if [ -n "${SERIAL_CAPTURE_PID:-}" ]; then
+            kill "$SERIAL_CAPTURE_PID" 2>/dev/null || true
+            for _ in $(seq 1 10); do
+              kill -0 "$SERIAL_CAPTURE_PID" 2>/dev/null || break
+              sleep 1
+            done
+            kill -9 "$SERIAL_CAPTURE_PID" 2>/dev/null || true
+          fi
+          echo "Serial capture stopped"
+
+      - name: Assert the poison image actually ran and crashed once
+        # Without this the API assertions alone cannot distinguish a real
+        # rollback from an OTA that silently never took: in both cases the
+        # baseline SHA is what answers at the end. The serial log is the only
+        # place the poison image's own execution is visible, because it dies
+        # long before the network comes up.
+        if: always() && steps.rollback.outcome != 'skipped'
+        run: |
+          set -euo pipefail
+          if [ ! -f rollback-serial.log ]; then
+            echo "::error::No serial log captured; cannot prove the poison image executed."
+            exit 1
+          fi
+          ACTIVE=$(grep -c 'POISON_BUILD_ACTIVE' rollback-serial.log || true)
+          ABORTS=$(grep -c 'POISON_ABORT_NOW' rollback-serial.log || true)
+          SUPPRESSED=$(grep -c 'POISON_SUPPRESSED' rollback-serial.log || true)
+          echo "POISON_BUILD_ACTIVE=$ACTIVE POISON_ABORT_NOW=$ABORTS POISON_SUPPRESSED=$SUPPRESSED"
+          grep -E 'POISON_(BUILD_ACTIVE|ABORT_NOW|SUPPRESSED)' rollback-serial.log || true
+
+          if [ "$ABORTS" -lt 1 ]; then
+            echo "::error::The poison image never reached its deliberate abort. Either it was not really poisoned, or it never booted — so nothing was rolled back and the baseline SHA at the end proves nothing."
+            exit 1
+          fi
+          if [ "$ABORTS" -gt 1 ]; then
+            echo "::error::The poison image aborted $ABORTS times. Rollback should have occurred after the first crash; repeated aborts mean the device was re-entering the poison image."
+            exit 1
+          fi
+          if [ "$SUPPRESSED" -gt 0 ]; then
+            echo "::error::The poison guard suppressed the crash (image reported non-pending, or the OTA state query failed). The rollback path was not exercised."
+            exit 1
+          fi
+          echo "OK: exactly one deliberate pre-commit crash, and the device recovered from it"
+
+      - name: Upload serial log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ota-rollback-serial-log
+          path: rollback-serial.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Recover the controller if it is not healthy
+        # Last line of defence. `if: always()` cannot cover runner death, job
+        # cancellation or a USB drop, so the preflight above also refuses to
+        # start when it finds a device left on a poison image.
+        if: always()
+        run: |
+          set -uo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          RESP=$(curl -sk --connect-timeout 5 "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+          SHA=""
+          if [ -n "$RESP" ]; then
+            SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || SHA=""
+          fi
+
+          HEALTHY=0
+          case "$SHA" in
+            ""|*-poison) HEALTHY=0 ;;
+            *)           HEALTHY=1 ;;
+          esac
+
+          if [ "$HEALTHY" = "1" ]; then
+            echo "Controller is healthy on $SHA — no recovery needed."
+            exit 0
+          fi
+
+          echo "::warning::Controller is not healthy (build_sha='${SHA:-<unreachable>}'). Attempting USB recovery."
+          if [ -z "${CONTROLLER_PORT:-}" ]; then
+            echo "::error::Controller is unhealthy and no serial port was detected. The rig needs manual attention."
+            exit 1
+          fi
+
+          # A FULL recovery transaction, not an app-only write. There is no
+          # factory partition on this device, so the safe state comes from
+          # rewriting otadata (which makes the bootloader select ota_0 and treat
+          # it as valid) rather than from any fallback slot. An app-only flash
+          # would inherit whatever OTA state was already recorded for that slot,
+          # which after this test may be exactly the state we are escaping.
+          echo "Generating NVS with WiFi credentials and API key..."
+          cat > /tmp/nvs_wifi.csv << 'CSVHEADER'
+          key,type,encoding,value
+          wifi_creds,namespace,,
+          ssid,data,string,${WIFI_SSID}
+          password,data,string,${WIFI_PASSWORD}
+          auth,namespace,,
+          api_key,data,string,${RECOVERY_API_KEY}
+          CSVHEADER
+          sed -i 's/^[[:space:]]*//' /tmp/nvs_wifi.csv
+          envsubst < /tmp/nvs_wifi.csv > /tmp/nvs_wifi_resolved.csv
+          python3 -m esp_idf_nvs_partition_gen generate \
+            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x40000
+
+          esptool.py --port "$CONTROLLER_PORT" --baud 921600 --chip esp32p4 \
+            --before default_reset --after hard_reset \
+            write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
+            0x2000  recovery/bootloader/bootloader.bin \
+            0x8000  recovery/partition_table/partition-table.bin \
+            0x9000  /tmp/nvs_wifi.bin \
+            0x49000 recovery/ota_data_initial.bin \
+            0x50000 recovery/arctic_controller.bin
+
+          # Restoration is not "the flash command exited 0" — verify the device
+          # actually comes back, on a non-poison image, and is committed.
+          echo "Waiting for the recovered controller..."
+          for i in $(seq 1 90); do
+            R=$(curl -sk --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || R=""
+            if [ -n "$R" ]; then
+              S=$(echo "$R" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || S=""
+              case "$S" in
+                ""|*-poison) ;;
+                *)
+                  echo "Controller recovered on $S after ${i}s"
+                  echo "::warning::The controller required USB recovery. The rollback test itself failed, but the rig has been restored and is usable by the next job."
+                  exit 1
+                  ;;
+              esac
+            fi
+            sleep 2
+          done
+          echo "::error::USB recovery did not bring the controller back. The rig is DOWN and needs manual attention before any further device CI can run."
+          exit 1
+        env:
+          WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
+          WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
+          RECOVERY_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
