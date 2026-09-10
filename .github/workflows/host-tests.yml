@@ -43,6 +43,26 @@ jobs:
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
 
+      - name: Enforce LF line endings
+        # The repo was normalized to LF (see .gitattributes "* text=auto" and
+        # the churn commit recorded in .git-blame-ignore-revs). Without a gate,
+        # a Windows contributor whose editor writes CRLF can reintroduce it and
+        # the next unrelated edit rewrites the whole file, burying the real
+        # change in a whole-file diff.
+        #
+        # This checks the INDEX (i/...), not the working tree, so it is
+        # unaffected by however the runner happens to check files out.
+        run: |
+          set -euo pipefail
+          if git ls-files --eol | grep -E '^i/(crlf|mixed)' > /tmp/crlf.txt; then
+            echo "::error::Tracked files have CRLF or mixed line endings in the index:"
+            sed 's/^/  /' /tmp/crlf.txt
+            echo ""
+            echo "Fix with: git add --renormalize . && git commit"
+            exit 1
+          fi
+          echo "All tracked text files are LF in the index."
+
       - name: Run host-side tests (no hardware)
         # tests/web has its own playwright dependency set and is browser-only;
         # exclude it from collection so a missing browser dep can't abort the
