@@ -487,6 +487,13 @@ jobs:
         if: steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'success'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          # Record how this firmware was installed so the OTA tests can assert on
+          # it. The device cannot report this itself: a USB-recovered device and a
+          # successfully OTA'd one present an identical build_sha, and differ only
+          # in which app slot they booted from — which is legitimate for a USB
+          # flash and a failure for an OTA. Only the workflow knows which was
+          # intended, so it states it here.
+          echo "ARCTIC_FLASH_METHOD=ota" >> "$GITHUB_ENV"
           sleep 10
           # 80s window: the async pull path (nightly) only starts flashing +
           # rebooting AFTER this step begins (it quiesced the network mid-download),
@@ -507,6 +514,9 @@ jobs:
         if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
         run: |
           echo "OTA failed, falling back to USB serial flash..."
+          # See the note in "Wait for device reboot (OTA)". A USB flash boots the
+          # factory slot, so the OTA tests must not demand an ota_* slot here.
+          echo "ARCTIC_FLASH_METHOD=usb" >> "$GITHUB_ENV"
 
           # Generate NVS partition with WiFi credentials + API key so the device can auto-connect
           # and tests can authenticate.  The "auth" namespace pre-seeds the API key so
@@ -763,16 +773,37 @@ jobs:
           fi
           echo "OK: device is running the build under test ($EXPECTED)"
 
-      - name: Enforce nightly OTA pull-path success (strict)
-        # The nightly run exists to validate the /api/ota/update pull path that
-        # field devices use. If that path failed, the USB fallback above will have
-        # recovered the device to the build-under-test (so the rollback guard still
-        # passes), which would otherwise silently mask the failure. Fail the job
-        # explicitly so a broken pull-path OTA can never pass nightly. This runs
-        # AFTER recovery so the device is left healthy for the next scheduled run.
-        if: github.event_name == 'schedule' && steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'failure'
+      - name: Enforce OTA installation success (strict)
+        # OTA is how firmware reaches devices in the field, so an OTA that fails
+        # must fail the run. It previously could not: "Flash device via OTA" is
+        # continue-on-error (deliberately — the USB fallback has to be allowed to
+        # rescue the rig), the fallback then recovers the device to the
+        # build-under-test, and the rollback guard above therefore passes. The
+        # net effect was a green run that had never successfully installed an
+        # image over the air. This gate closes that hole for every trigger.
+        #
+        # Which path was exercised depends on the trigger, and both matter:
+        #   - schedule → asynchronous PULL (/api/ota/update from the ci-nightly
+        #     release), which is what field devices actually do;
+        #   - PR/push/dispatch → synchronous PUSH (/api/ota/upload).
+        # Strictness used to be gated on `schedule`, leaving the push path — the
+        # one every PR relies on to install its own build — unenforced.
+        #
+        # Exempt: a partition-layout change, where OTA is genuinely impossible
+        # (the new table cannot be applied over the air) and USB is correct. That
+        # case skips the OTA step entirely, so its outcome is 'skipped', not
+        # 'failure', and does not trip this gate.
+        #
+        # This deliberately runs AFTER the USB fallback and the rollback guard so
+        # the device is left healthy for the next run even as we fail this one.
+        if: steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'failure'
         run: |
-          echo "::error::Nightly /api/ota/update (pull-path OTA) FAILED. The device was recovered via USB fallback, but nightly must strictly validate the pull path. Failing the job."
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            PATH_NAME="/api/ota/update (asynchronous pull path)"
+          else
+            PATH_NAME="/api/ota/upload (synchronous push path)"
+          fi
+          echo "::error::OTA installation FAILED via $PATH_NAME. The device was recovered over USB, so it is healthy and running the build under test — but the over-the-air install did not work, which is the failure mode that strands a field device. Failing the job."
           exit 1
 
       - name: Run device UI tests

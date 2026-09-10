@@ -702,60 +702,110 @@ def _get_firmware_binary():
     return bin_path.read_bytes()
 
 
-@pytest.mark.skip(reason="Requires serial connection and device reboot — not yet available on CI runner")
-class TestOtaRoundTrip:
-    """Tier 2: Upload current firmware via OTA, wait for reboot, verify recovery.
+def _expected_build_sha():
+    """The build_sha CI baked into the firmware under test, or None locally.
 
-    This proves the full OTA pipeline works end-to-end without needing a
-    different firmware version. The device should reboot onto the alternate
-    partition with the same version.
+    Same source of truth the workflow's rollback guard reads.
+    """
+    p = Path(__file__).resolve().parent.parent.parent / "build" / "build_sha.txt"
+    if not p.exists():
+        return None
+    return p.read_text().strip() or None
+
+
+class TestOtaRoundTrip:
+    """Tier 2 — assert that the OTA install CI just performed actually worked.
+
+    Un-skips the coverage tracked as T-01 in #252. The old skip reason
+    ("requires serial connection and device reboot — not yet available on CI
+    runner") has been stale for some time: device-tests.yml installs every
+    build under test *by OTA* as its primary path, over
+    /api/ota/upload on PR/push runs and /api/ota/update on nightly, falling
+    back to USB only when that fails.
+
+    These tests deliberately assert on that install rather than performing a
+    second one. Re-uploading the identical binary mid-suite would reboot the
+    device for ~90s, reset state that later tests depend on, and double the
+    flash wear — while producing no evidence the CI install had not already
+    produced. It is the same binary over the same code path. What was actually
+    missing was never the OTA; it was the assertions on its outcome, which
+    lived only in shell inside the workflow.
+
+    Three properties matter, and each fails differently:
+      - the running image is the build under test (else we silently tested a
+        rolled-back image — the failure #234 hit);
+      - it was committed, i.e. mark_valid() ran (else the device is still in
+        PENDING_VERIFY and the next reboot reverts it);
+      - it is executing from an OTA slot (else it arrived over USB, and the
+        over-the-air path — the only one field devices have — is unproven).
     """
 
-    def test_upload_same_version_round_trip(self):
-        """Upload current firmware binary → reboot → device comes back healthy."""
-        firmware = _get_firmware_binary()
+    def test_running_image_is_the_build_under_test(self):
+        """The device reports the build_sha CI baked into this build.
 
-        # Record pre-OTA state
-        pre = _get("/api/ota/status").json()
-        pre_version = pre["current_version"]
-
-        # Upload firmware
-        r = _post_raw("/api/ota/upload", data=firmware)
-        assert r.status_code == 200, f"Upload failed: {r.text}"
-        data = r.json()
-        assert data.get("success") is True
-        assert data.get("bytes_received") == len(firmware)
-
-        # Device will auto-reboot — wait for it to go offline then come back
-        post = _wait_for_device(timeout=90)
-
-        # Same version, idle state
-        assert post["current_version"] == pre_version
-        assert post["state"] == "idle"
-
-    def test_pending_verify_after_ota(self):
-        """After OTA reboot, firmware should briefly be in pending_verify
-        state before mark_valid() runs. By the time we can query the API,
-        mark_valid() has already fired (it runs during create_ui), so
-        pending_verify should be false.
+        Guards against a silent rollback: a reverted device stays reachable and
+        happily serves the whole suite from the *previous* image.
         """
-        # This runs after test_upload_same_version_round_trip
+        expected = _expected_build_sha()
+        if expected is None:
+            pytest.skip("build/build_sha.txt absent — not a CI build, nothing to compare against")
+
         data = _get("/api/ota/status").json()
-        assert data["pending_verify"] is False, (
-            "Firmware should have been validated by mark_valid() after create_ui()"
+        actual = data.get("build_sha")
+        assert actual, "Device reported no build_sha — firmware predates the rollback guard"
+        assert actual == expected, (
+            f"Device is running build_sha {actual!r}, expected {expected!r}. "
+            "The device most likely rolled back to the previous image, which means "
+            "this run has been testing firmware that is not the build under test."
+        )
+
+    def test_installed_image_was_committed(self):
+        """pending_verify is false — mark_valid() ran, so rollback is cancelled.
+
+        A device left in PENDING_VERIFY looks perfectly healthy over the API and
+        passes the whole suite, then reverts on its next reboot. That is exactly
+        the state a field device must never be released in.
+        """
+        data = _get("/api/ota/status").json()
+        assert data.get("pending_verify") is False, (
+            "Running image is still PENDING_VERIFY: mark_valid() never ran, so the "
+            "bootloader will revert to the previous image on the next reboot."
+        )
+
+    def test_running_from_ota_slot(self):
+        """The image is executing from an ota_* slot, not factory.
+
+        build_sha alone cannot distinguish a successful OTA from a USB recovery —
+        both report the same value. The slot label can.
+        """
+        method = os.environ.get("ARCTIC_FLASH_METHOD")
+        if method is None:
+            pytest.skip("ARCTIC_FLASH_METHOD unset — install method unknown outside CI")
+
+        data = _get("/api/ota/status").json()
+        part = data.get("running_partition")
+        assert part, "Device reported no running_partition"
+
+        if method == "usb":
+            # Legitimate: a partition-layout change cannot be applied over the
+            # air. The workflow's strict gate fails the run separately if USB was
+            # used because the OTA failed, so nothing is being excused here.
+            pytest.skip(f"Firmware was installed over USB (running from {part!r}); OTA slot not applicable")
+
+        assert part.startswith("ota_"), (
+            f"Firmware was installed by OTA but the device is running from {part!r}. "
+            "It should be executing an ota_* slot; 'factory' means the OTA did not "
+            "take and the device is running a USB-flashed image."
         )
 
     def test_device_functional_after_ota(self):
-        """After OTA, basic API endpoints should still work."""
-        # Health check
+        """Basic API endpoints still work on the OTA-installed image."""
         r = _get("/api/ota/status")
         assert r.status_code == 200
-
-        # Verify another endpoint works too
-        r = _get("/api/ota/status")
         data = r.json()
         assert "current_version" in data
         assert "pending_verify" in data
+        assert data["state"] == "idle", f"OTA state should be idle after install, got {data['state']!r}"
 
 
 # ══════════════════════════════════════════════════════════════════════════
