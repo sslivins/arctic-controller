@@ -11,6 +11,7 @@
 #include <mbedtls/x509_crt.h>
 #include <mbedtls/x509.h>
 #include <string.h>
+#include <stdlib.h>
 
 static const char* TAG = "tls_mgr";
 
@@ -331,6 +332,52 @@ const uint8_t* tls_mgr_get_key(size_t* out_len)
 // Store / clear
 // ============================================================================
 
+// A certificate that is merely PEM-SHAPED is not a certificate. The API layer
+// only checks for the "-----BEGIN CERTIFICATE-----" marker, so base64 garbage
+// between the markers was stored happily and then failed to load on the next
+// boot -- taking the whole web UI down, with no way back in over HTTPS to fix
+// it. Parse it here, where the answer is still a 400 to the user.
+static bool cert_is_parseable(const char* cert, size_t cert_len)
+{
+    // Callers disagree about whether the length includes the terminator, so
+    // normalise: trim trailing NULs, then hand mbedtls a buffer whose length
+    // includes exactly one (PEM parsing requires that).
+    while (cert_len > 0 && cert[cert_len - 1] == '\0') {
+        cert_len--;
+    }
+    if (cert_len == 0) {
+        return false;
+    }
+
+    char* buf = (char*)calloc(1, cert_len + 1);
+    if (buf == NULL) {
+        ESP_LOGE(TAG, "Out of memory validating certificate");
+        return false;
+    }
+    memcpy(buf, cert, cert_len);
+
+    mbedtls_x509_crt crt;
+    mbedtls_x509_crt_init(&crt);
+    const int ret = mbedtls_x509_crt_parse(
+        &crt, (const unsigned char*)buf, cert_len + 1);
+    mbedtls_x509_crt_free(&crt);
+    free(buf);
+
+    if (ret != 0) {
+        ESP_LOGE(TAG, "Rejecting unparseable certificate: -0x%04x", -ret);
+        return false;
+    }
+    return true;
+}
+
+bool tls_mgr_cert_is_valid(const char* cert, size_t cert_len)
+{
+    if (cert == NULL || cert_len == 0) {
+        return false;
+    }
+    return cert_is_parseable(cert, cert_len);
+}
+
 bool tls_mgr_store_certs(const char* cert, size_t cert_len,
                          const char* key, size_t key_len)
 {
@@ -341,6 +388,9 @@ bool tls_mgr_store_certs(const char* cert, size_t cert_len,
     if (cert_len > TLS_MAX_CERT_LEN || key_len > TLS_MAX_KEY_LEN) {
         ESP_LOGE(TAG, "Cert or key too large (cert=%d, key=%d)",
                  (int)cert_len, (int)key_len);
+        return false;
+    }
+    if (!cert_is_parseable(cert, cert_len)) {
         return false;
     }
 

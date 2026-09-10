@@ -50,6 +50,12 @@ void power_loss_after(int n);
 // touching the medium. `count < 0` means until reset or cleared.
 enum class Op { Read, Write, Erase };
 void fail_next(Op op, esp_err_t err, int count = 1);
+
+// Fail only the `nth` (1-based) subsequent call of the given operation,
+// letting the ones before it succeed. Needed when the interesting failure is
+// not the first of its kind -- e.g. a read error on the final payload load
+// after the scan has already read every slot header successfully.
+void fail_nth(Op op, esp_err_t err, int nth);
 void clear_failures();
 
 // --- inspection ---------------------------------------------------------

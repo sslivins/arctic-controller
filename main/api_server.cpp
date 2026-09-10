@@ -6007,6 +6007,16 @@ static esp_err_t tls_cert_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
+    // The marker check above only proves the text is PEM-shaped. Storing a
+    // certificate that cannot be parsed takes HTTPS down on the next boot, so
+    // reject it now, while the user is still here to read the error.
+    if (!tls_mgr_cert_is_valid(cert_pem, cert_len)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request",
+                        "cert is not a valid PEM certificate");
+        return ESP_OK;
+    }
+
     bool ok = tls_mgr_store_certs(cert_pem, cert_len, key_pem, key_len);
     cJSON_Delete(root);
 

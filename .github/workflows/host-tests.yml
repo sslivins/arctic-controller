@@ -124,6 +124,20 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # The advanced_params suite compiles the real
+          # components/arctic-macon/src/macon_advanced_params.cpp rather than a
+          # fake, so this job needs the submodule too.
+          submodules: 'recursive'
+
+      - name: Guard against an unpopulated submodule
+        # Without this, an empty submodule surfaces as a confusing "Cannot find
+        # source file" from add_library() instead of naming the real problem.
+        run: |
+          if [ ! -f components/arctic-macon/src/macon_advanced_params.cpp ]; then
+            echo "::error::components/arctic-macon was not checked out — the main/ native test suite cannot build."
+            exit 1
+          fi
 
       - name: Configure native test build
         run: cmake -S main/tests -B build-main-tests
@@ -141,8 +155,8 @@ jobs:
         run: |
           COUNT=$(ctest --test-dir build-main-tests -N | sed -n 's/^Total Tests: //p')
           echo "ctest reports ${COUNT:-0} registered tests"
-          if [ -z "${COUNT}" ] || [ "${COUNT}" -lt 3 ]; then
-            echo "::error::Only ${COUNT:-0} main/ native tests were registered (expected at least 3). Tests were dropped, or the suite failed to configure."
+          if [ -z "${COUNT}" ] || [ "${COUNT}" -lt 12 ]; then
+            echo "::error::Only ${COUNT:-0} main/ native tests were registered (expected at least 12). Tests were dropped, or the suite failed to configure."
             exit 1
           fi
 
@@ -151,7 +165,7 @@ jobs:
         # stubs and the test file, and nothing from main/ at all", which would
         # still link and still pass. Check the object files exist.
         run: |
-          for OBJ in i18n.cpp.o history_storage.cpp.o; do
+          for OBJ in i18n.cpp.o history_storage.cpp.o auth_manager.cpp.o log_buffer.cpp.o event_log.cpp.o log_persist.cpp.o boot_stats.cpp.o time_manager.cpp.o iana_tz.cpp.o location_manager.cpp.o app_preferences.cpp.o advanced_params.cpp.o macon_advanced_params.cpp.o; do
             if ! find build-main-tests -name "$OBJ" | grep -q .; then
               echo "::error::$OBJ was not compiled by the host build — MAIN_HOST_SRCS has probably been emptied."
               find build-main-tests -name '*.o' -print

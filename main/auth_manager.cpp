@@ -64,18 +64,23 @@ static void generate_random_hex(char* buffer, size_t len)
     buffer[len] = '\0';
 }
 
-static void hash_password(const char* password, uint8_t* hash_out)
+// Returns false when the digest could not be computed. Callers must fail
+// closed on false: zeroing the buffer is not enough on its own, because if a
+// hash failure happens while a password is being SET, the stored digest is
+// also all zeros, and a later failure at login would then compare equal for
+// any password at all.
+static bool hash_password(const char* password, uint8_t* hash_out)
 {
     size_t hash_len = 0;
     const psa_status_t status = psa_hash_compute(
         PSA_ALG_SHA_256, (const uint8_t*)password, strlen(password),
         hash_out, PSA_HASH_LENGTH(PSA_ALG_SHA_256), &hash_len);
     if (status != PSA_SUCCESS) {
-        // Never leave a caller-visible digest that could compare equal to a
-        // stored hash; zeroing cannot match a real SHA-256 of a password.
         ESP_LOGE(TAG, "psa_hash_compute failed: %d", (int)status);
         memset(hash_out, 0, PSA_HASH_LENGTH(PSA_ALG_SHA_256));
+        return false;
     }
+    return true;
 }
 
 static bool constant_time_equal(const uint8_t* lhs, const uint8_t* rhs, size_t len)
@@ -272,8 +277,10 @@ void auth_mgr_init(void)
         ESP_LOGI(TAG, "No credentials found in NVS, setting defaults (arctic/arctic)");
         strncpy(state.username, AUTH_FACTORY_USERNAME, sizeof(state.username) - 1);
         state.username[sizeof(state.username) - 1] = '\0';
-        hash_password(AUTH_FACTORY_PASSWORD, state.password_hash);
-        state.password_set = true;
+        // A zeroed hash must never be treated as a usable credential: leaving
+        // password_set true here would mean any password hashed by a second
+        // failure would match it.
+        state.password_set = hash_password(AUTH_FACTORY_PASSWORD, state.password_hash);
         save_to_nvs();
     } else {
         ESP_LOGI(TAG, "Credentials loaded from NVS: username='%s', password_set=%d", 
@@ -345,7 +352,14 @@ bool auth_mgr_set_credentials(const char* username, const char* password)
     }
     
     if (password != NULL && password[0] != '\0') {
-        hash_password(password, state.password_hash);
+        if (!hash_password(password, state.password_hash)) {
+            // Refuse rather than store a zeroed digest, which a later hash
+            // failure at login would match for any password.
+            ESP_LOGE(TAG, "Refusing to store credentials: hashing failed");
+            state.password_set = false;
+            auth_mgr_logout_all();
+            return false;
+        }
         state.password_set = true;
         changed = true;
         ESP_LOGI(TAG, "Password hash updated");
@@ -369,7 +383,10 @@ bool auth_mgr_set_credentials(const char* username, const char* password)
 bool auth_mgr_credentials_change_required(void)
 {
     uint8_t default_hash[32];
-    hash_password(AUTH_FACTORY_PASSWORD, default_hash);
+    if (!hash_password(AUTH_FACTORY_PASSWORD, default_hash)) {
+        mbedtls_platform_zeroize(default_hash, sizeof(default_hash));
+        return false;
+    }
     const bool factory_credentials =
         state.password_set &&
         constant_time_equal(
@@ -403,7 +420,11 @@ bool auth_mgr_login(const char* username, const char* password, char* session_to
     }
     
     uint8_t input_hash[32];
-    hash_password(password, input_hash);
+    if (!hash_password(password, input_hash)) {
+        mbedtls_platform_zeroize(input_hash, sizeof(input_hash));
+        ESP_LOGW(TAG, "Login failed: could not hash the supplied password");
+        return false;
+    }
     
     const bool password_matches =
         constant_time_equal(input_hash, state.password_hash, sizeof(input_hash));
@@ -547,7 +568,16 @@ bool auth_mgr_issue_integration_token(char* buffer)
     char token[AUTH_INTEGRATION_TOKEN_LEN + 1];
     uint8_t token_hash[sizeof(state.integration_token_hash)];
     generate_random_hex(token, AUTH_INTEGRATION_TOKEN_LEN);
-    hash_password(token, token_hash);
+    if (!hash_password(token, token_hash)) {
+        // Persisting a zeroed digest would both hand out a token that cannot
+        // be validated and make any token match after a second failure.
+        ESP_LOGE(TAG, "Refusing to issue integration token: hashing failed");
+        buffer[0] = '\0';
+        mbedtls_platform_zeroize(token, sizeof(token));
+        mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
+        xSemaphoreGive(integration_token_mutex);
+        return false;
+    }
 
     nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
@@ -648,9 +678,10 @@ bool auth_mgr_validate_integration_token_with_generation(
         return false;
     }
 
-    hash_password(token, token_hash);
-    const bool valid = constant_time_equal(
-        token_hash, expected_hash, sizeof(token_hash));
+    const bool hashed = hash_password(token, token_hash);
+    const bool valid = hashed &&
+                       constant_time_equal(
+                           token_hash, expected_hash, sizeof(token_hash));
     mbedtls_platform_zeroize(token_hash, sizeof(token_hash));
     mbedtls_platform_zeroize(expected_hash, sizeof(expected_hash));
     if (valid && generation_out != NULL) {

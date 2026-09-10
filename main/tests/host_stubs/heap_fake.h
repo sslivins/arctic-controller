@@ -15,6 +15,12 @@ namespace heap_fake {
 
 // Fail the next `count` allocations by returning NULL.
 void fail_next_alloc(int count = 1);
+
+// Fail only the `nth` (1-based) subsequent allocation, letting the earlier
+// ones succeed. Needed when a function allocates several times and the
+// interesting cleanup path is the failure of a later one.
+void fail_nth_alloc(int nth);
+
 void clear_failures();
 
 // Allocation bookkeeping since reset(). outstanding() > 0 after an operation

@@ -71,7 +71,7 @@ static const char* s_event_names[] = {
     "network_recovered",
 };
 
-_Static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
+static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
                "s_event_names must match EVENT_TYPE_COUNT");
 
 static const char* s_category_names[] = {
@@ -81,7 +81,7 @@ static const char* s_category_names[] = {
     "system",
 };
 
-_Static_assert(sizeof(s_category_names) / sizeof(s_category_names[0]) == EVENT_CATEGORY_COUNT,
+static_assert(sizeof(s_category_names) / sizeof(s_category_names[0]) == EVENT_CATEGORY_COUNT,
                "s_category_names must match EVENT_CATEGORY_COUNT");
 
 void event_log_init(void) {

@@ -90,6 +90,7 @@ const esp_partition_t *desc_for(SharedSlot *s) {
 struct Injection {
     esp_err_t err;
     int remaining;
+    int skip;  // let this many calls through first
 };
 std::map<int, Injection> g_injections;
 std::map<int, int> g_calls;
@@ -108,6 +109,10 @@ esp_err_t take_injection(flash_fake::Op op) {
         return ESP_OK;
     }
     esp_err_t err = it->second.err;
+    if (it->second.skip > 0) {
+        --it->second.skip;
+        return ESP_OK;
+    }
     if (it->second.remaining > 0 && --it->second.remaining == 0) {
         g_injections.erase(it);
     }
@@ -293,7 +298,11 @@ void power_loss_after(int n) {
 }
 
 void fail_next(Op op, esp_err_t err, int count) {
-    g_injections[key_of(op)] = Injection{err, count};
+    g_injections[key_of(op)] = Injection{err, count, 0};
+}
+
+void fail_nth(Op op, esp_err_t err, int nth) {
+    g_injections[key_of(op)] = Injection{err, 1, nth > 0 ? nth - 1 : 0};
 }
 
 void clear_failures() { g_injections.clear(); }
