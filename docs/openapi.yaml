@@ -3,13 +3,13 @@ info:
   title: Arctic Heat Pump Controller API
   description: |
     REST API for the Arctic Heat Pump Controller running on ESP32-P4 with ESP32-C6 WiFi.
-    
+
     The device is discoverable via mDNS at `http://arctic-<xxxx>.local` when connected to your local network,
     where `<xxxx>` is the last two bytes of the WiFi MAC (lowercase hex, e.g. `arctic-3f2a.local`).
     The suffix keeps multiple controllers from colliding on `arctic.local`. The exact name is reported as
     `hostname`/`local_url` by `GET /api/wifi`.
     HTTPS is available on port 443 when TLS certificates are provisioned via the `/api/tls/certificate` endpoint.
-    
+
     ## Features
     - Device status and health monitoring
     - WiFi connection status with signal strength
@@ -18,19 +18,19 @@ info:
     - Web interface authentication with session management
     - API key authentication for programmatic access
     - Heat pump status monitoring
-    
+
     ## Authentication
-    
+
     The API supports two optional authentication mechanisms:
-    
+
     ### Web Authentication (Session-based)
     When enabled, users must log in via `/login` with username/password. 
     A session cookie (`arctic_session`) is returned and must be included in subsequent requests.
-    
+
     ### API Key Authentication
     When enabled, programmatic API access requires the `X-API-Key` header.
     The API key can be retrieved from the web interface settings.
-    
+
     Both authentication types can be independently enabled/disabled via `/api/auth/config`.
 
     ### Home Assistant Integration Authentication
@@ -45,54 +45,54 @@ info:
     name: MIT
 
 servers:
-  - url: http://arctic.local
-    description: Local mDNS hostname
-  - url: https://{ip_address}
-    description: Direct IP address
-    variables:
-      ip_address:
-        default: 192.168.1.100
-        description: Device IP address
-  - url: https://{ip_address}:8443
-    description: Home Assistant integration identity endpoint
-    variables:
-      ip_address:
-        default: 192.168.1.100
-        description: Device IP address
+- url: http://arctic.local
+  description: Local mDNS hostname
+- url: https://{ip_address}
+  description: Direct IP address
+  variables:
+    ip_address:
+      default: 192.168.1.100
+      description: Device IP address
+- url: https://{ip_address}:8443
+  description: Home Assistant integration identity endpoint
+  variables:
+    ip_address:
+      default: 192.168.1.100
+      description: Device IP address
 
 tags:
-  - name: Health
-    description: Health check endpoints
-  - name: Status
-    description: Device status information
-  - name: WiFi
-    description: WiFi connection information
-  - name: Time
-    description: Time and NTP configuration
-  - name: Location
-    description: Device location and automatic timezone
-  - name: Weather
-    description: Outdoor weather for the device location
-  - name: Info
-    description: Device information
-  - name: OTA
-    description: Over-the-Air firmware updates
-  - name: Authentication
-    description: Session and API key authentication
-  - name: HeatPump
-    description: Heat pump status and control
-  - name: Events
-    description: Operational event log
-  - name: Logs
-    description: System debug log buffer
-  - name: HomeAssistant
-    description: Strictly authenticated local Home Assistant integration
+- name: Health
+  description: Health check endpoints
+- name: Status
+  description: Device status information
+- name: WiFi
+  description: WiFi connection information
+- name: Time
+  description: Time and NTP configuration
+- name: Location
+  description: Device location and automatic timezone
+- name: Weather
+  description: Outdoor weather for the device location
+- name: Info
+  description: Device information
+- name: OTA
+  description: Over-the-Air firmware updates
+- name: Authentication
+  description: Session and API key authentication
+- name: HeatPump
+  description: Heat pump status and control
+- name: Events
+  description: Operational event log
+- name: Logs
+  description: System debug log buffer
+- name: HomeAssistant
+  description: Strictly authenticated local Home Assistant integration
 
 paths:
   /login:
     post:
       tags:
-        - Authentication
+      - Authentication
       summary: Login with credentials
       description: |
         Authenticates a user and returns a session cookie.
@@ -105,8 +105,8 @@ paths:
             schema:
               type: object
               required:
-                - username
-                - password
+              - username
+              - password
               properties:
                 username:
                   type: string
@@ -160,10 +160,12 @@ paths:
               example:
                 error: Too many failed login attempts
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /logout:
     post:
       tags:
-        - Authentication
+      - Authentication
       summary: Logout and invalidate session
       description: Invalidates the current session and clears the session cookie.
       operationId: logout
@@ -184,10 +186,12 @@ paths:
                     type: boolean
                     example: true
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/health:
     get:
       tags:
-        - Health
+      - Health
       summary: Health check
       description: Simple health check endpoint to verify the device is responding.
       operationId: getHealth
@@ -207,10 +211,12 @@ paths:
                     description: Device uptime in milliseconds
                     example: 123456789
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/status:
     get:
       tags:
-        - Status
+      - Status
       summary: Full device status
       description: Returns comprehensive device status including WiFi and time information.
       operationId: getStatus
@@ -261,10 +267,12 @@ paths:
                         description: Unix timestamp
                         example: 1738766400
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/time:
     get:
       tags:
-        - Time
+      - Time
       summary: Current time information
       description: Returns current time in various formats with NTP sync status.
       operationId: getTime
@@ -302,10 +310,12 @@ paths:
                     description: Whether time has been synchronized via NTP
                     example: true
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/time/config:
     get:
       tags:
-        - Time
+      - Time
       summary: Get time configuration
       description: Returns current timezone and time format settings.
       operationId: getTimeConfig
@@ -329,9 +339,11 @@ paths:
                     type: boolean
                     description: Whether NTP sync has occurred
                     example: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
     post:
       tags:
-        - Time
+      - Time
       summary: Set time configuration
       description: Updates timezone and time format settings.
       operationId: setTimeConfig
@@ -361,10 +373,12 @@ paths:
                     type: boolean
                     example: true
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/time/sync:
     post:
       tags:
-        - Time
+      - Time
       summary: Force NTP sync
       description: Triggers an immediate NTP time synchronization.
       operationId: syncTime
@@ -383,10 +397,12 @@ paths:
                     type: string
                     example: NTP sync initiated
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/location:
     get:
       tags:
-        - Location
+      - Location
       summary: Get device location and timezone mode
       description: |
         Returns the persisted device location plus whether the timezone is
@@ -406,9 +422,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '400':
+          $ref: '#/components/responses/BadRequest'
     post:
       tags:
-        - Location
+      - Location
       summary: Set device location and/or timezone mode
       description: |
         Sets the device location, the automatic-timezone preference, or both.
@@ -448,8 +466,8 @@ paths:
                   description: Derive the timezone from the location.
                   example: true
               anyOf:
-                - required: [latitude, longitude]
-                - required: [tz_auto]
+              - required: [latitude, longitude]
+              - required: [tz_auto]
       responses:
         '200':
           description: Location updated
@@ -457,12 +475,12 @@ paths:
             application/json:
               schema:
                 allOf:
-                  - type: object
-                    properties:
-                      success:
-                        type: boolean
-                        example: true
-                  - $ref: '#/components/schemas/Location'
+                - type: object
+                  properties:
+                    success:
+                      type: boolean
+                      example: true
+                - $ref: '#/components/schemas/Location'
         '400':
           description: Missing or invalid fields
           content:
@@ -479,7 +497,7 @@ paths:
   /api/location/search:
     get:
       tags:
-        - Location
+      - Location
       summary: Search for a location by name
       description: |
         Resolves a free-text place name to candidate locations using the
@@ -487,14 +505,14 @@ paths:
         request and can take several seconds.
       operationId: searchLocation
       parameters:
-        - name: q
-          in: query
-          required: true
-          description: Free-text place name. Must not be empty.
-          schema:
-            type: string
-            minLength: 1
-            example: sun peaks
+      - name: q
+        in: query
+        required: true
+        description: Free-text place name. Must not be empty.
+        schema:
+          type: string
+          minLength: 1
+          example: sun peaks
       responses:
         '200':
           description: Matching locations, most relevant first
@@ -557,7 +575,7 @@ paths:
   /api/weather:
     get:
       tags:
-        - Weather
+      - Weather
       summary: Current outdoor weather
       description: |
         Returns the most recent weather reading for the device location. The
@@ -599,10 +617,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/wifi:
     get:
       tags:
-        - WiFi
+      - WiFi
       summary: WiFi connection status
       description: Returns current WiFi connection state and signal strength.
       operationId: getWifi
@@ -642,28 +662,32 @@ paths:
                     description: Full mDNS URL (only when connected)
                     example: http://arctic.local
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/wifi/scan:
     post:
       tags: [WiFi]
       summary: Start a WiFi network scan
       operationId: scanWifi
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Scan started
         '409':
           description: A scan is already in progress
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/wifi/networks:
     get:
       tags: [WiFi]
       summary: Get the latest WiFi scan results
       operationId: getWifiNetworks
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Latest scan state and results
@@ -686,14 +710,16 @@ paths:
                         authmode:
                           type: integer
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/wifi/connect:
     post:
       tags: [WiFi]
       summary: Save credentials and connect to a WiFi network
       operationId: connectWifi
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -712,28 +738,32 @@ paths:
         '200':
           description: Connection scheduled
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/wifi/disconnect:
     post:
       tags: [WiFi]
       summary: Disconnect from the current WiFi network
       operationId: disconnectWifi
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Disconnect scheduled
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/info:
     get:
       tags:
-        - Info
+      - Info
       summary: Device information
       description: Returns device hardware/software information.
       operationId: getInfo
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Device information
@@ -778,10 +808,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/notifications:
     get:
       tags:
-        - Status
+      - Status
       summary: Active status-bar notifications
       description: |
         Returns the notifications currently shown on the on-device status-bar
@@ -789,8 +821,8 @@ paths:
         dashboard uses this to mirror the device notification bell.
       operationId: getNotifications
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Active notifications
@@ -828,10 +860,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/ota/status:
     get:
       tags:
-        - OTA
+      - OTA
       summary: OTA update status
       description: |
         Returns current OTA update status, progress, and partition information.
@@ -841,9 +875,9 @@ paths:
         session cookie.
       operationId: getOtaStatus
       security:
-        - apiKey: []
-        - sessionCookie: []
-        - integrationBearer: []
+      - apiKey: []
+      - sessionCookie: []
+      - integrationBearer: []
       responses:
         '200':
           description: OTA status
@@ -905,10 +939,12 @@ paths:
                         type: integer
                         example: 4194304
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/ota/releases:
     get:
       tags:
-        - OTA
+      - OTA
       summary: Check GitHub for the latest firmware release
       description: |
         Queries the controller's configured GitHub releases feed and compares the
@@ -920,9 +956,9 @@ paths:
         polls to detect available firmware.
       operationId: getOtaReleases
       security:
-        - apiKey: []
-        - sessionCookie: []
-        - integrationBearer: []
+      - apiKey: []
+      - sessionCookie: []
+      - integrationBearer: []
       responses:
         '200':
           description: Latest release information
@@ -957,10 +993,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/ota/github:
     post:
       tags:
-        - OTA
+      - OTA
       summary: Install the latest GitHub firmware release
       description: |
         Starts an OTA update using the release discovered by
@@ -972,9 +1010,9 @@ paths:
         calls to install firmware.
       operationId: startGithubOtaUpdate
       security:
-        - apiKey: []
-        - sessionCookie: []
-        - integrationBearer: []
+      - apiKey: []
+      - sessionCookie: []
+      - integrationBearer: []
       responses:
         '200':
           description: GitHub OTA update started
@@ -1012,18 +1050,18 @@ paths:
   /api/ota/update:
     post:
       tags:
-        - OTA
+      - OTA
       summary: Start OTA update from URL
       description: |
         Initiates an OTA firmware update from the specified URL.
-        
+
         **Security**: Only URLs starting with `https://github.com/sslivins/arctic-controller/` are allowed.
-        
+
         The device will automatically reboot after a successful update.
       operationId: startOtaUpdate
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -1031,7 +1069,7 @@ paths:
             schema:
               type: object
               required:
-                - url
+              - url
               properties:
                 url:
                   type: string
@@ -1091,20 +1129,20 @@ paths:
   /api/ota/upload:
     post:
       tags:
-        - OTA
+      - OTA
       summary: Upload firmware file
       description: |
         Uploads a firmware binary file directly to the device.
-        
+
         The file must be a valid ESP32-P4 firmware binary (.bin file starting with magic byte 0xE9).
-        
+
         **Note**: The device will automatically reboot after successful upload.
-        
+
         Only one OTA operation (upload or URL download) can be in progress at a time.
       operationId: uploadFirmware
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -1162,13 +1200,13 @@ paths:
   /api/ota/reboot:
     post:
       tags:
-        - OTA
+      - OTA
       summary: Reboot device
       description: Immediately reboots the device. Can be used to apply updates or restart the system.
       operationId: reboot
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Device is rebooting
@@ -1190,10 +1228,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/auth/config:
     get:
       tags:
-        - Authentication
+      - Authentication
       summary: Get authentication configuration
       description: Returns current authentication settings. This endpoint is always accessible.
       operationId: getAuthConfig
@@ -1221,14 +1261,16 @@ paths:
                     type: boolean
                     description: Whether current request is authenticated
                     example: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
     post:
       tags:
-        - Authentication
+      - Authentication
       summary: Set authentication configuration
       description: Updates authentication settings. Requires authentication if web auth is enabled.
       operationId: setAuthConfig
       security:
-        - sessionCookie: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -1260,10 +1302,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/auth/status:
     get:
       tags:
-        - Authentication
+      - Authentication
       summary: Quick auth status check
       description: Returns whether authentication is required and if current session is valid.
       operationId: getAuthStatus
@@ -1283,10 +1327,12 @@ paths:
                     description: Whether the current session cookie is valid
                     example: true
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/auth/credentials:
     post:
       tags:
-        - Authentication
+      - Authentication
       summary: Set login credentials
       description: |
         Replaces the username and password.
@@ -1313,8 +1359,8 @@ paths:
         clears any active `/login` cooldown.
       operationId: setCredentials
       security:
-        - sessionCookie: []
-        - {}
+      - sessionCookie: []
+      - {}
       requestBody:
         required: true
         content:
@@ -1322,8 +1368,8 @@ paths:
             schema:
               type: object
               required:
-                - username
-                - password
+              - username
+              - password
               properties:
                 username:
                   type: string
@@ -1384,12 +1430,12 @@ paths:
   /api/auth/apikey:
     get:
       tags:
-        - Authentication
+      - Authentication
       summary: Get API key
       description: Returns the current API key. Requires authentication.
       operationId: getApiKey
       security:
-        - sessionCookie: []
+      - sessionCookie: []
       responses:
         '200':
           description: API key
@@ -1409,18 +1455,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/auth/apikey/regenerate:
     post:
       tags:
-        - Authentication
+      - Authentication
       summary: Regenerate API key
       description: |
         Generates a new random API key. 
-        
+
         **Warning**: Existing API integrations using the old key will stop working.
       operationId: regenerateApiKey
       security:
-        - sessionCookie: []
+      - sessionCookie: []
       responses:
         '200':
           description: New API key generated
@@ -1440,18 +1488,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/tls/status:
     get:
       tags:
-        - TLS
+      - TLS
       summary: Get TLS status
       description: |
         Returns whether TLS certificates are provisioned and whether the server
         is currently running in HTTPS mode.
       operationId: getTlsStatus
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: TLS status
@@ -1479,10 +1529,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/tls/certificate:
     post:
       tags:
-        - TLS
+      - TLS
       summary: Upload TLS certificate and private key
       description: |
         Store a PEM-encoded certificate chain and private key in NVS.
@@ -1495,7 +1547,7 @@ paths:
         - When TLS certs are provisioned, authentication cannot be disabled
       operationId: uploadTlsCertificate
       security:
-        - apiKey: []
+      - apiKey: []
       requestBody:
         required: true
         content:
@@ -1503,8 +1555,8 @@ paths:
             schema:
               type: object
               required:
-                - cert
-                - key
+              - cert
+              - key
               properties:
                 cert:
                   type: string
@@ -1551,14 +1603,14 @@ paths:
                 $ref: '#/components/schemas/Error'
     delete:
       tags:
-        - TLS
+      - TLS
       summary: Remove TLS certificates
       description: |
         Clears stored certificates from NVS. After rebooting, the server will
         fall back to HTTP on port 80.
       operationId: deleteTlsCertificate
       security:
-        - apiKey: []
+      - apiKey: []
       responses:
         '200':
           description: Certificates cleared
@@ -1586,10 +1638,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/ha/status:
     get:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Home Assistant pairing status (web UI)
       description: |
         Returns the current Home Assistant pairing state for the authenticated
@@ -1601,8 +1655,8 @@ paths:
         integration bearer token). It never returns the pairing code.
       operationId: getHomeAssistantStatus
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Home Assistant pairing status
@@ -1634,10 +1688,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/ha/pair:
     post:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Open a Home Assistant pairing window (web UI)
       description: |
         Opens a short-lived physical-presence pairing window and returns the
@@ -1651,8 +1707,8 @@ paths:
         ownership of the controller remains physical-presence-only.
       operationId: startHomeAssistantPairing
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Pairing window opened
@@ -1681,16 +1737,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '400':
+          $ref: '#/components/responses/BadRequest'
     delete:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Cancel the active Home Assistant pairing window (web UI)
       description: |
         Closes any open pairing window and erases the current pairing code.
       operationId: cancelHomeAssistantPairing
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Pairing window cancelled
@@ -1709,10 +1767,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/ha/revoke:
     post:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Revoke the Home Assistant integration token (web UI)
       description: |
         Revokes the Home Assistant integration token and cancels any open
@@ -1720,8 +1780,8 @@ paths:
         paired again.
       operationId: revokeHomeAssistantToken
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Integration token revoked
@@ -1746,18 +1806,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/status:
     get:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Heat pump status
       description: |
         Returns comprehensive heat pump status including connection state, operating mode,
         component states, temperatures, setpoints, and any error conditions.
       operationId: getHeatpumpStatus
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Heat pump status
@@ -1905,7 +1967,7 @@ paths:
                     type: string
                     nullable: true
                     description: Comma-separated list of active errors, or null if no errors
-                    example: null
+                    example:
         '401':
           description: API key required
           content:
@@ -1913,10 +1975,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/raw:
     get:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Get raw heat-pump register cache
       description: |
         Internal diagnostic endpoint that returns the raw register window used
@@ -1924,8 +1988,8 @@ paths:
       operationId: getHeatpumpRawRegisters
       x-internal: true
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Raw register cache
@@ -1955,10 +2019,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/windows:
     get:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Get observed Tuya response windows
       description: |
         Internal diagnostic endpoint that returns the catalog of response
@@ -1966,8 +2032,8 @@ paths:
       operationId: getHeatpumpObservedWindows
       x-internal: true
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Observed response-window catalog
@@ -2011,17 +2077,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/power:
     put:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Set power on/off
       description: |
         Turn the heat pump unit on or off. Works in demo mode (logs action but doesn't control real hardware).
       operationId: setHeatpumpPower
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -2029,7 +2097,7 @@ paths:
             schema:
               type: object
               required:
-                - 'on'
+              - 'on'
               properties:
                 'on':
                   type: boolean
@@ -2062,17 +2130,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/mode:
     put:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Set operating mode
       description: |
         Set the heat pump operating mode. Works in demo mode.
       operationId: setHeatpumpMode
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -2080,7 +2150,7 @@ paths:
             schema:
               type: object
               required:
-                - mode
+              - mode
               properties:
                 mode:
                   type: string
@@ -2123,15 +2193,15 @@ paths:
   /api/heatpump/setpoints:
     put:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Set temperature setpoints
       description: |
         Set one or more temperature setpoints. All fields are optional - only provided fields are updated.
         Temperatures are in degrees Celsius.
       operationId: setHeatpumpSetpoints
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -2194,16 +2264,16 @@ paths:
   /api/heatpump/diagnostic:
     get:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Download diagnostic CSV report
       description: |
         Returns a comprehensive system diagnostic as a downloadable CSV file.
         Includes all cached register values, sensor readings, component status,
         active errors, and advanced (AP) parameters with current values.
         Useful for remote troubleshooting with Arctic support.
-        
+
         CSV columns: Category, Name, P-Code, Register Address, Value, Unit
-        
+
         Sections:
         - System State (power, mode, connection)
         - Temperatures (all sensor readings in °C)
@@ -2233,10 +2303,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/temperature-history:
     get:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Get temperature history timeline
       description: |
         Returns up to an eight-hour window of telemetry samples (inlet, outlet,
@@ -2251,17 +2323,17 @@ paths:
         All timestamps are Unix epoch seconds.
       operationId: getTemperatureHistory
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       parameters:
-        - name: end
-          in: query
-          required: false
-          schema:
-            type: integer
-          description: |
-            Unix epoch seconds for the end of the window. Defaults to the latest
-            aligned sample. Clamped to [window_seconds, latest_end].
+      - name: end
+        in: query
+        required: false
+        schema:
+          type: integer
+        description: |
+          Unix epoch seconds for the end of the window. Defaults to the latest
+          aligned sample. Clamped to [window_seconds, latest_end].
       responses:
         '200':
           description: Telemetry timeline
@@ -2329,10 +2401,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/errors:
     get:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Get error information and history
       description: |
         Returns detailed information about active errors and error history.
@@ -2342,8 +2416,8 @@ paths:
         All timestamps are Unix epoch seconds in UTC.
       operationId: getHeatpumpErrors
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Error information
@@ -2429,22 +2503,22 @@ paths:
                 error_count: 3
                 highest_severity: "warning"
                 active:
-                  - code: "P02"
-                    name: "HIGH_PRESSURE"
-                    description: "High pressure protection activated"
-                    resolution: "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked."
-                    severity: "warning"
-                    occurred: 1739145600
-                    active: true
+                - code: "P02"
+                  name: "HIGH_PRESSURE"
+                  description: "High pressure protection activated"
+                  resolution: "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked."
+                  severity: "warning"
+                  occurred: 1739145600
+                  active: true
                 history:
-                  - code: "E26"
-                    occurred: 1739138400
-                    cleared: 1739142000
-                    active: false
-                  - code: "E19"
-                    occurred: 1739131200
-                    cleared: 1739134800
-                    active: false
+                - code: "E26"
+                  occurred: 1739138400
+                  cleared: 1739142000
+                  active: false
+                - code: "E19"
+                  occurred: 1739131200
+                  cleared: 1739134800
+                  active: false
         '401':
           description: API key required
           content:
@@ -2452,16 +2526,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/errors/history:
     delete:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Clear heat-pump error history
       description: Deletes cleared error-history entries while preserving active errors.
       operationId: clearHeatpumpErrorHistory
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Error history cleared
@@ -2483,10 +2559,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/advanced:
     get:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Get all advanced (AP) parameters
       description: |
         Returns all verified advanced ("AP") parameters with their current values,
@@ -2495,8 +2573,8 @@ paths:
         been change-and-capture verified are included.
       operationId: getHeatpumpAdvanced
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: All advanced parameters
@@ -2522,32 +2600,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/heatpump/advanced/{id}:
     get:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Get single advanced (AP) parameter
       description: |
         Returns a single advanced parameter by its key (e.g., `AP13`) or bare AP
         number (e.g., `13`).
       operationId: getHeatpumpAdvancedParam
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          description: AP key (e.g., `AP13`) or bare AP number (e.g., `13`)
-          schema:
-            type: string
-          examples:
-            by_key:
-              value: AP13
-              summary: By AP key
-            by_number:
-              value: '13'
-              summary: By bare AP number
+      - name: id
+        in: path
+        required: true
+        description: AP key (e.g., `AP13`) or bare AP number (e.g., `13`)
+        schema:
+          type: string
+        examples:
+          by_key:
+            value: AP13
+            summary: By AP key
+          by_number:
+            value: '13'
+            summary: By bare AP number
       responses:
         '200':
           description: Parameter details
@@ -2555,15 +2635,15 @@ paths:
             application/json:
               schema:
                 allOf:
-                  - $ref: '#/components/schemas/AdvancedParam'
-                  - type: object
-                    properties:
-                      key:
-                        type: string
-                      connected:
-                        type: boolean
-                      demo_mode:
-                        type: boolean
+                - $ref: '#/components/schemas/AdvancedParam'
+                - type: object
+                  properties:
+                    key:
+                      type: string
+                    connected:
+                      type: boolean
+                    demo_mode:
+                      type: boolean
         '404':
           description: Unknown parameter
           content:
@@ -2577,9 +2657,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
     put:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Set advanced (AP) parameter value
       description: |
         Sets an advanced parameter value. The request body is a plain integer (not JSON).
@@ -2588,15 +2670,15 @@ paths:
         unverified parameters are refused. Works in demo mode (updates in-memory values).
       operationId: setHeatpumpAdvancedParam
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          description: AP key or bare AP number
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        description: AP key or bare AP number
+        schema:
+          type: string
       requestBody:
         required: true
         description: Plain integer value (not JSON)
@@ -2649,7 +2731,7 @@ paths:
   /api/heatpump/demo:
     patch:
       tags:
-        - HeatPump
+      - HeatPump
       summary: Set simulated heat-pump fields
       description: |
         Internal testing endpoint that updates read-only simulated fields. It is
@@ -2658,8 +2740,8 @@ paths:
       operationId: updateHeatpumpDemoFields
       x-internal: true
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -2713,15 +2795,15 @@ paths:
   /api/events:
     get:
       tags:
-        - Events
+      - Events
       summary: Get event log
       description: |
         Returns durable operational events, newest first, with offset/limit pagination.
         Up to 1,000 entries survive reboots. Each event includes its category and boot ID.
       operationId: getEvents
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Event log retrieved
@@ -2759,15 +2841,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
     delete:
       tags:
-        - Events
+      - Events
       summary: Clear event log
       description: Deletes all persisted events.
       operationId: clearEvents
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Event log cleared
@@ -2786,16 +2870,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/brownout/clear:
     post:
       tags:
-        - Events
+      - Events
       summary: Clear persistent brownout statistics
       description: Resets the persistent brownout counter and stored reset statistics.
       operationId: clearBrownoutStatistics
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Brownout statistics cleared
@@ -2814,6 +2900,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/display/brightness:
     get:
       tags: [Status]
@@ -2831,13 +2919,15 @@ paths:
                     type: integer
                     minimum: 5
                     maximum: 100
+        '400':
+          $ref: '#/components/responses/BadRequest'
     put:
       tags: [Status]
       summary: Save and apply display brightness
       operationId: setDisplayBrightness
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -2854,6 +2944,8 @@ paths:
         '200':
           description: Brightness saved and applied
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/preferences:
     get:
       tags: [Status]
@@ -2866,13 +2958,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Preferences'
+        '400':
+          $ref: '#/components/responses/BadRequest'
     patch:
       tags: [Status]
       summary: Update application preferences
       operationId: updatePreferences
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -2892,14 +2986,16 @@ paths:
         '200':
           description: Updated preferences
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/factory-reset:
     post:
       tags: [Status]
       summary: Erase controller data and restore factory defaults
       operationId: factoryReset
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       requestBody:
         required: true
         content:
@@ -2915,10 +3011,12 @@ paths:
         '200':
           description: Reset started; controller will restart
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/logs:
     get:
       tags:
-        - Logs
+      - Logs
       summary: Get system log entries
       description: |
         Returns ESP_LOG output captured in a RAM ring buffer (max 256 entries).
@@ -2926,37 +3024,37 @@ paths:
         Entries are returned in chronological order (oldest first).
       operationId: getLogs
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       parameters:
-        - name: since
-          in: query
-          description: Only return entries with sequence number greater than this value (for incremental polling)
-          required: false
-          schema:
-            type: integer
-            example: 0
-        - name: level
-          in: query
-          description: |
-            Minimum log level filter:
-            - `E` — errors only
-            - `W` — warnings and errors
-            - `I` — info, warnings, and errors
-            - `D` — debug and above
-            - `V` — all (verbose), this is the default
-          required: false
-          schema:
-            type: string
-            enum: [E, W, I, D, V]
-            default: V
-        - name: limit
-          in: query
-          description: Maximum number of entries to return
-          required: false
-          schema:
-            type: integer
-            default: 256
+      - name: since
+        in: query
+        description: Only return entries with sequence number greater than this value (for incremental polling)
+        required: false
+        schema:
+          type: integer
+          example: 0
+      - name: level
+        in: query
+        description: |
+          Minimum log level filter:
+          - `E` — errors only
+          - `W` — warnings and errors
+          - `I` — info, warnings, and errors
+          - `D` — debug and above
+          - `V` — all (verbose), this is the default
+        required: false
+        schema:
+          type: string
+          enum: [E, W, I, D, V]
+          default: V
+      - name: limit
+        in: query
+        description: Maximum number of entries to return
+        required: false
+        schema:
+          type: integer
+          default: 256
       responses:
         '200':
           description: Log entries retrieved
@@ -2984,15 +3082,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
     delete:
       tags:
-        - Logs
+      - Logs
       summary: Clear log buffer
       description: Deletes all entries from the log buffer. Sequence numbers continue to increment.
       operationId: clearLogs
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Log buffer cleared
@@ -3011,10 +3111,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/logs/persisted:
     get:
       tags:
-        - Logs
+      - Logs
       summary: Get the previous boot's persisted debug-log tail
       description: |
         Returns the debug-log tail snapshotted to a dedicated flash region
@@ -3028,8 +3130,8 @@ paths:
         prior boot.
       operationId: getPersistedLogs
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: Persisted log tail (or a comment when none is available)
@@ -3044,10 +3146,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/screenshot:
     get:
       tags:
-        - Display
+      - Display
       summary: Capture live screen as PNG
       description: |
         Returns a PNG screenshot of the current LVGL display.
@@ -3060,8 +3164,8 @@ paths:
         Typical response size: ~2.77 MB.
       operationId: getScreenshot
       security:
-        - apiKey: []
-        - sessionCookie: []
+      - apiKey: []
+      - sessionCookie: []
       responses:
         '200':
           description: PNG screenshot of the current display
@@ -3083,10 +3187,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/capabilities:
     get:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Home Assistant integration capabilities
       description: |
         Returns the stable device identity, protocol version, supported
@@ -3095,7 +3201,7 @@ paths:
         this endpoint only over HTTPS.
       operationId: getHomeAssistantCapabilities
       security:
-        - integrationBearer: []
+      - integrationBearer: []
       responses:
         '200':
           description: Integration capabilities
@@ -3110,10 +3216,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/pair:
     post:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Claim a physically authorized pairing window
       description: |
         Exchanges the six-digit code displayed on the physical controller for
@@ -3130,7 +3238,7 @@ paths:
             schema:
               type: object
               required:
-                - code
+              - code
               properties:
                 code:
                   type: string
@@ -3149,10 +3257,10 @@ paths:
               schema:
                 type: object
                 required:
-                  - protocol_version
-                  - device_id
-                  - sha256_fingerprint
-                  - token
+                - protocol_version
+                - device_id
+                - sha256_fingerprint
+                - token
                 properties:
                   protocol_version:
                     type: integer
@@ -3194,7 +3302,7 @@ paths:
   /api/v1/state:
     get:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Coherent Home Assistant state snapshot
       description: |
         Returns a complete versioned state snapshot. Revisions are monotonic
@@ -3202,7 +3310,7 @@ paths:
         Production firmware exposes this endpoint only over HTTPS.
       operationId: getHomeAssistantState
       security:
-        - integrationBearer: []
+      - integrationBearer: []
       responses:
         '200':
           description: Versioned state snapshot
@@ -3217,14 +3325,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/control/power:
     put:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Accept an allowlisted power command
       operationId: setHomeAssistantPower
       security:
-        - integrationBearer: []
+      - integrationBearer: []
       requestBody:
         required: true
         content:
@@ -3247,14 +3357,16 @@ paths:
         '503':
           description: Control unavailable or unsupported
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/control/mode:
     put:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Accept an allowlisted exact-mode command
       operationId: setHomeAssistantMode
       security:
-        - integrationBearer: []
+      - integrationBearer: []
       requestBody:
         required: true
         content:
@@ -3277,14 +3389,16 @@ paths:
         '503':
           description: Control unavailable or unsupported
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/control/setpoint:
     put:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Accept one allowlisted setpoint command
       operationId: setHomeAssistantSetpoint
       security:
-        - integrationBearer: []
+      - integrationBearer: []
       requestBody:
         required: true
         content:
@@ -3307,10 +3421,12 @@ paths:
         '503':
           description: Control unavailable or unsupported
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/events:
     get:
       tags:
-        - HomeAssistant
+      - HomeAssistant
       summary: Authenticated Home Assistant WebSocket event stream
       description: |
         Upgrades to WSS on port 8443. The server sends a hello message followed
@@ -3321,7 +3437,7 @@ paths:
         available for REST reconciliation.
       operationId: streamHomeAssistantEvents
       security:
-        - integrationBearer: []
+      - integrationBearer: []
       responses:
         '101':
           description: WebSocket upgrade accepted
@@ -3338,6 +3454,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+        '400':
+          $ref: '#/components/responses/BadRequest'
 components:
   securitySchemes:
     apiKey:
@@ -3358,6 +3476,13 @@ components:
         Dedicated token issued only by the physical Home Assistant pairing
         flow. Existing web/API authentication settings never bypass it.
 
+  responses:
+    BadRequest:
+      description: Malformed request. esp_http_server rejects unparseable or oversized request headers with 400 before the handler runs, so any operation can return this; individual handlers also use it for invalid payloads.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
     Location:
       type: object
@@ -3400,13 +3525,13 @@ components:
     HomeAssistantCapabilities:
       type: object
       required:
-        - protocol_version
-        - device_id
-        - model
-        - firmware_version
-        - transports
-        - capabilities
-        - setpoint_limits_c
+      - protocol_version
+      - device_id
+      - model
+      - firmware_version
+      - transports
+      - capabilities
+      - setpoint_limits_c
       properties:
         protocol_version:
           type: integer
@@ -3429,14 +3554,14 @@ components:
         capabilities:
           type: object
           required:
-            - read_state
-            - control_power
-            - control_mode
-            - control_setpoints
-            - advanced_parameters
-            - raw_registers
-            - supported_modes
-            - setpoint_controls
+          - read_state
+          - control_power
+          - control_mode
+          - control_setpoints
+          - advanced_parameters
+          - raw_registers
+          - supported_modes
+          - setpoint_controls
           properties:
             read_state:
               type: boolean
@@ -3545,12 +3670,12 @@ components:
     HomeAssistantStateSnapshot:
       type: object
       required:
-        - protocol_version
-        - device_id
-        - boot_id
-        - revision
-        - captured_at_ms
-        - state
+      - protocol_version
+      - device_id
+      - boot_id
+      - revision
+      - captured_at_ms
+      - state
       properties:
         protocol_version:
           type: integer
@@ -3570,16 +3695,16 @@ components:
         state:
           type: object
           required:
-            - connected
-            - unit_on
-            - mode
-            - operation
-            - defrosting
-            - components
-            - temperatures_c
-            - setpoints_c
-            - readings
-            - error
+          - connected
+          - unit_on
+          - mode
+          - operation
+          - defrosting
+          - components
+          - temperatures_c
+          - setpoints_c
+          - readings
+          - error
 
 
     LogEntry:
@@ -3616,28 +3741,28 @@ components:
           type: string
           description: Event type identifier
           enum:
-            - system_start
-            - power_on
-            - power_off
-            - mode_changed
-            - setpoint_changed
-            - compressor_on
-            - compressor_off
-            - fan_on
-            - fan_off
-            - pump_on
-            - pump_off
-            - aux_heater_on
-            - aux_heater_off
-            - defrost_start
-            - defrost_end
-            - error_appeared
-            - error_cleared
-            - connected
-            - disconnected
-            - brownout_reset
-            - application_crash
-            - watchdog_reset
+          - system_start
+          - power_on
+          - power_off
+          - mode_changed
+          - setpoint_changed
+          - compressor_on
+          - compressor_off
+          - fan_on
+          - fan_off
+          - pump_on
+          - pump_off
+          - aux_heater_on
+          - aux_heater_off
+          - defrost_start
+          - defrost_end
+          - error_appeared
+          - error_cleared
+          - connected
+          - disconnected
+          - brownout_reset
+          - application_crash
+          - watchdog_reset
           example: power_on
         category:
           type: string
