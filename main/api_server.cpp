@@ -3262,6 +3262,7 @@ static const char* ota_state_to_string(ota_state_t state)
 {
     switch (state) {
         case OTA_STATE_IDLE: return "idle";
+        case OTA_STATE_UPLOADING: return "uploading";
         case OTA_STATE_DOWNLOADING: return "downloading";
         case OTA_STATE_VERIFYING: return "verifying";
         case OTA_STATE_READY_TO_REBOOT: return "ready_to_reboot";
