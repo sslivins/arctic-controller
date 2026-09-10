@@ -14,6 +14,7 @@
 #include "geocoding.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
+#include "status_bar.h"
 #include <esp_log.h>
 #include <string.h>
 #include <stdio.h>
@@ -184,6 +185,12 @@ static void save_settings(void)
 {
     // Use time_manager API to save format - it updates both NVS and in-memory state
     time_mgr_set_24h_format(s_state.use_24h);
+    // Repaint the status-bar clock now instead of leaving it in the old format
+    // until its 10-second refresh timer next fires. Without this the clock
+    // still reads e.g. "17:05" (or "05:05" with no AM/PM) for several seconds
+    // after the user toggles the format, which reads as the setting having
+    // been ignored.
+    status_bar_update_time();
     ESP_LOGI(TAG, "Saved 24h format: %d", s_state.use_24h);
 }
 

@@ -146,6 +146,63 @@ def test_toggle_to_12h_format(device: DeviceClient, time_format_restore):
         f"Expected format_24h=False, got {prefs['format_24h']}"
 
 
+def _open_temperature_history(device: DeviceClient):
+    """From the main screen, open the 8-hour temperature history graph."""
+    device.click(tag="nav_status")
+    device.wait_for_widget(tag="temperature_history_open", timeout=5.0)
+    device.click(tag="temperature_history_open")
+    device.wait_for_widget(tag="temperature_history_screen", timeout=5.0)
+
+
+def _history_range_text(device: DeviceClient) -> str:
+    w = device.find_widget(tag="temperature_history_range")
+    return (w.text or "").strip() if w is not None else ""
+
+
+def test_history_range_label_follows_time_format(
+    device: DeviceClient, time_format_restore
+):
+    """The history graph's range label must honour the 12/24h setting.
+
+    Regression guard: this screen formatted its range label and axis ticks with
+    a hardcoded "%H:%M", so it stayed on 24-hour time forever no matter what the
+    user selected. Every other screen already branched on the setting, which is
+    what made the omission easy to miss.
+    """
+    device.populate_temperature_history()
+
+    # 24-hour: the range reads like "Sep 10, 14:05" with no meridiem.
+    _navigate_to_time_screen(device)
+    _set_format_24h(device, True)
+    _return_to_main(device)
+    _open_temperature_history(device)
+    device.wait_until(
+        "history range label rendered",
+        lambda: bool(_history_range_text(device)),
+        timeout=5.0,
+    )
+    text_24h = _history_range_text(device)
+    assert not _12H_PATTERN.search(text_24h), \
+        f"Expected 24h range label (no AM/PM), got '{text_24h}'"
+    device.click(tag="temperature_history_back")
+
+    # 12-hour: the same label must now carry AM/PM.
+    _return_to_main(device)
+    _navigate_to_time_screen(device)
+    _set_format_24h(device, False)
+    _return_to_main(device)
+    _open_temperature_history(device)
+    device.wait_until(
+        "history range label shows 12h format",
+        lambda: bool(_12H_PATTERN.search(_history_range_text(device))),
+        timeout=5.0,
+    )
+    text_12h = _history_range_text(device)
+    assert _12H_PATTERN.search(text_12h), \
+        f"Expected 12h range label (with AM/PM), got '{text_12h}'"
+    device.click(tag="temperature_history_back")
+
+
 def test_main_screen_shows_24h(device: DeviceClient, time_format_restore):
     """After switching to 24h, the main screen status bar should show 24h format."""
     _navigate_to_time_screen(device)
