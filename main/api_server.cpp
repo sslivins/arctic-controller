@@ -3262,6 +3262,7 @@ static const char* ota_state_to_string(ota_state_t state)
 {
     switch (state) {
         case OTA_STATE_IDLE: return "idle";
+        case OTA_STATE_UPLOADING: return "uploading";
         case OTA_STATE_DOWNLOADING: return "downloading";
         case OTA_STATE_VERIFYING: return "verifying";
         case OTA_STATE_READY_TO_REBOOT: return "ready_to_reboot";
@@ -3296,6 +3297,19 @@ static esp_err_t ota_status_get_handler(httpd_req_t* req)
     // build it just OTA'd, so a silent rollback to the previous image is caught
     // instead of being masked by tests passing against the rolled-back firmware.
     cJSON_AddStringToObject(root, "build_sha", ARCTIC_BUILD_SHA);
+
+    // Which app slot is executing. `build_sha` proves *which build* is running;
+    // this proves *how it got there*. A device that booted from `factory` was
+    // flashed over USB, so an OTA either never ran or was rolled back — a
+    // distinction the OTA tests need and could not previously make, because a
+    // USB-recovered device presents exactly the same build_sha as a
+    // successfully OTA'd one (see the OTA strictness gate in device-tests.yml).
+    {
+        char part_label[17] = {0};
+        ota_mgr_get_partition_info(part_label, NULL, NULL);
+        part_label[16] = '\0';
+        cJSON_AddStringToObject(root, "running_partition", part_label);
+    }
     
     if (status.new_version[0] != '\0') {
         cJSON_AddStringToObject(root, "new_version", status.new_version);

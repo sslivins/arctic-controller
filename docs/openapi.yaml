@@ -919,6 +919,25 @@ paths:
                       been validated yet. If the device reboots before validation,
                       the bootloader reverts to the previous partition.
                     example: false
+                  build_sha:
+                    type: string
+                    description: |
+                      Per-build fingerprint baked in at compile time. CI asserts
+                      this equals the build it just installed, so a silent
+                      rollback to the previous image is caught rather than being
+                      masked by tests passing against the reverted firmware.
+                    example: "a1b2c3d"
+                  running_partition:
+                    type: string
+                    description: |
+                      Label of the app partition currently executing, e.g.
+                      `factory`, `ota_0` or `ota_1`. Where `build_sha` identifies
+                      *which* build is running, this identifies *how it got
+                      there*: a device running from `factory` was flashed over
+                      USB, so an OTA either never ran or was rolled back. A
+                      USB-recovered device otherwise reports exactly the same
+                      `build_sha` as a successfully updated one.
+                    example: "ota_0"
                   new_version:
                     type: string
                     description: Version being installed (only during URL update)

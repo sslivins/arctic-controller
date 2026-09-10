@@ -92,6 +92,14 @@ BENIGN_SKIP_PATTERNS = [
     # Self-invalidating by design: the call under test destroys the credential
     # the rest of the run depends on, so it can only be exercised in isolation.
     r"invalidates arctic_api_key",
+    # The OTA install assertions (#252 T-01) check properties of the install CI
+    # itself performed. Run outside CI there is no such install to assert on:
+    # no baked build_sha to compare against, and no statement of whether the
+    # firmware arrived over the air or over USB. Genuinely not applicable rather
+    # than untested — in CI these always execute.
+    r"not a ci build",
+    r"arctic_flash_method unset",
+    r"ota slot not applicable",
 ]
 
 # Deliberate, tracked gaps: the test is skipped because the feature or the
