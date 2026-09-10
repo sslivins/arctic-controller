@@ -22,8 +22,34 @@
 
 static const char* TAG = "ota_manager";
 
-// OTA task stack size
-#define OTA_TASK_STACK_SIZE 8192
+// OTA task stack size.
+//
+// Sized from measurement, not habit. The task's deepest path is the TLS-backed
+// download (mbedTLS handshake + HTTP receive); measured on hardware it leaves
+// 4648 of 8192 bytes untouched, i.e. it actually uses ~3544. The old 8192 had
+// to be found as one contiguous block of internal RAM at the moment an update
+// is requested, and internal RAM routinely fragments below that during normal
+// API traffic -- observed largest free block 7936 while ~29 KB was free overall,
+// which made OTA unstartable (#256). 6144 keeps ~74% headroom over the measured
+// peak while sitting well under the worst fragmentation seen.
+//
+// ota_log_stack_headroom() reports the real figure on every OTA, so this can be
+// re-checked rather than assumed if the task grows.
+#define OTA_TASK_STACK_SIZE 6144
+
+// Report how much of the OTA task's stack was never used, at the points where
+// it has just finished the two phases that dominate its depth: the TLS-backed
+// download, and the flash write. OTA_TASK_STACK_SIZE has to be requested as one
+// contiguous block of internal RAM, which is the scarcest allocation the device
+// makes (#256), so the size needs to be justified by measurement rather than
+// left at a round number.
+static void ota_log_stack_headroom(const char* phase)
+{
+    // ESP-IDF's uxTaskGetStackHighWaterMark() returns bytes, not words.
+    ESP_LOGI(TAG, "ota_task stack: %u bytes never used after %s (of %d)",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL), phase,
+             OTA_TASK_STACK_SIZE);
+}
 
 // GitHub API URL for releases
 #define GITHUB_API_URL "https://api.github.com/repos/sslivins/arctic-controller/releases/latest"
@@ -131,15 +157,20 @@ bool ota_mgr_init(void)
 
 bool ota_mgr_start_update(const char* url)
 {
+    return ota_mgr_start_update_ex(url) == OTA_START_OK;
+}
+
+ota_start_result_t ota_mgr_start_update_ex(const char* url)
+{
     if (url == NULL || strlen(url) == 0) {
         ESP_LOGE(TAG, "Invalid URL");
-        return false;
+        return OTA_START_INVALID_URL;
     }
     
     // Security: Only allow updates from official GitHub repository
     if (strncmp(url, ALLOWED_OTA_URL_PREFIX, strlen(ALLOWED_OTA_URL_PREFIX)) != 0) {
         ESP_LOGE(TAG, "URL not allowed: must start with %s", ALLOWED_OTA_URL_PREFIX);
-        return false;
+        return OTA_START_INVALID_URL;
     }
     
     xSemaphoreTake(status_mutex, portMAX_DELAY);
@@ -150,7 +181,7 @@ bool ota_mgr_start_update(const char* url)
         ota_status.state == OTA_STATE_VERIFYING) {
         ESP_LOGW(TAG, "OTA already in progress (state=%d)", ota_status.state);
         xSemaphoreGive(status_mutex);
-        return false;
+        return OTA_START_BUSY;
     }
     
     // Store URL and reset status
@@ -172,15 +203,23 @@ bool ota_mgr_start_update(const char* url)
     // Lower priority than LVGL (5) to avoid display glitches during flash writes
     BaseType_t ret = xTaskCreate(ota_task, "ota_task", OTA_TASK_STACK_SIZE, NULL, 3, NULL);
     if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create OTA task");
+        // The stack is one contiguous block of internal RAM, so this fails when
+        // internal RAM is fragmented even though plenty is free overall (#256).
+        // Log what was actually available: without it this is indistinguishable
+        // from a logic error.
+        ESP_LOGE(TAG, "Failed to create OTA task (need %d contiguous internal bytes, "
+                      "largest free block is %u, %u free in total)",
+                 OTA_TASK_STACK_SIZE,
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
         xSemaphoreTake(status_mutex, portMAX_DELAY);
         ota_status.state = OTA_STATE_FAILED;
         strncpy(ota_status.error_msg, "Failed to start OTA task", sizeof(ota_status.error_msg));
         xSemaphoreGive(status_mutex);
-        return false;
+        return OTA_START_NO_RESOURCES;
     }
     
-    return true;
+    return OTA_START_OK;
 }
 
 ota_status_t ota_mgr_get_status(void)
@@ -550,6 +589,7 @@ static void ota_task(void* pvParameter)
     if (err != ESP_OK || buf_ctx.err != ESP_OK || http_status != 200) {
         ESP_LOGE(TAG, "Download failed: http=%d perform=%s buf=%s",
                  http_status, esp_err_to_name(err), esp_err_to_name(buf_ctx.err));
+        ota_log_stack_headroom("a failed download");
         heap_caps_free(img_buf);
         ota_twdt_resume_idle();
         xSemaphoreTake(status_mutex, portMAX_DELAY);
@@ -594,6 +634,7 @@ static void ota_task(void* pvParameter)
     ota_status.progress_percent = 100;
     xSemaphoreGive(status_mutex);
     ESP_LOGI(TAG, "Download complete (%d bytes) buffered in PSRAM", img_len);
+    ota_log_stack_headroom("the download");
 
     // ---- Point of no return: from here we quiesce the network and touch flash. ----
     // Any failure below leaves the servers stopped, so we MUST reboot rather than
@@ -646,6 +687,7 @@ static void ota_task(void* pvParameter)
 
     // Success!
     ESP_LOGI(TAG, "OTA update successful! Rebooting...");
+    ota_log_stack_headroom("the flash write");
     xSemaphoreTake(status_mutex, portMAX_DELAY);
     ota_status.state = OTA_STATE_READY_TO_REBOOT;
     xSemaphoreGive(status_mutex);
