@@ -31,7 +31,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ota-rollback-validation
+  group: ota-device-hardware
   cancel-in-progress: false
 
 permissions:
