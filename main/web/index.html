@@ -1000,7 +1000,7 @@
         <select id="log-level" style="width:120px"><option>V</option><option>D</option><option>I</option><option>W</option><option>E</option></select></div>
         <div id="log-container" class="logs">${state.logs.map(l => `<div class="log ${esc(l.level)}">[${esc(l.level)}] ${esc(l.tag)}: ${esc(l.message)}</div>`).join("") || "No logs loaded."}</div>
         <div class="btn-row" style="margin-top:14px"><button class="btn" data-action="refresh-logs">Refresh</button><button class="btn danger" data-action="clear-logs">Clear logs</button>
-          <a class="btn" href="/api/heatpump/diagnostic" download>Download report</a><a class="btn" href="/api/screenshot" target="_blank">Device screenshot</a></div></section>`;
+          <a class="btn" href="/api/heatpump/diagnostic" download>Download report</a><a class="btn" href="/api/screenshot?format=jpeg" target="_blank">Device screenshot</a></div></section>`;
     }
     function systemSettings() {
       return `<div class="grid"><section class="card"><h2>Controller</h2>

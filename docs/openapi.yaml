@@ -3209,25 +3209,58 @@ paths:
     get:
       tags:
       - Display
-      summary: Capture live screen as PNG
+      summary: Capture live screen as PNG or JPEG
       description: |
-        Returns a PNG screenshot of the current LVGL display.
-        The image is encoded as an **uncompressed PNG** (DEFLATE stored blocks)
-        for minimal CPU overhead on the ESP32. The response is streamed via
-        HTTP chunked transfer — no extra memory allocation beyond the
-        framebuffer capture (~2.7 MB in PSRAM).
+        Returns a screenshot of the current LVGL display.
 
         Image dimensions: 720×1280 (portrait), RGB888 color.
-        Typical response size: ~2.77 MB.
+
+        **`format=png`** (default, unchanged): an **uncompressed PNG**
+        (DEFLATE stored blocks) for minimal CPU overhead. Streamed via HTTP
+        chunked transfer — no allocation beyond the framebuffer capture
+        (~2.7 MB in PSRAM). Typical response size ~2.77 MB.
+
+        **`format=jpeg`**: encoded by the ESP32-P4's **hardware JPEG
+        encoder**, so compression costs a few milliseconds rather than CPU
+        time. Chroma subsampling is 4:4:4, chosen because a UI screenshot is
+        thin text and single-pixel borders — exactly the content 4:2:0
+        smears. Typically a few hundred KB, roughly an order of magnitude
+        smaller than the PNG, which also cuts TLS work on the device by the
+        same factor. Sent as a single response rather than chunked.
+
+        Prefer JPEG unless you need pixel-exact output.
       operationId: getScreenshot
       security:
       - apiKey: []
       - sessionCookie: []
+      parameters:
+      - name: format
+        in: query
+        required: false
+        description: Output image format. Defaults to `png` for backward compatibility.
+        schema:
+          type: string
+          enum: [png, jpeg, jpg]
+          default: png
+      - name: quality
+        in: query
+        required: false
+        description: |
+          JPEG quality factor. Ignored when `format=png`.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 80
       responses:
         '200':
-          description: PNG screenshot of the current display
+          description: Screenshot of the current display
           content:
             image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
               schema:
                 type: string
                 format: binary

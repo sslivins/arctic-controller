@@ -494,6 +494,9 @@ jobs:
             # ---- Nightly: asynchronous PULL path (/api/ota/update) ----
             ASSET_URL="https://github.com/sslivins/arctic-controller/releases/download/ci-nightly/arctic_controller.bin"
             echo "Nightly OTA pull path: instructing device to download $ASSET_URL"
+            # See the note on the push path: curl leaves a previous run's body
+            # in place when a transfer dies before the response.
+            rm -f /tmp/ota_response.txt
             HTTP_CODE=$(curl -sk -o /tmp/ota_response.txt -w "%{http_code}" \
               -X POST \
               -H "Content-Type: application/json" \
@@ -501,7 +504,7 @@ jobs:
               --connect-timeout 5 --max-time 20 \
               -d "{\"url\": \"$ASSET_URL\"}" \
               "$ARCTIC_URL_HTTPS/api/ota/update") || true
-            echo "Update trigger: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
+            echo "Update trigger: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt 2>/dev/null || echo '<no response body>')"
             if [ "$HTTP_CODE" != "200" ]; then
               echo "::error::/api/ota/update was rejected (HTTP $HTTP_CODE). Nightly pull-path OTA failed to start."
               exit 1
@@ -549,15 +552,41 @@ jobs:
           else
             # ---- PR/push: synchronous PUSH path (/api/ota/upload) ----
             echo "Uploading firmware to device via /api/ota/upload ..."
+            FW_BYTES=$(stat -c %s build/arctic_controller.bin)
+            echo "Firmware is $FW_BYTES bytes"
+
+            # curl only creates/truncates the output file once it has body data
+            # to write, so a transfer that dies before the response leaves
+            # whatever a PREVIOUS run wrote still sitting there. The 000 branch
+            # below reads this file, so a stale success body would be accepted
+            # as though it described this upload. Run 34633291016 did exactly
+            # that: the device logged
+            #   E esp_ota_ops: New image failed verification
+            #   E api_server: esp_ota_end failed: ESP_ERR_OTA_VALIDATE_FAILED
+            # and answered 500, while the workflow read a leftover
+            # {"success":true,"bytes_received":2407824,...} — the byte count of
+            # the PREVIOUS build, not this one — and called the OTA good.
+            rm -f /tmp/ota_response.txt
+
+            # 300s, not 30s. --max-time is a hard stop on the whole transfer,
+            # so a limit sized for a response was silently cutting a ~2.4 MB
+            # TLS upload off mid-body. The device then received a truncated
+            # image, correctly failed esp_ota_end verification and returned
+            # 500. In run 34633291016 the device's receive window is visible
+            # ending at exactly 30,158 ms. This is also the whole of the
+            # "intermittent" behaviour in #273: the upload sat right at the
+            # limit, so it completed or was truncated depending on how the
+            # link happened to be performing, and a slightly larger firmware
+            # pushed it consistently over.
             HTTP_CODE=$(curl -skL -o /tmp/ota_response.txt -w "%{http_code}" \
               -X POST \
               -H "Content-Type: application/octet-stream" \
               -H "X-API-Key: ${ARCTIC_API_KEY}" \
               --connect-timeout 5 \
-              --max-time 30 \
+              --max-time 300 \
               --data-binary @build/arctic_controller.bin \
               "$ARCTIC_URL_HTTPS/api/ota/upload") || true
-            echo "Response: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
+            echo "Response: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt 2>/dev/null || echo '<no response body>')"
             if [ "$HTTP_CODE" = "200" ]; then
               echo "OTA upload successful, waiting for reboot..."
               wait_for_new_build_sha
@@ -565,27 +594,31 @@ jobs:
             fi
             # The device reboots the instant it has written the image, so it
             # never sends a clean TLS close_notify. curl can therefore receive
-            # the complete success body and still report 000, either because
-            # the connection was torn down mid-transfer or because --max-time
-            # expired waiting for a close that was never coming. Run
-            # 34625998136 failed exactly this way: the body read
-            # {"success":true,"bytes_received":2407824,"message":"Firmware
-            # uploaded. Rebooting..."} and the status code was 000, so a
-            # successful over-the-air install was recorded as a failure. The
-            # job then fell back to USB, which boots the factory slot, and
-            # the identity, OTA-strict, heap and floor gates all failed in
-            # cascade behind it.
+            # the complete success body and still report 000 because the
+            # connection was torn down before a clean close. Run 34625998136
+            # failed exactly this way: the body read {"success":true,
+            # "bytes_received":2407824,"message":"Firmware uploaded.
+            # Rebooting..."} and the status code was 000, so a successful
+            # over-the-air install was recorded as a failure. The job then fell
+            # back to USB, which boots the factory slot, and the identity,
+            # OTA-strict, heap and floor gates all failed in cascade behind it.
             #
-            # The body is the device's own statement that it accepted and
-            # wrote the image, and "Enforce OTA installation success (strict)"
-            # later proves the running image by build_sha — strictly stronger
-            # evidence than any status code. So accept the body, and only
-            # when the code is 000; a real HTTP error code still fails.
-            if [ "$HTTP_CODE" = "000" ] && grep -q '"success"[[:space:]]*:[[:space:]]*true' /tmp/ota_response.txt; then
-              echo "OTA upload reported success in-body but the connection closed uncleanly (HTTP $HTTP_CODE)."
-              echo "Accepting the upload; the running image is verified by build_sha below."
-              wait_for_new_build_sha
-              exit $?
+            # So accept the body when the code is 000 — but only if it is
+            # actually this upload's body. Requiring bytes_received to equal
+            # the firmware size is what makes that check honest: it rejects
+            # both a stale file from an earlier run and a genuine short write,
+            # either of which would otherwise pass on "success":true alone.
+            if [ "$HTTP_CODE" = "000" ] && [ -f /tmp/ota_response.txt ] \
+               && grep -q '"success"[[:space:]]*:[[:space:]]*true' /tmp/ota_response.txt; then
+              GOT=$(python3 -c "import sys,json; print(int(json.load(sys.stdin).get('bytes_received',-1)))" \
+                    < /tmp/ota_response.txt 2>/dev/null) || GOT=-1
+              if [ "$GOT" = "$FW_BYTES" ]; then
+                echo "OTA upload reported success in-body for all $FW_BYTES bytes, but the connection closed uncleanly (HTTP $HTTP_CODE)."
+                echo "Accepting the upload; the running image is verified by build_sha below."
+                wait_for_new_build_sha
+                exit $?
+              fi
+              echo "::error::Ignoring a success body that does not describe this upload: it reports bytes_received=${GOT} but the firmware is ${FW_BYTES} bytes. Either the upload was truncated or this is a stale response from an earlier run."
             fi
             echo "OTA upload failed"
             exit 1
