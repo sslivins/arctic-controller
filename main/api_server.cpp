@@ -52,7 +52,6 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>   // strcasecmp — case-insensitive ?format= matching
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
 #include <lvgl.h>
@@ -5752,6 +5751,24 @@ static esp_err_t screenshot_send_jpeg(httpd_req_t* req, int32_t w, int32_t h,
     return send_err;
 }
 
+/*
+ * Case-insensitive compare for short query-parameter values. strcasecmp lives
+ * in <strings.h>, which this toolchain does not expose to C++ in this
+ * translation unit, so compare directly rather than depend on feature-test
+ * macros.
+ */
+static bool query_value_ieq(const char* a, const char* b)
+{
+    while (*a != '\0' && *b != '\0') {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) {
+            return false;
+        }
+        ++a;
+        ++b;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 static esp_err_t screenshot_get_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -5766,9 +5783,9 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
         char param[16];
         if (httpd_query_key_value(query, "format", param, sizeof(param)) == ESP_OK) {
-            if (strcasecmp(param, "jpeg") == 0 || strcasecmp(param, "jpg") == 0) {
+            if (query_value_ieq(param, "jpeg") || query_value_ieq(param, "jpg")) {
                 want_jpeg = true;
-            } else if (strcasecmp(param, "png") != 0) {
+            } else if (!query_value_ieq(param, "png")) {
                 send_json_error(req, "400 Bad Request",
                                 "format must be 'png' or 'jpeg'");
                 return ESP_OK;
