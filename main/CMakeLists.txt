@@ -46,6 +46,7 @@ idf_component_register(
         "status_bar.cpp"
         "api_server.cpp"
         "ota_manager.cpp"
+        "ota_commit.cpp"
         "auth_manager.cpp"
         "ha_integration.cpp"
         "setup_pairing.cpp"

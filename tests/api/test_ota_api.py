@@ -386,6 +386,58 @@ class TestOtaStatusSchema:
             f"Unexpected state: {data['state']}"
         )
 
+    def test_commit_status_is_valid_enum(self):
+        """
+        commit_status must be one of the documented values.
+
+        This field reports why an unverified image has not committed itself.
+        It is the observable half of the commit criteria (#252 T-05): a
+        commissioned device must have reached the network at least once this
+        boot before it marks its firmware valid, so that an image which boots
+        and renders but cannot reach the network rolls back instead of
+        stranding a device that has no serial console in the field.
+        """
+        data = _get("/api/ota/status").json()
+        valid = {
+            "committed", "not_pending", "waiting_for_ui",
+            "waiting_for_network", "waiting_for_network_grace",
+        }
+        assert data["commit_status"] in valid, (
+            f"Unexpected commit_status: {data['commit_status']}"
+        )
+        assert isinstance(data["commissioned"], bool)
+
+    def test_reachable_device_is_not_stuck_uncommitted(self):
+        """
+        A device answering over the network must not be refusing to commit.
+
+        We are talking to it over TCP, so networking demonstrably works on this
+        boot and the reachability criterion is satisfied by construction. If it
+        still reports waiting_for_network, the latch is broken and this image
+        would roll itself back on the next reboot despite being healthy --
+        which on a fielded unit means an unexplained version regression.
+        """
+        data = _get("/api/ota/status").json()
+        assert data["commit_status"] != "waiting_for_network", (
+            "Device is reachable over HTTP but reports waiting_for_network; "
+            "the reachability latch is not being set, so this firmware would "
+            "roll back on the next reboot."
+        )
+
+    def test_reachable_device_is_commissioned(self):
+        """
+        Reaching the device over the network must have latched 'commissioned'.
+
+        The latch is what stops a credential-loading regression from making a
+        deployed device look factory-fresh and thereby qualify for the weaker
+        UI-only commit criterion.
+        """
+        data = _get("/api/ota/status").json()
+        assert data["commissioned"] is True, (
+            "Device served an HTTP request but is not marked commissioned; "
+            "the persistent latch is not being written."
+        )
+
 
 # ── OTA Status — idle baseline values ─────────────────────────────────────
 

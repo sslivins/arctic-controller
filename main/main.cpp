@@ -21,6 +21,7 @@
 #include "status_bar.h"
 #include "weather.h"
 #include "ota_manager.h"
+#include "ota_commit.h"
 #if CONFIG_ARCTIC_POISON_FIRMWARE
 #include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
@@ -371,15 +372,18 @@ extern "C" void app_main(void)
 
     // Initialize OTA manager
     ota_mgr_init();
-    
+    ota_commit_init();
+
     // NOTE: ota_mgr_mark_valid() is NOT called here.  With rollback enabled,
-    // new firmware boots in PENDING_VERIFY state.  We defer mark_valid()
-    // until after the UI has been created and critical subsystems are up,
-    // proving the firmware is functional.  If the device crash-loops before
-    // reaching that point, the bootloader rolls back to the previous version.
+    // new firmware boots in PENDING_VERIFY state.  The commit decision is
+    // owned by ota_commit_eval(), driven from the main loop: the UI must come
+    // up AND (on a commissioned device) the network must have been reachable
+    // at least once this boot.  An image that crash-loops, or that boots but
+    // cannot reach the network, is never committed and the bootloader rolls
+    // back to the previous version.
     if (ota_mgr_is_pending_verify()) {
         ESP_LOGW(TAG, "*** First boot after OTA — firmware pending verification ***");
-        ESP_LOGW(TAG, "*** Will mark valid after UI creation succeeds ***");
+        ESP_LOGW(TAG, "*** Will mark valid once the UI is up and the network is reachable ***");
     }
 
 #if CONFIG_ARCTIC_POISON_FIRMWARE
@@ -477,6 +481,9 @@ extern "C" void app_main(void)
     bool health_marked = false;
     int64_t next_health_attempt_us = HEALTH_WINDOW_US;
 
+    const int64_t COMMIT_EVAL_INTERVAL_US = 1000000LL;  // 1 s
+    int64_t next_commit_eval_us = 0;
+
     // Main loop
     while (1) {
         esp_task_wdt_reset();
@@ -495,14 +502,29 @@ extern "C" void app_main(void)
             bsp_display_unlock();
             mclog::tagInfo(TAG, "UI Created");
             show_main_ui = false;  // Only create once
-            
-            // NOW mark firmware as valid — display init succeeded, LVGL is
-            // running, UI rendered, heat-pump integration started, event log is up.
-            // If we got here, the firmware is functional.
-            if (ota_mgr_is_pending_verify()) {
-                ESP_LOGI(TAG, "Post-OTA health check passed — marking firmware valid");
-                ota_mgr_mark_valid();
-            }
+
+            // Display init succeeded, LVGL is running, the UI rendered, the
+            // heat-pump integration started and the event log is up. That is
+            // one of the commit criteria — NOT the commit itself.
+            //
+            // The commit decision deliberately does not live in this block.
+            // This block runs exactly once, about a second into boot, whereas
+            // association and DHCP typically land several seconds later. A
+            // commit check here would observe "no network", never re-run, and
+            // leave every OTA'd unit uncommitted until it rolled itself back.
+            // ota_commit_eval() below re-evaluates until the criteria are met.
+            ota_commit_note_ui_ready();
+        }
+
+        // Decide whether this firmware has earned the right to commit itself.
+        // See ota_commit.h — a commissioned device must have been reachable at
+        // least once this boot, so an image that boots and renders but has
+        // broken networking is rolled back instead of stranding the device.
+        // Throttled: the loop runs at ~100 Hz and the evaluation reads the OTA
+        // partition state.
+        if (esp_timer_get_time() >= next_commit_eval_us) {
+            next_commit_eval_us = esp_timer_get_time() + COMMIT_EVAL_INTERVAL_US;
+            ota_commit_eval();
         }
 
         // Once the device has run for the stability window, declare it healthy

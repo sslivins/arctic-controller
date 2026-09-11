@@ -13,6 +13,7 @@
 #include "geocoding.h"
 #include "weather.h"
 #include "ota_manager.h"
+#include "ota_commit.h"
 #include "auth_manager.h"
 #include "ha_integration.h"
 #include "setup_pairing.h"
@@ -3310,6 +3311,13 @@ static esp_err_t ota_status_get_handler(httpd_req_t* req)
         part_label[16] = '\0';
         cJSON_AddStringToObject(root, "running_partition", part_label);
     }
+
+    // Why an unverified image has not committed itself yet. Lets the CMS (and
+    // the rollback-validation job) distinguish "healthy and committed" from
+    // "up, but refusing to commit because it cannot reach the network" — the
+    // latter will roll back on the next reboot.
+    cJSON_AddStringToObject(root, "commit_status", ota_commit_status());
+    cJSON_AddBoolToObject(root, "commissioned", ota_commit_is_commissioned());
     
     if (status.new_version[0] != '\0') {
         cJSON_AddStringToObject(root, "new_version", status.new_version);
