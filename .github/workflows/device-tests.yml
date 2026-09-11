@@ -517,21 +517,58 @@ jobs:
           # flash and a failure for an OTA. Only the workflow knows which was
           # intended, so it states it here.
           echo "ARCTIC_FLASH_METHOD=ota" >> "$GITHUB_ENV"
-          sleep 10
-          # 80s window: the async pull path (nightly) only starts flashing +
-          # rebooting AFTER this step begins (it quiesced the network mid-download),
-          # so allow for flash-from-PSRAM + reboot + C6 bringup. Harmless for the
-          # synchronous upload path, which is already rebooting by now.
-          for i in $(seq 1 80); do
-            if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
-               curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
-              echo "Device is back online after $((i + 10))s"
-              exit 0
+
+          # Waiting for "something answers" is not enough. The device keeps
+          # serving the OLD image for several seconds after it acknowledges the
+          # upload — it only reboots once it has finished writing the slot. A
+          # reachability poll therefore returns as soon as the pre-OTA firmware
+          # replies, and the identity gate downstream then reads the old
+          # build_sha and fails. Run 34627065548 did exactly that: "Device is
+          # back online after 11s", immediately followed by a mismatch naming
+          # the previous run's build. It was masked until now because the OTA
+          # step used to be misreported as failing (see the note in "Flash
+          # device via OTA"), which sent every run down the USB fallback and
+          # skipped this step entirely.
+          #
+          # So wait for the condition we actually care about: the device
+          # reporting the build_sha we just installed. Where build_sha.txt is
+          # absent (local or dispatch builds with no baked identity) fall back
+          # to plain reachability, which is all that is knowable there.
+          #
+          # HTTPS-only: this request carries the API key, and the security
+          # contract (tests/api/test_ha_security_contract.py) forbids
+          # secret-bearing automation from falling back to plain HTTP.
+          EXPECTED=$(cat build/build_sha.txt 2>/dev/null || true)
+          echo "Waiting for device to report build_sha '${EXPECTED:-<unknown>}'"
+
+          # 150s: covers reboot, WiFi association and C6 bringup, and the
+          # nightly pull path which only begins flashing from PSRAM once this
+          # step is already running.
+          sleep 5
+          deadline=$((SECONDS + 150))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            RESP=$(curl -sk --connect-timeout 2 --max-time 5 \
+              -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || true
+            if [ -n "$RESP" ]; then
+              if [ -z "$EXPECTED" ]; then
+                echo "No expected build_sha to match; device is reachable after ${SECONDS}s"
+                exit 0
+              fi
+              ACTUAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || true
+              if [ "$ACTUAL" = "$EXPECTED" ]; then
+                echo "Device is running the new build ($EXPECTED) after ${SECONDS}s"
+                exit 0
+              fi
             fi
-            sleep 1
+            sleep 2
           done
-          echo "Device did not come back online within 90s"
-          exit 1
+
+          echo "Device did not report build_sha '$EXPECTED' within 150s"
+          # Deliberately not a failure. The dedicated identity gate below
+          # distinguishes a rollback from an OTA that never took and says so
+          # precisely; failing here would pre-empt it with a vaguer message.
+          exit 0
 
       - name: Fallback — flash via USB serial
         if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
