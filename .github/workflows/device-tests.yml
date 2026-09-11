@@ -374,6 +374,29 @@ jobs:
             echo "does NOT exercise the OTA rollback path."
           fi
 
+      - name: Start serial capture for the OTA window
+        # The OTA window was the one part of the run with no console coverage:
+        # the main capture below cannot start until the USB port is free of
+        # flashing and hard-resets, which is long after the OTA has happened.
+        # That blind spot cost a full diagnostic cycle in run 34628089378, where
+        # the device accepted the whole image, answered "Rebooting..." and then
+        # did not reboot — and the only serial we had began 3 minutes later, so
+        # the uptime counter was the sole evidence of what occurred.
+        #
+        # This capture is deliberately scoped to the OTA step and stopped again
+        # before anything needs the port, so it cannot interfere with the USB
+        # fallback or the readiness hard-reset.
+        id: ota_serial
+        if: steps.partition_layout.outputs.changed != 'true'
+        run: |
+          python .github/scripts/capture_serial.py \
+            --usb-serial "$CONTROLLER_USB_SERIAL" \
+            --output controller-serial-ota.log &
+          echo "OTA_SERIAL_PID=$!" >> "$GITHUB_ENV"
+          sleep 2
+        env:
+          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
+
       - name: Flash device via OTA
         id: ota_flash
         if: steps.partition_layout.outputs.changed != 'true'
@@ -410,6 +433,63 @@ jobs:
           fi
           echo "Device responding at $ARCTIC_URL_HTTPS"
 
+          # An OTA "succeeded" only if the device is actually running the image
+          # we just sent. Everything before this point — an HTTP 200, a success
+          # body, a ready_to_reboot status — is the device telling us what it
+          # intends to do, not evidence that it did it. Run 34628089378 is the
+          # cautionary case: /api/ota/upload accepted all 2,407,824 bytes and
+          # answered "Firmware uploaded. Rebooting...", and the device then
+          # simply never rebooted (serial showed an unbroken 25-minute uptime
+          # straight through the OTA window).
+          #
+          # So verify, inside this step, that the reported build_sha is the one
+          # we installed. Doing it here rather than in a step of its own is what
+          # makes the outcome mean something: this step is continue-on-error, so
+          # a failure here lets "Fallback — flash via USB serial" rescue the rig,
+          # the suite still runs against the right build, and "Enforce OTA
+          # installation success (strict)" fails the job with the precise reason.
+          # Verifying in a separate step could do none of that — it could only
+          # dead-end the run with the device left on the old firmware.
+          wait_for_new_build_sha() {
+            local EXPECTED
+            EXPECTED=$(cat build/build_sha.txt 2>/dev/null || true)
+            if [ -z "$EXPECTED" ]; then
+              echo "::error::build/build_sha.txt is empty/missing — cannot confirm the OTA took."
+              return 1
+            fi
+            echo "Waiting for the device to report build_sha '$EXPECTED'..."
+
+            # 150s covers reboot, WiFi association and C6 bringup, plus the
+            # nightly pull path's flash-from-PSRAM, which only begins once the
+            # device has gone offline above.
+            local deadline=$((SECONDS + 150))
+            local RESP ACTUAL LAST=""
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              RESP=$(curl -sk --connect-timeout 2 --max-time 5 \
+                -H "X-API-Key: ${ARCTIC_API_KEY}" \
+                "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+              if [ -n "$RESP" ]; then
+                ACTUAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || ACTUAL=""
+                if [ "$ACTUAL" = "$EXPECTED" ]; then
+                  echo "Device is running the new build ($EXPECTED) after ${SECONDS}s"
+                  # Record how this firmware was installed so the OTA tests can
+                  # assert on it. The device cannot report this itself: a
+                  # USB-recovered device and a successfully OTA'd one present an
+                  # identical build_sha and differ only in which app slot they
+                  # booted from — legitimate for a USB flash, a failure for an
+                  # OTA. Only the workflow knows which was intended.
+                  echo "ARCTIC_FLASH_METHOD=ota" >> "$GITHUB_ENV"
+                  return 0
+                fi
+                LAST="$ACTUAL"
+              fi
+              sleep 2
+            done
+
+            echo "::error::The device never came up running the OTA'd image. Expected build_sha '$EXPECTED'; the device is still reporting '${LAST:-<unreachable>}' 150s after it accepted the upload. The bytes were delivered and acknowledged, so this is not a transfer failure — either the device did not reboot, or it rebooted and the bootloader reverted to the previous image. Check controller-serial.log for the OTA window."
+            return 1
+          }
+
           if [ "${{ github.event_name }}" = "schedule" ]; then
             # ---- Nightly: asynchronous PULL path (/api/ota/update) ----
             ASSET_URL="https://github.com/sslivins/arctic-controller/releases/download/ci-nightly/arctic_controller.bin"
@@ -431,7 +511,8 @@ jobs:
             # The status server goes offline *before* it reports ready_to_reboot, so
             # poll /api/ota/status until either it reports 'failed', or the device
             # goes offline AFTER we have observed download progress (= quiesce/flash/
-            # reboot underway). The subsequent "Wait for device reboot" step reconnects.
+            # reboot underway). wait_for_new_build_sha then reconnects and confirms
+          # the device came up on the new image.
             SAW_PROGRESS=false
             for i in $(seq 1 90); do
               ST=$(curl -sk --connect-timeout 2 --max-time 5 \
@@ -440,7 +521,8 @@ jobs:
               if [ -z "$ST" ]; then
                 if [ "$SAW_PROGRESS" = "true" ]; then
                   echo "Device went offline after download progress — quiesce/flash/reboot underway"
-                  exit 0
+                  wait_for_new_build_sha
+                  exit $?
                 fi
                 echo "  device not yet reachable for status (no progress seen yet)..."
               else
@@ -456,7 +538,8 @@ jobs:
                 fi
                 if [ "$STATE" = "ready_to_reboot" ]; then
                   echo "Device reported ready_to_reboot — rebooting into new firmware"
-                  exit 0
+                  wait_for_new_build_sha
+                  exit $?
                 fi
               fi
               sleep 2
@@ -477,7 +560,8 @@ jobs:
             echo "Response: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt)"
             if [ "$HTTP_CODE" = "200" ]; then
               echo "OTA upload successful, waiting for reboot..."
-              exit 0
+              wait_for_new_build_sha
+              exit $?
             fi
             # The device reboots the instant it has written the image, so it
             # never sends a clean TLS close_notify. curl can therefore receive
@@ -499,82 +583,49 @@ jobs:
             # when the code is 000; a real HTTP error code still fails.
             if [ "$HTTP_CODE" = "000" ] && grep -q '"success"[[:space:]]*:[[:space:]]*true' /tmp/ota_response.txt; then
               echo "OTA upload reported success in-body but the connection closed uncleanly (HTTP $HTTP_CODE)."
-              echo "Accepting the upload; the running image is verified by build_sha downstream."
-              exit 0
+              echo "Accepting the upload; the running image is verified by build_sha below."
+              wait_for_new_build_sha
+              exit $?
             fi
             echo "OTA upload failed"
             exit 1
           fi
 
-      - name: Wait for device reboot (OTA)
-        if: steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'success'
+
+      - name: Stop OTA-window serial capture
+        # Must run even when the OTA failed — that is precisely when the log is
+        # worth having — and must complete before anything touches the USB port.
+        if: always() && steps.ota_serial.outcome == 'success'
         run: |
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          # Record how this firmware was installed so the OTA tests can assert on
-          # it. The device cannot report this itself: a USB-recovered device and a
-          # successfully OTA'd one present an identical build_sha, and differ only
-          # in which app slot they booted from — which is legitimate for a USB
-          # flash and a failure for an OTA. Only the workflow knows which was
-          # intended, so it states it here.
-          echo "ARCTIC_FLASH_METHOD=ota" >> "$GITHUB_ENV"
+          if [ -n "${OTA_SERIAL_PID:-}" ]; then
+            kill "$OTA_SERIAL_PID" 2>/dev/null || true
+            # Give the child a moment to flush and close the port, or the USB
+            # fallback's esptool will find it still held.
+            for i in $(seq 1 10); do
+              kill -0 "$OTA_SERIAL_PID" 2>/dev/null || break
+              sleep 1
+            done
+            kill -9 "$OTA_SERIAL_PID" 2>/dev/null || true
+          fi
 
-          # Waiting for "something answers" is not enough. The device keeps
-          # serving the OLD image for several seconds after it acknowledges the
-          # upload — it only reboots once it has finished writing the slot. A
-          # reachability poll therefore returns as soon as the pre-OTA firmware
-          # replies, and the identity gate downstream then reads the old
-          # build_sha and fails. Run 34627065548 did exactly that: "Device is
-          # back online after 11s", immediately followed by a mismatch naming
-          # the previous run's build. It was masked until now because the OTA
-          # step used to be misreported as failing (see the note in "Flash
-          # device via OTA"), which sent every run down the USB fallback and
-          # skipped this step entirely.
-          #
-          # So wait for the condition we actually care about: the device
-          # reporting the build_sha we just installed. Where build_sha.txt is
-          # absent (local or dispatch builds with no baked identity) fall back
-          # to plain reachability, which is all that is knowable there.
-          #
-          # HTTPS-only: this request carries the API key, and the security
-          # contract (tests/api/test_ha_security_contract.py) forbids
-          # secret-bearing automation from falling back to plain HTTP.
-          EXPECTED=$(cat build/build_sha.txt 2>/dev/null || true)
-          echo "Waiting for device to report build_sha '${EXPECTED:-<unknown>}'"
-
-          # 150s: covers reboot, WiFi association and C6 bringup, and the
-          # nightly pull path which only begins flashing from PSRAM once this
-          # step is already running.
-          sleep 5
-          deadline=$((SECONDS + 150))
-          while [ "$SECONDS" -lt "$deadline" ]; do
-            RESP=$(curl -sk --connect-timeout 2 --max-time 5 \
-              -H "X-API-Key: ${ARCTIC_API_KEY}" \
-              "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || true
-            if [ -n "$RESP" ]; then
-              if [ -z "$EXPECTED" ]; then
-                echo "No expected build_sha to match; device is reachable after ${SECONDS}s"
-                exit 0
-              fi
-              ACTUAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || true
-              if [ "$ACTUAL" = "$EXPECTED" ]; then
-                echo "Device is running the new build ($EXPECTED) after ${SECONDS}s"
-                exit 0
-              fi
-            fi
-            sleep 2
-          done
-
-          echo "Device did not report build_sha '$EXPECTED' within 150s"
-          # Deliberately not a failure. The dedicated identity gate below
-          # distinguishes a rollback from an OTA that never took and says so
-          # precisely; failing here would pre-empt it with a vaguer message.
-          exit 0
+          if [ -s controller-serial-ota.log ]; then
+            echo "Device console during the OTA window:"
+            echo "----------------------------------------"
+            tail -80 controller-serial-ota.log
+            echo "----------------------------------------"
+            # The device's own account of the install, surfaced in the job log
+            # so a failed OTA is diagnosable without downloading artifacts.
+            grep -nE 'ota|OTA|Rebooting|Safe restart|restart|boot|Guru Meditation|abort\(\)|assert failed' \
+              controller-serial-ota.log | tail -40 || true
+          else
+            echo "::warning::No serial captured for the OTA window."
+          fi
 
       - name: Fallback — flash via USB serial
         if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
         run: |
           echo "OTA failed, falling back to USB serial flash..."
-          # See the note in "Wait for device reboot (OTA)". A USB flash boots the
+          # See the note in "Flash device via OTA". A USB flash boots the
           # factory slot, so the OTA tests must not demand an ota_* slot here.
           echo "ARCTIC_FLASH_METHOD=usb" >> "$GITHUB_ENV"
 
@@ -1022,7 +1073,9 @@ jobs:
         if: always()
         with:
           name: controller-serial-log
-          path: controller-serial.log
+          path: |
+            controller-serial.log
+            controller-serial-ota.log
           if-no-files-found: warn
           retention-days: 14
 
