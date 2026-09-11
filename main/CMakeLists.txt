@@ -103,6 +103,7 @@ idf_component_register(
         "tls_manager.cpp"
         "png_encoder.c"
         "png_uncompressed.c"
+        "jpeg_screenshot.c"
     INCLUDE_DIRS
         "."
         "settings"
@@ -125,6 +126,7 @@ idf_component_register(
         mdns
         esp_http_server
         esp_https_server
+        esp_driver_jpeg
         cjson
         esp_https_ota
         app_update

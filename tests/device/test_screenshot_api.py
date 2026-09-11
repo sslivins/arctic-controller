@@ -47,6 +47,11 @@ _session.mount("https://", HTTPAdapter(max_retries=_retry))
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
+# JPEG framing. SOI opens every JPEG, EOI closes it; checking both is what
+# distinguishes a complete image from one truncated by a failed send.
+JPEG_SOI = b"\xff\xd8"
+JPEG_EOI = b"\xff\xd9"
+
 
 def _api_headers(api_key: str = API_KEY) -> dict:
     """Build request headers with optional API key."""
@@ -56,11 +61,12 @@ def _api_headers(api_key: str = API_KEY) -> dict:
     return headers
 
 
-def _get_screenshot(api_key: str = API_KEY) -> requests.Response:
+def _get_screenshot(api_key: str = API_KEY, params: dict = None) -> requests.Response:
     """Fetch a screenshot from the production endpoint."""
     return _session.get(
         f"{ARCTIC_URL}/api/screenshot",
         headers=_api_headers(api_key),
+        params=params,
         timeout=30.0,
     )
 
@@ -135,6 +141,36 @@ def _parse_png_ihdr(data: bytes) -> dict:
         "bit_depth": bit_depth,
         "color_type": color_type,
     }
+
+
+def _parse_jpeg_dimensions(data: bytes) -> tuple:
+    """Return (width, height) from a JPEG's SOFn marker.
+
+    Walks the marker segments rather than assuming a fixed offset, because the
+    hardware encoder is free to emit whatever tables and APPn segments it likes
+    ahead of the frame header.
+    """
+    assert data[:2] == JPEG_SOI, "Not a JPEG (missing SOI)"
+    i = 2
+    while i + 3 < len(data):
+        if data[i] != 0xFF:
+            raise AssertionError(f"Expected a marker at offset {i}, got {data[i]:#04x}")
+        marker = data[i + 1]
+        # Standalone markers carry no length field.
+        if marker in (0xD8, 0xD9) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        seg_len = struct.unpack(">H", data[i + 2:i + 4])[0]
+        # SOF0/1/2/3, 5-7, 9-11, 13-15 — every frame header except DHT (0xC4),
+        # JPG (0xC8) and DAC (0xCC), which share the 0xCn range.
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+                      0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+            height, width = struct.unpack(">HH", data[i + 5:i + 9])
+            return width, height
+        if marker == 0xDA:  # start of scan — no frame header found
+            break
+        i += 2 + seg_len
+    raise AssertionError("No SOF marker found in JPEG")
 
 
 # ── Tests ────────────────────────────────────────────────────────────────
@@ -225,3 +261,115 @@ class TestScreenshotAPI:
         ihdr2 = _parse_png_ihdr(r2.content)
         assert ihdr1["width"] == ihdr2["width"]
         assert ihdr1["height"] == ihdr2["height"]
+
+
+@pytest.mark.skipif(not API_KEY, reason="ARCTIC_API_KEY not set")
+class TestScreenshotJPEG:
+    """Tests for GET /api/screenshot?format=jpeg (hardware JPEG encoder)."""
+
+    def test_jpeg_content_type(self):
+        """format=jpeg returns image/jpeg, not image/png."""
+        r = _get_screenshot(params={"format": "jpeg"})
+        assert r.status_code == 200
+        assert "image/jpeg" in r.headers.get("Content-Type", "")
+
+    def test_jpeg_is_complete(self):
+        """Body is framed by SOI and EOI.
+
+        EOI matters as much as SOI: a truncated response still starts with
+        SOI, so only the terminator proves the whole image arrived.
+        """
+        r = _get_screenshot(params={"format": "jpeg"})
+        assert r.status_code == 200
+        assert r.content[:2] == JPEG_SOI, "Response is not a JPEG"
+        assert r.content[-2:] == JPEG_EOI, "JPEG is truncated (no EOI)"
+
+    def test_jpeg_dimensions(self):
+        """SOF reports the full 720×1280 display."""
+        r = _get_screenshot(params={"format": "jpeg"})
+        assert r.status_code == 200
+        width, height = _parse_jpeg_dimensions(r.content)
+        assert width == EXPECTED_WIDTH, f"Expected width {EXPECTED_WIDTH}, got {width}"
+        assert height == EXPECTED_HEIGHT, f"Expected height {EXPECTED_HEIGHT}, got {height}"
+
+    def test_jpeg_is_far_smaller_than_png(self):
+        """The point of the JPEG path is the payload reduction.
+
+        The PNG is ~2.77 MB uncompressed. If the JPEG is not dramatically
+        smaller the feature has no reason to exist, so assert the benefit
+        rather than merely asserting validity.
+        """
+        r = _get_screenshot(params={"format": "jpeg"})
+        assert r.status_code == 200
+        size = len(r.content)
+        assert size > 10_000, f"JPEG suspiciously small ({size} bytes) — likely blank or corrupt"
+        assert size < 1_000_000, f"JPEG not meaningfully smaller than the PNG ({size} bytes)"
+
+    def test_jpg_alias(self):
+        """format=jpg is accepted as a synonym for jpeg."""
+        r = _get_screenshot(params={"format": "jpg"})
+        assert r.status_code == 200
+        assert "image/jpeg" in r.headers.get("Content-Type", "")
+
+    def test_jpeg_content_disposition(self):
+        """Filename reflects the actual format, not screenshot.png."""
+        r = _get_screenshot(params={"format": "jpeg"})
+        assert r.status_code == 200
+        assert "screenshot.jpg" in r.headers.get("Content-Disposition", "")
+
+    def test_default_format_is_still_png(self):
+        """Omitting format must not change existing clients' behaviour."""
+        r = _get_screenshot()
+        assert r.status_code == 200
+        assert "image/png" in r.headers.get("Content-Type", "")
+        assert r.content[:8] == PNG_SIGNATURE
+
+    def test_explicit_png_format(self):
+        """format=png selects the PNG path explicitly."""
+        r = _get_screenshot(params={"format": "png"})
+        assert r.status_code == 200
+        assert r.content[:8] == PNG_SIGNATURE
+
+    def test_quality_changes_payload_size(self):
+        """quality is wired through to the encoder, not silently ignored.
+
+        Asserting only that a low-quality request succeeds would pass even if
+        the parameter were dropped, so compare the sizes at the two extremes.
+        """
+        low = _get_screenshot(params={"format": "jpeg", "quality": 10})
+        high = _get_screenshot(params={"format": "jpeg", "quality": 95})
+        assert low.status_code == 200
+        assert high.status_code == 200
+        assert len(low.content) < len(high.content), (
+            f"quality had no effect: q10={len(low.content)} bytes, "
+            f"q95={len(high.content)} bytes"
+        )
+
+    @pytest.mark.parametrize("bad_format", ["gif", "bmp", "", "jpeg2000"])
+    def test_invalid_format_rejected(self, bad_format):
+        """An unsupported format is a client error, not a silent PNG."""
+        r = _get_screenshot(params={"format": bad_format})
+        assert r.status_code == 400, (
+            f"format={bad_format!r} should be rejected, got {r.status_code}"
+        )
+
+    @pytest.mark.parametrize("bad_quality", ["0", "101", "-1", "abc"])
+    def test_invalid_quality_rejected(self, bad_quality):
+        """Out-of-range or non-numeric quality is a client error."""
+        r = _get_screenshot(params={"format": "jpeg", "quality": bad_quality})
+        assert r.status_code == 400, (
+            f"quality={bad_quality!r} should be rejected, got {r.status_code}"
+        )
+
+    def test_consecutive_jpeg_screenshots(self):
+        """Back-to-back encodes must both succeed.
+
+        The encoder engine is created and destroyed per request; if it were
+        ever leaked the peripheral would be stranded and the second request
+        would fail. That makes this the regression test for engine teardown.
+        """
+        for attempt in range(3):
+            r = _get_screenshot(params={"format": "jpeg"})
+            assert r.status_code == 200, f"attempt {attempt + 1} failed: {r.status_code}"
+            assert r.content[:2] == JPEG_SOI
+            assert r.content[-2:] == JPEG_EOI

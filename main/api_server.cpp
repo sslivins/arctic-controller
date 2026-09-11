@@ -43,6 +43,7 @@
 #include "test_endpoints.h"
 #include "tls_manager.h"
 #include "png_uncompressed.h"
+#include "jpeg_screenshot.h"
 #include <esp_http_server.h>
 #include <esp_https_server.h>
 #include <esp_log.h>
@@ -5673,6 +5674,83 @@ static esp_err_t png_http_write(void *ctx, const void *buf, size_t len)
     return httpd_resp_send_chunk((httpd_req_t *)ctx, (const char *)buf, len);
 }
 
+/**
+ * Capture the live screen and send it as a hardware-encoded JPEG.
+ *
+ * Unlike the PNG path this does not swap channels. LVGL's RGB888 stores B,G,R
+ * in memory and the P4 encoder's JPEG_ENCODE_IN_FORMAT_RGB888 is defined as
+ * ESP_COLOR_FOURCC_BGR24, so LVGL's output is already in the byte order the
+ * peripheral wants. Skipping the swap avoids a per-pixel pass over ~2.7 MB.
+ */
+static esp_err_t screenshot_send_jpeg(httpd_req_t* req, int32_t w, int32_t h,
+                                      uint32_t stride, uint8_t quality)
+{
+    /*
+     * The encoder consumes tightly packed rows. With CONFIG_LV_DRAW_BUF_STRIDE_ALIGN=1
+     * LVGL already produces those, so rather than carry a repacking path that
+     * never executes and is therefore never tested, refuse loudly if that
+     * assumption is ever broken by a config change. A wrong stride would
+     * otherwise produce a silently skewed image.
+     */
+    if (stride != (uint32_t)w * 3) {
+        ESP_LOGE(TAG, "stride %lu != packed %lu; JPEG path needs packed rows",
+                 (unsigned long)stride, (unsigned long)((uint32_t)w * 3));
+        send_json_error(req, "500 Internal Server Error",
+                        "Display stride is not packed; JPEG encoding unavailable");
+        return ESP_OK;
+    }
+
+    jpeg_screenshot_ctx_t ctx;
+    esp_err_t err = jpeg_screenshot_begin(&ctx, (uint32_t)w, (uint32_t)h);
+    if (err == ESP_ERR_INVALID_SIZE) {
+        send_json_error(req, "500 Internal Server Error",
+                        "Display dimensions are not a multiple of 8");
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+
+    lv_draw_buf_t snapshot;
+    lv_draw_buf_init(&snapshot, w, h, LV_COLOR_FORMAT_RGB888, stride,
+                     ctx.in_buf, ctx.in_capacity);
+
+    bsp_display_lock(0);
+    lv_obj_t* screen = lv_screen_active();
+    lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
+    bsp_display_unlock();
+
+    if (snap_res != LV_RESULT_OK) {
+        ESP_LOGE(TAG, "Snapshot capture failed");
+        jpeg_screenshot_end(&ctx);
+        send_json_error(req, "500 Internal Server Error", "Snapshot capture failed");
+        return ESP_OK;
+    }
+
+    uint32_t jpeg_len = 0;
+    int64_t t0 = esp_timer_get_time();
+    err = jpeg_screenshot_encode(&ctx, (uint32_t)w, (uint32_t)h, quality, &jpeg_len);
+    int64_t encode_ms = (esp_timer_get_time() - t0) / 1000;
+
+    if (err != ESP_OK || jpeg_len == 0) {
+        jpeg_screenshot_end(&ctx);
+        send_json_error(req, "500 Internal Server Error", "JPEG encoding failed");
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "image/jpeg");
+    httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"screenshot.jpg\"");
+    esp_err_t send_err = httpd_resp_send(req, (const char*)ctx.out_buf, jpeg_len);
+
+    jpeg_screenshot_end(&ctx);
+
+    ESP_LOGI(TAG, "Screenshot sent: %ldx%ld, q%u, %lu bytes, encoded in %ld ms (JPEG)",
+             (long)w, (long)h, (unsigned)quality,
+             (unsigned long)jpeg_len, (long)encode_ms);
+    return send_err;
+}
+
 static esp_err_t screenshot_get_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -5680,7 +5758,33 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "Screenshot requested");
+    // ?format=png|jpeg (default png for backward compatibility), ?quality=1-100
+    bool want_jpeg = false;
+    uint8_t quality = JPEG_SCREENSHOT_DEFAULT_QUALITY;
+    char query[64];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char param[16];
+        if (httpd_query_key_value(query, "format", param, sizeof(param)) == ESP_OK) {
+            if (strcasecmp(param, "jpeg") == 0 || strcasecmp(param, "jpg") == 0) {
+                want_jpeg = true;
+            } else if (strcasecmp(param, "png") != 0) {
+                send_json_error(req, "400 Bad Request",
+                                "format must be 'png' or 'jpeg'");
+                return ESP_OK;
+            }
+        }
+        if (httpd_query_key_value(query, "quality", param, sizeof(param)) == ESP_OK) {
+            long q = atol(param);
+            if (q < 1 || q > 100) {
+                send_json_error(req, "400 Bad Request",
+                                "quality must be between 1 and 100");
+                return ESP_OK;
+            }
+            quality = (uint8_t)q;
+        }
+    }
+
+    ESP_LOGI(TAG, "Screenshot requested (%s)", want_jpeg ? "jpeg" : "png");
 
     // Get screen dimensions under LVGL lock
     bsp_display_lock(0);
@@ -5690,8 +5794,13 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     int32_t h = lv_obj_get_height(screen);
     bsp_display_unlock();
 
-    // Allocate pixel buffer in PSRAM (720x1280x3 ≈ 2.7 MB)
     uint32_t stride = lv_draw_buf_width_to_stride(w, LV_COLOR_FORMAT_RGB888);
+
+    if (want_jpeg) {
+        return screenshot_send_jpeg(req, w, h, stride, quality);
+    }
+
+    // Allocate pixel buffer in PSRAM (720x1280x3 ≈ 2.7 MB)
     uint32_t buf_size = stride * h;
     void* pixel_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!pixel_buf) {

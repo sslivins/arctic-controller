@@ -61,7 +61,7 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "Diagnostics")
         expect(dashboard_page.locator("#log-container")).to_be_visible()
         expect(dashboard_page.locator('a[href="/api/heatpump/diagnostic"]')).to_be_visible()
-        expect(dashboard_page.locator('a[href="/api/screenshot"]')).to_be_visible()
+        expect(dashboard_page.locator('a[href="/api/screenshot?format=jpeg"]')).to_be_visible()
 
     def test_system_and_factory_reset(self, dashboard_page: Page):
         open_settings(dashboard_page, "System")
