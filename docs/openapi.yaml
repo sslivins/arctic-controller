@@ -3820,6 +3820,8 @@ components:
           - brownout_reset
           - application_crash
           - watchdog_reset
+          - network_unreachable
+          - network_recovered
           example: power_on
         category:
           type: string

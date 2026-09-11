@@ -72,6 +72,17 @@ def _delete(path):
     return _session.delete(f"{BASE_URL}{path}", headers=_headers(), timeout=10)
 
 
+def _spec_event_types():
+    """The EventEntry.type enum from the OpenAPI spec, as a set."""
+    import yaml
+
+    spec_path = Path(__file__).resolve().parents[2] / "docs" / "openapi.yaml"
+    spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    enum = spec["components"]["schemas"]["EventEntry"]["properties"]["type"]["enum"]
+    assert enum, "EventEntry.type enum is empty — the spec cannot validate anything"
+    return set(enum)
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _check_prerequisites():
     if not API_KEY:
@@ -117,18 +128,22 @@ class TestEventsAPI:
         assert evt["category"] in ("problems", "equipment", "changes", "system")
 
     def test_event_type_is_string(self):
-        """Event type should be a known string."""
-        valid_types = {
-            "system_start", "power_on", "power_off", "mode_changed",
-            "setpoint_changed", "compressor_on", "compressor_off",
-            "fan_on", "fan_off", "pump_on", "pump_off",
-            "aux_heater_on", "aux_heater_off", "defrost_start", "defrost_end",
-            "error_appeared", "error_cleared", "connected", "disconnected",
-            "brownout_reset", "application_crash", "watchdog_reset",
-        }
+        """Event type should be a known string.
+
+        The accepted set is read from the OpenAPI spec rather than duplicated
+        here. A hard-coded copy silently rots: when firmware gained
+        network_unreachable/network_recovered, this list and the spec were both
+        left behind, and the gap only surfaced months later on a scheduled run
+        that happened to catch a real network blip. test_event_type_coverage.py
+        keeps the spec itself honest against the firmware table.
+        """
+        valid_types = _spec_event_types()
         data = _get("/api/events").json()
         for evt in data["events"]:
-            assert evt["type"] in valid_types, f"Unknown event type: {evt['type']}"
+            assert evt["type"] in valid_types, (
+                f"Unknown event type: {evt['type']}. If firmware added this "
+                f"event, add it to the EventEntry.type enum in docs/openapi.yaml."
+            )
 
     def test_events_total_matches_array_length(self):
         """total field should match or exceed the events array length."""
