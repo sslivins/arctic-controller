@@ -220,7 +220,12 @@ jobs:
           set -euo pipefail
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           SIZE=$(stat -c%s recovery/arctic_controller.bin)
-          tr '\0' '\377' < /dev/zero | head -c "$SIZE" > /tmp/blank.bin
+          # head must read from /dev/zero directly rather than from a tr
+          # pipeline: when head closes the pipe after $SIZE bytes, tr dies of
+          # SIGPIPE (exit 141) and `set -o pipefail` fails the step before the
+          # device is ever contacted.
+          head -c "$SIZE" /dev/zero | tr '\0' '\377' > /tmp/blank.bin
+          test "$(stat -c%s /tmp/blank.bin)" = "$SIZE"
           echo "Uploading a $SIZE byte blank (0xFF) image..."
 
           CODE=$(curl -sk -o /tmp/blank_resp.txt -w '%{http_code}' --max-time 120 \
@@ -244,6 +249,7 @@ jobs:
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           SIZE=$(stat -c%s recovery/arctic_controller.bin)
           head -c "$SIZE" /dev/urandom > /tmp/garbage.bin
+          test "$(stat -c%s /tmp/garbage.bin)" = "$SIZE"
 
           CODE=$(curl -sk -o /tmp/garbage_resp.txt -w '%{http_code}' --max-time 120 \
             -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
