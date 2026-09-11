@@ -882,60 +882,37 @@ class TestOtaRoundTrip:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Tier 3 — Rollback validation
+# Tier 3 — Rollback validation: covered by .github/workflows/ota-rollback.yml
 # ══════════════════════════════════════════════════════════════════════════
-
-# These tests verify that the bootloader reverts to the previous firmware
-# if the new one fails to call mark_valid(). They require:
-#   - Serial connection (to flash recovery firmware after rollback)
-#   - CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
-#   - A "poison" firmware binary that crashes before mark_valid()
 #
-# Building the poison firmware:
-#   1. Add an assert(false) or abort() call in create_ui() (before mark_valid)
-#   2. Build with: idf.py build
-#   3. Save build/arctic_controller.bin as the poison binary
-#   4. Rebuild normal firmware for recovery
+# The most dangerous OTA property — an image that boots but dies BEFORE
+# committing itself is rolled back by the bootloader, leaving the device
+# reachable on its previous firmware — is validated on real hardware by the
+# "OTA Rollback Validation" workflow, nightly at 03:00 UTC and on demand:
 #
-# This is complex enough that it should probably be a manual test script
-# rather than part of the automated suite, at least initially.
-
-@pytest.mark.skip(reason="Requires serial connection, poison firmware, and manual recovery — future work")
-class TestOtaRollback:
-    """Tier 3: Verify bootloader rolls back bad firmware.
-
-    Upload a firmware that crashes before mark_valid(). After the device
-    reboots, the bootloader should revert to the previous working partition.
-    """
-
-    def test_rollback_on_crash_before_mark_valid(self):
-        """Upload poison firmware → device crashes → bootloader reverts.
-
-        Test plan:
-        1. Record current version and partition
-        2. Upload poison firmware (crashes in create_ui before mark_valid)
-        3. Device reboots into poison → crashes → bootloader reverts
-        4. Device boots back into original firmware
-        5. Verify version matches, state is idle, pending_verify is false
-        """
-        import time
-
-        # Record pre-OTA state
-        pre = _get("/api/ota/status").json()
-        pre_version = pre["current_version"]
-
-        # TODO: Load poison firmware binary
-        # poison_path = Path(__file__).resolve().parent / "fixtures" / "poison_firmware.bin"
-        # poison = poison_path.read_bytes()
-
-        # TODO: Upload poison firmware
-        # r = _post_raw("/api/ota/upload", data=poison)
-        # assert r.status_code == 200
-
-        # Wait for crash + rollback + reboot (may take 2 cycles)
-        # post = _wait_for_device(timeout=120)
-        # assert post["current_version"] == pre_version
-        # assert post["state"] == "idle"
-        # assert post["pending_verify"] is False
-
-        pytest.skip("Poison firmware binary not yet available")
+#     gh workflow run ota-rollback.yml --repo sslivins/arctic-controller
+#
+# It builds a known-good recovery image, builds a poison image that aborts
+# before esp_ota_mark_app_valid_cancel_rollback(), OTAs the poison image to
+# the controller, waits for the bootloader to revert, and recovers the device
+# over USB serial with esptool.
+#
+# It deliberately does NOT live in this suite (see the header of
+# ota-rollback.yml for the full rationale):
+#
+#   1. device-tests.yml fails the job on "abort() was called". This test's
+#      whole purpose is to produce exactly that signature, and teaching the
+#      shared crash gate to tolerate an abort would weaken the guard that
+#      caught the #234 regression.
+#   2. Recovery needs esptool, but device-tests.yml holds the controller's
+#      serial port open for the duration of the run and the port has a single
+#      owner.
+#   3. It is destructive and slow; running it per-PR would double physical
+#      device time on the repository's only controller for a property that
+#      changes rarely.
+#
+# A skipped stub class used to sit here claiming this was "future work"
+# requiring "serial connection, poison firmware, and manual recovery". All of
+# that has since been built, so the stub made the executed-floor report
+# advertise rollback as an uncovered gap when it is in fact exercised nightly.
+# Removed rather than left lying - see #242.

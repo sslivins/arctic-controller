@@ -142,7 +142,7 @@ def test_deferred_skip_never_fails_even_when_enforcing(tmp_path):
         xml,
         tests=454,
         skipped=1,
-        skip_messages=["Requires serial connection and device reboot"],
+        skip_messages=["Backup/aux heater is not mapped from any Tuya register yet"],
     )
     floors = tmp_path / "floors.json"
     floors.write_text(json.dumps({"api": 380}), encoding="utf-8")
@@ -158,7 +158,7 @@ def test_report_separates_deferred_from_benign(tmp_path):
         tests=454,
         skipped=2,
         skip_messages=[
-            "Requires serial connection and device reboot",
+            "Backup/aux heater is not mapped from any Tuya register yet",
             "dangerous endpoint: /login",
         ],
     )
@@ -176,7 +176,12 @@ def test_report_separates_deferred_from_benign(tmp_path):
 def test_deferred_takes_precedence_over_a_broader_benign_pattern():
     # Ordering inside classify_skip is load-bearing: if benign were checked
     # first, a debt could be absorbed by a more general pattern and disappear.
-    assert mod.classify_skip("Requires serial connection and device reboot") == "deferred"
+    # Construct a message that genuinely matches BOTH classes, otherwise this
+    # test passes without ever exercising the ordering it claims to guard.
+    both = "No events on device: backup/aux heater is not mapped from any Tuya register yet"
+    assert any(rx.search(both) for rx in mod._BENIGN_RE), "fixture no longer matches a benign pattern"
+    assert any(rx.search(both) for rx in mod._DEFERRED_RE), "fixture no longer matches a deferred pattern"
+    assert mod.classify_skip(both) == "deferred"
     assert mod.DEFERRED_SKIP_PATTERNS, "the deferred class has been emptied"
 
 
@@ -195,8 +200,12 @@ def test_deferred_takes_precedence_over_a_broader_benign_pattern():
         ("Another OTA operation in progress - cannot test error state", "benign"),
         ("Need at least 2 entries to test ordering", "benign"),
         ("Regenerating the API key invalidates ARCTIC_API_KEY for the rest of the run", "benign"),
-        ("Requires serial connection and device reboot", "deferred"),
-        ("Requires serial connection, poison firmware, and manual recovery", "deferred"),
+        # Deliberately unknown since #242: the OTA rollback stub these described
+        # was removed once .github/workflows/ota-rollback.yml began exercising
+        # rollback nightly on hardware. Pinned here so re-adding the patterns
+        # without a matching stub is caught. Unknown only warns, never fails.
+        ("Requires serial connection and device reboot", "unknown"),
+        ("Poison firmware binary not yet available", "unknown"),
         ("Backup/aux heater is not mapped from any Tuya register yet", "deferred"),
         ("some brand new reason nobody classified", "unknown"),
         ("", "unknown"),
