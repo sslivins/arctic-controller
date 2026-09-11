@@ -479,6 +479,29 @@ jobs:
               echo "OTA upload successful, waiting for reboot..."
               exit 0
             fi
+            # The device reboots the instant it has written the image, so it
+            # never sends a clean TLS close_notify. curl can therefore receive
+            # the complete success body and still report 000, either because
+            # the connection was torn down mid-transfer or because --max-time
+            # expired waiting for a close that was never coming. Run
+            # 34625998136 failed exactly this way: the body read
+            # {"success":true,"bytes_received":2407824,"message":"Firmware
+            # uploaded. Rebooting..."} and the status code was 000, so a
+            # successful over-the-air install was recorded as a failure. The
+            # job then fell back to USB, which boots the factory slot, and
+            # the identity, OTA-strict, heap and floor gates all failed in
+            # cascade behind it.
+            #
+            # The body is the device's own statement that it accepted and
+            # wrote the image, and "Enforce OTA installation success (strict)"
+            # later proves the running image by build_sha — strictly stronger
+            # evidence than any status code. So accept the body, and only
+            # when the code is 000; a real HTTP error code still fails.
+            if [ "$HTTP_CODE" = "000" ] && grep -q '"success"[[:space:]]*:[[:space:]]*true' /tmp/ota_response.txt; then
+              echo "OTA upload reported success in-body but the connection closed uncleanly (HTTP $HTTP_CODE)."
+              echo "Accepting the upload; the running image is verified by build_sha downstream."
+              exit 0
+            fi
             echo "OTA upload failed"
             exit 1
           fi
