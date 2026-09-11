@@ -87,7 +87,6 @@ BENIGN_SKIP_PATTERNS = [
     r"device cannot reach github",
     r"another ota operation in progress",
     r"download failed too quickly",
-    r"poison firmware binary not yet available",
     r"live weather reading",
     # Self-invalidating by design: the call under test destroys the credential
     # the rest of the run depends on, so it can only be exercised in isolation.
@@ -109,11 +108,13 @@ BENIGN_SKIP_PATTERNS = [
 #
 # Evidence for the entries below (device run 34306377818, the first run to
 # publish the skip itemisation): 48 API skips, of which 0 were infra.
+#
+# A `requires serial connection` entry was removed here (#242). It covered a
+# skipped stub for OTA rollback and asserted the harness had not been built --
+# by then untrue. Rollback is exercised nightly on hardware by
+# .github/workflows/ota-rollback.yml, so classifying it as an outstanding debt
+# understated coverage. Do not re-add it without a stub to match.
 DEFERRED_SKIP_PATTERNS = [
-    # OTA rollback Tiers 2/3 -- #217 T05/T06. The runner does in fact have USB
-    # serial access to the controller, so "not available on CI" understates it:
-    # the harness has not been built. Tracked rather than silently tolerated.
-    r"requires serial connection",
     # Aux/backup heater has no Tuya register mapping yet, so the reading is
     # hardcoded false; the test is real and will matter once it is mapped.
     r"not mapped from any tuya register yet",
