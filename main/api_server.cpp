@@ -52,6 +52,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>   // strcasecmp — case-insensitive ?format= matching
 #include <esp_ota_ops.h>
 #include <esp_app_format.h>
 #include <lvgl.h>
