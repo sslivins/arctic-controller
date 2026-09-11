@@ -938,6 +938,44 @@ paths:
                       USB-recovered device otherwise reports exactly the same
                       `build_sha` as a successfully updated one.
                     example: "ota_0"
+                  commit_status:
+                    type: string
+                    enum: [committed, not_pending, waiting_for_ui, waiting_for_network, waiting_for_network_grace]
+                    description: |
+                      Why an unverified image has not yet committed itself.
+
+                      With rollback enabled an OTA image boots in
+                      `PENDING_VERIFY` and must be explicitly committed, or the
+                      bootloader reverts to the previous slot on the next
+                      reboot. Committing is an assertion that the firmware
+                      works, so a *commissioned* device must have reached the
+                      network at least once this boot before it is allowed to
+                      commit. That closes the case where an image boots and
+                      renders its UI but has broken networking: it would
+                      otherwise commit itself and strand the device, which has
+                      no serial console in the field.
+
+                      `waiting_for_network` is the significant value: the device
+                      is up and serving this very response, but is refusing to
+                      commit and **will roll back if it reboots**. Reachability
+                      latches for the whole uptime and there is no deadline, so
+                      a device behind a router that is down for hours still
+                      commits the moment the network returns.
+
+                      `not_pending` means there is nothing to commit — the
+                      running image is already valid.
+                    example: "committed"
+                  commissioned:
+                    type: boolean
+                    description: |
+                      Whether this device has ever reached the network, latched
+                      persistently. Until it has, it is treated as being set up
+                      from the touchscreen and may commit on UI alone; there is
+                      no SoftAP provisioning path on this hardware. The latch is
+                      one-way so that a regression in credential loading cannot
+                      make a deployed device look factory-fresh and thereby
+                      re-earn the weaker criterion.
+                    example: true
                   new_version:
                     type: string
                     description: Version being installed (only during URL update)
