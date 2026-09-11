@@ -806,6 +806,77 @@ jobs:
           echo "::error::OTA installation FAILED via $PATH_NAME. The device was recovered over USB, so it is healthy and running the build under test — but the over-the-air install did not work, which is the failure mode that strands a field device. Failing the job."
           exit 1
 
+      - name: Assert the OTA'd image committed itself
+        # #252 T-05. A newly OTA'd image boots PENDING_VERIFY and must commit,
+        # or the bootloader reverts it on the next reboot. The commit criteria
+        # require the UI to be up AND — on a commissioned device — the network
+        # to have been reachable this boot, so that an image which boots and
+        # renders but cannot reach the network rolls back instead of stranding
+        # a device that has no serial console in the field.
+        #
+        # That criterion is only meaningful if it is actually observed passing.
+        # Without this gate the strong path is merely inferred: the suite would
+        # stay green if the reachability latch silently broke and every OTA'd
+        # unit was left uncommitted, quietly rolling back on its next reboot.
+        #
+        # Deliberately placed before the test suites, which may reboot the
+        # device: after a second reboot the image is already valid and reports
+        # 'not_pending', which would make this assertion vacuous.
+        if: steps.partition_layout.outputs.changed != 'true'
+        env:
+          OTA_OUTCOME: ${{ steps.ota_flash.outcome }}
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
+          echo "/api/ota/status: $RESP"
+          OTA_OUTCOME="$OTA_OUTCOME" python3 - "$RESP" <<'PY'
+          import json, os, sys
+          d = json.loads(sys.argv[1])
+          cs = d.get("commit_status")
+          commissioned = d.get("commissioned")
+          ota_ok = os.environ.get("OTA_OUTCOME") == "success"
+
+          if cs is None:
+              print("::error::/api/ota/status has no commit_status field. The firmware "
+                    "predates the commit criteria, so nothing here is being verified.")
+              sys.exit(1)
+
+          # We are talking to the device over HTTP, so networking demonstrably
+          # works on this boot. Refusing to commit for lack of a network means
+          # the reachability latch is broken, and this image would roll back on
+          # its next reboot despite being healthy.
+          if cs == "waiting_for_network":
+              print("::error::Device is reachable over HTTP but reports "
+                    "commit_status=waiting_for_network. The reachability latch is not "
+                    "being set, so this firmware would roll back on the next reboot.")
+              sys.exit(1)
+          if cs == "waiting_for_ui":
+              print("::error::commit_status=waiting_for_ui after the UI should be up; "
+                    "the image will roll back on the next reboot.")
+              sys.exit(1)
+          if commissioned is not True:
+              print("::error::Device served an HTTP request but commissioned is "
+                    f"{commissioned!r}; the persistent latch is not being written, so a "
+                    "future OTA would qualify for the weaker UI-only commit criterion.")
+              sys.exit(1)
+
+          if ota_ok and cs != "committed":
+              print(f"::error::Firmware was installed over the air but commit_status is {cs!r}, "
+                    "expected 'committed'. The image did not satisfy the commit criteria and "
+                    "would roll back on the next reboot.")
+              sys.exit(1)
+
+          # USB fallback path: the slot was written as already-valid, so there is
+          # nothing to commit and 'not_pending' is correct.
+          if not ota_ok and cs not in ("committed", "not_pending"):
+              print(f"::error::Unexpected commit_status {cs!r} after USB recovery.")
+              sys.exit(1)
+
+          print(f"OK: commit_status={cs}, commissioned=True "
+                f"({'OTA' if ota_ok else 'USB fallback'} path)")
+          PY
+
       - name: Run device UI tests
         id: ui_tests
         continue-on-error: true

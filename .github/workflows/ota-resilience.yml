@@ -1,0 +1,494 @@
+# OTA Resilience Validation (#252 T-03 / T-04)
+#
+# The rollback workflow proves that a firmware which *installs successfully and
+# then crashes* is rolled back. This one covers the failures that happen during
+# the transfer itself, before there is ever a bootable image in the slot:
+#
+#   T-03  a blank or corrupt image is written to the inactive slot
+#   T-04  the download/upload is interrupted part-way
+#
+# Both must be rejected without disturbing the running firmware, and — the
+# property that actually matters — the device must still be able to accept a
+# subsequent, legitimate OTA. A device that survives a bad upload but is left
+# with its OTA lock held can never be updated again, which for a fielded unit
+# with no serial console is a brick in every sense that counts.
+#
+# The run therefore ends by performing a real OTA and asserting it installs.
+# That both proves recovery and leaves the rig on a known-good build.
+
+name: OTA Resilience Validation
+
+on:
+  schedule:
+    # Weekly, after the nightly device tests have long finished.
+    - cron: '0 11 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: ota-device-hardware
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-good:
+    name: Build known-good firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+
+      - name: Fetch dependencies
+        run: python3 fetch_repos.py
+
+      - name: Stamp build fingerprint
+        run: |
+          echo -n "${GITHUB_SHA}" > build_sha.txt
+          echo "Baked build_sha=${GITHUB_SHA}"
+
+      - name: Enable test endpoints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("sdkconfig")
+          disabled = "# CONFIG_TEST_ENDPOINTS is not set"
+          config = path.read_text(encoding="utf-8")
+          if disabled not in config:
+              raise SystemExit("CONFIG_TEST_ENDPOINTS is not disabled in sdkconfig")
+          path.write_text(config.replace(disabled, "CONFIG_TEST_ENDPOINTS=y", 1), encoding="utf-8")
+          PY
+          grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
+
+      - name: ESP-IDF Build
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.1
+          target: esp32p4
+          path: '.'
+
+      - name: Verify the image is not poisoned
+        # Shares a runner and a rig with the rollback workflow, which builds a
+        # deliberately crashing image. This image is both the subject of the
+        # final real-OTA check and the rig's way back, so assert it is clean.
+        run: |
+          set -euo pipefail
+          if grep -q '^#define CONFIG_ARCTIC_POISON_FIRMWARE 1$' build/config/sdkconfig.h; then
+            echo "::error::This image has poison fault injection compiled in. Refusing to publish it."
+            exit 1
+          fi
+          echo "OK: image is clean"
+
+      - name: Stage build fingerprint
+        run: sudo cp build_sha.txt build/build_sha.txt
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: resilience-good-firmware
+          path: |
+            build/arctic_controller.bin
+            build/build_sha.txt
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/ota_data_initial.bin
+          retention-days: 3
+
+  resilience-test:
+    name: Validate OTA resilience on the device
+    needs: [build-good]
+    runs-on: [self-hosted, vm-mi]
+    timeout-minutes: 45
+    env:
+      ARCTIC_URL: http://arctic-controller-ghr.mi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download known-good firmware
+        uses: actions/download-artifact@v8
+        with:
+          name: resilience-good-firmware
+          path: recovery
+
+      - name: Set up Python environment
+        run: |
+          python3 -m venv ~/test-venv || true
+          echo "$HOME/test-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Detect controller serial port
+        run: |
+          for dev in /dev/ttyACM*; do
+            [ -e "$dev" ] || continue
+            SERIAL=$(udevadm info -q property -n "$dev" | sed -n 's/^ID_SERIAL_SHORT=//p')
+            if [ "$SERIAL" = "$CONTROLLER_USB_SERIAL" ]; then
+              echo "CONTROLLER_PORT=$dev" >> "$GITHUB_ENV"
+              echo "Controller ($SERIAL) is $dev"
+            fi
+          done
+        env:
+          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
+
+      - name: Sync API key from device
+        # /api/ota/status and /api/ota/upload are auth-gated, and the device's
+        # credentials are NOT the ARCTIC_USERNAME/ARCTIC_PASSWORD secrets:
+        # device-tests.yml provisions isolated per-run credentials, so whichever
+        # job ran last left its own behind. Reset them through the
+        # unauthenticated, test-only /api/test/credentials endpoint first.
+        run: |
+          set -uo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          BODY='{"username": "arctic", "password": "ArcticTest!2026"}'
+          DEVICE_KEY=""
+
+          for i in $(seq 1 12); do
+            curl -sk --connect-timeout 3 --max-time 8 \
+              -X POST "$ARCTIC_URL_HTTPS/api/test/credentials" \
+              -H "Content-Type: application/json" -d "$BODY" > /dev/null 2>&1 || true
+
+            JAR=$(mktemp)
+            curl -sk -c "$JAR" --connect-timeout 3 --max-time 8 \
+              -X POST "$ARCTIC_URL_HTTPS/login" \
+              -H "Content-Type: application/json" -d "$BODY" > /dev/null 2>&1 || true
+            RESP=$(curl -sk -b "$JAR" --connect-timeout 3 --max-time 8 \
+              "$ARCTIC_URL_HTTPS/api/auth/apikey" 2>/dev/null) || true
+            rm -f "$JAR"
+            DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
+            if [ -n "$DEVICE_KEY" ]; then break; fi
+            sleep 2
+          done
+
+          if [ -z "$DEVICE_KEY" ]; then
+            echo "::error::Could not read the device API key; every probe and upload below would be rejected."
+            exit 1
+          fi
+          echo "::add-mask::$DEVICE_KEY"
+          echo "ARCTIC_API_KEY=$DEVICE_KEY" >> "$GITHUB_ENV"
+          echo "Device API key acquired."
+
+      - name: Preflight — record the known-good baseline
+        # Everything downstream is asserted against this. A device that is not
+        # already healthy and committed cannot distinguish "the bad upload was
+        # rejected" from the mess it started in. In particular a device left in
+        # PENDING_VERIFY would have its next OTA rejected with
+        # ESP_ERR_OTA_ROLLBACK_INVALID_STATE, which would look exactly like the
+        # rejection we are trying to prove.
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
+          echo "Baseline /api/ota/status: $RESP"
+
+          BASE_SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))")
+          BASE_PART=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('running_partition',''))")
+          PENDING=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('pending_verify'))")
+
+          if [ -z "$BASE_SHA" ]; then
+            echo "::error::Device did not report a build_sha. Either the probe was rejected or the firmware predates build_sha; the resilience assertions would be meaningless."
+            exit 1
+          fi
+          if [ "$PENDING" != "False" ]; then
+            echo "::error::Device is in PENDING_VERIFY before the test starts. Its next OTA would be rejected for that reason alone, which this test would misread as correct rejection of a bad image."
+            exit 1
+          fi
+
+          echo "BASELINE_SHA=$BASE_SHA" >> "$GITHUB_ENV"
+          echo "BASELINE_PARTITION=$BASE_PART" >> "$GITHUB_ENV"
+          echo "Baseline: sha=$BASE_SHA partition=$BASE_PART committed"
+
+      - name: Start serial capture
+        run: |
+          nohup python3 .github/scripts/capture_serial.py \
+            --usb-serial "$CONTROLLER_USB_SERIAL" \
+            --output resilience-serial.log > /dev/null 2>&1 &
+          echo "SERIAL_CAPTURE_PID=$!" >> "$GITHUB_ENV"
+          sleep 3
+        env:
+          CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
+
+      - name: 'T-03: reject a blank image'
+        # The literal "nothing was written to the slot" case: an image of the
+        # right shape but entirely erased flash (0xFF). It has no valid magic
+        # byte, so esp_ota_write must refuse it. If the device were instead to
+        # accept and boot it, there would be no application to run at all.
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          SIZE=$(stat -c%s recovery/arctic_controller.bin)
+          tr '\0' '\377' < /dev/zero | head -c "$SIZE" > /tmp/blank.bin
+          echo "Uploading a $SIZE byte blank (0xFF) image..."
+
+          CODE=$(curl -sk -o /tmp/blank_resp.txt -w '%{http_code}' --max-time 120 \
+            -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
+            --data-binary "@/tmp/blank.bin" \
+            "$ARCTIC_URL_HTTPS/api/ota/upload") || CODE="000"
+          echo "Blank upload: HTTP $CODE — $(head -c 300 /tmp/blank_resp.txt)"
+
+          if [ "$CODE" = "200" ]; then
+            echo "::error::The device ACCEPTED a blank 0xFF image. It has no valid application header, so this would leave the inactive slot unbootable while being reported as a successful update."
+            exit 1
+          fi
+          echo "OK: blank image rejected (HTTP $CODE)"
+
+      - name: 'T-03: reject a corrupt image'
+        # Random bytes of exactly the right length: passes any size check, fails
+        # image validation. Distinguishes "we validate the image" from "we
+        # validate the transfer".
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          SIZE=$(stat -c%s recovery/arctic_controller.bin)
+          head -c "$SIZE" /dev/urandom > /tmp/garbage.bin
+
+          CODE=$(curl -sk -o /tmp/garbage_resp.txt -w '%{http_code}' --max-time 120 \
+            -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
+            --data-binary "@/tmp/garbage.bin" \
+            "$ARCTIC_URL_HTTPS/api/ota/upload") || CODE="000"
+          echo "Corrupt upload: HTTP $CODE — $(head -c 300 /tmp/garbage_resp.txt)"
+
+          if [ "$CODE" = "200" ]; then
+            echo "::error::The device ACCEPTED a random-bytes image of the correct length. Image validation is not being enforced, so a corrupted transfer would be flashed and booted."
+            exit 1
+          fi
+          echo "OK: corrupt image rejected (HTTP $CODE)"
+
+      - name: 'T-03: the running firmware is untouched'
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
+          echo "/api/ota/status: $RESP"
+          python3 - "$RESP" <<'PY'
+          import json, os, sys
+          d = json.loads(sys.argv[1])
+          errs = []
+          if d.get("build_sha") != os.environ["BASELINE_SHA"]:
+              errs.append(f"build_sha changed to {d.get('build_sha')!r}")
+          if d.get("running_partition") != os.environ["BASELINE_PARTITION"]:
+              errs.append(f"running_partition changed to {d.get('running_partition')!r}")
+          if d.get("pending_verify") is not False:
+              errs.append("device is now PENDING_VERIFY — a rejected image must never be staged for boot")
+          if errs:
+              print("::error::Rejected uploads disturbed the running firmware: " + "; ".join(errs))
+              sys.exit(1)
+          print("OK: still on the baseline image, committed")
+          PY
+
+      - name: 'T-04: interrupt an upload part-way'
+        # Cut the connection mid-stream. This is the common field failure: WiFi
+        # drops, or the CMS goes away, half way through a transfer.
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          echo "Starting an upload and killing it mid-stream..."
+          set +e
+          curl -sk --max-time 6 --limit-rate 300k \
+            -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
+            --data-binary "@recovery/arctic_controller.bin" \
+            "$ARCTIC_URL_HTTPS/api/ota/upload" -o /tmp/interrupted.txt
+          RC=$?
+          set -e
+          echo "curl exited $RC (28 = timed out mid-transfer, which is the intent)"
+          if [ "$RC" -eq 0 ]; then
+            echo "::error::The whole image transferred within the cutoff, so no interruption was exercised. Lower --limit-rate or --max-time."
+            exit 1
+          fi
+
+      - name: 'T-04: the device recovers from the interruption'
+        # The critical property. An abandoned transfer must not leave the OTA
+        # lock held: ota_mgr_try_lock_upload refuses while UPLOADING, so a stuck
+        # lock means no future OTA can ever start. On a fielded device with no
+        # serial console that is unrecoverable, even though the device still
+        # answers every other request perfectly.
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+
+          echo "Waiting for the device to answer again..."
+          HEALTHY=0
+          for i in $(seq 1 60); do
+            C=$(curl -sk --connect-timeout 2 -o /dev/null -w '%{http_code}' "$ARCTIC_URL_HTTPS/api/health" 2>/dev/null) || C="000"
+            if [ "$C" = "200" ]; then HEALTHY=1; echo "Device healthy after ${i}s"; break; fi
+            sleep 2
+          done
+          if [ "$HEALTHY" != "1" ]; then
+            echo "::error::Device never became healthy after an interrupted upload. An aborted transfer must not take the device down."
+            exit 1
+          fi
+
+          echo "Waiting for the OTA state machine to settle..."
+          SETTLED=0
+          for i in $(seq 1 60); do
+            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            STATE=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('state',''))" 2>/dev/null) || STATE=""
+            case "$STATE" in
+              idle|failed) SETTLED=1; echo "OTA state settled to '$STATE' after ${i}s"; break ;;
+            esac
+            sleep 2
+          done
+          if [ "$SETTLED" != "1" ]; then
+            echo "::error::OTA state never left the in-progress state after the transfer was abandoned. The upload lock is still held, so no future OTA can start — the device is permanently un-updatable."
+            exit 1
+          fi
+
+      - name: 'T-04: a real OTA still installs afterwards'
+        # Proves the lock was genuinely released rather than merely reported as
+        # released, and leaves the rig on a known-good committed build.
+        id: real_ota
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          echo "Uploading the known-good image for real..."
+          CODE=$(curl -sk -o /tmp/real.txt -w '%{http_code}' --max-time 300 \
+            -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
+            --data-binary "@recovery/arctic_controller.bin" \
+            "$ARCTIC_URL_HTTPS/api/ota/upload") || CODE="000"
+          echo "Upload: HTTP $CODE — $(head -c 300 /tmp/real.txt)"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::A legitimate OTA was rejected (HTTP $CODE) after an interrupted one. The device survived the interruption but can no longer be updated, which is the failure mode that strands a field device."
+            exit 1
+          fi
+
+          # The slot always changes on a successful OTA, so compare partitions
+          # rather than build_sha: this image may carry the same commit SHA as
+          # the one already running, which would make a SHA check vacuous.
+          echo "Waiting for the device to come back on the other slot..."
+          for i in $(seq 1 120); do
+            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            if [ -n "$RESP" ]; then
+              PART=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('running_partition',''))" 2>/dev/null) || PART=""
+              if [ -n "$PART" ] && [ "$PART" != "$BASELINE_PARTITION" ]; then
+                echo "Device is running from $PART (was $BASELINE_PARTITION) after ${i} polls"
+                echo "final=$RESP" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+            sleep 2
+          done
+          echo "::error::Device never came back on the other slot; the post-interruption OTA did not install."
+          exit 1
+
+      - name: 'T-04: the reinstalled image commits itself'
+        run: |
+          set -euo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          # Allow for the commit criteria: the UI must be up and the network
+          # reachable before the image marks itself valid (#252 T-05).
+          for i in $(seq 1 60); do
+            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            CS=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('commit_status',''))" 2>/dev/null) || CS=""
+            if [ "$CS" = "committed" ] || [ "$CS" = "not_pending" ]; then
+              echo "commit_status=$CS after ${i} polls"
+              echo "OK: the reinstalled image committed itself"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::The reinstalled image never committed (last commit_status='${CS:-<none>}'). It would roll back on the next reboot, leaving the rig on an older build."
+          exit 1
+
+      - name: Stop serial capture
+        if: always()
+        run: |
+          if [ -n "${SERIAL_CAPTURE_PID:-}" ]; then
+            kill "$SERIAL_CAPTURE_PID" 2>/dev/null || true
+            sleep 2
+          fi
+
+      - name: Assert the device never crashed
+        # None of the above should provoke a panic. A crash here would mean a
+        # malformed or truncated upload can take down a running controller,
+        # which is a remote denial of service against every fielded device.
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f resilience-serial.log ]; then
+            echo "::warning::No serial log captured; cannot check for panics."
+            exit 0
+          fi
+          if grep -qE 'Guru Meditation|abort\(\) was called|StoreProhibited|LoadProhibited|assert failed' resilience-serial.log; then
+            echo "::error::The controller panicked during the resilience test. A rejected or interrupted upload must never crash the running firmware."
+            grep -nE 'Guru Meditation|abort\(\) was called|StoreProhibited|LoadProhibited|assert failed' resilience-serial.log | head -20
+            exit 1
+          fi
+          echo "OK: no panics in the serial log"
+
+      - name: Upload serial log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: resilience-serial-log
+          path: resilience-serial.log
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Recover the controller if it is not healthy
+        if: always()
+        run: |
+          set -uo pipefail
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          PROBE_KEY="${ARCTIC_API_KEY:-$RECOVERY_API_KEY}"
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${PROBE_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+          SHA=""
+          if [ -n "$RESP" ]; then
+            SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || SHA=""
+          fi
+
+          if [ -n "$SHA" ]; then
+            echo "Controller is healthy on $SHA — no recovery needed."
+            exit 0
+          fi
+
+          echo "::warning::Controller is unreachable. Attempting USB recovery."
+          if [ -z "${CONTROLLER_PORT:-}" ]; then
+            echo "::error::Controller is unhealthy and no serial port was detected. The rig needs manual attention."
+            exit 1
+          fi
+
+          echo "Generating NVS with WiFi credentials and API key..."
+          cat > /tmp/nvs_wifi.csv << 'CSVHEADER'
+          key,type,encoding,value
+          wifi_creds,namespace,,
+          ssid,data,string,${WIFI_SSID}
+          password,data,string,${WIFI_PASSWORD}
+          auth,namespace,,
+          api_key,data,string,${RECOVERY_API_KEY}
+          CSVHEADER
+          sed -i 's/^[[:space:]]*//' /tmp/nvs_wifi.csv
+          envsubst < /tmp/nvs_wifi.csv > /tmp/nvs_wifi_resolved.csv
+          python3 -m esp_idf_nvs_partition_gen generate \
+            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x40000
+
+          esptool.py --port "$CONTROLLER_PORT" --baud 921600 --chip esp32p4 \
+            --before default_reset --after hard_reset \
+            write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
+            0x2000  recovery/bootloader/bootloader.bin \
+            0x8000  recovery/partition_table/partition-table.bin \
+            0x9000  /tmp/nvs_wifi.bin \
+            0x49000 recovery/ota_data_initial.bin \
+            0x50000 recovery/arctic_controller.bin
+
+          echo "Waiting for the recovered controller..."
+          for i in $(seq 1 90); do
+            R=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${RECOVERY_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || R=""
+            if [ -n "$R" ]; then
+              S=$(echo "$R" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || S=""
+              if [ -n "$S" ]; then
+                echo "Controller recovered on $S after ${i}s"
+                echo "::warning::The controller required USB recovery. The resilience test failed, but the rig has been restored."
+                exit 1
+              fi
+            fi
+            sleep 2
+          done
+          echo "::error::USB recovery did not bring the controller back. The rig is DOWN and needs manual attention before any further device CI can run."
+          exit 1
+        env:
+          WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
+          WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
+          RECOVERY_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
