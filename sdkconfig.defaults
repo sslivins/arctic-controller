@@ -28,6 +28,49 @@ CONFIG_LWIP_MAX_SOCKETS=24
 # lru_purge (see api_server.cpp max_open_sockets) starved this pool and took
 # every server (443/8443/web) unresponsive at once (mbedtls -0x7780 storm).
 CONFIG_LWIP_MAX_ACTIVE_TCP=24
+
+# TCP window / send buffer. IDF's stock 5760 is 4x MSS, which caps throughput
+# at window/RTT regardless of link speed: measured against the CI controller at
+# ~10 ms idle RTT (~23 ms effective under load) that is a hard ~250 KB/s
+# ceiling, and a 2.7 MB PNG screenshot duly took ~11 s. The tell that it was
+# the window and not the encoder, TLS or the flash was that PNG and JPEG
+# measured the SAME throughput (253 vs 280 KB/s) despite a 28x size difference
+# -- both were pinned to the same BDP ceiling, with the radio idle most of each
+# round trip waiting for an ACK.
+#
+# 6x MSS is measured, not guessed. On the CI controller, mean PNG download:
+#
+#      5760 (4x MSS)   253 KB/s
+#      8640 (6x MSS)   363 KB/s
+#     11520 (8x MSS)   333 KB/s
+#
+# 8x is no better than 6x -- that difference is run-to-run variance -- which is
+# the signature of a ceiling that is no longer the window. Past ~8 KB the limit
+# is the P4 -> SDIO -> C6 -> radio path at ~350-400 KB/s, so a larger window
+# would spend internal RAM for nothing. 6x also matches what the BDP math
+# predicts from the other direction (350 KB/s x 23 ms ~= 8 KB).
+#
+# Right-sizing matters because the cost is charged against internal RAM, where
+# healthy runs bottom out at 24-33 KB free (see the heap gate in
+# device-tests.yml and issue #247), and NOT against the ~23 MB of PSRAM that
+# makes any "free heap" figure look comfortable.
+#
+# This does nothing for OTA upload, and is not expected to: that direction
+# measured 74.7 / 75.2 / 72.4 KB/s at 4x / 6x / 8x MSS. Uploads are bound by
+# the device writing each chunk to flash as it arrives, not by the window, so
+# no TCP tuning will speed up an OTA.
+#
+# CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP was considered as a companion -- the
+# same trade the esp_hosted mempool patch (0001-mempool-prefer-spiram) makes
+# for the SDIO RX buffer, and P4 GDMA does reach PSRAM through the cache path
+# -- but in IDF 6.1 it is not a placement-only switch: it also activates
+# ESP_WIFI_CACHE_TX_BUFFER_NUM on the wifi-remote path and flips the
+# LWIP_TCP_OOSEQ_MAX_PBUFS default from 4 to 0 (uncontrolled OOSEQ). Landing
+# both at once would make an internal-heap regression unattributable. Revisit
+# separately, with the heap gate's "heap int=" figure as before/after evidence.
+CONFIG_LWIP_TCP_WND_DEFAULT=8640
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=8640
+
 # Test instrumentation is enabled only by device-tests.yml.
 CONFIG_TEST_ENDPOINTS=n
 
