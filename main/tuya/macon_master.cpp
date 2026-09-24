@@ -187,6 +187,23 @@ bool set_hot_water_setpoint(int celsius)
     return guarded_setpoint(&arctic::MaconMaster::set_hot_water_setpoint, celsius, "hot-water");
 }
 
+bool set_working_mode(arctic::MaconWorkingMode mode)
+{
+    if (!s_active.load() || s_master == nullptr || s_bus_mutex == nullptr) {
+        return false;
+    }
+    xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
+    const arctic::MaconResult r = s_master->set_working_mode(mode);
+    xSemaphoreGive(s_bus_mutex);
+
+    if (r == arctic::MaconResult::Ok) {
+        ESP_LOGI(TAG, "working mode -> %s (ACKed)", arctic::working_mode_name(mode));
+        return true;
+    }
+    ESP_LOGW(TAG, "working mode write failed: %s", arctic::macon_result_name(r));
+    return false;
+}
+
 bool write_register(uint16_t address, uint8_t value)
 {
     if (!s_active.load() || s_master == nullptr || s_bus_mutex == nullptr) {

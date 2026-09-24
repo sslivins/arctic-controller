@@ -2740,10 +2740,17 @@ static bool read_integration_body(
         return ESP_OK;
     }
 
-    static bool ha_supports_power_or_mode()
+    static bool ha_supports_power()
     {
         const arctic::HeatPumpState state = arctic::getState();
         return state.connected && arctic::isDemoMode();
+    }
+
+    static bool ha_supports_mode()
+    {
+        const arctic::HeatPumpState state = arctic::getState();
+        return state.connected &&
+               (arctic::isDemoMode() || macon_master::is_active());
     }
 
     static bool ha_supports_setpoint(const char* kind)
@@ -2972,7 +2979,7 @@ static esp_err_t ha_power_put_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    if (!ha_supports_power_or_mode()) {
+    if (!ha_supports_power()) {
         ha_command_finish(slot, false, command_id, "power", payload);
         cJSON_Delete(root);
         send_json_error(
@@ -3057,7 +3064,7 @@ static esp_err_t ha_mode_put_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    if (!ha_supports_power_or_mode()) {
+    if (!ha_supports_mode()) {
         ha_command_finish(slot, false, command_id, "mode", payload);
         cJSON_Delete(root);
         send_json_error(

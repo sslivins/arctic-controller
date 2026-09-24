@@ -22,6 +22,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "macon_state.h"   // arctic::MaconWorkingMode
 
 namespace macon_master {
 
@@ -43,6 +44,10 @@ bool is_active();
 // active so the existing UI/REST callers work unchanged.
 bool set_cooling_setpoint(int celsius);
 bool set_hot_water_setpoint(int celsius);
+
+// Selected working-mode command (library-owned wire encoding). Returns false
+// (no-op) unless the master is active.
+bool set_working_mode(arctic::MaconWorkingMode mode);
 
 // Write a one-byte value to a register covered by a known Macon wire window.
 bool write_register(uint16_t address, uint8_t value);
