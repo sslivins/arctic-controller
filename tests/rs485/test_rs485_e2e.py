@@ -11,7 +11,6 @@ the simulator's `outlet_water_temp` is the controller's
 `temperatures.outlet`), which is API naming, not bus knowledge.
 """
 
-import time
 
 import pytest
 
@@ -281,8 +280,9 @@ def test_unverified_writes_are_refused(sim, device, path, body):
 
 def test_recovers_after_simulator_reboot(sim, device):
     sim.reboot()
-    time.sleep(3)  # let it actually go down
-    wait_until(sim.is_reachable, timeout=60.0, desc="simulator back on WiFi")
+    # The lease is RAM-only, so seeing it gone proves the sim really rebooted.
+    wait_until(lambda: sim.lease().get("held") is False, timeout=60.0,
+               desc="simulator back on WiFi after a reboot")
     sim.acquire_lease(LEASE_OWNER, ttl_s=1800)  # the lease lives in RAM
     sim.set(outlet_water_temp=41)
     wait_until(lambda: (s := device.get_heatpump_status())["connected"]

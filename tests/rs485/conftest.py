@@ -97,12 +97,24 @@ def pytest_generate_tests(metafunc):
 # Session fixtures
 # ---------------------------------------------------------------------------
 
+def _uptime_ms(dev: DeviceClient):
+    try:
+        r = dev.session.get(f"{dev.base_url}/api/status", timeout=5)
+        return int(r.json()["uptime_ms"]) if r.ok else None
+    except Exception:
+        return None
+
+
 def _set_demo_mode(dev: DeviceClient, enabled: bool) -> None:
     if bool(dev.get_preferences().get("demo_mode")) == enabled:
         return
     dev.set_preference(demo_mode=enabled)
+    before = _uptime_ms(dev)
     dev.reboot()
-    time.sleep(5)  # let it actually go down before polling for it
+    # A fresh boot is the only proof the preference was re-read; a still-up
+    # device would pass wait_for_device immediately.
+    wait_until(lambda: (u := _uptime_ms(dev)) is not None and u < before,
+               timeout=90.0, poll=1.0, desc=f"controller reboot (demo_mode={enabled})")
     if not dev.wait_for_device(timeout=60.0):
         raise RuntimeError(f"Device did not come back after setting demo_mode={enabled}")
     if bool(dev.get_preferences().get("demo_mode")) != enabled:

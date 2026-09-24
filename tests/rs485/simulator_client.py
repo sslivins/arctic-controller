@@ -128,6 +128,10 @@ class ArcticSimClient:
 
     # -- bench lease -----------------------------------------------------
 
+    def lease(self) -> dict:
+        """{"held": bool, "owner"?, "remaining_s"?}. RAM-only: a reboot clears it."""
+        return self._req("GET", "/api/lease")
+
     def acquire_lease(self, owner: str, ttl_s: int = 1800) -> dict:
         return self._req("POST", "/api/lease", {"owner": owner, "ttl_s": ttl_s})
 
