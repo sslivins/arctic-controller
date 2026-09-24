@@ -74,6 +74,11 @@ CONFIG_LWIP_TCP_SND_BUF_DEFAULT=8640
 # Test instrumentation is enabled only by device-tests.yml.
 CONFIG_TEST_ENDPOINTS=n
 
+# RS485 bus mode: production controllers are the sole bus master. Pinned here
+# so an sdkconfig regeneration can never fall back to passive LISTEN, which
+# never polls the heat pump (regressed silently in the IDF v6.1 migration).
+CONFIG_ARCTIC_TUYA_MASTER=y
+
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_SPEED_200M=y
 # Enable XIP from PSRAM - allows PSRAM reads (display framebuffer) to continue

@@ -77,6 +77,17 @@ jobs:
           target: ${{ env.TARGET }}
           path: '.'
 
+      - name: Verify production bus mode is the active master
+        # The IDF v6.1 sdkconfig regeneration silently reverted the bus mode to
+        # passive LISTEN, which never polls the heat pump, and every build
+        # stayed green. Assert the EFFECTIVE compiled config instead.
+        run: |
+          if ! grep -q '^#define CONFIG_ARCTIC_TUYA_MASTER 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_ARCTIC_TUYA_MASTER is NOT set in the compiled firmware — this image would never poll the heat pump."
+            exit 1
+          fi
+          echo "OK: CONFIG_ARCTIC_TUYA_MASTER=y in compiled firmware"
+
       - name: Verify OTA rollback protection is enabled
         # P0 tripwire: assert the EFFECTIVE compiled config (not what
         # sdkconfig.defaults merely requests) has bootloader app rollback
@@ -164,14 +175,11 @@ jobs:
           fi
           echo "OK: CONFIG_DEMO_MODE is disabled in the compiled firmware"
 
-  # Compile-only guard for the ACTIVE bus master. CONFIG_ARCTIC_TUYA_MASTER
-  # gates main/tuya/macon_master.cpp — the code that actually drives the RS485
-  # bus and writes setpoints to the heat pump. Every other build (and the whole
-  # device-tests suite) runs the default passive ARCTIC_TUYA_LISTEN branch, so
-  # until this job existed the production control path was not merely untested,
-  # it was not proven to COMPILE. A build break there would only be discovered
-  # when someone flashed a unit wired to a real heat pump.
-  build-tuya-master:
+  # Compile-only guard for the passive LISTEN bus mode. Production (and the
+  # device-tests suite) builds the default ARCTIC_TUYA_MASTER branch, so
+  # main/tuya/tuya_listener.cpp is otherwise never compiled. This keeps the
+  # bench/validation variant buildable.
+  build-tuya-listen:
     runs-on: ubuntu-latest
     env:
       TARGET: ${{ inputs.target || 'esp32p4' }}
@@ -188,35 +196,34 @@ jobs:
         run: |
           echo -n "${GITHUB_SHA}" > build_sha.txt
 
-      - name: Select the active Tuya master bus mode
-        # ARCTIC_BUS_MODE is a Kconfig `choice`, so the LISTEN member must be
-        # cleared as MASTER is set. Write both the committed sdkconfig (which
+      - name: Select the passive Tuya listen bus mode
+        # ARCTIC_BUS_MODE is a Kconfig `choice`, so the MASTER member must be
+        # cleared as LISTEN is set. Write both the committed sdkconfig (which
         # takes precedence when present) and sdkconfig.defaults, so the variant
         # applies regardless of which one the build regenerates from. The
         # verify step below is the real guard.
         run: |
-          sed -i 's/^CONFIG_ARCTIC_TUYA_LISTEN=y$/# CONFIG_ARCTIC_TUYA_LISTEN is not set/' sdkconfig
-          sed -i 's/^# CONFIG_ARCTIC_TUYA_MASTER is not set$/CONFIG_ARCTIC_TUYA_MASTER=y/' sdkconfig
-          echo "CONFIG_ARCTIC_TUYA_LISTEN=n" >> sdkconfig.defaults
-          echo "CONFIG_ARCTIC_TUYA_MASTER=y" >> sdkconfig.defaults
+          sed -i 's/^CONFIG_ARCTIC_TUYA_MASTER=y$/# CONFIG_ARCTIC_TUYA_MASTER is not set/' sdkconfig
+          sed -i 's/^# CONFIG_ARCTIC_TUYA_LISTEN is not set$/CONFIG_ARCTIC_TUYA_LISTEN=y/' sdkconfig
+          sed -i 's/^CONFIG_ARCTIC_TUYA_MASTER=y$/CONFIG_ARCTIC_TUYA_LISTEN=y/' sdkconfig.defaults
 
-      - name: ESP-IDF Build (active Tuya master)
+      - name: ESP-IDF Build (passive Tuya listen)
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v6.1
           target: ${{ env.TARGET }}
           path: '.'
 
-      - name: Verify the active master path was actually compiled
+      - name: Verify the passive listen path was actually compiled
         # Without this, a failure to apply the config would silently rebuild the
-        # default LISTEN variant and report a green "master builds fine".
+        # default MASTER variant and report a green "listen builds fine".
         run: |
-          if ! grep -q '^#define CONFIG_ARCTIC_TUYA_MASTER 1$' build/config/sdkconfig.h; then
-            echo "::error::CONFIG_ARCTIC_TUYA_MASTER is NOT set in the compiled firmware — this job rebuilt the default passive LISTEN variant and proved nothing about the active master path."
+          if ! grep -q '^#define CONFIG_ARCTIC_TUYA_LISTEN 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_ARCTIC_TUYA_LISTEN is NOT set in the compiled firmware — this job rebuilt the default MASTER variant and proved nothing about the listen path."
             exit 1
           fi
-          if grep -q '^#define CONFIG_ARCTIC_TUYA_LISTEN 1$' build/config/sdkconfig.h; then
-            echo "::error::CONFIG_ARCTIC_TUYA_LISTEN is still set alongside MASTER — the bus-mode choice was not switched cleanly."
+          if grep -q '^#define CONFIG_ARCTIC_TUYA_MASTER 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_ARCTIC_TUYA_MASTER is still set alongside LISTEN — the bus-mode choice was not switched cleanly."
             exit 1
           fi
-          echo "OK: firmware compiled with CONFIG_ARCTIC_TUYA_MASTER=y"
+          echo "OK: firmware compiled with CONFIG_ARCTIC_TUYA_LISTEN=y"

@@ -48,7 +48,7 @@ menu "Arctic Controller"
 
     choice ARCTIC_BUS_MODE
         prompt "Arctic RS485 bus mode"
-        default ARCTIC_TUYA_LISTEN
+        default ARCTIC_TUYA_MASTER
         help
             Selects how the controller talks to the heat pump over RS485.
 
