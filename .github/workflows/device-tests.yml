@@ -1048,6 +1048,50 @@ jobs:
           TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
           TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 
+      - name: Run RS-485 end-to-end tests (arctic-simulator)
+        id: rs485_tests
+        continue-on-error: true
+        # Runs last: it takes the controller out of demo mode and makes it the
+        # live RS-485 master against the bench arctic-simulator. Every field,
+        # fault and write under test comes from the simulator's arctic-macon
+        # catalog, so the suite has no register map of its own.
+        run: python -m pytest tests/rs485/ -v -rs --tb=short --junitxml=rs485-test-results.xml -p no:cacheprovider
+        env:
+          ARCTIC_SIM_URL: http://192.168.1.177
+          PYTHONDONTWRITEBYTECODE: '1'
+
+      - name: Restore RS-485 bench baseline
+        if: always() && steps.rs485_tests.outcome != 'skipped'
+        # Safety net if the suite died before its own teardown: simulator idle
+        # with no faults and no lease, controller back in demo mode.
+        run: |
+          set -uo pipefail
+          SIM=http://192.168.1.177
+          curl -s --max-time 10 -X POST -H "Content-Type: application/json" \
+            -d '{}' "${SIM}/api/faults/clear" >/dev/null 2>&1 || true
+          curl -s --max-time 10 -X POST -H "Content-Type: application/json" \
+            -d '{"name":"idle"}' "${SIM}/api/preset" >/dev/null 2>&1 || true
+          curl -s --max-time 10 -X DELETE -H "Content-Type: application/json" \
+            -d '{"force":true}' "${SIM}/api/lease" >/dev/null 2>&1 || true
+          DEMO="$(curl -sk --max-time 10 -H "X-API-Key: ${ARCTIC_API_KEY}" \
+            "${ARCTIC_URL}/api/heatpump/status" 2>/dev/null \
+            | python3 -c "import sys,json;print(json.load(sys.stdin).get('demo_mode'))" 2>/dev/null || echo Unknown)"
+          echo "demo_mode before restore: ${DEMO}"
+          if [ "$DEMO" != "True" ]; then
+            curl -sk --max-time 10 -X POST -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              -H "Content-Type: application/json" -d '{"demo_mode": true}' \
+              "${ARCTIC_URL}/api/test/set-preference" >/dev/null 2>&1 || true
+            curl -sk --max-time 10 -X POST -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              "${ARCTIC_URL}/api/ota/reboot" >/dev/null 2>&1 || true
+            for _ in $(seq 1 30); do
+              sleep 2
+              curl -sk --max-time 5 "${ARCTIC_URL}/api/health" >/dev/null 2>&1 && break
+            done
+          fi
+          curl -sk --max-time 10 -X POST -H "X-API-Key: ${ARCTIC_API_KEY}" \
+            -H "Content-Type: application/json" -d '{"session_id":"","force":true}' \
+            "${ARCTIC_URL}/api/test/unlock" >/dev/null 2>&1 || true
+
       - name: Reset device to baseline TLS/auth state
         if: always()
         run: |
@@ -1326,6 +1370,16 @@ jobs:
           reporter: java-junit
           use-actions-summary: 'false'
 
+      - name: Publish RS-485 test results
+        uses: dorny/test-reporter@v2
+        if: always() && steps.rs485_tests.outcome != 'skipped'
+        continue-on-error: true
+        with:
+          name: RS-485 E2E Test Results
+          path: rs485-test-results.xml
+          reporter: java-junit
+          use-actions-summary: 'false'
+
       - name: Upload failure screenshots
         uses: actions/upload-artifact@v7
         # NOT `failure()`. The three test steps are continue-on-error, and the
@@ -1337,7 +1391,8 @@ jobs:
         if: >-
           always() && (steps.ui_tests.outcome == 'failure'
           || steps.api_tests.outcome == 'failure'
-          || steps.web_tests.outcome == 'failure')
+          || steps.web_tests.outcome == 'failure'
+          || steps.rs485_tests.outcome == 'failure')
         with:
           name: failure-screenshots
           path: |
@@ -1376,6 +1431,7 @@ jobs:
             ui=test-results.xml \
             api=api-test-results.xml \
             web=web-test-results.xml \
+            rs485=rs485-test-results.xml \
             --floors tests/executed_floor.json \
             --enforce-infra-skips \
             --report executed-floor-report.json
@@ -1391,6 +1447,7 @@ jobs:
             test-results.xml
             api-test-results.xml
             web-test-results.xml
+            rs485-test-results.xml
             executed-floor-report.json
           if-no-files-found: warn
           retention-days: 14
@@ -1491,6 +1548,7 @@ jobs:
           steps.ui_tests.outcome == 'success' &&
           steps.api_tests.outcome == 'success' &&
           steps.web_tests.outcome == 'success' &&
+          steps.rs485_tests.outcome == 'success' &&
           (
             (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
             github.event_name == 'merge_group' ||
@@ -1508,6 +1566,7 @@ jobs:
           UI_OUTCOME: ${{ steps.ui_tests.outcome }}
           API_OUTCOME: ${{ steps.api_tests.outcome }}
           WEB_OUTCOME: ${{ steps.web_tests.outcome }}
+          RS485_OUTCOME: ${{ steps.rs485_tests.outcome }}
         run: |
           set -euo pipefail
           # Authoritative record that this exact main SHA passed the physical
@@ -1534,6 +1593,7 @@ jobs:
                   "ui": os.environ["UI_OUTCOME"],
                   "api": os.environ["API_OUTCOME"],
                   "web": os.environ["WEB_OUTCOME"],
+                  "rs485": os.environ["RS485_OUTCOME"],
               },
               "test_firmware": {
                   "file": "build/arctic_controller.bin",
@@ -1578,7 +1638,7 @@ jobs:
         run: |
           # With continue-on-error on test steps, we need to explicitly fail the job
           FAILED=false
-          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}"; do
+          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}" "${{ steps.rs485_tests.outcome }}"; do
             if [ "$step_outcome" = "failure" ]; then
               FAILED=true
             fi
