@@ -884,7 +884,7 @@
         <div class="kv"><span>Update status</span><strong>${esc(inst ? OTA_PHASE_LABEL[inst.phase] : titleCase(state.ota.state || "idle"))}</strong></div>
         ${installing && inst.phase === "downloading" ? `<div class="kv"><span>Progress</span><strong>${inst.progress || 0}%</strong></div>` : ""}
         ${indeterminate ? `<div class="ota-indeterminate"><div class="ota-indeterminate-bar"></div></div>
-          <div class="metric-sub">The controller is writing the new firmware and will reboot. This can take a couple of minutes and the connection will drop briefly — that's expected.</div>` : ""}
+          <div class="metric-sub">Installing the update. The controller will restart, and this page will briefly lose its connection.</div>` : ""}
         ${showProgress ? `<div class="kv"><span>Progress</span><strong>${state.ota.progress || 0}%</strong></div>` : ""}
         ${installDone ? `<div class="notice good" style="margin-top:16px">Updated to ${esc(inst.newVersion || inst.target || "the latest version")} ✓</div>` : ""}
         ${installFailed ? `<div class="notice bad" style="margin-top:16px">${inst.phase === "timeout" ? "The device is taking longer than expected. Reload the page to check its status." : "Update failed: " + esc(inst.error || "unknown error")}</div>` : ""}
