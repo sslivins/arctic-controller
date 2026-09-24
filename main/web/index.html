@@ -518,8 +518,12 @@
               response = await fetch(url, options);
             }
             if (response.status === 401) {
+              // Re-render only on the transition: background pollers keep
+              // hitting 401 until the user signs in again, and re-rendering
+              // the login page each time would wipe what they are typing.
+              const wasLoggedIn = state.auth.loggedIn;
               state.auth.loggedIn = false;
-              render();
+              if (wasLoggedIn) render();
               throw new Error("Authentication required");
             }
             const type = response.headers.get("content-type") || "";
@@ -642,7 +646,7 @@
             <span class="status-item"><span class="dot ${connected ? "good" : "bad"}"></span>${connected ? "Heat pump online" : "Heat pump offline"}</span>
             <span class="status-item wifi">${esc(state.wifi.ssid || "WiFi disconnected")}</span>
             ${weatherStatus()}
-            <span class="status-item clock">${esc(state.status.time?.local || "--:--")}</span>
+            <span class="status-item clock">${esc(fmtStatusClock(state.status.time?.local))}</span>
             ${notifBell()}
             <button class="icon-btn" data-route="settings" aria-label="Settings">⚙</button>
             ${state.auth.required ? `<button class="btn" data-action="logout" style="padding:6px 12px;font-size:13px" aria-label="Sign out">Sign out</button>` : ""}
@@ -1063,13 +1067,27 @@
         <button class="btn primary" type="submit">Save credentials</button>
         ${recovering ? `<p style="margin:16px 0 0;text-align:center"><button class="btn" type="button" data-action="cancel-recovery">Back to sign in</button></p>` : ""}</form></div>`;
     }
+    // Follows the controller's clock-format setting (default 24 h).
+    function use24h() { return state.status.time?.format_24h !== false; }
+    function fmtClock(hours, minutes, seconds) {
+      const mm = String(minutes).padStart(2, "0");
+      const ss = seconds == null ? "" : `:${String(seconds).padStart(2, "0")}`;
+      if (use24h()) return `${String(hours).padStart(2, "0")}:${mm}${ss}`;
+      return `${hours % 12 || 12}:${mm}${ss} ${hours < 12 ? "AM" : "PM"}`;
+    }
+    function fmtStatusClock(local) {
+      const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(local || "");
+      return m ? fmtClock(+m[1], +m[2], m[3]) : (local || "--:--");
+    }
     function fmtHistClock(epoch, withDate) {
       const d = new Date(epoch * 1000);
-      const hh = String(d.getHours()).padStart(2, "0");
-      const mm = String(d.getMinutes()).padStart(2, "0");
-      if (!withDate) return `${hh}:${mm}`;
+      if (!withDate) {
+        // Axis ticks land on the hour, so "6 AM" reads cleaner than "6:00 AM".
+        if (!use24h() && d.getMinutes() === 0) return `${d.getHours() % 12 || 12} ${d.getHours() < 12 ? "AM" : "PM"}`;
+        return fmtClock(d.getHours(), d.getMinutes());
+      }
       const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      return `${months[d.getMonth()]} ${d.getDate()}, ${hh}:${mm}`;
+      return `${months[d.getMonth()]} ${d.getDate()}, ${fmtClock(d.getHours(), d.getMinutes())}`;
     }
     // Convert raw deci-Celsius to tenths of the user's preferred unit.
     function histDeciToDisplay(deciC) {
@@ -1487,7 +1505,9 @@
         const timezone = data.get("timezone");
         if (timezone !== null) body.timezone = timezone;
         await mutate("/api/time/config", jsonOptions("POST", body), "Time settings saved");
-        state.timeConfig = await api("/api/time/config"); render();
+        state.timeConfig = await api("/api/time/config");
+        if (state.status.time) state.status.time.format_24h = state.timeConfig.format_24h;
+        render();
       }
       if (type === "location-search") {
         const query = String(data.get("q") || "").trim();
@@ -1569,6 +1589,13 @@
       const tick = async () => {
         const inst = state.otaInstall;
         if (!inst || !inst.active) return;
+        // The reboot drops the session. Pause (and stop the timeout clock)
+        // until the user signs back in, then resume and report the result.
+        if (!state.auth.loggedIn) {
+          inst.started += 2000;
+          setTimeout(tick, 2000);
+          return;
+        }
         if (Date.now() - inst.started > TIMEOUT_MS) {
           inst.phase = "timeout"; inst.active = false; render(); return;
         }
