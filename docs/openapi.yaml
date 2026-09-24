@@ -243,7 +243,8 @@ paths:
                       Identity of the arctic-macon bus library this firmware was
                       built against. Two firmwares (e.g. controller and
                       arctic-simulator) with equal fingerprints agree on every
-                      register, bit, scaling and fault.
+                      register, bit, scaling and fault. Present only on test
+                      firmware (CONFIG_TEST_ENDPOINTS).
                     properties:
                       api_version:
                         type: integer
