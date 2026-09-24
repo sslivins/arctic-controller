@@ -187,7 +187,14 @@ jobs:
             echo "::error::Built image has CONFIG_ARCTIC_POISON_FIRMWARE enabled — this image crashes on purpose before committing itself and must never be released."
             exit 1
           fi
-          echo "OK: effective build config has neither test endpoints nor poison fault injection"
+          # A released controller must poll the heat pump. The passive LISTEN
+          # variant never transmits, so a unit on a real bus stays "disconnected"
+          # forever (this shipped silently after the IDF v6.1 sdkconfig regen).
+          if ! grep -q '^#define CONFIG_ARCTIC_TUYA_MASTER 1$' build/config/sdkconfig.h; then
+            echo "::error::Built image is not in ARCTIC_TUYA_MASTER bus mode — it would never poll the heat pump."
+            exit 1
+          fi
+          echo "OK: effective build config has neither test endpoints nor poison fault injection, and is in active-master bus mode"
 
       - name: Record production firmware provenance
         env:

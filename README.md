@@ -66,8 +66,8 @@ the shared `arctic-macon` library.
 
 | Mode (`CONFIG_…`) | Behaviour |
 |---|---|
-| `ARCTIC_TUYA_LISTEN` *(default)* | **Passive listen.** RX-only; DIR held low so the Tab5 never transmits. Decodes the OEM controller's bus traffic. Safe to splice in alongside the real controller. |
-| `ARCTIC_TUYA_MASTER` | **Active master.** The Tab5 is the *sole* bus master: it polls telemetry (fc=0x03) and writes setpoints (fc=0x06) via the `MaconLink` transaction layer. **The OEM controller must be physically disconnected** — two masters collide. On boot the firmware listens for existing bus traffic and refuses to transmit if another master is detected. |
+| `ARCTIC_TUYA_LISTEN` | **Passive listen (bench/validation only).** RX-only; DIR held low so the Tab5 never transmits. Decodes the OEM controller's bus traffic. Safe to splice in alongside the real controller. |
+| `ARCTIC_TUYA_MASTER` *(default, required for releases)* | **Active master.** The Tab5 is the *sole* bus master: it polls telemetry (fc=0x03) and writes setpoints (fc=0x06) via the `MaconLink` transaction layer. **The OEM controller must be physically disconnected** — two masters collide. On boot the firmware listens for existing bus traffic and refuses to transmit if another master is detected. |
 In active-master mode, setpoint changes from the UI/REST API
 (`setCoolingSetpoint` / `setHotWaterSetpoint`) are routed through
 `MaconLink`, which owns the wire/register mapping. Verified advanced-parameter

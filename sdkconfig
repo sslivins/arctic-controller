@@ -1321,9 +1321,9 @@ CONFIG_DEMO_MODE=y
 # default:
 # CONFIG_ARCTIC_POISON_FIRMWARE is not set
 # default:
-CONFIG_ARCTIC_TUYA_LISTEN=y
+# CONFIG_ARCTIC_TUYA_LISTEN is not set
 # default:
-# CONFIG_ARCTIC_TUYA_MASTER is not set
+CONFIG_ARCTIC_TUYA_MASTER=y
 # end of Arctic Controller
 
 #
