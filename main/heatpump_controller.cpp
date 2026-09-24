@@ -814,14 +814,17 @@ bool setUnitPower(bool on) {
 }
 
 bool setWorkingMode(WorkingMode mode) {
-    if (macon_master::is_active()) {
-        ESP_LOGW(TAG, "Working-mode write unsupported in Tuya master mode (no verified fc06 mapping)");
-        return false;
-    }
     // Translate the controller's WorkingMode to the library's MaconWorkingMode
     // via an explicit mapping; the controller never touches the wire encoding.
+    const MaconWorkingMode macon_mode = to_macon_working_mode(mode);
+    if (macon_master::is_active()) {
+        if (!macon_master::set_working_mode(macon_mode)) {
+            return false;
+        }
+        // ACKed: reflect it in the image now; the next poll re-reads it.
+    }
     imageLock();
-    s_image.set_working_mode(to_macon_working_mode(mode));
+    s_image.set_working_mode(macon_mode);
     imageUnlock();
     applyMaconMapping();
     ESP_LOGI(TAG, "Working mode set to %s", workingModeToString(mode));

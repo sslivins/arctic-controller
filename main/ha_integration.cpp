@@ -298,6 +298,7 @@ cJSON* createCapabilities()
     const bool hot_water_setpoint =
         demo_controls || active_master_controls;
     const bool heating_setpoint = demo_controls;
+    const bool mode_control = demo_controls || active_master_controls;
 
     cJSON_AddNumberToObject(root, "protocol_version", PROTOCOL_VERSION);
     cJSON_AddStringToObject(root, "device_id", s_device_id);
@@ -311,7 +312,7 @@ cJSON* createCapabilities()
     cJSON* capabilities = cJSON_AddObjectToObject(root, "capabilities");
     cJSON_AddBoolToObject(capabilities, "read_state", true);
     cJSON_AddBoolToObject(capabilities, "control_power", demo_controls);
-    cJSON_AddBoolToObject(capabilities, "control_mode", demo_controls);
+    cJSON_AddBoolToObject(capabilities, "control_mode", mode_control);
     cJSON_AddBoolToObject(
         capabilities, "control_setpoints",
         cooling_setpoint || hot_water_setpoint);
@@ -319,7 +320,7 @@ cJSON* createCapabilities()
     cJSON_AddBoolToObject(capabilities, "raw_registers", false);
 
     cJSON* modes = cJSON_AddArrayToObject(capabilities, "supported_modes");
-    if (demo_controls) {
+    if (mode_control) {
         cJSON_AddItemToArray(modes, cJSON_CreateString("cooling"));
         cJSON_AddItemToArray(modes, cJSON_CreateString("floor_heating"));
         cJSON_AddItemToArray(
