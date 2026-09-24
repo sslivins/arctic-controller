@@ -52,7 +52,12 @@ static struct {
     lv_obj_t* latest_button = nullptr;
     heatpump_history_close_cb_t on_close = nullptr;
     history_telemetry_sample_t* samples = nullptr;
+    // Plateau-interpolated inlet/outlet (deci-C) for drawing; see
+    // interpolate_series(). INT32_MIN marks "no value".
+    int32_t* interp_inlet = nullptr;
+    int32_t* interp_outlet = nullptr;
     size_t sample_count = 0;
+    int32_t cursor = -1;          // touched sample index, -1 = none
     uint32_t window_start = 0;
     uint32_t window_end = 0;
     uint32_t latest_end = 0;
@@ -138,15 +143,221 @@ static bool sample_value(const history_telemetry_sample_t& sample,
     return true;
 }
 
+static constexpr int32_t NO_VALUE = INT32_MIN;
+
+// Inlet/outlet are recorded in whole degrees, so a raw line staircases. Each
+// run of identical readings is a plateau the true temperature crossed
+// somewhere inside, so the line is drawn through each plateau's midpoint
+// (30 for 10 min then 31 reads 30.5 at the changeover). Plateau values,
+// including peaks, are kept exactly; a gap or invalid sample breaks the line.
+static void interpolate_series(uint8_t valid_flag,
+                               int16_t history_telemetry_sample_t::* member,
+                               int32_t* out) {
+    const history_telemetry_sample_t* s = state.samples;
+    const size_t n = state.sample_count;
+    for (size_t k = 0; k < n; k++) out[k] = NO_VALUE;
+
+    auto valid = [&](size_t k) { return (s[k].flags & valid_flag) != 0; };
+    size_t a = 0;
+    while (a < n) {
+        if (!valid(a)) { a++; continue; }
+        size_t b = a;
+        while (b + 1 < n && valid(b + 1) &&
+               s[b + 1].timestamp - s[b].timestamp <= CONTIGUOUS_SECONDS) {
+            b++;
+        }
+        // Anchors: segment start, each plateau midpoint, segment end. Times
+        // are doubled so plateau midpoints stay integral.
+        int64_t t0 = 2 * (int64_t)s[a].timestamp;
+        int32_t v0 = s[a].*member;
+        size_t k = a;
+        auto emit_to = [&](int64_t t1, int32_t v1) {
+            while (k <= b && 2 * (int64_t)s[k].timestamp <= t1) {
+                const int64_t t = 2 * (int64_t)s[k].timestamp;
+                out[k] = (t1 > t0)
+                    ? v0 + (int32_t)(((int64_t)(v1 - v0) * (t - t0)) / (t1 - t0))
+                    : v1;
+                k++;
+            }
+            t0 = t1;
+            v0 = v1;
+        };
+        for (size_t i = a; i <= b;) {
+            size_t j = i;
+            while (j + 1 <= b && s[j + 1].*member == s[i].*member) j++;
+            emit_to((int64_t)s[i].timestamp + s[j].timestamp, s[i].*member);
+            i = j + 1;
+        }
+        emit_to(2 * (int64_t)s[b].timestamp, s[b].*member);
+        a = b + 1;
+    }
+}
+
+static void recompute_interpolation() {
+    if (state.interp_inlet == nullptr || state.interp_outlet == nullptr) return;
+    interpolate_series(HISTORY_TELEMETRY_INLET_VALID,
+                       &history_telemetry_sample_t::inlet_deci_c,
+                       state.interp_inlet);
+    interpolate_series(HISTORY_TELEMETRY_OUTLET_VALID,
+                       &history_telemetry_sample_t::outlet_deci_c,
+                       state.interp_outlet);
+}
+
+static lv_area_t plot_area(lv_obj_t* chart) {
+    lv_area_t coords;
+    lv_obj_get_coords(chart, &coords);
+    return {coords.x1 + 72, coords.y1 + 20, coords.x2 - 18, coords.y2 - 48};
+}
+
+// Whole-degree reading in the user's unit, e.g. "37°C".
+static void format_reading(char* buf, size_t len, const history_telemetry_sample_t& s,
+                           uint8_t valid_flag, int16_t deci_c) {
+    if (!(s.flags & valid_flag)) {
+        snprintf(buf, len, "--");
+        return;
+    }
+    const int32_t v = display_deci_c(deci_c);
+    const long whole = (v >= 0) ? (v + 5) / 10 : -((-v + 5) / 10);
+    snprintf(buf, len, "%ld°%s", whole,
+             app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT ? "F" : "C");
+}
+
+static void chart_press_cb(lv_event_t* event) {
+    if (state.sample_count == 0) return;
+    lv_indev_t* indev = lv_indev_active();
+    if (indev == nullptr) return;
+    lv_point_t point;
+    lv_indev_get_point(indev, &point);
+    const lv_area_t plot = plot_area(state.chart);
+    int32_t best = -1;
+    int32_t best_dx = INT32_MAX;
+    if (point.x >= plot.x1 && point.x <= plot.x2) {
+        for (size_t i = 0; i < state.sample_count; i++) {
+            const auto& s = state.samples[i];
+            if (!(s.flags & (HISTORY_TELEMETRY_INLET_VALID |
+                             HISTORY_TELEMETRY_OUTLET_VALID))) {
+                continue;
+            }
+            const int32_t dx = abs(map_x(s.timestamp, plot) - point.x);
+            if (dx < best_dx) { best_dx = dx; best = (int32_t)i; }
+        }
+    }
+    // Only snap to a sample near the finger, so tapping an empty stretch of
+    // the chart clears the crosshair.
+    if (best_dx > 30) best = -1;
+    if (best != state.cursor) {
+        state.cursor = best;
+        lv_obj_invalidate(state.chart);
+    }
+    (void)event;
+}
+
+static void draw_dot(lv_layer_t* layer, int32_t x, int32_t y, lv_color_t color) {
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.bg_color = color;
+    dsc.bg_opa = LV_OPA_COVER;
+    dsc.radius = LV_RADIUS_CIRCLE;
+    dsc.border_color = COLOR_PANEL;
+    dsc.border_width = 2;
+    lv_area_t area = {x - 7, y - 7, x + 7, y + 7};
+    lv_draw_rect(layer, &dsc, &area);
+}
+
+static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
+                        int32_t min_value, int32_t max_value) {
+    if (state.cursor < 0 || (size_t)state.cursor >= state.sample_count) return;
+    const size_t i = (size_t)state.cursor;
+    const auto& s = state.samples[i];
+    const int32_t x = map_x(s.timestamp, plot);
+
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = UI_COLOR_TEXT_DIM;
+    line.width = 2;
+    line.dash_width = 6;
+    line.dash_gap = 5;
+    line.p1.x = x; line.p1.y = plot.y1;
+    line.p2.x = x; line.p2.y = plot.y2;
+    lv_draw_line(layer, &line);
+
+    if (s.flags & HISTORY_TELEMETRY_SETPOINT_VALID) {
+        draw_dot(layer, x, map_y(s.setpoint_deci_c, min_value, max_value, plot),
+                 COLOR_SETPOINT);
+    }
+    if (state.interp_outlet && state.interp_outlet[i] != NO_VALUE) {
+        draw_dot(layer, x, map_y(state.interp_outlet[i], min_value, max_value, plot),
+                 COLOR_OUTLET);
+    }
+    if (state.interp_inlet && state.interp_inlet[i] != NO_VALUE) {
+        draw_dot(layer, x, map_y(state.interp_inlet[i], min_value, max_value, plot),
+                 COLOR_INLET);
+    }
+
+    char when[12];
+    time_t t = s.timestamp;
+    struct tm local = {};
+    localtime_r(&t, &local);
+    if (time_mgr_get_24h_format()) {
+        strftime(when, sizeof(when), "%H:%M", &local);
+    } else {
+        int hour12 = local.tm_hour % 12;
+        if (hour12 == 0) hour12 = 12;
+        snprintf(when, sizeof(when), "%d:%02d %s", hour12, local.tm_min,
+                 local.tm_hour < 12 ? "AM" : "PM");
+    }
+    char outlet[12], inlet[12], setpoint[12];
+    format_reading(outlet, sizeof(outlet), s, HISTORY_TELEMETRY_OUTLET_VALID,
+                   s.outlet_deci_c);
+    format_reading(inlet, sizeof(inlet), s, HISTORY_TELEMETRY_INLET_VALID,
+                   s.inlet_deci_c);
+    format_reading(setpoint, sizeof(setpoint), s,
+                   HISTORY_TELEMETRY_SETPOINT_VALID, s.setpoint_deci_c);
+
+    static constexpr int32_t BOX_W = 210, BOX_H = 112, ROW_H = 22, PAD = 10;
+    int32_t bx = x + 16;
+    if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
+    if (bx < plot.x1) bx = plot.x1;
+    const lv_area_t box = {bx, plot.y1 + 4, bx + BOX_W, plot.y1 + 4 + BOX_H};
+    lv_draw_rect_dsc_t bg;
+    lv_draw_rect_dsc_init(&bg);
+    bg.bg_color = COLOR_BG;
+    bg.bg_opa = LV_OPA_90;
+    bg.radius = 10;
+    bg.border_color = COLOR_GRID;
+    bg.border_width = 1;
+    lv_draw_rect(layer, &bg, &box);
+
+    lv_area_t row = {box.x1 + PAD, box.y1 + 6, box.x2 - PAD, box.y1 + 6 + ROW_H};
+    draw_label(layer, row, when, UI_COLOR_TEXT_DIM, LV_TEXT_ALIGN_LEFT);
+    struct Row { lv_color_t color; const char* name; const char* value; };
+    const Row rows[] = {
+        {COLOR_OUTLET, i18n_get(STR_HISTORY_OUTLET), outlet},
+        {COLOR_INLET, i18n_get(STR_HISTORY_INLET), inlet},
+        {COLOR_SETPOINT, i18n_get(STR_HISTORY_SETPOINT), setpoint},
+    };
+    for (const auto& r : rows) {
+        row.y1 += ROW_H;
+        row.y2 += ROW_H;
+        lv_draw_rect_dsc_t sw;
+        lv_draw_rect_dsc_init(&sw);
+        sw.bg_color = r.color;
+        sw.radius = 2;
+        const int32_t cy = (row.y1 + row.y2) / 2;
+        const lv_area_t swatch = {row.x1, cy - 2, row.x1 + 14, cy + 2};
+        lv_draw_rect(layer, &sw, &swatch);
+        lv_area_t name_area = {row.x1 + 22, row.y1, row.x2, row.y2};
+        draw_label(layer, name_area, r.name, UI_COLOR_TEXT, LV_TEXT_ALIGN_LEFT);
+        draw_label(layer, row, r.value, UI_COLOR_TEXT, LV_TEXT_ALIGN_RIGHT);
+    }
+}
+
 static void chart_draw_cb(lv_event_t* event) {
     lv_obj_t* chart = (lv_obj_t*)lv_event_get_target(event);
     lv_layer_t* layer = lv_event_get_layer(event);
     lv_area_t coords;
     lv_obj_get_coords(chart, &coords);
-    lv_area_t plot = {
-        coords.x1 + 72, coords.y1 + 20,
-        coords.x2 - 18, coords.y2 - 48,
-    };
+    const lv_area_t plot = plot_area(chart);
 
     int32_t min_value = INT32_MAX;
     int32_t max_value = INT32_MIN;
@@ -279,19 +490,24 @@ static void chart_draw_cb(lv_event_t* event) {
         int16_t history_telemetry_sample_t::* value;
         lv_color_t color;
         bool step;
+        const int32_t* interp;
     };
     const Series series[] = {
         {HISTORY_TELEMETRY_INLET_VALID,
-         &history_telemetry_sample_t::inlet_deci_c, COLOR_INLET, false},
+         &history_telemetry_sample_t::inlet_deci_c, COLOR_INLET, false,
+         state.interp_inlet},
         {HISTORY_TELEMETRY_OUTLET_VALID,
-         &history_telemetry_sample_t::outlet_deci_c, COLOR_OUTLET, false},
+         &history_telemetry_sample_t::outlet_deci_c, COLOR_OUTLET, false,
+         state.interp_outlet},
         {HISTORY_TELEMETRY_SETPOINT_VALID,
-         &history_telemetry_sample_t::setpoint_deci_c, COLOR_SETPOINT, true},
+         &history_telemetry_sample_t::setpoint_deci_c, COLOR_SETPOINT, true,
+         nullptr},
     };
 
     for (const auto& item : series) {
         bool have_previous = false;
         history_telemetry_sample_t previous = {};
+        int32_t previous_value = 0;
         for (size_t i = 0; i < state.sample_count; i++) {
             const auto& current = state.samples[i];
             int32_t current_value;
@@ -300,9 +516,11 @@ static void chart_draw_cb(lv_event_t* event) {
                 have_previous = false;
                 continue;
             }
+            if (item.interp && item.interp[i] != NO_VALUE) {
+                current_value = item.interp[i];
+            }
             if (have_previous &&
                 current.timestamp - previous.timestamp <= CONTIGUOUS_SECONDS) {
-                int32_t previous_value = previous.*(item.value);
                 lv_point_t p1 = {
                     map_x(previous.timestamp, plot),
                     map_y(previous_value, min_value, max_value, plot),
@@ -320,9 +538,12 @@ static void chart_draw_cb(lv_event_t* event) {
                 }
             }
             previous = current;
+            previous_value = current_value;
             have_previous = true;
         }
     }
+
+    draw_cursor(layer, plot, min_value, max_value);
 }
 
 static void update_range_label() {
@@ -384,6 +605,25 @@ static void query_complete(void* data) {
     heap_caps_free(state.samples);
     state.samples = result->samples;
     state.sample_count = result->count;
+    state.cursor = -1;
+    heap_caps_free(state.interp_inlet);
+    heap_caps_free(state.interp_outlet);
+    state.interp_inlet = nullptr;
+    state.interp_outlet = nullptr;
+    if (state.sample_count > 0) {
+        state.interp_inlet = static_cast<int32_t*>(heap_caps_malloc(
+            sizeof(int32_t) * state.sample_count, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        state.interp_outlet = static_cast<int32_t*>(heap_caps_malloc(
+            sizeof(int32_t) * state.sample_count, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (state.interp_inlet == nullptr || state.interp_outlet == nullptr) {
+            // Fall back to drawing the raw readings.
+            heap_caps_free(state.interp_inlet);
+            heap_caps_free(state.interp_outlet);
+            state.interp_inlet = nullptr;
+            state.interp_outlet = nullptr;
+        }
+        recompute_interpolation();
+    }
     if (result->error != ESP_OK) {
         lv_label_set_text(state.status_label,
                           i18n_get(STR_HISTORY_STORAGE_ERROR));
@@ -585,6 +825,10 @@ void heatpump_history_show(lv_obj_t* parent,
     lv_obj_set_style_radius(state.chart, 16, LV_PART_MAIN);
     lv_obj_set_style_pad_all(state.chart, 0, LV_PART_MAIN);
     lv_obj_clear_flag(state.chart, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(state.chart, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_user_data(state.chart, (void*)"temperature_history_chart");
+    lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_PRESSING, nullptr);
     lv_obj_add_event_cb(state.chart, chart_draw_cb, LV_EVENT_DRAW_MAIN_END,
                         nullptr);
 
@@ -650,6 +894,11 @@ void heatpump_history_hide(void) {
     state.latest_button = nullptr;
     heap_caps_free(state.samples);
     state.samples = nullptr;
+    heap_caps_free(state.interp_inlet);
+    heap_caps_free(state.interp_outlet);
+    state.interp_inlet = nullptr;
+    state.interp_outlet = nullptr;
+    state.cursor = -1;
     state.sample_count = 0;
 }
 
