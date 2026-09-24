@@ -2003,6 +2003,7 @@ static esp_err_t status_get_handler(httpd_req_t* req)
     char time_str[32];
     time_mgr_get_time_str(time_str, sizeof(time_str), "%H:%M:%S");
     cJSON_AddStringToObject(time_obj, "local", time_str);
+    cJSON_AddBoolToObject(time_obj, "format_24h", time_mgr_get_24h_format());
     cJSON_AddStringToObject(time_obj, "timezone", time_mgr_get_timezone());
     cJSON_AddBoolToObject(time_obj, "synced", time_mgr_is_synced());
     

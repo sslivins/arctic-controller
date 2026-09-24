@@ -1,5 +1,7 @@
 """Web dashboard tests for the temperature history view."""
 
+import re
+
 import requests
 import urllib3
 from playwright.sync_api import Page, expect
@@ -49,10 +51,11 @@ class TestTemperatureHistoryWeb:
         # SVG <text> nodes support textContent (not innerText), so use
         # all_text_contents() which reads textContent.
         labels = dashboard_page.locator(".hist-chart text.hist-axis").all_text_contents()
-        clock_labels = [t for t in labels if t and ":" in t]
+        # 24 h ticks read "14:00"; 12 h ticks read "2 PM".
+        clock_labels = [t for t in labels if t and (":" in t or t.endswith("M"))]
         assert clock_labels, "expected time labels on the x-axis"
-        # Every x-axis time label is rounded to a whole hour (:00).
-        assert all(t.endswith(":00") for t in clock_labels)
+        # Every x-axis time label is rounded to a whole hour.
+        assert all(re.fullmatch(r"\d{1,2}:00|\d{1,2} [AP]M", t) for t in clock_labels)
 
     def test_history_navigation_shifts_window(
         self, dashboard_page: Page, base_url: str
