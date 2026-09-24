@@ -246,8 +246,12 @@
     .hist-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--cp-text-muted); }
     .hist-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .hist-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
-    .hist-chart-wrap { width: 100%; }
-    .hist-chart { width: 100%; height: auto; display: block; }
+    .hist-chart-wrap { width: 100%; position: relative; }
+    .hist-chart { width: 100%; height: auto; display: block; touch-action: pan-y; }
+    .hist-tip { display: none; position: absolute; top: 12px; pointer-events: none; background: var(--cp-surface, #1e293b); border: 1px solid var(--cp-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.6; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
+    .hist-tip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: middle; }
+    .hist-tip strong { margin-left: 6px; }
+    .hist-tip-time { color: var(--cp-text-muted); font-size: 12px; }
     .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
     .hist-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
     .field { display: grid; gap: 6px; margin-bottom: 14px; }
@@ -1140,13 +1144,52 @@
         svg += `<text x="${x.toFixed(1)}" y="${plotB + 20}" text-anchor="middle" class="hist-axis">${fmtHistClock(ts, false)}</text>`;
       }
 
-      // Series paths (setpoint is a step line, temps are smooth polylines).
+      // Series paths (setpoint is a step line, temps are interpolated).
+      // Inlet/outlet arrive as whole degrees, so a raw line staircases. Each
+      // run of identical readings is a plateau; the true temperature crossed
+      // that value somewhere inside it, so the line is drawn through each
+      // plateau's midpoint instead (30° for 10 min then 31° reads 30.5° at the
+      // changeover). Plateau values, including peaks, are kept exactly, and a
+      // gap in the data breaks the line.
+      const isNum = v => v !== null && v !== undefined;
+      const interpolated = key => {
+        const vals = new Array(samples.length).fill(null);
+        let a = 0;
+        while (a < samples.length) {
+          if (!isNum(samples[a][key])) { a++; continue; }
+          let b = a;
+          while (b + 1 < samples.length && isNum(samples[b + 1][key])) b++;
+          const pts = [{ t: samples[a].t, v: samples[a][key] }];
+          for (let i = a; i <= b;) {
+            let j = i;
+            while (j + 1 <= b && samples[j + 1][key] === samples[i][key]) j++;
+            pts.push({ t: (samples[i].t + samples[j].t) / 2, v: samples[i][key] });
+            i = j + 1;
+          }
+          pts.push({ t: samples[b].t, v: samples[b][key] });
+          let p = 0;
+          for (let k = a; k <= b; k++) {
+            const t = samples[k].t;
+            while (p + 1 < pts.length - 1 && pts[p + 1].t <= t) p++;
+            const p0 = pts[p], p1 = pts[p + 1];
+            vals[k] = p1.t > p0.t ? p0.v + (p1.v - p0.v) * (t - p0.t) / (p1.t - p0.t) : p1.v;
+          }
+          a = b + 1;
+        }
+        return vals;
+      };
+      const series = {
+        set: samples.map(s => s.set),
+        out: interpolated("out"),
+        in: interpolated("in"),
+      };
       const line = (key, color, step) => {
+        const vals = series[key];
         let d = "", pen = false;
-        for (const s of samples) {
-          const v = s[key];
-          if (v === null || v === undefined) { pen = false; continue; }
-          const x = mapX(s.t), y = mapY(v);
+        for (let k = 0; k < samples.length; k++) {
+          const v = vals[k];
+          if (!isNum(v)) { pen = false; continue; }
+          const x = mapX(samples[k].t), y = mapY(v);
           if (!pen) { d += `M${x.toFixed(1)} ${y.toFixed(1)}`; pen = true; }
           else if (step) { d += `H${x.toFixed(1)}V${y.toFixed(1)}`; }
           else { d += `L${x.toFixed(1)} ${y.toFixed(1)}`; }
@@ -1157,8 +1200,52 @@
       svg += line("out", "#fb7185", false);
       svg += line("in", "#38bdf8", false);
 
+      // Hover crosshair: a vertical line plus a dot on each series, driven by
+      // histHover() from the pointer position.
+      svg += `<g class="hist-hover" style="display:none">
+        <line class="hist-hover-line" y1="${plotT}" y2="${plotB}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
+        <circle data-key="set" r="4" fill="#4ade80"/><circle data-key="out" r="4" fill="#fb7185"/><circle data-key="in" r="4" fill="#38bdf8"/></g>`;
+      histGeom = { W, plotL, plotR, mapX, mapY, samples, series };
+
       svg += `</svg>`;
       return svg;
+    }
+    let histGeom = null;
+    function histHover(event) {
+      const svg = event.target.closest?.(".hist-chart");
+      const wrap = svg?.closest(".hist-chart-wrap");
+      const hide = () => document.querySelectorAll(".hist-hover, .hist-tip").forEach(el => { el.style.display = "none"; });
+      if (!svg || !wrap || !histGeom || !histGeom.samples.length) { hide(); return; }
+      const g = histGeom, rect = svg.getBoundingClientRect();
+      const vx = (event.clientX - rect.left) / rect.width * g.W;
+      if (vx < g.plotL || vx > g.plotR) { hide(); return; }
+      let best = -1, bestDx = Infinity;
+      g.samples.forEach((s, k) => {
+        if (g.series.in[k] === null && g.series.out[k] === null) return;
+        const dx = Math.abs(g.mapX(s.t) - vx);
+        if (dx < bestDx) { bestDx = dx; best = k; }
+      });
+      if (best < 0 || bestDx > 24) { hide(); return; }
+      const s = g.samples[best], x = g.mapX(s.t);
+      const hover = svg.querySelector(".hist-hover");
+      hover.style.display = "";
+      const ln = hover.querySelector(".hist-hover-line");
+      ln.setAttribute("x1", x.toFixed(1)); ln.setAttribute("x2", x.toFixed(1));
+      hover.querySelectorAll("circle").forEach(c => {
+        const v = g.series[c.dataset.key][best];
+        if (v === null || v === undefined) { c.style.display = "none"; return; }
+        c.style.display = ""; c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", g.mapY(v).toFixed(1));
+      });
+      const fmt = v => (v === null || v === undefined) ? "--" : temp(v / 10);
+      const tip = wrap.querySelector(".hist-tip");
+      tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(s.t, true))}</div>
+        <div><i style="background:#fb7185"></i>Outlet <strong>${fmt(s.out)}</strong></div>
+        <div><i style="background:#38bdf8"></i>Inlet <strong>${fmt(s.in)}</strong></div>
+        <div><i style="background:#4ade80"></i>Setpoint <strong>${fmt(s.set)}</strong></div>`;
+      tip.style.display = "block";
+      const px = x / g.W * rect.width;
+      const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
+      tip.style.left = `${Math.max(0, left)}px`;
     }
     function historyPage() {
       const th = state.tempHistory, data = th.data;
@@ -1183,7 +1270,7 @@
               <span><i style="background:#4ade80"></i>Setpoint</span>
             </div>
           </div>
-          <div class="hist-chart-wrap">${historyChartSvg(data)}</div>
+          <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>
           <div class="hist-nav">
             <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ Earlier</button>
             <button class="btn" data-action="history-latest" ${atLatest ? "disabled" : ""}>Latest</button>
@@ -1713,6 +1800,8 @@
       document.addEventListener(name, event => {
         if (event.target.closest?.('[data-action="power-hold"]')) cancelPowerHold();
       }));
+    document.addEventListener("pointermove", histHover);
+    document.addEventListener("pointerleave", histHover);
     document.addEventListener("input", event => {
       if (event.target.id === "event-search") {
         state.eventFilters.search = event.target.value;
