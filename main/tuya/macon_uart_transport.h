@@ -52,7 +52,7 @@ public:
     // Drive RS485_DIR_PIN LOW as a GPIO (receive) with the internal pull-down.
     // Standalone so app_main() can call it before anything else: the pin is a
     // floating strapping pin at reset with no external pull-down on the Tab5.
-    static void drive_de_low();
+    static esp_err_t drive_de_low();
 
 private:
     bool initialized_ = false;

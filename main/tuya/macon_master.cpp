@@ -241,6 +241,7 @@ void begin_shutdown()
 void quiesce_for_restart(int timeout_ms)
 {
     begin_shutdown();
+    const int64_t t0 = esp_timer_get_time();
     // Deliberately never given back: the poll task and any late writer block
     // here until the reset. On timeout (a wedged transaction) we still release
     // the transceiver; a truncated frame fails the protocol checksum.
@@ -249,6 +250,8 @@ void quiesce_for_restart(int timeout_ms)
         ESP_LOGW(TAG, "Bus still busy after %d ms - releasing anyway", timeout_ms);
     }
     s_transport.release_bus();
+    ESP_LOGW(TAG, "Bus quiesced for restart in %d ms (DE low)",
+             (int)((esp_timer_get_time() - t0) / 1000));
 }
 
 void drive_de_low_early()

@@ -66,7 +66,7 @@ static void factory_reset_task(void* arg)
     }
 
     vTaskDelay(pdMS_TO_TICKS(250));
-    macon_master::quiesce_for_restart(1500);
+    macon_master::quiesce_for_restart(2000);
     esp_restart();
 }
 

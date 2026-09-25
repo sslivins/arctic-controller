@@ -14,9 +14,10 @@
 
 static const char* TAG = "system_restart";
 
-// Longest single bus transaction (verified write incl. read-back) is well
-// under a second; this only bounds a wedged one.
-static constexpr int BUS_QUIESCE_TIMEOUT_MS = 1500;
+// The poll task holds the bus for two back-to-back window reads (each capped
+// at 500 ms), so a worst-case wait is ~1 s (~800 ms measured). This only
+// bounds a wedged transaction.
+static constexpr int BUS_QUIESCE_TIMEOUT_MS = 2000;
 
 void system_safe_restart(void) {
     ESP_LOGW(TAG, "Safe restart requested - quiescing RS485 bus and flash writers");
