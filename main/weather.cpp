@@ -31,14 +31,14 @@ static const char* TAG = "weather";
 #define WX_REFRESH_INTERVAL_MS (15 * 60 * 1000)  // 15 minutes
 
 // UTF-8 glyphs from the weather_icons_32 font (FontAwesome subset).
-#define WX_ICON_SUN            "\xEF\x86\x85"  // U+F185 sun
-#define WX_ICON_CLOUD_SUN      "\xEF\x9B\x84"  // U+F6C4 cloud-sun
-#define WX_ICON_CLOUD          "\xEF\x83\x82"  // U+F0C2 cloud
-#define WX_ICON_FOG            "\xEF\x9D\x9F"  // U+F75F smog
-#define WX_ICON_RAIN           "\xEF\x9C\xBD"  // U+F73D cloud-rain
-#define WX_ICON_HEAVY_RAIN     "\xEF\x9D\x80"  // U+F740 cloud-showers-heavy
-#define WX_ICON_SNOW           "\xEF\x8B\x9C"  // U+F2DC snowflake
-#define WX_ICON_THUNDER        "\xEF\x83\xA7"  // U+F0E7 bolt
+#define WX_ICON_SUN            "\xEF\x86\x85"  // glyphs: weather_icons_32 (U+F185 sun)
+#define WX_ICON_CLOUD_SUN      "\xEF\x9B\x84"  // glyphs: weather_icons_32 (U+F6C4 cloud-sun)
+#define WX_ICON_CLOUD          "\xEF\x83\x82"  // glyphs: weather_icons_32 (U+F0C2 cloud)
+#define WX_ICON_FOG            "\xEF\x9D\x9F"  // glyphs: weather_icons_32 (U+F75F smog)
+#define WX_ICON_RAIN           "\xEF\x9C\xBD"  // glyphs: weather_icons_32 (U+F73D cloud-rain)
+#define WX_ICON_HEAVY_RAIN     "\xEF\x9D\x80"  // glyphs: weather_icons_32 (U+F740 cloud-showers-heavy)
+#define WX_ICON_SNOW           "\xEF\x8B\x9C"  // glyphs: weather_icons_32 (U+F2DC snowflake)
+#define WX_ICON_THUNDER        "\xEF\x83\xA7"  // glyphs: weather_icons_32 (U+F0E7 bolt)
 
 #ifdef CONFIG_TEST_ENDPOINTS
 // Test-only canned response. When set, weather_fetch() parses this instead of
