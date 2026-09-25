@@ -156,9 +156,15 @@ jobs:
           echo -n "${GITHUB_SHA}" > build_sha.txt
 
       - name: Disable demo mode (keep test endpoints to cover demo-off branches)
+        # The committed sdkconfig marks CONFIG_DEMO_MODE as "# default:", so a
+        # sdkconfig.defaults line overrides it. CONFIG_TEST_ENDPOINTS has no
+        # such marker there (it is user-set to "not set"), which beats
+        # sdkconfig.defaults, so it must be flipped in sdkconfig itself, exactly
+        # as device-tests.yml does. The verify step asserts the effective config.
         run: |
           echo "CONFIG_DEMO_MODE=n" >> sdkconfig.defaults
-          echo "CONFIG_TEST_ENDPOINTS=y" >> sdkconfig.defaults
+          sed -i 's/^# CONFIG_TEST_ENDPOINTS is not set$/CONFIG_TEST_ENDPOINTS=y/' sdkconfig
+          grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
 
       - name: ESP-IDF Build (demo disabled)
         uses: espressif/esp-idf-ci-action@v1
@@ -173,7 +179,11 @@ jobs:
             echo "::error::CONFIG_DEMO_MODE is still enabled in this variant — the demo-disabled build did not take effect."
             exit 1
           fi
-          echo "OK: CONFIG_DEMO_MODE is disabled in the compiled firmware"
+          if ! grep -q '^#define CONFIG_TEST_ENDPOINTS 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_TEST_ENDPOINTS is NOT set in this variant — the demo-off branches in test_endpoints.cpp were not compiled."
+            exit 1
+          fi
+          echo "OK: CONFIG_DEMO_MODE is disabled and CONFIG_TEST_ENDPOINTS enabled in the compiled firmware"
 
   # Compile-only guard for the passive LISTEN bus mode. Production (and the
   # device-tests suite) builds the default ARCTIC_TUYA_MASTER branch, so
