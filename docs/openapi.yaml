@@ -237,6 +237,24 @@ paths:
                   uptime_ms:
                     type: number
                     example: 123456789
+                  macon:
+                    type: object
+                    description: >-
+                      Identity of the arctic-macon bus library this firmware was
+                      built against. Two firmwares (e.g. controller and
+                      arctic-simulator) with equal fingerprints agree on every
+                      register, bit, scaling and fault. Present only on test
+                      firmware (CONFIG_TEST_ENDPOINTS).
+                    properties:
+                      api_version:
+                        type: integer
+                        example: 1
+                      layout_fingerprint:
+                        type: string
+                        example: 7deed7e2
+                      catalog_fingerprint:
+                        type: string
+                        example: a8311e02
                   wifi:
                     type: object
                     properties:

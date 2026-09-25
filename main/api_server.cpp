@@ -28,6 +28,7 @@
 // never includes them, so it carries no Macon register map at all.
 #include "macon_image.h"   // arctic::MaconField / macon_field_address
 #include "macon_faults.h"  // arctic::MACON_FAULT_REGS (fault-register addresses)
+#include "macon_fields.h"  // arctic::macon_*_fingerprint (bus-library compatibility)
 #endif
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "heatpump_errors.h"
@@ -1976,6 +1977,27 @@ static esp_err_t status_get_handler(httpd_req_t* req)
     cJSON_AddStringToObject(root, "device", "Arctic Heat Pump Controller");
     cJSON_AddStringToObject(root, "hostname", hostname);
     cJSON_AddNumberToObject(root, "uptime_ms", (double)xTaskGetTickCount() * portTICK_PERIOD_MS);
+
+    // arctic-macon library identity: a peer (e.g. the arctic-simulator) built
+    // against a different register layout or fault catalog reports different
+    // fingerprints, so test rigs can refuse to compare mismatched builds.
+    // Test firmware only, like the other register-map-aware diagnostics.
+#ifdef CONFIG_TEST_ENDPOINTS
+    {
+        static char s_layout_fp[12] = "";
+        static char s_catalog_fp[12] = "";
+        if (!s_layout_fp[0]) {
+            snprintf(s_catalog_fp, sizeof(s_catalog_fp), "%08lx",
+                     (unsigned long)arctic::macon_catalog_fingerprint());
+            snprintf(s_layout_fp, sizeof(s_layout_fp), "%08lx",
+                     (unsigned long)arctic::macon_layout_fingerprint());
+        }
+        cJSON* macon = cJSON_AddObjectToObject(root, "macon");
+        cJSON_AddNumberToObject(macon, "api_version", arctic::MACON_SEMANTIC_API_VERSION);
+        cJSON_AddStringToObject(macon, "layout_fingerprint", s_layout_fp);
+        cJSON_AddStringToObject(macon, "catalog_fingerprint", s_catalog_fp);
+    }
+#endif
     
     // WiFi status
     cJSON* wifi = cJSON_AddObjectToObject(root, "wifi");

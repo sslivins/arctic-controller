@@ -8,6 +8,7 @@
 #include "heatpump_errors.h"
 #include "event_log.h"
 #include "macon_state.h"
+#include "macon_fields.h"
 #include "macon_image.h"
 #include "macon_listener.h"
 #include "macon_master.h"
@@ -975,64 +976,29 @@ void getStatusDescription(char* buffer, size_t buffer_size) {
 bool setDemoField(const char* field, int32_t value) {
     if (!s_demo_mode || field == nullptr) return false;
 
-    // Map the demo field name to an opaque MaconImage operation. No register
-    // address, bit position, or scaling factor appears here — the arctic-macon
-    // library owns all of that. Fault injection is NOT a field write: use
-    // injectDemoFault()/clearDemoFaults() (which reference faults by identity).
-    struct FieldEntry { const char* name; MaconField field; };
-    static const FieldEntry kFields[] = {
-        { "water_tank_temp",      MaconField::WaterTankTemp },
-        { "outlet_water_temp",    MaconField::OutletWaterTemp },
-        { "inlet_water_temp",     MaconField::InletWaterTemp },
-        { "discharge_temp",       MaconField::DischargeTemp },
-        { "suction_temp",         MaconField::SuctionTemp },
-        { "outdoor_coil_temp",    MaconField::OutdoorCoilTemp },
-        { "indoor_coil_temp",     MaconField::IndoorCoilTemp },
-        { "outdoor_ambient_temp", MaconField::OutdoorAmbientTemp },
-        { "ipm_temp",             MaconField::IpmTemp },
-        { "compressor_freq",      MaconField::CompressorFreq },
-        { "fan_speed",            MaconField::FanLevel },
-        { "ac_voltage",           MaconField::AcVoltage },
-        { "ac_current",           MaconField::AcCurrent },
-        { "dc_voltage",           MaconField::DcVoltage },
-        { "main_eev",             MaconField::PrimaryEev },
-        { "primary_eev_opening",  MaconField::PrimaryEev },
-        { "realtime_power",       MaconField::RealtimePower },
-        { "cooling_setpoint",     MaconField::CoolingSetpoint },
-        { "heating_setpoint",     MaconField::HeatingSetpoint },
-        { "hot_water_setpoint",   MaconField::HotWaterSetpoint },
-    };
-    struct FlagEntry { const char* name; MaconFlag flag; };
-    static const FlagEntry kFlags[] = {
-        { "fan_on",     MaconFlag::Fan },
-        { "cooling_on", MaconFlag::Cooling },
-        { "pump_on",    MaconFlag::Pump },
-        { "unit_on",    MaconFlag::UnitOn },
-    };
-
+    // Field names, aliases, units and the image encoding all come from the
+    // arctic-macon field catalog (macon_fields.h) -- the same catalog the
+    // simulator's /api/state uses -- so no register, bit or scaling lives here.
+    // Fault injection is NOT a field write: use injectDemoFault()/
+    // clearDemoFaults() (which reference faults by identity).
+    //
+    // working_mode is the one exception: the demo API takes the controller's
+    // own WorkingMode numbering, so translate it before handing it over.
     bool matched = false;
-    imageLock();
-    for (const FieldEntry& e : kFields) {
-        if (strcmp(field, e.name) == 0) {
-            s_image.set_value(e.field, value);
-            matched = true;
-            break;
-        }
-    }
-    if (!matched) {
-        for (const FlagEntry& e : kFlags) {
-            if (strcmp(field, e.name) == 0) {
-                s_image.set_flag(e.flag, value != 0);
-                matched = true;
-                break;
-            }
-        }
-    }
-    if (!matched && strcmp(field, "working_mode") == 0) {
+    if (strcmp(field, "working_mode") == 0) {
+        imageLock();
         s_image.set_working_mode(to_macon_working_mode(static_cast<WorkingMode>(value)));
+        imageUnlock();
+        matched = true;
+    } else if (const MaconFieldDesc* d = macon_field_find(field)) {
+        imageLock();
+        const MaconSetResult r = macon_field_set(s_image, *d, value, /*strict=*/false);
+        imageUnlock();
+        if (r != MaconSetResult::Ok) {
+            ESP_LOGW(TAG, "[DEMO] Field '%s'=%ld not encodable (%d)", field, (long)value, (int)r);
+        }
         matched = true;
     }
-    imageUnlock();
 
     if (!matched) return false;
 

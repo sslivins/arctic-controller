@@ -94,7 +94,7 @@ jobs:
             || { echo "::error::Attestation commit_sha does not match $TARGET_SHA"; exit 1; }
           jq -e --arg t "$TREE_SHA" '.tree_sha == $t' "$FILE" > /dev/null \
             || { echo "::error::Attestation tree_sha does not match $TREE_SHA"; exit 1; }
-          jq -e '.suites.ui == "success" and .suites.api == "success" and .suites.web == "success"' "$FILE" > /dev/null \
+          jq -e '.suites.ui == "success" and .suites.api == "success" and .suites.web == "success" and .suites.rs485 == "success"' "$FILE" > /dev/null \
             || { echo "::error::Attestation records a non-passing suite"; exit 1; }
           echo "✅ Attestation verified for $TARGET_SHA (run $RUN_ID)"
 

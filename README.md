@@ -211,6 +211,20 @@ See [tests/api/](tests/api/).
 ARCTIC_URL=http://arctic.local pytest tests/api/ -v
 ```
 
+### RS-485 End-to-End Tests (arctic-simulator)
+Makes the controller the live RS-485 master against an
+[arctic-simulator](https://github.com/sslivins/arctic-simulator) bench and checks that
+every field, fault and verified write round-trips. The fields and fault codes come from
+the simulator's arctic-macon catalog (`/api/fields`, `/api/faults/catalog`), so the
+suite has no register map of its own. It refuses to run if the controller and simulator
+report different arctic-macon fingerprints. It takes the controller out of demo mode,
+leases the simulator for the run, and puts both back afterwards.
+
+```bash
+ARCTIC_URL=https://arctic.local ARCTIC_API_KEY=... ARCTIC_SIM_URL=http://192.168.1.177 \
+  pytest tests/rs485/ -v
+```
+
 ## Project Structure
 
 ```
