@@ -246,6 +246,7 @@
     .hist-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--cp-text-muted); }
     .hist-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .hist-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+    .hist-legend i.band { width: 12px; height: 12px; border-radius: 3px; }
     .hist-chart-wrap { width: 100%; position: relative; }
     .hist-chart { width: 100%; height: auto; display: block; touch-action: pan-y; }
     .hist-tip { display: none; position: absolute; top: 12px; pointer-events: none; background: var(--cp-surface, #1e293b); border: 1px solid var(--cp-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.6; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
@@ -1215,14 +1216,14 @@
         return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
       };
       svg += line("set", "#4ade80", true);
-      svg += line("out", "#fb7185", false);
-      svg += line("in", "#38bdf8", false);
+      svg += line("out", "#f1f5f9", false);
+      svg += line("in", "#d946ef", false);
 
       // Hover crosshair: a vertical line plus a dot on each series, driven by
       // histHover() from the pointer position.
       svg += `<g class="hist-hover" style="display:none">
         <line class="hist-hover-line" y1="${plotT}" y2="${plotB}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
-        <circle data-key="set" r="4" fill="#4ade80"/><circle data-key="out" r="4" fill="#fb7185"/><circle data-key="in" r="4" fill="#38bdf8"/></g>`;
+        <circle data-key="set" r="4" fill="#4ade80"/><circle data-key="out" r="4" fill="#f1f5f9"/><circle data-key="in" r="4" fill="#d946ef"/></g>`;
       histGeom = { W, plotL, plotR, mapX, mapY, samples, series };
 
       svg += `</svg>`;
@@ -1257,8 +1258,8 @@
       const fmt = v => (v === null || v === undefined) ? "--" : temp(v / 10);
       const tip = wrap.querySelector(".hist-tip");
       tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(s.t, true))}</div>
-        <div><i style="background:#fb7185"></i>Outlet <strong>${fmt(s.out)}</strong></div>
-        <div><i style="background:#38bdf8"></i>Inlet <strong>${fmt(s.in)}</strong></div>
+        <div><i style="background:#f1f5f9"></i>Outlet <strong>${fmt(s.out)}</strong></div>
+        <div><i style="background:#d946ef"></i>Inlet <strong>${fmt(s.in)}</strong></div>
         <div><i style="background:#4ade80"></i>Setpoint <strong>${fmt(s.set)}</strong></div>`;
       tip.style.display = "block";
       const px = x / g.W * rect.width;
@@ -1283,9 +1284,12 @@
           <div class="hist-toolbar">
             <div class="hist-range">${esc(rangeText)}</div>
             <div class="hist-legend">
-              <span><i style="background:#38bdf8"></i>Inlet</span>
-              <span><i style="background:#fb7185"></i>Outlet</span>
+              <span><i style="background:#d946ef"></i>Inlet</span>
+              <span><i style="background:#f1f5f9"></i>Outlet</span>
               <span><i style="background:#4ade80"></i>Setpoint</span>
+              <span><i class="band" style="background:#ef4444"></i>Heating</span>
+              <span><i class="band" style="background:#3b82f6"></i>Cooling</span>
+              <span><i class="band" style="background:#fbbf24"></i>Hot Water</span>
             </div>
           </div>
           <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>

@@ -62,6 +62,7 @@ idf_component_register(
         "system_restart.cpp"
         "event_log_screen.cpp"
         "ui_dialog.cpp"
+        "ui_overlay.cpp"
         "boot_stats.cpp"
         "wifi_supervisor.cpp"
         "log_buffer.cpp"

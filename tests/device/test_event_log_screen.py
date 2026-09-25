@@ -371,6 +371,32 @@ class TestEventLogSearchAndFilters:
 
         device.click(tag="event_search_cancel")
 
+    def test_search_and_filters_survive_display_off(self, device: DeviceClient):
+        """Display-off dismisses the overlays; they must still open afterwards.
+
+        Regression: dismissal deleted the build-once overlays, leaving the
+        Search and Filters buttons dead until reboot.
+        """
+        _open_event_log(device)
+        _reset_filters(device)
+        device.click(tag="event_search_open")
+        assert device.wait_for_widget(tag="event_search_input", timeout=3.0)
+
+        assert device.set_display_idle("off")["off"] is True
+        device.set_display_idle("wake")
+        assert device.wait_for_screen("main", timeout=5.0)
+        assert device.find_widget(tag="event_search_input") is None
+
+        _open_event_log(device)
+        device.click(tag="event_search_open")
+        assert device.wait_for_widget(tag="event_search_input", timeout=3.0), \
+            "Search overlay did not reopen after display-off"
+        device.click(tag="event_search_cancel")
+        device.click(tag="event_filters_open")
+        assert device.wait_for_widget(tag="event_filters_apply", timeout=3.0), \
+            "Filters overlay did not reopen after display-off"
+        device.click(tag="event_filters_cancel")
+
     def test_search_filters_event_descriptions(self, device: DeviceClient):
         _seed_fault_cycle(device, "P02")
 

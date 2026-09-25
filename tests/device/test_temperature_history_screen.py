@@ -39,3 +39,22 @@ def test_temperature_history_page_and_navigation(device: DeviceClient):
     )
     device.click(tag="temperature_history_back")
     device.wait_for_widget(tag="temperature_history_open")
+
+
+def test_status_tab_survives_display_off_while_history_open(device: DeviceClient):
+    """Display-off tears down the history overlay from outside the Status tab.
+
+    Regression: the Status content stayed hidden afterwards, so the tab
+    rendered blank until reboot.
+    """
+    _open_status(device)
+    device.click(tag="temperature_history_open")
+    device.wait_for_widget(tag="temperature_history_screen")
+
+    off = device.set_display_idle("off")
+    assert off["off"] is True
+    device.set_display_idle("wake")
+    assert device.screen == "main"
+    assert not device.has_widget(tag="temperature_history_screen")
+
+    _open_status(device)
