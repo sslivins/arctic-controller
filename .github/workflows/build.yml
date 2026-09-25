@@ -156,26 +156,14 @@ jobs:
           echo -n "${GITHUB_SHA}" > build_sha.txt
 
       - name: Disable demo mode (keep test endpoints to cover demo-off branches)
-        # Edit the committed sdkconfig, not sdkconfig.defaults: sdkconfig wins,
-        # so a defaults line is silently ignored for any option it already sets
-        # (both of these), and this job used to compile demo-off WITHOUT test
-        # endpoints. The verify step below asserts the effective config.
+        # The committed sdkconfig marks CONFIG_DEMO_MODE as "# default:", so a
+        # sdkconfig.defaults line overrides it. CONFIG_TEST_ENDPOINTS has no
+        # such marker there (it is user-set to "not set"), which beats
+        # sdkconfig.defaults, so it must be flipped in sdkconfig itself, exactly
+        # as device-tests.yml does. The verify step asserts the effective config.
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("sdkconfig")
-          config = path.read_text(encoding="utf-8")
-          for old, new in (
-              ("CONFIG_DEMO_MODE=y", "# CONFIG_DEMO_MODE is not set"),
-              ("# CONFIG_TEST_ENDPOINTS is not set", "CONFIG_TEST_ENDPOINTS=y"),
-          ):
-              if old not in config:
-                  raise SystemExit(f"expected {old!r} in sdkconfig")
-              config = config.replace(old, new, 1)
-          path.write_text(config, encoding="utf-8")
-          PY
-          grep -q '^# CONFIG_DEMO_MODE is not set$' sdkconfig
+          echo "CONFIG_DEMO_MODE=n" >> sdkconfig.defaults
+          sed -i 's/^# CONFIG_TEST_ENDPOINTS is not set$/CONFIG_TEST_ENDPOINTS=y/' sdkconfig
           grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
 
       - name: ESP-IDF Build (demo disabled)
