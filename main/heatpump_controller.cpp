@@ -46,6 +46,9 @@ static bool s_heating_setpoint_valid = false;
 static bool s_hot_water_setpoint_valid = false;
 static bool s_mode_valid = false;
 static bool s_compressor_valid = false;
+// Whether the heating (aux-heat) setpoint has been decoded at all. Distinct
+// from s_heating_setpoint_valid, which is deliberately forced false for the API.
+static bool s_heating_setpoint_decoded = false;
 
 static constexpr uint32_t TELEMETRY_FRESHNESS_MS = 90000;
 
@@ -65,6 +68,12 @@ static int16_t s_prev_cooling_sp = 0;
 static int16_t s_prev_heating_sp = 0;
 static int16_t s_prev_hotwater_sp = 0;
 static bool s_prev_state_valid = false;  // False until first successful poll
+// Per-field baselines: the first bus window after boot often lacks the mode /
+// setpoint registers, so those fields only get a baseline once they decode.
+static bool s_prev_mode_valid = false;
+static bool s_prev_cooling_sp_valid = false;
+static bool s_prev_heating_sp_valid = false;
+static bool s_prev_hotwater_sp_valid = false;
 
 // Get current time in milliseconds
 static uint32_t getTimeMs() {
@@ -119,20 +128,23 @@ static void detectAndLogStateEvents() {
             event_log_record(s_state.unit_on ? EVENT_POWER_ON : EVENT_POWER_OFF, 0);
         }
         // Mode changed
-        if (s_state.working_mode != s_prev_mode) {
+        if (s_mode_valid && s_prev_mode_valid && s_state.working_mode != s_prev_mode) {
             uint32_t payload = ((uint32_t)s_prev_mode << 8) | (uint32_t)s_state.working_mode;
             event_log_record(EVENT_MODE_CHANGED, payload);
         }
         // Setpoint changes
-        if (s_state.cooling_setpoint != s_prev_cooling_sp) {
+        if (s_cooling_setpoint_valid && s_prev_cooling_sp_valid &&
+            s_state.cooling_setpoint != s_prev_cooling_sp) {
             uint32_t payload = (0 << 16) | ((uint16_t)s_prev_cooling_sp << 8) | (uint16_t)s_state.cooling_setpoint;
             event_log_record(EVENT_SETPOINT_CHANGED, payload);
         }
-        if (s_state.heating_setpoint != s_prev_heating_sp) {
+        if (s_heating_setpoint_decoded && s_prev_heating_sp_valid &&
+            s_state.heating_setpoint != s_prev_heating_sp) {
             uint32_t payload = (1 << 16) | ((uint16_t)s_prev_heating_sp << 8) | (uint16_t)s_state.heating_setpoint;
             event_log_record(EVENT_SETPOINT_CHANGED, payload);
         }
-        if (s_state.hot_water_setpoint != s_prev_hotwater_sp) {
+        if (s_hot_water_setpoint_valid && s_prev_hotwater_sp_valid &&
+            s_state.hot_water_setpoint != s_prev_hotwater_sp) {
             uint32_t payload = (2 << 16) | ((uint16_t)s_prev_hotwater_sp << 8) | (uint16_t)s_state.hot_water_setpoint;
             event_log_record(EVENT_SETPOINT_CHANGED, payload);
         }
@@ -195,10 +207,24 @@ static void detectAndLogStateEvents() {
 
     // Update previous state
     s_prev_unit_on = s_state.unit_on;
-    s_prev_mode = s_state.working_mode;
-    s_prev_cooling_sp = s_state.cooling_setpoint;
-    s_prev_heating_sp = s_state.heating_setpoint;
-    s_prev_hotwater_sp = s_state.hot_water_setpoint;
+    // Only advance a field's baseline while it decodes, so a window that lacks
+    // it neither seeds a bogus 0 nor wipes the last known value.
+    if (s_mode_valid) {
+        s_prev_mode = s_state.working_mode;
+        s_prev_mode_valid = true;
+    }
+    if (s_cooling_setpoint_valid) {
+        s_prev_cooling_sp = s_state.cooling_setpoint;
+        s_prev_cooling_sp_valid = true;
+    }
+    if (s_heating_setpoint_decoded) {
+        s_prev_heating_sp = s_state.heating_setpoint;
+        s_prev_heating_sp_valid = true;
+    }
+    if (s_hot_water_setpoint_valid) {
+        s_prev_hotwater_sp = s_state.hot_water_setpoint;
+        s_prev_hotwater_sp_valid = true;
+    }
     s_prev_compressor = s_state.isCompressorRunning();
     s_prev_fan = s_state.isFanRunning();
     s_prev_pump = s_state.isWaterPumpRunning();
@@ -487,6 +513,7 @@ static void applyMaconMapping() {
     // unit, so expose its value in the diagnostic UI but do not persist it as
     // a valid target.
     s_heating_setpoint_valid = false;
+    s_heating_setpoint_decoded = ms.aux_heat_setpoint_valid;
     s_hot_water_setpoint_valid = ms.hot_water_setpoint_valid;
     s_mode_valid = ms.working_mode_valid;
     s_compressor_valid = ms.compressor_freq_valid;

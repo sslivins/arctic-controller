@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 16 px
  * Bpp: 4
- * Opts: --font C:\Windows\Fonts\seguisym.ttf -r 0x25CB,0x25CF --bpp 4 --size 16 --format lvgl -o J:\code\tab5\arctic-controller\main\fonts\montserrat_16_misc.c --no-compress
+ * Opts: --no-compress --bpp 4 --size 16 --format lvgl --font Montserrat-Medium.ttf -r 0x2013,0x2014,0x2022,0x2026,0x2190-0x2193 --font C:\Windows\Fonts\seguisym.ttf -r 0x25CB,0x25CF -o montserrat_16_misc.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -22,6 +22,45 @@
 
 /*Store the image of the glyphs*/
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
+    /* U+2013 "–" */
+    0xff, 0xff, 0xff, 0xff, 0x22, 0x22, 0x22, 0x22,
+
+    /* U+2014 "—" */
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
+
+    /* U+2022 "•" */
+    0x0, 0x8, 0xf8, 0xef, 0xe7, 0xf7,
+
+    /* U+2026 "…" */
+    0x3, 0x10, 0x3, 0x0, 0x13, 0x2, 0xfc, 0x7,
+    0xf7, 0xb, 0xf3, 0x1e, 0x90, 0x4f, 0x50, 0x9e,
+    0x10,
+
+    /* U+2190 "←" */
+    0x0, 0x5a, 0x0, 0x0, 0x1, 0xe6, 0x0, 0x0,
+    0xb, 0xc0, 0x0, 0x0, 0x4f, 0xff, 0xff, 0xf8,
+    0xd, 0xb3, 0x33, 0x31, 0x3, 0xf4, 0x0, 0x0,
+    0x0, 0x7c, 0x0, 0x0,
+
+    /* U+2191 "↑" */
+    0x0, 0x2c, 0x60, 0x0, 0x7f, 0xff, 0xb1, 0x8d,
+    0x4e, 0x6a, 0xe3, 0x0, 0xe5, 0x4, 0x0, 0xe,
+    0x50, 0x0, 0x0, 0xe5, 0x0, 0x0, 0xe, 0x50,
+    0x0, 0x0, 0x10, 0x0,
+
+    /* U+2192 "→" */
+    0x0, 0x3, 0xa0, 0x0, 0x0, 0x0, 0xca, 0x0,
+    0x0, 0x0, 0x3f, 0x40, 0xef, 0xff, 0xff, 0xe0,
+    0x23, 0x33, 0x4f, 0x70, 0x0, 0x0, 0xac, 0x0,
+    0x0, 0x3, 0xe2, 0x0,
+
+    /* U+2193 "↓" */
+    0x0, 0xc, 0x50, 0x0, 0x0, 0xd5, 0x0, 0x0,
+    0xd, 0x50, 0x1, 0x0, 0xd5, 0x1, 0x8b, 0x1d,
+    0x56, 0xf1, 0xaf, 0xfe, 0xe4, 0x0, 0x5e, 0xa1,
+    0x0, 0x0, 0x0, 0x0,
+
     /* U+25CB "○" */
     0x0, 0x0, 0x1, 0x10, 0x0, 0x0, 0x0, 0x19,
     0xed, 0xee, 0x80, 0x0, 0x3, 0xe7, 0x0, 0x1,
@@ -54,8 +93,16 @@ static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
 
 static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 0, .adv_w = 0, .box_w = 0, .box_h = 0, .ofs_x = 0, .ofs_y = 0} /* id = 0 reserved */,
-    {.bitmap_index = 0, .adv_w = 221, .box_w = 12, .box_h = 13, .ofs_x = 1, .ofs_y = -1},
-    {.bitmap_index = 78, .adv_w = 221, .box_w = 12, .box_h = 13, .ofs_x = 1, .ofs_y = -1}
+    {.bitmap_index = 0, .adv_w = 128, .box_w = 8, .box_h = 2, .ofs_x = 0, .ofs_y = 3},
+    {.bitmap_index = 8, .adv_w = 256, .box_w = 16, .box_h = 2, .ofs_x = 0, .ofs_y = 3},
+    {.bitmap_index = 24, .adv_w = 80, .box_w = 3, .box_h = 4, .ofs_x = 1, .ofs_y = 3},
+    {.bitmap_index = 30, .adv_w = 177, .box_w = 11, .box_h = 3, .ofs_x = 0, .ofs_y = 0},
+    {.bitmap_index = 47, .adv_w = 154, .box_w = 8, .box_h = 7, .ofs_x = 1, .ofs_y = 1},
+    {.bitmap_index = 75, .adv_w = 154, .box_w = 7, .box_h = 8, .ofs_x = 1, .ofs_y = 0},
+    {.bitmap_index = 103, .adv_w = 154, .box_w = 8, .box_h = 7, .ofs_x = 1, .ofs_y = 1},
+    {.bitmap_index = 131, .adv_w = 154, .box_w = 7, .box_h = 8, .ofs_x = 1, .ofs_y = 0},
+    {.bitmap_index = 159, .adv_w = 221, .box_w = 12, .box_h = 13, .ofs_x = 1, .ofs_y = -1},
+    {.bitmap_index = 237, .adv_w = 221, .box_w = 12, .box_h = 13, .ofs_x = 1, .ofs_y = -1}
 };
 
 /*---------------------
@@ -63,19 +110,48 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
  *--------------------*/
 
 static const uint16_t unicode_list_0[] = {
-    0x0, 0x4
+    0x0, 0x1, 0xf, 0x13, 0x17d, 0x17e, 0x17f, 0x180,
+    0x5b8, 0x5bc
 };
 
 /*Collect the unicode lists and glyph_id offsets*/
 static const lv_font_fmt_txt_cmap_t cmaps[] =
 {
     {
-        .range_start = 9675, .range_length = 5, .glyph_id_start = 1,
-        .unicode_list = unicode_list_0, .glyph_id_ofs_list = NULL, .list_length = 2, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
+        .range_start = 8211, .range_length = 1469, .glyph_id_start = 1,
+        .unicode_list = unicode_list_0, .glyph_id_ofs_list = NULL, .list_length = 10, .type = LV_FONT_FMT_TXT_CMAP_SPARSE_TINY
     }
 };
 
+/*-----------------
+ *    KERNING
+ *----------------*/
 
+
+/*Pair left and right glyphs for kerning*/
+static const uint8_t kern_pair_glyph_ids[] =
+{
+    1, 4,
+    3, 4,
+    4, 1,
+    4, 3
+};
+
+/* Kerning between the respective left and right glyphs
+ * 4.4 format which needs to scaled with `kern_scale`*/
+static const int8_t kern_pair_values[] =
+{
+    -2, -2, -2, -2
+};
+
+/*Collect the kern pair's data in one place*/
+static const lv_font_fmt_txt_kern_pair_t kern_pairs =
+{
+    .glyph_ids = kern_pair_glyph_ids,
+    .values = kern_pair_values,
+    .pair_cnt = 4,
+    .glyph_ids_size = 0
+};
 
 /*--------------------
  *  ALL CUSTOM DATA
@@ -94,8 +170,8 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
     .glyph_bitmap = glyph_bitmap,
     .glyph_dsc = glyph_dsc,
     .cmaps = cmaps,
-    .kern_dsc = NULL,
-    .kern_scale = 0,
+    .kern_dsc = &kern_pairs,
+    .kern_scale = 16,
     .cmap_num = 1,
     .bpp = 4,
     .kern_classes = 0,
@@ -125,7 +201,7 @@ lv_font_t montserrat_16_misc = {
     .subpx = LV_FONT_SUBPX_NONE,
 #endif
 #if LV_VERSION_CHECK(7, 4, 0) || LVGL_VERSION_MAJOR >= 8
-    .underline_position = -1,
+    .underline_position = -2,
     .underline_thickness = 1,
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */

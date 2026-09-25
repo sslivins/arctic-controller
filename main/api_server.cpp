@@ -4730,7 +4730,7 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
 #endif
 
     // UTF-8 BOM so Excel interprets the file correctly (degree signs, accents, etc.)
-    httpd_resp_send_chunk(req, "\xEF\xBB\xBF", 3);
+    httpd_resp_send_chunk(req, "\xEF\xBB\xBF", 3);  // glyphs: not-ui
 
     // CSV header
     httpd_resp_sendstr_chunk(req, "Category,Name,P-Code,Register Address,Value,Unit\r\n");
