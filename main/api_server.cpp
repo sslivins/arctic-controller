@@ -48,9 +48,11 @@
 #include <esp_http_server.h>
 #include <esp_https_server.h>
 #include <esp_log.h>
+#include <lwip/sockets.h>
 #include <mdns.h>
 #include <cJSON.h>
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <esp_ota_ops.h>
@@ -1799,12 +1801,28 @@ static esp_err_t https_api_method_not_allowed_handler(httpd_req_t* req,
 // is unknown, and keeping the connection alive would let the leftover bytes be
 // parsed as a further request. Closing is also what the default path does.
 // req->uri is not echoed because it may be empty or only partially parsed.
+//
+// TCP_NODELAY is load-bearing, and mirrors what the default path does under
+// CONFIG_HTTPD_ERR_RESP_NO_DELAY. A parser error often follows a response the
+// handler already sent on this connection (e.g. a handler that answered without
+// reading a chunked body, whose leftover chunk bytes are then parsed as the
+// next request). Part of that earlier response can still be held back by Nagle,
+// and closing with unread request bytes makes lwIP send an RST that discards
+// it: the client gets headers but no body (IncompleteRead). Flushing first
+// keeps both responses intact. The socket is closed straight after, so the
+// option is not restored.
 static esp_err_t http_bad_request_handler(httpd_req_t* req,
                                           httpd_err_code_t err)
 {
     (void)err;
 
     ESP_LOGW(TAG, "HTTP 400: request rejected by the HTTP parser");
+
+    int nodelay = 1;
+    if (setsockopt(httpd_req_to_sockfd(req), IPPROTO_TCP, TCP_NODELAY,
+                   &nodelay, sizeof(nodelay)) < 0) {
+        ESP_LOGW(TAG, "HTTP 400: TCP_NODELAY failed: errno %d", errno);
+    }
 
     httpd_resp_set_status(req, "400 Bad Request");
     httpd_resp_set_type(req, "application/json");
