@@ -1226,7 +1226,11 @@ void event_log_screen_set_active(bool active) {
 }
 
 void event_log_screen_dismiss_overlays(void) {
-    close_overlays();
+    // Search/filter overlays are built once per tab and reused, so dismissing
+    // must only hide them -- deleting them here left Search/Filter dead until
+    // reboot. They are destroyed only with the screen (event_log_screen_hide).
+    if (state.search_overlay) lv_obj_add_flag(state.search_overlay, LV_OBJ_FLAG_HIDDEN);
+    if (state.filter_overlay) lv_obj_add_flag(state.filter_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
 void event_log_screen_hide(void) {

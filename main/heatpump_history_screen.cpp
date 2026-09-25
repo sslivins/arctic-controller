@@ -25,8 +25,10 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 #define COLOR_BG        lv_color_hex(0x1a1a2e)
 #define COLOR_PANEL     lv_color_hex(0x16213e)
 #define COLOR_GRID      lv_color_hex(0x3d4f6f)
-#define COLOR_INLET     lv_color_hex(0x38bdf8)
-#define COLOR_OUTLET    lv_color_hex(0xfb7185)
+// Neutral hues: red/blue would read as heating/cooling and clash with the
+// mode bands.
+#define COLOR_INLET     lv_color_hex(0xd946ef)
+#define COLOR_OUTLET    lv_color_hex(0xf1f5f9)
 #define COLOR_SETPOINT  lv_color_hex(0x4ade80)
 #define COLOR_HEATING   lv_color_hex(0xef4444)
 #define COLOR_COOLING   lv_color_hex(0x3b82f6)
@@ -124,11 +126,12 @@ static void draw_line(lv_layer_t* layer, lv_point_t p1, lv_point_t p2,
 
 static void draw_label(lv_layer_t* layer, const lv_area_t& area,
                        const char* text, lv_color_t color,
-                       lv_text_align_t align) {
+                       lv_text_align_t align,
+                       const lv_font_t* font = &montserrat_16_latin) {
     lv_draw_label_dsc_t dsc;
     lv_draw_label_dsc_init(&dsc);
     dsc.color = color;
-    dsc.font = &montserrat_16_latin;
+    dsc.font = font;
     dsc.text = text;
     dsc.text_local = true;
     dsc.align = align;
@@ -314,7 +317,8 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
     format_reading(setpoint, sizeof(setpoint), s,
                    HISTORY_TELEMETRY_SETPOINT_VALID, s.setpoint_deci_c);
 
-    static constexpr int32_t BOX_W = 210, BOX_H = 112, ROW_H = 22, PAD = 10;
+    static constexpr int32_t BOX_W = 250, TIME_H = 30, ROW_H = 30, PAD = 10;
+    static constexpr int32_t BOX_H = 6 + TIME_H + 3 * ROW_H + 8;
     int32_t bx = x + 16;
     if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
     if (bx < plot.x1) bx = plot.x1;
@@ -328,8 +332,11 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
     bg.border_width = 1;
     lv_draw_rect(layer, &bg, &box);
 
-    lv_area_t row = {box.x1 + PAD, box.y1 + 6, box.x2 - PAD, box.y1 + 6 + ROW_H};
-    draw_label(layer, row, when, UI_COLOR_TEXT_DIM, LV_TEXT_ALIGN_LEFT);
+    const lv_area_t time_row = {box.x1 + PAD, box.y1 + 6, box.x2 - PAD,
+                                box.y1 + 6 + TIME_H};
+    draw_label(layer, time_row, when, UI_COLOR_TEXT_DIM, LV_TEXT_ALIGN_LEFT,
+               &montserrat_24_latin);
+    lv_area_t row = {time_row.x1, time_row.y2 - ROW_H, time_row.x2, time_row.y2};
     struct Row { lv_color_t color; const char* name; const char* value; };
     const Row rows[] = {
         {COLOR_OUTLET, i18n_get(STR_HISTORY_OUTLET), outlet},
@@ -344,11 +351,13 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
         sw.bg_color = r.color;
         sw.radius = 2;
         const int32_t cy = (row.y1 + row.y2) / 2;
-        const lv_area_t swatch = {row.x1, cy - 2, row.x1 + 14, cy + 2};
+        const lv_area_t swatch = {row.x1, cy - 2, row.x1 + 16, cy + 2};
         lv_draw_rect(layer, &sw, &swatch);
-        lv_area_t name_area = {row.x1 + 22, row.y1, row.x2, row.y2};
-        draw_label(layer, name_area, r.name, UI_COLOR_TEXT, LV_TEXT_ALIGN_LEFT);
-        draw_label(layer, row, r.value, UI_COLOR_TEXT, LV_TEXT_ALIGN_RIGHT);
+        lv_area_t name_area = {row.x1 + 24, row.y1, row.x2, row.y2};
+        draw_label(layer, name_area, r.name, UI_COLOR_TEXT, LV_TEXT_ALIGN_LEFT,
+                   &montserrat_24_latin);
+        draw_label(layer, row, r.value, UI_COLOR_TEXT, LV_TEXT_ALIGN_RIGHT,
+                   &montserrat_24_latin);
     }
 }
 
@@ -706,9 +715,7 @@ static lv_obj_t* create_button(lv_obj_t* parent, const char* text,
 }
 
 static void close_cb(lv_event_t*) {
-    heatpump_history_close_cb_t callback = state.on_close;
     heatpump_history_hide();
-    if (callback) callback();
 }
 
 static void previous_cb(lv_event_t*) {
@@ -725,31 +732,33 @@ static void latest_cb(lv_event_t*) {
     request_window(state.latest_end);
 }
 
+// Lines get a thin bar swatch, mode bands a filled block, so the two legend
+// rows read like a chart key.
 static void add_legend_item(lv_obj_t* parent, lv_color_t color,
-                            const char* text) {
+                            const char* text, bool band) {
     lv_obj_t* item = lv_obj_create(parent);
     lv_obj_remove_style_all(item);
-    lv_obj_set_size(item, LV_SIZE_CONTENT, 32);
+    lv_obj_set_size(item, LV_SIZE_CONTENT, 34);
     lv_obj_set_flex_flow(item, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(item, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(item, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(item, 8, LV_PART_MAIN);
 
     lv_obj_t* swatch = lv_obj_create(item);
-    lv_obj_set_size(swatch, 22, 8);
+    lv_obj_set_size(swatch, band ? 20 : 26, band ? 20 : 6);
     lv_obj_set_style_bg_color(swatch, color, LV_PART_MAIN);
     lv_obj_set_style_border_width(swatch, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(swatch, 4, LV_PART_MAIN);
+    lv_obj_set_style_radius(swatch, band ? 4 : 3, LV_PART_MAIN);
 
     lv_obj_t* label = lv_label_create(item);
     lv_label_set_text(label, text);
-    lv_obj_set_style_text_font(label, &montserrat_16_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_font(label, &montserrat_24_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, UI_COLOR_TEXT_DIM, LV_PART_MAIN);
 }
 
-void heatpump_history_show(lv_obj_t* parent,
-                           heatpump_history_close_cb_t on_close) {
-    if (state.shown || parent == nullptr) return;
+lv_obj_t* heatpump_history_show(lv_obj_t* parent,
+                                heatpump_history_close_cb_t on_close) {
+    if (state.shown || parent == nullptr) return nullptr;
     state.shown = true;
     state.on_close = on_close;
     state.generation++;
@@ -801,20 +810,31 @@ void heatpump_history_show(lv_obj_t* parent,
     lv_obj_set_user_data(state.range_label,
                          (void*)"temperature_history_range");
 
-    lv_obj_t* legend = lv_obj_create(state.overlay);
-    lv_obj_remove_style_all(legend);
-    lv_obj_set_size(legend, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(legend, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(legend, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(legend, 16, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(legend, 4, LV_PART_MAIN);
-    add_legend_item(legend, COLOR_INLET, i18n_get(STR_HISTORY_INLET));
-    add_legend_item(legend, COLOR_OUTLET, i18n_get(STR_HISTORY_OUTLET));
-    add_legend_item(legend, COLOR_SETPOINT, i18n_get(STR_HISTORY_SETPOINT));
-    add_legend_item(legend, COLOR_HEATING, i18n_get(STR_HP_MODE_HEATING));
-    add_legend_item(legend, COLOR_COOLING, i18n_get(STR_HP_MODE_COOLING));
-    add_legend_item(legend, COLOR_HOT_WATER, i18n_get(STR_HP_MODE_HOT_WATER));
+    // Row 1: plotted lines. Row 2: mode bands.
+    auto make_legend_row = [](lv_obj_t* parent) {
+        lv_obj_t* row = lv_obj_create(parent);
+        lv_obj_remove_style_all(row);
+        lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(row, 28, LV_PART_MAIN);
+        lv_obj_set_style_pad_row(row, 4, LV_PART_MAIN);
+        return row;
+    };
+    lv_obj_t* legend_lines = make_legend_row(state.overlay);
+    add_legend_item(legend_lines, COLOR_INLET, i18n_get(STR_HISTORY_INLET), false);
+    add_legend_item(legend_lines, COLOR_OUTLET, i18n_get(STR_HISTORY_OUTLET), false);
+    add_legend_item(legend_lines, COLOR_SETPOINT,
+                    i18n_get(STR_HISTORY_SETPOINT), false);
+    lv_obj_t* legend_modes = make_legend_row(state.overlay);
+    lv_obj_set_style_margin_top(legend_modes, -8, LV_PART_MAIN);
+    add_legend_item(legend_modes, COLOR_HEATING,
+                    i18n_get(STR_HISTORY_LEGEND_HEATING), true);
+    add_legend_item(legend_modes, COLOR_COOLING,
+                    i18n_get(STR_HISTORY_LEGEND_COOLING), true);
+    add_legend_item(legend_modes, COLOR_HOT_WATER,
+                    i18n_get(STR_HISTORY_LEGEND_HOT_WATER), true);
 
     state.chart = lv_obj_create(state.overlay);
     lv_obj_set_width(state.chart, LV_PCT(100));
@@ -876,10 +896,12 @@ void heatpump_history_show(lv_obj_t* parent,
     }
     state.latest_end = latest;
     request_window(latest);
+    return state.overlay;
 }
 
 void heatpump_history_hide(void) {
     if (!state.shown) return;
+    heatpump_history_close_cb_t callback = state.on_close;
     state.shown = false;
     state.generation++;
     state.on_close = nullptr;
@@ -900,6 +922,7 @@ void heatpump_history_hide(void) {
     state.interp_outlet = nullptr;
     state.cursor = -1;
     state.sample_count = 0;
+    if (callback) callback();
 }
 
 bool heatpump_history_is_shown(void) {

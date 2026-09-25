@@ -17,6 +17,7 @@
 #include "settings_web_screen.h"
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
+#include "../ui_overlay.h"
 #include "../app_preferences.h"
 #include "../status_bar.h"
 #include "../factory_reset.h"
@@ -284,6 +285,7 @@ static void show_reboot_confirmation(void)
         i18n_get(STR_DEMO_MODE_CHANGED), i18n_get(STR_RESTART_REQUIRED),
         UI_DIALOG_LAYOUT_SHEET, "reboot_overlay", "reboot_panel");
     if (!state.reboot_overlay) return;
+    ui_overlay_track(state.reboot_overlay, &state.reboot_overlay);
 
     ui_dialog_add_action(state.reboot_overlay, i18n_get(STR_CANCEL),
                          "reboot_cancel", UI_DIALOG_ACTION_SECONDARY,
@@ -456,6 +458,7 @@ static void show_factory_reset_confirmation(void)
         i18n_get(STR_FACTORY_RESET_DESCRIPTION),
         UI_DIALOG_LAYOUT_SHEET, "factory_reset_overlay", "factory_reset_panel");
     if (!state.factory_reset_overlay) return;
+    ui_overlay_track(state.factory_reset_overlay, &state.factory_reset_overlay);
 
     ui_dialog_set_title_color(state.factory_reset_overlay, lv_color_hex(0xff5a5f));
     ui_dialog_add_text(state.factory_reset_overlay,

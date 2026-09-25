@@ -6,6 +6,7 @@
 
 #include "settings_common.h"
 #include "settings_menu.h"
+#include "ui_overlay.h"
 #include "auth_manager.h"
 #include "setup_pairing.h"
 #include "ha_integration.h"
@@ -201,12 +202,6 @@ static void revoke_cancel_cb(lv_event_t* event)
     dismiss_revoke_overlay();
 }
 
-static void revoke_overlay_deleted_cb(lv_event_t* event)
-{
-    (void)event;
-    state.revoke_overlay = NULL;
-}
-
 static void revoke_btn_cb(lv_event_t* event)
 {
     (void)event;
@@ -221,8 +216,7 @@ static void revoke_btn_cb(lv_event_t* event)
     }
     // The dialog lives on the top layer, so it can also be torn down by the
     // shell's lv_obj_clean(lv_layer_top()); clear our handle either way.
-    lv_obj_add_event_cb(
-        state.revoke_overlay, revoke_overlay_deleted_cb, LV_EVENT_DELETE, NULL);
+    ui_overlay_track(state.revoke_overlay, &state.revoke_overlay);
 
     ui_dialog_add_action(state.revoke_overlay, i18n_get(STR_CANCEL),
                          "ha_revoke_cancel", UI_DIALOG_ACTION_SECONDARY,
