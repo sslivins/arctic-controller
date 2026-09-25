@@ -19,13 +19,14 @@ import json
 import os
 import socket
 import ssl
-import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
 import requests
 import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -105,16 +106,21 @@ def _send_raw(header_line: bytes):
 
 
 def _health_ok():
-    for _ in range(10):
-        try:
-            r = requests.get(f"{BASE_URL}/api/health", timeout=5, verify=False,
-                             headers={"Connection": "close"})
-            if r.status_code == 200:
-                return True
-        except requests.RequestException:
-            pass
-        time.sleep(1)
-    return False
+    # Retries with backoff cover the moment the closed socket takes to be
+    # reclaimed; a device that stays down still fails.
+    session = requests.Session()
+    retry = Retry(total=8, connect=8, read=8, backoff_factor=0.5,
+                  allowed_methods=None, status_forcelist=[502, 503, 504])
+    session.mount("http://", HTTPAdapter(max_retries=retry))
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    try:
+        r = session.get(f"{BASE_URL}/api/health", timeout=5, verify=False,
+                        headers={"Connection": "close"})
+        return r.status_code == 200
+    except requests.RequestException:
+        return False
+    finally:
+        session.close()
 
 
 @pytest.mark.parametrize("header_line", MALFORMED_HEADERS.values(),
