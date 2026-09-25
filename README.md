@@ -9,6 +9,19 @@
 
 Controller for Arctic heat pump with LVGL-based UI on M5Stack Tab5 and web-based management interface.
 
+## Screenshots
+
+Captured from controllers running real heat pumps, mid heating cycle.
+
+<p>
+  <img src="docs/images/device-home-heating.jpg" alt="On-device touch UI: heating, COP 3.49, 3.2 kW" height="420">
+  <img src="docs/images/web-home-heating.jpg" alt="Web dashboard home page while heating" height="420">
+</p>
+
+| Cycle history | Status | Control |
+|---|---|---|
+| ![Cycle history chart of compressor runs](docs/images/web-cycle-history.jpg) | ![Full telemetry status page](docs/images/web-status.jpg) | ![Mode selection and setpoints](docs/images/web-control.jpg) |
+
 ## Hardware
 
 - **Platform:** M5Stack Tab5 (ESP32-P4 main processor, ESP32-C6 WiFi co-processor)
