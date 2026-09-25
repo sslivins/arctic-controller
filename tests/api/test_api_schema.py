@@ -92,6 +92,7 @@ SKIP_ENTIRELY = {
     "/api/ota/update",              # triggers firmware download
     "/api/ota/upload",              # writes firmware to flash
     "/api/ota/reboot",              # reboots the device
+    "/api/v1/control/restart",      # reboots the device
     "/api/ota/github",              # installs the latest GitHub release
     "/api/auth/credentials",        # changes login credentials
     "/api/auth/apikey/regenerate",  # invalidates existing API key

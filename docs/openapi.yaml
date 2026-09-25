@@ -3435,6 +3435,90 @@ paths:
 
         '400':
           $ref: '#/components/responses/BadRequest'
+  /api/v1/diagnostics:
+    get:
+      tags:
+      - HomeAssistant
+      summary: Controller health diagnostics
+      description: |
+        Controller (not heat-pump) health: reset history, memory, WiFi, time
+        sync, OTA and RS485 link health. Built on request and deliberately
+        excluded from the revisioned state snapshot because its values change
+        continuously. Clients poll it (about once a minute) and must treat
+        every field as optional. Production firmware exposes this endpoint
+        only over HTTPS.
+      operationId: getHomeAssistantDiagnostics
+      security:
+      - integrationBearer: []
+      responses:
+        '200':
+          description: Controller diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantDiagnostics'
+        '401':
+          description: Missing or invalid integration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/control/restart:
+    post:
+      tags:
+      - HomeAssistant
+      summary: Restart the controller
+      description: |
+        Reboots the controller. boot_id must match the current boot, so a
+        request retried after the reboot already happened is rejected with
+        409 instead of restarting the device again. Refused with 503 while an
+        OTA update is in progress or a new image is pending verification.
+      operationId: restartHomeAssistantController
+      security:
+      - integrationBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HomeAssistantRestartCommand'
+      responses:
+        '202':
+          description: Restart accepted; the controller reboots shortly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeAssistantCommandAccepted'
+        '401':
+          description: Missing, invalid or rotated integration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: boot_id does not match the current boot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Restart unavailable during a firmware update
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/v1/control/power:
     put:
       tags:
@@ -3685,6 +3769,12 @@ components:
             raw_registers:
               type: boolean
               enum: [false]
+            diagnostics:
+              type: boolean
+              description: GET /api/v1/diagnostics is available.
+            restart:
+              type: boolean
+              description: POST /api/v1/control/restart is available.
             supported_modes:
               type: array
               items:
@@ -3734,6 +3824,183 @@ components:
         status:
           type: string
           example: accepted_waiting_for_reported_state
+
+    HomeAssistantRestartCommand:
+      type: object
+      additionalProperties: false
+      required: [command_id, boot_id]
+      properties:
+        command_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        boot_id:
+          type: string
+          description: The boot_id of the boot being restarted.
+
+    HomeAssistantDiagnostics:
+      type: object
+      required: [protocol_version, device_id, boot_id, diagnostics]
+      properties:
+        protocol_version:
+          type: integer
+          example: 1
+        device_id:
+          type: string
+          pattern: '^arctic-[0-9a-f]{12}$'
+        boot_id:
+          type: string
+        diagnostics:
+          type: object
+          required: [uptime_ms, system, memory, wifi, time, ota, rs485]
+          properties:
+            uptime_ms:
+              type: integer
+              minimum: 0
+              description: 64-bit monotonic uptime in milliseconds.
+            system:
+              type: object
+              required:
+              - last_reset_reason
+              - brownout_count
+              - panic_count
+              - watchdog_count
+              - crash_streak
+              - safe_mode
+              properties:
+                last_reset_reason:
+                  type: string
+                  enum:
+                  - power_on
+                  - external
+                  - software
+                  - panic
+                  - interrupt_wdt
+                  - task_wdt
+                  - other_wdt
+                  - deep_sleep
+                  - brownout
+                  - sdio
+                  - usb
+                  - jtag
+                  - efuse_error
+                  - power_glitch
+                  - cpu_lockup
+                  - unknown
+                brownout_count:
+                  type: integer
+                  minimum: 0
+                  description: Lifetime brownout resets (persisted).
+                panic_count:
+                  type: integer
+                  minimum: 0
+                  description: Lifetime panic resets (persisted).
+                watchdog_count:
+                  type: integer
+                  minimum: 0
+                  description: Lifetime watchdog resets (persisted).
+                crash_streak:
+                  type: integer
+                  minimum: 0
+                  description: Consecutive crash reboots; cleared once healthy.
+                safe_mode:
+                  type: boolean
+            memory:
+              type: object
+              required:
+              - internal_free_bytes
+              - internal_min_free_bytes
+              - internal_largest_free_block_bytes
+              properties:
+                internal_free_bytes:
+                  type: integer
+                  minimum: 0
+                internal_min_free_bytes:
+                  type: integer
+                  minimum: 0
+                internal_largest_free_block_bytes:
+                  type: integer
+                  minimum: 0
+            wifi:
+              type: object
+              required:
+              - connected
+              - ssid
+              - rssi_dbm
+              - disconnect_count
+              - last_disconnect_reason
+              properties:
+                connected:
+                  type: boolean
+                ssid:
+                  type: string
+                  nullable: true
+                rssi_dbm:
+                  type: integer
+                  nullable: true
+                disconnect_count:
+                  type: integer
+                  minimum: 0
+                  description: STA disconnect events this boot.
+                last_disconnect_reason:
+                  type: integer
+                  nullable: true
+                  description: wifi_err_reason_t of the last disconnect.
+            time:
+              type: object
+              required: [synced]
+              properties:
+                synced:
+                  type: boolean
+            ota:
+              type: object
+              required: [busy, pending_verify]
+              properties:
+                busy:
+                  type: boolean
+                pending_verify:
+                  type: boolean
+            rs485:
+              type: object
+              required: [role]
+              description: |
+                Per-boot RS485 link health. The master-only and listener-only
+                counters are present only in that role.
+              properties:
+                role:
+                  type: string
+                  enum: [master, listener, blocked, demo, inactive]
+                last_ok_uptime_ms:
+                  type: integer
+                  nullable: true
+                  description: uptime_ms of the last successful poll or frame.
+                polls_ok:
+                  type: integer
+                  minimum: 0
+                polls_no_response:
+                  type: integer
+                  minimum: 0
+                polls_transport_error:
+                  type: integer
+                  minimum: 0
+                checksum_errors:
+                  type: integer
+                  minimum: 0
+                consecutive_failures:
+                  type: integer
+                  minimum: 0
+                writes_ok:
+                  type: integer
+                  minimum: 0
+                writes_failed:
+                  type: integer
+                  minimum: 0
+                frames_ok:
+                  type: integer
+                  minimum: 0
+                resyncs:
+                  type: integer
+                  minimum: 0
 
     HomeAssistantPowerCommand:
       type: object

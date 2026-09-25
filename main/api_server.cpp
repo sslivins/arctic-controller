@@ -145,6 +145,8 @@ static esp_err_t ha_state_get_handler(httpd_req_t* req);
 static esp_err_t ha_power_put_handler(httpd_req_t* req);
 static esp_err_t ha_mode_put_handler(httpd_req_t* req);
 static esp_err_t ha_setpoint_put_handler(httpd_req_t* req);
+static esp_err_t ha_diagnostics_get_handler(httpd_req_t* req);
+static esp_err_t ha_restart_post_handler(httpd_req_t* req);
 static esp_err_t ota_status_get_handler(httpd_req_t* req);
 static esp_err_t ota_update_post_handler(httpd_req_t* req);
 static esp_err_t ota_upload_post_handler(httpd_req_t* req);
@@ -613,7 +615,7 @@ bool api_server_start(void)
         // 8 core HA handlers (pair, capabilities, state, events/WSS, power,
         // mode, setpoint + WSS worker) plus the 3 OTA control endpoints the
         // integration drives (status, releases, github) plus headroom.
-        integration_config.httpd.max_uri_handlers = 12;
+        integration_config.httpd.max_uri_handlers = 14;
         integration_config.httpd.max_open_sockets = 5;
         integration_config.httpd.stack_size = 12288;
         // Reject surplus connections instead of evicting established WSS
@@ -1396,6 +1398,36 @@ bool api_server_start(void)
         ret = httpd_register_uri_handler(server_integration, &ha_state_uri);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to register HA state: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
+        httpd_uri_t ha_diagnostics_uri = {
+            .uri = "/api/v1/diagnostics",
+            .method = HTTP_GET,
+            .handler = ha_diagnostics_get_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(
+            server_integration, &ha_diagnostics_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA diagnostics: %s",
+                     esp_err_to_name(ret));
+            api_server_stop();
+            return false;
+        }
+
+        httpd_uri_t ha_restart_uri = {
+            .uri = "/api/v1/control/restart",
+            .method = HTTP_POST,
+            .handler = ha_restart_post_handler,
+            .user_ctx = NULL
+        };
+        ret = httpd_register_uri_handler(
+            server_integration, &ha_restart_uri);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA restart: %s",
                      esp_err_to_name(ret));
             api_server_stop();
             return false;
@@ -3299,6 +3331,89 @@ static esp_err_t ha_setpoint_put_handler(httpd_req_t* req)
     }
     ha_command_finish(slot, true, command_id, "setpoint", payload);
     return send_accepted_command(req, command_id);
+}
+
+static esp_err_t ha_diagnostics_get_handler(httpd_req_t* req)
+{
+    if (!check_integration_auth(req)) {
+        send_json_error(
+            req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+    return send_integration_document(req, arctic::ha::createDiagnostics());
+}
+
+// Restart the controller. The body must name the boot being restarted, so a
+// request retried after the reboot already happened is rejected (409) instead
+// of restarting the device a second time.
+static esp_err_t ha_restart_post_handler(httpd_req_t* req)
+{
+    uint32_t generation = 0;
+    if (!check_integration_auth(req, &generation)) {
+        send_json_error(req, "401 Unauthorized", "Integration token required");
+        return ESP_OK;
+    }
+
+    char body[160];
+    if (!read_integration_body(req, body, sizeof(body))) {
+        send_json_error(req, "422 Unprocessable Entity", "Invalid request body");
+        return ESP_OK;
+    }
+    cJSON* root = cJSON_ParseWithLength(body, strlen(body));
+    const char* keys[] = {"command_id", "boot_id"};
+    cJSON* boot_id = root == nullptr
+        ? nullptr
+        : cJSON_GetObjectItemCaseSensitive(root, "boot_id");
+    char command_id[HA_COMMAND_ID_MAX + 1] = {};
+    if (root == nullptr ||
+        !integration_object_has_only_keys(root, keys, 2) ||
+        !integration_command_id(root, command_id) ||
+        !cJSON_IsString(boot_id) || boot_id->valuestring == nullptr) {
+        cJSON_Delete(root);
+        send_json_error(
+            req, "422 Unprocessable Entity",
+            "Body must contain only command_id and string boot_id");
+        return ESP_OK;
+    }
+    const bool same_boot =
+        strcmp(boot_id->valuestring, arctic::ha::bootId()) == 0;
+    cJSON_Delete(root);
+    if (!same_boot) {
+        send_json_error(
+            req, "409 Conflict", "boot_id does not match the current boot");
+        return ESP_OK;
+    }
+    // Rebooting mid-download, or before a freshly flashed image has been
+    // marked valid, could interrupt the update or trigger a rollback.
+    if (ota_mgr_is_busy() || ota_mgr_is_pending_verify()) {
+        send_json_error(
+            req, "503 Service Unavailable",
+            "Restart unavailable while a firmware update is in progress");
+        return ESP_OK;
+    }
+
+    if (!auth_mgr_begin_control_write(generation)) {
+        send_json_error(req, "401 Unauthorized", "Integration token rotated");
+        return ESP_OK;
+    }
+    ESP_LOGW(TAG, "Restart requested by Home Assistant (command %s)", command_id);
+    macon_master::begin_shutdown();
+    auth_mgr_end_control_write();
+
+    httpd_resp_set_status(req, "202 Accepted");
+    set_json_content_type(req);
+    cJSON* response = cJSON_CreateObject();
+    cJSON_AddBoolToObject(response, "accepted", true);
+    cJSON_AddStringToObject(response, "command_id", command_id);
+    cJSON_AddStringToObject(response, "status", "restarting");
+    char* json = cJSON_PrintUnformatted(response);
+    cJSON_Delete(response);
+    httpd_resp_sendstr(req, json != nullptr ? json : "{\"accepted\":true}");
+    cJSON_free(json);
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+    system_safe_restart();
+    return ESP_OK;
 }
 
 static esp_err_t info_get_handler(httpd_req_t* req)

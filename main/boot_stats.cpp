@@ -12,6 +12,8 @@ static const char* TAG = "boot_stats";
 #define NVS_NAMESPACE   "boot_stats"
 #define NVS_KEY_BO_CNT  "bo_count"
 #define NVS_KEY_PANIC_STREAK "panic_strk"
+#define NVS_KEY_PANIC_CNT "panic_cnt"
+#define NVS_KEY_WDT_CNT   "wdt_cnt"
 
 // Consecutive crash reboots at/above this count trip SAFE MODE for the boot.
 #define SAFE_MODE_PANIC_THRESHOLD 3
@@ -20,9 +22,29 @@ static struct {
     bool initialized;
     uint32_t brownout_count;
     uint32_t panic_streak;
+    uint32_t panic_count;
+    uint32_t watchdog_count;
     bool safe_mode;
     esp_reset_reason_t reason;
-} s = { false, 0, 0, false, ESP_RST_UNKNOWN };
+} s = { false, 0, 0, 0, 0, false, ESP_RST_UNKNOWN };
+
+static bool is_watchdog_reason(esp_reset_reason_t reason) {
+    return reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT ||
+           reason == ESP_RST_WDT;
+}
+
+// Lifetime counter bumped at most once per boot, so flash wear is bounded by
+// the reboot rate. Returns the (possibly incremented) persisted value.
+static uint32_t bump_lifetime_counter(nvs_handle_t nvs, const char* key, bool bump) {
+    uint32_t cnt = 0;
+    nvs_get_u32(nvs, key, &cnt);   // leaves cnt=0 if key absent
+    if (bump) {
+        cnt++;
+        nvs_set_u32(nvs, key, cnt);
+        nvs_commit(nvs);
+    }
+    return cnt;
+}
 
 static bool is_crash_reason(esp_reset_reason_t reason) {
     return reason == ESP_RST_PANIC || reason == ESP_RST_TASK_WDT ||
@@ -61,6 +83,13 @@ void boot_stats_init(esp_reset_reason_t reason) {
         }
         s.panic_streak = streak;
 
+        // Lifetime crash evidence. Unlike the streak these are never cleared
+        // by a healthy boot, nor by boot_stats_clear().
+        s.panic_count = bump_lifetime_counter(nvs, NVS_KEY_PANIC_CNT,
+                                              reason == ESP_RST_PANIC);
+        s.watchdog_count = bump_lifetime_counter(nvs, NVS_KEY_WDT_CNT,
+                                                 is_watchdog_reason(reason));
+
         nvs_close(nvs);
     } else {
         ESP_LOGW(TAG, "Failed to open NVS (%s); boot stats unavailable",
@@ -79,6 +108,10 @@ void boot_stats_init(esp_reset_reason_t reason) {
 uint32_t boot_stats_brownout_count(void) { return s.brownout_count; }
 
 uint32_t boot_stats_panic_streak(void) { return s.panic_streak; }
+
+uint32_t boot_stats_panic_count(void) { return s.panic_count; }
+
+uint32_t boot_stats_watchdog_count(void) { return s.watchdog_count; }
 
 bool boot_stats_in_safe_mode(void) { return s.safe_mode; }
 

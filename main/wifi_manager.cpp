@@ -3,6 +3,7 @@
  * WiFi Manager Implementation - ESP-Hosted WiFi via ESP32-C6
  */
 #include "wifi_manager.h"
+#include <atomic>
 #include "time_manager.h"
 #include "api_server.h"
 #include <string.h>
@@ -18,6 +19,10 @@
 #include <esp_hosted.h>
 
 static const char* TAG = "wifi_mgr";
+
+// Per-boot link-health counters for device diagnostics (RAM only).
+static std::atomic<uint32_t> s_disconnect_count{0};
+static std::atomic<uint16_t> s_last_disconnect_reason{0};
 
 // Event group bits
 #define WIFI_CONNECTED_BIT   BIT0
@@ -408,6 +413,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         case WIFI_EVENT_STA_DISCONNECTED: {
             wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
             ESP_LOGW(TAG, "Disconnected from AP, reason: %d", event->reason);
+            s_disconnect_count.fetch_add(1);
+            s_last_disconnect_reason.store(event->reason);
             wifi_state.current_ip[0] = '\0';
             
             // Stop REST API server on disconnect
@@ -647,4 +654,14 @@ bool wifi_mgr_get_coprocessor_version(uint32_t* major, uint32_t* minor, uint32_t
     if (minor) *minor = wifi_state.coproc_ver_minor;
     if (patch) *patch = wifi_state.coproc_ver_patch;
     return true;
+}
+
+uint32_t wifi_mgr_get_disconnect_count(void)
+{
+    return s_disconnect_count.load();
+}
+
+uint16_t wifi_mgr_get_last_disconnect_reason(void)
+{
+    return s_last_disconnect_reason.load();
 }

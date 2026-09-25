@@ -114,6 +114,17 @@ bool wifi_mgr_get_ip_addr(char* buf, size_t buf_len);
 int8_t wifi_mgr_get_rssi(void);
 
 /**
+ * @brief Number of STA disconnect events this boot (includes failed
+ *        reconnect attempts).
+ */
+uint32_t wifi_mgr_get_disconnect_count(void);
+
+/**
+ * @brief wifi_err_reason_t of the most recent disconnect this boot (0 = none).
+ */
+uint16_t wifi_mgr_get_last_disconnect_reason(void);
+
+/**
  * @brief Save WiFi credentials to NVS
  * @param ssid Network SSID
  * @param password Network password

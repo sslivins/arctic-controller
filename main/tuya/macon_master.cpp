@@ -64,6 +64,50 @@ static TaskHandle_t             s_task        = nullptr;
 static std::atomic<bool>        s_active{false};
 static std::atomic<bool>        s_shutdown{false};
 static bool                     s_initialized = false;
+static std::atomic<bool>        s_blocked{false};
+
+// Diagnostics snapshot, published by the poll task / write paths and read by
+// HTTP handlers. Guarded by a spinlock (never held across bus I/O).
+static portMUX_TYPE             s_stats_lock = portMUX_INITIALIZER_UNLOCKED;
+static BusStats                 s_stats;
+
+// Caller holds the bus mutex (the library stats are only touched under it).
+static void publish_poll_stats(bool polled_ok)
+{
+    const arctic::MaconPollStats poll = s_master->poll_stats();
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    taskENTER_CRITICAL(&s_stats_lock);
+    s_stats.poll = poll;
+    if (polled_ok) {
+        s_stats.has_last_ok = true;
+        s_stats.last_ok_uptime_ms = now_ms;
+    }
+    taskEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void note_write(bool ok)
+{
+    taskENTER_CRITICAL(&s_stats_lock);
+    if (ok) {
+        ++s_stats.writes_ok;
+    } else {
+        ++s_stats.writes_failed;
+    }
+    taskEXIT_CRITICAL(&s_stats_lock);
+}
+
+BusStats get_bus_stats()
+{
+    taskENTER_CRITICAL(&s_stats_lock);
+    const BusStats copy = s_stats;
+    taskEXIT_CRITICAL(&s_stats_lock);
+    return copy;
+}
+
+bool is_blocked_by_other_master()
+{
+    return s_blocked.load();
+}
 
 // ---------------------------------------------------------------------------
 // Poll task — serialises each window read through the bus mutex so the
@@ -82,13 +126,13 @@ static void poll_task(void *)
             // in-flight transaction.
             xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
             arctic::liveIngestBeginCycle();
-            s_master->poll_holding();
+            publish_poll_stats(s_master->poll_holding());
             arctic::liveIngestEndCycle();
             xSemaphoreGive(s_bus_mutex);
 
             xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
             arctic::liveIngestBeginCycle();
-            s_master->poll_telemetry();
+            publish_poll_stats(s_master->poll_telemetry());
             arctic::liveIngestEndCycle();
             xSemaphoreGive(s_bus_mutex);
         }
@@ -137,9 +181,11 @@ esp_err_t start()
         ESP_LOGE(TAG,
                  "Bus is NOT idle - the OEM controller appears to still be "
                  "connected. Staying passive; no telemetry or setpoint writes.");
+        s_blocked.store(true);
         return ESP_ERR_INVALID_STATE;
     }
     ESP_LOGI(TAG, "Preflight passed (bus quiet). Becoming active master.");
+    s_blocked.store(false);
 
     // Mark active before the task starts so setters queued immediately after
     // start() are honoured; clear it again if task creation fails.
@@ -183,6 +229,7 @@ static bool guarded_setpoint(arctic::MaconResult (arctic::MaconMaster::*fn)(int)
     if (!acquire_for_write(what)) return false;
     const arctic::MaconResult r = (s_master->*fn)(celsius);
     xSemaphoreGive(s_bus_mutex);
+    note_write(r == arctic::MaconResult::Ok);
 
     if (r == arctic::MaconResult::Ok) {
         ESP_LOGI(TAG, "%s setpoint -> %d C (ACKed)", what, celsius);
@@ -207,6 +254,7 @@ bool set_working_mode(arctic::MaconWorkingMode mode)
     if (!acquire_for_write("working mode")) return false;
     const arctic::MaconResult r = s_master->set_working_mode(mode);
     xSemaphoreGive(s_bus_mutex);
+    note_write(r == arctic::MaconResult::Ok);
 
     if (r == arctic::MaconResult::Ok) {
         ESP_LOGI(TAG, "working mode -> %s (ACKed)", arctic::working_mode_name(mode));
@@ -221,6 +269,7 @@ bool write_register(uint16_t address, uint8_t value)
     if (!acquire_for_write("register")) return false;
     const arctic::MaconResult r = s_master->write_register(address, value);
     xSemaphoreGive(s_bus_mutex);
+    note_write(r == arctic::MaconResult::Ok);
 
     if (r == arctic::MaconResult::Ok) {
         ESP_LOGI(TAG, "register %u -> %u (ACKed)", (unsigned)address, (unsigned)value);

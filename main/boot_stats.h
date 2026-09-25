@@ -55,6 +55,19 @@ void boot_stats_clear(void);
 uint32_t boot_stats_panic_streak(void);
 
 /**
+ * @brief Lifetime number of panic resets (ESP_RST_PANIC) recorded in NVS.
+ *        Never cleared by boot_stats_note_healthy() or boot_stats_clear().
+ */
+uint32_t boot_stats_panic_count(void);
+
+/**
+ * @brief Lifetime number of watchdog resets (task / interrupt / other WDT)
+ *        recorded in NVS. Never cleared by boot_stats_note_healthy() or
+ *        boot_stats_clear().
+ */
+uint32_t boot_stats_watchdog_count(void);
+
+/**
  * @brief True if this boot entered SAFE MODE because the consecutive
  *        crash-reboot streak reached the safe-mode threshold. In safe mode the
  *        firmware disables optional/risky subsystems (e.g. demo mode) so a
