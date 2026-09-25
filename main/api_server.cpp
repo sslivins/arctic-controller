@@ -116,6 +116,8 @@ static esp_err_t https_api_not_found_handler(httpd_req_t* req,
                                              httpd_err_code_t err);
 static esp_err_t https_api_method_not_allowed_handler(httpd_req_t* req,
                                                       httpd_err_code_t err);
+static esp_err_t http_bad_request_handler(httpd_req_t* req,
+                                          httpd_err_code_t err);
 static esp_err_t web_login_handler(httpd_req_t* req);
 static esp_err_t web_logout_handler(httpd_req_t* req);
 static esp_err_t favicon_handler(httpd_req_t* req);
@@ -1599,6 +1601,21 @@ bool api_server_start(void)
         }
     }
 
+    // Parser-level 400s answer in JSON on every server; see
+    // http_bad_request_handler.
+    httpd_handle_t parse_err_servers[] = {server, server_ssl, server_integration};
+    for (httpd_handle_t hd : parse_err_servers) {
+        if (hd == NULL) {
+            continue;
+        }
+        esp_err_t rerr = httpd_register_err_handler(
+            hd, HTTPD_400_BAD_REQUEST, http_bad_request_handler);
+        if (rerr != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to register 400 handler: %s",
+                     esp_err_to_name(rerr));
+        }
+    }
+
     ESP_LOGI(TAG, "HTTP server started on port 80");
     if (server_ssl != NULL) {
         ESP_LOGI(TAG, "HTTPS server started on port 443");
@@ -1766,6 +1783,34 @@ static esp_err_t https_api_method_not_allowed_handler(httpd_req_t* req,
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, body, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
+}
+
+// 400 handler for all three servers. esp_http_server raises HTTPD_400 only
+// when http_parser rejects the request itself (bad bytes in the request line or
+// a header, conflicting Content-Length/Transfer-Encoding, ...), before any URI
+// handler runs. The built-in response is a text/html "Bad request syntax" page,
+// which breaks the documented contract (components/responses/BadRequest in
+// docs/openapi.yaml is JSON) and is what the API schema fuzz tripped over.
+// Handlers that reject a payload with 400 use send_json_error and never come
+// through here.
+//
+// Unlike the 404/405 handlers this must return ESP_FAIL: parsing stopped part
+// way through the request, so where the next request starts in the byte stream
+// is unknown, and keeping the connection alive would let the leftover bytes be
+// parsed as a further request. Closing is also what the default path does.
+// req->uri is not echoed because it may be empty or only partially parsed.
+static esp_err_t http_bad_request_handler(httpd_req_t* req,
+                                          httpd_err_code_t err)
+{
+    (void)err;
+
+    ESP_LOGW(TAG, "HTTP 400: request rejected by the HTTP parser");
+
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_sendstr(req, "{\"error\":\"Bad Request\"}");
+    return ESP_FAIL;
 }
 
 static esp_err_t web_root_handler(httpd_req_t* req)

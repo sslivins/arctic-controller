@@ -20,7 +20,6 @@ Run:
 
 import gc
 import os
-import re
 import time
 
 import pytest
@@ -178,30 +177,12 @@ _DEVICE_REACHABLE = _probe_device()
 _CASES_EXECUTED = 0
 
 # Schemathesis's negative-mode mutations (which derandomize does NOT pin) now
-# and then generate header names/values that are not legal HTTP. ESP-IDF's
-# http_parser rejects some of those before any URI handler runs, answering
-# with httpd's own text/html "400 Bad request syntax" — which then fails the
-# content-type check on whatever endpoint drew the case. There is nothing about
-# the API to validate in such a request, so drop it.
-#
-# The rejection looks random because the parser only checks part of each
-# header value: s_header_value_start takes the first byte without checking it,
-# IS_HEADER_CHAR then checks the second byte, and the h_general fast path
-# memchr()s ahead to CR/LF. So "a\x15b" gets a 400 but "\x15" and "ab\x15" get
-# a 200 (checked on the device, IDF v5.5.2 and v6.1 alike). We filter on the
-# full RFC 9110 grammar rather than copy that quirk: a field name is a token,
-# and a field value may not hold CTLs other than HTAB (obs-text 0x80-0xFF is
-# allowed).
-_HTTP_TOKEN = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
-_HTTP_BAD_VALUE = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
-
-
-def _is_valid_http_request(case) -> bool:
-    for name, value in (case.headers or {}).items():
-        if not _HTTP_TOKEN.match(str(name)) or _HTTP_BAD_VALUE.search(str(value)):
-            return False
-    # Cookies travel inside the Cookie header, so the same value rule applies.
-    return not any(_HTTP_BAD_VALUE.search(str(v)) for v in (case.cookies or {}).values())
+# and then put bytes in a header name or value that are not legal HTTP. Such
+# cases are deliberately kept: http_parser rejects some of them before any URI
+# handler runs, and the device must still answer with the documented JSON
+# BadRequest (http_bad_request_handler), not httpd's built-in text/html page.
+# Which of them get rejected is position-dependent because of an http_parser
+# bug (espressif/esp-idf#19140); the rest reach the handler as usual.
 
 
 # ── Tier 1: Automatic schema validation ──────────────────────────────────
@@ -233,9 +214,6 @@ def test_production_api_schema(case):
     if API_KEY:
         case.headers = case.headers or {}
         case.headers["X-API-Key"] = API_KEY
-
-    # Checked after auth injection: only what actually goes on the wire counts.
-    assume(_is_valid_http_request(case))
 
     time.sleep(0.1)  # be gentle on the ESP32
     global _CASES_EXECUTED
