@@ -156,9 +156,27 @@ jobs:
           echo -n "${GITHUB_SHA}" > build_sha.txt
 
       - name: Disable demo mode (keep test endpoints to cover demo-off branches)
+        # Edit the committed sdkconfig, not sdkconfig.defaults: sdkconfig wins,
+        # so a defaults line is silently ignored for any option it already sets
+        # (both of these), and this job used to compile demo-off WITHOUT test
+        # endpoints. The verify step below asserts the effective config.
         run: |
-          echo "CONFIG_DEMO_MODE=n" >> sdkconfig.defaults
-          echo "CONFIG_TEST_ENDPOINTS=y" >> sdkconfig.defaults
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("sdkconfig")
+          config = path.read_text(encoding="utf-8")
+          for old, new in (
+              ("CONFIG_DEMO_MODE=y", "# CONFIG_DEMO_MODE is not set"),
+              ("# CONFIG_TEST_ENDPOINTS is not set", "CONFIG_TEST_ENDPOINTS=y"),
+          ):
+              if old not in config:
+                  raise SystemExit(f"expected {old!r} in sdkconfig")
+              config = config.replace(old, new, 1)
+          path.write_text(config, encoding="utf-8")
+          PY
+          grep -q '^# CONFIG_DEMO_MODE is not set$' sdkconfig
+          grep -q '^CONFIG_TEST_ENDPOINTS=y$' sdkconfig
 
       - name: ESP-IDF Build (demo disabled)
         uses: espressif/esp-idf-ci-action@v1
@@ -173,7 +191,11 @@ jobs:
             echo "::error::CONFIG_DEMO_MODE is still enabled in this variant — the demo-disabled build did not take effect."
             exit 1
           fi
-          echo "OK: CONFIG_DEMO_MODE is disabled in the compiled firmware"
+          if ! grep -q '^#define CONFIG_TEST_ENDPOINTS 1$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_TEST_ENDPOINTS is NOT set in this variant — the demo-off branches in test_endpoints.cpp were not compiled."
+            exit 1
+          fi
+          echo "OK: CONFIG_DEMO_MODE is disabled and CONFIG_TEST_ENDPOINTS enabled in the compiled firmware"
 
   # Compile-only guard for the passive LISTEN bus mode. Production (and the
   # device-tests suite) builds the default ARCTIC_TUYA_MASTER branch, so
