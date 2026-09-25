@@ -58,6 +58,7 @@
 #include "log_buffer.h"
 #include "log_persist.h"
 #include "esp_task_wdt.h"
+#include <cJSON.h>
 
 static const char* TAG = "main";
 
@@ -149,6 +150,20 @@ static void show_error_message(const char* message)
                          UI_DIALOG_ACTION_PRIMARY, ui_dialog_dismiss_cb);
 }
 
+// cJSON trees are hundreds of sub-512-byte nodes, which SPIRAM_MALLOC_ALWAYSINTERNAL
+// would place in internal RAM. One 128-entry /api/events response drained it to
+// ~23 bytes and starved lwIP (#247), so keep every cJSON allocation in PSRAM.
+static void* cjson_psram_malloc(size_t size)
+{
+    void* p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : malloc(size);
+}
+
+static void cjson_free(void* p)
+{
+    heap_caps_free(p);
+}
+
 extern "C" void app_main(void)
 {
     // First: the RS485 DE pin floats through reset with no external pull-down,
@@ -157,6 +172,9 @@ extern "C" void app_main(void)
 
     // Initialize log buffer first to capture boot logs
     log_buffer_init();
+
+    cJSON_Hooks cjson_hooks = { cjson_psram_malloc, cjson_free };
+    cJSON_InitHooks(&cjson_hooks);
 
     // Log reset reason (survives reboot - reads from hardware registers)
     esp_reset_reason_t reset_reason = esp_reset_reason();
