@@ -2,6 +2,7 @@
 
 #include "event_log.h"
 #include "telemetry_history.h"
+#include "tuya/macon_master_iface.h"
 #include <esp_log.h>
 #include <esp_partition.h>
 #include <esp_system.h>
@@ -43,6 +44,7 @@ static esp_err_t erase_data_partition_optional(const char* label)
 static void factory_reset_task(void* arg)
 {
     (void)arg;
+    macon_master::begin_shutdown();
     telemetry_history_prepare_factory_reset();
     event_log_prepare_factory_reset();
 
@@ -64,6 +66,7 @@ static void factory_reset_task(void* arg)
     }
 
     vTaskDelay(pdMS_TO_TICKS(250));
+    macon_master::quiesce_for_restart(1500);
     esp_restart();
 }
 

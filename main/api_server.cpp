@@ -3547,6 +3547,9 @@ static esp_err_t ota_upload_post_handler(httpd_req_t* req)
     }
     
     ESP_LOGI(TAG, "Firmware upload complete: %lu bytes", (unsigned long)total_received);
+    // The reboot is now committed; refuse heat-pump writes during the grace
+    // period so a last-second command cannot race the reset.
+    macon_master::begin_shutdown();
     
     set_json_content_type(req);
     cJSON* response = cJSON_CreateObject();

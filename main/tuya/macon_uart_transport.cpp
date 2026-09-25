@@ -27,6 +27,21 @@ static constexpr size_t      TX_BUF_SIZE = 512;
 // (~10 bits/byte => ~2.3 ms/byte) is < 160 ms. 250 ms gives ample headroom.
 static constexpr int         TX_DONE_TIMEOUT_MS = 250;
 
+void MaconUartTransport::drive_de_low()
+{
+    // gpio_config() also reselects the plain-GPIO function, detaching the pin
+    // from the UART RTS signal if it was routed there.
+    gpio_config_t dir_cfg = {};
+    dir_cfg.pin_bit_mask = 1ULL << arctic::RS485_DIR_PIN;
+    dir_cfg.mode         = GPIO_MODE_OUTPUT;
+    dir_cfg.pull_up_en   = GPIO_PULLUP_DISABLE;
+    dir_cfg.pull_down_en = GPIO_PULLDOWN_ENABLE;
+    dir_cfg.intr_type    = GPIO_INTR_DISABLE;
+    gpio_set_level((gpio_num_t)arctic::RS485_DIR_PIN, 0);
+    gpio_config(&dir_cfg);
+    gpio_set_level((gpio_num_t)arctic::RS485_DIR_PIN, 0);
+}
+
 esp_err_t MaconUartTransport::init()
 {
     if (initialized_) return ESP_OK;
@@ -117,6 +132,14 @@ int MaconUartTransport::read(uint8_t *buf, size_t n, int timeout_ms)
 void MaconUartTransport::flush_rx()
 {
     if (initialized_) uart_flush_input(UART_PORT);
+}
+
+void MaconUartTransport::release_bus()
+{
+    if (initialized_) {
+        uart_wait_tx_done(UART_PORT, pdMS_TO_TICKS(TX_DONE_TIMEOUT_MS));
+    }
+    drive_de_low();
 }
 
 }  // namespace tuya

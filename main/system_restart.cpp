@@ -10,11 +10,21 @@
 
 #include "history_storage.h"
 #include "telemetry_history.h"
+#include "tuya/macon_master_iface.h"
 
 static const char* TAG = "system_restart";
 
+// Longest single bus transaction (verified write incl. read-back) is well
+// under a second; this only bounds a wedged one.
+static constexpr int BUS_QUIESCE_TIMEOUT_MS = 1500;
+
 void system_safe_restart(void) {
-    ESP_LOGW(TAG, "Safe restart requested - quiescing flash writers");
+    ESP_LOGW(TAG, "Safe restart requested - quiescing RS485 bus and flash writers");
+
+    // Finish (or wait out) any heat-pump bus transaction, block further ones,
+    // and hand the transceiver back to receive, so the reset cannot truncate
+    // a frame mid-wire or leave DE asserted.
+    macon_master::quiesce_for_restart(BUS_QUIESCE_TIMEOUT_MS);
 
     // Stop the periodic telemetry recorder so it launches no further partition
     // writes, then wait for the recorder task to actually exit.
