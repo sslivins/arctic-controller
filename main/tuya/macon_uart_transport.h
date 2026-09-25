@@ -44,6 +44,16 @@ public:
     // transaction) so a genuine response is never dropped.
     void flush_rx();
 
+    // Let any queued TX finish, then take RS485_DIR_PIN back from the UART as
+    // a plain GPIO driven LOW (receive). Used before a reset so the
+    // transceiver cannot be left driving the bus. Safe before init().
+    void release_bus();
+
+    // Drive RS485_DIR_PIN LOW as a GPIO (receive) with the internal pull-down.
+    // Standalone so app_main() can call it before anything else: the pin is a
+    // floating strapping pin at reset with no external pull-down on the Tab5.
+    static esp_err_t drive_de_low();
+
 private:
     bool initialized_ = false;
 };

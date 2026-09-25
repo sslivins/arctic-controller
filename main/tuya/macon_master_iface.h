@@ -52,4 +52,19 @@ bool set_working_mode(arctic::MaconWorkingMode mode);
 // Write a one-byte value to a register covered by a known Macon wire window.
 bool write_register(uint16_t address, uint8_t value);
 
+// Reject every subsequent setpoint/mode/register write (they return false).
+// Called as soon as a reboot is committed (e.g. a successful OTA) so a
+// last-second UI/REST/HA command cannot race the reset. Polling continues
+// and is_active() is unchanged. Irreversible; idempotent.
+void begin_shutdown();
+
+// Final bus hand-off before a reset: begin_shutdown(), wait up to timeout_ms
+// for any in-flight transaction, keep the bus mutex so nothing else starts,
+// then release the transceiver (TX drained, DE driven low). Safe in any bus
+// mode, including before init(). Never returns the bus.
+void quiesce_for_restart(int timeout_ms);
+
+// Drive the RS485 DE pin low immediately. Call first thing in app_main().
+void drive_de_low_early();
+
 }  // namespace macon_master

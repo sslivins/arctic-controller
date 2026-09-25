@@ -14,6 +14,7 @@
 #include <mdns.h>
 #include "api_server.h"
 #include "system_restart.h"
+#include "tuya/macon_master_iface.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_task_wdt.h>
@@ -645,6 +646,7 @@ static void ota_task(void* pvParameter)
     // hold the cache disabled / interrupts masked. Stop the HTTPS + HA-websocket + WS
     // servers and mDNS, then let any queued RX drain briefly.
     ESP_LOGI(TAG, "Quiescing network before flashing (stopping servers + mDNS)...");
+    macon_master::begin_shutdown();  // every path below ends in a reboot
     api_server_stop();
     mdns_free();
     vTaskDelay(pdMS_TO_TICKS(500));

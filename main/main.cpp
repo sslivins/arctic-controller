@@ -151,6 +151,10 @@ static void show_error_message(const char* message)
 
 extern "C" void app_main(void)
 {
+    // First: the RS485 DE pin floats through reset with no external pull-down,
+    // so pin it to receive before anything else can delay us.
+    macon_master::drive_de_low_early();
+
     // Initialize log buffer first to capture boot logs
     log_buffer_init();
 

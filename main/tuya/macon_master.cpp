@@ -62,6 +62,7 @@ static arctic::MaconMaster     *s_master      = nullptr;
 static SemaphoreHandle_t        s_bus_mutex   = nullptr;
 static TaskHandle_t             s_task        = nullptr;
 static std::atomic<bool>        s_active{false};
+static std::atomic<bool>        s_shutdown{false};
 static bool                     s_initialized = false;
 
 // ---------------------------------------------------------------------------
@@ -157,15 +158,29 @@ bool is_active()
     return s_active.load();
 }
 
+// Take the bus for a control write. Fails (without holding the mutex) once a
+// reboot is committed; re-checked after the wait so a write queued behind a
+// poll cannot slip in after begin_shutdown().
+static bool acquire_for_write(const char *what)
+{
+    if (!s_active.load() || s_master == nullptr || s_bus_mutex == nullptr) {
+        return false;
+    }
+    if (!s_shutdown.load()) {
+        xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
+        if (!s_shutdown.load()) return true;
+        xSemaphoreGive(s_bus_mutex);
+    }
+    ESP_LOGW(TAG, "%s write rejected: reboot pending", what);
+    return false;
+}
+
 // Serialise a verified setpoint write through the bus mutex, then log the
 // outcome. The library master owns the RX flush before/after the write.
 static bool guarded_setpoint(arctic::MaconResult (arctic::MaconMaster::*fn)(int),
                              int celsius, const char *what)
 {
-    if (!s_active.load() || s_master == nullptr || s_bus_mutex == nullptr) {
-        return false;
-    }
-    xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
+    if (!acquire_for_write(what)) return false;
     const arctic::MaconResult r = (s_master->*fn)(celsius);
     xSemaphoreGive(s_bus_mutex);
 
@@ -189,10 +204,7 @@ bool set_hot_water_setpoint(int celsius)
 
 bool set_working_mode(arctic::MaconWorkingMode mode)
 {
-    if (!s_active.load() || s_master == nullptr || s_bus_mutex == nullptr) {
-        return false;
-    }
-    xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
+    if (!acquire_for_write("working mode")) return false;
     const arctic::MaconResult r = s_master->set_working_mode(mode);
     xSemaphoreGive(s_bus_mutex);
 
@@ -206,10 +218,7 @@ bool set_working_mode(arctic::MaconWorkingMode mode)
 
 bool write_register(uint16_t address, uint8_t value)
 {
-    if (!s_active.load() || s_master == nullptr || s_bus_mutex == nullptr) {
-        return false;
-    }
-    xSemaphoreTake(s_bus_mutex, portMAX_DELAY);
+    if (!acquire_for_write("register")) return false;
     const arctic::MaconResult r = s_master->write_register(address, value);
     xSemaphoreGive(s_bus_mutex);
 
@@ -220,6 +229,34 @@ bool write_register(uint16_t address, uint8_t value)
     ESP_LOGW(TAG, "register %u write failed: %s",
              (unsigned)address, arctic::macon_result_name(r));
     return false;
+}
+
+void begin_shutdown()
+{
+    if (!s_shutdown.exchange(true)) {
+        ESP_LOGW(TAG, "Reboot committed - rejecting further bus writes");
+    }
+}
+
+void quiesce_for_restart(int timeout_ms)
+{
+    begin_shutdown();
+    const int64_t t0 = esp_timer_get_time();
+    // Deliberately never given back: the poll task and any late writer block
+    // here until the reset. On timeout (a wedged transaction) we still release
+    // the transceiver; a truncated frame fails the protocol checksum.
+    if (s_bus_mutex != nullptr &&
+        xSemaphoreTake(s_bus_mutex, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        ESP_LOGW(TAG, "Bus still busy after %d ms - releasing anyway", timeout_ms);
+    }
+    s_transport.release_bus();
+    ESP_LOGW(TAG, "Bus quiesced for restart in %d ms (DE low)",
+             (int)((esp_timer_get_time() - t0) / 1000));
+}
+
+void drive_de_low_early()
+{
+    tuya::MaconUartTransport::drive_de_low();
 }
 
 }  // namespace macon_master
