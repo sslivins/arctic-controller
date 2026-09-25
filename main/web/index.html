@@ -77,6 +77,13 @@
       --cp-highlight: rgba(0, 90, 158, 0.12);
       --cp-panel: rgba(251, 252, 254, 0.86);
       --cp-panel-strong: rgba(251, 252, 254, 0.96);
+      /* Cycle-history chart series. */
+      --hist-out: #334155;
+      --hist-in: #c026d3;
+      --hist-set: #16a34a;
+      --hist-heat: #ef4444;
+      --hist-cool: #3b82f6;
+      --hist-dhw: #f59e0b;
     }
     html[data-theme="dark"] {
       --cp-bg: #1a1a2e;
@@ -100,6 +107,12 @@
       --cp-panel: rgba(15, 26, 46, 0.72);
       --cp-panel-strong: rgba(15, 26, 46, 0.96);
       --cp-highlight: rgba(0, 212, 255, 0.12);
+      --hist-out: #f1f5f9;
+      --hist-in: #d946ef;
+      --hist-set: #4ade80;
+      --hist-heat: #ef4444;
+      --hist-cool: #3b82f6;
+      --hist-dhw: #fbbf24;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; }
@@ -1129,7 +1142,7 @@
       let svg = `<svg class="hist-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Cycle history chart">`;
 
       // Mode bands: contiguous running periods tinted by operating mode.
-      const bandColor = { 1: "#ef4444", 2: "#3b82f6", 3: "#fbbf24" };
+      const bandColor = { 1: "var(--hist-heat)", 2: "var(--hist-cool)", 3: "var(--hist-dhw)" };
       const interval = data.sample_interval_sec || 30;
       let i = 0;
       while (i < samples.length) {
@@ -1215,15 +1228,15 @@
         }
         return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
       };
-      svg += line("set", "#4ade80", true);
-      svg += line("out", "#f1f5f9", false);
-      svg += line("in", "#d946ef", false);
+      svg += line("set", "var(--hist-set)", true);
+      svg += line("out", "var(--hist-out)", false);
+      svg += line("in", "var(--hist-in)", false);
 
       // Hover crosshair: a vertical line plus a dot on each series, driven by
       // histHover() from the pointer position.
       svg += `<g class="hist-hover" style="display:none">
         <line class="hist-hover-line" y1="${plotT}" y2="${plotB}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
-        <circle data-key="set" r="4" fill="#4ade80"/><circle data-key="out" r="4" fill="#f1f5f9"/><circle data-key="in" r="4" fill="#d946ef"/></g>`;
+        <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/></g>`;
       histGeom = { W, plotL, plotR, mapX, mapY, samples, series };
 
       svg += `</svg>`;
@@ -1258,9 +1271,9 @@
       const fmt = v => (v === null || v === undefined) ? "--" : temp(v / 10);
       const tip = wrap.querySelector(".hist-tip");
       tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(s.t, true))}</div>
-        <div><i style="background:#f1f5f9"></i>Outlet <strong>${fmt(s.out)}</strong></div>
-        <div><i style="background:#d946ef"></i>Inlet <strong>${fmt(s.in)}</strong></div>
-        <div><i style="background:#4ade80"></i>Setpoint <strong>${fmt(s.set)}</strong></div>`;
+        <div><i style="background:var(--hist-out)"></i>Outlet <strong>${fmt(s.out)}</strong></div>
+        <div><i style="background:var(--hist-in)"></i>Inlet <strong>${fmt(s.in)}</strong></div>
+        <div><i style="background:var(--hist-set)"></i>Setpoint <strong>${fmt(s.set)}</strong></div>`;
       tip.style.display = "block";
       const px = x / g.W * rect.width;
       const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
@@ -1284,12 +1297,12 @@
           <div class="hist-toolbar">
             <div class="hist-range">${esc(rangeText)}</div>
             <div class="hist-legend">
-              <span><i style="background:#d946ef"></i>Inlet</span>
-              <span><i style="background:#f1f5f9"></i>Outlet</span>
-              <span><i style="background:#4ade80"></i>Setpoint</span>
-              <span><i class="band" style="background:#ef4444"></i>Heating</span>
-              <span><i class="band" style="background:#3b82f6"></i>Cooling</span>
-              <span><i class="band" style="background:#fbbf24"></i>Hot Water</span>
+              <span><i style="background:var(--hist-in)"></i>Inlet</span>
+              <span><i style="background:var(--hist-out)"></i>Outlet</span>
+              <span><i style="background:var(--hist-set)"></i>Setpoint</span>
+              <span><i class="band" style="background:var(--hist-heat)"></i>Heating</span>
+              <span><i class="band" style="background:var(--hist-cool)"></i>Cooling</span>
+              <span><i class="band" style="background:var(--hist-dhw)"></i>Hot Water</span>
             </div>
           </div>
           <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>
