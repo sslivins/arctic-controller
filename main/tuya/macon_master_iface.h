@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "macon_state.h"   // arctic::MaconWorkingMode
+#include "macon_master.h"  // arctic::MaconPollStats
 
 namespace macon_master {
 
@@ -38,6 +39,25 @@ esp_err_t start();
 
 // True once start() has confirmed an idle bus and begun active mastering.
 bool is_active();
+
+// True when start() ran its preflight and refused to transmit because another
+// master (the OEM controller) was driving the bus.
+bool is_blocked_by_other_master();
+
+// Per-boot active-master link health, for device diagnostics. Counters are RAM
+// only and reset on reboot. last_ok_uptime_ms is the esp_timer uptime of the
+// most recent successful poll (valid only when has_last_ok).
+struct BusStats {
+    arctic::MaconPollStats poll;
+    uint32_t writes_ok = 0;
+    uint32_t writes_failed = 0;
+    bool     has_last_ok = false;
+    int64_t  last_ok_uptime_ms = 0;
+};
+
+// Lock-free-for-callers snapshot (copied from the poll task after each poll),
+// so an HTTP handler never waits behind an in-flight bus transaction.
+BusStats get_bus_stats();
 
 // Setpoint commands. Return false (no-op) unless the master is active. The
 // legacy arctic::setCoolingSetpoint / setHotWaterSetpoint route here when

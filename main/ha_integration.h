@@ -24,4 +24,8 @@ const char* bootId();
 cJSON* createCapabilities();
 cJSON* createStateSnapshot();
 
+// Controller health document for GET /api/v1/diagnostics. Deliberately not
+// part of the revisioned state snapshot: its values change continuously.
+cJSON* createDiagnostics();
+
 }  // namespace arctic::ha

@@ -138,6 +138,37 @@ The Home Assistant client discards a REST or WebSocket snapshot when:
 - Its boot ID matches the current boot but its revision is not newer.
 - Its protocol version is unsupported.
 
+### `GET /api/v1/diagnostics`
+
+Controller health, as opposed to heat-pump state. It is built on request and
+kept out of the revisioned state snapshot on purpose: values such as uptime,
+free heap and RSSI change continuously and would otherwise bump the revision
+(and push a snapshot) on every 250 ms pass. The integration polls it about
+once a minute. Advertised by `capabilities.diagnostics`.
+
+The response carries `protocol_version`, `device_id`, `boot_id` and a
+`diagnostics` object:
+
+- `uptime_ms`: 64-bit monotonic uptime (does not wrap at 49.7 days).
+- `system`: `last_reset_reason` (lower-case, for example `power_on`,
+  `brownout`, `panic`, `task_wdt`), lifetime `brownout_count`, `panic_count`
+  and `watchdog_count` (persisted, incremented at most once per boot),
+  `crash_streak`, and `safe_mode`.
+- `memory`: internal-RAM `internal_free_bytes`, `internal_min_free_bytes` and
+  `internal_largest_free_block_bytes`.
+- `wifi`: `connected`, `ssid`, `rssi_dbm`, and per-boot `disconnect_count`
+  and `last_disconnect_reason` (a `wifi_err_reason_t`, or null).
+- `time.synced`, and `ota.busy` / `ota.pending_verify`.
+- `rs485`: `role` (`master`, `listener`, `blocked` by another bus master,
+  `demo`, or `inactive`) and `last_ok_uptime_ms`. The active master adds
+  `polls_ok`, `polls_no_response`, `polls_transport_error`,
+  `checksum_errors`, `consecutive_failures`, `writes_ok` and `writes_failed`.
+  The passive listener adds `frames_ok`, `checksum_errors` and `resyncs`
+  instead. All RS485 counters are per boot.
+
+Clients must treat every field as optional, because a rolled-back firmware
+may not have it.
+
 ### Commands
 
 The allowlisted controls use versioned endpoints rather than generic register
@@ -148,6 +179,11 @@ require the paired integration credential in the `Authorization` header.
 - `PUT /api/v1/control/mode` — `{ "command_id": "...", "mode": "cooling" }`
 - `PUT /api/v1/control/setpoint` — `{ "command_id": "...", "kind":
   "cooling", "value": 24 }`
+- `POST /api/v1/control/restart` — `{ "command_id": "...", "boot_id":
+  "..." }`. This reboots the controller. `boot_id` must match the current
+  boot, so a request retried after the reboot has already happened gets
+  `409` instead of restarting the device again. It returns `503` while an OTA
+  update is downloading or a new image is still pending verification.
 
 The exact mode allowlist is `cooling`, `floor_heating`, `fan_coil_heating`,
 `hot_water`, and `auto`; generic `heating` is not a selectable mode. Setpoint

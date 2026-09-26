@@ -2,6 +2,7 @@
  * Home Assistant integration identity and versioned state serialization.
  */
 #include "ha_integration.h"
+#include "device_diagnostics.h"
 #include "api_server.h"
 #include "heatpump_controller.h"
 #include "heatpump_errors.h"
@@ -318,6 +319,8 @@ cJSON* createCapabilities()
         cooling_setpoint || hot_water_setpoint);
     cJSON_AddBoolToObject(capabilities, "advanced_parameters", false);
     cJSON_AddBoolToObject(capabilities, "raw_registers", false);
+    cJSON_AddBoolToObject(capabilities, "diagnostics", true);
+    cJSON_AddBoolToObject(capabilities, "restart", true);
 
     cJSON* modes = cJSON_AddArrayToObject(capabilities, "supported_modes");
     if (mode_control) {
@@ -393,6 +396,27 @@ cJSON* createStateSnapshot()
         root, "captured_at_ms",
         static_cast<double>(esp_timer_get_time() / 1000));
     cJSON_AddItemToObject(root, "state", state);
+    return root;
+}
+
+cJSON* createDiagnostics()
+{
+    if (!s_initialized) {
+        return nullptr;
+    }
+    cJSON* diagnostics = device_diagnostics_create();
+    if (diagnostics == nullptr) {
+        return nullptr;
+    }
+    cJSON* root = cJSON_CreateObject();
+    if (root == nullptr) {
+        cJSON_Delete(diagnostics);
+        return nullptr;
+    }
+    cJSON_AddNumberToObject(root, "protocol_version", PROTOCOL_VERSION);
+    cJSON_AddStringToObject(root, "device_id", s_device_id);
+    cJSON_AddStringToObject(root, "boot_id", s_boot_id);
+    cJSON_AddItemToObject(root, "diagnostics", diagnostics);
     return root;
 }
 
