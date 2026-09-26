@@ -1,6 +1,7 @@
 """Home Assistant controller diagnostics and restart (/api/v1/diagnostics,
 /api/v1/control/restart) on the integration server."""
 
+import gc
 import os
 import time
 import uuid
@@ -36,6 +37,19 @@ MASTER_COUNTERS = {
     "checksum_errors", "consecutive_failures", "writes_ok", "writes_failed",
 }
 LISTENER_COUNTERS = {"frames_ok", "checksum_errors", "resyncs"}
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _release_pooled_connections():
+    # esp_http_server keeps an idle keep-alive socket open for as long as the
+    # client holds it, and the integration server has only 5 slots with no
+    # LRU eviction. After the restart test, urllib3 pools orphaned by the
+    # reboot stay reachable from response/exception reference cycles, so their
+    # sockets survive session.close() until the cyclic GC runs - and starved
+    # test_websocket_reserves_capacity_for_rest (run 36206822808).
+    yield
+    _session.close()
+    gc.collect()
 
 
 def _issue_test_token() -> str:
@@ -211,22 +225,27 @@ def _wait_for_new_boot(old_boot_id: str, timeout: float) -> dict:
     last_error = None
     while time.monotonic() < deadline:
         try:
-            probe = requests.Session()
-            probe.verify = False
-            probe.headers["Connection"] = "close"
-            token = probe.post(f"{BASE_URL}/api/test/ha-token", timeout=5).json()["token"]
-            response = probe.get(
-                f"{HA_URL}/api/v1/diagnostics", headers=_headers(token), timeout=5
-            )
-            response.raise_for_status()
-            data = response.json()
+            with requests.Session() as probe:
+                probe.verify = False
+                token = probe.post(
+                    f"{BASE_URL}/api/test/ha-token", timeout=5
+                ).json()["token"]
+                response = probe.get(
+                    f"{HA_URL}/api/v1/diagnostics",
+                    headers=_headers(token),
+                    timeout=5,
+                )
+                response.raise_for_status()
+                data = response.json()
             if data["boot_id"] != old_boot_id:
                 return data
         except (requests.RequestException, ValueError, KeyError) as exc:
-            last_error = exc
+            # Keep only the text: the exception's traceback pins the failed
+            # attempt's socket open until the cyclic GC happens to run.
+            last_error = repr(exc)
     pytest.fail(
         f"controller did not come back on a new boot within {timeout}s "
-        f"(last error: {last_error!r})"
+        f"(last error: {last_error})"
     )
 
 
