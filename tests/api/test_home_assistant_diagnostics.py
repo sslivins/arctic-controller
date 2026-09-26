@@ -247,6 +247,9 @@ def test_restart_reboots_into_a_new_boot():
     assert after["diagnostics"]["system"]["last_reset_reason"] == "software"
     # uptime restarted from zero (bounded by the wait plus request slack).
     assert after["diagnostics"]["uptime_ms"] < 150_000
+    # The reboot killed every pooled keep-alive socket, and urllib3 never
+    # retries a POST on a dead one, so reconnect before the retry.
+    _session.close()
     # A retry of the same request after the reboot must not restart again.
     retry = _restart(_issue_test_token(), before["boot_id"])
     assert retry.status_code == 409
