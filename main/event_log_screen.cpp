@@ -230,7 +230,8 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
                 static_cast<arctic::MaconFaultSiteId>(p);
             const arctic::MaconFaultBit* fb = arctic::macon_fault_bit_for_site(site);
             if (fb != nullptr) {
-                snprintf(buf, buf_size, "(%s) %s", fb->code, fb->label);
+                snprintf(buf, buf_size, "(%s) %s", fb->code,
+                         i18n_get_key(fb->label_msg_id, fb->label));
             } else {
                 snprintf(buf, buf_size, "Error %u", (unsigned)site);
             }

@@ -29,7 +29,7 @@ from device_client import DeviceClient
 # used to stress the event log / errors screen with a full set of faults.
 ALL_FAULT_CODES = [
     "P15", "P16", "FE", "FF", "E28", "E19", "E18", "E13", "E03", "E27", "E21",
-    "r02", "E26", "r01", "E01", "E09", "E05", "E22", "P19", "r06", "r10", "r11",
+    "r02", "E26", "r01", "E01", "E09", "E05", "E22", "FA", "P19", "r06", "r10", "r11",
     "r05", "P11", "P02", "P06", "P27", "PC", "P10", "P30", "P01",
 ]
 

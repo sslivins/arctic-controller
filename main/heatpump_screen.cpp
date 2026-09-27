@@ -34,7 +34,8 @@ static void format_error_card_text(char* buf, size_t buf_size, const lv_font_t* 
     
     // Build first error: "<code>: <description>" (both library-provided)
     char first[128];
-    snprintf(first, sizeof(first), "\xEF\x81\xB1 %s: %s", errors[0].code, errors[0].description);
+    snprintf(first, sizeof(first), "\xEF\x81\xB1 %s: %s", errors[0].code,
+             i18n_get_key(errors[0].name_msg_id, errors[0].description));
     
     if (count == 1) {
         // Single error — truncate with ellipsis if too wide
