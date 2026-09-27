@@ -46,8 +46,7 @@ static bool s_heating_setpoint_valid = false;
 static bool s_hot_water_setpoint_valid = false;
 static bool s_mode_valid = false;
 static bool s_compressor_valid = false;
-// Whether the heating (aux-heat) setpoint has been decoded at all. Distinct
-// from s_heating_setpoint_valid, which is deliberately forced false for the API.
+// Whether the heating setpoint has been decoded at all.
 static bool s_heating_setpoint_decoded = false;
 
 static constexpr uint32_t TELEMETRY_FRESHNESS_MS = 90000;
@@ -328,13 +327,13 @@ void initDemoState() {
     // Run-state / mode. (Compressor run-state is derived from compressor_freq,
     // and the operating-mode register is unused by the mapping, so neither is
     // seeded.)
-    s_image.set_working_mode(MaconWorkingMode::FloorHeating);
+    s_image.set_working_mode(MaconWorkingMode::Heating);
     s_image.set_flag(MaconFlag::Pump, true);
     s_image.set_flag(MaconFlag::Fan, true);
 
     // Setpoints (whole °C).
     s_image.set_temp(MaconField::CoolingSetpoint, 18);
-    s_image.set_temp(MaconField::HeatingSetpoint, 45);   // aux/heating, demo only
+    s_image.set_temp(MaconField::HeatingSetpoint, 45);
     s_image.set_temp(MaconField::HotWaterSetpoint, 50);
     s_image.set_value(MaconField::HotWaterCeiling, 50);   // AP13 ceiling
 
@@ -432,16 +431,20 @@ static WorkingMode to_working_mode(const MaconState& state) {
     switch (state.working_mode) {
         case MaconWorkingMode::Cooling:
             return WorkingMode::COOLING;
-        case MaconWorkingMode::FloorHeating:
-            return WorkingMode::FLOOR_HEATING;
-        case MaconWorkingMode::FanCoilHeating:
-            return WorkingMode::FAN_COIL_HEATING;
+        case MaconWorkingMode::Heating:
+            return WorkingMode::HEATING;
+        case MaconWorkingMode::Mode2:
+            return WorkingMode::MODE_2;
+        case MaconWorkingMode::Mode3:
+            return WorkingMode::MODE_3;
+        case MaconWorkingMode::Mode4:
+            return WorkingMode::MODE_4;
         case MaconWorkingMode::HotWater:
             return WorkingMode::HOT_WATER;
-        case MaconWorkingMode::Auto:
-            return WorkingMode::AUTO;
+        case MaconWorkingMode::HotWaterCooling:
+            return WorkingMode::HOT_WATER_COOLING;
         default:
-            return WorkingMode::AUTO;
+            return WorkingMode::UNKNOWN;
     }
 }
 
@@ -451,13 +454,14 @@ static WorkingMode to_working_mode(const MaconState& state) {
 // rather than casting one enum's integer value onto the other.
 static MaconWorkingMode to_macon_working_mode(WorkingMode mode) {
     switch (mode) {
-        case WorkingMode::COOLING:          return MaconWorkingMode::Cooling;
-        case WorkingMode::FLOOR_HEATING:    return MaconWorkingMode::FloorHeating;
-        case WorkingMode::FAN_COIL_HEATING: return MaconWorkingMode::FanCoilHeating;
-        case WorkingMode::HEATING:          return MaconWorkingMode::FloorHeating; // generic heating -> floor heating
-        case WorkingMode::HOT_WATER:        return MaconWorkingMode::HotWater;
-        case WorkingMode::AUTO:             return MaconWorkingMode::Auto;
-        default:                            return MaconWorkingMode::Auto;
+        case WorkingMode::COOLING:           return MaconWorkingMode::Cooling;
+        case WorkingMode::HEATING:           return MaconWorkingMode::Heating;
+        case WorkingMode::MODE_2:            return MaconWorkingMode::Mode2;
+        case WorkingMode::MODE_3:            return MaconWorkingMode::Mode3;
+        case WorkingMode::MODE_4:            return MaconWorkingMode::Mode4;
+        case WorkingMode::HOT_WATER:         return MaconWorkingMode::HotWater;
+        case WorkingMode::HOT_WATER_COOLING: return MaconWorkingMode::HotWaterCooling;
+        default:                             return MaconWorkingMode::Unknown;
     }
 }
 
@@ -502,18 +506,15 @@ static void applyMaconMapping() {
     // previously left unmapped so the API reported 0.
     s_state.hot_water_setpoint   = ms.hot_water_setpoint;
     s_state.cooling_setpoint     = ms.cooling_setpoint;
-    if (ms.aux_heat_setpoint_valid) {
-        s_state.heating_setpoint = ms.aux_heat_setpoint;
+    if (ms.heating_setpoint_valid) {
+        s_state.heating_setpoint = ms.heating_setpoint;
     }
 
     s_inlet_valid = ms.inlet_valid;
     s_outlet_valid = ms.outlet_valid;
     s_cooling_setpoint_valid = ms.cooling_setpoint_valid;
-    // The heating target is still not confirmed as the active target on this
-    // unit, so expose its value in the diagnostic UI but do not persist it as
-    // a valid target.
-    s_heating_setpoint_valid = false;
-    s_heating_setpoint_decoded = ms.aux_heat_setpoint_valid;
+    s_heating_setpoint_valid = ms.heating_setpoint_valid;
+    s_heating_setpoint_decoded = ms.heating_setpoint_valid;
     s_hot_water_setpoint_valid = ms.hot_water_setpoint_valid;
     s_mode_valid = ms.working_mode_valid;
     s_compressor_valid = ms.compressor_freq_valid;
@@ -691,16 +692,15 @@ TelemetrySnapshot getTelemetrySnapshot() {
             if (s_state.working_mode == WorkingMode::COOLING) {
                 snapshot.active_setpoint_c = s_state.cooling_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
-            } else if (s_state.working_mode == WorkingMode::AUTO &&
+            } else if (s_state.working_mode == WorkingMode::HOT_WATER_COOLING &&
                        s_state.operation == HeatPumpOperation::COOLING) {
                 snapshot.active_setpoint_c = s_state.cooling_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
             } else if (s_state.working_mode == WorkingMode::HOT_WATER) {
                 snapshot.active_setpoint_c = s_state.hot_water_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
-            } else if (s_state.working_mode == WorkingMode::FLOOR_HEATING ||
-                       s_state.working_mode == WorkingMode::FAN_COIL_HEATING ||
-                       s_state.working_mode == WorkingMode::HEATING) {
+            } else if (s_state.working_mode == WorkingMode::HEATING ||
+                       s_state.working_mode == WorkingMode::MODE_2) {
                 snapshot.active_setpoint_c = s_state.heating_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
             }
@@ -742,7 +742,7 @@ TelemetrySnapshot getTelemetrySnapshot() {
                     snapshot.setpoint_valid =
                         telemetry_fresh && s_cooling_setpoint_valid;
                     break;
-                case WorkingMode::AUTO:
+                case WorkingMode::HOT_WATER_COOLING:
                     if (s_state.operation == HeatPumpOperation::COOLING) {
                         snapshot.active_setpoint_c = s_state.cooling_setpoint;
                         snapshot.setpoint_valid =
@@ -754,9 +754,10 @@ TelemetrySnapshot getTelemetrySnapshot() {
                     snapshot.setpoint_valid =
                         telemetry_fresh && s_hot_water_setpoint_valid;
                     break;
-                case WorkingMode::FLOOR_HEATING:
-                case WorkingMode::FAN_COIL_HEATING:
+                // Modes 1 and 2 both use the heating setpoint;
+                // modes 3/4 use P2/P3, which aren't exposed yet.
                 case WorkingMode::HEATING:
+                case WorkingMode::MODE_2:
                     snapshot.active_setpoint_c = s_state.heating_setpoint;
                     snapshot.setpoint_valid =
                         telemetry_fresh && s_heating_setpoint_valid;
@@ -842,6 +843,10 @@ bool setUnitPower(bool on) {
 }
 
 bool setWorkingMode(WorkingMode mode) {
+    if (!isSelectableWorkingMode(mode)) {
+        ESP_LOGW(TAG, "Refusing to select working mode %s", workingModeToString(mode));
+        return false;
+    }
     // Translate the controller's WorkingMode to the library's MaconWorkingMode
     // via an explicit mapping; the controller never touches the wire encoding.
     const MaconWorkingMode macon_mode = to_macon_working_mode(mode);
@@ -883,9 +888,12 @@ bool setCoolingSetpoint(int16_t temp) {
 bool setHeatingSetpoint(int16_t temp) {
     temp = static_cast<int16_t>(clamp_setpoint(SetpointKind::Heating, temp));
     if (macon_master::is_active()) {
-        // MaconLink deliberately has no set_heating_setpoint: the heating
-        // target is unverified on this unit. Fail explicitly rather than guess.
-        ESP_LOGW(TAG, "Heating setpoint write unsupported in Tuya master mode (heating target unverified)");
+        if (macon_master::set_heating_setpoint((int)temp)) {
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            s_state.heating_setpoint = temp;
+            xSemaphoreGive(s_state_mutex);
+            return true;
+        }
         return false;
     }
     imageLock();

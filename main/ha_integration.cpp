@@ -298,7 +298,7 @@ cJSON* createCapabilities()
         demo_controls || active_master_controls;
     const bool hot_water_setpoint =
         demo_controls || active_master_controls;
-    const bool heating_setpoint = demo_controls;
+    const bool heating_setpoint = demo_controls || active_master_controls;
     const bool mode_control = demo_controls || active_master_controls;
 
     cJSON_AddNumberToObject(root, "protocol_version", PROTOCOL_VERSION);
@@ -316,7 +316,7 @@ cJSON* createCapabilities()
     cJSON_AddBoolToObject(capabilities, "control_mode", mode_control);
     cJSON_AddBoolToObject(
         capabilities, "control_setpoints",
-        cooling_setpoint || hot_water_setpoint);
+        cooling_setpoint || heating_setpoint || hot_water_setpoint);
     cJSON_AddBoolToObject(capabilities, "advanced_parameters", false);
     cJSON_AddBoolToObject(capabilities, "raw_registers", false);
     cJSON_AddBoolToObject(capabilities, "diagnostics", true);
@@ -325,18 +325,15 @@ cJSON* createCapabilities()
     cJSON* modes = cJSON_AddArrayToObject(capabilities, "supported_modes");
     if (mode_control) {
         cJSON_AddItemToArray(modes, cJSON_CreateString("cooling"));
-        cJSON_AddItemToArray(modes, cJSON_CreateString("floor_heating"));
-        cJSON_AddItemToArray(
-            modes, cJSON_CreateString("fan_coil_heating"));
+        cJSON_AddItemToArray(modes, cJSON_CreateString("heating"));
         cJSON_AddItemToArray(modes, cJSON_CreateString("hot_water"));
-        cJSON_AddItemToArray(modes, cJSON_CreateString("auto"));
+        cJSON_AddItemToArray(
+            modes, cJSON_CreateString("hot_water_cooling"));
     }
 
     cJSON* setpoint_controls =
         cJSON_AddObjectToObject(capabilities, "setpoint_controls");
     cJSON_AddBoolToObject(setpoint_controls, "cooling", cooling_setpoint);
-    // Heating setpoint writes are available only in the synthetic demo
-    // adapter; the live Tuya mapping is unverified and unsupported.
     cJSON_AddBoolToObject(setpoint_controls, "heating", heating_setpoint);
     cJSON_AddBoolToObject(
         setpoint_controls, "hot_water", hot_water_setpoint);

@@ -28,7 +28,7 @@ FAN_OFF, FAN_LOW, FAN_MED, FAN_HIGH = 0, 200, 450, 700
 
 # Working modes
 MODE_COOLING       = 0
-MODE_FLOOR_HEATING = 1
+MODE_HEATING = 1
 MODE_HOT_WATER     = 5
 
 # Inactive dot color
@@ -97,7 +97,7 @@ def _ensure_demo_defaults(device: DeviceClient):
     device.clear_all_faults()
     device.inject_fault(DEMO_FAULT, True)
     device.set_demo_fields(
-        working_mode=MODE_FLOOR_HEATING,
+        working_mode=MODE_HEATING,
         cooling_on=0,
         unit_on=1,
         water_tank_temp=42,

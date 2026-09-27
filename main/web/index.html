@@ -339,7 +339,7 @@
       background: var(--cp-surface-soft); color: var(--cp-text-muted);
       font-size: 13px; line-height: 1.4; overflow-wrap: anywhere;
     }
-    .mode-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .mode-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
     .mode-btn {
       min-height: 66px; padding: 8px; border: 1px solid var(--cp-border);
       border-radius: 10px; background: var(--cp-surface-soft); color: var(--cp-text-muted);
@@ -495,7 +495,13 @@
       ["preferences", "Preferences"], ["security", "Security"], ["home_assistant", "Home Assistant"],
       ["diagnostics", "Diagnostics"], ["system", "System"]
     ];
-    const modes = ["cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto"];
+    // Selectable modes only; mode_2..mode_4 are displayed but never offered.
+    const modes = ["cooling", "heating", "hot_water", "hot_water_cooling"];
+    const modeLabels = {
+      cooling: "Cooling", heating: "Heating", mode_2: "Mode 2", mode_3: "Mode 3", mode_4: "Mode 4",
+      hot_water: "Hot water", hot_water_cooling: "Hot water / cooling"
+    };
+    const modeLabel = mode => modeLabels[mode] || titleCase(mode || "unknown");
 
     const state = {
       auth: { checked: false, required: true, loggedIn: false, changeRequired: false, loginError: "", recovering: false, recoveryError: "" },
@@ -683,7 +689,9 @@
     function homePage() {
       const hp = state.hp;
       const target = hp.mode === "cooling" ? hp.setpoints.cooling :
-        hp.mode === "hot_water" ? hp.setpoints.hot_water : hp.setpoints.heating;
+        hp.mode === "hot_water" ? hp.setpoints.hot_water :
+        hp.mode === "hot_water_cooling" ? (hp.operation === "cooling" ? hp.setpoints.cooling : hp.setpoints.hot_water) :
+        hp.setpoints.heating;
       const operation = hp.operation || (hp.unit_on ? "idle" : "off");
       return `<div class="page">
         ${pageHead("Home", "Live operating state and the information you need at a glance.")}
@@ -724,7 +732,7 @@
         <section class="card"><div class="card-head"><h2>Cycle history</h2><button class="btn" data-route="history">View cycle history</button></div>
           <p class="hist-muted">Compressor run cycles with inlet, outlet, and setpoint temperatures over recent hours.</p></section>
         <h2>Operating state</h2><div class="grid grid-2">
-          ${metricCard("Selected mode", titleCase(h.mode || "unknown"), "Configured mode policy from the mainboard")}
+          ${metricCard("Selected mode", modeLabel(h.mode), "Configured mode policy from the mainboard")}
           ${metricCard("Actual operation", titleCase(h.operation || "unknown"), "Live operating status from the mainboard")}
         </div>
         <h2>Temperatures</h2><div class="grid grid-3">
@@ -788,7 +796,9 @@
             ${state.hp.unit_on ? "Hold for 3 seconds to power off" : "Power on"}
             ${state.powerHolding ? `<span class="power-progress" style="animation:hold 3s linear"></span>` : ""}</button></section>
           <section class="card"><h2>Mode selection</h2><div class="mode-grid">${modes.map(mode =>
-            `<button class="mode-btn ${state.hp.mode === mode ? "active" : ""}" data-action="mode" data-value="${mode}">${titleCase(mode)}</button>`).join("")}</div></section>
+            `<button class="mode-btn ${state.hp.mode === mode ? "active" : ""}" data-action="mode" data-value="${mode}">${modeLabel(mode)}</button>`).join("")}</div>${
+            modes.includes(state.hp.mode) || !state.hp.mode || state.hp.mode === "unknown" ? "" :
+            `<p class="metric-sub">Current mode: ${esc(modeLabel(state.hp.mode))}</p>`}</section>
         </div>
         <h2 style="margin-top:28px">Setpoints</h2><div class="grid grid-3">
           ${setpointCard("cooling", "Cooling")}${setpointCard("heating", "Heating")}${setpointCard("hot_water", "Hot water")}

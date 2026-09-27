@@ -185,8 +185,10 @@ require the paired integration credential in the `Authorization` header.
   `409` instead of restarting the device again. It returns `503` while an OTA
   update is downloading or a new image is still pending verification.
 
-The exact mode allowlist is `cooling`, `floor_heating`, `fan_coil_heating`,
-`hot_water`, and `auto`; generic `heating` is not a selectable mode. Setpoint
+The mode allowlist is `cooling`, `heating`, `hot_water`, and
+`hot_water_cooling` (the old `floor_heating` and `auto` names are still
+accepted as aliases). `mode_2`, `mode_3` and `mode_4` can be reported but are
+never selectable. Setpoint
 values must be whole degrees and inside the advertised inclusive range.
 Responses use `202 Accepted` and acknowledge command acceptance only.
 
@@ -196,18 +198,16 @@ and `503` means the control is disconnected or unsupported by the active
 runtime. The device rechecks the token generation while reserving the control
 write, so rotation or revocation prevents a raced bus write.
 
-Capabilities are dynamic. Demo mode advertises power, exact-mode, and all
-three setpoints. The live Tuya master advertises only cooling and hot-water
-setpoints; power, selected-mode, and heating-setpoint writes are unsupported.
+Capabilities are dynamic. Demo mode advertises power, mode, and all three
+setpoints. The live Tuya master advertises mode and all three setpoints;
+power writes are unsupported.
 Passive-listen and disconnected runtimes advertise no controls. Home Assistant
 must wire only advertised controls and wait for the normal pushed/reconciled
 reported state; it never mutates entity state optimistically.
 
-The climate entity uses coarse HVAC display semantics only. An exact Arctic
-mode select entity preserves `floor_heating`, `fan_coil_heating`, and
-`hot_water`; a reported generic `heating` mode remains display-only because
-the control allowlist never guesses a heating subtype. Generic Home Assistant
-`HEAT` never selects an arbitrary Arctic heating subtype.
+The climate entity uses coarse HVAC display semantics only. The Arctic mode
+select entity offers the four selectable modes; a reported `mode_2`..`mode_4`
+is display-only.
 
 ## WebSocket Contract
 

@@ -42,7 +42,7 @@ def _set_idle(device: DeviceClient, **overrides):
 
 
 MODE_COOLING       = 0
-MODE_FLOOR_HEATING = 1
+MODE_HEATING = 1
 MODE_HOT_WATER     = 5
 
 UI_SETTLE = 1.5
@@ -73,11 +73,11 @@ HERO_STATES = {
 }
 
 HERO_MODES = {
-    "English":  {MODE_FLOOR_HEATING: "FLOOR HEAT", MODE_COOLING: "COOLING",
+    "English":  {MODE_HEATING: "HEATING", MODE_COOLING: "COOLING",
                  MODE_HOT_WATER: "HOT WATER"},
-    "Français": {MODE_FLOOR_HEATING: "CHAUFF. SOL", MODE_COOLING: "REFROIDISSEMENT",
+    "Français": {MODE_HEATING: "CHAUFFAGE", MODE_COOLING: "REFROIDISSEMENT",
                  MODE_HOT_WATER: "EAU CHAUDE"},
-    "Español":  {MODE_FLOOR_HEATING: "CALEF. SUELO", MODE_COOLING: "ENFRIAMIENTO",
+    "Español":  {MODE_HEATING: "CALEFACCIÓN", MODE_COOLING: "ENFRIAMIENTO",
                  MODE_HOT_WATER: "AGUA CALIENTE"},
 }
 
@@ -196,7 +196,7 @@ def _restore_english_and_demo(device: DeviceClient):
     # Restore demo defaults
     device.clear_all_faults()
     device.inject_fault(DEMO_FAULT, True)
-    _set_running(device, working_mode=MODE_FLOOR_HEATING)
+    _set_running(device, working_mode=MODE_HEATING)
     # Restore English if switched
     prefs = device.get_preferences()
     if prefs["language"] != "English":
@@ -220,7 +220,7 @@ class TestFrenchHeroStates:
     def test_idle_french(self, device: DeviceClient):
         """IDLE → INACTIF in French."""
         device.clear_all_faults()
-        _set_idle(device, working_mode=MODE_FLOOR_HEATING)
+        _set_idle(device, working_mode=MODE_HEATING)
         _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["IDLE"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -245,9 +245,9 @@ class TestFrenchHeroStates:
         assert w.text == HERO_STATES["Français"]["STANDBY"]
 
     def test_floor_heat_selection_shows_heating_french(self, device: DeviceClient):
-        """Floor-heat selection still reports the actual heating operation."""
+        """Heating selection still reports the actual heating operation."""
         device.clear_all_faults()
-        _set_running(device, working_mode=MODE_FLOOR_HEATING)
+        _set_running(device, working_mode=MODE_HEATING)
         _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["HEATING"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -319,7 +319,7 @@ class TestSpanishHeroStates:
     def test_idle_spanish(self, device: DeviceClient):
         """IDLE → INACTIVO in Spanish."""
         device.clear_all_faults()
-        _set_idle(device, working_mode=MODE_FLOOR_HEATING)
+        _set_idle(device, working_mode=MODE_HEATING)
         _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["IDLE"])
         w = device.find_widget(tag="hero_state")
         assert w is not None
@@ -344,9 +344,9 @@ class TestSpanishHeroStates:
         assert w.text == HERO_STATES["Español"]["STANDBY"]
 
     def test_floor_heat_selection_shows_heating_spanish(self, device: DeviceClient):
-        """Floor-heat selection still reports the actual heating operation."""
+        """Heating selection still reports the actual heating operation."""
         device.clear_all_faults()
-        _set_running(device, working_mode=MODE_FLOOR_HEATING)
+        _set_running(device, working_mode=MODE_HEATING)
         _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["HEATING"])
         w = device.find_widget(tag="hero_state")
         assert w is not None

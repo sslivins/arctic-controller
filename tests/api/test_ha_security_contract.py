@@ -183,7 +183,7 @@ def test_home_assistant_controls_are_allowlisted_and_generation_guarded() -> Non
     assert "macon_master::is_active()" in api
     assert "supported_modes" in capabilities
     assert "setpoint_controls" in capabilities
-    assert "Heating setpoint writes are available only" in capabilities
+    assert "heating_setpoint = demo_controls || active_master_controls" in capabilities
 
 
 def test_home_assistant_command_validation_rejects_ambiguous_controls() -> None:
@@ -193,10 +193,11 @@ def test_home_assistant_command_validation_rejects_ambiguous_controls() -> None:
     assert "Setpoint is outside the advertised inclusive range" in api
     assert "Power control is unsupported by the active runtime" in api
     assert "Selected-mode control is unsupported by the active runtime" in api
-    assert "Heating setpoint is unsupported by the active Tuya runtime" in api
     assert '"heating") == 0' in api
-    assert '"floor_heating") == 0' in api
-    assert '"fan_coil_heating") == 0' in api
+    assert "parseSelectableWorkingMode" in api
+    types = (ROOT / "main" / "heatpump_types.h").read_text(encoding="utf-8")
+    assert '{"hot_water_cooling", WorkingMode::HOT_WATER_COOLING}' in types
+    assert "mode_2" not in types.split("parseSelectableWorkingMode", 1)[1]
     assert "/api/v1/control/register" not in api
     assert "/api/v1/control/advanced" not in api
     capabilities = (

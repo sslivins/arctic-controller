@@ -2884,6 +2884,7 @@ static bool read_integration_body(
         }
         if (macon_master::is_active()) {
             return strcmp(kind, "cooling") == 0 ||
+                   strcmp(kind, "heating") == 0 ||
                    strcmp(kind, "hot_water") == 0;
         }
         return false;
@@ -2892,12 +2893,10 @@ static bool read_integration_body(
     static const char* ha_control_unavailable_message(
         const char* operation, const char* kind = nullptr)
     {
+        (void)kind;
         const arctic::HeatPumpState state = arctic::getState();
         if (!state.connected) {
             return "Heat pump not connected";
-        }
-        if (kind != nullptr && strcmp(kind, "heating") == 0) {
-            return "Heating setpoint is unsupported by the active Tuya runtime";
         }
         if (strcmp(operation, "power") == 0) {
             return "Power control is unsupported by the active runtime";
@@ -3146,13 +3145,9 @@ static esp_err_t ha_mode_put_handler(httpd_req_t* req)
     const char* mode = mode_value != nullptr && cJSON_IsString(mode_value)
         ? mode_value->valuestring
         : nullptr;
+    arctic::WorkingMode working_mode = arctic::WorkingMode::UNKNOWN;
     const bool valid_mode =
-        mode != nullptr &&
-        (strcmp(mode, "cooling") == 0 ||
-         strcmp(mode, "floor_heating") == 0 ||
-         strcmp(mode, "fan_coil_heating") == 0 ||
-         strcmp(mode, "hot_water") == 0 ||
-         strcmp(mode, "auto") == 0);
+        arctic::parseSelectableWorkingMode(mode, &working_mode);
     if (root == nullptr ||
         !integration_object_has_only_keys(root, keys, 2) ||
         !integration_command_id(root, command_id) ||
@@ -3189,16 +3184,6 @@ static esp_err_t ha_mode_put_handler(httpd_req_t* req)
             req, "503 Service Unavailable",
             ha_control_unavailable_message("mode"));
         return ESP_OK;
-    }
-    arctic::WorkingMode working_mode = arctic::WorkingMode::COOLING;
-    if (strcmp(mode, "floor_heating") == 0) {
-        working_mode = arctic::WorkingMode::FLOOR_HEATING;
-    } else if (strcmp(mode, "fan_coil_heating") == 0) {
-        working_mode = arctic::WorkingMode::FAN_COIL_HEATING;
-    } else if (strcmp(mode, "hot_water") == 0) {
-        working_mode = arctic::WorkingMode::HOT_WATER;
-    } else if (strcmp(mode, "auto") == 0) {
-        working_mode = arctic::WorkingMode::AUTO;
     }
     if (!auth_mgr_begin_control_write(generation)) {
         ha_command_finish(slot, false, command_id, "mode", payload);
@@ -4675,7 +4660,8 @@ static esp_err_t heatpump_power_put_handler(httpd_req_t* req)
 }
 
 // PUT /api/heatpump/mode - Set operating mode
-// Body: { "mode": "cooling" | "floor_heating" | "fan_coil_heating" | "hot_water" | "auto" }
+// Body: { "mode": "cooling" | "heating" | "hot_water" | "hot_water_cooling" }
+// (the old "floor_heating" and "auto" are accepted as aliases)
 static esp_err_t heatpump_mode_put_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -4715,20 +4701,10 @@ static esp_err_t heatpump_mode_put_handler(httpd_req_t* req)
     const char* mode_str = mode_val->valuestring;
     arctic::WorkingMode mode;
     
-    if (strcmp(mode_str, "cooling") == 0) {
-        mode = arctic::WorkingMode::COOLING;
-    } else if (strcmp(mode_str, "floor_heating") == 0) {
-        mode = arctic::WorkingMode::FLOOR_HEATING;
-    } else if (strcmp(mode_str, "fan_coil_heating") == 0) {
-        mode = arctic::WorkingMode::FAN_COIL_HEATING;
-    } else if (strcmp(mode_str, "hot_water") == 0) {
-        mode = arctic::WorkingMode::HOT_WATER;
-    } else if (strcmp(mode_str, "auto") == 0) {
-        mode = arctic::WorkingMode::AUTO;
-    } else {
+    if (!arctic::parseSelectableWorkingMode(mode_str, &mode)) {
         cJSON_Delete(root);
         send_json_error(req, "400 Bad Request", 
-            "Invalid mode. Valid: cooling, floor_heating, fan_coil_heating, hot_water, auto");
+            "Invalid mode. Valid: cooling, heating, hot_water, hot_water_cooling");
         return ESP_OK;
     }
     

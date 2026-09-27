@@ -60,9 +60,10 @@ struct BusStats {
 BusStats get_bus_stats();
 
 // Setpoint commands. Return false (no-op) unless the master is active. The
-// legacy arctic::setCoolingSetpoint / setHotWaterSetpoint route here when
-// active so the existing UI/REST callers work unchanged.
+// legacy arctic::setCoolingSetpoint / setHeatingSetpoint / setHotWaterSetpoint
+// route here when active so the existing UI/REST callers work unchanged.
 bool set_cooling_setpoint(int celsius);
+bool set_heating_setpoint(int celsius);
 bool set_hot_water_setpoint(int celsius);
 
 // Selected working-mode command (library-owned wire encoding). Returns false
