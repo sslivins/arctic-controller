@@ -81,6 +81,16 @@ void status_bar_set_wifi_connecting(bool connecting);
 void status_bar_add_notification(status_bar_notify_type_t type, const char* message);
 
 /**
+ * @brief Add a notification with a detail value for the localized device text
+ * @param type The notification type to add
+ * @param message English message (reported by the web API; shown on the device in English)
+ * @param detail Value substituted into the translated device text, e.g. the
+ *               firmware version or the brownout count (may be NULL)
+ */
+void status_bar_add_notification_detail(status_bar_notify_type_t type, const char* message,
+                                        const char* detail);
+
+/**
  * @brief Clear a specific notification
  * @param type The notification type to clear
  */

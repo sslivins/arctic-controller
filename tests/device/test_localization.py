@@ -197,6 +197,22 @@ def _assert_visible_text(device: DeviceClient, expected: str):
         f"Expected visible text containing {expected!r}; saw {[w.text for w in device.widgets if w.text]}"
 
 
+def _assert_all_text_drawable(device: DeviceClient, where: str):
+    """No visible text on this screen uses a character its font can't draw.
+
+    Catches widgets drawn with LVGL's built-in ASCII-only fonts, where an
+    accented letter renders as an empty box (e.g. the old events search
+    placeholder "Rechercher des ▯v▯nements"). The static check in
+    tests/test_ui_glyphs.py can't see which font a widget ends up using.
+    """
+    bad = [
+        (w.tag or w.type, w.text if w.missing_glyphs else w.placeholder)
+        for w in device.widgets
+        if w.missing_glyphs or w.placeholder_missing_glyphs
+    ]
+    assert not bad, f"{where}: text drawn with a font missing its characters: {bad}"
+
+
 def _open_settings(device: DeviceClient):
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
@@ -493,21 +509,25 @@ def test_tabs_settings_and_overlays_refresh_after_touch_language_change(
 
     for label in (TANK_DESCRIPTION[lang_name], *FOOTER_NAV[lang_name]):
         _assert_visible_text(device, label)
+    _assert_all_text_drawable(device, "home")
 
     device.click(tag="nav_status")
     assert device.wait_for_screen("status", timeout=5.0)
     for label in STATUS_TAB_LABELS[lang_name]:
         _assert_visible_text(device, label)
+    _assert_all_text_drawable(device, "status tab")
 
     device.click(tag="nav_control")
     assert device.wait_for_screen("control", timeout=5.0)
     for label in CONTROL_TAB_LABELS[lang_name]:
         _assert_visible_text(device, label)
+    _assert_all_text_drawable(device, "control tab")
 
     device.click(tag="nav_events")
     assert device.wait_for_screen("event_log", timeout=5.0)
     for label in EVENTS_TAB_LABELS[lang_name]:
         _assert_visible_text(device, label)
+    _assert_all_text_drawable(device, "events tab")
 
     device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0)
@@ -516,21 +536,65 @@ def test_tabs_settings_and_overlays_refresh_after_touch_language_change(
     assert device.wait_for_screen("errors", timeout=5.0)
     for label in ERRORS_OVERLAY_LABELS[lang_name]:
         _assert_visible_text(device, label)
+    _assert_all_text_drawable(device, "errors overlay")
     device.click(tag="errors_close")
     assert device.wait_for_screen("main", timeout=5.0)
 
     _open_settings(device)
     for label in SETTINGS_MENU_LABELS[lang_name]:
         _assert_visible_text(device, label)
+    _assert_all_text_drawable(device, "settings menu")
 
     for row_tag, screen, label in SETTINGS_SUBSCREEN_LABELS[lang_name]:
         device.click(tag=row_tag)
         assert device.wait_for_screen(screen, timeout=5.0)
         _assert_visible_text(device, label)
+        _assert_all_text_drawable(device, f"settings {screen}")
         device.click(tag=f"{screen}_back")
         assert device.wait_for_screen("settings", timeout=5.0)
 
     _close_settings(device)
+
+
+# Notification text shown on the device (the mocks carry no version/count
+# detail, so the device falls back to the generic translated text).
+NOTIFY_TEXT = {
+    "Français": {"notify_item_firmware": "Mise à jour disponible",
+                 "notify_item_brownout": "Baisse de tension détectée"},
+    "Español":  {"notify_item_firmware": "Actualización disponible",
+                 "notify_item_brownout": "Caída de tensión detectada"},
+}
+
+
+@pytest.mark.parametrize("lang_name", ["Français", "Español"])
+def test_search_overlay_and_notifications_are_translated_and_drawable(
+    device: DeviceClient, lang_name: str
+):
+    """Popups outside the tab tree: events search and the notification bell."""
+    _switch_language(device, lang_name)
+
+    device.click(tag="nav_events")
+    assert device.wait_for_screen("event_log", timeout=5.0)
+    device.click(tag="event_search_open")
+    assert device.wait_for_widget(tag="event_search_input", timeout=5.0)
+    _assert_all_text_drawable(device, "events search overlay")
+    device.click(tag="event_search_cancel")
+    device.click(tag="nav_home")
+    assert device.wait_for_screen("main", timeout=5.0)
+
+    device.notification_mock_reset()
+    try:
+        device.notification_mock(0, "Firmware v99.0.0 available")
+        device.notification_mock(3, "Brownout detected (2) - check power supply")
+        device.click(tag="notifications")
+        assert device.wait_for_widget(tag="notify_item_firmware", timeout=5.0)
+        for item_tag, expected in NOTIFY_TEXT[lang_name].items():
+            assert device.find_widget(tag=item_tag) is not None, f"{item_tag} not shown"
+            _assert_visible_text(device, expected)
+        _assert_all_text_drawable(device, "notifications dropdown")
+        device.click(tag="notifications")
+    finally:
+        device.notification_mock_reset()
 
 
 @pytest.mark.parametrize("lang_code,lang_name", [("fr", "Français"), ("es", "Español")])

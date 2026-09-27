@@ -91,6 +91,9 @@ static const char* strings_en[STR_COUNT] = {
     [STR_NOTIFY_UPDATE_AVAILABLE] = "Update available",
     [STR_NOTIFY_WIFI_UNSTABLE] = "WiFi connection unstable",
     [STR_NOTIFY_LOW_BATTERY] = "Low battery",
+    [STR_NOTIFY_FW_VERSION_AVAILABLE] = "Firmware v%s available",
+    [STR_NOTIFY_BROWNOUT] = "Power dip detected – check the power supply",
+    [STR_NOTIFY_BROWNOUT_COUNT] = "Power dip detected (%s) – check the power supply",
     
     // Time Panel
     [STR_TIME_TITLE] = "Date & Time",
@@ -507,6 +510,9 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_NOTIFY_UPDATE_AVAILABLE] = "Mise à jour disponible",
     [STR_NOTIFY_WIFI_UNSTABLE] = "Connexion WiFi instable",
     [STR_NOTIFY_LOW_BATTERY] = "Batterie faible",
+    [STR_NOTIFY_FW_VERSION_AVAILABLE] = "Firmware v%s disponible",
+    [STR_NOTIFY_BROWNOUT] = "Baisse de tension détectée – vérifiez l'alimentation",
+    [STR_NOTIFY_BROWNOUT_COUNT] = "Baisse de tension détectée (%s) – vérifiez l'alimentation",
     
     // Time Panel
     [STR_TIME_TITLE] = "Date et heure",
@@ -924,6 +930,9 @@ static const char* strings_es[STR_COUNT] = {
     [STR_NOTIFY_UPDATE_AVAILABLE] = "Actualización disponible",
     [STR_NOTIFY_WIFI_UNSTABLE] = "Conexión WiFi inestable",
     [STR_NOTIFY_LOW_BATTERY] = "Batería baja",
+    [STR_NOTIFY_FW_VERSION_AVAILABLE] = "Firmware v%s disponible",
+    [STR_NOTIFY_BROWNOUT] = "Caída de tensión detectada – revisa la alimentación",
+    [STR_NOTIFY_BROWNOUT_COUNT] = "Caída de tensión detectada (%s) – revisa la alimentación",
     
     // Time Panel
     [STR_TIME_TITLE] = "Fecha y hora",

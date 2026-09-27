@@ -40,7 +40,10 @@ class Widget:
     option_count: Optional[int] = None
     selected_text: Optional[str] = None
     bg_color: Optional[str] = None
-
+    placeholder: Optional[str] = None
+    # Characters the widget's font can't draw (they show as empty boxes).
+    missing_glyphs: Optional[int] = None
+    placeholder_missing_glyphs: Optional[int] = None
 
 class DeviceError(Exception):
     """Raised when the device returns an error response."""

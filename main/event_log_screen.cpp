@@ -1060,7 +1060,7 @@ static void create_search_overlay() {
     lv_textarea_set_max_length(state.search_textarea, sizeof(state.search_query) - 1);
     lv_textarea_set_placeholder_text(state.search_textarea, i18n_get(STR_EVENT_SEARCH));
     lv_obj_set_user_data(state.search_textarea, (void*)"event_search_input");
-    lv_obj_set_style_text_font(state.search_textarea, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state.search_textarea, UI_FONT_BODY, LV_PART_MAIN);
 
     lv_obj_t* keyboard = lv_keyboard_create(state.search_overlay);
     lv_obj_set_size(keyboard, LV_PCT(100), LV_PCT(25));

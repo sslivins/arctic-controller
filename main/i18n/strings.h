@@ -98,6 +98,9 @@ typedef enum {
     STR_NOTIFY_UPDATE_AVAILABLE,
     STR_NOTIFY_WIFI_UNSTABLE,
     STR_NOTIFY_LOW_BATTERY,
+    STR_NOTIFY_FW_VERSION_AVAILABLE,
+    STR_NOTIFY_BROWNOUT,
+    STR_NOTIFY_BROWNOUT_COUNT,
     
     // ========================================================================
     // Time Panel

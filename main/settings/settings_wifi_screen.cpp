@@ -622,7 +622,7 @@ static void create_password_dialog(void)
     lv_textarea_set_password_mode(s_state.password_textarea, true);
     lv_textarea_set_placeholder_text(s_state.password_textarea, i18n_get(STR_WIFI_PASSWORD));
     lv_obj_set_user_data(s_state.password_textarea, (void*)"wifi_password_input");
-    lv_obj_set_style_text_font(s_state.password_textarea, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_state.password_textarea, &montserrat_32_latin, LV_PART_MAIN);
     
     // Show password button
     s_state.show_password_btn = lv_btn_create(input_row);
@@ -635,7 +635,7 @@ static void create_password_dialog(void)
     
     s_state.show_password_icon = lv_label_create(s_state.show_password_btn);
     lv_label_set_text(s_state.show_password_icon, LV_SYMBOL_EYE_CLOSE);
-    lv_obj_set_style_text_font(s_state.show_password_icon, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_state.show_password_icon, &lv_font_montserrat_32, LV_PART_MAIN);  // glyphs: ascii-only (icon)
     lv_obj_center(s_state.show_password_icon);
     
     // Keyboard at bottom - 25% height

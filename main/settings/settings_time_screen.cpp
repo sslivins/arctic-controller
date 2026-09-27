@@ -373,7 +373,7 @@ static void create_content(void)
     
     // Current time preview (left)
     s_state.preview_label = lv_label_create(time_row);
-    lv_obj_set_style_text_font(s_state.preview_label, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(s_state.preview_label, &lv_font_montserrat_32, LV_PART_MAIN);  // glyphs: ascii-only (digits, AM/PM)
     lv_obj_set_style_text_color(s_state.preview_label, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_align(s_state.preview_label, LV_ALIGN_LEFT_MID, 10, 0);
     lv_obj_set_user_data(s_state.preview_label, (void*)"time_preview");
