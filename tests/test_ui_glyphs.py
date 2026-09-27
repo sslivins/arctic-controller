@@ -28,7 +28,7 @@ def test_firmware_ui_strings_only_use_characters_the_fonts_can_draw():
 def test_the_arrow_and_dashes_used_by_the_ui_are_in_every_ui_font():
     fonts = check_glyphs.load_fonts(ROOT / "main" / "fonts")
     ui = [n for n in fonts if n.startswith("montserrat_") and n.endswith("_latin")]
-    assert len(ui) == 4
+    assert len(ui) == 5
     for name in ui:
         for cp in (0x2192, 0x2014, 0x2013, 0xB0, 0xE9):
             assert cp in fonts[name], f"U+{cp:04X} missing from {name}"

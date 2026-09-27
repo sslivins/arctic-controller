@@ -44,6 +44,7 @@ class Widget:
     # Characters the widget's font can't draw (they show as empty boxes).
     missing_glyphs: Optional[int] = None
     placeholder_missing_glyphs: Optional[int] = None
+    font_px: Optional[int] = None
 
 class DeviceError(Exception):
     """Raised when the device returns an error response."""

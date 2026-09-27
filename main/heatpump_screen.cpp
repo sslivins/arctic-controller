@@ -32,6 +32,7 @@ static const lv_font_t* component_row_font(lv_coord_t label_width_px) {
     const lv_font_t* fonts[] = {
         UI_FONT_BODY,
         &montserrat_24_latin,
+        &montserrat_20_latin,
         kMinReadableLabelFont,
     };
 

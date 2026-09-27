@@ -621,3 +621,34 @@ def test_rest_language_preference_refreshes_visible_ui(
     for label in (DEMO_BANNER[lang_name], COMPONENT_DOTS[lang_name][0],
                   PERF_STRIP_LABELS[lang_name][0], FOOTER_NAV[lang_name][0]):
         _assert_visible_text(device, label)
+
+# Category chips on the Events tab, in the order they are laid out.
+EVENT_CHIPS = {
+    "English":  ["Problems", "Equipment", "Changes", "System"],
+    "Français": ["Problèmes", "Équipement", "Modifications", "Système"],
+    "Español":  ["Problemas", "Equipo", "Cambios", "Sistema"],
+}
+
+# Long labels may drop to a smaller font to fit, but never below this.
+MIN_LABEL_FONT_PX = 20
+
+
+def _assert_labels_readable(device: DeviceClient, labels: list[str], where: str):
+    found = {w.text: w.font_px for w in device.widgets if w.text in labels}
+    missing = [t for t in labels if t not in found]
+    assert not missing, f"{where}: labels not shown: {missing}"
+    small = {t: px for t, px in found.items() if not px or px < MIN_LABEL_FONT_PX}
+    assert not small, f"{where}: labels below {MIN_LABEL_FONT_PX}px: {small}"
+
+
+@pytest.mark.parametrize("lang_name", ["English", "Français", "Español"])
+def test_component_row_and_event_chips_stay_readable(device: DeviceClient, lang_name: str):
+    """Full words fit on the Home component row and Events chips without tiny text."""
+    _switch_language(device, lang_name)
+    _assert_labels_readable(device, COMPONENT_DOTS[lang_name], "home component row")
+
+    device.click(tag="nav_events")
+    assert device.wait_for_screen("event_log", timeout=5.0)
+    _assert_labels_readable(device, EVENT_CHIPS[lang_name], "events chips")
+    device.click(tag="nav_home")
+    assert device.wait_for_screen("main", timeout=5.0)

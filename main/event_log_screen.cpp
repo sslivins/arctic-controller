@@ -903,6 +903,7 @@ static const lv_font_t* category_chip_font(const string_id_t* labels,
     const lv_font_t* fonts[] = {
         UI_FONT_BODY,
         &montserrat_24_latin,
+        &montserrat_20_latin,
         kMinReadableLabelFont,
     };
 

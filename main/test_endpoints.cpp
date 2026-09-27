@@ -32,6 +32,7 @@
 #include "settings/settings_language_screen.h"
 #include "settings/settings_types.h"
 #include "i18n/i18n.h"
+#include "fonts/fonts.h"
 #include "heatpump_controller.h"
 #include "auth_manager.h"
 #include "setup_pairing.h"
@@ -438,6 +439,21 @@ static int count_missing_glyphs(const lv_font_t* font, const char* text)
     }
     return missing;
 }
+
+// Nominal pixel size of one of our UI fonts, or 0 for any other font.
+// Lets the device tests check that text never shrinks below a readable size.
+static int ui_font_px(const lv_font_t* font)
+{
+    static const struct { const lv_font_t* font; int px; } kFonts[] = {
+        {&montserrat_16_latin, 16}, {&montserrat_20_latin, 20},
+        {&montserrat_24_latin, 24}, {&montserrat_32_latin, 32},
+        {&montserrat_40_latin, 40},
+    };
+    for (const auto& f : kFonts) {
+        if (f.font == font) return f.px;
+    }
+    return 0;
+}
 // Returns true if the widget was added, false if buffer full or not interesting.
 static bool serialize_widget(lv_obj_t* obj, char* buf, int* pos, int buf_size, int* widget_count)
 {
@@ -505,7 +521,10 @@ static bool serialize_widget(lv_obj_t* obj, char* buf, int* pos, int buf_size, i
         }
     }
     if (text) {
-        int missing = count_missing_glyphs(lv_obj_get_style_text_font(obj, LV_PART_MAIN), text);
+        const lv_font_t* font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
+        int px = ui_font_px(font);
+        if (px > 0) TPRINTF(",\"font_px\":%d", px);
+        int missing = count_missing_glyphs(font, text);
         if (missing > 0) TPRINTF(",\"missing_glyphs\":%d", missing);
     }
     if (lv_obj_check_type(obj, &lv_roller_class)) {
