@@ -7,9 +7,11 @@
   <script>
     (() => {
       const param = new URLSearchParams(window.location.search).get("clawpilotTheme");
-      const theme =
-        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-      document.documentElement.setAttribute("data-theme", theme);
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      const apply = () =>
+        document.documentElement.setAttribute("data-theme", param || (mq.matches ? "dark" : "light"));
+      apply();
+      if (!param && mq.addEventListener) mq.addEventListener("change", apply);
     })();
   </script>
   <style>
@@ -115,6 +117,7 @@
       --hist-dhw: #fbbf24;
     }
     * { box-sizing: border-box; }
+
     html, body { margin: 0; min-height: 100%; }
     body {
       background: var(--cp-bg);
@@ -138,10 +141,12 @@
     .brand-mark {
       width: 34px; height: 34px; display: grid; place-items: center;
       border-radius: 10px; background: var(--cp-accent); color: var(--cp-accent-fg);
-      font-size: 19px;
+      font-size: 19px; flex: none;
     }
-    .top-status { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 16px; min-width: 0; }
+    .top-status { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 0; }
     .status-item { display: flex; align-items: center; gap: 7px; color: var(--cp-text-muted); font-size: 13px; white-space: nowrap; }
+    .hp-status { min-width: 0; }
+    .status-label { overflow: hidden; text-overflow: ellipsis; }
     .wx-icon { width: 18px; height: 20px; flex: none; }
     .status-item.wx { gap: 5px; }
     .loc-current { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
@@ -152,14 +157,16 @@
       padding: 11px 12px; font: inherit; color: inherit; min-height: 44px; }
     .loc-result:hover, .loc-result:focus-visible { background: var(--cp-surface-soft); }
     .loc-result small { display: block; color: var(--cp-text-muted); font-size: 12px; }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--cp-border-strong); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--cp-border-strong); flex: none; }
     .dot.good { background: var(--cp-success); }
     .dot.bad { background: var(--cp-danger); }
     .icon-btn {
-      width: 38px; height: 38px; border: 1px solid var(--cp-border);
-      border-radius: 10px; background: var(--cp-surface); color: var(--cp-text);
-      display: grid; place-items: center; text-decoration: none;
+      width: 42px; min-width: 42px; height: 42px; border: 1px solid var(--cp-border);
+      border-radius: 12px; background: var(--cp-surface); color: var(--cp-text);
+      display: grid; place-items: center; text-decoration: none; padding: 0; flex: none;
     }
+    .icon-svg { width: 22px; height: 22px; display: block; fill: currentColor; }
+    .signout-btn { color: var(--cp-text); }
     .notif-wrap { position: relative; }
     .notif-btn { position: relative; cursor: pointer; font-size: 17px; }
     .notif-badge {
@@ -202,6 +209,12 @@
     .main { min-width: 0; padding: 28px clamp(16px, 3vw, 40px) 48px; }
     .page { max-width: 1220px; margin: 0 auto; }
     .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+    .page-head > div:first-child, .history-title { min-width: 0; }
+    .page-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: none; }
+    .page-actions .btn { white-space: nowrap; }
+    .history-head { align-items: flex-start; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; }
+    .history-head h1 { margin: 0; }
+    .history-back { font-size: 28px; font-weight: 700; line-height: 1; }
     .page-head h1 { margin: 0; font-size: clamp(26px, 4vw, 36px); letter-spacing: -0.03em; }
     .page-head p { margin: 5px 0 0; color: var(--cp-text-muted); }
     .grid { display: grid; gap: 16px; }
@@ -243,9 +256,9 @@
     .badge.warn { color: var(--cp-warning); }
     .badge.bad { color: var(--cp-danger); }
     .btn {
-      min-height: 40px; border-radius: 10px; padding: 8px 14px;
+      min-height: 42px; border-radius: 10px; padding: 8px 14px;
       border: 1px solid var(--cp-border-strong); background: var(--cp-surface);
-      color: var(--cp-text); font-weight: 650;
+      color: var(--cp-text); font-weight: 650; white-space: nowrap;
     }
     .btn:hover { background: var(--cp-surface-soft); }
     .btn.primary { background: var(--cp-accent); border-color: var(--cp-accent); color: var(--cp-accent-fg); }
@@ -301,7 +314,7 @@
     .info-panel ol { margin: 0; padding-left: 18px; }
     .info-panel li + li { margin-top: 4px; }
     input, select, textarea {
-      width: 100%; border: 1px solid var(--cp-border-strong);
+      width: 100%; min-height: 44px; border: 1px solid var(--cp-border-strong);
       background: var(--cp-surface); color: var(--cp-text);
       border-radius: 10px; padding: 10px 12px; outline: none;
     }
@@ -313,7 +326,7 @@
     .range-readout output { color: var(--cp-accent); font-size: 24px; font-weight: 750; }
     .range-limits { display: flex; justify-content: space-between; color: var(--cp-text-muted); font-size: 12px; }
     input.control-range {
-      appearance: none; height: 28px; padding: 0; border: 0; background: transparent;
+      appearance: none; height: 44px; padding: 0; border: 0; background: transparent;
       box-shadow: none;
     }
     input.control-range:focus { box-shadow: none; }
@@ -423,26 +436,43 @@
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       .rail { display: none; }
-      .main { padding-bottom: 92px; }
+      .topbar { background: var(--cp-bg-elevated); gap: 8px; }
+      .main { padding-bottom: calc(108px + env(safe-area-inset-bottom)); }
       .mobile-nav {
         position: fixed; display: grid; grid-template-columns: repeat(4, 1fr);
         bottom: 0; left: 0; right: 0; z-index: 40;
-        background: var(--cp-panel-strong); border-top: 1px solid var(--cp-border);
-        padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+        background: var(--cp-bg-elevated); border-top: 1px solid var(--cp-border);
+        box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.16);
+        padding: 8px 8px max(8px, env(safe-area-inset-bottom));
       }
-      .mobile-nav .nav-link { justify-content: center; flex-direction: column; gap: 2px; padding: 7px; font-size: 11px; }
-      .brand { min-width: 0; }
+      .mobile-nav .nav-link { justify-content: center; flex-direction: column; gap: 2px; padding: 8px 6px; font-size: 11px; min-height: 58px; }
+      .brand { min-width: 0; flex: none; }
       .brand span:last-child { display: none; }
+      .top-status { gap: 8px; }
       .top-status .status-item.wifi, .top-status .status-item.clock { display: none; }
+      .hp-status { width: 18px; height: 44px; justify-content: center; flex: none; }
+      .hp-status .status-label { display: none; }
+      .hp-status .dot { width: 10px; height: 10px; }
+      .icon-btn { width: 44px; min-width: 44px; height: 44px; }
+      .notif-panel { position: fixed; top: 58px; left: 12px; right: 12px; width: auto; max-width: none; }
       .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .settings-layout { grid-template-columns: 1fr; }
-      .settings-nav { position: static; display: flex; overflow-x: auto; gap: 4px; }
-      .settings-nav .nav-link { width: auto; white-space: nowrap; }
+      .settings-nav { position: static; display: flex; flex-wrap: wrap; overflow-x: visible; gap: 6px; padding: 10px; }
+      .settings-nav .nav-link { width: auto; flex: 1 1 calc(50% - 6px); justify-content: center; white-space: normal; min-height: 48px; text-align: center; }
     }
     @media (max-width: 620px) {
-      .topbar { padding: 0 12px; }
+      .topbar { padding: 0 10px; }
       .main { padding-inline: 12px; padding-top: 20px; }
+      .top-status { gap: 7px; }
+      .status-item.wx { gap: 4px; }
+      .page-head { gap: 14px; }
+      .page-actions { gap: 8px; }
+      .card { padding: 18px 16px; }
+      .kv { grid-template-columns: 1fr; gap: 3px; }
+      .kv strong { overflow-wrap: anywhere; }
+      .field label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+      .field label input[type="checkbox"] { width: 40px !important; min-width: 40px; height: 40px; min-height: 40px; }
       .hero { grid-template-columns: 1fr; }
       .temp-hero { text-align: left; }
       .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
@@ -453,6 +483,8 @@
       .event-time { grid-column: 1 / -1; }
       .ap-row { grid-template-columns: 1fr; }
       .page-head { align-items: flex-start; }
+      .history-head { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; }
+      .history-title p { font-size: 15px; }
     }
   </style>
 </head>
@@ -663,13 +695,13 @@
         <header class="topbar">
           <div class="brand"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
           <div class="top-status">
-            <span class="status-item"><span class="dot ${connected ? "good" : "bad"}"></span>${connected ? "Heat pump online" : "Heat pump offline"}</span>
+            <span class="status-item hp-status" title="${connected ? "Heat pump online" : "Heat pump offline"}" aria-label="${connected ? "Heat pump online" : "Heat pump offline"}"><span class="dot ${connected ? "good" : "bad"}"></span><span class="status-label">${connected ? "Online" : "Offline"}</span></span>
             <span class="status-item wifi">${esc(state.wifi.ssid || "WiFi disconnected")}</span>
             ${weatherStatus()}
             <span class="status-item clock">${esc(fmtStatusClock(state.status.time?.local))}</span>
             ${notifBell()}
             <button class="icon-btn" data-route="settings" aria-label="Settings">⚙</button>
-            ${state.auth.required ? `<button class="btn" data-action="logout" style="padding:6px 12px;font-size:13px" aria-label="Sign out">Sign out</button>` : ""}
+            ${state.auth.required ? `<button class="icon-btn signout-btn" data-action="logout" aria-label="Sign out" title="Sign out"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Sign out</title><path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h7v2H5v14h7v2H5Zm11-4-1.375-1.45 2.55-2.55H9v-2h8.175l-2.55-2.55L16 7l5 5-5 5Z"/></svg></button>` : ""}
           </div>
         </header>
         <div class="layout">
@@ -680,7 +712,7 @@
       </div>`;
     }
     function pageHead(title, subtitle, action = "") {
-      return `<div class="page-head"><div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${action}</div>`;
+      return `<div class="page-head"><div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${action ? `<div class="page-actions">${action}</div>` : ""}</div>`;
     }
     function component(name, active, detail = "") {
       return `<div class="component"><span class="${active ? "state-on" : "state-off"}">${active ? "● Active" : "○ Idle"}</span>
@@ -1324,7 +1356,7 @@
         </section>`;
       }
       return `<div class="page">
-        ${pageHead("Cycle history", "Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.", `<button class="btn" data-route="status">‹ Back</button><button class="btn" data-action="history-refresh">Refresh</button>`)}
+        <div class="page-head history-head"><button class="icon-btn history-back" data-route="status" aria-label="Back to status" title="Back to status">‹</button><div class="history-title"><h1>Cycle history</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.</p></div><button class="icon-btn" data-action="history-refresh" aria-label="Refresh cycle history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>
         ${body}
       </div>`;
     }
