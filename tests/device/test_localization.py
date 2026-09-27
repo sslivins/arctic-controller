@@ -141,7 +141,8 @@ SETTINGS_SUBSCREEN_LABELS = {
         ("settings_time", "time", "Format d'affichage"),
         ("settings_language", "language", "Langue"),
         ("settings_display", "display", "Luminosité"),
-        ("settings_home_assistant", "home_assistant", "Associé"),
+        # The status reads differently when paired, so accept either state.
+        ("settings_home_assistant", "home_assistant", ("Associé", "Non associé")),
         ("settings_security", "security", "Sécurité"),
         ("settings_web", "web", "Interface Web"),
     ],
@@ -151,7 +152,7 @@ SETTINGS_SUBSCREEN_LABELS = {
         ("settings_time", "time", "Formato de visualización"),
         ("settings_language", "language", "Idioma"),
         ("settings_display", "display", "Brillo"),
-        ("settings_home_assistant", "home_assistant", "Emparejado"),
+        ("settings_home_assistant", "home_assistant", ("Emparejado", "Sin emparejar")),
         ("settings_security", "security", "Seguridad"),
         ("settings_web", "web", "Interfaz web"),
     ],
@@ -192,8 +193,10 @@ def _has_text_containing(device: DeviceClient, expected: str) -> bool:
     return any(expected in w.text for w in device.widgets if w.text)
 
 
-def _assert_visible_text(device: DeviceClient, expected: str):
-    assert _has_text_containing(device, expected), \
+def _assert_visible_text(device: DeviceClient, expected):
+    """``expected`` may be a tuple of alternatives; any one of them must show."""
+    options = expected if isinstance(expected, tuple) else (expected,)
+    assert any(_has_text_containing(device, o) for o in options), \
         f"Expected visible text containing {expected!r}; saw {[w.text for w in device.widgets if w.text]}"
 
 
