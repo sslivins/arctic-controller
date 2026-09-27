@@ -696,7 +696,8 @@ TelemetrySnapshot getTelemetrySnapshot() {
                        s_state.operation == HeatPumpOperation::COOLING) {
                 snapshot.active_setpoint_c = s_state.cooling_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
-            } else if (s_state.working_mode == WorkingMode::HOT_WATER) {
+            } else if (s_state.working_mode == WorkingMode::HOT_WATER ||
+                       s_state.working_mode == WorkingMode::HOT_WATER_COOLING) {
                 snapshot.active_setpoint_c = s_state.hot_water_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
             } else if (s_state.working_mode == WorkingMode::HEATING ||
@@ -742,11 +743,17 @@ TelemetrySnapshot getTelemetrySnapshot() {
                     snapshot.setpoint_valid =
                         telemetry_fresh && s_cooling_setpoint_valid;
                     break;
+                // Hot water / cooling works to the cooling setpoint while
+                // cooling and makes hot water the rest of the time.
                 case WorkingMode::HOT_WATER_COOLING:
                     if (s_state.operation == HeatPumpOperation::COOLING) {
                         snapshot.active_setpoint_c = s_state.cooling_setpoint;
                         snapshot.setpoint_valid =
                             telemetry_fresh && s_cooling_setpoint_valid;
+                    } else {
+                        snapshot.active_setpoint_c = s_state.hot_water_setpoint;
+                        snapshot.setpoint_valid =
+                            telemetry_fresh && s_hot_water_setpoint_valid;
                     }
                     break;
                 case WorkingMode::HOT_WATER:
