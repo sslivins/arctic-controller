@@ -159,6 +159,9 @@ int getActiveErrors(ActiveError* errors, int max_errors) {
         e.name = faults[i].label;
         e.description = faults[i].label;
         e.resolution = macon_fault_resolution(faults[i].id);
+        e.name_msg_id = faults[i].label_msg_id;
+        e.resolution_msg_id = macon_fault_resolution_msg_id(faults[i].id);
+        e.wired_display = faults[i].wired_display;
         e.severity = toErrorSeverity(faults[i].severity);
         e.site = faults[i].site;
         time_t fs = getFirstSeen(faults[i].site);
@@ -194,7 +197,9 @@ ErrorSeverity getHighestSeverity() {
 bool describeFaultCode(const char* code, const char** name_out,
                        const char** description_out,
                        const char** resolution_out,
-                       ErrorSeverity* severity_out) {
+                       ErrorSeverity* severity_out,
+                       const char** name_msg_id_out,
+                       const char** resolution_msg_id_out) {
     const MaconFaultBit* sites[8];
     size_t n = macon_fault_bits_for_code(code, sites, 8);
     if (n == 0) return false;
@@ -203,6 +208,8 @@ bool describeFaultCode(const char* code, const char** name_out,
     if (description_out)  *description_out = fb->label;
     if (resolution_out)   *resolution_out = macon_fault_resolution(fb->id);
     if (severity_out)     *severity_out = toErrorSeverity(fb->severity);
+    if (name_msg_id_out)  *name_msg_id_out = fb->label_msg_id;
+    if (resolution_msg_id_out) *resolution_msg_id_out = macon_fault_resolution_msg_id(fb->id);
     return true;
 }
 
@@ -392,6 +399,10 @@ char* getErrorsAsJson() {
         cJSON_AddStringToObject(err, "description", errors[i].description);
         cJSON_AddStringToObject(err, "resolution", errors[i].resolution);
         cJSON_AddStringToObject(err, "severity", severityToString(errors[i].severity));
+        cJSON_AddStringToObject(err, "name_msg_id", errors[i].name_msg_id ? errors[i].name_msg_id : "");
+        cJSON_AddStringToObject(err, "resolution_msg_id",
+                                errors[i].resolution_msg_id ? errors[i].resolution_msg_id : "");
+        cJSON_AddBoolToObject(err, "wired_display", errors[i].wired_display);
         if (errors[i].first_seen > 0) {
             cJSON_AddNumberToObject(err, "occurred", (double)errors[i].first_seen);
         } else {

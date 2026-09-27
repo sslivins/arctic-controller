@@ -49,6 +49,12 @@ struct ActiveError {
     const char* name;       // Short label (from the macon library)
     const char* description;// Human-readable description (from the macon library)
     const char* resolution; // Suggested resolution steps (library-provided)
+    // Stable i18n keys for name/description and resolution (library-provided).
+    // Device screens translate via i18n_get_key(key, english); the JSON API
+    // stays English so HA entity states don't change with the device language.
+    const char* name_msg_id;
+    const char* resolution_msg_id;
+    bool wired_display;     // false = code only appears in the Macon app
     ErrorSeverity severity;
     MaconFaultSiteId site;  // Opaque per-fault site token (library-owned)
     time_t first_seen;      // When error first appeared
@@ -84,7 +90,9 @@ ErrorSeverity getHighestSeverity();
 bool describeFaultCode(const char* code, const char** name_out,
                        const char** description_out,
                        const char** resolution_out,
-                       ErrorSeverity* severity_out);
+                       ErrorSeverity* severity_out,
+                       const char** name_msg_id_out = nullptr,
+                       const char** resolution_msg_id_out = nullptr);
 
 // ============================================================================
 // Error History Functions

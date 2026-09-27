@@ -12,6 +12,7 @@
 // components/arctic-macon/tests/.
 
 #include "i18n.h"
+#include "macon_faults.h"
 #include "nvs_fake.h"
 
 #include <cstdio>
@@ -240,6 +241,35 @@ static void test_get_key_translates_a_known_key(void) {
     i18n_set_language(LANG_ENGLISH);
 }
 
+// Every fault label and resolution key the macon library emits must have a
+// French and a Spanish translation, so a new or renamed fault can't silently
+// show English on a translated device.
+static void test_every_fault_key_is_translated(void) {
+    const char *fallback = "PLACEHOLDER-ENGLISH";
+    auto check = [&](const char *key) {
+        for (int lang = LANG_FRENCH; lang <= LANG_SPANISH; ++lang) {
+            i18n_set_language((language_t)lang);
+            const char *t = i18n_get_key(key, fallback);
+            if (t == nullptr || std::strcmp(t, fallback) == 0) {
+                std::printf("FAIL: fault key '%s' has no %s translation\n", key,
+                            lang == LANG_FRENCH ? "French" : "Spanish");
+                ++g_failures;
+            }
+        }
+    };
+    for (size_t i = 0; i < arctic::MACON_FAULT_BITS_COUNT; ++i) {
+        const arctic::MaconFaultBit &fb = arctic::MACON_FAULT_BITS[i];
+        if (fb.severity == arctic::FaultSeverity::INFO) continue;
+        CHECK(fb.label_msg_id != nullptr);
+        if (fb.label_msg_id) check(fb.label_msg_id);
+    }
+    for (uint16_t id = 0; id < static_cast<uint16_t>(arctic::MaconFaultId::Count); ++id) {
+        check(arctic::macon_fault_resolution_msg_id(static_cast<arctic::MaconFaultId>(id)));
+    }
+    check(arctic::macon_fault_resolution_msg_id(arctic::MaconFaultId::Unknown));
+    i18n_set_language(LANG_ENGLISH);
+}
+
 // --------------------------------------------------------------------------
 // Persistence
 // --------------------------------------------------------------------------
@@ -335,6 +365,7 @@ int main(void) {
 
     test_get_key_fallback_rules();
     test_get_key_translates_a_known_key();
+    test_every_fault_key_is_translated();
 
     test_language_choice_is_persisted();
     test_init_restores_the_saved_language();

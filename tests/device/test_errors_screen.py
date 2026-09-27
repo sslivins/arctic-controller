@@ -169,10 +169,10 @@ class TestActiveErrors:
         device.inject_fault("P02", True)
 
         _open_errors(device)
-        _wait_screen_text(device, "high pressure")
+        _wait_screen_text(device, "pressure too high")
 
-        # P02 description contains "high pressure"
-        assert _has_text_containing(device, "high pressure"), \
+        # P02 description contains "pressure too high"
+        assert _has_text_containing(device, "pressure too high"), \
             "Error description for P02 not found on screen"
 
     def test_multiple_errors(self, device: DeviceClient):

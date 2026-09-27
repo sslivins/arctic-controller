@@ -2534,7 +2534,7 @@ paths:
                         description:
                           type: string
                           description: Human-readable description
-                          example: "High pressure protection activated"
+                          example: "Refrigerant pressure too high"
                         resolution:
                           type: string
                           description: Suggested resolution steps
@@ -2543,6 +2543,18 @@ paths:
                           type: string
                           enum: [info, warning, error, critical]
                           example: "warning"
+                        name_msg_id:
+                          type: string
+                          description: Stable i18n key for name/description (English text above is the fallback)
+                          example: "fault.high_pressure.label"
+                        resolution_msg_id:
+                          type: string
+                          description: Stable i18n key for resolution (English text above is the fallback)
+                          example: "fault.high_pressure.resolution"
+                        wired_display:
+                          type: boolean
+                          description: Whether the OEM wired controller shows this code (false = Macon app only)
+                          example: true
                         occurred:
                           type: integer
                           nullable: true
@@ -2580,9 +2592,12 @@ paths:
                 active:
                 - code: "P02"
                   name: "HIGH_PRESSURE"
-                  description: "High pressure protection activated"
-                  resolution: "1) Check whether the water temperature is too high or blocked. 2) Check whether the fan blades are blocked."
-                  severity: "warning"
+                  description: "Refrigerant pressure too high"
+                  resolution: "1) Check whether the water temperature is too high or the water flow is blocked. 2) Check that the fan blades and evaporator fins aren't blocked."
+                  severity: "critical"
+                  name_msg_id: "fault.high_pressure.label"
+                  resolution_msg_id: "fault.high_pressure.resolution"
+                  wired_display: true
                   occurred: 1739145600
                   active: true
                 history:

@@ -54,6 +54,7 @@ set(MAIN_HOST_SRCS
 # Only the bus underneath (host_stubs/bus_fake.cpp) is a fake.
 set(MACON_HOST_SRCS
   ${MACON_DIR}/src/macon_advanced_params.cpp
+  ${MACON_DIR}/src/macon_faults.cpp
 )
 
 add_library(arctic_main_host STATIC

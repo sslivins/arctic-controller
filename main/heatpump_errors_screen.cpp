@@ -178,7 +178,7 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     
     // Description (no snake_case name - just the human readable description)
     lv_obj_t* desc_label = lv_label_create(card);
-    lv_label_set_text(desc_label, error->description);
+    lv_label_set_text(desc_label, i18n_get_key(error->name_msg_id, error->description));
     lv_label_set_long_mode(desc_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(desc_label, LV_PCT(100));
     lv_obj_set_style_text_font(desc_label, &montserrat_24_latin, LV_PART_MAIN);
@@ -236,7 +236,9 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     
     // Resolution text
     lv_obj_t* res_label = lv_label_create(resolution_cont);
-    lv_label_set_text(res_label, error->resolution ? error->resolution : i18n_get(STR_HP_CONTACT_DEALER));
+    lv_label_set_text(res_label, error->resolution
+                                     ? i18n_get_key(error->resolution_msg_id, error->resolution)
+                                     : i18n_get(STR_HP_CONTACT_DEALER));
     lv_label_set_long_mode(res_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(res_label, LV_PCT(100));
     lv_obj_set_style_text_font(res_label, &montserrat_24_latin, LV_PART_MAIN);
@@ -342,11 +344,16 @@ static void create_history_card(const arctic::ErrorHistoryEntry* entry) {
     const char* name = nullptr;
     const char* desc = nullptr;
     const char* resolution = nullptr;
+    const char* name_msg_id = nullptr;
+    const char* resolution_msg_id = nullptr;
     arctic::ErrorSeverity sev = arctic::ErrorSeverity::INFO;
-    if (arctic::describeFaultCode(entry->code, &name, &desc, &resolution, &sev)) {
+    if (arctic::describeFaultCode(entry->code, &name, &desc, &resolution, &sev,
+                                  &name_msg_id, &resolution_msg_id)) {
         hist_err.name = name ? name : "";
         hist_err.description = desc ? desc : "";
         hist_err.resolution = resolution;
+        hist_err.name_msg_id = name_msg_id;
+        hist_err.resolution_msg_id = resolution_msg_id;
         hist_err.severity = sev;
     }
 
