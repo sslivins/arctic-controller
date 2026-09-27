@@ -74,7 +74,7 @@ HERO_MODES = {
 COMPONENT_DOTS = {
     "English":  ["Compressor", "Fan", "Pump", "Aux Heat"],
     "Français": ["Compresseur", "Ventilateur", "Pompe", "Appoint"],
-    "Español":  ["Compresor", "Ventilador", "Bomba", "Calef. aux."],
+    "Español":  ["Compresor", "Ventilador", "Bomba", "Apoyo"],
 }
 
 PERF_STRIP_LABELS = {

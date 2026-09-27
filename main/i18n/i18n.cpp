@@ -1055,7 +1055,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HP_COMPRESSOR] = "Compresor",
     [STR_HP_FAN] = "Ventilador",
     [STR_HP_PUMP] = "Bomba",
-    [STR_HP_AUX_HEAT] = "Calef. aux.",
+    [STR_HP_AUX_HEAT] = "Apoyo",
     
     // Heat Pump - Fan Speeds
     [STR_HP_FAN_LOW] = "Baja",
