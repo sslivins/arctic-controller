@@ -40,6 +40,7 @@
 #include "boot_stats.h"
 #include "log_buffer.h"
 #include "log_persist.h"
+#include "tab_shell.h"
 #include "app_preferences.h"
 #include "test_endpoints.h"
 #include "tls_manager.h"
@@ -5649,7 +5650,12 @@ static esp_err_t preferences_patch_handler(httpd_req_t* req)
         language_t value = LANG_ENGLISH;
         if (strcmp(language->valuestring, "fr") == 0) value = LANG_FRENCH;
         if (strcmp(language->valuestring, "es") == 0) value = LANG_SPANISH;
-        i18n_set_language(value);
+        if (value != i18n_get_language()) {
+            i18n_set_language(value);
+            bsp_display_lock(0);
+            ui_language_changed();
+            bsp_display_unlock();
+        }
     }
     cJSON_Delete(root);
 

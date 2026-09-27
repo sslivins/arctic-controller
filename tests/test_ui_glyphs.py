@@ -28,7 +28,7 @@ def test_firmware_ui_strings_only_use_characters_the_fonts_can_draw():
 def test_the_arrow_and_dashes_used_by_the_ui_are_in_every_ui_font():
     fonts = check_glyphs.load_fonts(ROOT / "main" / "fonts")
     ui = [n for n in fonts if n.startswith("montserrat_") and n.endswith("_latin")]
-    assert len(ui) == 4
+    assert len(ui) == 5
     for name in ui:
         for cp in (0x2192, 0x2014, 0x2013, 0xB0, 0xE9):
             assert cp in fonts[name], f"U+{cp:04X} missing from {name}"
@@ -98,3 +98,22 @@ def test_annotation_checks_against_the_named_font(tmp_path):
         "main/ui.cpp:2: U+00B0 '\u00b0' is not in montserrat_16_misc",
         "main/ui.cpp:3: unknown font 'no_such_font' in glyphs annotation",
     ]
+
+def test_flags_text_widgets_using_the_ascii_only_builtin_fonts(tmp_path):
+    root = _tree(tmp_path, """\
+        lv_obj_set_style_text_font(search, &lv_font_montserrat_32, LV_PART_MAIN);
+        lv_obj_set_style_text_font(icon, &lv_font_montserrat_32, 0);  // glyphs: ascii-only
+        // a comment naming lv_font_montserrat_24 is fine
+        /* so is lv_font_montserrat_24 in a block comment */
+        lv_obj_set_style_text_font(ok, &montserrat_32_latin, LV_PART_MAIN);
+        """)
+    problems, _ = check_glyphs.find_problems(root)
+    assert len(problems) == 1
+    assert problems[0].startswith("main/ui.cpp:1: lv_font_montserrat_32 is ASCII-only")
+
+
+def test_ascii_only_lines_may_not_contain_accented_text(tmp_path):
+    root = _tree(tmp_path, 'set_text(l, "d\\xc3\\xa9j\\xc3\\xa0");  // glyphs: ascii-only\n')
+    problems, _ = check_glyphs.find_problems(root)
+    assert problems == ["main/ui.cpp:1: U+00E9 '\u00e9' is not in an ASCII-only font",
+                        "main/ui.cpp:1: U+00E0 '\u00e0' is not in an ASCII-only font"]

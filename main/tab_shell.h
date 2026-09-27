@@ -43,6 +43,15 @@ void tab_shell_select(nav_tab_t tab);
  */
 nav_tab_t tab_shell_current(void);
 
+/**
+ * @brief Rebuild resident UI after a language change.
+ *
+ * Must be called with LVGL access held (or from the LVGL/UI task). Recreates
+ * the persistent tab panels so every static label is regenerated from i18n,
+ * while preserving the selected tab.
+ */
+void ui_language_changed(void);
+
 #ifdef __cplusplus
 }
 #endif

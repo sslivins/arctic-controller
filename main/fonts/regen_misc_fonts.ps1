@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $montserrat = "0x2013,0x2014,0x2022,0x2026,0x2190-0x2193"
 $symbols    = "0x25CB,0x25CF"
-foreach ($size in 16, 24, 32, 40) {
+foreach ($size in 16, 20, 24, 32, 40) {
     npx --yes lv_font_conv@1.5.3 --no-compress --bpp 4 --size $size --format lvgl `
         --font Montserrat-Medium.ttf -r $montserrat `
         --font C:\Windows\Fonts\seguisym.ttf -r $symbols `

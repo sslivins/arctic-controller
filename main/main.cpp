@@ -614,9 +614,11 @@ void create_ui(void)
     uint32_t brownouts = boot_stats_brownout_count();
     if (brownouts > 0) {
         char msg[64];
+        char count[12];
         snprintf(msg, sizeof(msg), "Brownout detected (%lu) - check power supply",
                  (unsigned long)brownouts);
-        status_bar_add_notification(STATUS_BAR_NOTIFY_BROWNOUT, msg);
+        snprintf(count, sizeof(count), "%lu", (unsigned long)brownouts);
+        status_bar_add_notification_detail(STATUS_BAR_NOTIFY_BROWNOUT, msg, count);
     }
 }
 

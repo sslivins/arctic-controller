@@ -32,6 +32,7 @@
 #include "settings/settings_language_screen.h"
 #include "settings/settings_types.h"
 #include "i18n/i18n.h"
+#include "fonts/fonts.h"
 #include "heatpump_controller.h"
 #include "auth_manager.h"
 #include "setup_pairing.h"
@@ -413,7 +414,46 @@ static int json_escape_into(char* buf, int max, const char* s)
     return p;
 }
 
-// Serialize a single widget into the JSON buffer using snprintf (no cJSON, no heap alloc).
+// Count the characters in `text` that `font` (including its fallback chain)
+// cannot draw, i.e. the ones that would show up as empty boxes on screen.
+// Lets the device tests catch widgets drawn with an ASCII-only font.
+static int count_missing_glyphs(const lv_font_t* font, const char* text)
+{
+    if (!font || !text) return 0;
+    int missing = 0;
+    const unsigned char* s = (const unsigned char*)text;
+    while (*s) {
+        uint32_t cp;
+        int len;
+        if (s[0] < 0x80)               { cp = s[0]; len = 1; }
+        else if ((s[0] & 0xE0) == 0xC0) { cp = s[0] & 0x1F; len = 2; }
+        else if ((s[0] & 0xF0) == 0xE0) { cp = s[0] & 0x0F; len = 3; }
+        else if ((s[0] & 0xF8) == 0xF0) { cp = s[0] & 0x07; len = 4; }
+        else { s++; continue; }
+        int i = 1;
+        for (; i < len && (s[i] & 0xC0) == 0x80; i++) cp = (cp << 6) | (s[i] & 0x3F);
+        s += i;
+        if (i != len || cp < 0x20) continue;  // malformed sequence or control char
+        lv_font_glyph_dsc_t dsc;
+        if (!lv_font_get_glyph_dsc(font, &dsc, cp, 0) || dsc.is_placeholder) missing++;
+    }
+    return missing;
+}
+
+// Nominal pixel size of one of our UI fonts, or 0 for any other font.
+// Lets the device tests check that text never shrinks below a readable size.
+static int ui_font_px(const lv_font_t* font)
+{
+    static const struct { const lv_font_t* font; int px; } kFonts[] = {
+        {&montserrat_16_latin, 16}, {&montserrat_20_latin, 20},
+        {&montserrat_24_latin, 24}, {&montserrat_32_latin, 32},
+        {&montserrat_40_latin, 40},
+    };
+    for (const auto& f : kFonts) {
+        if (f.font == font) return f.px;
+    }
+    return 0;
+}
 // Returns true if the widget was added, false if buffer full or not interesting.
 static bool serialize_widget(lv_obj_t* obj, char* buf, int* pos, int buf_size, int* widget_count)
 {
@@ -470,6 +510,22 @@ static bool serialize_widget(lv_obj_t* obj, char* buf, int* pos, int buf_size, i
     }
     if (lv_obj_check_type(obj, &lv_textarea_class)) {
         TPRINTF(",\"password_mode\":%s", lv_textarea_get_password_mode(obj) ? "true" : "false");
+        const char* ph = lv_textarea_get_placeholder_text(obj);
+        if (ph && ph[0]) {
+            char escaped[128];
+            json_escape_into(escaped, sizeof(escaped), ph);
+            TPRINTF(",\"placeholder\":\"%s\"", escaped);
+            int ph_missing = count_missing_glyphs(
+                lv_obj_get_style_text_font(obj, LV_PART_TEXTAREA_PLACEHOLDER), ph);
+            if (ph_missing > 0) TPRINTF(",\"placeholder_missing_glyphs\":%d", ph_missing);
+        }
+    }
+    if (text) {
+        const lv_font_t* font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
+        int px = ui_font_px(font);
+        if (px > 0) TPRINTF(",\"font_px\":%d", px);
+        int missing = count_missing_glyphs(font, text);
+        if (missing > 0) TPRINTF(",\"missing_glyphs\":%d", missing);
     }
     if (lv_obj_check_type(obj, &lv_roller_class)) {
         char sel_text[64] = {0};

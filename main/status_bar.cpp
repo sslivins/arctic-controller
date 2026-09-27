@@ -30,20 +30,22 @@ static const char* TAG = "status_bar";
 #define COLOR_ITEM_HOVER   0x21262d
 
 // Fonts
-#define FONT_STATUS_BAR_ICON  (&lv_font_montserrat_32)  // Icons in status bar (WiFi, settings, bell)
-#define FONT_STATUS_BAR_TIME  (&lv_font_montserrat_32)  // Time display
+#define FONT_STATUS_BAR_ICON  (&lv_font_montserrat_32)  // glyphs: ascii-only (LV_SYMBOL icons)
+#define FONT_STATUS_BAR_TIME  (&lv_font_montserrat_32)  // glyphs: ascii-only (digits, AM/PM)
 #define FONT_STATUS_BAR_WEATHER (&montserrat_32_latin)  // Weather temperature (needs the ° glyph)
 #define FONT_WEATHER_ICON     (&weather_icons_32)       // Weather condition glyph
-#define FONT_DROPDOWN_ICON    (&lv_font_montserrat_32)  // Icons in dropdown
-#define FONT_DROPDOWN_TEXT    (&lv_font_montserrat_24)  // Text in dropdown
+#define FONT_DROPDOWN_ICON    (&lv_font_montserrat_32)  // glyphs: ascii-only (LV_SYMBOL icons)
+#define FONT_DROPDOWN_TEXT    (&montserrat_24_latin)    // Translated text in dropdown
 
 // Maximum notification message length
 #define NOTIFY_MSG_MAX_LEN 64
+#define NOTIFY_DETAIL_MAX_LEN 24
 
 // Notification item storage
 typedef struct {
     bool active;
-    char message[NOTIFY_MSG_MAX_LEN];
+    char message[NOTIFY_MSG_MAX_LEN];   // English; reported by /api/notifications
+    char detail[NOTIFY_DETAIL_MAX_LEN]; // Value for the translated device text
 } notification_item_t;
 
 // Internal state
@@ -415,6 +417,12 @@ static void update_badge_display(void)
 
 void status_bar_add_notification(status_bar_notify_type_t type, const char* message)
 {
+    status_bar_add_notification_detail(type, message, NULL);
+}
+
+void status_bar_add_notification_detail(status_bar_notify_type_t type, const char* message,
+                                        const char* detail)
+{
     if (type >= STATUS_BAR_NOTIFY_MAX) {
         return;
     }
@@ -425,6 +433,12 @@ void status_bar_add_notification(status_bar_notify_type_t type, const char* mess
         bar_state.notifications[type].message[NOTIFY_MSG_MAX_LEN - 1] = '\0';
     } else {
         bar_state.notifications[type].message[0] = '\0';
+    }
+    if (detail) {
+        strncpy(bar_state.notifications[type].detail, detail, NOTIFY_DETAIL_MAX_LEN - 1);
+        bar_state.notifications[type].detail[NOTIFY_DETAIL_MAX_LEN - 1] = '\0';
+    } else {
+        bar_state.notifications[type].detail[0] = '\0';
     }
     
     update_badge_display();
@@ -730,32 +744,51 @@ static void show_dropdown(void)
         lv_obj_set_style_text_color(icon, lv_color_hex(COLOR_NOTIFY), LV_PART_MAIN);
         lv_obj_align(icon, LV_ALIGN_LEFT_MID, 10, 0);
         
-        // Message label
+        // Message label. The stored message is English (it is also what the
+        // web API reports), so on the device show the translated text unless
+        // the device is in English and the caller supplied its own message.
         lv_obj_t* label = lv_label_create(item);
-        const char* msg = bar_state.notifications[i].message;
-        if (msg[0] == '\0') {
-            // Default messages if none provided
+        const notification_item_t* n = &bar_state.notifications[i];
+        const bool has_detail = n->detail[0] != '\0';
+        char msg_buf[128];
+        const char* msg = n->message;
+        if (msg[0] == '\0' || i18n_get_language() != LANG_ENGLISH) {
             switch (i) {
                 case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
-                    msg = "Firmware update available";
+                    if (has_detail) {
+                        snprintf(msg_buf, sizeof(msg_buf), i18n_get(STR_NOTIFY_FW_VERSION_AVAILABLE),
+                                 n->detail);
+                        msg = msg_buf;
+                    } else {
+                        msg = i18n_get(STR_NOTIFY_UPDATE_AVAILABLE);
+                    }
                     break;
                 case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:
-                    msg = "WiFi connection unstable";
+                    msg = i18n_get(STR_NOTIFY_WIFI_UNSTABLE);
                     break;
                 case STATUS_BAR_NOTIFY_LOW_BATTERY:
-                    msg = "Low battery warning";
+                    msg = i18n_get(STR_NOTIFY_LOW_BATTERY);
                     break;
                 case STATUS_BAR_NOTIFY_BROWNOUT:
-                    msg = "Brownout detected - check power supply";
+                    if (has_detail) {
+                        snprintf(msg_buf, sizeof(msg_buf), i18n_get(STR_NOTIFY_BROWNOUT_COUNT),
+                                 n->detail);
+                        msg = msg_buf;
+                    } else {
+                        msg = i18n_get(STR_NOTIFY_BROWNOUT);
+                    }
                     break;
                 default:
-                    msg = "Notification";
+                    if (msg[0] == '\0') msg = i18n_get(STR_NOTIFY_TITLE);
                     break;
             }
         }
         lv_label_set_text(label, msg);
         lv_obj_set_style_text_font(label, FONT_DROPDOWN_TEXT, LV_PART_MAIN);
         lv_obj_set_style_text_color(label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
+        // Room to the right of the icon; long translations wrap onto a second line.
+        lv_obj_set_width(label, 390);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
         lv_obj_align(label, LV_ALIGN_LEFT_MID, 60, 0);
     }
     

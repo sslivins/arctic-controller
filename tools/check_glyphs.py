@@ -15,6 +15,12 @@ drawn with a different font, annotate the line:
     // glyphs: not-ui              skip this line
     // glyphs: weather_icons_32    check against that font instead
 
+Widgets must not use LVGL's built-in lv_font_montserrat_* fonts: they are
+ASCII-only, so accented text drawn with them shows empty boxes. Each use is
+reported unless the line is marked as icon/digit-only:
+
+    // glyphs: ascii-only          built-in font, no translated text
+
 Usage: python tools/check_glyphs.py [--root DIR]
 Exit status: 0 = clean, 1 = missing glyphs found.
 Run in CI by tests/test_ui_glyphs.py (Host Tests).
@@ -36,6 +42,10 @@ LOG_CALL = re.compile(
     r"ESP_RETURN_ON_\w+|ESP_GOTO_ON_\w+|ESP_ERROR_CHECK\w*|LV_LOG\w*|assert)$"
 )
 ANNOTATION = re.compile(r"//\s*glyphs:\s*([\w-]+)")
+# LVGL's built-in Montserrat fonts are ASCII + LV_SYMBOL icons only. Anything
+# showing translated text must use the montserrat_*_latin fonts instead.
+BUILTIN_FONT = re.compile(r"\blv_font_montserrat_\d+\b")
+ASCII_ONLY = "ascii-only"
 
 
 def parse_font(path: pathlib.Path) -> tuple[set[int], str | None]:
@@ -163,13 +173,33 @@ def find_problems(root: pathlib.Path) -> tuple[list[str], int]:
             continue
         source = path.read_text(encoding="utf-8", errors="replace")
         lines = source.splitlines()
+        in_block = False
+        for line_no, raw in enumerate(lines, 1):
+            code = raw
+            if in_block:
+                end = code.find("*/")
+                if end < 0:
+                    continue
+                code, in_block = code[end + 2 :], False
+            code = re.sub(r"/\*.*?\*/", "", code)
+            if "/*" in code:
+                code, in_block = code[: code.index("/*")], True
+            code = code.split("//", 1)[0]
+            note = ANNOTATION.search(raw)
+            if BUILTIN_FONT.search(code) and not (note and note.group(1) == ASCII_ONLY):
+                problems.append(
+                    f"{rel}:{line_no}: {BUILTIN_FONT.search(code).group(0)} is ASCII-only; "
+                    "use a montserrat_*_latin font, or mark icon/digit-only use with "
+                    f"'// glyphs: {ASCII_ONLY}'")
         for line_no, body, call in literals(source):
             if LOG_CALL.match(call):
                 continue
             note = ANNOTATION.search(lines[line_no - 1]) if line_no <= len(lines) else None
             if note and note.group(1) == "not-ui":
                 continue
-            if note:
+            if note and note.group(1) == ASCII_ONLY:
+                allowed, where = set(), "an ASCII-only font"
+            elif note:
                 if note.group(1) not in fonts:
                     problems.append(f"{rel}:{line_no}: unknown font '{note.group(1)}' "
                                     "in glyphs annotation")

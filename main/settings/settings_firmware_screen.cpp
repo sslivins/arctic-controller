@@ -658,9 +658,9 @@ void firmware_screen_apply_update_notification(bool update_available, const char
 {
     if (update_available) {
         char msg[64];
-        snprintf(msg, sizeof(msg), "Firmware v%s available",
-                 (new_version && new_version[0]) ? new_version : "?");
-        status_bar_add_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE, msg);
+        const char* version = (new_version && new_version[0]) ? new_version : "?";
+        snprintf(msg, sizeof(msg), "Firmware v%s available", version);
+        status_bar_add_notification_detail(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE, msg, version);
     } else {
         status_bar_clear_notification(STATUS_BAR_NOTIFY_FIRMWARE_UPDATE);
     }

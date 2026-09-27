@@ -90,7 +90,6 @@ typedef enum {
     STR_LANG_SPANISH,
     STR_LANG_SELECT,
     STR_LANG_CURRENT,
-    STR_LANG_RESTART_REQUIRED,
     
     // ========================================================================
     // Status Bar / Notifications
@@ -99,6 +98,9 @@ typedef enum {
     STR_NOTIFY_UPDATE_AVAILABLE,
     STR_NOTIFY_WIFI_UNSTABLE,
     STR_NOTIFY_LOW_BATTERY,
+    STR_NOTIFY_FW_VERSION_AVAILABLE,
+    STR_NOTIFY_BROWNOUT,
+    STR_NOTIFY_BROWNOUT_COUNT,
     
     // ========================================================================
     // Time Panel
@@ -329,11 +331,14 @@ typedef enum {
     STR_HP_CANNOT_SAVE_SETPOINT,
     STR_HP_AP_TRIGGER_PROMPT,
     STR_HP_AP_TRIGGER_RUN,
+    STR_HP_ADVANCED_PARAMETERS,
     STR_HP_CAT_EEV,
+    STR_HP_CAT_FREQUENCY,
     STR_HP_CAT_DEFROST,
     STR_HP_CAT_PROTECTION,
     STR_HP_CAT_AUTO_MODE,
     STR_HP_CAT_PUMP_VALVE,
+    STR_HP_UNIT_STEPS,
 
     // Heat Pump - P-parameter names
     STR_HP_PARAM_EEV_OPENING,

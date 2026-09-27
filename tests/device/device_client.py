@@ -40,7 +40,11 @@ class Widget:
     option_count: Optional[int] = None
     selected_text: Optional[str] = None
     bg_color: Optional[str] = None
-
+    placeholder: Optional[str] = None
+    # Characters the widget's font can't draw (they show as empty boxes).
+    missing_glyphs: Optional[int] = None
+    placeholder_missing_glyphs: Optional[int] = None
+    font_px: Optional[int] = None
 
 class DeviceError(Exception):
     """Raised when the device returns an error response."""
@@ -261,6 +265,21 @@ class DeviceClient:
             f"{self.base_url}/api/preferences", timeout=self.timeout
         )
         r.raise_for_status()
+        return r.json()
+
+    def update_preferences(self, **prefs) -> dict:
+        """PATCH /api/preferences — set production preferences through the REST API."""
+        r = self.session.patch(
+            f"{self.base_url}/api/preferences",
+            json=prefs,
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Update preferences failed ({r.status_code}): {msg}")
         return r.json()
 
     def get_persisted_logs(self) -> str:

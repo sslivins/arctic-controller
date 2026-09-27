@@ -24,6 +24,7 @@
 #include <time.h>
 
 static const char* TAG = "evt_screen";
+static const lv_font_t* kMinReadableLabelFont = &montserrat_16_latin;
 
 // ============================================================================
 // Colors
@@ -896,6 +897,32 @@ static lv_obj_t* create_text_button(lv_obj_t* parent, const char* text,
     return btn;
 }
 
+static const lv_font_t* category_chip_font(const string_id_t* labels,
+                                           size_t count,
+                                           lv_coord_t label_width_px) {
+    const lv_font_t* fonts[] = {
+        UI_FONT_BODY,
+        &montserrat_24_latin,
+        &montserrat_20_latin,
+        kMinReadableLabelFont,
+    };
+
+    for (const lv_font_t* font : fonts) {
+        bool fits = true;
+        for (size_t i = 0; i < count; ++i) {
+            lv_point_t size;
+            lv_txt_get_size(&size, i18n_get(labels[i]), font, 0, 0,
+                            LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (size.x > label_width_px) {
+                fits = false;
+                break;
+            }
+        }
+        if (fits) return font;
+    }
+    return kMinReadableLabelFont;
+}
+
 static void create_filter_controls() {
     state.controls = lv_obj_create(state.screen);
     lv_obj_set_size(state.controls, LV_PCT(100), FILTER_BAR_H);
@@ -961,6 +988,10 @@ static void create_filter_controls() {
     const string_id_t category_labels[] = {
         STR_EVENT_PROBLEMS, STR_EVENT_EQUIPMENT, STR_EVENT_CHANGES, STR_EVENT_SYSTEM
     };
+    const lv_coord_t category_label_width = 150;
+    const lv_font_t* category_font = category_chip_font(
+        category_labels, sizeof(category_labels) / sizeof(category_labels[0]),
+        category_label_width);
     const uint8_t categories[] = {
         EVENT_CATEGORY_MASK_PROBLEMS, EVENT_CATEGORY_MASK_EQUIPMENT,
         EVENT_CATEGORY_MASK_CHANGES, EVENT_CATEGORY_MASK_SYSTEM
@@ -976,8 +1007,13 @@ static void create_filter_controls() {
         lv_obj_set_height(btn, LV_PCT(100));
         lv_obj_set_flex_grow(btn, 1);
         style_toggle_button(btn);
-        lv_obj_set_style_text_font(
-            lv_obj_get_child(btn, 0), &montserrat_24_latin, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(btn, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(btn, 4, LV_PART_MAIN);
+        lv_obj_t* label = lv_obj_get_child(btn, 0);
+        lv_obj_set_width(label, LV_PCT(100));
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(label, category_font, LV_PART_MAIN);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_add_event_cb(
             btn, category_btn_cb, LV_EVENT_CLICKED,
             (void*)(uintptr_t)categories[i]);
@@ -1025,7 +1061,7 @@ static void create_search_overlay() {
     lv_textarea_set_max_length(state.search_textarea, sizeof(state.search_query) - 1);
     lv_textarea_set_placeholder_text(state.search_textarea, i18n_get(STR_EVENT_SEARCH));
     lv_obj_set_user_data(state.search_textarea, (void*)"event_search_input");
-    lv_obj_set_style_text_font(state.search_textarea, &lv_font_montserrat_32, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state.search_textarea, UI_FONT_BODY, LV_PART_MAIN);
 
     lv_obj_t* keyboard = lv_keyboard_create(state.search_overlay);
     lv_obj_set_size(keyboard, LV_PCT(100), LV_PCT(25));

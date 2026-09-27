@@ -294,7 +294,8 @@ static void update_readings() {
     snprintf(buf, sizeof(buf), "%.0f V", hp.getDcVoltageV());
     lv_label_set_text(state.dc_voltage, buf);
 
-    snprintf(buf, sizeof(buf), "%d steps", hp.primary_eev_opening);
+    snprintf(buf, sizeof(buf), "%d %s", hp.primary_eev_opening,
+             i18n_get(STR_HP_UNIT_STEPS));
     lv_label_set_text(state.primary_eev, buf);
 
     snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(hp.cooling_setpoint), app_prefs_temp_unit_str());

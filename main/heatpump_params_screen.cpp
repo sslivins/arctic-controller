@@ -41,11 +41,18 @@ static const char* TAG = "hp_params";
 // Map advanced-parameter category string (from arctic-macon) to i18n string ID
 static const char* get_category_i18n(const char* category) {
     if (strcmp(category, "EEV") == 0)          return i18n_get(STR_HP_CAT_EEV);
+    if (strcmp(category, "Frequency") == 0)    return i18n_get(STR_HP_CAT_FREQUENCY);
     if (strcmp(category, "Defrost") == 0)      return i18n_get(STR_HP_CAT_DEFROST);
     if (strcmp(category, "Protection") == 0)   return i18n_get(STR_HP_CAT_PROTECTION);
     if (strcmp(category, "Auto Mode") == 0)    return i18n_get(STR_HP_CAT_AUTO_MODE);
     if (strcmp(category, "Pump & Valve") == 0) return i18n_get(STR_HP_CAT_PUMP_VALVE);
     return category;  // Fallback to original
+}
+
+static const char* display_unit_i18n(const char* unit) {
+    if (!unit) return "";
+    if (strcmp(unit, "steps") == 0) return i18n_get(STR_HP_UNIT_STEPS);
+    return unit;
 }
 
 // ============================================================================
@@ -1068,7 +1075,7 @@ static void update_edit_value_display(void) {
             }
         } else if (p && arctic::advanced_display_unit(p->ap)) {
             snprintf(val_buf, sizeof(val_buf), "%d %s", display_val,
-                     arctic::advanced_display_unit(p->ap));
+                     display_unit_i18n(arctic::advanced_display_unit(p->ap)));
         } else {
             snprintf(val_buf, sizeof(val_buf), "%d", display_val);
         }
@@ -1134,7 +1141,8 @@ static void format_ap_value(const arctic::AdvancedParam* p, int16_t raw,
         if (s) snprintf(buf, n, "%s", s);
         else   snprintf(buf, n, "%d", raw);
     } else if (arctic::advanced_display_unit(p->ap)) {
-        snprintf(buf, n, "%d %s", raw, arctic::advanced_display_unit(p->ap));
+        snprintf(buf, n, "%d %s", raw,
+                 display_unit_i18n(arctic::advanced_display_unit(p->ap)));
     } else {
         snprintf(buf, n, "%d", raw);
     }
@@ -1250,7 +1258,7 @@ static void create_ap_section(lv_obj_t* parent) {
     state.ap_display_count = 0;
 
     // One top-level header, then rows grouped in canonical category order.
-    create_section_header(parent, "Advanced Parameters");
+    create_section_header(parent, i18n_get(STR_HP_ADVANCED_PARAMETERS));
 
     const size_t ncat = arctic::advanced_category_count();
     const size_t nparam = arctic::advanced_param_count();
@@ -1263,7 +1271,7 @@ static void create_ap_section(lv_obj_t* parent) {
             if (strcmp(p->category, cat) != 0) continue;
             if (!arctic::advanced_param_reg_known(p->ap)) continue;  // hide unverified
             if (!header_done) {
-                create_section_header(parent, cat);
+                create_section_header(parent, get_category_i18n(cat));
                 header_done = true;
             }
             create_ap_row(parent, p);

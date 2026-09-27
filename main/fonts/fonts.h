@@ -16,6 +16,7 @@ extern "C" {
 // Montserrat fonts with Latin-1 Supplement (0x20-0xFF) + Greek Delta (U+0394)
 // + Curly Quotes (0x2018-0x201F) + FontAwesome icons
 LV_FONT_DECLARE(montserrat_16_latin);
+LV_FONT_DECLARE(montserrat_20_latin);
 LV_FONT_DECLARE(montserrat_24_latin);
 LV_FONT_DECLARE(montserrat_32_latin);
 LV_FONT_DECLARE(montserrat_40_latin);
@@ -23,6 +24,7 @@ LV_FONT_DECLARE(montserrat_40_latin);
 // Misc glyph fonts: geometric shapes (U+25CB ○, U+25CF ●) etc.
 // These are set as fallback fonts on the latin fonts at compile time.
 LV_FONT_DECLARE(montserrat_16_misc);
+LV_FONT_DECLARE(montserrat_20_misc);
 LV_FONT_DECLARE(montserrat_24_misc);
 LV_FONT_DECLARE(montserrat_32_misc);
 LV_FONT_DECLARE(montserrat_40_misc);
