@@ -1,14 +1,4 @@
-"""
-Test: Localization — French & Spanish labels on the main screen
-
-Switches the device language to French or Spanish, then returns to the
-main screen and verifies that hero state, footer nav, and other
-dynamically-refreshed labels are properly translated.
-
-Note: Some static labels (component dots, perf strip headers, expandable
-panel headers) are set at screen creation and do NOT refresh on language
-change. Those are excluded from this test and tracked as a known issue.
-"""
+"""Test: Localization — French & Spanish labels update without a reboot."""
 
 import pytest
 from device_client import DeviceClient
@@ -68,7 +58,7 @@ HERO_STATES = {
                  "DEFROST": "DÉGIVRAGE",  "HEATING": "CHAUFFAGE",
                  "DISCONNECTED": "DÉCONNECTÉ"},
     "Español":  {"IDLE": "INACTIVO",      "FAULT": "FALLO",   "STANDBY": "EN ESPERA",
-                 "DEFROST": "DESCONGELACIÓN", "HEATING": "CALEFACCIÓN",
+                 "DEFROST": "DESHIELO", "HEATING": "CALEFACCIÓN",
                  "DISCONNECTED": "DESCONECTADO"},
 }
 
@@ -83,7 +73,7 @@ HERO_MODES = {
 
 COMPONENT_DOTS = {
     "English":  ["Compressor", "Fan", "Pump", "Aux Heat"],
-    "Français": ["Compresseur", "Ventilateur", "Pompe", "Chauff. aux."],
+    "Français": ["Compresseur", "Ventilateur", "Pompe", "Appoint"],
     "Español":  ["Compresor", "Ventilador", "Bomba", "Calef. aux."],
 }
 
@@ -103,7 +93,7 @@ ERROR_CARD_NO_ERRORS = {
 TANK_DESCRIPTION = {
     "English":  "Tank Temperature",
     "Français": "Température du ballon",
-    "Español":  "Temperatura del tanque",
+    "Español":  "Temperatura del depósito",
 }
 
 FOOTER_NAV = {
@@ -112,12 +102,65 @@ FOOTER_NAV = {
     "Español":  ["Estado", "Control", "Eventos"],
 }
 
-# Known issue: These labels are set at screen creation and do NOT
-# refresh on language change. Tracked for a future fix.
-# - Component dots:  Compressor, Fan, Pump, Aux Heat
-# - Perf strip:      COP, POWER, FAN
-# - Panel headers:   Temperatures, Compressor, Energy
-# - Demo banner:     Demo Mode Enabled
+HOME_PANEL_HEADERS = {
+    "English":  ["Temperatures", "Compressor", "Energy"],
+    "Français": ["Températures", "Compresseur", "Énergie"],
+    "Español":  ["Temperaturas", "Compresor", "Energía"],
+}
+
+DEMO_BANNER = {
+    "English":  "Demo Mode Enabled",
+    "Français": "Mode démo activé",
+    "Español":  "Modo demo activado",
+}
+
+STATUS_TAB_LABELS = {
+    "Français": ["Températures", "Fréquence"],
+    "Español":  ["Temperaturas", "Frecuencia"],
+}
+
+CONTROL_TAB_LABELS = {
+    "Français": ["Sélection du mode", "CHAUFFAGE", "Consignes"],
+    "Español":  ["Selección de modo", "CALEFACCIÓN", "Consignas"],
+}
+
+EVENTS_TAB_LABELS = {
+    "Français": ["Rechercher...", "Filtres"],
+    "Español":  ["Buscar...", "Filtros"],
+}
+
+SETTINGS_MENU_LABELS = {
+    "Français": ["Paramètres", "Mise à jour", "Langue", "Température"],
+    "Español":  ["Ajustes", "Actualizar", "Idioma", "Temperatura"],
+}
+
+SETTINGS_SUBSCREEN_LABELS = {
+    "Français": [
+        ("settings_wifi", "wifi", "WiFi"),
+        ("settings_firmware", "firmware", "Mise à jour du firmware"),
+        ("settings_time", "time", "Format d'affichage"),
+        ("settings_language", "language", "Langue"),
+        ("settings_display", "display", "Luminosité"),
+        ("settings_home_assistant", "home_assistant", "Associé"),
+        ("settings_security", "security", "Sécurité"),
+        ("settings_web", "web", "Interface Web"),
+    ],
+    "Español": [
+        ("settings_wifi", "wifi", "WiFi"),
+        ("settings_firmware", "firmware", "Actualización de firmware"),
+        ("settings_time", "time", "Formato de visualización"),
+        ("settings_language", "language", "Idioma"),
+        ("settings_display", "display", "Brillo"),
+        ("settings_home_assistant", "home_assistant", "Emparejado"),
+        ("settings_security", "security", "Seguridad"),
+        ("settings_web", "web", "Interfaz web"),
+    ],
+}
+
+ERRORS_OVERLAY_LABELS = {
+    "Français": ["Historique des erreurs"],
+    "Español":  ["Historial de errores"],
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -145,10 +188,28 @@ def _wait_widget_text(device: DeviceClient, tag: str, expected: str, *,
                       raise_on_timeout=False)
 
 
-def _switch_language(device: DeviceClient, lang_name: str):
-    """Navigate to Settings → Language → select language → return to main."""
+def _has_text_containing(device: DeviceClient, expected: str) -> bool:
+    return any(expected in w.text for w in device.widgets if w.text)
+
+
+def _assert_visible_text(device: DeviceClient, expected: str):
+    assert _has_text_containing(device, expected), \
+        f"Expected visible text containing {expected!r}; saw {[w.text for w in device.widgets if w.text]}"
+
+
+def _open_settings(device: DeviceClient):
     device.click(tag="settings")
     assert device.wait_for_screen("settings", timeout=5.0)
+
+
+def _close_settings(device: DeviceClient):
+    device.click(tag="settings_close")
+    assert device.wait_for_screen("main", timeout=5.0)
+
+
+def _switch_language(device: DeviceClient, lang_name: str):
+    """Navigate to Settings → Language → select language → return to main."""
+    _open_settings(device)
 
     device.click(tag="settings_language")
     assert device.wait_for_screen("language", timeout=5.0)
@@ -167,8 +228,7 @@ def _switch_language(device: DeviceClient, lang_name: str):
     device.click(tag="language_back")
     assert device.wait_for_screen("settings", timeout=5.0)
 
-    device.click(tag="settings_close")
-    assert device.wait_for_screen("main", timeout=5.0)
+    _close_settings(device)
 
     # wait_for_screen only gates on the screen being *settled* — the main
     # screen's translated labels (tank description, footer nav) are refreshed
@@ -294,6 +354,16 @@ class TestFrenchMainLabels:
             found = any(label in w.text for w in device.widgets if w.text)
             assert found, f"French footer label '{label}' not found"
 
+    def test_static_home_labels_refresh_french(self, device: DeviceClient):
+        """Home labels that are created once still refresh after the language switch."""
+        for label in (
+            COMPONENT_DOTS["Français"] +
+            PERF_STRIP_LABELS["Français"] +
+            HOME_PANEL_HEADERS["Français"] +
+            [DEMO_BANNER["Français"]]
+        ):
+            _assert_visible_text(device, label)
+
     def test_error_card_no_errors_french(self, device: DeviceClient):
         """Error card shows French 'no errors' text."""
         device.clear_all_faults()
@@ -393,6 +463,16 @@ class TestSpanishMainLabels:
             found = any(label in w.text for w in device.widgets if w.text)
             assert found, f"Spanish footer label '{label}' not found"
 
+    def test_static_home_labels_refresh_spanish(self, device: DeviceClient):
+        """Home labels that are created once still refresh after the language switch."""
+        for label in (
+            COMPONENT_DOTS["Español"] +
+            PERF_STRIP_LABELS["Español"] +
+            HOME_PANEL_HEADERS["Español"] +
+            [DEMO_BANNER["Español"]]
+        ):
+            _assert_visible_text(device, label)
+
     def test_error_card_no_errors_spanish(self, device: DeviceClient):
         """Error card shows Spanish 'no errors' text."""
         device.clear_all_faults()
@@ -402,3 +482,78 @@ class TestSpanishMainLabels:
         assert w is not None
         assert ERROR_CARD_NO_ERRORS["Español"] in w.text, \
             f"Expected '{ERROR_CARD_NO_ERRORS['Español']}' in error label, got '{w.text}'"
+
+
+@pytest.mark.parametrize("lang_name", ["Français", "Español"])
+def test_tabs_settings_and_overlays_refresh_after_touch_language_change(
+    device: DeviceClient, lang_name: str
+):
+    """Representative labels on every main tab and settings screen update live."""
+    _switch_language(device, lang_name)
+
+    for label in (TANK_DESCRIPTION[lang_name], *FOOTER_NAV[lang_name]):
+        _assert_visible_text(device, label)
+
+    device.click(tag="nav_status")
+    assert device.wait_for_screen("status", timeout=5.0)
+    for label in STATUS_TAB_LABELS[lang_name]:
+        _assert_visible_text(device, label)
+
+    device.click(tag="nav_control")
+    assert device.wait_for_screen("control", timeout=5.0)
+    for label in CONTROL_TAB_LABELS[lang_name]:
+        _assert_visible_text(device, label)
+
+    device.click(tag="nav_events")
+    assert device.wait_for_screen("event_log", timeout=5.0)
+    for label in EVENTS_TAB_LABELS[lang_name]:
+        _assert_visible_text(device, label)
+
+    device.click(tag="nav_home")
+    assert device.wait_for_screen("main", timeout=5.0)
+    device.clear_all_faults()
+    device.click(tag="error_label")
+    assert device.wait_for_screen("errors", timeout=5.0)
+    for label in ERRORS_OVERLAY_LABELS[lang_name]:
+        _assert_visible_text(device, label)
+    device.click(tag="errors_close")
+    assert device.wait_for_screen("main", timeout=5.0)
+
+    _open_settings(device)
+    for label in SETTINGS_MENU_LABELS[lang_name]:
+        _assert_visible_text(device, label)
+
+    for row_tag, screen, label in SETTINGS_SUBSCREEN_LABELS[lang_name]:
+        device.click(tag=row_tag)
+        assert device.wait_for_screen(screen, timeout=5.0)
+        _assert_visible_text(device, label)
+        device.click(tag=f"{screen}_back")
+        assert device.wait_for_screen("settings", timeout=5.0)
+
+    _close_settings(device)
+
+
+@pytest.mark.parametrize("lang_code,lang_name", [("fr", "Français"), ("es", "Español")])
+def test_rest_language_preference_refreshes_visible_ui(
+    device: DeviceClient, lang_code: str, lang_name: str
+):
+    """PATCH /api/preferences updates already-built tab labels without rebooting."""
+    assert device.wait_for_screen("main", timeout=5.0)
+
+    response = device.update_preferences(language=lang_code)
+    assert response["success"] is True
+    device.wait_until(
+        f"language preference is {lang_name}",
+        lambda: device.get_preferences().get("language") == lang_name,
+        timeout=5.0,
+    )
+
+    device.wait_until(
+        f"home label refreshed to {lang_name}",
+        lambda: _has_text_containing(device, DEMO_BANNER[lang_name])
+                and _has_text_containing(device, COMPONENT_DOTS[lang_name][0]),
+        timeout=5.0,
+    )
+    for label in (DEMO_BANNER[lang_name], COMPONENT_DOTS[lang_name][0],
+                  PERF_STRIP_LABELS[lang_name][0], FOOTER_NAV[lang_name][0]):
+        _assert_visible_text(device, label)

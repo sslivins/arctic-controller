@@ -8,12 +8,15 @@
 #include "heatpump_temps_screen.h"
 #include "heatpump_control_screen.h"
 #include "event_log_screen.h"
+#include "heatpump_errors_screen.h"
+#include "heatpump_history_screen.h"
 #include <esp_log.h>
 
 static const char* TAG = "tab_shell";
 
 static lv_obj_t* s_content_area = nullptr;
 static lv_obj_t* s_panels[NAV_TAB_COUNT] = { nullptr, nullptr, nullptr, nullptr };
+static bool s_panel_stale[NAV_TAB_COUNT] = { false, false, false, false };
 static nav_tab_t s_current = NAV_TAB_HOME;
 
 // Enable/disable a tab's periodic updates so only the visible panel polls.
@@ -39,6 +42,25 @@ static lv_obj_t* make_panel(void) {
     return panel;
 }
 
+static void build_panel(nav_tab_t tab) {
+    switch (tab) {
+        case NAV_TAB_HOME:
+            heatpump_screen_create(s_panels[NAV_TAB_HOME], 0);
+            break;
+        case NAV_TAB_STATUS:
+            heatpump_temps_create_in(s_panels[NAV_TAB_STATUS]);
+            break;
+        case NAV_TAB_CONTROL:
+            heatpump_control_create_in(s_panels[NAV_TAB_CONTROL]);
+            break;
+        case NAV_TAB_EVENTS:
+            event_log_screen_create_in(s_panels[NAV_TAB_EVENTS]);
+            break;
+        default:
+            break;
+    }
+}
+
 void tab_shell_create(lv_obj_t* root) {
     // Content area spans from just below the top status bar to the bottom of the
     // screen. The persistent nav bar is drawn last (on root) and overlays the
@@ -60,10 +82,10 @@ void tab_shell_create(lv_obj_t* root) {
     s_panels[NAV_TAB_CONTROL] = make_panel();
     s_panels[NAV_TAB_EVENTS]  = make_panel();
 
-    heatpump_screen_create(s_panels[NAV_TAB_HOME], 0);
-    heatpump_temps_create_in(s_panels[NAV_TAB_STATUS]);
-    heatpump_control_create_in(s_panels[NAV_TAB_CONTROL]);
-    event_log_screen_create_in(s_panels[NAV_TAB_EVENTS]);
+    for (int i = 0; i < NAV_TAB_COUNT; i++) {
+        build_panel((nav_tab_t)i);
+        s_panel_stale[i] = false;
+    }
 
     // Show Home, hide the rest; only the active panel polls.
     for (int i = 0; i < NAV_TAB_COUNT; i++) {
@@ -94,6 +116,12 @@ void tab_shell_select(nav_tab_t tab) {
     lv_obj_add_flag(s_panels[s_current], LV_OBJ_FLAG_HIDDEN);
     set_panel_active(s_current, false);
 
+    if (s_panel_stale[tab]) {
+        lv_obj_clean(s_panels[tab]);
+        build_panel(tab);
+        s_panel_stale[tab] = false;
+    }
+
     // Show + resume the incoming panel.
     lv_obj_clear_flag(s_panels[tab], LV_OBJ_FLAG_HIDDEN);
     set_panel_active(tab, true);
@@ -104,4 +132,57 @@ void tab_shell_select(nav_tab_t tab) {
 
 nav_tab_t tab_shell_current(void) {
     return s_current;
+}
+
+void ui_language_changed(void) {
+    if (!s_content_area) {
+        nav_bar_refresh_labels();
+        return;
+    }
+
+    nav_tab_t selected = s_current;
+    if (selected < 0 || selected >= NAV_TAB_COUNT) {
+        selected = NAV_TAB_HOME;
+    }
+
+    ESP_LOGI(TAG, "language changed; rebuilding tab panels (selected=%d)", (int)selected);
+
+    for (int i = 0; i < NAV_TAB_COUNT; i++) {
+        set_panel_active((nav_tab_t)i, false);
+    }
+
+    event_log_screen_dismiss_overlays();
+    heatpump_control_dismiss_overlays();
+    if (heatpump_history_is_shown()) {
+        heatpump_history_hide();
+    }
+    if (heatpump_errors_is_shown()) {
+        heatpump_errors_hide();
+    }
+
+    heatpump_screen_delete();
+    heatpump_temps_hide();
+    heatpump_control_hide();
+    event_log_screen_hide();
+
+    for (int i = 0; i < NAV_TAB_COUNT; i++) {
+        if (!s_panels[i]) {
+            s_panel_stale[i] = true;
+            continue;
+        }
+        lv_obj_clean(s_panels[i]);
+        if ((nav_tab_t)i == selected) {
+            build_panel((nav_tab_t)i);
+            s_panel_stale[i] = false;
+            lv_obj_clear_flag(s_panels[i], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            s_panel_stale[i] = true;
+            lv_obj_add_flag(s_panels[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    s_current = selected;
+    set_panel_active(selected, true);
+    nav_bar_refresh_labels();
+    nav_bar_set_active(selected);
 }

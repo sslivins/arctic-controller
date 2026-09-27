@@ -20,6 +20,35 @@
 #include <string.h>
 
 static const char* TAG = "hp_screen";
+static const lv_font_t* kMinReadableLabelFont = &montserrat_16_latin;
+
+static const lv_font_t* component_row_font(lv_coord_t label_width_px) {
+    const char* labels[] = {
+        i18n_get(STR_HP_COMPRESSOR),
+        i18n_get(STR_HP_FAN),
+        i18n_get(STR_HP_PUMP),
+        i18n_get(STR_HP_AUX_HEAT),
+    };
+    const lv_font_t* fonts[] = {
+        UI_FONT_BODY,
+        &montserrat_24_latin,
+        kMinReadableLabelFont,
+    };
+
+    for (const lv_font_t* font : fonts) {
+        bool fits = true;
+        for (const char* label : labels) {
+            lv_point_t size;
+            lv_txt_get_size(&size, label, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            if (size.x > label_width_px) {
+                fits = false;
+                break;
+            }
+        }
+        if (fits) return font;
+    }
+    return kMinReadableLabelFont;
+}
 
 // Format error summary for the main screen error card.
 // Shows first error with code, truncates if needed, appends "+ N more" for additional errors.
@@ -529,7 +558,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // COMPONENT DOTS: Comp | Fan | Pump | Aux Heat
     // =========================================================================
     lv_obj_t* dots_row = lv_obj_create(state.container);
-    lv_obj_set_size(dots_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_size(dots_row, LV_PCT(100), 82);
     lv_obj_set_style_bg_color(dots_row, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_border_color(dots_row, COLOR_CARD_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(dots_row, 2, LV_PART_MAIN);
@@ -537,15 +566,19 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_pad_all(dots_row, 12, LV_PART_MAIN);
     lv_obj_clear_flag(dots_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(dots_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(dots_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(dots_row, 8, LV_PART_MAIN);
+    lv_obj_set_flex_align(dots_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    const lv_coord_t component_label_width = ((720 - (12 * 2) - (8 * 3)) / 4) - 10;
+    const lv_font_t* component_font = component_row_font(component_label_width);
     
     // Helper lambda: dot above label, both centered in a column
     auto make_dot = [&](lv_obj_t* parent_row, const char* text, lv_obj_t** dot_out, lv_obj_t** label_out) {
         lv_obj_t* cont = lv_obj_create(parent_row);
-        lv_obj_set_size(cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_size(cont, 0, LV_PCT(100));
+        lv_obj_set_flex_grow(cont, 1);
         lv_obj_set_style_bg_opa(cont, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_border_width(cont, 0, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(cont, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(cont, 2, LV_PART_MAIN);
         lv_obj_clear_flag(cont, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(cont, 6, LV_PART_MAIN);
@@ -560,7 +593,10 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
         
         *label_out = lv_label_create(cont);
         lv_label_set_text(*label_out, text);
-        lv_obj_set_style_text_font(*label_out, UI_FONT_BODY, LV_PART_MAIN);
+        lv_obj_set_width(*label_out, LV_PCT(100));
+        lv_label_set_long_mode(*label_out, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(*label_out, component_font, LV_PART_MAIN);
+        lv_obj_set_style_text_align(*label_out, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_set_style_text_color(*label_out, COLOR_TEXT_DIM, LV_PART_MAIN);
     };
     
@@ -569,10 +605,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // Fan speed bars (3 ascending bars like signal strength)
     {
         lv_obj_t* fan_col = lv_obj_create(dots_row);
-        lv_obj_set_size(fan_col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_size(fan_col, 0, LV_PCT(100));
+        lv_obj_set_flex_grow(fan_col, 1);
         lv_obj_set_style_bg_opa(fan_col, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_border_width(fan_col, 0, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(fan_col, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(fan_col, 2, LV_PART_MAIN);
         lv_obj_clear_flag(fan_col, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_flex_flow(fan_col, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(fan_col, 6, LV_PART_MAIN);
@@ -604,7 +641,10 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
 
         state.fan_dot_label = lv_label_create(fan_col);
         lv_label_set_text(state.fan_dot_label, i18n_get(STR_HP_FAN));
-        lv_obj_set_style_text_font(state.fan_dot_label, UI_FONT_BODY, LV_PART_MAIN);
+        lv_obj_set_width(state.fan_dot_label, LV_PCT(100));
+        lv_label_set_long_mode(state.fan_dot_label, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_font(state.fan_dot_label, component_font, LV_PART_MAIN);
+        lv_obj_set_style_text_align(state.fan_dot_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_set_style_text_color(state.fan_dot_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     }
     make_dot(dots_row, i18n_get(STR_HP_PUMP), &state.pump_dot, &state.pump_dot_label);
@@ -990,7 +1030,8 @@ void heatpump_screen_update(void) {
                  app_prefs_convert_temp(hp.suction_temp), app_prefs_temp_unit_str());
         lv_label_set_text(state.comp_suction_value, comp_buf);
         
-        snprintf(comp_buf, sizeof(comp_buf), "%u steps", hp.primary_eev_opening);
+        snprintf(comp_buf, sizeof(comp_buf), "%u %s", hp.primary_eev_opening,
+                 i18n_get(STR_HP_UNIT_STEPS));
         lv_label_set_text(state.comp_eev_value, comp_buf);
         
         if (defrosting) {

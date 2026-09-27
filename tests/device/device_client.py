@@ -263,6 +263,21 @@ class DeviceClient:
         r.raise_for_status()
         return r.json()
 
+    def update_preferences(self, **prefs) -> dict:
+        """PATCH /api/preferences — set production preferences through the REST API."""
+        r = self.session.patch(
+            f"{self.base_url}/api/preferences",
+            json=prefs,
+            timeout=self.timeout,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Update preferences failed ({r.status_code}): {msg}")
+        return r.json()
+
     def get_persisted_logs(self) -> str:
         """GET /api/logs/persisted — the debug-log tail saved to flash on the
         PREVIOUS boot.
