@@ -1917,9 +1917,11 @@ paths:
                     example: true
                   mode:
                     type: string
-                    enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto, unknown]
-                    description: Current operating mode
-                    example: floor_heating
+                    enum: [cooling, heating, mode_2, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
+                    description: >-
+                      Current working mode. mode_2..mode_4 are heating
+                      variants that are reported but cannot be selected.
+                    example: heating
                   defrosting:
                     type: boolean
                     description: Whether the unit is in defrost cycle
@@ -2229,9 +2231,11 @@ paths:
               properties:
                 mode:
                   type: string
-                  enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
-                  description: Operating mode
-                  example: floor_heating
+                  enum: [cooling, heating, hot_water, hot_water_cooling, floor_heating, auto]
+                  description: >-
+                    Working mode to select. floor_heating and auto are deprecated
+                    aliases for heating and hot_water_cooling.
+                  example: heating
       responses:
         '200':
           description: Mode set
@@ -3794,7 +3798,7 @@ components:
               type: array
               items:
                 type: string
-                enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+                enum: [cooling, heating, hot_water, hot_water_cooling]
             setpoint_controls:
               type: object
               required: [cooling, heating, hot_water]
@@ -4040,7 +4044,10 @@ components:
           maxLength: 64
         mode:
           type: string
-          enum: [cooling, floor_heating, fan_coil_heating, hot_water, auto]
+          description: >-
+            floor_heating and auto are deprecated aliases for heating and
+            hot_water_cooling.
+          enum: [cooling, heating, hot_water, hot_water_cooling, floor_heating, auto]
 
     HomeAssistantSetpointCommand:
       type: object

@@ -235,6 +235,8 @@ def _put(device, path, body):
     ("cooling", "cooling_setpoint", 7),
     ("hot_water", "hot_water_setpoint", 48),
     ("hot_water", "hot_water_setpoint", 38),
+    ("heating", "heating_setpoint", 45),
+    ("heating", "heating_setpoint", 35),
 ])
 def test_setpoint_write_lands_on_unit(sim, device, kind, field, value):
     before = sim.commands()["total"]
@@ -248,8 +250,13 @@ def test_setpoint_write_lands_on_unit(sim, device, kind, field, value):
                desc=f"controller reads back {kind} == {value}")
 
 
+SELECTABLE_MODES = ("cooling", "heating", "hot_water", "hot_water_cooling")
+
+
 def test_working_mode_write_lands_on_unit(sim, device):
-    for key in sim.field("working_mode")["options"]:
+    options = sim.field("working_mode")["options"]
+    assert set(SELECTABLE_MODES) <= set(options), options
+    for key in SELECTABLE_MODES:
         before = sim.commands()["total"]
         r = _put(device, "/api/heatpump/mode", {"mode": key})
         assert r.status_code == 200, r.text
@@ -260,8 +267,16 @@ def test_working_mode_write_lands_on_unit(sim, device):
                    desc=f"controller reads back mode {key!r}")
 
 
+@pytest.mark.parametrize("mode", ["mode_2", "mode_3", "mode_4"])
+def test_unselectable_modes_are_refused(sim, device, mode):
+    """Modes 2-4 are reported but never selected by the controller."""
+    before = sim.commands()["total"]
+    r = _put(device, "/api/heatpump/mode", {"mode": mode})
+    assert r.status_code == 400, r.text
+    assert sim.commands()["total"] == before
+
+
 @pytest.mark.parametrize("path,body", [
-    ("/api/heatpump/setpoints", {"heating": 45}),
     ("/api/heatpump/power", {"on": False}),
 ])
 def test_unverified_writes_are_refused(sim, device, path, body):

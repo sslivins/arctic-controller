@@ -74,9 +74,11 @@ static struct {
     bool power_hold_completed = false;  // Suppress CLICKED after successful hold
     
     // Mode selector
-    lv_obj_t* mode_btns[5] = {};
-    lv_obj_t* mode_labels[5] = {};
-    int active_mode_idx = 0;
+    lv_obj_t* mode_btns[4] = {};
+    lv_obj_t* mode_labels[4] = {};
+    // Shown only when the unit is in a mode with no button (2/3/4).
+    lv_obj_t* mode_other_label = nullptr;
+    int active_mode_idx = -1;
     
 
     // Advanced ("AP") parameter rows (arctic-macon table, verified regs only).
@@ -161,6 +163,8 @@ static void power_update_timer_cb(lv_timer_t* timer);
 static void update_power_btn_appearance(bool power_on);
 static void mode_btn_event_cb(lv_event_t* e);
 static void update_mode_btn_styles(int selected_idx);
+static int mode_button_index(arctic::WorkingMode mode);
+static void update_mode_other_label(arctic::WorkingMode mode);
 static void set_mode_controls_enabled(bool enabled);
 // Advanced ("AP") parameter section
 static void ap_row_cb(lv_event_t* e);
@@ -260,8 +264,10 @@ static void update_power_btn_appearance(bool power_on) {
 // Enable/disable the working-mode buttons together. When disabled (pump
 // disconnected) they are dimmed and non-interactive so the user cannot trigger
 // a doomed write that just pops a communication-error modal.
+static constexpr int MODE_BTN_COUNT = 4;
+
 static void set_mode_controls_enabled(bool enabled) {
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < MODE_BTN_COUNT; i++) {
         if (!state.mode_btns[i]) continue;
         if (enabled) {
             lv_obj_add_flag(state.mode_btns[i], LV_OBJ_FLAG_CLICKABLE);
@@ -399,51 +405,67 @@ static void power_update_timer_cb(lv_timer_t* timer) {
     }
     
     // Also keep mode buttons in sync
-    int mode_idx = 0;
-    switch (hp.working_mode) {
-        case arctic::WorkingMode::COOLING:          mode_idx = 0; break;
-        case arctic::WorkingMode::FLOOR_HEATING:    mode_idx = 1; break;
-        case arctic::WorkingMode::FAN_COIL_HEATING: mode_idx = 2; break;
-        case arctic::WorkingMode::HOT_WATER:        mode_idx = 3; break;
-        case arctic::WorkingMode::AUTO:             mode_idx = 4; break;
-        default: mode_idx = 0; break;
-    }
+    const int mode_idx = mode_button_index(hp.working_mode);
     if (mode_idx != state.active_mode_idx) {
         state.active_mode_idx = mode_idx;
         update_mode_btn_styles(mode_idx);
     }
+    update_mode_other_label(hp.working_mode);
 }
 
 // ============================================================================
 // Mode Selector
 // ============================================================================
 
-static const arctic::WorkingMode s_mode_values[] = {
+// Only the selectable modes get a button; modes 2-4 are reported via
+// mode_other_label instead.
+static const arctic::WorkingMode s_mode_values[MODE_BTN_COUNT] = {
     arctic::WorkingMode::COOLING,
-    arctic::WorkingMode::FLOOR_HEATING,
-    arctic::WorkingMode::FAN_COIL_HEATING,
+    arctic::WorkingMode::HEATING,
     arctic::WorkingMode::HOT_WATER,
-    arctic::WorkingMode::AUTO,
+    arctic::WorkingMode::HOT_WATER_COOLING,
 };
 
-static const string_id_t s_mode_labels[] = {
+static const string_id_t s_mode_labels[MODE_BTN_COUNT] = {
     STR_HP_MODE_COOLING,
-    STR_HP_MODE_FLOOR_HEAT,
-    STR_HP_MODE_FAN_HEAT,
+    STR_HP_MODE_HEATING,
     STR_HP_MODE_HOT_WATER,
-    STR_HP_MODE_AUTO,
+    STR_HP_MODE_HOT_WATER_COOLING,
 };
 
-static const uint32_t s_mode_colors[] = {
+static const uint32_t s_mode_colors[MODE_BTN_COUNT] = {
     0x3b82f6,  // Cooling - blue
-    0xf97316,  // Floor heating - orange
-    0xf97316,  // Fan coil heating - orange
+    0xf97316,  // Heating - orange
     0xef4444,  // Hot water - red
-    0x8b5cf6,  // Auto - purple
+    0x8b5cf6,  // Hot water / cooling - purple
 };
+
+static int mode_button_index(arctic::WorkingMode mode) {
+    for (int i = 0; i < MODE_BTN_COUNT; i++) {
+        if (s_mode_values[i] == mode) return i;
+    }
+    return -1;
+}
+
+static void update_mode_other_label(arctic::WorkingMode mode) {
+    if (!state.mode_other_label) return;
+    string_id_t name;
+    switch (mode) {
+        case arctic::WorkingMode::MODE_2: name = STR_HP_MODE_MODE_2; break;
+        case arctic::WorkingMode::MODE_3: name = STR_HP_MODE_MODE_3; break;
+        case arctic::WorkingMode::MODE_4: name = STR_HP_MODE_MODE_4; break;
+        default:
+            lv_obj_add_flag(state.mode_other_label, LV_OBJ_FLAG_HIDDEN);
+            return;
+    }
+    char buf[64];
+    snprintf(buf, sizeof(buf), i18n_get(STR_HP_MODE_CURRENT_FMT), i18n_get(name));
+    lv_label_set_text(state.mode_other_label, buf);
+    lv_obj_remove_flag(state.mode_other_label, LV_OBJ_FLAG_HIDDEN);
+}
 
 static void update_mode_btn_styles(int selected_idx) {
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < MODE_BTN_COUNT; i++) {
         if (!state.mode_btns[i]) continue;
         if (i == selected_idx) {
             lv_obj_set_style_bg_color(state.mode_btns[i], lv_color_hex(s_mode_colors[i]), LV_PART_MAIN);
@@ -466,7 +488,7 @@ static void update_mode_btn_styles(int selected_idx) {
 static void mode_btn_event_cb(lv_event_t* e) {
     lv_obj_t* btn = (lv_obj_t*)lv_event_get_target(e);
     int idx = (int)(intptr_t)lv_obj_get_user_data(btn);
-    if (idx < 0 || idx >= 5) return;
+    if (idx < 0 || idx >= MODE_BTN_COUNT) return;
     if (idx == state.active_mode_idx) return;  // Already selected
     
     arctic::HeatPumpState hp = arctic::getState();
@@ -1485,17 +1507,10 @@ void heatpump_control_create_in(lv_obj_t* parent) {
     // Determine current mode index
     {
         arctic::HeatPumpState hp_mode = arctic::getState();
-        switch (hp_mode.working_mode) {
-            case arctic::WorkingMode::COOLING:          state.active_mode_idx = 0; break;
-            case arctic::WorkingMode::FLOOR_HEATING:    state.active_mode_idx = 1; break;
-            case arctic::WorkingMode::FAN_COIL_HEATING: state.active_mode_idx = 2; break;
-            case arctic::WorkingMode::HOT_WATER:        state.active_mode_idx = 3; break;
-            case arctic::WorkingMode::AUTO:             state.active_mode_idx = 4; break;
-            default: state.active_mode_idx = 0; break;
-        }
+        state.active_mode_idx = mode_button_index(hp_mode.working_mode);
     }
     
-    // Create a row of mode buttons (2 rows of ~3 for readability)
+    // Mode buttons in a 2x2 grid
     lv_obj_t* mode_grid = lv_obj_create(state.scroll_container);
     lv_obj_set_size(mode_grid, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(mode_grid, COLOR_CARD_BG, LV_PART_MAIN);
@@ -1510,11 +1525,9 @@ void heatpump_control_create_in(lv_obj_t* parent) {
     lv_obj_set_flex_align(mode_grid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(mode_grid, LV_OBJ_FLAG_SCROLLABLE);
     
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < MODE_BTN_COUNT; i++) {
         lv_obj_t* btn = lv_btn_create(mode_grid);
-        // First 3 buttons on row 1 (~215px each), last 2 on row 2 (~330px each)
-        int btn_w = (i < 3) ? 210 : 320;
-        lv_obj_set_size(btn, btn_w, 60);
+        lv_obj_set_size(btn, 320, 60);
         lv_obj_set_style_radius(btn, 10, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
         lv_obj_set_style_border_width(btn, 2, LV_PART_MAIN);
@@ -1524,10 +1537,25 @@ void heatpump_control_create_in(lv_obj_t* parent) {
         lv_obj_t* lbl = lv_label_create(btn);
         lv_label_set_text(lbl, i18n_get(s_mode_labels[i]));
         lv_obj_set_style_text_font(lbl, UI_FONT_SMALL, LV_PART_MAIN);
+        // FR/ES "hot water / cooling" doesn't fit on one line
+        lv_obj_set_width(lbl, 300);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
         lv_obj_center(lbl);
         
         state.mode_btns[i] = btn;
         state.mode_labels[i] = lbl;
+    }
+
+    state.mode_other_label = lv_label_create(mode_grid);
+    lv_obj_set_width(state.mode_other_label, LV_PCT(100));
+    lv_obj_set_style_text_font(state.mode_other_label, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.mode_other_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_style_text_align(state.mode_other_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_add_flag(state.mode_other_label, LV_OBJ_FLAG_HIDDEN);
+    {
+        arctic::HeatPumpState hp_mode = arctic::getState();
+        update_mode_other_label(hp_mode.working_mode);
     }
     
     update_mode_btn_styles(state.active_mode_idx);
@@ -1693,7 +1721,8 @@ void heatpump_control_hide(void) {
     state.power_hold_completed = false;
     memset(state.mode_btns, 0, sizeof(state.mode_btns));
     memset(state.mode_labels, 0, sizeof(state.mode_labels));
-    state.active_mode_idx = 0;
+    state.mode_other_label = nullptr;
+    state.active_mode_idx = -1;
     state.cooling_value_label = nullptr;
     state.heating_value_label = nullptr;
     state.hotwater_value_label = nullptr;

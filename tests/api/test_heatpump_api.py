@@ -41,7 +41,10 @@ requests.Session.__init__ = _session_init_no_verify
 BASE_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 API_KEY = os.environ.get("ARCTIC_API_KEY")
 
-VALID_MODES = ["cooling", "floor_heating", "fan_coil_heating", "hot_water", "auto"]
+VALID_MODES = ["cooling", "heating", "hot_water", "hot_water_cooling"]
+REPORTED_MODES = VALID_MODES + ["mode_2", "mode_3", "mode_4"]
+# Old keys still accepted on write, mapped to the current name.
+MODE_ALIASES = {"floor_heating": "heating", "auto": "hot_water_cooling"}
 
 # Retry-enabled session for all API calls
 _session = requests.Session()
@@ -213,7 +216,7 @@ class TestHeatpumpStatus:
 
     def test_status_mode_is_valid_string(self):
         data = _get("/api/heatpump/status").json()
-        assert data["mode"] in VALID_MODES + ["unknown"]
+        assert data["mode"] in REPORTED_MODES + ["unknown"]
         assert data["operation"] in [
             "off", "idle", "heating", "cooling", "defrost", "fault", "unknown"
         ]
@@ -367,8 +370,8 @@ class TestDemoModeInjection:
 
     def test_inject_working_mode(self):
         """Injecting working_mode changes reported mode."""
-        # Enum values: 0=cooling, 1=floor_heating, 2=fan_coil_heating, 5=hot_water, 6=auto
-        modes = {0: "cooling", 1: "floor_heating", 2: "fan_coil_heating", 5: "hot_water", 6: "auto"}
+        modes = {0: "cooling", 1: "heating", 2: "mode_2", 3: "mode_3", 4: "mode_4",
+                 5: "hot_water", 6: "hot_water_cooling"}
         for mode_val, mode_name in modes.items():
             _inject_demo({"working_mode": mode_val})
             data = _wait_json("/api/heatpump/status",
@@ -637,8 +640,16 @@ class TestHeatpumpMode:
         assert data["success"] is True
         assert data["mode"] == mode
 
-    def test_invalid_mode_returns_400(self):
-        r = _put("/api/heatpump/mode", json={"mode": "turbo"})
+    @pytest.mark.parametrize("alias,mode", list(MODE_ALIASES.items()))
+    def test_legacy_mode_alias(self, alias, mode):
+        r = _put("/api/heatpump/mode", json={"mode": alias})
+        assert r.status_code == 200
+        assert r.json()["mode"] == mode
+
+    @pytest.mark.parametrize("mode", ["turbo", "mode_2", "mode_3", "mode_4",
+                                      "fan_coil_heating"])
+    def test_invalid_mode_returns_400(self, mode):
+        r = _put("/api/heatpump/mode", json={"mode": mode})
         assert r.status_code == 400
 
     def test_missing_mode_returns_400(self):

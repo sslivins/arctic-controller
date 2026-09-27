@@ -244,6 +244,11 @@ bool set_cooling_setpoint(int celsius)
     return guarded_setpoint(&arctic::MaconMaster::set_cooling_setpoint, celsius, "cooling");
 }
 
+bool set_heating_setpoint(int celsius)
+{
+    return guarded_setpoint(&arctic::MaconMaster::set_heating_setpoint, celsius, "heating");
+}
+
 bool set_hot_water_setpoint(int celsius)
 {
     return guarded_setpoint(&arctic::MaconMaster::set_hot_water_setpoint, celsius, "hot-water");

@@ -195,19 +195,20 @@ static const char* strings_en[STR_COUNT] = {
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "COOLING",
     [STR_HP_MODE_HEATING] = "HEATING",
-    [STR_HP_MODE_FLOOR_HEAT] = "FLOOR HEAT",
-    [STR_HP_MODE_FAN_HEAT] = "FAN HEAT",
+    [STR_HP_MODE_MODE_2] = "MODE 2",
+    [STR_HP_MODE_MODE_3] = "MODE 3",
+    [STR_HP_MODE_MODE_4] = "MODE 4",
     [STR_HP_MODE_HOT_WATER] = "HOT WATER",
-    [STR_HP_MODE_AUTO] = "AUTO",
+    [STR_HP_MODE_HOT_WATER_COOLING] = "HOT WATER / COOLING",
+    [STR_HP_MODE_CURRENT_FMT] = "Current mode: %s",
     [STR_HP_MODE_DEFROST] = "DEFROST",
     [STR_HP_MODE_UNKNOWN] = "UNKNOWN",
     
     // Heat Pump - Mode Dropdown Options
     [STR_HP_OPT_COOLING] = "Cooling",
-    [STR_HP_OPT_FLOOR_HEATING] = "Floor Heating",
-    [STR_HP_OPT_FAN_COIL_HEATING] = "Fan Coil Heating",
-    [STR_HP_OPT_HOT_WATER] = "Hot Water",
-    [STR_HP_OPT_AUTO] = "Auto",
+    [STR_HP_OPT_HEATING] = "Heating",
+    [STR_HP_OPT_HOT_WATER] = "Hot water",
+    [STR_HP_OPT_HOT_WATER_COOLING] = "Hot water / cooling",
     
     // Heat Pump - Component Labels
     [STR_HP_COMPRESSOR] = "Compressor",
@@ -608,19 +609,20 @@ static const char* strings_fr[STR_COUNT] = {
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "REFROIDISSEMENT",
     [STR_HP_MODE_HEATING] = "CHAUFFAGE",
-    [STR_HP_MODE_FLOOR_HEAT] = "CHAUFF. SOL",
-    [STR_HP_MODE_FAN_HEAT] = "VENTILO-CONV.",
+    [STR_HP_MODE_MODE_2] = "MODE 2",
+    [STR_HP_MODE_MODE_3] = "MODE 3",
+    [STR_HP_MODE_MODE_4] = "MODE 4",
     [STR_HP_MODE_HOT_WATER] = "EAU CHAUDE",
-    [STR_HP_MODE_AUTO] = "AUTO",
+    [STR_HP_MODE_HOT_WATER_COOLING] = "EAU CHAUDE / REFROIDISSEMENT",
+    [STR_HP_MODE_CURRENT_FMT] = "Mode actuel : %s",
     [STR_HP_MODE_DEFROST] = "DÉGIVRAGE",
     [STR_HP_MODE_UNKNOWN] = "INCONNU",
     
     // Heat Pump - Mode Dropdown Options
     [STR_HP_OPT_COOLING] = "Refroidissement",
-    [STR_HP_OPT_FLOOR_HEATING] = "Chauffage au sol",
-    [STR_HP_OPT_FAN_COIL_HEATING] = "Ventilo-convecteur",
+    [STR_HP_OPT_HEATING] = "Chauffage",
     [STR_HP_OPT_HOT_WATER] = "Eau chaude sanitaire",
-    [STR_HP_OPT_AUTO] = "Auto",
+    [STR_HP_OPT_HOT_WATER_COOLING] = "Eau chaude / refroidissement",
     
     // Heat Pump - Component Labels
     [STR_HP_COMPRESSOR] = "Compresseur",
@@ -1022,19 +1024,20 @@ static const char* strings_es[STR_COUNT] = {
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "ENFRIAMIENTO",
     [STR_HP_MODE_HEATING] = "CALEFACCIÓN",
-    [STR_HP_MODE_FLOOR_HEAT] = "CALEF. SUELO",
-    [STR_HP_MODE_FAN_HEAT] = "FAN COIL",
+    [STR_HP_MODE_MODE_2] = "MODO 2",
+    [STR_HP_MODE_MODE_3] = "MODO 3",
+    [STR_HP_MODE_MODE_4] = "MODO 4",
     [STR_HP_MODE_HOT_WATER] = "AGUA CALIENTE",
-    [STR_HP_MODE_AUTO] = "AUTO",
+    [STR_HP_MODE_HOT_WATER_COOLING] = "AGUA CALIENTE / ENFRIAMIENTO",
+    [STR_HP_MODE_CURRENT_FMT] = "Modo actual: %s",
     [STR_HP_MODE_DEFROST] = "DESCONGELACIÓN",
     [STR_HP_MODE_UNKNOWN] = "DESCONOCIDO",
     
     // Heat Pump - Mode Dropdown Options
     [STR_HP_OPT_COOLING] = "Enfriamiento",
-    [STR_HP_OPT_FLOOR_HEATING] = "Calefacción por suelo",
-    [STR_HP_OPT_FAN_COIL_HEATING] = "Fan coil",
+    [STR_HP_OPT_HEATING] = "Calefacción",
     [STR_HP_OPT_HOT_WATER] = "Agua caliente sanitaria",
-    [STR_HP_OPT_AUTO] = "Auto",
+    [STR_HP_OPT_HOT_WATER_COOLING] = "Agua caliente / enfriamiento",
     
     // Heat Pump - Component Labels
     [STR_HP_COMPRESSOR] = "Compresor",

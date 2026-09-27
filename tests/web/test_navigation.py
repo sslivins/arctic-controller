@@ -32,7 +32,7 @@ class TestNavigation:
     def test_control_surface(self, dashboard_page: Page):
         primary(dashboard_page, "Control").click()
         expect(dashboard_page.locator(".power-btn")).to_be_visible()
-        assert dashboard_page.locator(".mode-btn").count() == 5
+        assert dashboard_page.locator(".mode-btn").count() == 4
         assert dashboard_page.locator('form[data-form="setpoint"]').count() == 3
         assert dashboard_page.locator('form[data-form="setpoint"] input[type="range"]').count() == 3
         expect(dashboard_page.locator('form[data-form="setpoint"] output').first).to_contain_text("°")

@@ -6,7 +6,8 @@ mode selector, and setpoint controls are displayed correctly in demo mode.
 
 The control screen shows:
 - Power ON/OFF button (single click to turn on, 3s hold to turn off)
-- 5 mode buttons (Cooling, Floor Heat, Fan Heat, Hot Water, Auto)
+- 4 mode buttons (Cooling, Heating, Hot Water, Hot Water / Cooling); modes
+  2-4 have no button and are reported in a "Current mode" note instead
 - 3 setpoint rows (Cooling, Heating, Hot Water) with values
 - Advanced Parameter rows (AP13, AP24, AP38, etc.)
 """
@@ -14,15 +15,15 @@ The control screen shows:
 import pytest
 from device_client import DeviceClient
 
-# Working modes (must match arctic_registers.h)
+# Working modes (reg2096 values, see heatpump_types.h)
 MODE_COOLING = 0
-MODE_FLOOR_HEATING = 1
-MODE_FAN_HEATING = 2
+MODE_HEATING = 1
+MODE_2 = 2
 MODE_HOT_WATER = 5
-MODE_AUTO = 6
+MODE_HOT_WATER_COOLING = 6
 
 # Mode button labels (i18n English)
-MODE_LABELS = ["COOLING", "FLOOR HEAT", "FAN HEAT", "HOT WATER", "AUTO"]
+MODE_LABELS = ["COOLING", "HEATING", "HOT WATER", "HOT WATER / COOLING"]
 
 # Demo default setpoints (from heatpump_params_screen.cpp)
 DEMO_SETPOINTS = {
@@ -71,7 +72,7 @@ def _restore_control_defaults(device: DeviceClient):
     yield
     device.set_demo_fields(
         unit_on=1,
-        working_mode=MODE_FLOOR_HEATING,
+        working_mode=MODE_HEATING,
         cooling_setpoint=18,
         heating_setpoint=45,
         hot_water_setpoint=50,
@@ -126,7 +127,7 @@ class TestPowerButton:
 # =========================================================================
 
 class TestModeButtons:
-    """Verify all 5 mode buttons are present."""
+    """Verify the 4 selectable mode buttons are present."""
 
     @pytest.mark.parametrize("mode_label", MODE_LABELS)
     def test_mode_button_present(self, device: DeviceClient, mode_label):
@@ -137,16 +138,28 @@ class TestModeButtons:
         assert _has_text_containing(device, mode_label), \
             f"Mode button '{mode_label}' not found on screen"
 
-    def test_active_mode_highlighted(self, device: DeviceClient):
-        """The active mode (Floor Heating) should be distinguishable."""
-        device.set_demo_fields(working_mode=MODE_FLOOR_HEATING)
+    def test_no_button_for_unselectable_modes(self, device: DeviceClient):
+        """Modes 2-4 are never offered as buttons."""
+        device.set_demo_fields(working_mode=MODE_HEATING)
         _open_control(device)
-        _wait_for_text(device, "FLOOR HEAT")
+        _wait_for_text(device, "HOT WATER / COOLING")
 
-        # Just verify the mode label exists — visual highlighting
-        # is difficult to test without bg_color on mode buttons
-        assert _has_text_containing(device, "FLOOR HEAT"), \
-            "Active mode 'FLOOR HEAT' not found"
+        for hidden in ("MODE 2", "MODE 3", "MODE 4"):
+            assert not _has_text_containing(device, hidden), \
+                f"Unexpected mode text '{hidden}' on control screen"
+
+    def test_unselectable_mode_is_reported(self, device: DeviceClient):
+        """When the unit is in mode 2 the screen says so without a button."""
+        device.set_demo_fields(working_mode=MODE_2)
+        _open_control(device)
+        _wait_for_text(device, "Current mode: MODE 2")
+
+        device.set_demo_fields(working_mode=MODE_HEATING)
+        device.wait_until(
+            "current-mode note hidden",
+            lambda: not _has_text_containing(device, "Current mode:"),
+            timeout=5.0,
+        )
 
 
 # =========================================================================
