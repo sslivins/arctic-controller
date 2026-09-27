@@ -7,9 +7,11 @@
   <script>
     (() => {
       const param = new URLSearchParams(window.location.search).get("clawpilotTheme");
-      const theme =
-        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-      document.documentElement.setAttribute("data-theme", theme);
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      const apply = () =>
+        document.documentElement.setAttribute("data-theme", param || (mq.matches ? "dark" : "light"));
+      apply();
+      if (!param && mq.addEventListener) mq.addEventListener("change", apply);
     })();
   </script>
   <style>
