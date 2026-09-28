@@ -261,6 +261,21 @@ ARCTIC_URL=https://arctic-xxxx.local ARCTIC_API_KEY=... ARCTIC_SIM_URL=http://19
   pytest tests/rs485/ -v
 ```
 
+### Home Assistant End-to-End Tests (nightly)
+Runs the Home Assistant integration ([hass-macon](https://github.com/sslivins/hass-macon))
+inside Home Assistant's test harness, paired with the controller while it drives the
+simulator, as in the RS-485 suite. It checks that every entity comes up, that setpoint and
+mode changes made in Home Assistant reach the simulated heat pump and come back, and that
+an idle unit doesn't flood Home Assistant's activity log. It needs Python 3.13 and a
+hass-macon checkout, so CI runs it only in the nightly run.
+
+```bash
+git clone https://github.com/sslivins/hass-macon ../hass-macon
+python3.13 -m venv .ha-venv && .ha-venv/bin/pip install -e "../hass-macon[tests]"
+ARCTIC_URL=https://arctic-xxxx.local ARCTIC_API_KEY=... ARCTIC_SIM_URL=http://192.168.1.177 \
+  PYTHONPATH=../hass-macon .ha-venv/bin/python -m pytest tests/home_assistant/ -v
+```
+
 ## Project Structure
 
 ```
@@ -282,7 +297,7 @@ ARCTIC_URL=https://arctic-xxxx.local ARCTIC_API_KEY=... ARCTIC_SIM_URL=http://19
 ├── components/
 │   └── arctic-macon/         # Shared heat pump protocol library (git submodule)
 ├── dependencies/             # LVGL and UI libraries (fetched via fetch_repos.py)
-├── tests/                    # Device, web, API, and RS-485 test suites
+├── tests/                    # Device, web, API, RS-485 and Home Assistant test suites
 ├── docs/                     # OpenAPI spec, Home Assistant design, CI notes
 ├── partitions.csv            # Partition table (A/B OTA)
 └── sdkconfig                 # ESP-IDF settings
