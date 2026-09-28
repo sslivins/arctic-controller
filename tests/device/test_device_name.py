@@ -8,6 +8,7 @@ from device_client import DeviceClient
 
 NAME = "Heat Pump 1 – Radiant Floor"
 ACCENTED_NAME = "Pompe à chaleur – Étage"
+MAX_LENGTH_NAME = "Radiant Floor Heat Pump 123456"
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +71,27 @@ class TestDeviceNameHome:
         assert widget.missing_glyphs in (None, 0)
 
 
+class TestDeviceNameSettings:
+    def test_settings_row_value_stays_single_line_for_max_length_name(
+        self, device: DeviceClient
+    ):
+        assert len(MAX_LENGTH_NAME) == 30
+        device.update_preferences(device_name=MAX_LENGTH_NAME)
+
+        device.click(tag="settings")
+        assert device.wait_for_screen("settings", timeout=5.0)
+        assert device.wait_for_widget(tag="settings_device_name_value", timeout=5.0)
+
+        row = device.find_widget(tag="settings_device_name")
+        value = device.find_widget(tag="settings_device_name_value")
+        assert row is not None
+        assert value is not None
+        assert value.text is not None
+        assert "\n" not in value.text
+        assert value.h <= 40
+        assert value.x + value.w <= row.x + row.w - 45
+
+
 class TestDeviceNameApiValidation:
     def _patch(self, device: DeviceClient, name: str):
         return device.session.patch(
@@ -93,4 +115,3 @@ class TestDeviceNameApiValidation:
         response = self._patch(device, name)
         assert response.status_code == 200
         assert response.json()["device_name"] == name
-

@@ -138,12 +138,12 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (273 UI tests + 9 screenshot API tests + 10 HTTPS tests + 291 REST API tests + 57 web tests + API contract tests)
+### Test Files (274 UI tests + 9 screenshot API tests + 10 HTTPS tests + 291 REST API tests + 57 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
 | [`test_main_screen.py`](test_main_screen.py) | 20 | Hero card states, tank temp, component dots, performance strip, error card |
-| [`test_device_name.py`](test_device_name.py) | 6 | Friendly controller name: Home display, live updates, glyphs, validation |
+| [`test_device_name.py`](test_device_name.py) | 7 | Friendly controller name: Home display, settings row, live updates, glyphs, validation |
 | [`test_error_mapping.py`](test_error_mapping.py) | 33 | Every Macon fault code → correct code + description on UI |
 | [`test_system_screen.py`](test_system_screen.py) | 31 | System sub-screen: temps, flows, component states, section headers |
 | [`test_fahrenheit.py`](test_fahrenheit.py) | 24 | °F/°C conversion: hero card, temps screen, API preference, math verification |

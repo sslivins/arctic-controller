@@ -728,18 +728,20 @@ static void create_menu_list(void)
         "settings_web");
 
     lv_obj_t* name_row = create_settings_row(
-        state.list_container, LV_SYMBOL_HOME,
+        state.list_container, LV_SYMBOL_EDIT,
         i18n_get(STR_SETTINGS_CONTROLLER_NAME),
         "settings_device_name");
     state.device_name_value_label = lv_label_create(name_row);
     const char* current_name = app_prefs_get_device_name();
-    lv_label_set_text(state.device_name_value_label,
-                      current_name[0] ? current_name : i18n_get(STR_CONTROLLER_NAME_HINT));
     lv_obj_set_style_text_font(state.device_name_value_label, FONT_NORMAL, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.device_name_value_label, COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_label_set_long_mode(state.device_name_value_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(state.device_name_value_label, 300);
-    lv_obj_align(state.device_name_value_label, LV_ALIGN_RIGHT_MID, -35, 0);
+    lv_obj_set_size(state.device_name_value_label, 270, 34);
+    lv_obj_set_style_max_width(state.device_name_value_label, 270, LV_PART_MAIN);
+    lv_obj_set_user_data(state.device_name_value_label, (void*)"settings_device_name_value");
+    lv_label_set_text(state.device_name_value_label,
+                      current_name[0] ? current_name : i18n_get(STR_CONTROLLER_NAME_HINT));
+    lv_obj_align(state.device_name_value_label, LV_ALIGN_RIGHT_MID, -60, 0);
     
     // Demo Mode toggle
 #if CONFIG_DEMO_MODE
