@@ -116,9 +116,9 @@ HOME_PANEL_HEADERS = {
 }
 
 DEMO_BANNER = {
-    "English":  "Demo Mode Enabled",
-    "Français": "Mode démo activé",
-    "Español":  "Modo demo activado",
+    "English":  "Demo mode",
+    "Français": "Mode démo",
+    "Español":  "Modo demo",
 }
 
 STATUS_TAB_LABELS = {

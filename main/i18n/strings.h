@@ -475,8 +475,10 @@ typedef enum {
     // ========================================================================
     // Reboot confirmation
     // ========================================================================
-    STR_DEMO_MODE_CHANGED,
-    STR_RESTART_REQUIRED,
+    STR_DEMO_MODE_TURN_ON_TITLE,
+    STR_DEMO_MODE_TURN_ON_BODY,
+    STR_DEMO_MODE_TURN_OFF_TITLE,
+    STR_DEMO_MODE_TURN_OFF_BODY,
     STR_RESTART,
     STR_FACTORY_RESET_TITLE,
     STR_FACTORY_RESET_DESCRIPTION,
