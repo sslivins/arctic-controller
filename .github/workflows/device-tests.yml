@@ -1060,6 +1060,33 @@ jobs:
           ARCTIC_SIM_URL: http://192.168.1.177
           PYTHONDONTWRITEBYTECODE: '1'
 
+      - name: Run Home Assistant end-to-end tests (nightly)
+        id: ha_tests
+        # Pairs the Home Assistant integration (hass-macon, main) with the bench
+        # controller while it drives the simulator, and checks that entities
+        # come up, commands from Home Assistant reach the heat pump, and an idle
+        # unit doesn't flood the activity log. Nightly and on demand only: it
+        # tests hass-macon's main branch as much as this firmware, so it must not
+        # gate pull requests here. Home Assistant's test harness needs Python
+        # 3.13, hence its own virtualenv.
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          HM="$RUNNER_TEMP/hass-macon"
+          VENV="$RUNNER_TEMP/ha-venv"
+          rm -rf "$HM" "$VENV"
+          git clone --quiet --depth 1 https://github.com/sslivins/hass-macon "$HM"
+          echo "hass-macon at $(git -C "$HM" rev-parse --short HEAD)"
+          pip install --quiet uv
+          uv venv --quiet --python 3.13 "$VENV"
+          uv pip install --quiet --python "$VENV/bin/python" -e "$HM[tests]"
+          PYTHONPATH="$HM" "$VENV/bin/python" -m pytest tests/home_assistant/ -v -rs \
+            --tb=short --junitxml=ha-test-results.xml -p no:cacheprovider
+        env:
+          ARCTIC_SIM_URL: http://192.168.1.177
+          PYTHONDONTWRITEBYTECODE: '1'
+
       - name: Restore RS-485 bench baseline
         if: always() && steps.rs485_tests.outcome != 'skipped'
         # Safety net if the suite died before its own teardown: simulator idle
@@ -1380,6 +1407,16 @@ jobs:
           reporter: java-junit
           use-actions-summary: 'false'
 
+      - name: Publish Home Assistant test results
+        uses: dorny/test-reporter@v2
+        if: always() && steps.ha_tests.outcome != 'skipped'
+        continue-on-error: true
+        with:
+          name: Home Assistant E2E Test Results
+          path: ha-test-results.xml
+          reporter: java-junit
+          use-actions-summary: 'false'
+
       - name: Upload failure screenshots
         uses: actions/upload-artifact@v7
         # NOT `failure()`. The three test steps are continue-on-error, and the
@@ -1448,6 +1485,7 @@ jobs:
             api-test-results.xml
             web-test-results.xml
             rs485-test-results.xml
+            ha-test-results.xml
             executed-floor-report.json
           if-no-files-found: warn
           retention-days: 14
@@ -1638,7 +1676,7 @@ jobs:
         run: |
           # With continue-on-error on test steps, we need to explicitly fail the job
           FAILED=false
-          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}" "${{ steps.rs485_tests.outcome }}"; do
+          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}" "${{ steps.rs485_tests.outcome }}" "${{ steps.ha_tests.outcome }}"; do
             if [ "$step_outcome" = "failure" ]; then
               FAILED=true
             fi
