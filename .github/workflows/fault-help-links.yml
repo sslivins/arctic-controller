@@ -31,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The fault codes come from the arctic-macon library's fault table.
+          submodules: 'recursive'
 
       - uses: actions/setup-python@v5
         with:
