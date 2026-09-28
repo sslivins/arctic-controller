@@ -79,7 +79,34 @@ permissions:
   pull-requests: read
 
 jobs:
+  # Runs FIRST and gates everything else: a PR whose title/description would
+  # make a useless release note fails here in seconds, instead of after the
+  # ~45 minute hardware suite. Fixing the title re-runs CI via pr-metadata.yml.
+  pr-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+      - name: Check the PR title and description
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Merge-queue runs re-validate an already-checked PR.
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "event=${EVENT}: no PR metadata to check"
+            exit 0
+          fi
+          # Fetched live rather than from the event payload, so a re-run after
+          # editing the title sees the new text.
+          python3 .github/scripts/check_pr_metadata.py --repo "$REPO" --pr "$PR_NUMBER"
+
   classify:
+    needs: pr-metadata
     runs-on: ubuntu-latest
     outputs:
       # Always an explicit literal 'true' or 'false'.
@@ -195,12 +222,16 @@ jobs:
 
   # The ONLY status check that should be required on main.
   ci-gate:
-    needs: [classify, call-build, call-host-tests, call-device-tests]
+    needs: [pr-metadata, classify, call-build, call-host-tests, call-device-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
       - name: Enforce an acceptable CI outcome
         env:
+          META: ${{ needs.pr-metadata.result }}
           CLASSIFY: ${{ needs.classify.result }}
           HW: ${{ needs.classify.outputs.hw_relevant }}
           FORK: ${{ needs.classify.outputs.is_fork }}
@@ -220,6 +251,9 @@ jobs:
             exit 1
           }
 
+          if [ "$META" != "success" ]; then
+            fail "pr-metadata is '${META}': the PR title or description needs fixing (see that job). Editing the PR re-runs CI automatically."
+          fi
           # Everything downstream is meaningless if the classifier did not
           # produce a trustworthy decision.
           if [ "$CLASSIFY" != "success" ]; then
@@ -255,3 +289,11 @@ jobs:
           # condition disagree).
           [ "$DEVICE" = "skipped" ] || fail "Change classified as documentation-only, but call-device-tests is '${DEVICE}', expected skipped. The classifier and the job condition disagree."
           echo "Accepted: documentation-only change, physical device suite correctly skipped."
+
+      - name: Re-check the PR title and description
+        # The title may have been edited to something unusable while the suite
+        # ran; the squash commit uses whatever the title is at merge time.
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/check_pr_metadata.py --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"

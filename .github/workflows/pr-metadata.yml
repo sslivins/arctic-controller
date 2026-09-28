@@ -1,0 +1,66 @@
+name: PR Metadata
+
+# Companion to the pr-metadata job at the top of ci.yml. That job only runs when
+# CI runs (open / push), so fixing a rejected title would otherwise leave CI
+# failed until the next push. On a title/description edit this re-checks, and if
+# the latest CI run for the PR's head commit failed ONLY because of the PR
+# metadata, re-runs its failed jobs. Nothing heavy has run in that case (every
+# hardware job waits on pr-metadata), so the re-run starts from the top; a run
+# whose final ci-gate re-check failed re-runs just ci-gate.
+
+on:
+  pull_request:
+    types: [edited]
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: write
+
+concurrency:
+  group: pr-metadata-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  recheck:
+    if: github.event.changes.title || github.event.changes.body
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+      - name: Check the PR title and description
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/check_pr_metadata.py --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
+
+      - name: Re-run CI if it was only blocked by the PR metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          RUN=$(gh api "repos/${REPO}/actions/workflows/ci.yml/runs?event=pull_request&head_sha=${HEAD_SHA}&per_page=1" \
+            --jq '.workflow_runs[0] | select(.) | "\(.id) \(.status) \(.conclusion)"')
+          if [ -z "$RUN" ]; then
+            echo "No CI run for ${HEAD_SHA}; nothing to re-run."
+            exit 0
+          fi
+          read -r ID STATUS CONCLUSION <<< "$RUN"
+          echo "Latest CI run ${ID}: ${STATUS}/${CONCLUSION}"
+          if [ "$STATUS" != "completed" ] || [ "$CONCLUSION" != "failure" ]; then
+            echo "CI is not in a failed state; leaving it alone."
+            exit 0
+          fi
+          OTHER=$(gh api --paginate "repos/${REPO}/actions/runs/${ID}/jobs" \
+            --jq '.jobs[] | select(.conclusion == "failure" and .name != "pr-metadata" and .name != "ci-gate") | .name')
+          if [ -n "$OTHER" ]; then
+            echo "CI also failed for other reasons, so a metadata fix alone won't make it pass:"
+            echo "$OTHER" | sed 's/^/  /'
+            exit 0
+          fi
+          echo "Re-running the failed jobs of CI run ${ID}."
+          gh run rerun "$ID" --failed --repo "$REPO"
