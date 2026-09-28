@@ -33,6 +33,28 @@ class TestSettingsWorkspace:
         expect(dashboard_page.get_by_role("button", name="Check for updates")).to_be_visible()
         expect(dashboard_page.locator('input[type="file"]')).to_have_attribute("accept", ".bin,application/octet-stream")
 
+    def test_check_for_updates_shows_progress(self, dashboard_page: Page):
+        """The update check takes a couple of seconds; the button must show
+        that it's working instead of doing nothing until the result lands."""
+        open_settings(dashboard_page, "Firmware")
+        held = []
+        dashboard_page.route("**/api/ota/releases", lambda route: held.append(route))
+        try:
+            dashboard_page.get_by_role("button", name="Check for updates").click()
+            checking = dashboard_page.get_by_role("button", name="Checking for updates…")
+            expect(checking).to_be_visible()
+            expect(checking).to_be_disabled()
+            expect(checking.locator(".btn-spinner")).to_be_visible()
+            expect(dashboard_page.get_by_role("button", name="Check for updates")).to_have_count(0)
+            assert len(held) == 1
+            held.pop().continue_()
+            expect(dashboard_page.get_by_role("button", name="Check for updates")).to_be_enabled(timeout=30000)
+            expect(checking).to_have_count(0)
+        finally:
+            dashboard_page.unroute("**/api/ota/releases")
+            for route in held:
+                route.continue_()
+
     def test_time_controls(self, dashboard_page: Page):
         open_settings(dashboard_page, "Time")
         expect(dashboard_page.locator('select[name="timezone"]')).to_be_visible()
