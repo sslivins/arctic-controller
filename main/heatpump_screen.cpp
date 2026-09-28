@@ -926,8 +926,8 @@ void heatpump_screen_update(void) {
     // same convention the power reading already uses ("0 W"), and the one the
     // Status screen has always used.
     if (hp.connected) {
-        char fan_buf[16];
-        snprintf(fan_buf, sizeof(fan_buf), "%u RPM", hp.fan_speed);
+        char fan_buf[24];
+        snprintf(fan_buf, sizeof(fan_buf), "%u %s", hp.fan_speed, i18n_get(STR_UNIT_RPM));
         lv_label_set_text(state.perf_fan_value, fan_buf);
         lv_obj_set_style_text_color(state.perf_fan_value,
                                     hp.fan_speed > 0 ? COLOR_TEXT : COLOR_TEXT_DIM,
