@@ -149,6 +149,30 @@ void event_names_are_the_documented_api_strings() {
     CHECK(std::strcmp(event_type_name(EVENT_WATCHDOG_RESET), "watchdog_reset") == 0);
 }
 
+void event_payloads_decode_to_the_documented_api_keys() {
+    // setpoint_changed: (kind << 16) | (old << 8) | new, as the controller packs it.
+    const uint32_t hot_water = ((uint32_t)EVENT_SETPOINT_HOT_WATER << 16) | (50u << 8) | 45u;
+    CHECK(std::strcmp(event_setpoint_key(hot_water), "hot_water") == 0);
+    CHECK(event_payload_from(hot_water) == 50);
+    CHECK(event_payload_to(hot_water) == 45);
+    CHECK(std::strcmp(event_setpoint_key((uint32_t)EVENT_SETPOINT_COOLING << 16), "cooling") == 0);
+    CHECK(std::strcmp(event_setpoint_key((uint32_t)EVENT_SETPOINT_HEATING << 16), "heating") == 0);
+    CHECK(event_setpoint_key(7u << 16) == nullptr);
+
+    // mode_changed: (old << 8) | new.
+    CHECK(event_payload_from((5u << 8) | 1u) == 5);
+    CHECK(event_payload_to((5u << 8) | 1u) == 1);
+
+    CHECK(std::strcmp(event_watchdog_key(ESP_RST_INT_WDT), "interrupt") == 0);
+    CHECK(std::strcmp(event_watchdog_key(ESP_RST_TASK_WDT), "task") == 0);
+    CHECK(std::strcmp(event_watchdog_key(ESP_RST_WDT), "other") == 0);
+
+    CHECK(std::strcmp(event_network_recovery_key(EVENT_NETWORK_RECOVERED_SELF), "self") == 0);
+    CHECK(std::strcmp(event_network_recovery_key(EVENT_NETWORK_RECOVERED_WIFI_BOUNCE), "wifi_bounce") == 0);
+    CHECK(std::strcmp(event_network_recovery_key(EVENT_NETWORK_RECOVERED_REBOOT), "reboot") == 0);
+    CHECK(event_network_recovery_key(9) == nullptr);
+}
+
 void every_event_type_maps_to_a_valid_category() {
     for (int t = 0; t < EVENT_TYPE_COUNT; ++t) {
         event_category_t c = event_type_category((event_type_t)t);
@@ -881,6 +905,8 @@ int main() {
              categories_match_the_intended_grouping);
     SCENARIO("category names are stable and bounded",
              category_names_are_stable_and_bounded);
+    SCENARIO("event payloads decode to the documented API keys",
+             event_payloads_decode_to_the_documented_api_keys);
 
     // Recording
     SCENARIO("recording before init is ignored",

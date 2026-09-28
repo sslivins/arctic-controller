@@ -36,6 +36,7 @@
 #include "system_restart.h"
 #include "status_bar.h"        // status_bar_get_notifications() for /api/notifications
 #include "event_log.h"
+#include "fault_help_links.h"
 #include "factory_reset.h"
 #include "boot_stats.h"
 #include "log_buffer.h"
@@ -5416,6 +5417,55 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
 // Events API
 // ============================================================================
 
+// Decoded, client-friendly fields for an event's payload, so REST/HA/web
+// clients never unpack the raw bit layout themselves.
+static void add_event_details(cJSON* evt, const event_entry_t& e)
+{
+    const uint32_t p = e.payload;
+    switch (e.type) {
+        case EVENT_MODE_CHANGED:
+            cJSON_AddStringToObject(evt, "from_mode", arctic::workingModeToString(
+                static_cast<arctic::WorkingMode>(event_payload_from(p))));
+            cJSON_AddStringToObject(evt, "to_mode", arctic::workingModeToString(
+                static_cast<arctic::WorkingMode>(event_payload_to(p))));
+            break;
+        case EVENT_SETPOINT_CHANGED: {
+            const char* key = event_setpoint_key(p);
+            if (key) cJSON_AddStringToObject(evt, "setpoint", key);
+            else cJSON_AddNullToObject(evt, "setpoint");
+            cJSON_AddNumberToObject(evt, "from", event_payload_from(p));
+            cJSON_AddNumberToObject(evt, "to", event_payload_to(p));
+            break;
+        }
+        case EVENT_ERROR_APPEARED:
+        case EVENT_ERROR_CLEARED: {
+            const arctic::MaconFaultBit* fb = arctic::macon_fault_bit_for_site(
+                static_cast<arctic::MaconFaultSiteId>(p));
+            if (fb) {
+                cJSON_AddStringToObject(evt, "fault_code", fb->code);
+                cJSON_AddStringToObject(evt, "fault_label", fb->label);
+                cJSON_AddStringToObject(evt, "help_url", arctic::faultHelpUrl(fb->code));
+            } else {
+                cJSON_AddNullToObject(evt, "fault_code");
+                cJSON_AddNullToObject(evt, "fault_label");
+                cJSON_AddNullToObject(evt, "help_url");
+            }
+            break;
+        }
+        case EVENT_WATCHDOG_RESET:
+            cJSON_AddStringToObject(evt, "watchdog", event_watchdog_key(p));
+            break;
+        case EVENT_NETWORK_RECOVERED: {
+            const char* key = event_network_recovery_key(p);
+            if (key) cJSON_AddStringToObject(evt, "recovery", key);
+            else cJSON_AddNullToObject(evt, "recovery");
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 static esp_err_t events_get_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -5465,6 +5515,7 @@ static esp_err_t events_get_handler(httpd_req_t* req)
         cJSON_AddNumberToObject(evt, "boot_id", events[i].boot_id);
         cJSON_AddNumberToObject(evt, "uptime_ms", (double)events[i].uptime_ms);
         cJSON_AddNumberToObject(evt, "payload", events[i].payload);
+        add_event_details(evt, events[i]);
         cJSON_AddItemToArray(arr, evt);
     }
     

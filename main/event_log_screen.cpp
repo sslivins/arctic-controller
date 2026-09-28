@@ -124,6 +124,8 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_BROWNOUT_RESET:  return STR_EVENT_BROWNOUT_RESET;
         case EVENT_APPLICATION_CRASH:return STR_EVENT_APPLICATION_CRASH;
         case EVENT_WATCHDOG_RESET:   return STR_EVENT_WATCHDOG_RESET;
+        case EVENT_NETWORK_UNREACHABLE: return STR_EVENT_NETWORK_UNREACHABLE;
+        case EVENT_NETWORK_RECOVERED:   return STR_EVENT_NETWORK_RECOVERED;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -152,6 +154,8 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_BROWNOUT_RESET:  return LV_SYMBOL_WARNING;
         case EVENT_APPLICATION_CRASH:return LV_SYMBOL_WARNING;
         case EVENT_WATCHDOG_RESET:   return LV_SYMBOL_WARNING;
+        case EVENT_NETWORK_UNREACHABLE: return LV_SYMBOL_WIFI;
+        case EVENT_NETWORK_RECOVERED:   return LV_SYMBOL_WIFI;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -166,6 +170,7 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_CONNECTED:
         case EVENT_DEFROST_END:
         case EVENT_ERROR_CLEARED:
+        case EVENT_NETWORK_RECOVERED:
             return COLOR_SUCCESS;
         
         case EVENT_ERROR_APPEARED:
@@ -178,6 +183,7 @@ static lv_color_t event_type_color(event_type_t type) {
         
         case EVENT_DEFROST_START:
         case EVENT_AUX_HEATER_OFF:
+        case EVENT_NETWORK_UNREACHABLE:
             return COLOR_WARNING;
         
         case EVENT_MODE_CHANGED:
@@ -208,20 +214,20 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
     
     switch (evt->type) {
         case EVENT_MODE_CHANGED: {
-            int old_mode = (p >> 8) & 0xFF;
-            int new_mode = p & 0xFF;
-            snprintf(buf, buf_size, "%s → %s", mode_name_i18n(old_mode), mode_name_i18n(new_mode));
+            snprintf(buf, buf_size, "%s → %s", mode_name_i18n(event_payload_from(p)),
+                     mode_name_i18n(event_payload_to(p)));
             break;
         }
         case EVENT_SETPOINT_CHANGED: {
-            int sp_type = (p >> 16) & 0xFF;
-            int old_val = (p >> 8) & 0xFF;
-            int new_val = p & 0xFF;
-            const char* sp_names[] = {
-                "Cooling", "Heating", "Hot Water"
-            };
-            const char* name = (sp_type < 3) ? sp_names[sp_type] : "?";
-            snprintf(buf, buf_size, "%s: %d° → %d°", name, old_val, new_val);
+            const char* name = "?";
+            switch (event_payload_setpoint(p)) {
+                case EVENT_SETPOINT_COOLING:   name = i18n_get(STR_HP_COOLING); break;
+                case EVENT_SETPOINT_HEATING:   name = i18n_get(STR_HP_HEATING); break;
+                case EVENT_SETPOINT_HOT_WATER: name = i18n_get(STR_HP_HOT_WATER); break;
+                default: break;
+            }
+            snprintf(buf, buf_size, "%s: %d° → %d°", name, event_payload_from(p),
+                     event_payload_to(p));
             break;
         }
         case EVENT_ERROR_APPEARED:
@@ -250,6 +256,22 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
                     break;
                 default:
                     snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_WATCHDOG_OTHER));
+                    break;
+            }
+            break;
+        case EVENT_NETWORK_RECOVERED:
+            switch (p) {
+                case EVENT_NETWORK_RECOVERED_SELF:
+                    snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_NETWORK_RECOVERED_SELF));
+                    break;
+                case EVENT_NETWORK_RECOVERED_WIFI_BOUNCE:
+                    snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_NETWORK_RECOVERED_WIFI));
+                    break;
+                case EVENT_NETWORK_RECOVERED_REBOOT:
+                    snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_NETWORK_RECOVERED_REBOOT));
+                    break;
+                default:
+                    buf[0] = '\0';
                     break;
             }
             break;

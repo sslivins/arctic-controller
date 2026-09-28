@@ -57,6 +57,20 @@ typedef enum {
     EVENT_CATEGORY_COUNT
 } event_category_t;
 
+// Which setpoint an EVENT_SETPOINT_CHANGED payload refers to (bits 16..23).
+typedef enum {
+    EVENT_SETPOINT_COOLING = 0,
+    EVENT_SETPOINT_HEATING = 1,
+    EVENT_SETPOINT_HOT_WATER = 2,
+} event_setpoint_t;
+
+// How the network came back, as the EVENT_NETWORK_RECOVERED payload.
+typedef enum {
+    EVENT_NETWORK_RECOVERED_SELF = 0,        // came back on its own (keepalive)
+    EVENT_NETWORK_RECOVERED_WIFI_BOUNCE = 1, // a WiFi link bounce restored it
+    EVENT_NETWORK_RECOVERED_REBOOT = 2,      // gave up and rebooted
+} event_network_recovery_t;
+
 // ============================================================================
 // Event Entry
 // ============================================================================
@@ -153,6 +167,37 @@ event_category_t event_type_category(event_type_t type);
  * @brief Get the stable API name for an event category.
  */
 const char* event_category_name(event_category_t category);
+
+// ----------------------------------------------------------------------------
+// Payload decoding (shared by the device screen and /api/events)
+// ----------------------------------------------------------------------------
+
+/** "Before" value of a mode/setpoint change payload (bits 8..15). */
+static inline int event_payload_from(uint32_t payload) { return (int)((payload >> 8) & 0xFF); }
+
+/** "After" value of a mode/setpoint change payload (bits 0..7). */
+static inline int event_payload_to(uint32_t payload) { return (int)(payload & 0xFF); }
+
+/** Setpoint kind of an EVENT_SETPOINT_CHANGED payload (bits 16..23). */
+static inline int event_payload_setpoint(uint32_t payload) { return (int)((payload >> 16) & 0xFF); }
+
+/**
+ * @brief Stable API key ("cooling", "heating", "hot_water") for the setpoint
+ *        an EVENT_SETPOINT_CHANGED payload refers to, or NULL if unknown.
+ */
+const char* event_setpoint_key(uint32_t payload);
+
+/**
+ * @brief Stable API key for an EVENT_WATCHDOG_RESET payload
+ *        ("interrupt", "task" or "other").
+ */
+const char* event_watchdog_key(uint32_t payload);
+
+/**
+ * @brief Stable API key for an EVENT_NETWORK_RECOVERED payload
+ *        ("self", "wifi_bounce", "reboot"), or NULL if unknown.
+ */
+const char* event_network_recovery_key(uint32_t payload);
 
 #ifdef __cplusplus
 }
