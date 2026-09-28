@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check that the controller's fault troubleshooting links still work.
 
-The controller links each fault code to an article on Arctic's Freshdesk
-support site (main/fault_help_links.cpp). Arctic can delete or renumber those
+The controller links each fault to an article on Arctic's Freshdesk support
+site (main/fault_help_links.cpp, keyed by the arctic-macon library's
+MaconFaultId; the fault code comes from the library's fault table). Arctic can delete or renumber those
 articles at any time, and nothing on the device would notice, so this script
 opens every link and checks that it still leads to the article for that code.
 
@@ -31,8 +32,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "main" / "fault_help_links.cpp"
+FAULT_TABLE = ROOT / "components" / "arctic-macon" / "src" / "macon_faults.cpp"
 
-_ROW = re.compile(r'\{\s*"([A-Za-z0-9]+)"\s*,\s*"(https://[^"]+)"\s*\}')
+_ROW = re.compile(r'\{\s*MaconFaultId::(\w+)\s*,\s*"(https://[^"]+)"\s*\}')
+_FAULT = re.compile(r'"([A-Za-z]{1,2}\d{0,2})"\s*,.*?MaconFaultId::(\w+)')
 _LIST = re.compile(r'SUPPORT_ARTICLE_LIST\s*=\s*"(https://[^"]+)"')
 _TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
@@ -42,12 +45,21 @@ ATTEMPTS = 3
 
 @dataclass(frozen=True)
 class Link:
-    code: str
+    fault_id: str
+    code: str | None
     url: str
 
 
-def parse_links(text: str) -> list[Link]:
-    return [Link(code, url) for code, url in _ROW.findall(text)]
+def parse_fault_codes(table_text: str) -> dict[str, str]:
+    """MaconFaultId name -> OEM code, from the library's fault table."""
+    codes: dict[str, str] = {}
+    for code, fault_id in _FAULT.findall(table_text):
+        codes.setdefault(fault_id, code)
+    return codes
+
+
+def parse_links(text: str, codes: dict[str, str]) -> list[Link]:
+    return [Link(fault_id, codes.get(fault_id), url) for fault_id, url in _ROW.findall(text)]
 
 
 def parse_support_list_url(text: str) -> str | None:
@@ -104,12 +116,17 @@ def check_url(code: str | None, url: str) -> str | None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--source", type=Path, default=SOURCE)
+    parser.add_argument("--fault-table", type=Path, default=FAULT_TABLE)
     args = parser.parse_args(argv)
 
     text = args.source.read_text(encoding="utf-8")
-    links = parse_links(text)
+    links = parse_links(text, parse_fault_codes(args.fault_table.read_text(encoding="utf-8")))
     if not links:
         print(f"No links found in {args.source}", file=sys.stderr)
+        return 1
+    unknown = [link.fault_id for link in links if link.code is None]
+    if unknown:
+        print(f"No fault code in the library for: {', '.join(unknown)}", file=sys.stderr)
         return 1
 
     checks: list[tuple[str | None, str]] = [(link.code, link.url) for link in links]

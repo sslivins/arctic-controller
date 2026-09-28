@@ -22,19 +22,30 @@ sys.modules[_spec.name] = links_tool  # dataclasses look their module up here
 _spec.loader.exec_module(links_tool)
 
 SOURCE = (ROOT / "main" / "fault_help_links.cpp").read_text(encoding="utf-8")
+CODES = links_tool.parse_fault_codes(links_tool.FAULT_TABLE.read_text(encoding="utf-8"))
 ARTICLE_URL = re.compile(r"^https://arcticheatpumps\.freshdesk\.com/support/solutions/articles/\d+$")
 
 
 def test_the_checker_finds_every_row_of_the_table():
-    rows = re.findall(r"^\s*\{\"", SOURCE, re.MULTILINE)
-    links = links_tool.parse_links(SOURCE)
+    rows = re.findall(r"^\s*\{MaconFaultId::", SOURCE, re.MULTILINE)
+    links = links_tool.parse_links(SOURCE, CODES)
     assert len(links) == len(rows) >= 20
 
 
-def test_each_code_has_one_article_link():
-    links = links_tool.parse_links(SOURCE)
-    codes = [link.code.upper() for link in links]
-    assert len(codes) == len(set(codes)), "a code is listed twice"
+def test_every_linked_fault_has_a_code_in_the_library():
+    for link in links_tool.parse_links(SOURCE, CODES):
+        assert link.code, f"MaconFaultId::{link.fault_id} has no code in the library's fault table"
+
+
+def test_the_library_table_maps_ids_to_their_codes():
+    assert CODES["HighPressureProtection"] == "P02"
+    assert CODES["DcFanMotor"] == "FA"
+
+
+def test_each_fault_has_one_article_link():
+    links = links_tool.parse_links(SOURCE, CODES)
+    ids = [link.fault_id for link in links]
+    assert len(ids) == len(set(ids)), "a fault is listed twice"
     for link in links:
         # No title slug: it isn't needed, and a shorter URL makes a smaller QR code.
         assert ARTICLE_URL.match(link.url), link

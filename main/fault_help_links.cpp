@@ -1,23 +1,25 @@
 /*
  * Arctic Heat Pump Controller
- * Links from fault codes to Arctic's online troubleshooting articles.
+ * Links from faults to Arctic's online troubleshooting articles.
  *
- * Arctic publishes one troubleshooting article per fault code on its Freshdesk
+ * Arctic publishes one troubleshooting article per fault on its Freshdesk
  * support site. This table lives in the controller rather than the arctic-macon
  * library because the library describes the Macon hardware, which other brands
- * also sell; the articles are Arctic's.
+ * also sell; the articles are Arctic's. It is keyed by the library's opaque
+ * MaconFaultId so the controller never names an OEM fault code itself.
  *
  * The URLs leave out the article's title slug: Freshdesk finds articles by the
  * number alone, and the shorter URL gives a smaller, easier-to-scan QR code.
  *
- * tools/check_fault_help_links.py reads this table (one {"CODE", "URL"} entry
- * per line) and checks that every link still opens the right article. A
- * weekly workflow runs it so a link Arctic removes gets noticed.
+ * tools/check_fault_help_links.py reads this table (one
+ * {MaconFaultId::Name, "URL"} entry per line) and checks that every link still
+ * opens the article for that fault's code. A weekly workflow runs it so a link
+ * Arctic removes or renumbers gets noticed.
  */
 
 #include "fault_help_links.h"
 
-#include <ctype.h>
+#include "macon_faults.h"
 
 namespace arctic {
 
@@ -27,52 +29,43 @@ constexpr const char* SUPPORT_ARTICLE_LIST =
     "https://arcticheatpumps.freshdesk.com/support/solutions";
 
 struct FaultHelpLink {
-    const char* code;
+    MaconFaultId id;
     const char* url;
 };
 
 // clang-format off
 constexpr FaultHelpLink FAULT_HELP_LINKS[] = {
-    {"E01", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837781"},
-    {"E05", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837782"},
-    {"E09", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837783"},
-    {"E13", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837785"},
-    {"E18", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837786"},
-    {"E19", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837787"},
-    {"E20", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837788"},
-    {"E21", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837789"},
-    {"E22", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837790"},
-    {"E27", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000982091"},
-    {"E28", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959944"},
-    {"EA",  "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832846"},
-    {"EB",  "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832847"},
-    {"EC",  "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832850"},
-    {"FA",  "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832842"},
-    {"P01", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000810195"},
-    {"P02", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838"},
-    {"P06", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832839"},
-    {"P11", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832841"},
-    {"P15", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959949"},
-    {"P19", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959948"},
-    {"P27", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959950"},
-    {"PC",  "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832851"},
-    {"R02", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60001048972"},
-    {"R10", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959947"},
-    {"R11", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959945"},
+    {MaconFaultId::DischargeSensor,          "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837781"},
+    {MaconFaultId::CoilSensor,               "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837782"},
+    {MaconFaultId::SuctionSensor,            "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837783"},
+    {MaconFaultId::CoolCoilSensor,           "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837785"},
+    {MaconFaultId::OutletWaterSensor,        "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837786"},
+    {MaconFaultId::InletWaterSensor,         "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837787"},
+    {MaconFaultId::ControllerCommunication,  "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837789"},
+    {MaconFaultId::AmbientSensor,            "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000837790"},
+    {MaconFaultId::DriverCommunication,      "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000982091"},
+    {MaconFaultId::EepromError,              "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959944"},
+    {MaconFaultId::DcFanMotor,               "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832842"},
+    {MaconFaultId::WaterFlowProtection,      "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000810195"},
+    {MaconFaultId::HighPressureProtection,   "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838"},
+    {MaconFaultId::LowPressureProtection,    "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832839"},
+    {MaconFaultId::HighDischargeTemp,        "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832841"},
+    {MaconFaultId::TempDifferenceTooLarge,   "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959949"},
+    {MaconFaultId::AcCurrentProtection,      "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959948"},
+    {MaconFaultId::CoilOverheat,             "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959950"},
+    {MaconFaultId::AmbientOutOfRange,        "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832851"},
+    {MaconFaultId::CompressorStartFailure,   "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60001048972"},
+    {MaconFaultId::AcVoltageProtection,      "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959947"},
+    {MaconFaultId::DcBusVoltageProtection,   "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000959945"},
 };
 // clang-format on
 
-bool same_code(const char* a, const char* b) {
-    for (; *a && *b; ++a, ++b) {
-        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return false;
-    }
-    return *a == *b;
-}
-
 const FaultHelpLink* find(const char* code) {
     if (!code) return nullptr;
+    MaconFaultId id = macon_fault_id_from_code(code);
+    if (id == MaconFaultId::Unknown) return nullptr;
     for (const auto& link : FAULT_HELP_LINKS) {
-        if (same_code(link.code, code)) return &link;
+        if (link.id == id) return &link;
     }
     return nullptr;
 }

@@ -18,6 +18,7 @@ on:
   pull_request:
     paths:
       - main/fault_help_links.cpp
+      - components/arctic-macon/src/macon_faults.cpp
       - tools/check_fault_help_links.py
       - .github/workflows/fault-help-links.yml
 
