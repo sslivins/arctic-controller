@@ -82,7 +82,8 @@ def _triggers(doc: dict) -> dict:
 
 
 def _gate_script(workflow: str, job: str) -> str:
-    return _workflow(workflow)["jobs"][job]["steps"][0]["run"]
+    """The job's policy script: its first step that runs a shell script (not a checkout)."""
+    return next(s["run"] for s in _workflow(workflow)["jobs"][job]["steps"] if "run" in s)
 
 
 def _run_gate(script: str, env: dict[str, str]) -> int:
@@ -188,6 +189,23 @@ def test_ci_gate_depends_on_every_other_job():
     assert set(gate["needs"]) == expected
 
 
+def test_every_suite_waits_for_the_pr_metadata_check():
+    """A rejected PR title must stop CI before the ~45 minute hardware suite starts."""
+    jobs = _workflow("ci.yml")["jobs"]
+
+    def ancestors(name):
+        needs = jobs[name].get("needs", [])
+        needs = [needs] if isinstance(needs, str) else needs
+        found = set(needs)
+        for n in needs:
+            found |= ancestors(n)
+        return found
+
+    for name in jobs:
+        if name not in ("pr-metadata", "ci-gate"):
+            assert "pr-metadata" in ancestors(name), f"{name} does not wait for pr-metadata"
+
+
 def test_device_gate_depends_on_every_other_job():
     jobs = _workflow("device-tests.yml")["jobs"]
     gate = jobs["device-gate"]
@@ -201,6 +219,7 @@ def test_device_gate_depends_on_every_other_job():
 # --------------------------------------------------------------------------
 
 CI_OK = {
+    "META": "success",
     "CLASSIFY": "success",
     "HW": "true",
     "FORK": "false",
@@ -234,6 +253,9 @@ def test_ci_gate_accepts_valid_outcomes(override, reason):
         ({"BUILD": "skipped"}, "build skipped"),
         ({"HOST": "failure"}, "host tests failed"),
         ({"HOST": "skipped"}, "host tests skipped"),
+        ({"META": "failure"}, "PR title/description rejected"),
+        ({"META": "skipped"}, "PR metadata check skipped"),
+        ({"META": "cancelled"}, "PR metadata check cancelled"),
         ({"CLASSIFY": "failure"}, "classifier failed"),
         ({"CLASSIFY": "skipped"}, "classifier skipped"),
         ({"CLASSIFY": "cancelled"}, "classifier cancelled"),

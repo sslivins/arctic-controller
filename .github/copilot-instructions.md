@@ -26,6 +26,12 @@
   in CI. Don't create separate PRs for small, related fixes (e.g. multiple test
   tweaks). Group them on one branch and open one PR when the batch is ready.
 - When asked for a PR description, always output it in **Markdown** format.
+- **PR titles must be conventional commits too** (`feat(scope): what changed`).
+  PRs are squash-merged with the PR title as the commit subject, so the title is
+  what lands in the release notes. The `pr-metadata` job at the top of `ci.yml`
+  rejects a non-conventional or vague title, or an empty/template-only
+  description, in seconds, before the hardware suite runs; editing the PR re-runs
+  CI automatically (`pr-metadata.yml`). Rules: `.github/scripts/check_pr_metadata.py`.
 
 ## Project Overview
 
@@ -147,6 +153,29 @@ it toward these rules rather than matching the surrounding legacy layout.
   changes (`.md`, `docs/`) do **not** trigger builds.
 - **Device tests** run on a self-hosted runner (4-core VM, 4 GB RAM, runner label `vm-mi`)
 - **Concurrency group** `device-tests` serializes all device access (build + release)
+### Only one PR through the device suite at a time
+`main` requires PR branches to be **up to date** before merging (branch protection
+`strict: true`), and the device suite runs one job at a time on the single bench
+controller. So every merge makes every other open PR stale: its green run no longer
+counts, and it has to rebase and run the whole suite (~45 min) again. A PR that runs
+the suite while it's queued behind another PR does that work twice.
+
+- **Before pushing a PR branch, check what's already in flight:**
+  `gh pr list --repo sslivins/arctic-controller --state open` and
+  `gh run list --repo sslivins/arctic-controller --workflow ci.yml --status in_progress`
+  (and `--status queued`). If another PR will land first, commit locally and **don't
+  push yet**. Every push to an open PR starts CI.
+- **If it's already pushed**, cancel its queued or running CI run
+  (`gh run cancel <run-id>`) so it doesn't take the bench away from the PR ahead of it.
+  Leave auto-merge enabled; it just waits.
+- **When the PR ahead merges**, rebase once and push once:
+  `git fetch origin && git rebase origin/main && git push --force-with-lease`.
+  Don't use GitHub's "Update branch" button. It adds a merge commit, and pushing a
+  rebase afterwards starts the run a second time.
+- **Batch follow-up fixes locally** and push them together. Each extra push restarts
+  the run.
+- Changes that skip the device suite (docs-only, as decided by `classify`) are cheap
+  and don't need to wait.
 - `CONFIG_TEST_ENDPOINTS=y` is set only in `device-tests.yml`, not production builds
 - **Release workflow** (`create-release.yml`) gates on device tests passing and
   ships 4 binaries: bootloader, partition-table, ota_data_initial, firmware
