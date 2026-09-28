@@ -16,12 +16,14 @@ static const char* TAG = "app_prefs";
 #define NVS_NAMESPACE    "app_prefs"
 #define NVS_KEY_DEMO     "demo_mode"
 #define NVS_KEY_TEMP_UNIT "temp_unit"
+#define NVS_KEY_DEVICE_NAME "device_name"
 
 // Current state (cached from NVS)
 static struct {
     bool initialized = false;
     bool demo_mode = false;
     temp_unit_t temp_unit = TEMP_UNIT_CELSIUS;
+    char device_name[APP_PREFS_DEVICE_NAME_MAX_BYTES] = {};
 } s_prefs;
 
 void app_prefs_init(void) {
@@ -40,6 +42,13 @@ void app_prefs_init(void) {
         
         if (nvs_get_u8(nvs, NVS_KEY_TEMP_UNIT, &val) == ESP_OK) {
             s_prefs.temp_unit = (val == 1) ? TEMP_UNIT_FAHRENHEIT : TEMP_UNIT_CELSIUS;
+        }
+
+        size_t name_len = sizeof(s_prefs.device_name);
+        if (nvs_get_str(nvs, NVS_KEY_DEVICE_NAME, s_prefs.device_name, &name_len) != ESP_OK) {
+            s_prefs.device_name[0] = '\0';
+        } else {
+            s_prefs.device_name[sizeof(s_prefs.device_name) - 1] = '\0';
         }
         
         nvs_close(nvs);
@@ -81,6 +90,29 @@ void app_prefs_set_demo_mode(bool enabled) {
         ESP_LOGE(TAG, "Failed to save demo_mode: %s", esp_err_to_name(err));
     }
 #endif
+}
+
+const char* app_prefs_get_device_name(void) {
+    return s_prefs.device_name;
+}
+
+void app_prefs_set_device_name(const char* name) {
+    if (!name) name = "";
+    if (strncmp(s_prefs.device_name, name, sizeof(s_prefs.device_name)) == 0) return;
+
+    strncpy(s_prefs.device_name, name, sizeof(s_prefs.device_name) - 1);
+    s_prefs.device_name[sizeof(s_prefs.device_name) - 1] = '\0';
+
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        nvs_set_str(nvs, NVS_KEY_DEVICE_NAME, s_prefs.device_name);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+        ESP_LOGI(TAG, "Saved device_name = %s", s_prefs.device_name[0] ? s_prefs.device_name : "(unset)");
+    } else {
+        ESP_LOGE(TAG, "Failed to save device_name: %s", esp_err_to_name(err));
+    }
 }
 
 temp_unit_t app_prefs_get_temp_unit(void) {

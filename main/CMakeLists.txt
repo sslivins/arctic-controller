@@ -52,6 +52,7 @@ idf_component_register(
         "setup_pairing.cpp"
         "ha_websocket.cpp"
         "app_preferences.cpp"
+        "device_name.cpp"
         "display_idle.cpp"
         "factory_reset.cpp"
         "advanced_params.cpp"

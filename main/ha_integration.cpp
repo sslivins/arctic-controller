@@ -2,6 +2,7 @@
  * Home Assistant integration identity and versioned state serialization.
  */
 #include "ha_integration.h"
+#include "app_preferences.h"
 #include "device_diagnostics.h"
 #include "api_server.h"
 #include "heatpump_controller.h"
@@ -308,6 +309,12 @@ cJSON* createCapabilities()
 
     cJSON_AddNumberToObject(root, "protocol_version", PROTOCOL_VERSION);
     cJSON_AddStringToObject(root, "device_id", s_device_id);
+    const char* friendly_name = app_prefs_get_device_name();
+    if (friendly_name[0]) {
+        cJSON_AddStringToObject(root, "device_name", friendly_name);
+    } else {
+        cJSON_AddNullToObject(root, "device_name");
+    }
     cJSON_AddStringToObject(root, "model", "Arctic Heat Pump Controller");
     cJSON_AddStringToObject(root, "firmware_version", app->version);
 
@@ -392,6 +399,12 @@ cJSON* createStateSnapshot()
 
     cJSON_AddNumberToObject(root, "protocol_version", PROTOCOL_VERSION);
     cJSON_AddStringToObject(root, "device_id", s_device_id);
+    const char* friendly_name = app_prefs_get_device_name();
+    if (friendly_name[0]) {
+        cJSON_AddStringToObject(root, "device_name", friendly_name);
+    } else {
+        cJSON_AddNullToObject(root, "device_name");
+    }
     cJSON_AddStringToObject(root, "boot_id", s_boot_id);
     cJSON_AddNumberToObject(root, "revision", static_cast<double>(revision));
     cJSON_AddNumberToObject(

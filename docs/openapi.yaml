@@ -3078,6 +3078,10 @@ paths:
               properties:
                 demo_mode:
                   type: boolean
+                device_name:
+                  type: string
+                  description: Friendly controller name. Empty string clears the name.
+                  maxLength: 30
                 temp_unit:
                   type: string
                   enum: [celsius, fahrenheit]
@@ -4320,6 +4324,10 @@ components:
       properties:
         demo_mode:
           type: boolean
+        device_name:
+          type: string
+          description: Friendly controller name, or empty string when unset.
+          maxLength: 30
         temp_unit:
           type: string
           enum: [celsius, fahrenheit]

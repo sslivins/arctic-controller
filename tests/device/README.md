@@ -138,11 +138,12 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (267 UI tests + 9 screenshot API tests + 10 HTTPS tests + 286 REST API tests + 55 web tests + API contract tests)
+### Test Files (273 UI tests + 9 screenshot API tests + 10 HTTPS tests + 291 REST API tests + 57 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
 | [`test_main_screen.py`](test_main_screen.py) | 20 | Hero card states, tank temp, component dots, performance strip, error card |
+| [`test_device_name.py`](test_device_name.py) | 6 | Friendly controller name: Home display, live updates, glyphs, validation |
 | [`test_error_mapping.py`](test_error_mapping.py) | 33 | Every Macon fault code → correct code + description on UI |
 | [`test_system_screen.py`](test_system_screen.py) | 31 | System sub-screen: temps, flows, component states, section headers |
 | [`test_fahrenheit.py`](test_fahrenheit.py) | 24 | °F/°C conversion: hero card, temps screen, API preference, math verification |
@@ -174,7 +175,9 @@ The `conftest.py` session fixture handles this automatically.
 | [`../api/test_ota_api.py`](../api/test_ota_api.py) | 41 | OTA safety: URL allowlist, bad uploads, auth enforcement, releases, error state, schema |
 | [`../api/test_diagnostic_api.py`](../api/test_diagnostic_api.py) | 32 | Diagnostic CSV download: format, BOM, headers, categories, content, error injection, auth, idempotency |
 | [`../api/test_events_and_misc_api.py`](../api/test_events_and_misc_api.py) | 50 | Events, health, status, time config (round-trip), OTA status, time sync, WiFi, info, display brightness, preferences |
+| [`../api/test_preferences_api.py`](../api/test_preferences_api.py) | 5 | Preferences API friendly-name contract and validation |
 | [`../web/test_dashboard.py`](../web/test_dashboard.py) | — | Web dashboard: page load, real-time updates, temperature displays, controls |
+| [`../web/test_device_name.py`](../web/test_device_name.py) | 2 | Web friendly-name header, browser title, and preferences field |
 | [`../web/test_navigation.py`](../web/test_navigation.py) | — | Web navigation: tab switching, responsive layout, scroll behavior |
 | [`../web/test_login.py`](../web/test_login.py) | — | Web auth: login form, session persistence, logout |
 | [`../web/test_i18n.py`](../web/test_i18n.py) | — | Web i18n: language switching, label updates |

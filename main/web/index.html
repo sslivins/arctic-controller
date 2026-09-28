@@ -506,6 +506,9 @@
     const esc = value => String(value ?? "")
       .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+    const controllerName = () => String(state.preferences.device_name || "").trim();
+    const controllerTitle = () => controllerName() ? `${controllerName()} · Arctic Controller` : "Arctic Controller";
+    const updateDocumentTitle = () => { document.title = controllerTitle(); };
     const titleCase = value => String(value || "").replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
     const fmtBytes = value => {
       const n = Number(value || 0);
@@ -551,7 +554,7 @@
       info: {}, status: { time: {} }, wifi: {}, hp: {
         temperatures: {}, setpoints: {}, setpoint_limits: {}, readings: {}
       },
-      preferences: { temp_unit: "celsius", language_code: "en", brightness: 80 },
+      preferences: { temp_unit: "celsius", language_code: "en", brightness: 80, device_name: "" },
       errors: { active: [], history: [] }, params: {}, events: [], eventTotal: 0,
       tempHistory: { loading: false, error: "", data: null, end: null },
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
@@ -703,7 +706,7 @@
       const connected = !!state.hp.connected;
       return `<div class="app">
         <header class="topbar">
-          <div class="brand"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
+          <div class="brand"><div class="brand-mark">A</div><span>${esc(controllerTitle())}</span></div>
           <div class="top-status">
             <span class="status-item hp-status" title="${connected ? "Heat pump online" : "Heat pump offline"}" aria-label="${connected ? "Heat pump online" : "Heat pump offline"}"><span class="dot ${connected ? "good" : "bad"}"></span><span class="status-label">${connected ? "Online" : "Offline"}</span></span>
             <span class="status-item wifi">${esc(state.wifi.ssid || "WiFi disconnected")}</span>
@@ -1082,6 +1085,7 @@
     }
     function preferenceSettings() {
       return `<section class="card"><h2>Preferences</h2><form data-form="preferences">
+        <div class="field"><label>Controller name</label><input name="device_name" maxlength="120" value="${esc(state.preferences.device_name || "")}" placeholder="Up to 30 characters"></div>
         <div class="field"><label>Temperature units</label><select name="temp_unit"><option value="celsius" ${state.preferences.temp_unit==="celsius"?"selected":""}>Celsius</option>
           <option value="fahrenheit" ${state.preferences.temp_unit==="fahrenheit"?"selected":""}>Fahrenheit</option></select></div>
         <div class="field"><label>Device language</label><select name="language"><option value="en" ${state.preferences.language_code==="en"?"selected":""}>English</option>
@@ -1448,6 +1452,7 @@
       }
       const pages = { home: homePage, status: statusPage, control: controlPage, events: eventsPage,
         history: historyPage, errors: errorsPage, settings: settingsPage };
+      updateDocumentTitle();
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
       if (state.settingsPage === "diagnostics") {
         const logs = $("#log-container"); if (logs) logs.scrollTop = logs.scrollHeight;
@@ -1464,6 +1469,7 @@
       [state.info, state.status, state.wifi, state.hp, state.preferences, state.errors, state.ota] = values;
       state.notifications = values[7].notifications || [];
       state.weather = values[8];
+      updateDocumentTitle();
     }
     async function loadParams() { const data = await api("/api/heatpump/advanced"); state.params = data.params || {}; }
     async function loadEvents(reset = false) {
@@ -1668,7 +1674,7 @@
       }
       if (type === "preferences") {
         const response = await mutate("/api/preferences", jsonOptions("PATCH", {
-          temp_unit: data.get("temp_unit"), language: data.get("language"), demo_mode: data.get("demo_mode") === "on"
+          device_name: data.get("device_name"), temp_unit: data.get("temp_unit"), language: data.get("language"), demo_mode: data.get("demo_mode") === "on"
         }), "Preferences saved");
         state.preferences = response;
         if (response.reboot_required) toast("Restart required for demo mode change");

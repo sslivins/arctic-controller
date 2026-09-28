@@ -94,6 +94,8 @@ The initial exposed snapshot includes:
   to Arctic's troubleshooting article for that fault code (or to Arctic's
   support site when there is no article for it).
 - Firmware, protocol, and capability metadata.
+- The optional friendly controller name as `device_name` on both
+  `/api/v1/capabilities` and `/api/v1/state`; the value is `null` when unset.
 
 Diagnostic entities that are noisy or primarily useful for troubleshooting
 should be disabled by default.
@@ -124,6 +126,7 @@ Every snapshot includes:
 
 - `protocol_version`
 - `device_id`
+- `device_name` (friendly controller name, or `null` when unset)
 - `boot_id`
 - `revision`
 - `captured_at_ms`
