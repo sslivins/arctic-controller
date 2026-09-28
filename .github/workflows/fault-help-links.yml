@@ -18,7 +18,9 @@ on:
   pull_request:
     paths:
       - main/fault_help_links.cpp
-      - components/arctic-macon/src/macon_faults.cpp
+      # A submodule bump shows up only as this path changing, never as a change
+      # to a file inside it. The fault codes come from the library's table.
+      - components/arctic-macon
       - tools/check_fault_help_links.py
       - .github/workflows/fault-help-links.yml
 
