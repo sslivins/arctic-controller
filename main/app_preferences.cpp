@@ -9,6 +9,7 @@
 #include <nvs.h>
 #include <esp_log.h>
 #include <math.h>
+#include <string.h>
 
 static const char* TAG = "app_prefs";
 
