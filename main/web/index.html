@@ -444,6 +444,8 @@
     .mobile-nav { display: none; }
     .spinner { width: 18px; height: 18px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .btn-spinner { display: inline-block; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; }
+    .btn.checking:disabled { opacity: 1; cursor: progress; }
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       .rail { display: none; }
@@ -1034,11 +1036,13 @@
         <div class="btn-row" style="margin-top:16px">
           ${installing
             ? `<button class="btn" disabled>${indeterminate ? "Applying…" : "Installing…"}</button>`
+            : state.checkingUpdate
+            ? `<button class="btn checking" disabled><span class="btn-spinner" aria-hidden="true"></span>Checking for updates…</button>`
             : `<button class="btn" data-action="check-update">Check for updates</button>
                ${state.release?.update_available && state.release?.download_ready ? `<button class="btn primary" data-action="install-update">Install ${esc(state.release.latest_version)}</button>` : ""}
                ${(installDone || installFailed) ? `<button class="btn" data-action="ota-dismiss">Dismiss</button>` : ""}`}
           ${!installing && state.ota.state === "ready_to_reboot" ? `<button class="btn primary" data-action="reboot">Reboot now</button>` : ""}</div>
-        ${!otaActive && !inst && state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(state.release.latest_version)} is available.` : "The controller is up to date."}</div>` : ""}
+        ${!otaActive && !inst && !state.checkingUpdate && state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(state.release.latest_version)} is available.` : "The controller is up to date."}</div>` : ""}
         <h3 style="margin-top:28px">Upload firmware</h3><form data-form="firmware"><div class="field"><label>ESP-IDF application image (.bin)</label>
           <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit">Upload and install</button></form>
       </section>`;
@@ -1873,7 +1877,12 @@
         }, 4000);
         render();
       }
-      if (action === "check-update") { state.release = await mutate("/api/ota/releases", {}, "Update check complete"); render(); }
+      if (action === "check-update") {
+        if (state.checkingUpdate) return;
+        state.checkingUpdate = true; render();
+        try { state.release = await mutate("/api/ota/releases", {}, "Update check complete"); }
+        finally { state.checkingUpdate = false; render(); }
+      }
       if (action === "install-update" && confirm("Download and install this update?")) {
         await mutate("/api/ota/github", { method: "POST" }, "Update started");
         startInstallWatch();
