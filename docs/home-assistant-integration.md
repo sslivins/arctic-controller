@@ -90,7 +90,9 @@ The initial exposed snapshot includes:
   fully closed, not unknown). The mainboard publishes no full-scale EEV step
   count, so the opening is raw steps only and is never expressed as a
   percentage.
-- Current error state.
+- Current error state. When a fault is active this includes `help_url`, a link
+  to Arctic's troubleshooting article for that fault code (or to Arctic's
+  support site when there is no article for it).
 - Firmware, protocol, and capability metadata.
 
 Diagnostic entities that are noisy or primarily useful for troubleshooting

@@ -2559,6 +2559,10 @@ paths:
                           type: boolean
                           description: Whether the OEM wired controller shows this code (false = Macon app only)
                           example: true
+                        help_url:
+                          type: string
+                          description: Arctic's troubleshooting article for this code, or Arctic's support site when there is no article for it
+                          example: "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838"
                         occurred:
                           type: integer
                           nullable: true
@@ -2576,6 +2580,9 @@ paths:
                         code:
                           type: string
                           description: Arctic error code
+                        help_url:
+                          type: string
+                          description: Arctic's troubleshooting article for this code, or Arctic's support site when there is no article for it
                         occurred:
                           type: integer
                           nullable: true
@@ -2602,6 +2609,7 @@ paths:
                   name_msg_id: "fault.high_pressure.label"
                   resolution_msg_id: "fault.high_pressure.resolution"
                   wired_display: true
+                  help_url: "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838"
                   occurred: 1739145600
                   active: true
                 history:

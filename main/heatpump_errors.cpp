@@ -8,6 +8,7 @@
  * tracking, and the history ring buffer.
  */
 #include "heatpump_errors.h"
+#include "fault_help_links.h"
 #include "heatpump_controller.h"
 #include "macon_faults.h"
 #include <cJSON.h>
@@ -403,6 +404,7 @@ char* getErrorsAsJson() {
         cJSON_AddStringToObject(err, "resolution_msg_id",
                                 errors[i].resolution_msg_id ? errors[i].resolution_msg_id : "");
         cJSON_AddBoolToObject(err, "wired_display", errors[i].wired_display);
+        cJSON_AddStringToObject(err, "help_url", faultHelpUrl(errors[i].code));
         if (errors[i].first_seen > 0) {
             cJSON_AddNumberToObject(err, "occurred", (double)errors[i].first_seen);
         } else {
@@ -426,6 +428,7 @@ char* getErrorHistoryAsJson() {
     for (int i = 0; i < count; i++) {
         cJSON* entry = cJSON_CreateObject();
         cJSON_AddStringToObject(entry, "code", history[i].code);
+        cJSON_AddStringToObject(entry, "help_url", faultHelpUrl(history[i].code));
 
         if (history[i].occurred > 0) {
             cJSON_AddNumberToObject(entry, "occurred", (double)history[i].occurred);

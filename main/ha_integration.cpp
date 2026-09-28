@@ -6,6 +6,7 @@
 #include "api_server.h"
 #include "heatpump_controller.h"
 #include "heatpump_errors.h"
+#include "fault_help_links.h"
 #include "macon_state.h"
 #include "macon_master_iface.h"
 #include "wifi_manager.h"
@@ -177,6 +178,8 @@ cJSON* createStateObject(const HeatPumpState& hp)
                 error, "description", primary->description);
             cJSON_AddStringToObject(
                 error, "severity", severityToString(primary->severity));
+            cJSON_AddStringToObject(
+                error, "help_url", faultHelpUrl(primary->code));
         } else {
             // Error bits set but unmapped — fall back to concatenated text.
             char descriptions[256];
@@ -185,12 +188,14 @@ cJSON* createStateObject(const HeatPumpState& hp)
             cJSON_AddNullToObject(error, "name");
             cJSON_AddStringToObject(error, "description", descriptions);
             cJSON_AddNullToObject(error, "severity");
+            cJSON_AddNullToObject(error, "help_url");
         }
     } else {
         cJSON_AddNullToObject(error, "code");
         cJSON_AddNullToObject(error, "name");
         cJSON_AddNullToObject(error, "description");
         cJSON_AddNullToObject(error, "severity");
+        cJSON_AddNullToObject(error, "help_url");
     }
 
     return state;

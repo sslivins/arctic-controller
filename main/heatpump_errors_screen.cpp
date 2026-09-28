@@ -7,6 +7,7 @@
 
 #include "heatpump_errors_screen.h"
 #include "heatpump_errors.h"
+#include "fault_help_links.h"
 #include "heatpump_controller.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
@@ -88,14 +89,43 @@ static const char* severity_to_icon(arctic::ErrorSeverity severity) {
     }
 }
 
+static constexpr int HELP_QR_PLATE_PX = 230;
+static constexpr int HELP_QR_PX = 206;
+
+// Per-card state for the tap handler. The troubleshooting QR code is only
+// drawn the first time a card is opened, so a long history doesn't pay for a
+// QR bitmap on every card.
+struct ErrorCardCtx {
+    lv_obj_t* resolution_cont;
+    lv_obj_t* qr_plate;
+    const char* help_url;
+};
+
+static void error_card_delete_cb(lv_event_t* e) {
+    lv_free(lv_event_get_user_data(e));
+}
+
+static void ensure_help_qr(ErrorCardCtx* ctx) {
+    if (!ctx->qr_plate || lv_obj_get_child_count(ctx->qr_plate) > 0) return;
+    lv_obj_t* qr = lv_qrcode_create(ctx->qr_plate);
+    lv_qrcode_set_size(qr, HELP_QR_PX);
+    lv_qrcode_set_dark_color(qr, lv_color_black());
+    lv_qrcode_set_light_color(qr, lv_color_white());
+    lv_qrcode_update(qr, ctx->help_url, strlen(ctx->help_url));
+    lv_obj_center(qr);
+    lv_obj_set_user_data(qr, (void*)"error_help_qr");
+}
+
 // Toggle resolution visibility when card is tapped
 static void error_card_tap_cb(lv_event_t* e) {
     lv_obj_t* card = (lv_obj_t*)lv_event_get_target(e);
-    lv_obj_t* resolution_cont = (lv_obj_t*)lv_event_get_user_data(e);
+    ErrorCardCtx* ctx = (ErrorCardCtx*)lv_event_get_user_data(e);
+    lv_obj_t* resolution_cont = ctx ? ctx->resolution_cont : nullptr;
     
     if (resolution_cont) {
         bool is_hidden = lv_obj_has_flag(resolution_cont, LV_OBJ_FLAG_HIDDEN);
         if (is_hidden) {
+            ensure_help_qr(ctx);
             lv_obj_clear_flag(resolution_cont, LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_style_border_width(card, 3, LV_PART_MAIN);
         } else {
@@ -243,11 +273,59 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     lv_obj_set_width(res_label, LV_PCT(100));
     lv_obj_set_style_text_font(res_label, &montserrat_24_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(res_label, COLOR_TEXT, LV_PART_MAIN);
+
+    // Link to Arctic's troubleshooting article for this code, as a QR code
+    // the user can scan with a phone.
+    lv_obj_t* divider = lv_obj_create(resolution_cont);
+    lv_obj_set_size(divider, LV_PCT(100), 2);
+    lv_obj_set_style_bg_color(divider, lv_color_hex(0x2a4a7a), LV_PART_MAIN);
+    lv_obj_set_style_border_width(divider, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(divider, 0, LV_PART_MAIN);
+    lv_obj_set_style_margin_top(divider, 8, LV_PART_MAIN);
+    lv_obj_clear_flag(divider, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t* help_row = lv_obj_create(resolution_cont);
+    lv_obj_set_size(help_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(help_row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(help_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(help_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(help_row, 20, LV_PART_MAIN);
+    lv_obj_set_layout(help_row, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(help_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(help_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(help_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(help_row, LV_OBJ_FLAG_CLICKABLE);
+
+    // White plate so phone cameras read the code reliably.
+    lv_obj_t* qr_plate = lv_obj_create(help_row);
+    lv_obj_set_size(qr_plate, HELP_QR_PLATE_PX, HELP_QR_PLATE_PX);
+    lv_obj_set_style_bg_color(qr_plate, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_border_width(qr_plate, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(qr_plate, 8, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(qr_plate, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(qr_plate, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(qr_plate, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t* help_hint = lv_label_create(help_row);
+    lv_label_set_text(help_hint, i18n_get(STR_HP_HELP_QR_HINT));
+    lv_label_set_long_mode(help_hint, LV_LABEL_LONG_WRAP);
+    lv_obj_set_flex_grow(help_hint, 1);
+    lv_obj_set_style_text_font(help_hint, &montserrat_24_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_color(help_hint, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_set_user_data(help_hint, (void*)"error_help_hint");
+
+    ErrorCardCtx* ctx = (ErrorCardCtx*)lv_malloc(sizeof(ErrorCardCtx));
+    if (ctx) {
+        ctx->resolution_cont = resolution_cont;
+        ctx->qr_plate = qr_plate;
+        ctx->help_url = arctic::faultHelpUrl(error->code);
+        lv_obj_add_event_cb(card, error_card_delete_cb, LV_EVENT_DELETE, ctx);
+    }
     
     // Make card clickable to expand/collapse resolution
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_user_data(card, code_label);  // So tap callback can toggle arrow
-    lv_obj_add_event_cb(card, error_card_tap_cb, LV_EVENT_CLICKED, resolution_cont);
+    lv_obj_add_event_cb(card, error_card_tap_cb, LV_EVENT_CLICKED, ctx);
     
     return card;
 }

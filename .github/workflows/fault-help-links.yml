@@ -1,0 +1,73 @@
+name: Fault Help Links
+
+# The controller links each fault code to Arctic's troubleshooting article on
+# their Freshdesk support site (main/fault_help_links.cpp), shown as a QR code
+# on the touchscreen and as a button in the web UI. Arctic can delete or
+# renumber articles at any time, so this opens every link once a week and on
+# any PR that changes the table or the checker.
+#
+# Not a required check: it depends on a third-party site being up, and a
+# broken link is fixed by a table edit, not by blocking unrelated PRs. A
+# failing weekly run opens (or comments on) an issue so it doesn't go
+# unnoticed.
+
+on:
+  schedule:
+    - cron: '17 14 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - main/fault_help_links.cpp
+      # A submodule bump shows up only as this path changing, never as a change
+      # to a file inside it. The fault codes come from the library's table.
+      - components/arctic-macon
+      - tools/check_fault_help_links.py
+      - .github/workflows/fault-help-links.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fault-help-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The fault codes come from the arctic-macon library's fault table.
+          submodules: 'recursive'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check every troubleshooting link
+        id: check
+        run: |
+          set -o pipefail
+          python tools/check_fault_help_links.py | tee link-report.txt
+
+      - name: Open or update an issue when a scheduled check fails
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Fault troubleshooting links are broken"
+          {
+            echo "The weekly check of Arctic's troubleshooting links found problems."
+            echo "Update \`main/fault_help_links.cpp\` (see Arctic's article list at"
+            echo "https://arcticheatpumps.freshdesk.com/support/solutions)."
+            echo
+            echo '```'
+            cat link-report.txt 2>/dev/null || echo "(no report)"
+            echo '```'
+            echo
+            echo "Run: $RUN_URL"
+          } > body.md
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file body.md
+          fi
