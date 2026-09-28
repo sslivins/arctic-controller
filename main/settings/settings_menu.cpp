@@ -293,8 +293,11 @@ static void show_reboot_confirmation(void)
     // Clean up previous overlay if any
     dismiss_reboot_overlay();
 
+    // The preference has already been flipped, so it holds the new state.
+    bool on = app_prefs_is_demo_mode();
     state.reboot_overlay = ui_dialog_create_ex(
-        i18n_get(STR_DEMO_MODE_CHANGED), i18n_get(STR_RESTART_REQUIRED),
+        i18n_get(on ? STR_DEMO_MODE_TURN_ON_TITLE : STR_DEMO_MODE_TURN_OFF_TITLE),
+        i18n_get(on ? STR_DEMO_MODE_TURN_ON_BODY : STR_DEMO_MODE_TURN_OFF_BODY),
         UI_DIALOG_LAYOUT_SHEET, "reboot_overlay", "reboot_panel");
     if (!state.reboot_overlay) return;
     ui_overlay_track(state.reboot_overlay, &state.reboot_overlay);

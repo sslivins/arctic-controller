@@ -283,6 +283,17 @@
     .hist-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
     .field { display: grid; gap: 6px; margin-bottom: 14px; }
     .field label { color: var(--cp-text-muted); font-size: 13px; font-weight: 600; }
+    .field label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+    .field label input[type="checkbox"] { width: auto; min-height: 0; margin: 0; }
+    .demo-banner { background: var(--cp-warning); color: #000; border-radius: 10px; padding: 10px 16px; font-size: 16px; font-weight: 700; margin-bottom: 18px; }
+    .confirm-scrim { position: fixed; inset: 0; z-index: 1000; background: var(--cp-overlay); display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .confirm-dialog { background: var(--cp-surface); border: 1px solid var(--cp-border-strong); border-radius: 16px; padding: 24px; width: 100%; max-width: 380px; box-shadow: 0 12px 40px rgba(0, 0, 0, .45); }
+    .confirm-dialog h3 { margin: 0 0 8px; font-size: 20px; }
+    .confirm-dialog p { margin: 0 0 20px; color: var(--cp-text-muted); font-size: 16px; line-height: 1.4; }
+    .confirm-dialog .btn-row { justify-content: flex-end; }
+    .confirm-dialog.restarting { text-align: center; }
+    .confirm-dialog.restarting .spinner { margin: 0 auto 14px; width: 32px; height: 32px; border-width: 3px; }
+    .confirm-dialog.restarting p { margin: 0; }
     /* Inline help disclosure. Toggled by click rather than hover so the same
        control works with a mouse, a keyboard and a touchscreen -- hover has no
        equivalent on a phone. The panel sits in normal flow instead of floating,
@@ -484,7 +495,6 @@
       .card { padding: 18px 16px; }
       .kv { grid-template-columns: 1fr; gap: 3px; }
       .kv strong { overflow-wrap: anywhere; }
-      .field label:has(input[type="checkbox"]) { display: flex; align-items: center; gap: 10px; min-height: 44px; }
       .field label input[type="checkbox"] { width: 40px !important; min-width: 40px; height: 40px; min-height: 40px; }
       .hero { grid-template-columns: 1fr; }
       .temp-hero { text-align: left; }
@@ -721,7 +731,7 @@
         </header>
         <div class="layout">
           <aside class="rail">${nav.map(n => navButton(n)).join("")}</aside>
-          <main class="main">${content}</main>
+          <main class="main">${state.hp.demo_mode ? `<div class="demo-banner" role="status">Demo mode</div>` : ""}${content}</main>
         </div>
         <nav class="mobile-nav">${nav.map(n => navButton(n, true)).join("")}</nav>
       </div>`;
@@ -743,7 +753,7 @@
       return `<div class="page">
         ${pageHead("Home", "Live operating state and the information you need at a glance.")}
         <section class="card hero">
-          <div><div class="eyebrow">${hp.demo_mode ? "Demo mode · " : ""}${hp.connected ? "Connected" : "Disconnected"}</div>
+          <div><div class="eyebrow">${hp.connected ? "Connected" : "Disconnected"}</div>
             <div class="hero-title">${hp.connected ? (operation === "off" ? "Standby" : titleCase(operation)) : "Disconnected"}</div>
             <div class="hero-sub">${hp.defrosting ? "Defrost cycle active" : hp.unit_on ? "System is responding normally" : "Heat pump is powered off"}</div></div>
           <div class="temp-hero"><div class="temp-value">${temp(hp.temperatures.tank)}</div><div class="temp-label">Tank · target ${temp(target)}</div></div>
@@ -1070,7 +1080,7 @@
       return `<section class="card loc-card" style="margin-top:16px"><h2>Location</h2>
         <div class="loc-current"><strong id="loc-name">${loc.valid ? esc(loc.name || "Unnamed location") : "No location set"}</strong>
           <span class="loc-coords">${loc.valid ? coords : esc(coords)}</span></div>
-        <div class="field"><label><input style="width:auto" type="checkbox" data-action="toggle-tz-auto" ${loc.tz_auto ? "checked" : ""}>
+        <div class="field"><label><input type="checkbox" data-action="toggle-tz-auto" ${loc.tz_auto ? "checked" : ""}>
           Set the timezone automatically from this location</label></div>
         <form data-form="location-search"><div class="field"><label for="loc-query">Search for a place</label>
           <input id="loc-query" name="q" type="search" autocomplete="off" placeholder="City or town" value="${esc(search.query)}"></div>
@@ -1094,9 +1104,8 @@
           <option value="fahrenheit" ${state.preferences.temp_unit==="fahrenheit"?"selected":""}>Fahrenheit</option></select></div>
         <div class="field"><label>Device language</label><select name="language"><option value="en" ${state.preferences.language_code==="en"?"selected":""}>English</option>
           <option value="fr" ${state.preferences.language_code==="fr"?"selected":""}>Français</option><option value="es" ${state.preferences.language_code==="es"?"selected":""}>Español</option></select></div>
-        <div class="field"><label><input style="width:auto" type="checkbox" name="demo_mode" ${state.preferences.demo_mode?"checked":""}> Enable demo mode</label></div>
-        <button class="btn primary" type="submit">Save preferences</button></form>
-        <p class="metric-sub">Changing demo mode requires a restart.</p></section>`;
+        <div class="field"><label><input type="checkbox" name="demo_mode" data-action="toggle-demo-mode" ${state.preferences.demo_mode?"checked":""}> Enable demo mode</label></div>
+        <button class="btn primary" type="submit">Save preferences</button></form></section>`;
     }
     function securitySettings() {
       return `<div class="grid"><section class="card"><h2>Authentication</h2>
@@ -1681,7 +1690,6 @@
           device_name: data.get("device_name"), temp_unit: data.get("temp_unit"), language: data.get("language"), demo_mode: data.get("demo_mode") === "on"
         }), "Preferences saved");
         state.preferences = response;
-        if (response.reboot_required) toast("Restart required for demo mode change");
         render();
       }
       if (type === "auth-config") {
@@ -1721,6 +1729,52 @@
     // web server before erasing/writing flash (to avoid a C6 SDIO wedge), so the
     // browser loses connection mid-install — we treat that loss as "applying &
     // rebooting" and wait for the device to come back on the new version.
+    // Demo mode only takes effect after a restart, so (like the controller's
+    // own screen) toggling it asks first. The dialog lives outside #app so the
+    // periodic re-render can't wipe it or the form's unsaved edits.
+    function showOverlay(html) {
+      closeOverlay();
+      const el = document.createElement("div");
+      el.id = "overlay"; el.className = "confirm-scrim"; el.innerHTML = html;
+      document.body.appendChild(el);
+      return el;
+    }
+    function closeOverlay() { document.getElementById("overlay")?.remove(); }
+    function confirmDemoMode(enable) {
+      const el = showOverlay(`<div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="demo-title">
+        <h3 id="demo-title">${enable ? "Turn on demo mode?" : "Turn off demo mode?"}</h3>
+        <p>${enable ? "Shows sample data instead of controlling the heat pump." : "Resumes controlling the heat pump."} Requires a restart.</p>
+        <div class="btn-row"><button class="btn" data-action="demo-cancel">Cancel</button>
+          <button class="btn primary" data-action="demo-restart" data-enable="${enable ? "1" : "0"}">Restart</button></div></div>`);
+      el.querySelector('[data-action="demo-cancel"]').focus();
+    }
+    async function saveDemoModeAndRestart(enable) {
+      const form = document.querySelector('form[data-form="preferences"]');
+      const data = form ? new FormData(form) : new FormData();
+      const before = await fetch("/api/health", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
+      await mutate("/api/preferences", jsonOptions("PATCH", {
+        device_name: data.get("device_name"), temp_unit: data.get("temp_unit"), language: data.get("language"), demo_mode: enable
+      }));
+      await api("/api/ota/reboot", { method: "POST" });
+      showOverlay(`<div class="confirm-dialog restarting" role="status"><div class="spinner"></div>
+        <h3>Restarting…</h3><p id="restart-note">This page reconnects automatically.</p></div>`);
+      waitForRestart(before.uptime_ms);
+    }
+    // A fresh boot reports a smaller uptime than before the restart.
+    function waitForRestart(uptimeBefore) {
+      const started = Date.now();
+      const tick = async () => {
+        const health = await fetch("/api/health", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+        if (health && (uptimeBefore == null || health.uptime_ms < uptimeBefore)) { location.reload(); return; }
+        if (Date.now() - started > 3 * 60 * 1000) {
+          const note = document.getElementById("restart-note");
+          if (note) note.textContent = "This is taking longer than expected. Reload the page to check on the controller.";
+          return;
+        }
+        setTimeout(tick, 2000);
+      };
+      setTimeout(tick, 2000);
+    }
     async function startInstallWatch() {
       const startVersion = state.ota.current_version || state.info.version || "";
       state.otaInstall = {
@@ -1851,6 +1905,19 @@
       if (action === "scan-wifi") { await mutate("/api/wifi/scan", { method: "POST" }, "WiFi scan started"); setTimeout(loadNetworks, 500); }
       if (action === "disconnect-wifi" && confirm("Disconnect from WiFi? This page will close.")) await mutate("/api/wifi/disconnect", { method: "POST" });
       if (action === "sync-time") { await mutate("/api/time/sync", { method: "POST" }, "Time sync started"); }
+      if (action === "toggle-demo-mode") {
+        // The delegated click handler's preventDefault() leaves the box as it
+        // was; it only changes if the user confirms and the controller restarts.
+        confirmDemoMode(!state.preferences.demo_mode);
+        return;
+      }
+      if (action === "demo-cancel") { closeOverlay(); return; }
+      if (action === "demo-restart") {
+        el.disabled = true;
+        try { await saveDemoModeAndRestart(el.dataset.enable === "1"); }
+        catch (error) { closeOverlay(); throw error; }
+        return;
+      }
       if (action === "toggle-tz-auto") {
         // Derive from state rather than el.checked: the delegated click handler
         // calls preventDefault(), which reverts the checkbox's own toggle.
@@ -1967,6 +2034,9 @@
       handleForm(form).catch(error => {
         if (!error.toastShown) toast(error.message, "bad");
       });
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && document.querySelector('#overlay [data-action="demo-cancel"]')) closeOverlay();
     });
     document.addEventListener("pointerdown", event => {
       const button = event.target.closest('[data-action="power-hold"]');
