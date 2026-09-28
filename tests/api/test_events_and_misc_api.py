@@ -175,6 +175,101 @@ class TestEventsAPI:
         assert data["total"] < 5
 
 
+def _patch(path, json=None):
+    return _session.patch(f"{BASE_URL}{path}", headers=_headers(), json=json, timeout=10)
+
+
+def _wait_until(fetch, predicate, description, timeout=8.0):
+    """Poll ``fetch()`` until ``predicate`` returns something truthy; return it."""
+    deadline = time.monotonic() + timeout
+    while True:
+        found = predicate(fetch())
+        if found:
+            return found
+        if time.monotonic() >= deadline:
+            pytest.fail(f"Timed out waiting for {description}")
+        time.sleep(0.2)
+
+
+def _wait_for_event(predicate, description, timeout=8.0):
+    """Poll /api/events until an event matches ``predicate``; return it."""
+    return _wait_until(
+        lambda: _get("/api/events?limit=50").json()["events"],
+        lambda events: next((e for e in events if predicate(e)), None),
+        description, timeout)
+
+
+class TestEventDetails:
+    """/api/events decodes each payload into readable fields."""
+
+    @pytest.fixture(autouse=True)
+    def _demo_mode(self):
+        if not _get("/api/heatpump/status").json().get("demo_mode"):
+            pytest.skip("Demo mode not enabled on device")
+
+    def _inject_demo(self, fields):
+        r = _patch("/api/heatpump/demo", json=fields)
+        assert r.status_code == 200 and r.json().get("success"), f"Demo inject failed: {r.text}"
+
+    def test_setpoint_change_names_the_setpoint_and_values(self):
+        original = _get("/api/heatpump/status").json()["setpoints"]["hot_water"]
+        target = 47 if original != 47 else 46
+        _delete("/api/events")
+        try:
+            self._inject_demo({"hot_water_setpoint": target})
+            evt = _wait_for_event(
+                lambda e: e["type"] == "setpoint_changed" and e.get("to") == target,
+                f"setpoint_changed to {target}")
+            assert evt["setpoint"] == "hot_water"
+            assert evt["from"] == original
+        finally:
+            self._inject_demo({"hot_water_setpoint": original})
+
+    def test_mode_change_names_both_modes(self):
+        original = _get("/api/heatpump/status").json()["mode"]
+        modes = {"cooling": 0, "heating": 1, "hot_water": 5, "hot_water_cooling": 6}
+        start, target = ("hot_water", "heating") if original != "heating" else ("heating", "hot_water")
+        try:
+            self._inject_demo({"working_mode": modes[start]})
+            _wait_until(lambda: _get("/api/heatpump/status").json()["mode"],
+                        lambda mode: mode == start, f"mode to become {start}", timeout=5.0)
+            _delete("/api/events")
+            self._inject_demo({"working_mode": modes[target]})
+            evt = _wait_for_event(
+                lambda e: e["type"] == "mode_changed" and e.get("to_mode") == target,
+                f"mode_changed to {target}")
+            assert evt["from_mode"] == start
+        finally:
+            if original in modes:
+                self._inject_demo({"working_mode": modes[original]})
+
+    def test_fault_events_carry_code_label_and_help_link(self):
+        _post("/api/test/clear-faults")
+        _delete("/api/events")
+        r = _post("/api/test/inject-fault", json={"code": "P02", "active": True})
+        assert r.status_code == 200, r.text
+        try:
+            evt = _wait_for_event(
+                lambda e: e["type"] == "error_appeared" and e.get("fault_code") == "P02",
+                "error_appeared for P02")
+            assert isinstance(evt["fault_label"], str) and evt["fault_label"]
+            assert evt["help_url"].startswith("https://arcticheatpumps.freshdesk.com/")
+        finally:
+            _post("/api/test/clear-faults")
+        cleared = _wait_for_event(
+            lambda e: e["type"] == "error_cleared" and e.get("fault_code") == "P02",
+            "error_cleared for P02")
+        assert cleared["fault_label"]
+
+    def test_events_without_details_carry_no_decoded_fields(self):
+        decoded = {"from_mode", "to_mode", "setpoint", "from", "to", "fault_code",
+                   "fault_label", "help_url", "watchdog", "recovery"}
+        plain = [e for e in _get("/api/events").json()["events"]
+                 if e["type"] in ("system_start", "connected", "compressor_on", "compressor_off")]
+        for evt in plain:
+            assert not decoded & evt.keys(), f"{evt['type']} has unexpected fields: {evt}"
+
+
 # ── Health API ────────────────────────────────────────────────────────────
 
 

@@ -335,3 +335,29 @@ const char* event_category_name(event_category_t category) {
     if (category >= EVENT_CATEGORY_COUNT) return "system";
     return s_category_names[category];
 }
+
+const char* event_setpoint_key(uint32_t payload) {
+    switch (event_payload_setpoint(payload)) {
+        case EVENT_SETPOINT_COOLING:   return "cooling";
+        case EVENT_SETPOINT_HEATING:   return "heating";
+        case EVENT_SETPOINT_HOT_WATER: return "hot_water";
+        default:                       return NULL;
+    }
+}
+
+const char* event_watchdog_key(uint32_t payload) {
+    switch ((esp_reset_reason_t)payload) {
+        case ESP_RST_INT_WDT:  return "interrupt";
+        case ESP_RST_TASK_WDT: return "task";
+        default:               return "other";
+    }
+}
+
+const char* event_network_recovery_key(uint32_t payload) {
+    switch (payload) {
+        case EVENT_NETWORK_RECOVERED_SELF:        return "self";
+        case EVENT_NETWORK_RECOVERED_WIFI_BOUNCE: return "wifi_bounce";
+        case EVENT_NETWORK_RECOVERED_REBOOT:      return "reboot";
+        default:                                  return NULL;
+    }
+}

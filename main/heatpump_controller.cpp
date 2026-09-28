@@ -134,17 +134,17 @@ static void detectAndLogStateEvents() {
         // Setpoint changes
         if (s_cooling_setpoint_valid && s_prev_cooling_sp_valid &&
             s_state.cooling_setpoint != s_prev_cooling_sp) {
-            uint32_t payload = (0 << 16) | ((uint16_t)s_prev_cooling_sp << 8) | (uint16_t)s_state.cooling_setpoint;
+            uint32_t payload = ((uint32_t)EVENT_SETPOINT_COOLING << 16) | ((uint16_t)s_prev_cooling_sp << 8) | (uint16_t)s_state.cooling_setpoint;
             event_log_record(EVENT_SETPOINT_CHANGED, payload);
         }
         if (s_heating_setpoint_decoded && s_prev_heating_sp_valid &&
             s_state.heating_setpoint != s_prev_heating_sp) {
-            uint32_t payload = (1 << 16) | ((uint16_t)s_prev_heating_sp << 8) | (uint16_t)s_state.heating_setpoint;
+            uint32_t payload = ((uint32_t)EVENT_SETPOINT_HEATING << 16) | ((uint16_t)s_prev_heating_sp << 8) | (uint16_t)s_state.heating_setpoint;
             event_log_record(EVENT_SETPOINT_CHANGED, payload);
         }
         if (s_hot_water_setpoint_valid && s_prev_hotwater_sp_valid &&
             s_state.hot_water_setpoint != s_prev_hotwater_sp) {
-            uint32_t payload = (2 << 16) | ((uint16_t)s_prev_hotwater_sp << 8) | (uint16_t)s_state.hot_water_setpoint;
+            uint32_t payload = ((uint32_t)EVENT_SETPOINT_HOT_WATER << 16) | ((uint16_t)s_prev_hotwater_sp << 8) | (uint16_t)s_state.hot_water_setpoint;
             event_log_record(EVENT_SETPOINT_CHANGED, payload);
         }
         // Component state changes

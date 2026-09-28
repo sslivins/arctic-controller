@@ -259,6 +259,8 @@ class TestEventLogDisplay:
         types = [event["type"] for event in events]
         assert "application_crash" in types
         assert "watchdog_reset" in types
+        watchdog = next(e for e in events if e["type"] == "watchdog_reset")
+        assert watchdog["watchdog"] == "task"
 
     def test_events_survive_reboot(self, device: DeviceClient):
         """The raw-flash journal restores events after a software reboot."""

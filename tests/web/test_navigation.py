@@ -116,3 +116,101 @@ class TestErrorHelpLinks:
             "href", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838")
         expect(links.first).to_have_attribute("target", "_blank")
         expect(links.first).to_have_attribute("rel", "noopener noreferrer")
+
+
+def _fake_events():
+    """A fixed event log covering every detail format, dated relative to now."""
+    import datetime as dt
+    import time
+
+    now = int(time.time())
+    yesterday_noon = int(dt.datetime.combine(
+        dt.date.today() - dt.timedelta(days=1), dt.time(12, 0)).timestamp())
+    last_year = dt.date.today().year - 1
+    old = int(dt.datetime(last_year, 3, 4, 12, 0).timestamp())
+    cur, prev = 111, 222
+
+    def ev(type_, category, ts, boot, **extra):
+        return {"type": type_, "category": category, "timestamp": ts, "boot_id": boot,
+                "uptime_ms": 120000, "payload": 0, **extra}
+
+    events = [
+        ev("error_appeared", "problems", now, cur, fault_code="P02",
+           fault_label="High pressure protection",
+           help_url="https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838"),
+        ev("setpoint_changed", "changes", now - 1, cur, setpoint="hot_water", **{"from": 50, "to": 45}),
+        ev("mode_changed", "changes", now - 2, cur, from_mode="hot_water", to_mode="heating"),
+        ev("compressor_on", "equipment", now - 3, cur),
+        ev("watchdog_reset", "problems", yesterday_noon, prev, watchdog="task"),
+        ev("network_recovered", "problems", yesterday_noon - 60, prev, recovery="wifi_bounce"),
+        ev("system_start", "system", old, prev),
+        ev("pump_on", "equipment", 0, prev),
+    ]
+    body = {"total": len(events), "offset": 0, "count": len(events), "current_boot_id": cur,
+            "brownout_count": 0, "last_reset_reason": "sw", "events": events}
+    return body, f"Mar 4, {last_year}"
+
+
+class TestEventsPage:
+    """The Events page reads like the device's Events screen."""
+
+    def _open(self, page: Page):
+        import json
+        body, old_day = _fake_events()
+        page.route("**/api/events?*", lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(body)))
+        primary(page, "Events").click()
+        expect(page.locator("#event-list .event")).to_have_count(len(body["events"]))
+        return old_day
+
+    def _details(self, page: Page):
+        return page.locator("#event-list .event-detail").all_inner_texts()
+
+    def test_events_are_grouped_by_day(self, dashboard_page: Page):
+        old_day = self._open(dashboard_page)
+        expect(dashboard_page.locator("#event-list .event-day")).to_have_text(
+            ["Today", "Yesterday", old_day, "Before the clock was set"])
+
+    def test_details_are_readable(self, dashboard_page: Page):
+        self._open(dashboard_page)
+        details = self._details(dashboard_page)
+        assert "(P02) High pressure protection" in details
+        assert "Hot water → Heating" in details
+        assert "Task watchdog" in details
+        assert "Restored by reconnecting WiFi" in details
+        assert any(d in details for d in ("Hot water: 50°C → 45°C", "Hot water: 122°F → 113°F")), details
+
+    def test_no_boot_numbers_and_no_empty_details(self, dashboard_page: Page):
+        self._open(dashboard_page)
+        text = dashboard_page.locator("#event-list").inner_text()
+        assert not re.search(r"\bBoot\b|\b111\b|\b222\b", text), text
+        compressor = dashboard_page.locator('.event[data-event-type="compressor_on"]')
+        expect(compressor.locator(".event-title")).to_have_text("Compressor started")
+        expect(compressor.locator(".event-detail")).to_have_count(0)
+        expect(dashboard_page.locator('.event[data-event-type="pump_on"] .event-time')).to_have_text("0h 2m after start")
+
+    def test_problem_events_are_coloured_and_link_to_help(self, dashboard_page: Page):
+        self._open(dashboard_page)
+        problem = dashboard_page.locator('.event[data-event-type="error_appeared"]')
+        expect(problem).to_have_class(re.compile(r"\btone-bad\b"))
+        link = dashboard_page.locator("#event-list a[data-help-url]")
+        expect(link).to_have_count(1)
+        expect(link).to_have_attribute(
+            "href", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838")
+
+    def test_filters(self, dashboard_page: Page):
+        self._open(dashboard_page)
+        events = dashboard_page.locator("#event-list .event")
+        time_filter = dashboard_page.locator("#event-time")
+        assert time_filter.locator("option").all_inner_texts() == [
+            "All time", "Today", "Last 24 hours", "Last 7 days", "Current boot"]
+        time_filter.select_option("boot")
+        expect(events).to_have_count(4)
+        time_filter.select_option("today")
+        expect(events).to_have_count(4)
+        dashboard_page.locator("#event-time").select_option("all")
+        dashboard_page.locator("#event-category").select_option("problems")
+        expect(events).to_have_count(3)
+        dashboard_page.locator("#event-category").select_option("all")
+        dashboard_page.locator("#event-search").fill("P02")
+        expect(events).to_have_count(1)

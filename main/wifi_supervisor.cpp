@@ -85,9 +85,9 @@ static const int BOUNCE_STEP_MS  = 45000;    // gap between bounces / before reb
 static const int MAX_BOUNCES     = 2;
 
 // EVENT_NETWORK_RECOVERED payload (recovery method).
-static const uint32_t RECOVER_SELF   = 0;    // came back on its own (keepalive)
-static const uint32_t RECOVER_BOUNCE = 1;    // a WiFi link bounce restored it
-static const uint32_t RECOVER_REBOOT = 2;    // giving up -> rebooting
+static const uint32_t RECOVER_SELF   = EVENT_NETWORK_RECOVERED_SELF;
+static const uint32_t RECOVER_BOUNCE = EVENT_NETWORK_RECOVERED_WIFI_BOUNCE;
+static const uint32_t RECOVER_REBOOT = EVENT_NETWORK_RECOVERED_REBOOT;
 
 static SemaphoreHandle_t s_ping_done = nullptr;
 

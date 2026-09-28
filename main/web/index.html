@@ -392,14 +392,25 @@
     .search-clear:hover { background: var(--cp-surface-soft); color: var(--cp-text); }
     .search-clear[hidden] { display: none; }
     .event-list { display: grid; gap: 8px; }
-    .event {
-      display: grid; grid-template-columns: 110px 1fr auto; gap: 14px; align-items: center;
-      padding: 14px 16px; border: 1px solid var(--cp-border); border-radius: 10px;
-      background: var(--cp-surface);
+    .event-day {
+      margin: 14px 0 2px; color: var(--cp-text-muted); font-size: 14px; font-weight: 650;
     }
-    .event-time { color: var(--cp-text-muted); font-size: 13px; }
-    .event-title { font-weight: 650; }
-    .event-detail { color: var(--cp-text-muted); font-size: 13px; }
+    .event-day:first-child { margin-top: 0; }
+    .event {
+      --event-tone: var(--cp-text-muted);
+      display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 14px; align-items: start;
+      padding: 14px 16px; border: 1px solid var(--cp-border); border-left: 4px solid var(--event-tone);
+      border-radius: 10px; background: var(--cp-surface);
+    }
+    .event.tone-good { --event-tone: var(--cp-success); }
+    .event.tone-bad { --event-tone: var(--cp-danger); }
+    .event.tone-warn { --event-tone: var(--cp-warning); }
+    .event.tone-info { --event-tone: var(--cp-accent); }
+    .event-icon { color: var(--event-tone); font-size: 18px; line-height: 1.2; text-align: center; }
+    .event-time { color: var(--cp-text-muted); font-size: 13px; white-space: nowrap; line-height: 1.6; }
+    .event-title { font-weight: 650; color: var(--event-tone); }
+    .event-detail { color: var(--cp-text-muted); font-size: 13px; margin-top: 3px; }
+    .event-help { margin-top: 8px; }
     .settings-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 20px; }
     .settings-nav { align-self: start; position: sticky; top: 88px; }
     .settings-nav .nav-link { font-weight: 600; }
@@ -479,8 +490,7 @@
       .component-list { grid-template-columns: repeat(2, 1fr); }
       .mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .event-toolbar { grid-template-columns: 1fr; }
-      .event { grid-template-columns: 1fr auto; }
-      .event-time { grid-column: 1 / -1; }
+      .event { gap: 10px; padding: 12px; }
       .ap-row { grid-template-columns: 1fr; }
       .page-head { align-items: flex-start; }
       .history-head { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; }
@@ -843,30 +853,80 @@
         </section>
       </div>`;
     }
+    const eventNames = {
+      system_start: "Controller started", power_on: "Power turned on", power_off: "Power turned off",
+      mode_changed: "Operating mode changed", setpoint_changed: "Setpoint changed",
+      compressor_on: "Compressor started", compressor_off: "Compressor stopped",
+      fan_on: "Fan started", fan_off: "Fan stopped", pump_on: "Water pump started", pump_off: "Water pump stopped",
+      aux_heater_on: "Aux heater started", aux_heater_off: "Aux heater stopped",
+      defrost_start: "Defrost started", defrost_end: "Defrost ended",
+      error_appeared: "Problem appeared", error_cleared: "Problem cleared",
+      connected: "Heat pump connected", disconnected: "Heat pump disconnected",
+      brownout_reset: "Brownout reset", application_crash: "Application crash", watchdog_reset: "Watchdog reset",
+      network_unreachable: "Network unreachable", network_recovered: "Network recovered"
+    };
+    // Colour and icon per event type, matching the device's Events screen.
+    const eventTones = {
+      power_on: "good", compressor_on: "good", fan_on: "good", pump_on: "good", aux_heater_on: "good",
+      connected: "good", defrost_end: "good", error_cleared: "good", network_recovered: "good",
+      error_appeared: "bad", brownout_reset: "bad", application_crash: "bad", watchdog_reset: "bad",
+      defrost_start: "warn", aux_heater_off: "warn", network_unreachable: "warn",
+      mode_changed: "info", setpoint_changed: "info", system_start: "info"
+    };
+    const eventIcons = {
+      system_start: "↻", power_on: "⏻", power_off: "⏻", mode_changed: "⇄", setpoint_changed: "✎",
+      compressor_on: "⚙\uFE0E", compressor_off: "⚙\uFE0E", fan_on: "✻", fan_off: "✻",
+      pump_on: "≈", pump_off: "≈", aux_heater_on: "+", aux_heater_off: "+",
+      defrost_start: "❄\uFE0E", defrost_end: "❄\uFE0E", error_appeared: "⚠\uFE0E", error_cleared: "✓",
+      connected: "⇆", disconnected: "⇆", brownout_reset: "⚠\uFE0E", application_crash: "⚠\uFE0E",
+      watchdog_reset: "⚠\uFE0E", network_unreachable: "⚠\uFE0E", network_recovered: "✓"
+    };
+    const setpointNames = { cooling: "Cooling", heating: "Heating", hot_water: "Hot water" };
+    const watchdogNames = { interrupt: "Interrupt watchdog", task: "Task watchdog", other: "System watchdog" };
+    const recoveryNames = {
+      self: "Came back on its own", wifi_bounce: "Restored by reconnecting WiFi", reboot: "Restarting the controller"
+    };
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     function eventName(event) {
-      const names = {
-        system_start: "Controller started", power_on: "Power turned on", power_off: "Power turned off",
-        mode_changed: "Operating mode changed", setpoint_changed: "Setpoint changed",
-        compressor_on: "Compressor started", compressor_off: "Compressor stopped",
-        fan_on: "Fan started", fan_off: "Fan stopped", pump_on: "Water pump started", pump_off: "Water pump stopped",
-        aux_heater_on: "Aux heater started", aux_heater_off: "Aux heater stopped",
-        defrost_start: "Defrost started", defrost_end: "Defrost ended",
-        error_appeared: "Problem appeared", error_cleared: "Problem cleared",
-        connected: "Heat pump connected", disconnected: "Heat pump disconnected",
-        brownout_reset: "Brownout reset", application_crash: "Application crash", watchdog_reset: "Watchdog reset"
-      };
-      return names[event.type] || titleCase(event.type);
+      return eventNames[event.type] || titleCase(event.type);
     }
+    // One short line that says what changed; empty when the name says it all.
     function eventDetail(event) {
-      if (event.type === "mode_changed") return `Mode code ${(event.payload >> 8) & 255} → ${event.payload & 255}`;
-      if (event.type === "setpoint_changed") return `Value ${(event.payload >> 8) & 255} → ${event.payload & 255}`;
-      if (event.type.includes("error")) return `Error payload 0x${Number(event.payload).toString(16).toUpperCase()}`;
-      return event.boot_id === state.currentBootId ? "Current boot" : `Boot ${event.boot_id}`;
+      switch (event.type) {
+        case "mode_changed":
+          return event.from_mode && event.to_mode ? `${modeLabel(event.from_mode)} → ${modeLabel(event.to_mode)}` : "";
+        case "setpoint_changed":
+          return event.setpoint ? `${setpointNames[event.setpoint] || titleCase(event.setpoint)}: ${temp(event.from)} → ${temp(event.to)}` : "";
+        case "error_appeared": case "error_cleared":
+          return event.fault_code ? `(${event.fault_code}) ${event.fault_label || ""}`.trim() : "";
+        case "watchdog_reset": return watchdogNames[event.watchdog] || "";
+        case "network_recovered": return recoveryNames[event.recovery] || "";
+        default: return "";
+      }
+    }
+    function helpLink(url) {
+      return /^https:\/\/arcticheatpumps\.freshdesk\.com\//.test(url || "")
+        ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener noreferrer" data-help-url>Troubleshooting guide ↗</a>` : "";
+    }
+    const localDayKey = date => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    function eventDay(event) {
+      if (!event.timestamp) return "Before the clock was set";
+      const d = new Date(event.timestamp * 1000), now = new Date();
+      if (localDayKey(d) === localDayKey(now)) return "Today";
+      const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+      if (localDayKey(d) === localDayKey(yesterday)) return "Yesterday";
+      return `${monthNames[d.getMonth()]} ${d.getDate()}${d.getFullYear() === now.getFullYear() ? "" : `, ${d.getFullYear()}`}`;
+    }
+    function eventTime(event) {
+      if (!event.timestamp) return `${fmtUptime(event.uptime_ms)} after start`;
+      const d = new Date(event.timestamp * 1000);
+      return fmtClock(d.getHours(), d.getMinutes(), d.getSeconds());
     }
     function filteredEvents() {
-      const now = Date.now() / 1000, f = state.eventFilters;
+      const now = Date.now() / 1000, f = state.eventFilters, today = localDayKey(new Date());
       return state.events.filter(e => {
         if (f.category !== "all" && e.category !== f.category) return false;
+        if (f.time === "today" && (!e.timestamp || localDayKey(new Date(e.timestamp * 1000)) !== today)) return false;
         if (f.time === "boot" && e.boot_id !== state.currentBootId) return false;
         if (f.time === "24h" && (!e.timestamp || e.timestamp < now - 86400)) return false;
         if (f.time === "7d" && (!e.timestamp || e.timestamp < now - 604800)) return false;
@@ -874,13 +934,24 @@
         return !f.search || text.includes(f.search.toLowerCase());
       });
     }
+    function eventMarkup(e) {
+      const detail = eventDetail(e);
+      const help = e.type === "error_appeared" ? helpLink(e.help_url) : "";
+      return `<article class="event tone-${eventTones[e.type] || "muted"}" data-event-type="${esc(e.type)}">
+        <span class="event-icon" aria-hidden="true">${eventIcons[e.type] || "•"}</span>
+        <div><div class="event-title">${esc(eventName(e))}</div>${detail ? `<div class="event-detail">${esc(detail)}</div>` : ""}${
+          help ? `<div class="event-help">${help}</div>` : ""}</div>
+        <div class="event-time">${esc(eventTime(e))}</div></article>`;
+    }
     function eventListMarkup() {
       const events = filteredEvents();
-      return events.length ? events.map(e => `<article class="event">
-        <div class="event-time">${e.timestamp ? new Date(e.timestamp * 1000).toLocaleString() : `Uptime ${fmtUptime(e.uptime_ms)}`}</div>
-        <div><div class="event-title">${esc(eventName(e))}</div><div class="event-detail">${esc(eventDetail(e))}</div></div>
-        <span class="badge ${e.category === "problems" ? "bad" : ""}">${esc(e.category)}</span></article>`).join("") :
-        `<div class="card empty">No matching events.</div>`;
+      if (!events.length) return `<div class="card empty">No matching events.</div>`;
+      let day = null;
+      return events.map(e => {
+        const d = eventDay(e), heading = d !== day ? `<h3 class="event-day">${esc(d)}</h3>` : "";
+        day = d;
+        return heading + eventMarkup(e);
+      }).join("");
     }
     function refreshEventResults() {
       const list = $("#event-list");
@@ -889,24 +960,26 @@
       if (clear) clear.hidden = !state.eventFilters.search;
     }
     function eventsPage() {
-      return `<div class="page">${pageHead("Events", `${state.eventTotal} durable operational events.`,
+      const f = state.eventFilters;
+      const option = (value, label, current) => `<option value="${value}" ${current === value ? "selected" : ""}>${label}</option>`;
+      return `<div class="page">${pageHead("Events", `${state.eventTotal} events recorded on this controller.`,
         `<button class="btn danger" data-action="clear-events">Clear events</button>`)}
         <div class="event-toolbar">
           <div class="search-field"><input id="event-search" type="search" autocomplete="off"
-            placeholder="Search loaded events" value="${esc(state.eventFilters.search)}">
+            placeholder="Search loaded events" value="${esc(f.search)}">
             <button class="search-clear" type="button" data-action="clear-event-search"
-              aria-label="Clear event search" ${state.eventFilters.search ? "" : "hidden"}>&times;</button></div>
-          <select id="event-category">${["all","problems","equipment","changes","system"].map(v => `<option ${state.eventFilters.category===v?"selected":""}>${titleCase(v)}</option>`).join("")}</select>
-          <select id="event-time"><option value="all">All time</option><option value="boot" ${state.eventFilters.time==="boot"?"selected":""}>Current boot</option>
-            <option value="24h" ${state.eventFilters.time==="24h"?"selected":""}>Last 24 hours</option><option value="7d" ${state.eventFilters.time==="7d"?"selected":""}>Last 7 days</option></select>
+              aria-label="Clear event search" ${f.search ? "" : "hidden"}>&times;</button></div>
+          <select id="event-category" aria-label="Event category">${[["all", "All categories"], ["problems", "Problems"], ["equipment", "Equipment"],
+            ["changes", "Changes"], ["system", "System"]].map(([v, l]) => option(v, l, f.category)).join("")}</select>
+          <select id="event-time" aria-label="Time range">${[["all", "All time"], ["today", "Today"], ["24h", "Last 24 hours"],
+            ["7d", "Last 7 days"], ["boot", "Current boot"]].map(([v, l]) => option(v, l, f.time)).join("")}</select>
         </div>
         <div class="event-list" id="event-list">${eventListMarkup()}</div>
         ${state.events.length < state.eventTotal ? `<div style="text-align:center;margin-top:16px"><button class="btn" data-action="load-more-events">Load more</button></div>` : ""}
       </div>`;
     }
     function errorItem(error) {
-      const help = /^https:\/\/arcticheatpumps\.freshdesk\.com\//.test(error.help_url || "")
-        ? `<p><a class="btn" href="${esc(error.help_url)}" target="_blank" rel="noopener noreferrer" data-help-url>Troubleshooting guide ↗</a></p>` : "";
+      const link = helpLink(error.help_url), help = link ? `<p>${link}</p>` : "";
       return `<div class="error-item"><div><span class="error-code">${esc(error.code || "Error")}</span> · <strong>${esc(error.name || error.description || "")}</strong></div>
         <div class="metric-sub">${esc(error.description || "")}</div>${error.resolution ? `<p>${esc(error.resolution)}</p>` : ""}${help}</div>`;
     }

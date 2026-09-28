@@ -4188,12 +4188,66 @@ components:
         payload:
           type: integer
           description: |
-            Event-specific payload data:
+            Raw event-specific payload, kept for compatibility. Prefer the
+            decoded fields below, which are present only for the event types
+            they describe.
             - `mode_changed`: `(old_mode << 8) | new_mode`
             - `setpoint_changed`: `(type << 16) | (old_val << 8) | new_val` where type: 0=cooling, 1=heating, 2=hot_water
-            - `error_appeared` / `error_cleared`: `(register << 16) | bit_mask` where register is 1 or 2
+            - `error_appeared` / `error_cleared`: opaque fault site id
+            - `watchdog_reset`: ESP-IDF reset reason
+            - `network_recovered`: 0=came back on its own, 1=WiFi reconnect, 2=controller reboot
             - All other events: 0
           example: 0
+        from_mode:
+          type: string
+          description: "`mode_changed` only: the mode before the change."
+          enum: [cooling, heating, mode_2, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
+          example: hot_water
+        to_mode:
+          type: string
+          description: "`mode_changed` only: the mode after the change."
+          enum: [cooling, heating, mode_2, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
+          example: heating
+        setpoint:
+          type: string
+          nullable: true
+          description: "`setpoint_changed` only: which setpoint changed."
+          enum: [cooling, heating, hot_water]
+          example: hot_water
+        from:
+          type: integer
+          description: "`setpoint_changed` only: the old setpoint in °C."
+          example: 50
+        to:
+          type: integer
+          description: "`setpoint_changed` only: the new setpoint in °C."
+          example: 45
+        fault_code:
+          type: string
+          nullable: true
+          description: "`error_appeared` / `error_cleared` only: fault code shown on the unit."
+          example: P02
+        fault_label:
+          type: string
+          nullable: true
+          description: "`error_appeared` / `error_cleared` only: plain-English fault description."
+          example: High pressure protection
+        help_url:
+          type: string
+          nullable: true
+          description: "`error_appeared` / `error_cleared` only: Arctic's troubleshooting article for the fault."
+          example: https://arcticheatpumps.freshdesk.com/support/solutions/articles/000000
+        watchdog:
+          type: string
+          description: "`watchdog_reset` only: which watchdog reset the controller."
+          enum: [interrupt, task, other]
+          example: task
+        recovery:
+          type: string
+          nullable: true
+          description: "`network_recovered` only: how the network connection came back."
+          enum: [self, wifi_bounce, reboot]
+          example: wifi_bounce
 
     AdvancedParam:
       type: object
