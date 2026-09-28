@@ -279,7 +279,7 @@ static void update_readings() {
     lv_obj_set_style_text_color(state.compressor_freq,
         hp.compressor_freq > 0 ? COLOR_SUCCESS : COLOR_TEXT_DIM, LV_PART_MAIN);
 
-    snprintf(buf, sizeof(buf), "%d RPM", hp.fan_speed);
+    snprintf(buf, sizeof(buf), "%d %s", hp.fan_speed, i18n_get(STR_UNIT_RPM));
     lv_label_set_text(state.fan_speed, buf);
     lv_obj_set_style_text_color(state.fan_speed,
         hp.fan_speed > 0 ? COLOR_SUCCESS : COLOR_TEXT_DIM, LV_PART_MAIN);

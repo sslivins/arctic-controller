@@ -148,7 +148,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_fahrenheit.py`](test_fahrenheit.py) | 24 | °F/°C conversion: hero card, temps screen, API preference, math verification |
 | [`test_temps_screen.py`](test_temps_screen.py) | 22 | Temps sub-screen: all temperature rows, labels, values, navigation |
 | [`test_control_screen.py`](test_control_screen.py) | 19 | Control sub-screen: power button, mode buttons, setpoints, P-parameters |
-| [`test_localization.py`](test_localization.py) | 18 | French and Spanish translations on main screen |
+| [`test_localization.py`](test_localization.py) | 31 | French and Spanish translations on main screen |
 | [`test_errors_screen.py`](test_errors_screen.py) | 12 | Errors sub-screen: active/cleared errors, descriptions, clear history |
 | [`test_screen_performance.py`](test_screen_performance.py) | 11 | Render budget (300 ms) for all screen transitions, heavy state, leak detection |
 | [`test_event_log_screen.py`](test_event_log_screen.py) | 10 | Event log sub-screen: navigation, title, events, clear via API |

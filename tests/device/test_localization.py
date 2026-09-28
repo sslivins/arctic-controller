@@ -79,8 +79,15 @@ COMPONENT_DOTS = {
 
 PERF_STRIP_LABELS = {
     "English":  ["POWER", "FAN"],
-    "Français": ["PUISSANCE", "VENTIL."],
-    "Español":  ["POTENCIA", "VENTIL."],
+    "Français": ["PUISSANCE", "VENTILATEUR"],
+    "Español":  ["POTENCIA", "VENTILADOR"],
+}
+
+# Fan speed unit on the Home performance strip.
+FAN_SPEED_UNIT = {
+    "English":  "RPM",
+    "Français": "tr/min",
+    "Español":  "rpm",
 }
 
 ERROR_CARD_NO_ERRORS = {
@@ -383,6 +390,15 @@ class TestFrenchMainLabels:
         ):
             _assert_visible_text(device, label)
 
+    def test_fan_speed_unit_french(self, device: DeviceClient):
+        """The fan speed reading uses the French unit, not the English 'RPM'."""
+        _set_running(device)
+        expected = f"{FAN_MED} {FAN_SPEED_UNIT['Français']}"
+        _wait_widget_text(device, "perf_fan", expected, contains=True)
+        w = device.find_widget(tag="perf_fan")
+        assert w is not None and expected in (w.text or ""), \
+            f"Expected '{expected}' in fan speed, got '{w.text if w else None}'"
+
     def test_error_card_no_errors_french(self, device: DeviceClient):
         """Error card shows French 'no errors' text."""
         device.clear_all_faults()
@@ -491,6 +507,15 @@ class TestSpanishMainLabels:
             [DEMO_BANNER["Español"]]
         ):
             _assert_visible_text(device, label)
+
+    def test_fan_speed_unit_spanish(self, device: DeviceClient):
+        """The fan speed reading uses the Spanish unit, not the English 'RPM'."""
+        _set_running(device)
+        expected = f"{FAN_MED} {FAN_SPEED_UNIT['Español']}"
+        _wait_widget_text(device, "perf_fan", expected, contains=True)
+        w = device.find_widget(tag="perf_fan")
+        assert w is not None and expected in (w.text or ""), \
+            f"Expected '{expected}' in fan speed, got '{w.text if w else None}'"
 
     def test_error_card_no_errors_spanish(self, device: DeviceClient):
         """Error card shows Spanish 'no errors' text."""
