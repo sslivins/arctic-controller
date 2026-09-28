@@ -2,6 +2,9 @@ pytest>=7.0
 pytest-asyncio>=0.25
 requests>=2.28
 aiohttp>=3.11
+# The Home Assistant client library, at the release hass-macon pins
+# (tests/api/test_pymacon_client.py). Bump together with hass-macon.
+pymacon==0.5.2
 cryptography>=42
 schemathesis>=3.0
 # Pin jsonschema-rs below 0.50: 0.50.0 (released 2026-08-20) removed the
