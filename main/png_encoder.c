@@ -45,16 +45,22 @@
  */
 #include "../dependencies/lvgl/src/libs/lodepng/lodepng.c"
 
-/* --- Custom allocators routed to stdlib (→ PSRAM) --- */
+/* --- Custom allocators that prefer PSRAM ---
+ *
+ * Plain malloc() is not enough: CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512 keeps
+ * every request of 512 bytes or less in internal RAM, and deflate makes enough
+ * of them to drain it to ~1 KB for the whole encode, which stalls lwIP (#234).
+ * Fall back to internal RAM only if PSRAM is exhausted.
+ */
 
 void *lodepng_malloc(size_t size)
 {
-    return malloc(size);
+    return heap_caps_malloc_prefer(size, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT);
 }
 
 void *lodepng_realloc(void *ptr, size_t new_size)
 {
-    return realloc(ptr, new_size);
+    return heap_caps_realloc_prefer(ptr, new_size, 2, MALLOC_CAP_SPIRAM, MALLOC_CAP_DEFAULT);
 }
 
 void lodepng_free(void *ptr)
@@ -81,8 +87,8 @@ png_encode_result_t png_encode_rgb888(const uint8_t *pixels, uint32_t w, uint32_
 
     /*
      * Move the output to a PSRAM-backed buffer so the caller can use
-     * heap_caps_free() consistently.  lodepng used our malloc which already
-     * goes to PSRAM for large allocs, so this is fine as-is.
+     * heap_caps_free() consistently.  lodepng used our allocator, so the
+     * output is already in PSRAM.
      */
     *out_png = png_data;
     *out_size = png_size;
