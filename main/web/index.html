@@ -905,8 +905,10 @@
       </div>`;
     }
     function errorItem(error) {
+      const help = /^https:\/\/arcticheatpumps\.freshdesk\.com\//.test(error.help_url || "")
+        ? `<p><a class="btn" href="${esc(error.help_url)}" target="_blank" rel="noopener noreferrer" data-help-url>Troubleshooting guide ↗</a></p>` : "";
       return `<div class="error-item"><div><span class="error-code">${esc(error.code || "Error")}</span> · <strong>${esc(error.name || error.description || "")}</strong></div>
-        <div class="metric-sub">${esc(error.description || "")}</div>${error.resolution ? `<p>${esc(error.resolution)}</p>` : ""}</div>`;
+        <div class="metric-sub">${esc(error.description || "")}</div>${error.resolution ? `<p>${esc(error.resolution)}</p>` : ""}${help}</div>`;
     }
     function errorsPage() {
       return `<div class="page">${pageHead("Errors", "Active problems remain separate from the operational event stream.",

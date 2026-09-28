@@ -65,6 +65,13 @@ REST API + WebSocket dashboard for monitoring and control.
 - LVGL widgets use `lv_obj_set_user_data()` with string tags for test addressability
 - All user-facing strings go through the i18n translation layer (`i18n.h`)
 - Three languages: English, French, Spanish — update all three when adding strings
+- Write user-facing text in plain, natural language rather than copying the OEM's
+  terse wording (e.g. "Water temperature difference too large", not
+  "Temp. difference too large PT."), and don't abbreviate words to make them fit
+- Use Canadian spelling ("cancelled", "colour"), but prefer wording that reads
+  naturally in both Canada and the US, since Arctic sells in both. Where the two
+  spellings differ, pick another word if one works ("support site", not
+  "support centre/center")
 
 ### UI / UX Conventions (screens & dialogs)
 

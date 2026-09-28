@@ -56,6 +56,7 @@ idf_component_register(
         "factory_reset.cpp"
         "advanced_params.cpp"
         "heatpump_errors.cpp"
+        "fault_help_links.cpp"
         "event_log.cpp"
         "history_storage.cpp"
         "telemetry_history.cpp"

@@ -86,3 +86,33 @@ class TestNavigation:
         expect(search).to_be_focused()
         expect(search).to_have_value("")
         expect(clear).to_be_hidden()
+
+FAKE_ERRORS = {
+    "demo_mode": True, "connected": True, "has_errors": True, "error_count": 2,
+    "highest_severity": "critical",
+    "active": [
+        {"code": "P02", "name": "HIGH_PRESSURE", "description": "Refrigerant pressure too high",
+         "resolution": "Check the water flow.", "severity": "critical", "active": True, "occurred": None,
+         "help_url": "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838"},
+        {"code": "X99", "name": "BOGUS", "description": "Link that isn't Arctic's", "severity": "warning",
+         "active": True, "occurred": None, "help_url": "https://example.com/phish"},
+    ],
+    "history": [],
+}
+
+
+class TestErrorHelpLinks:
+    def test_errors_link_to_arctic_troubleshooting_articles(self, dashboard_page: Page):
+        import json
+        dashboard_page.route("**/api/heatpump/errors", lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(FAKE_ERRORS)))
+        dashboard_page.evaluate("location.hash = '#/errors'")
+        dashboard_page.reload()
+        expect(dashboard_page.get_by_role("heading", name="Errors", exact=True)).to_be_visible()
+        links = dashboard_page.locator("a[data-help-url]")
+        expect(links).to_have_count(1)
+        expect(links.first).to_have_text("Troubleshooting guide ↗")
+        expect(links.first).to_have_attribute(
+            "href", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838")
+        expect(links.first).to_have_attribute("target", "_blank")
+        expect(links.first).to_have_attribute("rel", "noopener noreferrer")

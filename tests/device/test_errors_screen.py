@@ -286,3 +286,53 @@ class TestErrorsApi:
         codes = [e.get("code", "") for e in active if isinstance(e, dict)]
         assert "P02" in codes, \
             f"P02 not found in active errors: {codes}"
+
+# =========================================================================
+# Troubleshooting links
+# =========================================================================
+
+P02_ARTICLE = "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838"
+SUPPORT_SITE = "https://arcticheatpumps.freshdesk.com/support/solutions"
+
+
+class TestTroubleshootingLinks:
+    """Each fault links to Arctic's troubleshooting article for its code."""
+
+    def test_opening_a_card_shows_the_troubleshooting_qr_code(self, device: DeviceClient):
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
+        _open_errors(device)
+        _wait_screen_text(device, "pressure too high")
+
+        # Closed cards don't draw the QR code at all.
+        assert device.find_widget(tag="error_help_qr") is None
+        assert device.find_widget(tag="error_help_hint") is None
+
+        device.click(label_contains="pressure too high")
+        device.wait_until(
+            "troubleshooting QR code to appear",
+            lambda: device.find_widget(tag="error_help_qr") is not None,
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
+        qr = device.find_widget(tag="error_help_qr")
+        assert qr is not None, "Opening the card didn't show the QR code"
+        assert qr.w >= 200 and qr.h >= 200, f"QR code too small to scan: {qr.w}x{qr.h}"
+        hint = device.find_widget(tag="error_help_hint")
+        assert hint is not None
+        assert "Arctic Heat Pumps support site" in (hint.text_en or hint.text)
+
+    def test_api_links_each_fault_to_its_article(self, device: DeviceClient):
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
+        device.inject_fault("E03", True)  # Arctic has no article for E03
+        device.wait_until(
+            "P02 and E03 to appear in errors endpoint",
+            lambda: {"P02", "E03"} <= set(_active_codes(device)),
+            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+        )
+        data = _errors_json(device)
+        urls = {e["code"]: e.get("help_url") for e in data.get("active", [])}
+        assert urls.get("P02") == P02_ARTICLE, urls
+        assert urls.get("E03") == SUPPORT_SITE, urls
+        for entry in data.get("history", []):
+            assert entry.get("help_url", "").startswith(SUPPORT_SITE), entry
