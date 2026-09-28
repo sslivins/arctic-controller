@@ -133,7 +133,8 @@ Every snapshot includes:
 - `state`
 
 `boot_id` changes on every controller boot. `revision` increases whenever any
-exposed state field changes. The revision is assigned while the state snapshot
+exposed state field or the friendly `device_name` changes (so a rename reaches
+clients even while the heat pump is idle). The revision is assigned while the state snapshot
 is coherent, but serialization and network transmission occur without holding
 the heat-pump state mutex.
 
