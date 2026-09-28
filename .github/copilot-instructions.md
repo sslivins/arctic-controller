@@ -26,6 +26,12 @@
   in CI. Don't create separate PRs for small, related fixes (e.g. multiple test
   tweaks). Group them on one branch and open one PR when the batch is ready.
 - When asked for a PR description, always output it in **Markdown** format.
+- **PR titles must be conventional commits too** (`feat(scope): what changed`).
+  PRs are squash-merged with the PR title as the commit subject, so the title is
+  what lands in the release notes. The `pr-metadata` job at the top of `ci.yml`
+  rejects a non-conventional or vague title, or an empty/template-only
+  description, in seconds, before the hardware suite runs; editing the PR re-runs
+  CI automatically (`pr-metadata.yml`). Rules: `.github/scripts/check_pr_metadata.py`.
 
 ## Project Overview
 
