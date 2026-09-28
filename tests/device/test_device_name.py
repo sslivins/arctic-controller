@@ -80,10 +80,10 @@ class TestDeviceNameSettings:
 
         device.click(tag="settings")
         assert device.wait_for_screen("settings", timeout=5.0)
-        assert device.wait_for_widget(tag="settings_device_name_value", timeout=5.0)
+        assert device.wait_for_widget(tag="device_name_settings_value", timeout=5.0)
 
         row = device.find_widget(tag="settings_device_name")
-        value = device.find_widget(tag="settings_device_name_value")
+        value = device.find_widget(tag="device_name_settings_value")
         assert row is not None
         assert value is not None
         assert value.text is not None

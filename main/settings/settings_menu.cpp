@@ -738,7 +738,7 @@ static void create_menu_list(void)
     lv_label_set_long_mode(state.device_name_value_label, LV_LABEL_LONG_DOT);
     lv_obj_set_size(state.device_name_value_label, 270, 34);
     lv_obj_set_style_max_width(state.device_name_value_label, 270, LV_PART_MAIN);
-    lv_obj_set_user_data(state.device_name_value_label, (void*)"settings_device_name_value");
+    lv_obj_set_user_data(state.device_name_value_label, (void*)"device_name_settings_value");
     lv_label_set_text(state.device_name_value_label,
                       current_name[0] ? current_name : i18n_get(STR_CONTROLLER_NAME_HINT));
     lv_obj_align(state.device_name_value_label, LV_ALIGN_RIGHT_MID, -60, 0);
