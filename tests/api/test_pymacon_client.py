@@ -75,6 +75,10 @@ async def test_home_assistant_client_understands_the_controller():
     token, fingerprint = _credentials()
     async with aiohttp.ClientSession() as session:
         client = MaconClient(HOST, token, fingerprint, session=session)
+        stream_up = asyncio.Event()
+        unsubscribe = client.subscribe_status(
+            lambda status: stream_up.set() if status.stream_connected else None
+        )
         try:
             snapshot = await client.start()
             capabilities = client.capabilities
@@ -87,9 +91,8 @@ async def test_home_assistant_client_understands_the_controller():
                 assert limits.minimum < limits.maximum, name
 
             # Live updates reach Home Assistant over the push stream.
-            async with asyncio.timeout(10):
-                while not client.stream_connected:
-                    await asyncio.sleep(0.1)
+            if not client.stream_connected:
+                await asyncio.wait_for(stream_up.wait(), timeout=10)
 
             diag = await client.async_fetch_diagnostics()
             assert diag.device_id == snapshot.device_id
@@ -109,6 +112,7 @@ async def test_home_assistant_client_understands_the_controller():
             ota = await client.async_ota_status()
             assert ota.state, "OTA state missing"
         finally:
+            unsubscribe()
             await client.stop()
 
 
