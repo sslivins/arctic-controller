@@ -230,6 +230,52 @@ def test_capabilities_report_network_identity():
     assert "reversing_valve_request" in first_data["state"]["components"]
 
 
+def _set_device_name(value: str) -> None:
+    api_key = os.environ.get("ARCTIC_API_KEY")
+    if not api_key:
+        pytest.skip("ARCTIC_API_KEY not set")
+    response = _session.patch(
+        f"{BASE_URL}/api/preferences",
+        headers={"X-API-Key": api_key},
+        json={"device_name": value},
+        timeout=10,
+    )
+    response.raise_for_status()
+
+
+def test_renaming_the_controller_bumps_the_state_revision():
+    """Clients drop snapshots whose revision they have already seen.
+
+    The friendly name sits outside ``state``, so without a bump a rename would
+    never reach Home Assistant while the heat pump itself stays idle.
+    """
+    token = _issue_test_token()
+
+    def snapshot():
+        response = _session.get(
+            f"{HA_URL}/api/v1/state", headers=_headers(token), timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+
+    _set_device_name("")
+    try:
+        before = snapshot()
+        assert before["device_name"] is None
+
+        _set_device_name("Revision Test Name")
+        renamed = snapshot()
+        assert renamed["device_name"] == "Revision Test Name"
+        assert renamed["revision"] > before["revision"]
+
+        _set_device_name("")
+        cleared = snapshot()
+        assert cleared["device_name"] is None
+        assert cleared["revision"] > renamed["revision"]
+    finally:
+        _set_device_name("")
+
+
 def test_rotating_token_immediately_invalidates_previous_token():
     previous = _issue_test_token()
     current = _issue_test_token()

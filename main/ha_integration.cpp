@@ -217,10 +217,32 @@ bool calculateHash(const cJSON* value, uint8_t* hash)
     return status == PSA_SUCCESS;
 }
 
-bool assignRevision(const cJSON* state, uint64_t* revision)
+// The friendly name lives outside "state" in the snapshot, but a rename must
+// still bump the revision: clients drop snapshots whose revision they have
+// already seen, so an unbumped rename would never reach Home Assistant.
+bool calculateSnapshotHash(const cJSON* state, const char* device_name, uint8_t* hash)
+{
+    uint8_t state_hash[SHA256_LEN];
+    if (!calculateHash(state, state_hash)) {
+        return false;
+    }
+    cJSON* keyed = cJSON_CreateObject();
+    if (keyed == nullptr) {
+        return false;
+    }
+    char hex[SHA256_LEN * 2 + 1];
+    bytesToHex(state_hash, SHA256_LEN, hex);
+    cJSON_AddStringToObject(keyed, "state", hex);
+    cJSON_AddStringToObject(keyed, "device_name", device_name);
+    const bool ok = calculateHash(keyed, hash);
+    cJSON_Delete(keyed);
+    return ok;
+}
+
+bool assignRevision(const cJSON* state, const char* device_name, uint64_t* revision)
 {
     uint8_t hash[SHA256_LEN];
-    if (!calculateHash(state, hash)) {
+    if (!calculateSnapshotHash(state, device_name, hash)) {
         return false;
     }
 
@@ -385,8 +407,9 @@ cJSON* createStateSnapshot()
         return nullptr;
     }
 
+    const char* friendly_name = app_prefs_get_device_name();
     uint64_t revision = 0;
-    if (!assignRevision(state, &revision)) {
+    if (!assignRevision(state, friendly_name, &revision)) {
         cJSON_Delete(state);
         return nullptr;
     }
@@ -399,7 +422,6 @@ cJSON* createStateSnapshot()
 
     cJSON_AddNumberToObject(root, "protocol_version", PROTOCOL_VERSION);
     cJSON_AddStringToObject(root, "device_id", s_device_id);
-    const char* friendly_name = app_prefs_get_device_name();
     if (friendly_name[0]) {
         cJSON_AddStringToObject(root, "device_name", friendly_name);
     } else {
