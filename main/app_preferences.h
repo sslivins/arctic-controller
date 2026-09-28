@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#define APP_PREFS_DEVICE_NAME_MAX_CODEPOINTS 30
+#define APP_PREFS_DEVICE_NAME_MAX_BYTES 128
+
 // Temperature unit options
 typedef enum {
     TEMP_UNIT_CELSIUS = 0,
@@ -46,6 +49,18 @@ temp_unit_t app_prefs_get_temp_unit(void);
  * @param unit TEMP_UNIT_CELSIUS or TEMP_UNIT_FAHRENHEIT
  */
 void app_prefs_set_temp_unit(temp_unit_t unit);
+
+/**
+ * @brief Get the configured controller-friendly name.
+ * @return UTF-8 name, or "" when unset
+ */
+const char* app_prefs_get_device_name(void);
+
+/**
+ * @brief Set the controller-friendly name.
+ * @param name Already-trimmed UTF-8 name, or "" to clear
+ */
+void app_prefs_set_device_name(const char* name);
 
 /**
  * @brief Convert Celsius to current unit

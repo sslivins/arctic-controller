@@ -133,6 +133,9 @@ static struct {
     bool created = false;
     lv_obj_t* container = nullptr;
     
+    // Friendly controller name
+    lv_obj_t* device_name_label = nullptr;
+
     // Demo mode banner
     lv_obj_t* demo_banner = nullptr;
     
@@ -208,6 +211,22 @@ static struct {
     // Update timer
     lv_timer_t* update_timer = nullptr;
 } state;
+
+static void update_device_name_label(void)
+{
+    if (!state.created || !state.device_name_label) return;
+
+    const char* name = app_prefs_get_device_name();
+    if (!name || name[0] == '\0') {
+        lv_obj_add_flag(state.device_name_label, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    char buf[APP_PREFS_DEVICE_NAME_MAX_BYTES + 8];
+    snprintf(buf, sizeof(buf), LV_SYMBOL_HOME " %s", name);
+    lv_label_set_text(state.device_name_label, buf);
+    lv_obj_clear_flag(state.device_name_label, LV_OBJ_FLAG_HIDDEN);
+}
 
 // ============================================================================
 // Colors
@@ -495,6 +514,17 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_flex_align(state.container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollbar_mode(state.container, LV_SCROLLBAR_MODE_AUTO);
     
+    // =========================================================================
+    // FRIENDLY CONTROLLER NAME (hidden when unset)
+    // =========================================================================
+    state.device_name_label = lv_label_create(state.container);
+    lv_obj_set_size(state.device_name_label, LV_PCT(100), 40);
+    lv_obj_set_style_text_font(state.device_name_label, &montserrat_32_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.device_name_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_set_style_text_align(state.device_name_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_label_set_long_mode(state.device_name_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_user_data(state.device_name_label, (void*)"home_device_name");
+
     // =========================================================================
     // DEMO MODE BANNER (always created, hidden when not in demo mode)
     // =========================================================================
@@ -816,6 +846,7 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     // =========================================================================
 
     state.created = true;
+    update_device_name_label();
     
     // Create update timer (1 second interval)
     state.update_timer = lv_timer_create(update_timer_cb, 1000, nullptr);
@@ -1138,4 +1169,8 @@ void heatpump_screen_set_demo_banner(bool visible) {
     } else {
         lv_obj_add_flag(state.demo_banner, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+void heatpump_screen_update_device_name(void) {
+    update_device_name_label();
 }

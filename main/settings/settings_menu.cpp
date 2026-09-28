@@ -15,10 +15,12 @@
 #include "settings_home_assistant_screen.h"
 #include "settings_security_screen.h"
 #include "settings_web_screen.h"
+#include "keyboard_maps.h"
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../ui_overlay.h"
 #include "../app_preferences.h"
+#include "../device_name.h"
 #include "../status_bar.h"
 #include "../factory_reset.h"
 #include "../system_restart.h"
@@ -46,6 +48,7 @@ static const char* TAG = "settings_menu";
 #define COLOR_TEXT          lv_color_hex(0xffffff)
 #define COLOR_TEXT_DIM      lv_color_hex(0x888888)
 #define COLOR_DIVIDER       lv_color_hex(0x2a3a5a)
+#define COLOR_ERROR         lv_color_hex(0xf44336)
 
 #define FONT_NORMAL   &montserrat_24_latin
 #define FONT_LARGE    &montserrat_24_latin
@@ -78,6 +81,11 @@ typedef struct {
     // Toggle switches
     lv_obj_t* demo_mode_switch;
     lv_obj_t* temp_unit_switch;
+    lv_obj_t* device_name_value_label;
+    lv_obj_t* name_dialog;
+    lv_obj_t* name_textarea;
+    lv_obj_t* name_keyboard;
+    lv_obj_t* name_error_label;
     
     // Temperature unit label pointers (for switch callback)
     lv_obj_t* celsius_label;
@@ -110,6 +118,10 @@ static void row_click_cb(lv_event_t* e);
 static void demo_mode_switch_cb(lv_event_t* e);
 #endif
 static void temp_unit_switch_cb(lv_event_t* e);
+static void show_name_dialog(void);
+static void name_save_cb(lv_event_t* e);
+static void name_cancel_cb(lv_event_t* e);
+static void name_keyboard_ready_cb(lv_event_t* e);
 static void show_reboot_confirmation(void);
 static void reboot_confirm_cb(lv_event_t* e);
 static void reboot_cancel_cb(lv_event_t* e);
@@ -403,9 +415,157 @@ static void row_click_cb(lv_event_t* e)
         web_screen_create(&web_cfg);
         state.sub_screen_active = true;
         state.active_sub_screen = SETTINGS_WEB;
+    } else if (strcmp(tag, "settings_device_name") == 0) {
+        show_name_dialog();
     } else if (strcmp(tag, "settings_factory_reset") == 0) {
         show_factory_reset_confirmation();
     }
+}
+
+static void dismiss_name_dialog(void)
+{
+    if (state.name_dialog) {
+        lv_obj_delete(state.name_dialog);
+        state.name_dialog = NULL;
+        state.name_textarea = NULL;
+        state.name_keyboard = NULL;
+        state.name_error_label = NULL;
+    }
+}
+
+static void name_cancel_cb(lv_event_t* e)
+{
+    (void)e;
+    dismiss_name_dialog();
+}
+
+static void name_keyboard_ready_cb(lv_event_t* e)
+{
+    (void)e;
+    name_save_cb(e);
+}
+
+static void name_save_cb(lv_event_t* e)
+{
+    (void)e;
+    if (!state.name_textarea) return;
+
+    char normalized[APP_PREFS_DEVICE_NAME_MAX_BYTES];
+    char err[96];
+    if (!device_name_validate_and_normalize(lv_textarea_get_text(state.name_textarea),
+                                            normalized, sizeof(normalized),
+                                            err, sizeof(err))) {
+        if (state.name_error_label) {
+            lv_label_set_text(state.name_error_label, i18n_get(STR_CONTROLLER_NAME_INVALID));
+            lv_obj_clear_flag(state.name_error_label, LV_OBJ_FLAG_HIDDEN);
+        }
+        ESP_LOGW(TAG, "Invalid controller name: %s", err);
+        return;
+    }
+
+    app_prefs_set_device_name(normalized);
+    heatpump_screen_update_device_name();
+    if (state.device_name_value_label) {
+        lv_label_set_text(state.device_name_value_label,
+                          normalized[0] ? normalized : i18n_get(STR_CONTROLLER_NAME_HINT));
+    }
+    dismiss_name_dialog();
+}
+
+static void show_name_dialog(void)
+{
+    if (!state.screen || state.name_dialog) return;
+
+    state.name_dialog = lv_obj_create(state.screen);
+    lv_obj_set_size(state.name_dialog, LV_PCT(100), LV_PCT(100));
+    lv_obj_center(state.name_dialog);
+    lv_obj_set_style_bg_color(state.name_dialog, COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(state.name_dialog, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.name_dialog, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(state.name_dialog, 0, LV_PART_MAIN);
+    disable_scrolling(state.name_dialog);
+    lv_obj_set_user_data(state.name_dialog, (void*)"device_name_dialog");
+
+    lv_obj_t* title = lv_label_create(state.name_dialog);
+    lv_label_set_text(title, i18n_get(STR_CONTROLLER_NAME_TITLE));
+    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
+    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
+
+    state.name_textarea = lv_textarea_create(state.name_dialog);
+    lv_obj_set_size(state.name_textarea, LV_PCT(90), 80);
+    lv_obj_align(state.name_textarea, LV_ALIGN_TOP_MID, 0, 100);
+    lv_textarea_set_one_line(state.name_textarea, true);
+    lv_textarea_set_text(state.name_textarea, app_prefs_get_device_name());
+    lv_textarea_set_placeholder_text(state.name_textarea, i18n_get(STR_CONTROLLER_NAME_HINT));
+    lv_obj_set_style_text_font(state.name_textarea, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_user_data(state.name_textarea, (void*)"device_name_input");
+
+    state.name_error_label = lv_label_create(state.name_dialog);
+    lv_label_set_text(state.name_error_label, "");
+    lv_obj_set_style_text_font(state.name_error_label, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.name_error_label, COLOR_ERROR, LV_PART_MAIN);
+    lv_obj_align(state.name_error_label, LV_ALIGN_TOP_MID, 0, 195);
+    lv_obj_add_flag(state.name_error_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_user_data(state.name_error_label, (void*)"device_name_error");
+
+    state.name_keyboard = lv_keyboard_create(state.name_dialog);
+    lv_obj_set_size(state.name_keyboard, LV_PCT(100), LV_PCT(25));
+    lv_obj_align(state.name_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(state.name_keyboard, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_text_font(state.name_keyboard, FONT_NORMAL, LV_PART_ITEMS);
+    lv_keyboard_set_textarea(state.name_keyboard, state.name_textarea);
+    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lc, kb_ctrl_lc);
+    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_uc, kb_ctrl_uc);
+    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec);
+    lv_keyboard_set_popovers(state.name_keyboard, true);
+    lv_obj_add_event_cb(state.name_keyboard, name_keyboard_ready_cb, LV_EVENT_READY, NULL);
+
+    lv_obj_t* action_bar = lv_obj_create(state.name_dialog);
+    lv_obj_set_size(action_bar, LV_PCT(100), 110);
+    lv_obj_align_to(action_bar, state.name_keyboard, LV_ALIGN_OUT_TOP_MID, 0, -8);
+    lv_obj_set_style_bg_color(action_bar, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(action_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(action_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(action_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(action_bar, 30, LV_PART_MAIN);
+    disable_scrolling(action_bar);
+
+    lv_obj_t* cancel_btn = lv_btn_create(action_bar);
+    lv_obj_set_size(cancel_btn, 300, 80);
+    lv_obj_align(cancel_btn, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_opa(cancel_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_radius(cancel_btn, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(cancel_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(cancel_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(cancel_btn, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_add_event_cb(cancel_btn, name_cancel_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(cancel_btn, (void*)"device_name_cancel");
+
+    lv_obj_t* cancel_lbl = lv_label_create(cancel_btn);
+    lv_label_set_text(cancel_lbl, i18n_get(STR_CANCEL));
+    lv_obj_set_style_text_font(cancel_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(cancel_lbl, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(cancel_lbl);
+
+    lv_obj_t* save_btn = lv_btn_create(action_bar);
+    lv_obj_set_size(save_btn, 300, 80);
+    lv_obj_align(save_btn, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(save_btn, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(save_btn, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(save_btn, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(save_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(save_btn, 0, LV_PART_MAIN);
+    lv_obj_add_event_cb(save_btn, name_save_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_user_data(save_btn, (void*)"device_name_save");
+
+    lv_obj_t* save_lbl = lv_label_create(save_btn);
+    lv_label_set_text(save_lbl, i18n_get(STR_SAVE));
+    lv_obj_set_style_text_font(save_lbl, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(save_lbl, COLOR_BG, LV_PART_MAIN);
+    lv_obj_center(save_lbl);
+
+    lv_obj_move_foreground(state.name_keyboard);
 }
 
 // ============================================================================
@@ -566,6 +726,22 @@ static void create_menu_list(void)
         state.list_container, LV_SYMBOL_IMAGE,
         i18n_get(STR_SETTINGS_WEB),
         "settings_web");
+
+    lv_obj_t* name_row = create_settings_row(
+        state.list_container, LV_SYMBOL_EDIT,
+        i18n_get(STR_SETTINGS_CONTROLLER_NAME),
+        "settings_device_name");
+    state.device_name_value_label = lv_label_create(name_row);
+    const char* current_name = app_prefs_get_device_name();
+    lv_obj_set_style_text_font(state.device_name_value_label, FONT_NORMAL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.device_name_value_label, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_label_set_long_mode(state.device_name_value_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_size(state.device_name_value_label, 270, 34);
+    lv_obj_set_style_max_width(state.device_name_value_label, 270, LV_PART_MAIN);
+    lv_obj_set_user_data(state.device_name_value_label, (void*)"device_name_settings_value");
+    lv_label_set_text(state.device_name_value_label,
+                      current_name[0] ? current_name : i18n_get(STR_CONTROLLER_NAME_HINT));
+    lv_obj_align(state.device_name_value_label, LV_ALIGN_RIGHT_MID, -60, 0);
     
     // Demo Mode toggle
 #if CONFIG_DEMO_MODE

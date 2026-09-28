@@ -6,6 +6,7 @@
 #include "api_server.h"
 #include "settings/settings_display_screen.h"
 #include "app_preferences.h"
+#include "device_name.h"
 #include "i18n/i18n.h"
 #include "wifi_manager.h"
 #include "time_manager.h"
@@ -42,7 +43,7 @@
 #include "log_buffer.h"
 #include "log_persist.h"
 #include "tab_shell.h"
-#include "app_preferences.h"
+#include "heatpump_screen.h"
 #include "test_endpoints.h"
 #include "tls_manager.h"
 #include "png_uncompressed.h"
@@ -5624,6 +5625,7 @@ static cJSON* create_preferences_json(void)
     cJSON_AddBoolToObject(root, "demo_mode", app_prefs_is_demo_mode());
     cJSON_AddStringToObject(root, "temp_unit",
         app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT ? "fahrenheit" : "celsius");
+    cJSON_AddStringToObject(root, "device_name", app_prefs_get_device_name());
     cJSON_AddNumberToObject(root, "brightness", display_screen_get_brightness());
     cJSON_AddStringToObject(root, "language",
         i18n_get_language_name(i18n_get_language()));
@@ -5651,7 +5653,7 @@ static esp_err_t preferences_patch_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    char body[256];
+    char body[512];
     int received = httpd_req_recv(req, body, sizeof(body) - 1);
     if (received <= 0) {
         send_json_error(req, "400 Bad Request", "Empty request body");
@@ -5667,7 +5669,8 @@ static esp_err_t preferences_patch_handler(httpd_req_t* req)
     cJSON* demo_mode = cJSON_GetObjectItem(root, "demo_mode");
     cJSON* temp_unit = cJSON_GetObjectItem(root, "temp_unit");
     cJSON* language = cJSON_GetObjectItem(root, "language");
-    bool any = demo_mode || temp_unit || language;
+    cJSON* device_name = cJSON_GetObjectItem(root, "device_name");
+    bool any = demo_mode || temp_unit || language || device_name;
     if ((demo_mode && !cJSON_IsBool(demo_mode)) ||
         (temp_unit && (!cJSON_IsString(temp_unit) ||
             (strcmp(temp_unit->valuestring, "celsius") != 0 &&
@@ -5675,7 +5678,8 @@ static esp_err_t preferences_patch_handler(httpd_req_t* req)
         (language && (!cJSON_IsString(language) ||
             (strcmp(language->valuestring, "en") != 0 &&
              strcmp(language->valuestring, "fr") != 0 &&
-             strcmp(language->valuestring, "es") != 0)))) {
+             strcmp(language->valuestring, "es") != 0))) ||
+        (device_name && !cJSON_IsString(device_name))) {
         cJSON_Delete(root);
         send_json_error(req, "400 Bad Request", "Invalid preference value");
         return ESP_OK;
@@ -5687,10 +5691,24 @@ static esp_err_t preferences_patch_handler(httpd_req_t* req)
     }
 
     bool reboot_required = false;
+    bool name_changed = false;
     if (demo_mode) {
         bool enabled = cJSON_IsTrue(demo_mode);
         reboot_required = enabled != app_prefs_is_demo_mode();
         app_prefs_set_demo_mode(enabled);
+    }
+    if (device_name) {
+        char normalized[APP_PREFS_DEVICE_NAME_MAX_BYTES];
+        char err[96];
+        if (!device_name_validate_and_normalize(device_name->valuestring,
+                                                normalized, sizeof(normalized),
+                                                err, sizeof(err))) {
+            cJSON_Delete(root);
+            send_json_error(req, "400 Bad Request", err);
+            return ESP_OK;
+        }
+        name_changed = strcmp(normalized, app_prefs_get_device_name()) != 0;
+        app_prefs_set_device_name(normalized);
     }
     if (temp_unit) {
         app_prefs_set_temp_unit(
@@ -5707,6 +5725,11 @@ static esp_err_t preferences_patch_handler(httpd_req_t* req)
             ui_language_changed();
             bsp_display_unlock();
         }
+    }
+    if (name_changed) {
+        bsp_display_lock(0);
+        heatpump_screen_update_device_name();
+        bsp_display_unlock();
     }
     cJSON_Delete(root);
 

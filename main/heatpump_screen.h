@@ -44,6 +44,7 @@ bool heatpump_screen_is_created(void);
  * @param visible true to show, false to hide
  */
 void heatpump_screen_set_demo_banner(bool visible);
+void heatpump_screen_update_device_name(void);
 
 #ifdef __cplusplus
 }

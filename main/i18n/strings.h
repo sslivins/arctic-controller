@@ -39,6 +39,10 @@ typedef enum {
     STR_SETTINGS_LANGUAGE,
     STR_SETTINGS_DEMO_MODE,
     STR_SETTINGS_TEMPERATURE,
+    STR_SETTINGS_CONTROLLER_NAME,
+    STR_CONTROLLER_NAME_TITLE,
+    STR_CONTROLLER_NAME_HINT,
+    STR_CONTROLLER_NAME_INVALID,
     STR_SETTINGS_FACTORY_RESET,
     
     // ========================================================================

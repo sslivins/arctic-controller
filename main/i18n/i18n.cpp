@@ -40,6 +40,10 @@ static const char* strings_en[STR_COUNT] = {
     [STR_SETTINGS_LANGUAGE] = "Language",
     [STR_SETTINGS_DEMO_MODE] = "Demo Mode",
     [STR_SETTINGS_TEMPERATURE] = "Temperature",
+    [STR_SETTINGS_CONTROLLER_NAME] = "Controller name",
+    [STR_CONTROLLER_NAME_TITLE] = "Controller name",
+    [STR_CONTROLLER_NAME_HINT] = "Up to 30 characters",
+    [STR_CONTROLLER_NAME_INVALID] = "Use 30 displayable characters or fewer.",
     [STR_SETTINGS_FACTORY_RESET] = "Factory Reset",
     
     // WiFi Panel
@@ -466,6 +470,10 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_SETTINGS_LANGUAGE] = "Langue",
     [STR_SETTINGS_DEMO_MODE] = "Mode d\xc3\xa9mo",
     [STR_SETTINGS_TEMPERATURE] = "Temp\xc3\xa9rature",
+    [STR_SETTINGS_CONTROLLER_NAME] = "Nom du contrôleur",
+    [STR_CONTROLLER_NAME_TITLE] = "Nom du contrôleur",
+    [STR_CONTROLLER_NAME_HINT] = "Jusqu'à 30 caractères",
+    [STR_CONTROLLER_NAME_INVALID] = "Utilisez 30 caractères affichables ou moins.",
     [STR_SETTINGS_FACTORY_RESET] = "Réinitialisation",
     
     // WiFi Panel
@@ -893,6 +901,10 @@ static const char* strings_es[STR_COUNT] = {
     [STR_SETTINGS_LANGUAGE] = "Idioma",
     [STR_SETTINGS_DEMO_MODE] = "Modo demo",
     [STR_SETTINGS_TEMPERATURE] = "Temperatura",
+    [STR_SETTINGS_CONTROLLER_NAME] = "Nombre del controlador",
+    [STR_CONTROLLER_NAME_TITLE] = "Nombre del controlador",
+    [STR_CONTROLLER_NAME_HINT] = "Hasta 30 caracteres",
+    [STR_CONTROLLER_NAME_INVALID] = "Usa 30 caracteres visibles o menos.",
     [STR_SETTINGS_FACTORY_RESET] = "Restablecer de fábrica",
     
     // WiFi Panel

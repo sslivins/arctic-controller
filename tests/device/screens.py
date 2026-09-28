@@ -85,5 +85,7 @@ NON_SUB_SCREEN_ROWS = frozenset(
         # there is no screen for _return_to_main to back out of. The overlay's
         # own dismiss path is exercised by the factory-reset tests.
         "settings_factory_reset",
+        # Opens an inline modal editor, not a settings sub-screen.
+        "settings_device_name",
     }
 )
