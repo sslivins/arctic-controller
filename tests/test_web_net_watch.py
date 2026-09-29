@@ -48,13 +48,19 @@ def test_run_of_missed_pings_is_an_outage():
 
 
 def test_background_thread_counts_pings():
-    w = net_watch.NetworkWatch("dev", interval_s=0.01,
-                               pinger=_scripted([False, False, False]))
+    import threading
+    fifth = threading.Event()
+    calls = []
+
+    def pinger(host):
+        calls.append(host)
+        if len(calls) >= 5:
+            fifth.set()
+        return len(calls) > 3
+
+    w = net_watch.NetworkWatch("dev", interval_s=0, pinger=pinger)
     with w:
-        import time
-        deadline = time.monotonic() + 2
-        while w.sent < 5 and time.monotonic() < deadline:
-            time.sleep(0.01)
+        assert fifth.wait(timeout=5), "watch thread never pinged"
     assert w.sent >= 5
     assert w.missed == 3
     assert w.saw_outage

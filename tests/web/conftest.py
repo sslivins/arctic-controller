@@ -305,7 +305,6 @@ def dashboard_page(page: Page, base_url: str, request) -> Page:
     if waited is None:
         pytest.fail(f"{host} stopped answering pings during the dashboard load "
                     f"and was still unreachable 60 s later", pytrace=False)
-    _wait_for_health(base_url, timeout=30)
 
     _report_network_outage(
         request.node.nodeid,
@@ -339,23 +338,6 @@ def _load_dashboard(page: Page, base_url: str) -> None:
         _browser_login(page)
     else:
         page.wait_for_selector(".rail", timeout=10000)
-
-
-def _wait_for_health(base_url: str, timeout: float) -> None:
-    """Wait for /api/health to answer after an outage (best effort)."""
-    import requests
-    import time
-
-    headers = {"X-API-Key": API_KEY} if API_KEY else {}
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            if requests.get(f"{base_url}/api/health", headers=headers,
-                            timeout=5, verify=False).ok:
-                return
-        except Exception:
-            pass
-        time.sleep(1)
 
 
 def _report_network_outage(nodeid: str, detail: str) -> None:
