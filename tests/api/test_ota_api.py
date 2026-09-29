@@ -839,9 +839,9 @@ class TestOtaRoundTrip:
         assert part, "Device reported no running_partition"
 
         if method == "usb":
-            # Legitimate: a partition-layout change cannot be applied over the
-            # air. The workflow's strict gate fails the run separately if USB was
-            # used because the OTA failed, so nothing is being excused here.
+            # Only happens when the OTA failed and the workflow recovered the rig
+            # over USB. The strict gate fails that run on its own, so skipping
+            # here excuses nothing.
             pytest.skip(f"Firmware was installed over USB (running from {part!r}); OTA slot not applicable")
 
         assert part.startswith("ota_"), (

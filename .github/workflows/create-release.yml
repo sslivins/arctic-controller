@@ -338,7 +338,7 @@ jobs:
             echo '```'
             echo ""
             echo "**For OTA update:**"
-            echo "OTA is supported only after the device has received this partition layout once via USB."
+            echo "The partition table never changes between releases, so any device can update over the air."
             echo "Use \`arctic_controller.bin\` with the device's OTA API:"
             echo '```bash'
             echo "curl -X POST http://arctic.local/api/ota/update \\"

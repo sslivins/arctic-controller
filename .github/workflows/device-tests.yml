@@ -212,6 +212,38 @@ jobs:
           fi
           echo "OK: CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y in compiled firmware"
 
+      - name: Partition table must match the field (latest release)
+        # An OTA only replaces the app. The partition table a device shipped
+        # with is the one it keeps for life, so a build that needs a different
+        # table can never reach the fleet, and one that assumes it has it would
+        # misbehave on every fielded unit. That makes any change here an
+        # immediate, unconditional failure, not a reason to fall back to USB.
+        #
+        # Compares the built binary rather than diffing partitions.csv, so a
+        # change made through sdkconfig (flash size, custom table filename) is
+        # caught too. The table's flash offset is not part of the binary, so it
+        # is pinned separately. Future space is already reserved in the
+        # "reserved" partition precisely so this never needs to change.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          rm -rf /tmp/field && mkdir -p /tmp/field
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern partition-table.bin --dir /tmp/field
+          if ! grep -q '^#define CONFIG_PARTITION_TABLE_OFFSET 0x8000$' build/config/sdkconfig.h; then
+            echo "::error::CONFIG_PARTITION_TABLE_OFFSET is no longer 0x8000. Fielded devices have their table at 0x8000 and can never move it."
+            exit 1
+          fi
+          if ! cmp -s build/partition_table/partition-table.bin /tmp/field/partition-table.bin; then
+            echo "::error::The partition table differs from the one in $TAG. Fielded devices can never receive a new partition table over the air, so this build cannot ship."
+            git fetch -q --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG" 2>/dev/null \
+              && git --no-pager diff "$TAG" HEAD -- partitions.csv || true
+            exit 1
+          fi
+          echo "OK: partition table is byte-identical to $TAG"
+
       - name: Stage build fingerprint for device job
         # build/ is created by the ESP-IDF Docker container as root, so a plain
         # cp is denied; use sudo (GitHub-hosted runner has passwordless sudo).
@@ -273,17 +305,6 @@ jobs:
         with:
           name: firmware
           path: build/
-
-      - name: Detect partition layout changes
-        id: partition_layout
-        run: |
-          git fetch origin main --depth=1
-          if git diff --quiet origin/main HEAD -- partitions.csv; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Partition layout changed; forcing a full USB flash."
-          fi
 
       - name: Set up Python environment
         run: |
@@ -369,10 +390,84 @@ jobs:
             echo "ARCTIC_API_KEY=$DEVICE_KEY" >> $GITHUB_ENV
             echo "Synced API key from device (OTA will authenticate)"
           else
-            echo "WARNING: Could not read device API key pre-OTA — OTA upload will"
-            echo "likely 401 and the job will fall back to USB serial flash, which"
-            echo "does NOT exercise the OTA rollback path."
+            echo "WARNING: Could not read the device API key. The release baseline"
+            echo "below will re-seed NVS with a known key instead."
           fi
+
+      - name: Install the latest release as the OTA baseline (USB)
+        # Field devices update FROM the current release, so that is where every
+        # OTA below has to start. Without this the bench updates from whatever
+        # the previous CI run left on it (an unreleased build with test
+        # endpoints), and an update that only breaks when installed over the
+        # shipped release would pass unnoticed.
+        #
+        # Writes the release's bootloader, partition table, otadata and app:
+        # exactly the images a fielded unit has. NVS is deliberately kept. A
+        # field device keeps its settings across an update, and the bench's
+        # NVS also holds its Wi-Fi credentials and the real TLS certificate
+        # deployed by renew-tls-cert.yml. The API key lives in NVS too, so the
+        # key read by the previous step still works against the release. Only
+        # when that read failed is NVS re-seeded with Wi-Fi and a known key.
+        #
+        # No continue-on-error: if the release cannot be installed or does not
+        # come up, the field upgrade path cannot be tested, so the run fails.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
+          WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
+          SEED_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CONTROLLER_PORT:-}" ]; then
+            echo "::error::No controller serial port detected; cannot install the release baseline."
+            exit 1
+          fi
+
+          TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          VERSION="${TAG#v}"
+          rm -rf /tmp/baseline && mkdir -p /tmp/baseline
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.bin' --dir /tmp/baseline
+          ls -l /tmp/baseline
+
+          NVS_ARGS=()
+          if [ -z "${ARCTIC_API_KEY:-}" ]; then
+            echo "::warning::No API key could be read from the running firmware. Re-seeding NVS, which also clears the bench's TLS certificate until renew-tls-cert.yml next runs."
+            ARCTIC_API_KEY="$SEED_API_KEY" bash .github/scripts/gen_bench_nvs.sh /tmp/baseline/nvs.bin
+            NVS_ARGS=(0x9000 /tmp/baseline/nvs.bin)
+            ARCTIC_API_KEY="$SEED_API_KEY"
+            echo "ARCTIC_API_KEY=$SEED_API_KEY" >> "$GITHUB_ENV"
+          fi
+
+          echo "Installing $TAG over USB as the OTA baseline..."
+          esptool.py --port "$CONTROLLER_PORT" --baud 921600 --chip esp32p4 \
+            --before default_reset --after hard_reset \
+            write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
+            0x2000  /tmp/baseline/bootloader.bin \
+            0x8000  /tmp/baseline/partition-table.bin \
+            "${NVS_ARGS[@]}" \
+            0x49000 /tmp/baseline/ota_data_initial.bin \
+            0x50000 /tmp/baseline/arctic_controller.bin
+          echo "BASELINE_TAG=$TAG" >> "$GITHUB_ENV"
+
+          # The release must come up, authenticate and report its own version,
+          # or the OTA below would not be starting from what the field runs.
+          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          deadline=$((SECONDS + 180))
+          LAST=""
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            RESP=$(curl -sk --connect-timeout 2 --max-time 5 \
+              -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            CUR=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('current_version',''))" 2>/dev/null) || CUR=""
+            if [ "${CUR#v}" = "$VERSION" ]; then
+              echo "Device is running $TAG (baseline ready after ${SECONDS}s)"
+              exit 0
+            fi
+            [ -n "$RESP" ] && LAST="$RESP"
+            sleep 3
+          done
+          echo "::error::The device did not come up running $TAG within 180s of the USB install. Last /api/ota/status: ${LAST:-<unreachable>}"
+          exit 1
 
       - name: Start serial capture for the OTA window
         # The OTA window was the one part of the run with no console coverage:
@@ -387,7 +482,6 @@ jobs:
         # before anything needs the port, so it cannot interfere with the USB
         # fallback or the readiness hard-reset.
         id: ota_serial
-        if: steps.partition_layout.outputs.changed != 'true'
         run: |
           python .github/scripts/capture_serial.py \
             --usb-serial "$CONTROLLER_USB_SERIAL" \
@@ -399,7 +493,6 @@ jobs:
 
       - name: Flash device via OTA
         id: ota_flash
-        if: steps.partition_layout.outputs.changed != 'true'
         continue-on-error: true
         run: |
           # Non-schedule runs (PR/push/dispatch) validate the SYNCHRONOUS push path:
@@ -655,31 +748,20 @@ jobs:
           fi
 
       - name: Fallback — flash via USB serial
-        if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
+        # Recovery only: puts the build under test on the rig so the suites can
+        # still run and the device is left healthy. It never excuses the failed
+        # OTA; "Enforce OTA installation success (strict)" fails the run.
+        if: steps.ota_flash.outcome == 'failure'
         run: |
           echo "OTA failed, falling back to USB serial flash..."
           # See the note in "Flash device via OTA". A USB flash boots the
           # factory slot, so the OTA tests must not demand an ota_* slot here.
           echo "ARCTIC_FLASH_METHOD=usb" >> "$GITHUB_ENV"
 
-          # Generate NVS partition with WiFi credentials + API key so the device can auto-connect
-          # and tests can authenticate.  The "auth" namespace pre-seeds the API key so
-          # auth_mgr_init() uses it instead of generating a random one.
+          # Seed NVS with Wi-Fi credentials and a known API key so the device
+          # can auto-connect and tests can authenticate.
           echo "Generating NVS partition with WiFi credentials and API key..."
-          cat > /tmp/nvs_wifi.csv << 'CSVHEADER'
-          key,type,encoding,value
-          wifi_creds,namespace,,
-          ssid,data,string,${WIFI_SSID}
-          password,data,string,${WIFI_PASSWORD}
-          auth,namespace,,
-          api_key,data,string,${ARCTIC_API_KEY}
-          CSVHEADER
-          # Strip leading whitespace from heredoc
-          sed -i 's/^[[:space:]]*//' /tmp/nvs_wifi.csv
-          # Substitute env vars
-          envsubst < /tmp/nvs_wifi.csv > /tmp/nvs_wifi_resolved.csv
-          python3 -m esp_idf_nvs_partition_gen generate \
-            /tmp/nvs_wifi_resolved.csv /tmp/nvs_wifi.bin 0x40000
+          bash .github/scripts/gen_bench_nvs.sh /tmp/nvs_wifi.bin
 
           if [ -z "$CONTROLLER_PORT" ]; then
             echo "ERROR: No ESP32-P4 controller detected on any serial port"
@@ -699,7 +781,7 @@ jobs:
           ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
 
       - name: Wait for device boot (USB)
-        if: steps.partition_layout.outputs.changed == 'true' || steps.ota_flash.outcome == 'failure'
+        if: steps.ota_flash.outcome == 'failure'
         run: |
           ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 15
@@ -933,21 +1015,22 @@ jobs:
         # Strictness used to be gated on `schedule`, leaving the push path — the
         # one every PR relies on to install its own build — unenforced.
         #
-        # Exempt: a partition-layout change, where OTA is genuinely impossible
-        # (the new table cannot be applied over the air) and USB is correct. That
-        # case skips the OTA step entirely, so its outcome is 'skipped', not
-        # 'failure', and does not trip this gate.
+        # There is no exemption. A partition-table change used to skip the OTA
+        # and go straight to USB, but fielded devices can never receive a new
+        # table, so the build job now rejects any table change outright ("Partition
+        # table must match the field"). Every run installs over the air, starting
+        # from the latest release.
         #
         # This deliberately runs AFTER the USB fallback and the rollback guard so
         # the device is left healthy for the next run even as we fail this one.
-        if: steps.partition_layout.outputs.changed != 'true' && steps.ota_flash.outcome == 'failure'
+        if: steps.ota_flash.outcome == 'failure'
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
             PATH_NAME="/api/ota/update (asynchronous pull path)"
           else
             PATH_NAME="/api/ota/upload (synchronous push path)"
           fi
-          echo "::error::OTA installation FAILED via $PATH_NAME. The device was recovered over USB, so it is healthy and running the build under test — but the over-the-air install did not work, which is the failure mode that strands a field device. Failing the job."
+          echo "::error::OTA installation FAILED via $PATH_NAME, updating from ${BASELINE_TAG:-the latest release}. The device was recovered over USB, so it is healthy and running the build under test, but a field device updating from that release would be stranded. Failing the job."
           exit 1
 
       - name: Assert the OTA'd image committed itself
@@ -966,7 +1049,6 @@ jobs:
         # Deliberately placed before the test suites, which may reboot the
         # device: after a second reboot the image is already valid and reports
         # 'not_pending', which would make this assertion vacuous.
-        if: steps.partition_layout.outputs.changed != 'true'
         env:
           OTA_OUTCOME: ${{ steps.ota_flash.outcome }}
         run: |
