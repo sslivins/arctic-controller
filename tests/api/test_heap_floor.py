@@ -227,3 +227,33 @@ def test_extended_format_still_trips_the_gate_when_exhausted(tmp_path):
     r = _run(_write(tmp_path, "extended_bad.log", lines))
     assert r.returncode == 1, f"exhausted extended log should fail; got {r.returncode}\n{r.stdout}{r.stderr}"
     assert "min-instantaneous-internal-heap=23" in r.stdout, r.stdout
+
+
+# netdiag lines now end with a WiFi link summary (signal, channel, AP,
+# disconnects, radio RPC time) so short network outages can be diagnosed. The
+# suffix must not disturb any figure the gate reads -- in particular it must
+# never add a second "tw=" that would corrupt peak-TIME_WAIT.
+WIFI_SUFFIX_LINES = [
+    "I (33395) netdiag: heap int=40615 (min 12632, largest 17408) psram=23673156 | tcp active=1 tw=0 bound=0 listen=4 | wifi rssi=-58 ch=6 ap=..3a:1f disc=0 reason=0 rpc=4ms",
+    "I (63840) netdiag: heap int=39880 (min 16, largest 11776) psram=23607152 | tcp active=1 tw=3 bound=0 listen=4 | wifi not-connected disc=1 reason=201",
+    "I (94001) netdiag: heap int=40100 (min 16, largest 11776) psram=23607152 | tcp active=1 tw=2 bound=0 listen=4 | wifi ap-info FAILED (ESP_FAIL) disc=1 reason=201 rpc=5003ms",
+]
+
+
+@requires_bash
+def test_wifi_suffix_does_not_disturb_the_gate(tmp_path):
+    r = _run(_write(tmp_path, "wifi.log", WIFI_SUFFIX_LINES))
+    assert r.returncode == 0, f"wifi-suffixed log should pass; got {r.returncode}\n{r.stdout}{r.stderr}"
+    assert "netdiag samples=3" in r.stdout, r.stdout
+    assert "min-instantaneous-internal-heap=39880" in r.stdout, r.stdout
+    assert "peak-TIME_WAIT=3" in r.stdout, r.stdout
+
+
+@requires_bash
+def test_wifi_suffix_still_trips_the_gate_on_pcb_timeout(tmp_path):
+    line = ("W (99000) netdiag: heap int=40000 (min 16, largest 11776) psram=23637360 "
+            "| tcp PCB walk TIMED OUT (tcpip thread unresponsive) "
+            "| wifi rssi=-60 ch=6 ap=..3a:1f disc=0 reason=0 rpc=3ms")
+    r = _run(_write(tmp_path, "wifi_timeout.log", WIFI_SUFFIX_LINES + [line]))
+    assert r.returncode == 1, f"PCB-walk timeout should fail; got {r.returncode}\n{r.stdout}{r.stderr}"
+    assert "tcpip thread unresponsive" in r.stderr, r.stderr

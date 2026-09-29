@@ -14,6 +14,8 @@
  */
 #pragma once
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -38,6 +40,19 @@ void net_diag_sample(net_diag_t* out);
 
 // Gather + emit an ESP_LOGI("netdiag", ...) line. Convenience wrapper.
 void net_diag_log_snapshot(void);
+
+// Format a one-line WiFi link summary into buf, e.g.
+//   "wifi rssi=-58 ch=6 ap=..3a:1f disc=0 reason=0 rpc=4ms"
+// Appended to every netdiag line and to the supervisor's "gateway unreachable"
+// lines, so a short outage can be pinned on the AP or on the device:
+//   - rssi / ch / ap: signal, channel and which access point (last two BSSID
+//     bytes, enough to spot a mesh roam) we are associated with.
+//   - disc / reason: disconnects since boot and the last reason code.
+//   - rpc: how long the host took to get the AP record from the C6 radio over
+//     ESP-Hosted. A slow or failed call ("ap-info FAILED") points at the
+//     host-to-radio link rather than the network.
+// Never contains "tw=", which scan_heap_floor.sh reads from netdiag lines.
+void net_diag_format_wifi(char* buf, size_t len);
 
 // Threshold for treating internal heap as critically low. Healthy runs sit at
 // 30-40 KB free internal; observed excursions collapse to double digits. 12 KB
