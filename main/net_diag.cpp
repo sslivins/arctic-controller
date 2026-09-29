@@ -4,8 +4,11 @@
  */
 #include "net_diag.h"
 
+#include <stdio.h>
 #include <string.h>
+#include <esp_err.h>
 #include <esp_log.h>
+#include <esp_wifi.h>
 #include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -14,6 +17,8 @@
 
 #include "lwip/tcpip.h"
 #include "lwip/priv/tcp_priv.h"   // tcp_active_pcbs, tcp_tw_pcbs, tcp_bound_pcbs, tcp_listen_pcbs
+
+#include "wifi_manager.h"
 
 static const char* TAG = "netdiag";
 
@@ -87,24 +92,52 @@ void net_diag_sample(net_diag_t* out)
     out->pcb_valid = sample_pcbs(out);
 }
 
+void net_diag_format_wifi(char* buf, size_t len)
+{
+    if (!buf || len == 0) return;
+    const unsigned disc   = (unsigned)wifi_mgr_get_disconnect_count();
+    const unsigned reason = (unsigned)wifi_mgr_get_last_disconnect_reason();
+
+    if (wifi_mgr_get_state() != WIFI_MGR_STATE_CONNECTED) {
+        snprintf(buf, len, "wifi not-connected disc=%u reason=%u", disc, reason);
+        return;
+    }
+
+    wifi_ap_record_t ap;
+    const int64_t t0 = esp_timer_get_time();
+    const esp_err_t err = esp_wifi_sta_get_ap_info(&ap);
+    const int rpc_ms = (int)((esp_timer_get_time() - t0) / 1000);
+    if (err != ESP_OK) {
+        snprintf(buf, len, "wifi ap-info FAILED (%s) disc=%u reason=%u rpc=%dms",
+                 esp_err_to_name(err), disc, reason, rpc_ms);
+        return;
+    }
+    snprintf(buf, len, "wifi rssi=%d ch=%u ap=..%02x:%02x disc=%u reason=%u rpc=%dms",
+             (int)ap.rssi, (unsigned)ap.primary, ap.bssid[4], ap.bssid[5],
+             disc, reason, rpc_ms);
+}
+
 void net_diag_log_snapshot(void)
 {
     net_diag_t d;
     net_diag_sample(&d);
 
+    char wifi[112];
+    net_diag_format_wifi(wifi, sizeof(wifi));
+
     if (d.pcb_valid) {
         ESP_LOGI(TAG,
-                 "heap int=%u (min %u, largest %u) psram=%u | tcp active=%d tw=%d bound=%d listen=%d",
+                 "heap int=%u (min %u, largest %u) psram=%u | tcp active=%d tw=%d bound=%d listen=%d | %s",
                  d.free_internal, d.min_free_internal, d.largest_free_internal,
                  d.free_psram,
-                 d.tcp_active, d.tcp_time_wait, d.tcp_bound, d.tcp_listen);
+                 d.tcp_active, d.tcp_time_wait, d.tcp_bound, d.tcp_listen, wifi);
     } else {
         // A timed-out PCB walk is itself a strong wedge signal: the tcpip thread
         // did not service our callback within 1s.
         ESP_LOGW(TAG,
-                 "heap int=%u (min %u, largest %u) psram=%u | tcp PCB walk TIMED OUT (tcpip thread unresponsive)",
+                 "heap int=%u (min %u, largest %u) psram=%u | tcp PCB walk TIMED OUT (tcpip thread unresponsive) | %s",
                  d.free_internal, d.min_free_internal, d.largest_free_internal,
-                 d.free_psram);
+                 d.free_psram, wifi);
     }
 }
 

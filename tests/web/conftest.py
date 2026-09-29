@@ -10,10 +10,16 @@ Credentials are read from environment variables or .env file:
 """
 
 import os
+import sys
+import warnings
 import pytest
 import urllib3
 from pathlib import Path
+from urllib.parse import urlparse
 from playwright.sync_api import Page, Browser, BrowserContext, expect
+from playwright.sync_api import Error as PlaywrightError
+
+from net_watch import NetworkWatch, wait_until_reachable
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -267,15 +273,52 @@ def _web_auth_baseline(base_url: str):
 
 
 @pytest.fixture
-def dashboard_page(page: Page, base_url: str) -> Page:
+def dashboard_page(page: Page, base_url: str, request) -> Page:
     """Navigate to the dashboard and wait for it to load.
 
     Tries to disable web auth first. If that fails (e.g. credentials changed),
     falls back to logging in via the browser.
     Retries page.goto on transient network/DNS errors.
-    """
-    auth_disabled = _ensure_auth_disabled(base_url)
 
+    If the load fails while the device has stopped answering pings, the bench
+    Wi-Fi dropped out rather than the dashboard breaking (see net_watch.py).
+    Then the fixture waits for the network, retries once and raises a visible
+    warning. A failure while the device kept answering is never retried.
+    """
+    _ensure_auth_disabled(base_url)
+
+    watch = NetworkWatch(urlparse(base_url).hostname)
+    try:
+        with watch:
+            _load_dashboard(page, base_url)
+        return page
+    except PlaywrightError:
+        if not watch.saw_outage:
+            if not watch.available:
+                print("net_watch: 'ping' unavailable, so a network outage "
+                      "can't be told apart from a dashboard failure")
+            raise
+        first_error_missed, first_error_sent = watch.missed, watch.sent
+
+    host = watch.host
+    waited = wait_until_reachable(host, timeout_s=60)
+    if waited is None:
+        pytest.fail(f"{host} stopped answering pings during the dashboard load "
+                    f"and was still unreachable 60 s later", pytrace=False)
+
+    _report_network_outage(
+        request.node.nodeid,
+        f"{host} missed {first_error_missed} of {first_error_sent} pings while "
+        f"the dashboard was loading, and answered again after {waited:.0f} s. "
+        f"Retried the load once. Check the controller serial log for "
+        f"'gateway unreachable' to see the device's side of the outage.")
+
+    _ensure_auth_disabled(base_url)
+    _load_dashboard(page, base_url)
+    return page
+
+
+def _load_dashboard(page: Page, base_url: str) -> None:
     # Retry page.goto to handle transient mDNS resolution failures
     last_err = None
     for attempt in range(3):
@@ -296,7 +339,16 @@ def dashboard_page(page: Page, base_url: str) -> Page:
     else:
         page.wait_for_selector(".rail", timeout=10000)
 
-    return page
+
+def _report_network_outage(nodeid: str, detail: str) -> None:
+    """Make a retried outage visible: pytest warning plus a CI annotation."""
+    msg = f"Network outage during {nodeid}: {detail}"
+    warnings.warn(msg)
+    if os.environ.get("GITHUB_ACTIONS"):
+        # sys.__stdout__ bypasses pytest's capture so the runner sees it.
+        sys.__stdout__.write(
+            f"::warning title=Bench network outage during a web test::{msg}\n")
+        sys.__stdout__.flush()
 
 
 @pytest.fixture

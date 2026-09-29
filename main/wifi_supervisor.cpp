@@ -46,6 +46,7 @@
 #include "system_restart.h"
 #include "log_persist.h"
 #include "event_log.h"
+#include "net_diag.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -266,6 +267,14 @@ static void wifi_supervisor_task(void* param) {
                              "(recovered via %s)", down_ms / 1000,
                              method == RECOVER_BOUNCE ? "wifi-bounce"
                                                       : "self-heal/keepalive");
+                } else {
+                    // Too short for the event log, but still worth a line so
+                    // the outage's end is visible next to its start.
+                    char wifi[112];
+                    net_diag_format_wifi(wifi, sizeof(wifi));
+                    ESP_LOGW(TAG, "gateway reachable again after %ds "
+                             "(brief outage, not recorded) | %s",
+                             down_ms / 1000, wifi);
                 }
             }
             unreachable_since_us = 0;
@@ -288,8 +297,10 @@ static void wifi_supervisor_task(void* param) {
             unreachable_since_us = now;
         }
         const int down_ms = (int)((now - unreachable_since_us) / 1000);
+        char wifi[112];
+        net_diag_format_wifi(wifi, sizeof(wifi));
         ESP_LOGW(TAG, "associated (ip=%s) but gateway unreachable for %ds "
-                 "(bounces so far %d)", ip, down_ms / 1000, bounces);
+                 "(bounces so far %d) | %s", ip, down_ms / 1000, bounces, wifi);
 
         // Record the outage once it is clearly not a transient blip, even if it
         // self-heals before we bounce (that itself confirms keepalive working).
