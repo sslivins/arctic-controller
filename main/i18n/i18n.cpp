@@ -7,6 +7,7 @@
 #include <nvs.h>
 #include <esp_log.h>
 #include <string.h>
+#include <stdio.h>
 
 static const char* TAG = "i18n";
 
@@ -438,6 +439,10 @@ static const char* strings_en[STR_COUNT] = {
     [STR_EVENT_MONTH_OCT] = "Oct",
     [STR_EVENT_MONTH_NOV] = "Nov",
     [STR_EVENT_MONTH_DEC] = "Dec",
+    [STR_SEVERITY_INFO] = "info",
+    [STR_SEVERITY_WARNING] = "warning",
+    [STR_SEVERITY_ERROR] = "error",
+    [STR_SEVERITY_CRITICAL] = "critical",
 
     // Reboot confirmation
     [STR_DEMO_MODE_TURN_ON_TITLE] = "Turn on demo mode?",
@@ -871,6 +876,10 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_EVENT_MONTH_OCT] = "oct.",
     [STR_EVENT_MONTH_NOV] = "nov.",
     [STR_EVENT_MONTH_DEC] = "déc.",
+    [STR_SEVERITY_INFO] = "info",
+    [STR_SEVERITY_WARNING] = "avertissement",
+    [STR_SEVERITY_ERROR] = "erreur",
+    [STR_SEVERITY_CRITICAL] = "critique",
 
     // Reboot confirmation
     [STR_DEMO_MODE_TURN_ON_TITLE] = "Activer le mode démo ?",
@@ -1304,6 +1313,10 @@ static const char* strings_es[STR_COUNT] = {
     [STR_EVENT_MONTH_OCT] = "oct",
     [STR_EVENT_MONTH_NOV] = "nov",
     [STR_EVENT_MONTH_DEC] = "dic",
+    [STR_SEVERITY_INFO] = "info",
+    [STR_SEVERITY_WARNING] = "advertencia",
+    [STR_SEVERITY_ERROR] = "error",
+    [STR_SEVERITY_CRITICAL] = "crítico",
 
     // Reboot confirmation
     [STR_DEMO_MODE_TURN_ON_TITLE] = "¿Activar el modo demo?",
@@ -1750,6 +1763,29 @@ const char* i18n_get_language_name(language_t lang)
         return "???";
     }
     return language_names_native[lang];
+}
+
+void i18n_format_date_time(char* buf, size_t buf_size, const struct tm* tm, bool use_24h)
+{
+    if (!buf || buf_size == 0) {
+        return;
+    }
+    buf[0] = '\0';
+    if (!tm || tm->tm_mon < 0 || tm->tm_mon > 11) {
+        return;
+    }
+
+    char time_part[16];
+    if (strftime(time_part, sizeof(time_part), use_24h ? "%H:%M" : "%I:%M %p", tm) == 0) {
+        time_part[0] = '\0';
+    }
+    const char* month = i18n_get((string_id_t)(STR_EVENT_MONTH_JAN + tm->tm_mon));
+
+    if (s_current_language == LANG_ENGLISH) {
+        snprintf(buf, buf_size, "%s %02d, %s", month, tm->tm_mday, time_part);
+    } else {
+        snprintf(buf, buf_size, "%d %s %s", tm->tm_mday, month, time_part);
+    }
 }
 
 const char* i18n_get_language_name_localized(language_t lang)

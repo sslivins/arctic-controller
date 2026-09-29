@@ -170,6 +170,14 @@ ERRORS_OVERLAY_LABELS = {
     "Español":  ["Historial de errores"],
 }
 
+# Fault card severity words (#304). The JSON API keeps the English words.
+SEVERITY_WORDS = {
+    "Français": {"info", "avertissement", "erreur", "critique"},
+    "Español":  {"info", "advertencia", "error", "crítico"},
+}
+ENGLISH_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -582,6 +590,43 @@ def test_tabs_settings_and_overlays_refresh_after_touch_language_change(
         assert device.wait_for_screen("settings", timeout=5.0)
 
     _close_settings(device)
+
+
+@pytest.mark.parametrize("lang_name", ["Français", "Español"])
+def test_fault_cards_translate_severity_and_month(device: DeviceClient, lang_name: str):
+    """Severity and start date on fault cards follow the device language (#304)."""
+    # The autouse fixture leaves the demo fault active, so there is always at
+    # least one card with a real start time.
+    _switch_language(device, lang_name)
+    device.click(tag="error_label")
+    assert device.wait_for_screen("errors", timeout=5.0)
+    try:
+        device.wait_until(
+            "fault cards rendered",
+            lambda: device.find_widget(tag="error_started") is not None,
+            timeout=5.0,
+        )
+        widgets = device.widgets
+        severities = [w.text for w in widgets if w.tag == "error_severity"]
+        started = [w.text for w in widgets if w.tag == "error_started"]
+        assert severities, "no severity labels on the fault cards"
+        unknown = [s for s in severities if s not in SEVERITY_WORDS[lang_name]]
+        assert not unknown, f"untranslated severity in {lang_name}: {unknown}"
+
+        dated = [s for s in started if any(ch.isdigit() for ch in s)]
+        assert dated, f"no dated fault card; saw {started}"
+        english = [s for s in dated if any(m in s for m in ENGLISH_MONTHS)]
+        assert not english, f"English month on {lang_name} fault cards: {english}"
+        _assert_all_text_drawable(device, "errors overlay")
+    finally:
+        device.click(tag="errors_close")
+        assert device.wait_for_screen("main", timeout=5.0)
+
+    # The API must stay English; Home Assistant depends on it.
+    faults = device.get_heatpump_errors()
+    api_sev = {e.get("severity") for e in faults.get("active", [])}
+    assert api_sev and api_sev <= {"info", "warning", "error", "critical"}, \
+        f"API severity must stay English in {lang_name}: {api_sev}"
 
 
 # Notification text shown on the device (the mocks carry no version/count
