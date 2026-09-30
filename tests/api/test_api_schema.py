@@ -125,6 +125,8 @@ SKIP_NON_GET = {
     "/api/preferences",             # PATCH changes persistent preferences
     "/api/wifi/scan",               # POST starts radio scan
     "/api/location",                # POST moves the device and its weather
+    "/api/performance/config",      # PUT overwrites the saved sensors, flow and fluid
+    "/api/performance/test",        # POST connects to arbitrary hosts; blocks httpd up to 8 s
 }
 
 

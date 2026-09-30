@@ -149,14 +149,8 @@ cJSON* createStateObject(const HeatPumpState& hp)
         cJSON_AddNullToObject(readings, "dc_voltage");
     }
     cJSON_AddNumberToObject(readings, "power_w", hp.realtime_power_w);
-    // No estimate: 0 W while the compressor is stopped (truly no output), but
-    // unknown while it runs (settling, defrost, missing temperatures) so HA
-    // energy statistics don't record a false zero.
-    if (hp.cop_valid || hp.compressor_freq == 0) {
-        cJSON_AddNumberToObject(readings, "thermal_w", hp.cop_valid ? hp.thermal_w : 0);
-    } else {
-        cJSON_AddNullToObject(readings, "thermal_w");
-    }
+    // Always a number: pymacon rejects a null thermal_w.
+    cJSON_AddNumberToObject(readings, "thermal_w", hp.thermal_w);
     if (hp.cop_valid) {
         cJSON_AddNumberToObject(readings, "cop", hp.cop_x100 / 100.0);
     } else {
