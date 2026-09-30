@@ -363,6 +363,17 @@ def _wait_readings(device: DeviceClient, timeout: float = POLL_TIMEOUT) -> dict:
     return _get_config(device)
 
 
+# Clean readings for kRecoverMs (60 s), plus up to kSettleMs (180 s) if demo
+# mode starts the compressor or changes mode meanwhile (main/perf_source.h).
+SWITCH_TIMEOUT = 300.0
+
+
+def _wait_source(device: DeviceClient, source: str, desc: str) -> dict:
+    device.wait_until(desc, lambda: _get_config(device)["status"]["source"] == source,
+                      timeout=SWITCH_TIMEOUT, poll=2.0)
+    return _get_config(device)["status"]
+
+
 class TestPolling:
 
     def test_configured_sensors_are_read(self, device: DeviceClient, fake):
@@ -387,9 +398,10 @@ class TestPolling:
             lambda: _get_config(device)["sensors"]["supply"]["rom_id"] == SUPPLY_ROM,
             timeout=POLL_TIMEOUT, poll=1.0)
 
-    def test_losing_the_sensor_falls_back(self, device: DeviceClient, thermux, fake):
+    def test_losing_the_sensor_falls_back_and_recovers(self, device: DeviceClient, thermux, fake):
+        """External -> sensor drops -> heat pump -> sensor back -> external."""
         _configure_both(device, fake)
-        _wait_readings(device)
+        _wait_source(device, "external", "estimate to switch to the external sensors")
         thermux.stop()
         try:
             device.wait_until(
@@ -401,9 +413,15 @@ class TestPolling:
             # The last reading stays visible (with its age), but the estimate
             # must not be using it.
             assert st["source"] == "heat_pump", st
+            assert st["fallback"] is True, st
         finally:
             thermux.start()
         _wait_readings(device)
+        st = _wait_source(device, "external", "estimate to switch back to the external sensors")
+        assert st["fallback"] is False, st
+        # Demo mode can start a settle hold, which blanks the estimate.
+        if not st["settling"]:
+            assert st["cop"] is not None, st
 
 
 # ---------------------------------------------------------------------------
