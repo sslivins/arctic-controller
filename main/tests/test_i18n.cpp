@@ -271,6 +271,97 @@ static void test_every_fault_key_is_translated(void) {
 }
 
 // --------------------------------------------------------------------------
+// Short date/time formatting (fault cards, cycle-history range)
+// --------------------------------------------------------------------------
+static struct tm make_tm(int mon, int mday, int hour, int min) {
+    struct tm t = {};
+    t.tm_year = 126;
+    t.tm_mon = mon;
+    t.tm_mday = mday;
+    t.tm_hour = hour;
+    t.tm_min = min;
+    return t;
+}
+
+static void test_format_date_time_english_is_unchanged(void) {
+    // English must match the strftime("%b %d, ...") output it replaced.
+    char buf[32];
+    struct tm t = make_tm(8, 9, 14, 35);
+    i18n_set_language(LANG_ENGLISH);
+    i18n_format_date_time(buf, sizeof(buf), &t, true);
+    CHECK_STR(buf, "Sep 09, 14:35");
+    i18n_format_date_time(buf, sizeof(buf), &t, false);
+    CHECK_STR(buf, "Sep 09, 02:35 PM");
+}
+
+static void test_format_date_time_translates_the_month(void) {
+    char buf[32];
+    struct tm t = make_tm(8, 29, 14, 13);
+    i18n_set_language(LANG_FRENCH);
+    i18n_format_date_time(buf, sizeof(buf), &t, true);
+    CHECK_STR(buf, "29 sept. 14:13");
+
+    i18n_set_language(LANG_SPANISH);
+    i18n_format_date_time(buf, sizeof(buf), &t, true);
+    CHECK_STR(buf, "29 sep 14:13");
+
+    // No month in any non-English language may use the English abbreviation.
+    // (Case matters: Spanish "mar" and "oct" are lower-case, so they pass.)
+    static const char *english[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    for (int lang = LANG_FRENCH; lang <= LANG_SPANISH; ++lang) {
+        i18n_set_language((language_t)lang);
+        for (int mon = 0; mon < 12; ++mon) {
+            struct tm m = make_tm(mon, 1, 9, 5);
+            i18n_format_date_time(buf, sizeof(buf), &m, true);
+            if (std::strstr(buf, english[mon]) != nullptr) {
+                std::printf("FAIL: language %d month %d formatted as \"%s\" "
+                            "(English month name)\n", lang, mon, buf);
+                ++g_failures;
+            }
+        }
+    }
+    i18n_set_language(LANG_ENGLISH);
+}
+
+static void test_format_date_time_fits_and_tolerates_bad_input(void) {
+    // Callers use 32-byte buffers; the longest case must fit untruncated.
+    char buf[32];
+    struct tm t = make_tm(1, 28, 23, 59);  // "févr." is the longest month
+    i18n_set_language(LANG_FRENCH);
+    i18n_format_date_time(buf, sizeof(buf), &t, false);
+    CHECK_STR(buf, "28 févr. 11:59 PM");
+
+    // Truncation must still terminate the string.
+    char tiny[6];
+    i18n_format_date_time(tiny, sizeof(tiny), &t, true);
+    CHECK(std::strlen(tiny) == sizeof(tiny) - 1);
+
+    std::strcpy(buf, "stale");
+    i18n_format_date_time(buf, sizeof(buf), nullptr, true);
+    CHECK_STR(buf, "");
+    struct tm bad = make_tm(12, 1, 0, 0);
+    std::strcpy(buf, "stale");
+    i18n_format_date_time(buf, sizeof(buf), &bad, true);
+    CHECK_STR(buf, "");
+    i18n_format_date_time(nullptr, 10, &t, true);  // must not crash
+    i18n_set_language(LANG_ENGLISH);
+}
+
+static void test_severity_words_are_translated(void) {
+    i18n_set_language(LANG_ENGLISH);
+    CHECK_STR(i18n_get(STR_SEVERITY_CRITICAL), "critical");
+    CHECK_STR(i18n_get(STR_SEVERITY_WARNING), "warning");
+    i18n_set_language(LANG_FRENCH);
+    CHECK_STR(i18n_get(STR_SEVERITY_CRITICAL), "critique");
+    CHECK_STR(i18n_get(STR_SEVERITY_WARNING), "avertissement");
+    i18n_set_language(LANG_SPANISH);
+    CHECK_STR(i18n_get(STR_SEVERITY_CRITICAL), "crítico");
+    CHECK_STR(i18n_get(STR_SEVERITY_WARNING), "advertencia");
+    i18n_set_language(LANG_ENGLISH);
+}
+
+// --------------------------------------------------------------------------
 // Persistence
 // --------------------------------------------------------------------------
 static void test_language_choice_is_persisted(void) {
@@ -366,6 +457,11 @@ int main(void) {
     test_get_key_fallback_rules();
     test_get_key_translates_a_known_key();
     test_every_fault_key_is_translated();
+
+    test_format_date_time_english_is_unchanged();
+    test_format_date_time_translates_the_month();
+    test_format_date_time_fits_and_tolerates_bad_input();
+    test_severity_words_are_translated();
 
     test_language_choice_is_persisted();
     test_init_restores_the_saved_language();

@@ -472,6 +472,12 @@ typedef enum {
     STR_EVENT_MONTH_NOV,
     STR_EVENT_MONTH_DEC,
 
+    // Fault severity shown on the error cards (the API keeps the English word)
+    STR_SEVERITY_INFO,
+    STR_SEVERITY_WARNING,
+    STR_SEVERITY_ERROR,
+    STR_SEVERITY_CRITICAL,
+
     // ========================================================================
     // Reboot confirmation
     // ========================================================================

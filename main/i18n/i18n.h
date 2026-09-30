@@ -6,6 +6,10 @@
 
 #include "strings.h"
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <time.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -99,6 +103,20 @@ const char* i18n_translate(const char* english_text);
  * @return The English version, or NULL if not found in any i18n table
  */
 const char* i18n_get_english(const char* localized_text);
+
+/**
+ * @brief Format a short date and time with the month in the current language
+ *
+ * English keeps the month first ("Sep 09, 14:35" / "Sep 09, 02:35 PM");
+ * French and Spanish put the day first ("9 sept. 14:35", "9 sep 14:35").
+ * AM/PM stays as-is, matching the status bar clock.
+ *
+ * @param buf      Output buffer (always NUL-terminated when buf_size > 0)
+ * @param buf_size Size of buf; 32 bytes is enough for every language
+ * @param tm       Local time to format; an empty string is written if NULL
+ * @param use_24h  true for 24-hour time, false for 12-hour with AM/PM
+ */
+void i18n_format_date_time(char* buf, size_t buf_size, const struct tm* tm, bool use_24h);
 
 #ifdef __cplusplus
 }

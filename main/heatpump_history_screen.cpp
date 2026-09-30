@@ -566,10 +566,9 @@ static void update_range_label() {
     char end_text[32];
     // The window edges are ragged (the range ends at "now"), so unlike the axis
     // ticks the minutes are meaningful here and the full form is used.
-    const char* fmt =
-        time_mgr_get_24h_format() ? "%b %d, %H:%M" : "%b %d, %I:%M %p";
-    strftime(start_text, sizeof(start_text), fmt, &start_tm);
-    strftime(end_text, sizeof(end_text), fmt, &end_tm);
+    const bool use_24h = time_mgr_get_24h_format();
+    i18n_format_date_time(start_text, sizeof(start_text), &start_tm, use_24h);
+    i18n_format_date_time(end_text, sizeof(end_text), &end_tm, use_24h);
     char range[80];
     snprintf(range, sizeof(range), "%s - %s", start_text, end_text);
     lv_label_set_text(state.range_label, range);

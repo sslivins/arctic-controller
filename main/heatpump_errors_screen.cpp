@@ -89,6 +89,16 @@ static const char* severity_to_icon(arctic::ErrorSeverity severity) {
     }
 }
 
+static const char* severity_to_text(arctic::ErrorSeverity severity) {
+    switch (severity) {
+        case arctic::ErrorSeverity::CRITICAL: return i18n_get(STR_SEVERITY_CRITICAL);
+        case arctic::ErrorSeverity::ERROR:    return i18n_get(STR_SEVERITY_ERROR);
+        case arctic::ErrorSeverity::WARNING:  return i18n_get(STR_SEVERITY_WARNING);
+        case arctic::ErrorSeverity::INFO:     return i18n_get(STR_SEVERITY_INFO);
+        default:                              return arctic::severityToString(severity);
+    }
+}
+
 static constexpr int HELP_QR_PLATE_PX = 230;
 static constexpr int HELP_QR_PX = 206;
 
@@ -201,7 +211,8 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     
     // Severity label
     lv_obj_t* severity_label = lv_label_create(top_row);
-    lv_label_set_text(severity_label, arctic::severityToString(error->severity));
+    lv_label_set_text(severity_label, severity_to_text(error->severity));
+    lv_obj_set_user_data(severity_label, (void*)"error_severity");
     lv_obj_set_style_text_font(severity_label, &montserrat_24_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(severity_label, severity_color, LV_PART_MAIN);
     lv_obj_align(severity_label, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -221,10 +232,9 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     // Format the start time as date/time (respect 12/24h setting)
     char time_str[32] = "Unknown";
     if (error->first_seen > 0) {
-        struct tm* tm_info = localtime(&error->first_seen);
-        if (tm_info) {
-            const char* fmt = time_mgr_get_24h_format() ? "%b %d, %H:%M" : "%b %d, %I:%M %p";
-            strftime(time_str, sizeof(time_str), fmt, tm_info);  // e.g., "Feb 09, 14:35" or "Feb 09, 2:35 PM"
+        struct tm tm_info;
+        if (localtime_r(&error->first_seen, &tm_info)) {
+            i18n_format_date_time(time_str, sizeof(time_str), &tm_info, time_mgr_get_24h_format());
         }
     }
     
@@ -242,6 +252,7 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
         snprintf(duration_buf, sizeof(duration_buf), "%s", i18n_get(STR_HP_JUST_DETECTED));
     }
     lv_label_set_text(duration_label, duration_buf);
+    lv_obj_set_user_data(duration_label, (void*)"error_started");
     lv_obj_set_style_text_font(duration_label, &montserrat_24_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(duration_label, error->active ? COLOR_WARNING : COLOR_TEXT_DIM, LV_PART_MAIN);
     
