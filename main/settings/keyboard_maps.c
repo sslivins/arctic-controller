@@ -1,6 +1,6 @@
 /**
- * Custom keyboard maps for WiFi password dialog
- * Removes OK and keyboard-toggle buttons (header has those)
+ * Shared on-screen keyboard maps (text keyboards omit OK and keyboard-toggle:
+ * dialogs have their own Cancel/Save bar). Used via ui_keyboard_create().
  * 
  * This is in a .c file because LVGL uses implicit int-to-enum
  * conversions that don't work in C++
@@ -58,3 +58,21 @@ const lv_buttonmatrix_ctrl_t kb_ctrl_spec[] = {
     KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1), KB_BTN(1),
     LV_BUTTONMATRIX_CTRL_CHECKED | 2, 6, LV_BUTTONMATRIX_CTRL_CHECKED | 2
 };
+
+// Numeric keypad (perf sensor port / unit ID / register). Digits pop up like
+// the text keyboards; backspace and OK don't.
+#define NUM_KEY KB_BTN(1)
+const char* const kb_map_num[] = {
+    "1", "2", "3", "\n",
+    "4", "5", "6", "\n",
+    "7", "8", "9", "\n",
+    LV_SYMBOL_BACKSPACE, "0", LV_SYMBOL_OK, ""
+};
+
+const lv_buttonmatrix_ctrl_t kb_ctrl_num[] = {
+    NUM_KEY, NUM_KEY, NUM_KEY,
+    NUM_KEY, NUM_KEY, NUM_KEY,
+    NUM_KEY, NUM_KEY, NUM_KEY,
+    LV_BUTTONMATRIX_CTRL_CHECKED | 1, NUM_KEY, LV_BUTTONMATRIX_CTRL_CHECKED | 1
+};
+#undef NUM_KEY

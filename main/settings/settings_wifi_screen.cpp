@@ -8,7 +8,7 @@
 #include "settings_wifi_screen.h"
 #include "settings_menu.h"
 #include "settings_common.h"  // For shared layout constants
-#include "keyboard_maps.h"    // Custom keyboard maps (C file for LVGL compatibility)
+#include "ui_keyboard.h"
 #include "wifi_manager.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
@@ -639,24 +639,10 @@ static void create_password_dialog(void)
     lv_obj_center(s_state.show_password_icon);
     
     // Keyboard at bottom - 25% height
-    s_state.keyboard = lv_keyboard_create(s_state.password_dialog);
-    lv_obj_set_size(s_state.keyboard, LV_PCT(100), LV_PCT(25));
+    s_state.keyboard = ui_keyboard_create(s_state.password_dialog, s_state.password_textarea,
+                                          UiKeyboardKind::Text, COLOR_CARD);
     lv_obj_align(s_state.keyboard, LV_ALIGN_BOTTOM_MID, 0, -25);
-    lv_obj_set_style_bg_color(s_state.keyboard, COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_state.keyboard, FONT_NORMAL, LV_PART_ITEMS);
-    lv_keyboard_set_textarea(s_state.keyboard, s_state.password_textarea);
     lv_obj_add_event_cb(s_state.keyboard, keyboard_ready_cb, LV_EVENT_READY, NULL);
-    
-    // Apply custom keyboard maps (without OK and keyboard-toggle buttons)
-    lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lc, kb_ctrl_lc);
-    lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_uc, kb_ctrl_uc);
-    lv_keyboard_set_map(s_state.keyboard, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec);
-
-    // Fix #1: pop the pressed key up above the finger for visual confirmation.
-    // The custom ctrl maps already carry LV_BUTTONMATRIX_CTRL_POPOVER on the
-    // character keys (see KB_BTN in keyboard_maps.c); enabling popovers keeps
-    // those flags instead of stripping them.
-    lv_keyboard_set_popovers(s_state.keyboard, true);
 
     // Fix #2: bottom action bar (Cancel left / Connect right), mirroring the
     // Control edit dialog. Sits just above the keyboard.

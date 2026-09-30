@@ -14,7 +14,7 @@
 #include "settings_perf_screen.h"
 #include "settings_menu.h"
 #include "settings_common.h"
-#include "keyboard_maps.h"
+#include "ui_keyboard.h"
 #include "i18n/i18n.h"
 #include "fonts/fonts.h"
 #include "../app_preferences.h"
@@ -1299,19 +1299,6 @@ static void close_editor(void)
 // Text entry (full screen with keyboard)
 // ============================================================================
 
-static const char* const kNumMap[] = {
-    "1", "2", "3", "\n",
-    "4", "5", "6", "\n",
-    "7", "8", "9", "\n",
-    LV_SYMBOL_BACKSPACE, "0", LV_SYMBOL_OK, "",
-};
-static const lv_buttonmatrix_ctrl_t kNumCtrl[] = {
-    LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
-    LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
-    LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
-    LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
-};
-
 static void entry_cancel_cb(lv_event_t* e)
 {
     (void)e;
@@ -1445,22 +1432,9 @@ static void open_text_entry(Field f)
     lv_obj_add_flag(te.err, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_user_data(te.err, (void*)"perf_entry_error");
 
-    lv_obj_t* kb = lv_keyboard_create(te.root);
-    lv_obj_set_size(kb, LV_PCT(100), LV_PCT(f == Field::Host ? 25 : 30));
+    lv_obj_t* kb = ui_keyboard_create(te.root, te.ta,
+        f == Field::Host ? UiKeyboardKind::Text : UiKeyboardKind::Number, COLOR_CARD);
     lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(kb, COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_text_font(kb, FONT_NORMAL, LV_PART_ITEMS);
-    if (f == Field::Host) {
-        lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lc, kb_ctrl_lc);
-        lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_uc, kb_ctrl_uc);
-        lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec);
-        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_TEXT_LOWER);
-        lv_keyboard_set_popovers(kb, true);
-    } else {
-        lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_NUMBER, kNumMap, kNumCtrl);
-        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_NUMBER);
-    }
-    lv_keyboard_set_textarea(kb, te.ta);
     lv_obj_set_user_data(kb, (void*)"perf_entry_keyboard");
     lv_obj_add_event_cb(kb, entry_save_cb, LV_EVENT_READY, NULL);
 

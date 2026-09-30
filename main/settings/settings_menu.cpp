@@ -17,7 +17,7 @@
 #include "settings_web_screen.h"
 #include "settings_perf_screen.h"
 #include "../ext_temp_sensors.h"
-#include "keyboard_maps.h"
+#include "ui_keyboard.h"
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../ui_overlay.h"
@@ -523,16 +523,9 @@ static void show_name_dialog(void)
     lv_obj_add_flag(state.name_error_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_user_data(state.name_error_label, (void*)"device_name_error");
 
-    state.name_keyboard = lv_keyboard_create(state.name_dialog);
-    lv_obj_set_size(state.name_keyboard, LV_PCT(100), LV_PCT(25));
+    state.name_keyboard = ui_keyboard_create(state.name_dialog, state.name_textarea,
+                                             UiKeyboardKind::Text, COLOR_CARD);
     lv_obj_align(state.name_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(state.name_keyboard, COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_text_font(state.name_keyboard, FONT_NORMAL, LV_PART_ITEMS);
-    lv_keyboard_set_textarea(state.name_keyboard, state.name_textarea);
-    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lc, kb_ctrl_lc);
-    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_uc, kb_ctrl_uc);
-    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec);
-    lv_keyboard_set_popovers(state.name_keyboard, true);
     lv_obj_add_event_cb(state.name_keyboard, name_keyboard_ready_cb, LV_EVENT_READY, NULL);
 
     lv_obj_t* action_bar = lv_obj_create(state.name_dialog);

@@ -78,6 +78,7 @@ idf_component_register(
         "settings/settings_menu.cpp"
         "settings/settings_wifi_screen.cpp"
         "settings/keyboard_maps.c"
+        "settings/ui_keyboard.cpp"
         "settings/settings_firmware_screen.cpp"
         "settings/settings_time_screen.cpp"
         "settings/settings_language_screen.cpp"
