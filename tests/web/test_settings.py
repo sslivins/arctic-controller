@@ -122,6 +122,22 @@ class TestSettingsWorkspace:
         expect(result).to_contain_text("No reading", timeout=15000)
         expect(result).to_contain_text("Couldn't connect")
 
+    def test_performance_sensor_test_adopts_register_type(self, dashboard_page: Page):
+        """When the test finds the value in the other register table, the form
+        switches to it so Save stores what worked."""
+        dashboard_page.route("**/api/performance/test", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","register_type":"holding","celsius":45.5,"thermux":null}'))
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="return"]')
+        card.locator('select[name="source"]').select_option("modbus_tcp")
+        card.locator('input[name="host"]').fill("127.0.0.1")
+        card.get_by_role("button", name="Test sensor").click()
+        result = card.locator("#perf-test-return")
+        expect(result).to_contain_text("Reading OK")
+        expect(result).to_contain_text("Register type set to Holding")
+        expect(card.locator('select[name="register_type"]')).to_have_value("holding")
+
     def test_diagnostics(self, dashboard_page: Page):
         open_settings(dashboard_page, "Diagnostics")
         expect(dashboard_page.locator("#log-container")).to_be_visible()

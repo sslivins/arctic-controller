@@ -5011,6 +5011,7 @@ static esp_err_t perf_test_post_handler(httpd_req_t* req)
     const bool ok = r.error == ext_temp::Error::None;
     cJSON_AddBoolToObject(resp, "ok", ok);
     cJSON_AddStringToObject(resp, "error", ext_temp::error_name(r.error));
+    cJSON_AddStringToObject(resp, "register_type", perf::register_type_name(r.reg_type));
     if (r.error == ext_temp::Error::Exception) {
         cJSON_AddNumberToObject(resp, "exception", r.exception);
     }

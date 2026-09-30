@@ -43,6 +43,9 @@ struct TestResult {
     Error error;
     uint8_t exception;
     float celsius;
+    // The register type that answered. When the requested one is rejected as
+    // an illegal function/address, the test tries the other one.
+    perf::RegisterType reg_type;
     // Filled when the device identifies as a Thermux and the register is one
     // of its temperature channels.
     bool thermux;

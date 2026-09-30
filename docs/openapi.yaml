@@ -3006,6 +3006,13 @@ paths:
                     type: boolean
                   error:
                     $ref: '#/components/schemas/PerformanceSensorError'
+                  register_type:
+                    type: string
+                    enum: [input, holding]
+                    description: >-
+                      Register type that answered. If the device rejects the
+                      requested type (illegal function or address), the test
+                      tries the other one.
                   exception:
                     type: integer
                     description: Modbus exception code, when `error` is `exception`

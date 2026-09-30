@@ -296,6 +296,22 @@ class TestSensorTest:
         assert body["celsius"] == pytest.approx(FLOAT_C, abs=0.01)
         assert body["thermux"] is None
 
+    def test_input_falls_back_to_holding(self, device: DeviceClient, fake):
+        body = _test_read(device, _modbus(fake, FLOAT_REG, value_type="float32", scale=1,
+                                          no_reading="none")).json()
+        assert body["ok"] is True, body
+        assert body["register_type"] == "holding"
+        assert body["celsius"] == pytest.approx(FLOAT_C, abs=0.01)
+
+    def test_holding_falls_back_to_input(self, device: DeviceClient, fake):
+        body = _test_read(device, _modbus(fake, SUPPLY_REG, register_type="holding")).json()
+        assert body["ok"] is True, body
+        assert body["register_type"] == "input"
+        assert body["thermux"]["channel"] == 4
+
+    def test_register_type_kept_when_it_works(self, device: DeviceClient, fake):
+        assert _test_read(device, _modbus(fake, SUPPLY_REG)).json()["register_type"] == "input"
+
     def test_channel_without_reading(self, device: DeviceClient, fake):
         body = _test_read(device, _modbus(fake, READ_ERROR_REG)).json()
         assert body["ok"] is False
@@ -452,6 +468,26 @@ class TestScreen:
         device.wait_until("editor closed",
                           lambda: not device.has_widget(tag="perf_editor"), timeout=3.0)
         assert _saved_settings(_get_config(device)) == before, "cancel saved the sensor"
+
+    def test_editor_test_picks_register_type(self, device: DeviceClient, fake):
+        r = _put_config(device, {"sensors": {
+            "supply": _modbus(fake, SUPPLY_REG, register_type="holding"),
+            "return": {"source": "heat_pump"}}})
+        assert r.status_code == 200, r.text
+        _open_perf_screen(device)
+        device.click(tag="perf_sensor_supply")
+        assert device.wait_for_widget(tag="perf_test", timeout=5.0)
+
+        device.click(tag="perf_test")
+        assert device.wait_for_widget(tag="perf_test_ok", timeout=12.0), \
+            "test result did not report success"
+        msg = device.find_widget(tag="perf_test_message").text
+        assert "Input" in msg, f"register type change not mentioned in {msg!r}"
+
+        device.click(tag="perf_editor_save")
+        device.wait_until("editor closed",
+                          lambda: not device.has_widget(tag="perf_editor"), timeout=5.0)
+        assert _get_config(device)["sensors"]["supply"]["register_type"] == "input"
 
     def test_editor_switches_back_to_heat_pump(self, device: DeviceClient, fake):
         _configure_both(device, fake)

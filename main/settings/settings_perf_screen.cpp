@@ -883,7 +883,7 @@ static void set_testing(bool testing)
     }
 }
 
-static void render_test_result(const ext_temp::TestResult& r)
+static void render_test_result(const ext_temp::TestResult& r, bool reg_type_switched)
 {
     char title[64];
     char body[256];
@@ -893,8 +893,9 @@ static void render_test_result(const ext_temp::TestResult& r)
     if (r.error == Error::None) {
         snprintf(title, sizeof(title), LV_SYMBOL_OK "  %.2f %s", (double)to_display_temp(r.celsius),
                  app_prefs_temp_unit_str());
+        int n = 0;
         if (r.thermux) {
-            int n = snprintf(body, sizeof(body), i18n_get(STR_PERF_THERMUX_CHANNEL), r.channel);
+            n = snprintf(body, sizeof(body), i18n_get(STR_PERF_THERMUX_CHANNEL), r.channel);
             if (r.thermux_age_s != 0xFFFF && n > 0 && (size_t)n < sizeof(body)) {
                 n += snprintf(body + n, sizeof(body) - n, " \xC2\xB7 ");
                 n += snprintf(body + n, sizeof(body) - n, i18n_get(STR_PERF_READ_AGO),
@@ -903,10 +904,16 @@ static void render_test_result(const ext_temp::TestResult& r)
             if (r.rom_valid && n > 0 && (size_t)n < sizeof(body)) {
                 snprintf(body + n, sizeof(body) - n, "\n");
                 n += 1;
-                snprintf(body + n, sizeof(body) - n, i18n_get(STR_PERF_SENSOR_ID), r.rom_hex);
+                n += snprintf(body + n, sizeof(body) - n, i18n_get(STR_PERF_SENSOR_ID), r.rom_hex);
             }
         } else {
-            snprintf(body, sizeof(body), "%s", i18n_get(STR_PERF_TEST_OK));
+            n = snprintf(body, sizeof(body), "%s", i18n_get(STR_PERF_TEST_OK));
+        }
+        if (reg_type_switched && n > 0 && (size_t)n < sizeof(body)) {
+            n += snprintf(body + n, sizeof(body) - n, "\n");
+            snprintf(body + n, sizeof(body) - n, i18n_get(STR_PERF_REG_SWITCHED),
+                     i18n_get(r.reg_type == perf::RegisterType::Holding ? STR_PERF_REG_HOLDING
+                                                                        : STR_PERF_REG_INPUT));
         }
         show_result(true, title, body);
         return;
@@ -950,7 +957,13 @@ static void test_poll_cb(lv_timer_t* t)
     ed.test_timer = NULL;
     ed.ticket = 0;
     set_testing(false);
-    render_test_result(r);
+    // The test found the value in the other register table: use that.
+    bool switched = done && r.reg_type != ed.ed.reg_type;
+    if (switched) {
+        ed.ed.reg_type = r.reg_type;
+        editor_refresh();
+    }
+    render_test_result(r, switched);
 }
 
 static void test_btn_cb(lv_event_t* e)
@@ -973,7 +986,7 @@ static void test_btn_cb(lv_event_t* e)
     if (ed.ticket == 0) {
         ext_temp::TestResult r = {};
         r.error = ext_temp::Error::Busy;
-        render_test_result(r);
+        render_test_result(r, false);
         return;
     }
     ed.test_started_ms = lv_tick_get();

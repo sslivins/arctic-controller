@@ -1245,6 +1245,7 @@
       const lines = [];
       if (tm) lines.push(`Thermux found · channel ${tm.channel}${tm.age_s != null ? ` · read ${tm.age_s} s ago` : ""}`);
       if (tm && tm.rom_id) lines.push(`Sensor ID ${esc(tm.rom_id)}`);
+      if (t.switched) lines.push(`Register type set to ${r.register_type === "holding" ? "Holding" : "Input"}`);
       if (r.ok) {
         return `<div class="perf-test ok"><strong>Reading OK · ${perfTemp(r.celsius)}</strong>${lines.map(l => `<div class="metric-sub">${l}</div>`).join("")}</div>`;
       }
@@ -2184,7 +2185,10 @@
         el.disabled = true;
         try {
           const result = await api("/api/performance/test", jsonOptions("POST", { slot, sensor }));
-          state.perfTests[slot] = { result };
+          const regSelect = form.querySelector('[name="register_type"]');
+          const switched = regSelect && result.register_type && result.register_type !== regSelect.value;
+          if (switched) regSelect.value = result.register_type;
+          state.perfTests[slot] = { result, switched };
         } catch (error) {
           state.perfTests[slot] = { failed: perfInvalidMessage(error) };
         } finally {

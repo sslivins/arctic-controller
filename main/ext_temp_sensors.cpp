@@ -304,23 +304,44 @@ void poll_slot(int i, const perf::SensorConfig& cfg, Connection& c, bool net_up)
     }
 }
 
-void run_test(const perf::SensorConfig& cfg, TestResult* out) {
+bool value_reachable(Error e) {
+    return e == Error::None || e == Error::NoReading || e == Error::OutOfRange;
+}
+
+// Illegal function (1) or illegal data address (2): the device may keep this
+// value in the other register table.
+bool wrong_register_table(const ValueRead& r) {
+    return r.error == Error::Exception && (r.exception == 1 || r.exception == 2);
+}
+
+void run_test(const perf::SensorConfig& requested, TestResult* out) {
     *out = {};
     out->error = Error::None;
     out->thermux_age_s = 0xFFFF;
+    out->reg_type = requested.reg_type;
     Connection c;
-    Error e = network_up() ? c.open(cfg.host, cfg.port) : Error::Connect;
+    Error e = network_up() ? c.open(requested.host, requested.port) : Error::Connect;
     if (e != Error::None) {
         out->error = e;
         return;
     }
+    perf::SensorConfig cfg = requested;
     ValueRead r = read_value(c, cfg);
+    if (wrong_register_table(r)) {
+        perf::SensorConfig other = cfg;
+        other.reg_type = cfg.reg_type == perf::RegisterType::Input ? perf::RegisterType::Holding
+                                                                   : perf::RegisterType::Input;
+        ValueRead r2 = read_value(c, other);
+        if (r2.error == Error::None) {
+            cfg = other;
+            r = r2;
+            out->reg_type = other.reg_type;
+        }
+    }
     out->error = r.error;
     out->exception = r.exception;
     out->celsius = r.celsius;
-    bool reachable = r.error == Error::None || r.error == Error::NoReading ||
-                     r.error == Error::OutOfRange;
-    if (!reachable || !perf::thermux::candidate(cfg) || !probe_thermux(c, cfg)) return;
+    if (!value_reachable(r.error) || !perf::thermux::candidate(cfg) || !probe_thermux(c, cfg)) return;
 
     out->thermux = true;
     out->channel = perf::thermux::channel_of(cfg);
