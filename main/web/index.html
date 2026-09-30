@@ -455,6 +455,15 @@
     .mobile-nav { display: none; }
     .spinner { width: 18px; height: 18px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .dot.warn { background: var(--cp-warning); }
+    .perf-src { display: flex; align-items: center; gap: 8px; margin: 2px 0 8px; font-weight: 600; }
+    .perf-warn { color: var(--cp-warning); }
+    .perf-glycol.is-disabled { opacity: .45; }
+    .perf-adv { margin: 0 0 14px; }
+    .perf-adv > .grid { padding: 14px 14px 0; gap: 0 14px; }
+    .perf-test { margin-top: 12px; }
+    .perf-test.ok { border-left: 4px solid var(--cp-success); padding: 12px 14px; background: var(--cp-surface-soft); border-radius: 0 10px 10px 0; }
+    .spinner-inline { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
     .btn-spinner { display: inline-block; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; }
     .btn.checking:disabled { opacity: 1; cursor: progress; }
     @media (max-width: 900px) {
@@ -550,7 +559,7 @@
     const settingsNav = [
       ["wifi", "WiFi"], ["firmware", "Firmware"], ["time", "Time & Location"], ["display", "Display"],
       ["preferences", "Preferences"], ["security", "Security"], ["home_assistant", "Home Assistant"],
-      ["diagnostics", "Diagnostics"], ["system", "System"]
+      ["performance", "Heat output & COP"], ["diagnostics", "Diagnostics"], ["system", "System"]
     ];
     // Selectable modes only; mode_2..mode_4 are displayed but never offered.
     const modes = ["cooling", "heating", "hot_water", "hot_water_cooling"];
@@ -575,6 +584,7 @@
       locationSearch: { query: "", busy: false, error: "", results: null },
       notifications: [], notifOpen: false,
       ha: {}, haTimer: null,
+      perf: null, perfTimer: null, perfTests: {},
       settingsLoaded: false, settingsPromise: null,
       logs: [], logSeq: 0, logLevel: "V", logTimer: null, pollTimer: null,
       powerHoldTimer: null, powerHolding: false
@@ -605,7 +615,11 @@
             }
             const type = response.headers.get("content-type") || "";
             const data = type.includes("json") ? await response.json() : await response.text();
-            if (!response.ok) throw new Error(data.error || data.message || `HTTP ${response.status}`);
+            if (!response.ok) {
+              const err = new Error(data.error || data.message || `HTTP ${response.status}`);
+              if (data && data.field) err.field = data.field;
+              throw err;
+            }
             resolve(data);
           } catch (error) { reject(error); }
           finally { activeRequests--; runQueue(); }
@@ -762,7 +776,7 @@
           <div class="card metric"><div class="metric-label">Outdoor</div><div class="metric-value">${temp(hp.temperatures.outdoor)}</div></div>
           <div class="card metric"><div class="metric-label">Water flow</div><div class="metric-value">${temp(hp.temperatures.outlet)}</div><div class="metric-sub">Inlet ${temp(hp.temperatures.inlet)}</div></div>
           <div class="card metric"><div class="metric-label">Power</div><div class="metric-value">${esc(hp.readings.power_consumption ?? "--")} W</div><div class="metric-sub">${esc(hp.readings.compressor_freq ?? "--")} Hz</div></div>
-          <div class="card metric"><div class="metric-label">Efficiency</div><div class="metric-value">${hp.readings.cop == null ? "--" : Number(hp.readings.cop).toFixed(2)}</div><div class="metric-sub">Estimated COP</div></div>
+          <div class="card metric"><div class="metric-label">Efficiency</div><div class="metric-value">${hp.readings.cop == null ? "--" : Number(hp.readings.cop).toFixed(2)}</div><div class="metric-sub">COP · ${perfCaption(hp.readings)}</div></div>
         </div>
         <div class="grid grid-2" style="margin-top:16px">
           <section class="card"><div class="card-head"><h2>Equipment</h2><button class="btn" data-route="status">All readings</button></div>
@@ -801,8 +815,8 @@
           ${metricCard("Compressor", `${r.compressor_freq ?? "--"} Hz`)}${metricCard("Fan speed", `${r.fan_rpm ?? "--"} RPM`)}
           ${metricCard("AC voltage", `${r.ac_voltage ?? "--"} V`)}${metricCard("AC current", `${r.ac_current ?? "--"} A`)}
           ${metricCard("DC voltage", `${r.dc_voltage ?? "--"} V`)}${metricCard("Main EEV", `${r.primary_eev ?? "--"} steps`)}
-          ${metricCard("Input power", `${r.power_consumption ?? "--"} W`)}${metricCard("Heat output", r.heat_out == null ? "--" : `${r.heat_out} W`)}
-          ${metricCard("Estimated COP", r.cop == null ? "--" : Number(r.cop).toFixed(2))}${metricCard("Controller uptime", fmtUptime(state.status.uptime_ms))}
+          ${metricCard("Input power", `${r.power_consumption ?? "--"} W`)}${metricCard(perfOutput(r.heat_out).label, perfOutput(r.heat_out).value, r.flow_lpm == null ? "" : `At an assumed ${r.flow_lpm} L/min`)}
+          ${metricCard("Estimated COP", r.cop == null ? "--" : Number(r.cop).toFixed(2), perfSource(r.perf_source, r.perf_fallback, r.perf_settling, r.perf_pending).caption)}${metricCard("Controller uptime", fmtUptime(state.status.uptime_ms))}
         </div>
       </div>`;
     }
@@ -1151,6 +1165,139 @@
         ${paired ? `<div class="btn-row" style="margin-top:18px"><button class="btn danger" data-action="ha-revoke">Revoke pairing</button></div>` : ""}
       </section></div>`;
     }
+    const perfSlots = [["supply", "Heat pump supply"], ["return", "Heat pump return"]];
+    const perfFluids = [["water", "Water"], ["propylene_glycol", "Propylene glycol"], ["ethylene_glycol", "Ethylene glycol"]];
+    const perfValueTypes = [["int16", "16-bit signed"], ["uint16", "16-bit unsigned"], ["float32", "32-bit float"], ["float32_swapped", "32-bit float, swapped"]];
+    const perfNoReadings = [["none", "None"], ["0x8000", "0x8000"], ["0x7fff", "0x7FFF"], ["0xffff", "0xFFFF"]];
+    const perfFieldNames = {
+      flow_lpm: "flow rate", fluid: "loop fluid", glycol_pct: "glycol concentration", source: "source", host: "device address",
+      port: "port", unit_id: "unit ID", register: "register", register_type: "register type", value_type: "value type",
+      scale: "scale", no_reading: "no-reading value"
+    };
+    const perfIsFloat = vt => vt === "float32" || vt === "float32_swapped";
+    function perfTemp(celsius) {
+      if (celsius == null) return "--";
+      const f = state.preferences.temp_unit === "fahrenheit";
+      return `${(f ? Number(celsius) * 9 / 5 + 32 : Number(celsius)).toFixed(1)} °${f ? "F" : "C"}`;
+    }
+    function perfOptions(list, selected) {
+      return list.map(([value, label]) => `<option value="${esc(value)}" ${String(value) === String(selected) ? "selected" : ""}>${esc(label)}</option>`).join("");
+    }
+    // Source line shared by the settings page and the home/status cards.
+    function perfSource(src, fallback, settling, pending) {
+      if (fallback) return { text: "Heat pump sensors (external sensor not responding)", caption: "Estimate · heat pump sensors", cls: "warn" };
+      if (pending) return { text: "Heat pump sensors (checking the external sensors)", caption: "Estimate · heat pump sensors", cls: "" };
+      if (src === "external" && settling) return { text: "External sensors (waiting for the loop to settle)", caption: "Estimate · external sensors", cls: "" };
+      if (src === "external") return { text: "External sensors", caption: "Estimate · external sensors", cls: "good" };
+      return { text: "Heat pump sensors", caption: "Estimate · heat pump sensors", cls: "" };
+    }
+    function perfCaption(r) {
+      const s = perfSource(r.perf_source, r.perf_fallback, r.perf_settling, r.perf_pending);
+      return s.cls === "warn" ? `<span style="color:var(--cp-warning)">${esc(s.caption)}</span>` : esc(s.caption);
+    }
+    function perfOutput(watts) {
+      if (watts == null) return { label: "Heat output", value: "--" };
+      return { label: watts < 0 ? "Cooling output" : "Heating output", value: `${(Math.abs(watts) / 1000).toFixed(1)} kW` };
+    }
+    function perfError(error, exception, thermux) {
+      if (thermux && thermux.status === "unassigned")
+        return `Connected, but channel ${thermux.channel} has no sensor assigned. Check the channel table on the Thermux.`;
+      if (thermux && ["read_error", "missing", "stale"].includes(thermux.status))
+        return `Connected, but the Thermux can't read the sensor on channel ${thermux.channel}. Check its wiring.`;
+      const messages = {
+        not_read: "Waiting for the first reading.",
+        resolve: "Couldn't find that hostname. Check the address, or use the IP address instead.",
+        connect: "Couldn't connect. Check the address and port, and that the device is on.",
+        timeout: "Connected, but the device didn't answer. Check the unit ID.",
+        protocol: "The device sent a reply this controller doesn't understand.",
+        exception: `The device turned the request down (Modbus exception ${exception ?? "?"}). Check the register and register type.`,
+        no_reading: "Connected, but the sensor has no reading right now.",
+        out_of_range: "The value read isn't a believable temperature. Check the value type and scale.",
+        sensor_changed: "A different sensor is now on this channel. Save this sensor again to accept it.",
+        busy: "Couldn't start the test. Try again in a moment."
+      };
+      return messages[error] || "No reading.";
+    }
+    function perfLiveHtml() {
+      const st = state.perf?.status || {};
+      const src = perfSource(st.source, st.fallback, st.settling, st.pending);
+      const out = perfOutput(st.heat_out);
+      return `<div class="card-head"><h2>Current estimate</h2></div>
+        <div class="perf-src"><span class="dot ${src.cls}"></span><span class="${src.cls === "warn" ? "perf-warn" : ""}">${esc(src.text)}</span></div>
+        <div class="kv"><span>${out.label}</span><strong>${out.value}</strong></div>
+        <div class="kv"><span>COP</span><strong>${st.cop == null ? "--" : Number(st.cop).toFixed(2)}</strong></div>`;
+    }
+    function perfReadingHtml(slot) {
+      const cfg = state.perf?.sensors?.[slot] || {};
+      const live = state.perf?.status?.sensors?.[slot] || {};
+      if (cfg.source !== "modbus_tcp") return "";
+      if (live.celsius != null && (live.error === "none" || !live.error))
+        return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>`;
+      return `<div class="kv"><span>Latest reading</span><strong>--</strong></div><p class="metric-sub perf-warn">${esc(perfError(live.error, live.exception, null))}</p>`;
+    }
+    function perfTestHtml(slot) {
+      const t = state.perfTests[slot];
+      if (!t) return "";
+      if (t.running) return `<div class="perf-test"><span class="spinner-inline"></span> Testing…</div>`;
+      if (t.failed) return `<div class="perf-test notice bad">${esc(t.failed)}</div>`;
+      const r = t.result;
+      const tm = r.thermux;
+      const lines = [];
+      if (tm) lines.push(`Thermux found · channel ${tm.channel}${tm.age_s != null ? ` · read ${tm.age_s} s ago` : ""}`);
+      if (tm && tm.rom_id) lines.push(`Sensor ID ${esc(tm.rom_id)}`);
+      if (r.ok) {
+        return `<div class="perf-test ok"><strong>Reading OK · ${perfTemp(r.celsius)}</strong>${lines.map(l => `<div class="metric-sub">${l}</div>`).join("")}</div>`;
+      }
+      return `<div class="perf-test notice bad"><strong>No reading</strong><div>${esc(perfError(r.error, r.exception, tm))}</div>${lines.map(l => `<div class="metric-sub">${l}</div>`).join("")}</div>`;
+    }
+    function perfSensorCard(slot, title) {
+      const s = state.perf.sensors[slot] || {};
+      const modbus = s.source === "modbus_tcp";
+      const float = perfIsFloat(s.value_type);
+      return `<section class="card"><form data-form="perf-sensor" data-slot="${slot}">
+        <div class="card-head"><h2>${esc(title)}</h2><span class="badge ${modbus ? "good" : ""}">${modbus ? "Modbus TCP" : "Heat pump's own sensor"}</span></div>
+        <div class="field"><label>Source</label><select name="source" data-perf="source">${perfOptions([["heat_pump", "Heat pump sensor"], ["modbus_tcp", "Modbus TCP"]], s.source)}</select></div>
+        <div class="perf-modbus" ${modbus ? "" : "hidden"}>
+          <div class="field"><label>Device address (IP or hostname)</label><input name="host" maxlength="63" value="${esc(s.host || "")}" placeholder="e.g. thermux.local" autocomplete="off" spellcheck="false"></div>
+          <div class="grid grid-3 perf-nums">
+            <div class="field"><label>Port</label><input name="port" type="number" min="1" max="65535" value="${esc(s.port ?? 502)}"></div>
+            <div class="field"><label>Unit ID</label><input name="unit_id" type="number" min="0" max="255" value="${esc(s.unit_id ?? 1)}"></div>
+            <div class="field"><label>Register</label><input name="register" type="number" min="0" max="65535" value="${esc(s.register ?? 0)}"></div>
+          </div>
+          <details class="ap-group perf-adv"><summary>Advanced</summary>
+            <div class="grid grid-2">
+              <div class="field"><label>Register type</label><select name="register_type">${perfOptions([["input", "Input"], ["holding", "Holding"]], s.register_type)}</select></div>
+              <div class="field"><label>Value type</label><select name="value_type" data-perf="value_type">${perfOptions(perfValueTypes, s.value_type)}</select></div>
+              <div class="field"><label>Scale</label><select name="scale">${perfOptions([["1", "× 1"], ["0.1", "× 0.1"], ["0.01", "× 0.01"], ["0.001", "× 0.001"]], s.scale)}</select></div>
+              <div class="field"><label>No-reading value</label><select name="no_reading" ${float ? "disabled" : ""}>${perfOptions(perfNoReadings, float ? "none" : s.no_reading)}</select></div>
+            </div>
+          </details>
+          <div id="perf-reading-${slot}">${perfReadingHtml(slot)}</div>
+        </div>
+        <div id="perf-test-${slot}">${perfTestHtml(slot)}</div>
+        <div class="btn-row" style="margin-top:14px">
+          <button class="btn" type="button" data-action="perf-test" data-slot="${slot}" ${modbus ? "" : "hidden"}>Test sensor</button>
+          <button class="btn primary" type="submit">Save</button></div>
+      </form></section>`;
+    }
+    function performanceSettings() {
+      const p = state.perf;
+      if (!p) return `<section class="card"><div class="spinner"></div></section>`;
+      const lim = p.limits || {};
+      const water = p.fluid === "water";
+      return `<div class="grid grid-2">
+        <section class="card" id="perf-live">${perfLiveHtml()}</section>
+        <section class="card"><h2>Flow and fluid</h2><form data-form="perf-flow">
+          <div class="field"><label>Assumed flow rate (L/min)</label><input name="flow_lpm" type="number" step="0.1" min="${lim.flow_min_lpm ?? 1}" max="${lim.flow_max_lpm ?? 300}" value="${esc(p.flow_lpm)}" required></div>
+          <div class="field"><label>Loop fluid</label><select name="fluid" data-perf="fluid">${perfOptions(perfFluids, p.fluid)}</select></div>
+          <div class="field perf-glycol ${water ? "is-disabled" : ""}"><label>Glycol concentration (by volume) · <span id="perf-glycol-value">${esc(p.glycol_pct)}%</span></label>
+            <input name="glycol_pct" type="range" min="0" max="${lim.glycol_max_pct ?? 60}" step="${lim.glycol_step_pct ?? 5}" value="${esc(p.glycol_pct)}" ${water ? "disabled" : ""}></div>
+          <button class="btn primary" type="submit">Save</button></form></section>
+      </div>
+      <h2 style="margin-top:28px">Temperature sensors</h2>
+      <p class="metric-sub">Choose where each temperature comes from. If an external sensor stops answering, the estimate falls back to the heat pump's own sensors.</p>
+      <div class="grid grid-2">${perfSlots.map(([slot, title]) => perfSensorCard(slot, title)).join("")}</div>`;
+    }
     function diagnosticsSettings() {
       return `<section class="card"><div class="card-head"><div><h2>Diagnostics</h2><div class="metric-sub">Logs poll only while this page is open.</div></div>
         <select id="log-level" style="width:120px"><option>V</option><option>D</option><option>I</option><option>W</option><option>E</option></select></div>
@@ -1170,7 +1317,7 @@
     function settingsPage() {
       const pages = { wifi: wifiSettings, firmware: firmwareSettings, time: timeSettings, display: displaySettings,
         preferences: preferenceSettings, security: securitySettings, home_assistant: homeAssistantSettings,
-        diagnostics: diagnosticsSettings, system: systemSettings };
+        performance: performanceSettings, diagnostics: diagnosticsSettings, system: systemSettings };
       if (!state.settingsLoaded) {
         return settingsShell(`<section class="card"><div class="spinner"></div></section>`);
       }
@@ -1557,9 +1704,45 @@
       }, 1000);
     }
     function stopHaPolling() { if (state.haTimer) clearInterval(state.haTimer); state.haTimer = null; }
+    async function loadPerf() { state.perf = await api("/api/performance/config"); }
+    // Refresh only the live parts in place so half-typed sensor edits survive.
+    function refreshPerfLive() {
+      const live = $("#perf-live"); if (live) live.innerHTML = perfLiveHtml();
+      perfSlots.forEach(([slot]) => { const el = $(`#perf-reading-${slot}`); if (el) el.innerHTML = perfReadingHtml(slot); });
+    }
+    function startPerfPolling() {
+      stopPerfPolling();
+      state.perfTimer = setInterval(async () => {
+        if (state.route !== "settings" || state.settingsPage !== "performance") { stopPerfPolling(); return; }
+        try {
+          const data = await api("/api/performance/config");
+          if (!state.perf) { state.perf = data; render(); return; }
+          state.perf.status = data.status;
+          refreshPerfLive();
+        } catch (_) {}
+      }, 5000);
+    }
+    function stopPerfPolling() { if (state.perfTimer) clearInterval(state.perfTimer); state.perfTimer = null; }
+    function perfSensorBody(form) {
+      const data = new FormData(form);
+      if (data.get("source") !== "modbus_tcp") return { source: "heat_pump" };
+      const body = {
+        source: "modbus_tcp", host: String(data.get("host") || "").trim(),
+        port: Number(data.get("port")), unit_id: Number(data.get("unit_id")), register: Number(data.get("register")),
+        register_type: data.get("register_type"), value_type: data.get("value_type"), scale: Number(data.get("scale"))
+      };
+      body.no_reading = perfIsFloat(body.value_type) ? "none" : data.get("no_reading");
+      if (!body.host) throw new Error("Enter an IP address or hostname.");
+      return body;
+    }
+    function perfInvalidMessage(error) {
+      const m = /Invalid value/i.test(error.message) && error.field ? perfFieldNames[error.field] : null;
+      return m ? `Check the ${m}.` : error.message;
+    }
     async function navigate(route, settingsPage = null) {
       stopLogPolling();
       stopHaPolling();
+      stopPerfPolling();
       state.route = route;
       if (settingsPage) state.settingsPage = settingsPage;
       if (route === "history" && !state.tempHistory.data) state.tempHistory.loading = true;
@@ -1583,6 +1766,7 @@
           if (state.settingsPage === "wifi") { api("/api/wifi/scan", { method: "POST" }).catch(() => {}); setTimeout(loadNetworks, 500); }
           if (state.settingsPage === "diagnostics") startLogPolling();
           if (state.settingsPage === "home_assistant") { await loadHaStatus().catch(() => {}); startHaPolling(); }
+          if (state.settingsPage === "performance") { state.perfTests = {}; await loadPerf(); startPerfPolling(); }
         }
       } catch (error) { toast(error.message, "bad"); }
       if (route === "events" && document.activeElement?.id === "event-search") refreshEventResults();
@@ -1596,6 +1780,15 @@
     }
     function jsonOptions(method, body) {
       return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+    }
+    async function perfSave(body, success) {
+      try {
+        state.perf = await api("/api/performance/config", jsonOptions("PUT", body));
+        toast(success, "good");
+      } catch (error) {
+        const e = new Error(perfInvalidMessage(error));
+        toast(e.message, "bad"); e.toastShown = true; throw e;
+      }
     }
     async function handleForm(form) {
       const type = form.dataset.form, data = new FormData(form);
@@ -1679,6 +1872,21 @@
           state.locationSearch.busy = false;
           render();
         }
+      }
+      if (type === "perf-flow") {
+        const body = { flow_lpm: Number(data.get("flow_lpm")), fluid: data.get("fluid") };
+        if (body.fluid !== "water") body.glycol_pct = Number(data.get("glycol_pct"));
+        await perfSave(body, "Flow and fluid saved");
+        refreshPerfLive();
+      }
+      if (type === "perf-sensor") {
+        const slot = form.dataset.slot;
+        await perfSave({ sensors: { [slot]: perfSensorBody(form) } }, "Sensor saved");
+        delete state.perfTests[slot];
+        // Replace just this card so edits in progress on the other one survive.
+        const title = perfSlots.find(([s]) => s === slot)[1];
+        form.closest("section").outerHTML = perfSensorCard(slot, title);
+        refreshPerfLive();
       }
       if (type === "brightness") {
         const brightness = Number(data.get("brightness"));
@@ -1966,6 +2174,25 @@
       }
       if (action === "logout") { await api("/logout", { method: "POST" }).catch(() => {}); location.reload(); return; }
       if (action === "copy-ha-code") { await navigator.clipboard.writeText(state.ha.code || ""); toast("Pairing code copied", "good"); }
+      if (action === "perf-test") {
+        const slot = el.dataset.slot;
+        const form = el.closest("form");
+        const sensor = perfSensorBody(form);
+        const box = () => $(`#perf-test-${slot}`);
+        state.perfTests[slot] = { running: true };
+        if (box()) box().innerHTML = perfTestHtml(slot);
+        el.disabled = true;
+        try {
+          const result = await api("/api/performance/test", jsonOptions("POST", { slot, sensor }));
+          state.perfTests[slot] = { result };
+        } catch (error) {
+          state.perfTests[slot] = { failed: perfInvalidMessage(error) };
+        } finally {
+          el.disabled = false;
+          if (box()) box().innerHTML = perfTestHtml(slot);
+        }
+        return;
+      }
       if (action === "ha-pair") {
         const data = await mutate("/api/ha/pair", { method: "POST" }, "Pairing started");
         const code = data.code || "";
@@ -2056,6 +2283,9 @@
       if (event.target.name === "brightness") {
         const value = $("#brightness-value"); if (value) value.textContent = `${event.target.value}%`;
       }
+      if (event.target.name === "glycol_pct") {
+        const value = $("#perf-glycol-value"); if (value) value.textContent = `${event.target.value}%`;
+      }
       if (event.target.matches(".control-range")) {
         const output = event.target.closest(".range-editor")?.querySelector("[data-range-output]");
         if (output) output.textContent = `${event.target.value}${event.target.dataset.unit ? ` ${event.target.dataset.unit}` : ""}`;
@@ -2070,6 +2300,24 @@
       if (event.target.id === "event-category") { state.eventFilters.category = event.target.value.toLowerCase(); render(); }
       if (event.target.id === "event-time") { state.eventFilters.time = event.target.value; render(); }
       if (event.target.id === "log-level") { state.logLevel = event.target.value; loadLogs(true).catch(() => {}); }
+      const perfField = event.target.dataset?.perf;
+      if (perfField === "fluid") {
+        const water = event.target.value === "water";
+        const field = event.target.form?.querySelector(".perf-glycol");
+        if (field) { field.classList.toggle("is-disabled", water); field.querySelector("input").disabled = water; }
+      }
+      if (perfField === "source") {
+        const form = event.target.form, modbus = event.target.value === "modbus_tcp";
+        form.querySelector(".perf-modbus").hidden = !modbus;
+        form.querySelector('[data-action="perf-test"]').hidden = !modbus;
+      }
+      if (perfField === "value_type") {
+        const select = event.target.form.querySelector('select[name="no_reading"]');
+        const float = perfIsFloat(event.target.value);
+        select.disabled = float;
+        if (float) select.value = "none";
+        else if (select.value === "none") select.value = "0x8000";
+      }
     });
     async function navigateFromLocation() {
       routeFromHash();
@@ -2107,6 +2355,11 @@
         await loadHaStatus().catch(() => {});
         render();
         startHaPolling();
+      }
+      if (state.route === "settings" && state.settingsPage === "performance") {
+        await loadPerf().catch(error => toast(error.message, "bad"));
+        render();
+        startPerfPolling();
       }
       state.pollTimer = setInterval(async () => {
         if (!state.auth.loggedIn || state.auth.changeRequired) return;

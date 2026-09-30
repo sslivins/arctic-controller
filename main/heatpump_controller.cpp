@@ -13,6 +13,8 @@
 #include "macon_listener.h"
 #include "macon_master.h"
 #include "macon_faults.h"
+#include "macon_fluid.h"
+#include "ext_temp_sensors.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -489,6 +491,32 @@ static void applyMaconMapping() {
     MaconState ms;
     snapshot.decode(&ms);
 
+    // Estimated performance (thermal output + COP). The mainboard reports no
+    // flow (only a flow switch), so flow and loop fluid come from the user's
+    // settings. Supply/return come from external Modbus sensors when they are
+    // configured and healthy, otherwise from the unit's whole-degree readings.
+    // The macon library owns the physics.
+    const perf::Settings perf_cfg = ext_temp::settings();
+    const perf::HeatPumpContext hp_ctx = {
+        ms.compressor_freq_valid && ms.compressor_freq > 0, ms.defrost_on, ms.mode};
+    const perf::Selection sel = ext_temp::choose_source(hp_ctx);
+    float supply_c = static_cast<float>(ms.outlet_c);
+    float return_c = static_cast<float>(ms.inlet_c);
+    const bool external = sel.source == perf::PerfSource::External;
+    if (external) {
+        if (perf_cfg.sensors[0].source == perf::SensorSource::ModbusTcp) supply_c = sel.supply_c;
+        if (perf_cfg.sensors[1].source == perf::SensorSource::ModbusTcp) return_c = sel.return_c;
+    }
+    const arctic::PerformanceInputs perf_in = arctic::loop_performance_inputs(
+        perf_cfg.flow_lpm_x10 / 10.0f, perf_cfg.fluid, perf_cfg.glycol_pct,
+        (supply_c + return_c) / 2.0f);
+    arctic::PerformanceEstimate perf = {};
+    if (!external) {
+        perf = arctic::estimate_performance(ms, perf_in);
+    } else if (!sel.settling) {
+        perf = arctic::estimate_performance_with_temps(ms, supply_c, return_c, perf_in);
+    }
+
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
 
     // Temperatures (signed whole °C).
@@ -550,17 +578,14 @@ static void applyMaconMapping() {
     // library normalises ac_current to whole amps.
     s_state.realtime_power_w    = ms.realtime_power_w;
 
-    // Estimated performance (thermal output + COP). Water flow is NOT reported
-    // by the mainboard (only a flow switch), so it is an outside estimate: 40
-    // L/min of water matches the arctic-sniffer's assumption so both agree. The
-    // macon library owns the physics; we only supply the estimated inputs.
-    static constexpr arctic::PerformanceInputs kPerfInputs = {
-        /*water_flow_lpm=*/40.0f, /*fluid_cp_j_per_kgK=*/4186.0f,
-        /*fluid_density_kg_per_l=*/1.00f };
-    const arctic::PerformanceEstimate perf = arctic::estimate_performance(ms, kPerfInputs);
-    s_state.thermal_w = perf.thermal_w;
-    s_state.cop_x100  = perf.cop_x100;
+    s_state.thermal_w = perf.valid ? perf.thermal_w : 0;
+    s_state.cop_x100  = perf.valid ? perf.cop_x100 : 0;
     s_state.cop_valid = perf.valid;
+    s_state.perf_external = external;
+    s_state.perf_fallback = sel.fallback;
+    s_state.perf_pending  = sel.pending;
+    s_state.perf_settling = external && sel.settling;
+    s_state.flow_lpm_x10  = perf_cfg.flow_lpm_x10;
 
 
     // Raw Macon fault-register bytes, stored exactly as the mainboard reports

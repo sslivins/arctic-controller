@@ -56,6 +56,9 @@ SUB_SCREENS: Tuple[SubScreen, ...] = (
     _screen("home_assistant"),
     _screen("security"),
     _screen("web"),
+    # The UI state reports this screen as "performance", but its row and
+    # widgets use the shorter "perf" prefix.
+    SubScreen(name="performance", row_tag="settings_perf", back_tag="perf_back"),
 )
 
 SUB_SCREENS_BY_NAME = {s.name: s for s in SUB_SCREENS}

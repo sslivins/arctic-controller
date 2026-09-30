@@ -21,7 +21,7 @@ class TestSettingsWorkspace:
         dashboard_page.locator('button[aria-label="Settings"]').click()
         labels = dashboard_page.locator(".settings-nav .nav-link").all_inner_texts()
         assert labels == ["WiFi", "Firmware", "Time & Location", "Display", "Preferences",
-                          "Security", "Home Assistant", "Diagnostics", "System"]
+                          "Security", "Home Assistant", "Heat output & COP", "Diagnostics", "System"]
 
     def test_wifi_controls(self, dashboard_page: Page):
         open_settings(dashboard_page, "WiFi")
@@ -78,6 +78,49 @@ class TestSettingsWorkspace:
         ).to_be_visible()
         expect(tls_form).to_be_visible()
         assert tls_form.locator("textarea").count() == 2
+
+    def test_performance_controls(self, dashboard_page: Page):
+        """Nothing here is saved: the checks only drive the form in place."""
+        open_settings(dashboard_page, "Heat output & COP")
+        expect(dashboard_page.get_by_role("heading", name="Current estimate")).to_be_visible()
+        flow = dashboard_page.locator('input[name="flow_lpm"]')
+        expect(flow).to_have_attribute("min", "1")
+        expect(flow).to_have_attribute("max", "300")
+
+        fluid = dashboard_page.locator('select[name="fluid"]')
+        glycol = dashboard_page.locator('input[name="glycol_pct"]')
+        fluid.select_option("water")
+        expect(glycol).to_be_disabled()
+        fluid.select_option("propylene_glycol")
+        expect(glycol).to_be_enabled()
+        expect(glycol).to_have_attribute("max", "60")
+        expect(glycol).to_have_attribute("step", "5")
+
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        expect(card.get_by_role("heading", name="Heat pump supply")).to_be_visible()
+        card.locator('select[name="source"]').select_option("modbus_tcp")
+        expect(card.locator('input[name="host"]')).to_be_visible()
+        expect(card.get_by_role("button", name="Test sensor")).to_be_visible()
+        card.locator("summary", has_text="Advanced").click()
+        card.locator('select[name="value_type"]').select_option("float32")
+        expect(card.locator('select[name="no_reading"]')).to_be_disabled()
+        card.locator('select[name="value_type"]').select_option("int16")
+        expect(card.locator('select[name="no_reading"]')).to_be_enabled()
+        card.locator('select[name="source"]').select_option("heat_pump")
+        expect(card.locator('input[name="host"]')).to_be_hidden()
+
+    def test_performance_sensor_test_reports_connect_error(self, dashboard_page: Page):
+        """Nothing listens on the controller's own port 1, so the test must
+        come back with the friendly connection error rather than hang."""
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="return"]')
+        card.locator('select[name="source"]').select_option("modbus_tcp")
+        card.locator('input[name="host"]').fill("127.0.0.1")
+        card.locator('input[name="port"]').fill("1")
+        card.get_by_role("button", name="Test sensor").click()
+        result = card.locator("#perf-test-return")
+        expect(result).to_contain_text("No reading", timeout=15000)
+        expect(result).to_contain_text("Couldn't connect")
 
     def test_diagnostics(self, dashboard_page: Page):
         open_settings(dashboard_page, "Diagnostics")

@@ -34,6 +34,7 @@
 #include "settings/settings_time_screen.h"
 #include "settings/settings_language_screen.h"
 #include "settings/settings_display_screen.h"
+#include "settings/settings_perf_screen.h"
 #include "display_idle.h"
 #include "app_navigation.h"
 #include "i18n/i18n.h"
@@ -57,6 +58,7 @@
 #include "ui_common.h"
 #include "log_buffer.h"
 #include "log_persist.h"
+#include "ext_temp_sensors.h"
 #include "esp_task_wdt.h"
 #include <cJSON.h>
 
@@ -89,6 +91,7 @@ void app_navigation_return_home(void)
         if (time_screen_is_visible()) time_screen_close();
         if (language_screen_is_visible()) language_screen_close();
         if (display_screen_is_visible()) display_screen_close();
+        if (perf_screen_is_visible()) perf_screen_close();
         if (lv_screen_active() != main_screen) {
             lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
         }
@@ -326,6 +329,11 @@ extern "C" void app_main(void)
                  (unsigned long)boot_stats_panic_streak());
     }
 
+    // Heat output & COP settings, and the external Modbus TCP sensor worker
+    // (started only when a sensor uses it; not at all in safe mode). Before
+    // the heat pump state is first decoded, which reads these settings.
+    ext_temp::init(!safe_mode);
+
     // Initialize demo state or one of the two Macon/Tuya bus modes.
     //
     // Safe-mode policy: safe mode disables the OPTIONAL demo subsystem (the
@@ -547,6 +555,9 @@ extern "C" void app_main(void)
         if (esp_timer_get_time() >= next_commit_eval_us) {
             next_commit_eval_us = esp_timer_get_time() + COMMIT_EVAL_INTERVAL_US;
             ota_commit_eval();
+            // Persist a learned Thermux ROM ID; the sensor worker's PSRAM
+            // stack can't write flash itself.
+            ext_temp::service();
         }
 
         // Once the device has run for the stability window, declare it healthy

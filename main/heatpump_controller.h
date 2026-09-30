@@ -68,11 +68,23 @@ struct HeatPumpState {
     bool     primary_eev_valid = false;
     uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
 
-    // Estimated performance (owned by the macon library; flow is an outside
-    // estimate — see estimate_performance). thermal_w is signed: + heating, - cooling.
-    int32_t  thermal_w = 0;          // W water-side heat (estimated)
+    // Estimated performance (owned by the macon library; flow and loop fluid
+    // are user settings -- see perf_settings.h). thermal_w is signed:
+    // + heating, - cooling.
+    int32_t  thermal_w = 0;          // W water-side heat (estimated); 0 when !cop_valid
     uint16_t cop_x100 = 0;           // COP x100 (e.g. 392 = 3.92); 0 when !cop_valid
     bool     cop_valid = false;      // true when the estimate is meaningful
+    // Where the supply/return temperatures came from: external (Modbus TCP)
+    // sensors, or the unit's own. perf_fallback: an external sensor is failing,
+    // so the unit's own are used. perf_pending: external sensors read fine but
+    // aren't trusted yet (the clean minute after start-up, a settings change
+    // or a failure). perf_settling: external sensors in use but the
+    // loop is still settling after a start, defrost or mode change.
+    bool     perf_external = false;
+    bool     perf_fallback = false;
+    bool     perf_pending = false;
+    bool     perf_settling = false;
+    uint16_t flow_lpm_x10 = 400;     // assumed loop flow, L/min x10
     
     // Component run-state, derived by the macon library from the native
     // MaconState (icon bits / compressor frequency / reversing-valve mode).

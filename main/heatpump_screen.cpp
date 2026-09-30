@@ -150,6 +150,8 @@ static struct {
     lv_obj_t* perf_cop_value = nullptr;
     lv_obj_t* perf_power_value = nullptr;
     lv_obj_t* perf_fan_value = nullptr;
+    lv_obj_t* perf_caption = nullptr;
+    lv_obj_t* perf_caption_dot = nullptr;
     
     // Component dots row (Comp | Fan | Pump | Aux)
     lv_obj_t* comp_dot = nullptr;
@@ -694,15 +696,52 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_radius(state.perf_card, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_all(state.perf_card, 12, LV_PART_MAIN);
     lv_obj_clear_flag(state.perf_card, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(state.perf_card, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(state.perf_card, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_flow(state.perf_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(state.perf_card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(state.perf_card, 6, LV_PART_MAIN);
+
+    lv_obj_t* perf_row = lv_obj_create(state.perf_card);
+    lv_obj_set_size(perf_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(perf_row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(perf_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(perf_row, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(perf_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(perf_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(perf_row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     
-    create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_COP), &state.perf_cop_value);
+    create_value_column(perf_row, i18n_get(STR_HP_LABEL_COP), &state.perf_cop_value);
     lv_obj_set_user_data(state.perf_cop_value, (void*)"perf_cop");
-    create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_POWER), &state.perf_power_value);
+    create_value_column(perf_row, i18n_get(STR_HP_LABEL_POWER), &state.perf_power_value);
     lv_obj_set_user_data(state.perf_power_value, (void*)"perf_power");
-    create_value_column(state.perf_card, i18n_get(STR_HP_LABEL_FAN), &state.perf_fan_value);
+    create_value_column(perf_row, i18n_get(STR_HP_LABEL_FAN), &state.perf_fan_value);
     lv_obj_set_user_data(state.perf_fan_value, (void*)"perf_fan");
+
+    // Where the COP estimate's temperatures come from (heat pump's own
+    // sensors or external ones), yellow when external sensors failed.
+    {
+        lv_obj_t* cap_row = lv_obj_create(state.perf_card);
+        lv_obj_set_size(cap_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_bg_opa(cap_row, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(cap_row, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(cap_row, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_column(cap_row, 8, LV_PART_MAIN);
+        lv_obj_clear_flag(cap_row, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_flex_flow(cap_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(cap_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        state.perf_caption_dot = lv_obj_create(cap_row);
+        lv_obj_set_size(state.perf_caption_dot, 10, 10);
+        lv_obj_set_style_radius(state.perf_caption_dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+        lv_obj_set_style_border_width(state.perf_caption_dot, 0, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(state.perf_caption_dot, COLOR_TEXT_DIM, LV_PART_MAIN);
+        lv_obj_clear_flag(state.perf_caption_dot, LV_OBJ_FLAG_SCROLLABLE);
+
+        state.perf_caption = lv_label_create(cap_row);
+        lv_label_set_text(state.perf_caption, i18n_get(STR_PERF_CAPTION_HEAT_PUMP));
+        lv_obj_set_style_text_font(state.perf_caption, UI_FONT_SMALL, LV_PART_MAIN);
+        lv_obj_set_style_text_color(state.perf_caption, COLOR_TEXT_DIM, LV_PART_MAIN);
+        lv_obj_set_user_data(state.perf_caption, (void*)"perf_caption");
+    }
     
     // =========================================================================
     // ERROR CARD: Prominent error/status display (tap for details)
@@ -939,17 +978,19 @@ void heatpump_screen_update(void) {
         char cop_buf[16];
         snprintf(cop_buf, sizeof(cop_buf), "%u.%02u", cop_x100 / 100, cop_x100 % 100);
         lv_label_set_text(state.perf_cop_value, cop_buf);
-        // Color-code: green >= 3.0, yellow >= 2.0, red < 2.0
-        if (cop_x100 >= 300) {
-            lv_obj_set_style_text_color(state.perf_cop_value, COLOR_SUCCESS, LV_PART_MAIN);
-        } else if (cop_x100 >= 200) {
-            lv_obj_set_style_text_color(state.perf_cop_value, COLOR_WARNING, LV_PART_MAIN);
-        } else {
-            lv_obj_set_style_text_color(state.perf_cop_value, COLOR_ERROR, LV_PART_MAIN);
-        }
+        lv_obj_set_style_text_color(state.perf_cop_value, perf_dim, LV_PART_MAIN);
     } else {
         lv_label_set_text(state.perf_cop_value, "--");
         lv_obj_set_style_text_color(state.perf_cop_value, COLOR_TEXT_DIM, LV_PART_MAIN);
+    }
+
+    if (state.perf_caption) {
+        lv_label_set_text(state.perf_caption,
+                          i18n_get(hp.perf_external ? STR_PERF_CAPTION_EXTERNAL
+                                                    : STR_PERF_CAPTION_HEAT_PUMP));
+        lv_color_t cap_color = hp.perf_fallback ? COLOR_WARNING : COLOR_TEXT_DIM;
+        lv_obj_set_style_text_color(state.perf_caption, cap_color, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(state.perf_caption_dot, cap_color, LV_PART_MAIN);
     }
     
     // Fan speed. "--" is reserved for "no data" (disconnected); a genuine
@@ -1121,13 +1162,7 @@ void heatpump_screen_update(void) {
         char cop_buf[16];
         snprintf(cop_buf, sizeof(cop_buf), "%u.%02u", cop_x100 / 100, cop_x100 % 100);
         lv_label_set_text(state.energy_cop_value, cop_buf);
-        if (cop_x100 >= 300) {
-            lv_obj_set_style_text_color(state.energy_cop_value, COLOR_SUCCESS, LV_PART_MAIN);
-        } else if (cop_x100 >= 200) {
-            lv_obj_set_style_text_color(state.energy_cop_value, COLOR_WARNING, LV_PART_MAIN);
-        } else {
-            lv_obj_set_style_text_color(state.energy_cop_value, COLOR_ERROR, LV_PART_MAIN);
-        }
+        lv_obj_set_style_text_color(state.energy_cop_value, COLOR_TEXT, LV_PART_MAIN);
     } else {
         lv_label_set_text(state.energy_out_value, "--");
         if (state.energy_out_label) {

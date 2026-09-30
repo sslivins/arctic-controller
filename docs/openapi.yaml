@@ -2036,6 +2036,33 @@ paths:
                         type: integer
                         description: Calculated power consumption in watts (AC voltage × AC current)
                         example: 1150
+                      heat_out:
+                        type: integer
+                        nullable: true
+                        description: Estimated heat output in watts (negative when cooling); null when there is no estimate
+                        example: 4200
+                      cop:
+                        type: number
+                        nullable: true
+                        description: Estimated COP; null when there is no estimate
+                        example: 3.6
+                      flow_lpm:
+                        type: number
+                        description: Assumed loop flow in L/min
+                        example: 40
+                      perf_source:
+                        type: string
+                        enum: [heat_pump, external]
+                        description: Where the estimate's supply and return temperatures come from right now
+                      perf_fallback:
+                        type: boolean
+                        description: An external sensor is failing, so the heat pump's own sensors are used
+                      perf_pending:
+                        type: boolean
+                        description: External sensors are reading fine but not trusted yet (the first clean minute after start-up, a settings change or a failure); the heat pump's own sensors are used meanwhile
+                      perf_settling:
+                        type: boolean
+                        description: External sensors are in use but still settling after a start, defrost or mode change
                   has_error:
                     type: boolean
                     description: Whether the unit has any active errors
@@ -2825,6 +2852,202 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/performance/config:
+    get:
+      tags:
+      - HeatPump
+      summary: Get heat output & COP settings
+      description: |
+        The assumed loop flow, the loop fluid, and where the supply and return
+        temperatures for the estimate come from, plus a live `status` view.
+      operationId: getPerformanceConfig
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Current settings and status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceConfig'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      tags:
+      - HeatPump
+      summary: Update heat output & COP settings
+      description: |
+        Partial update: only the fields given change. A sensor object that is
+        present counts as edited, so its remembered Thermux sensor ID is
+        forgotten and re-learned from the next reading. Home Assistant can read
+        but not change these settings.
+      operationId: setPerformanceConfig
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                flow_lpm:
+                  type: number
+                  minimum: 1
+                  maximum: 300
+                  description: Assumed loop flow in L/min (0.1 resolution)
+                fluid:
+                  type: string
+                  enum: [water, propylene_glycol, ethylene_glycol]
+                glycol_pct:
+                  type: integer
+                  minimum: 0
+                  maximum: 60
+                  multipleOf: 5
+                  description: Glycol concentration by volume; kept but ignored for water
+                sensors:
+                  type: object
+                  properties:
+                    supply:
+                      $ref: '#/components/schemas/PerformanceSensorInput'
+                    return:
+                      $ref: '#/components/schemas/PerformanceSensorInput'
+            example:
+              flow_lpm: 40
+              fluid: propylene_glycol
+              glycol_pct: 30
+              sensors:
+                supply:
+                  source: modbus_tcp
+                  host: thermux.local
+                  register: 104
+      responses:
+        '200':
+          description: Saved; returns the full settings as for GET
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceConfig'
+        '400':
+          description: Invalid value; `field` names the first bad field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceInvalid'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Settings could not be saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/performance/test:
+    post:
+      tags:
+      - HeatPump
+      summary: Test a temperature sensor
+      description: |
+        Reads a Modbus TCP sensor once without saving anything, so a sensor
+        can be checked before it is saved. Fields not given come from the saved
+        sensor for `slot`, or from the defaults. Takes up to a few seconds.
+        When the device is a Thermux and the register is one of its
+        temperature channels, `thermux` describes that channel.
+      operationId: testPerformanceSensor
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                slot:
+                  type: string
+                  enum: [supply, return]
+                sensor:
+                  $ref: '#/components/schemas/PerformanceSensorInput'
+            example:
+              sensor:
+                host: 192.168.10.230
+                register: 104
+      responses:
+        '200':
+          description: Test finished (check `ok`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  error:
+                    $ref: '#/components/schemas/PerformanceSensorError'
+                  exception:
+                    type: integer
+                    description: Modbus exception code, when `error` is `exception`
+                  celsius:
+                    type: number
+                    nullable: true
+                  thermux:
+                    type: object
+                    nullable: true
+                    properties:
+                      channel:
+                        type: integer
+                      status:
+                        type: string
+                        enum: [ok, unassigned, missing, read_error, stale]
+                      age_s:
+                        type: integer
+                        nullable: true
+                      rom_id:
+                        type: string
+                        nullable: true
+                        description: 1-Wire ROM ID, 16 hex digits
+        '400':
+          description: Invalid value; `field` names the first bad field
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceInvalid'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another sensor test is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: The test did not finish in time
           content:
             application/json:
               schema:
@@ -3707,6 +3930,145 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    PerformanceSensorError:
+      type: string
+      enum: [none, not_read, resolve, connect, timeout, protocol, exception, no_reading, out_of_range, sensor_changed, busy]
+      description: |
+        Result of the latest read. `resolve`: the host name didn't resolve.
+        `connect`: nothing answered on that address and port. `exception`: the
+        device refused the read (see `exception`). `no_reading`: the register
+        holds its "no reading" value. `sensor_changed`: a different Thermux
+        sensor is now on this channel; save the sensor again to accept it.
+    PerformanceSensorInput:
+      type: object
+      description: Temperature sensor settings; any subset when updating.
+      properties:
+        source:
+          type: string
+          enum: [heat_pump, modbus_tcp]
+        host:
+          type: string
+          maxLength: 63
+          description: IPv4 address or host name (`.local` names resolve over mDNS)
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 502
+        unit_id:
+          type: integer
+          minimum: 0
+          maximum: 255
+          default: 1
+        register:
+          type: integer
+          minimum: 0
+          maximum: 65535
+          description: Zero-based register address, as in the Modbus spec
+        register_type:
+          type: string
+          enum: [input, holding]
+          default: input
+        value_type:
+          type: string
+          enum: [int16, uint16, float32, float32_swapped]
+          default: int16
+          description: float32 is high word first; float32_swapped is low word first
+        scale:
+          type: number
+          enum: [1, 0.1, 0.01, 0.001]
+          default: 0.01
+          description: Degrees C = raw value × scale
+        no_reading:
+          type: string
+          enum: ['none', '0x8000', '0x7fff', '0xffff']
+          default: '0x8000'
+          description: Raw 16-bit value that means "no reading"
+    PerformanceSensor:
+      allOf:
+      - $ref: '#/components/schemas/PerformanceSensorInput'
+      - type: object
+        properties:
+          rom_id:
+            type: string
+            nullable: true
+            description: Thermux sensor ID remembered for this channel
+    PerformanceConfig:
+      type: object
+      properties:
+        flow_lpm:
+          type: number
+          example: 40
+        fluid:
+          type: string
+          enum: [water, propylene_glycol, ethylene_glycol]
+        glycol_pct:
+          type: integer
+          example: 30
+        sensors:
+          type: object
+          properties:
+            supply:
+              $ref: '#/components/schemas/PerformanceSensor'
+            return:
+              $ref: '#/components/schemas/PerformanceSensor'
+        limits:
+          type: object
+          properties:
+            flow_min_lpm:
+              type: number
+            flow_max_lpm:
+              type: number
+            glycol_max_pct:
+              type: integer
+            glycol_step_pct:
+              type: integer
+        status:
+          type: object
+          properties:
+            source:
+              type: string
+              enum: [heat_pump, external]
+            fallback:
+              type: boolean
+              description: An external sensor is failing, so the heat pump's own sensors are used
+            pending:
+              type: boolean
+              description: External sensors read fine but aren't trusted yet; the heat pump's own sensors are used meanwhile
+            settling:
+              type: boolean
+            heat_out:
+              type: integer
+              nullable: true
+            cop:
+              type: number
+              nullable: true
+            sensors:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  configured:
+                    type: boolean
+                  celsius:
+                    type: number
+                    nullable: true
+                  age_s:
+                    type: integer
+                    nullable: true
+                  error:
+                    $ref: '#/components/schemas/PerformanceSensorError'
+                  exception:
+                    type: integer
+    PerformanceInvalid:
+      type: object
+      properties:
+        error:
+          type: string
+          example: Invalid value
+        field:
+          type: string
+          example: host
     Location:
       type: object
       properties:
