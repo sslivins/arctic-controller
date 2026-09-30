@@ -48,8 +48,10 @@ def _unavailable(msg: str):
     pytest.skip(msg)
 
 
-def wait_until(fn, timeout: float = BUS_TIMEOUT, poll: float = 0.4, desc: str = "condition"):
-    """Poll fn() until it returns a truthy value; return it, or fail with the last value."""
+def wait_until(fn, timeout: float = BUS_TIMEOUT, poll: float = 0.4, desc: str = "condition",
+               diag=None):
+    """Poll fn() until it returns a truthy value; return it, or fail with the last value.
+    diag() may return extra context for the failure message."""
     deadline = time.monotonic() + timeout
     last = None
     while True:
@@ -60,7 +62,13 @@ def wait_until(fn, timeout: float = BUS_TIMEOUT, poll: float = 0.4, desc: str = 
         except Exception as e:  # transient HTTP hiccup - keep polling
             last = e
         if time.monotonic() >= deadline:
-            pytest.fail(f"Timed out after {timeout:.0f}s waiting for {desc} (last: {last!r})")
+            extra = ""
+            if diag:
+                try:
+                    extra = f"; {diag()}"
+                except Exception as e:
+                    extra = f"; diag failed: {e!r}"
+            pytest.fail(f"Timed out after {timeout:.0f}s waiting for {desc} (last: {last!r}){extra}")
         time.sleep(poll)
 
 
