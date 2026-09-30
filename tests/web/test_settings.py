@@ -97,7 +97,7 @@ class TestSettingsWorkspace:
         expect(glycol).to_have_attribute("step", "5")
 
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
-        expect(card.get_by_role("heading", name="Heat pump supply")).to_be_visible()
+        expect(card.get_by_role("heading", name="Heat Pump Supply")).to_be_visible()
         card.locator('select[name="source"]').select_option("modbus_tcp")
         expect(card.locator('input[name="host"]')).to_be_visible()
         expect(card.get_by_role("button", name="Test sensor")).to_be_visible()
