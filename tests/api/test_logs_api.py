@@ -296,3 +296,37 @@ class TestLogsClear:
         if len(after["entries"]) > 0:
             assert after["entries"][0]["seq"] > before_seq, \
                 "Sequence numbers should continue incrementing after clear"
+
+
+# ── /api/logs/coredump ────────────────────────────────────────────────────
+
+
+class TestCoreDump:
+    """GET/DELETE /api/logs/coredump — the dump saved by the last crash.
+
+    These tests never erase a real dump: CI collects it after the run, so a
+    crash earlier in the suite must survive until then.
+    """
+
+    def test_requires_api_key(self):
+        r = _session.get(f"{BASE_URL}/api/logs/coredump", timeout=10)
+        assert r.status_code == 401
+
+    def test_get_returns_a_dump_or_404(self):
+        r = _get("/api/logs/coredump")
+        if r.status_code == 404:
+            assert "error" in r.json()
+            return
+        assert r.status_code == 200
+        assert r.headers["Content-Type"].startswith("application/octet-stream")
+        # A raw flash dump starts with its own total length (little-endian).
+        assert len(r.content) > 4
+        assert int.from_bytes(r.content[:4], "little") == len(r.content)
+
+    def test_delete_with_nothing_saved_succeeds(self):
+        if _get("/api/logs/coredump").status_code != 404:
+            pytest.skip("a real core dump is saved; leaving it for CI to collect")
+        r = _delete("/api/logs/coredump")
+        assert r.status_code == 200
+        assert r.json() == {"success": True}
+        assert _get("/api/logs/coredump").status_code == 404
