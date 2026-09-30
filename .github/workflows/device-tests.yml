@@ -255,6 +255,7 @@ jobs:
           name: firmware
           path: |
             build/arctic_controller.bin
+            build/arctic_controller.elf
             build/build_sha.txt
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
@@ -293,6 +294,8 @@ jobs:
     if: needs.preflight.outputs.dedup != 'true'
     runs-on: [self-hosted, vm-mi]
     timeout-minutes: 120
+    outputs:
+      coredump: ${{ steps.coredump_after.outputs.found == 'true' || steps.coredump_before.outputs.found == 'true' }}
     env:
       ARCTIC_URL: http://arctic-controller-ghr.mi
 
@@ -1103,6 +1106,25 @@ jobs:
                 f"({'OTA' if ota_ok else 'USB fallback'} path)")
           PY
 
+      - name: Collect and clear any core dump from before the tests
+        # OTA and the USB baseline flash never touch the coredump partition, so
+        # a dump found here was left by an earlier crash (a previous run, or
+        # this build crashing while it was being installed). Keep it, then
+        # erase it so the dump collected after the tests belongs to this run.
+        id: coredump_before
+        run: |
+          set +e -uo pipefail
+          mkdir -p coredump
+          bash .github/scripts/fetch_coredump.sh coredump/coredump-before-tests.bin
+          rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Core dump from before the tests::The controller had a core dump saved before the test suites started. It is in the controller-coredump artifact."
+          fi
+          curl -sk --max-time 30 -X DELETE -H "X-API-Key: ${ARCTIC_API_KEY}" \
+            "${ARCTIC_URL/http:/https:}/api/logs/coredump" || true
+          echo
+
       - name: Run device UI tests
         id: ui_tests
         continue-on-error: true
@@ -1245,6 +1267,29 @@ jobs:
             -H "Content-Type: application/json" -d '{"web_auth_enabled": false}' \
             "${BASE}/api/auth/config" >/dev/null 2>&1 || true
           echo "Baseline TLS/auth reset complete."
+
+      - name: Collect core dump from the test run
+        # A panic or task-watchdog abort during the suites saves an ELF core
+        # dump before the reboot. The coredump-decode job turns it into a
+        # backtrace for every task.
+        id: coredump_after
+        if: always()
+        run: |
+          set +e -uo pipefail
+          mkdir -p coredump
+          bash .github/scripts/fetch_coredump.sh coredump/coredump.bin
+          if [ $? -eq 0 ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Core dump collected::The controller saved a core dump during this run. See the coredump-decode job for backtraces."
+          fi
+
+      - name: Upload core dump
+        if: always() && (steps.coredump_before.outputs.found == 'true' || steps.coredump_after.outputs.found == 'true')
+        uses: actions/upload-artifact@v7
+        with:
+          name: controller-coredump
+          path: coredump/
+          retention-days: 14
 
       - name: Stop controller serial capture
         if: always()
@@ -1845,8 +1890,75 @@ jobs:
   #
   # The policy ENUMERATES the acceptable combinations. Anything not listed --
   # including any unexpected, empty or cancelled state -- fails.
+  # Decode core dumps collected by device-tests into a backtrace for every task
+  # (the serial console only shows the one that crashed, which for a watchdog
+  # abort is just the idle task). Needs gdb, so it runs in the ESP-IDF image
+  # rather than on the self-hosted runner. Informational: the crash gate in
+  # device-tests already fails the run when the controller crashes.
+  coredump-decode:
+    needs: [device-tests]
+    if: always() && needs.device-tests.outputs.coredump == 'true'
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.1
+    steps:
+      - name: Download firmware
+        uses: actions/download-artifact@v8
+        with:
+          name: firmware
+          path: build/
+
+      - name: Download core dump
+        uses: actions/download-artifact@v8
+        with:
+          name: controller-coredump
+          path: coredump/
+
+      - name: Decode
+        shell: bash
+        run: |
+          set +e -uo pipefail
+          . "$IDF_PATH/export.sh" >/dev/null
+          failed=0
+          for f in coredump/*.bin; do
+            txt="${f%.bin}.txt"
+            esp-coredump info_corefile -t raw -c "$f" build/arctic_controller.elf > "$txt" 2>&1
+            rc=$?
+            echo "esp-coredump exit code: $rc" >> "$txt"
+            if [ "$rc" -ne 0 ]; then
+              if [ "$(basename "$f")" = "coredump-before-tests.bin" ]; then
+                echo "::warning::Could not decode the core dump from before the tests (it may be from another build)."
+              else
+                echo "::error::esp-coredump could not decode this run's core dump (exit $rc)."
+                failed=1
+              fi
+            fi
+            {
+              echo "### Core dump: $(basename "$f")"
+              echo ""
+              if [ "$(basename "$f")" = "coredump-before-tests.bin" ]; then
+                echo "Saved before the tests started, possibly by a different build. If the ELF doesn't match, esp-coredump says so below and the backtraces are unreliable."
+                echo ""
+              fi
+              echo '```'
+              # The full report is in the controller-coredump-decoded artifact;
+              # keep the summary to the crash cause and the task backtraces.
+              sed -n '/CURRENT THREAD REGISTERS/,/ALL MEMORY REGIONS/p' "$txt" | head -400
+              grep -E 'ELF file SHA256|does not match|exit code' "$txt" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit "$failed"
+
+      - name: Upload decoded core dump
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: controller-coredump-decoded
+          path: coredump/*.txt
+          retention-days: 14
+
   device-gate:
-    needs: [preflight, device-firmware-build, device-tests, reuse-attestation]
+    needs: [preflight, device-firmware-build, device-tests, reuse-attestation, coredump-decode]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -1856,6 +1968,7 @@ jobs:
           BUILD: ${{ needs.device-firmware-build.result }}
           DEVICE: ${{ needs.device-tests.result }}
           REUSE: ${{ needs.reuse-attestation.result }}
+          DECODE: ${{ needs.coredump-decode.result }}
           DEDUP: ${{ needs.preflight.outputs.dedup }}
         run: |
           set -euo pipefail
@@ -1864,6 +1977,7 @@ jobs:
           echo "device-firmware-build=${BUILD}"
           echo "device-tests=${DEVICE}"
           echo "reuse-attestation=${REUSE}"
+          echo "coredump-decode=${DECODE}"
 
           fail() {
             echo "::error::$1"
@@ -1887,6 +2001,7 @@ jobs:
             [ "$BUILD" = "skipped" ] || fail "dedup=true but device-firmware-build is '${BUILD}', expected skipped."
             [ "$DEVICE" = "skipped" ] || fail "dedup=true but device-tests is '${DEVICE}', expected skipped."
             [ "$REUSE" = "success" ] || fail "dedup=true but reuse-attestation is '${REUSE}', expected success."
+            [ "$DECODE" = "skipped" ] || fail "dedup=true but coredump-decode is '${DECODE}', expected skipped."
             echo "Accepted: validated tree reused, attestation re-emitted."
             exit 0
           fi
@@ -1895,4 +2010,10 @@ jobs:
           [ "$BUILD" = "success" ] || fail "device-firmware-build is '${BUILD}', expected success. A skipped build must never be read as a pass."
           [ "$DEVICE" = "success" ] || fail "device-tests is '${DEVICE}', expected success. A skipped hardware suite must never be read as a pass."
           [ "$REUSE" = "skipped" ] || fail "reuse-attestation is '${REUSE}', expected skipped when dedup=false."
+          # Decoding only runs when the device saved a core dump. When it runs
+          # it must work: a broken decoder would hide the next crash's cause.
+          case "$DECODE" in
+            skipped|success) ;;
+            *) fail "coredump-decode is '${DECODE}', expected success or skipped." ;;
+          esac
           echo "Accepted: physical device suite ran and passed."

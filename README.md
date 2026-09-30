@@ -163,7 +163,7 @@ a logged-in web session.
 |------|-----------|
 | System | `/api/status`, `/api/info`, `/api/time`, `/api/time/config`, `/api/time/sync`, `/api/location`, `/api/weather`, `/api/preferences`, `/api/display/brightness` |
 | Heat pump | `/api/heatpump/status`, `/api/heatpump/setpoints`, `/api/heatpump/mode`, `/api/heatpump/errors`, `/api/heatpump/errors/history`, `/api/heatpump/advanced`, `/api/heatpump/windows`, `/api/heatpump/temperature-history`, `/api/heatpump/demo` |
-| History and diagnostics | `/api/events`, `/api/logs`, `/api/logs/persisted`, `/api/notifications`, `/api/heatpump/diagnostic`, `/api/screenshot` |
+| History and diagnostics | `/api/events`, `/api/logs`, `/api/logs/persisted`, `/api/logs/coredump`, `/api/notifications`, `/api/heatpump/diagnostic`, `/api/screenshot` |
 | Firmware | `/api/ota/status`, `/api/ota/releases`, `/api/ota/github`, `/api/ota/upload`, `/api/ota/reboot` |
 | WiFi | `/api/wifi`, `/api/wifi/scan`, `/api/wifi/networks`, `/api/wifi/connect`, `/api/wifi/disconnect` |
 | Security | `/api/auth/config`, `/api/auth/credentials`, `/api/auth/apikey`, `/api/auth/apikey/regenerate`, `/api/tls/status`, `/api/tls/certificate` |

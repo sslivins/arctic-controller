@@ -42,6 +42,7 @@
 #include "boot_stats.h"
 #include "log_buffer.h"
 #include "log_persist.h"
+#include "crash_dump.h"
 #include "tab_shell.h"
 #include "heatpump_screen.h"
 #include "test_endpoints.h"
@@ -195,6 +196,8 @@ static esp_err_t factory_reset_post_handler(httpd_req_t* req);
 static esp_err_t logs_get_handler(httpd_req_t* req);
 static esp_err_t logs_clear_handler(httpd_req_t* req);
 static esp_err_t logs_persisted_get_handler(httpd_req_t* req);
+static esp_err_t logs_coredump_get_handler(httpd_req_t* req);
+static esp_err_t logs_coredump_delete_handler(httpd_req_t* req);
 static esp_err_t screenshot_get_handler(httpd_req_t* req);
 
 // TLS management handlers
@@ -1228,6 +1231,22 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(logs_persisted_uri);
+
+    // GET/DELETE /api/logs/coredump - Core dump saved by the last crash
+    httpd_uri_t logs_coredump_get_uri = {
+        .uri = "/api/logs/coredump",
+        .method = HTTP_GET,
+        .handler = logs_coredump_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(logs_coredump_get_uri);
+    httpd_uri_t logs_coredump_delete_uri = {
+        .uri = "/api/logs/coredump",
+        .method = HTTP_DELETE,
+        .handler = logs_coredump_delete_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(logs_coredump_delete_uri);
 
     // GET /api/screenshot - Capture live screen as uncompressed PNG
     httpd_uri_t screenshot_uri = {
@@ -5926,6 +5945,60 @@ static esp_err_t logs_persisted_get_handler(httpd_req_t* req)
     free(buf);
 
     httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+// GET /api/logs/coredump - Stream the raw ELF core dump saved by the last
+// crash, for decoding with `esp-coredump info_corefile -t raw` against the
+// matching firmware ELF. 404 when there is none.
+static esp_err_t logs_coredump_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    const size_t size = crash_dump_size();
+    if (size == 0) {
+        send_json_error(req, "404 Not Found", "No core dump saved");
+        return ESP_OK;
+    }
+
+    constexpr size_t kChunk = 4096;
+    char* buf = (char*)malloc(kChunk);
+    if (!buf) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"coredump.bin\"");
+    for (size_t off = 0; off < size; off += kChunk) {
+        const size_t n = (size - off < kChunk) ? size - off : kChunk;
+        if (crash_dump_read(off, buf, n) != ESP_OK ||
+            httpd_resp_send_chunk(req, buf, n) != ESP_OK) {
+            // Headers are already out, so the only way to signal the failure
+            // is to cut the transfer short.
+            free(buf);
+            return ESP_FAIL;
+        }
+    }
+    free(buf);
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+// DELETE /api/logs/coredump - Erase the saved core dump.
+static esp_err_t logs_coredump_delete_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    if (crash_dump_erase() != ESP_OK) {
+        send_json_error(req, "500 Internal Server Error", "Could not erase the core dump");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;
 }
 

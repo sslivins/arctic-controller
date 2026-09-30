@@ -70,6 +70,7 @@ idf_component_register(
         "wifi_supervisor.cpp"
         "log_buffer.cpp"
         "log_persist.cpp"
+        "crash_dump.cpp"
         "net_diag.cpp"
         "settings/settings_menu.cpp"
         "settings/settings_wifi_screen.cpp"
@@ -140,6 +141,7 @@ idf_component_register(
         esp-tls
         mbedtls
         spi_flash
+        esp_partition
         arctic-macon
         lwip
         espcoredump
