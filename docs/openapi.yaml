@@ -3219,6 +3219,12 @@ paths:
                           type: string
                         vendor_id:
                           type: integer
+        '400':
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceInvalid'
         '409':
           description: Another BACnet browse or discovery is running
           content:

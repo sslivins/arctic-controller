@@ -2311,6 +2311,11 @@
         if (host) host.value = el.dataset.host || "";
         if (port) port.value = el.dataset.port || "47808";
         if (deviceInst) deviceInst.value = el.dataset.deviceInstance || "";
+        // A different device: forget the sensor picked on the previous one.
+        for (const name of ["object_instance", "object_name", "rom_id"]) {
+          const f = form.querySelector(`[name="${name}"]`);
+          if (f) f.value = "";
+        }
         const browse = form.querySelector('[data-action="perf-browse-bacnet"]');
         if (browse) browse.click();
         return;

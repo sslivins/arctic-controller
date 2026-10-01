@@ -1269,7 +1269,8 @@ static void discover_task(void*)
     if (!s_discover_job.result) {
         s_discover_job.done = true;
         s_discover_job.running = false;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
+        return;
     }
     bool ok = ext_temp::discover_blocking(s_discover_job.result, 12000);
     if (!ok && s_discover_job.result->error == ext_temp::Error::None) {
@@ -1277,7 +1278,7 @@ static void discover_task(void*)
     }
     s_discover_job.done = true;
     s_discover_job.running = false;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 static void discover_pick_cb(lv_event_t* e)
@@ -1287,12 +1288,12 @@ static void discover_pick_cb(lv_event_t* e)
     const ext_temp::DiscoverDevice& d = s_discover_job.result->devices[idx];
     Editor& ed = s_state.editor;
     ed.ed.source = perf::SensorSource::BacnetIp;
+    clear_editor_bacnet_identity();
+    ed.ed.bacnet_instance = perf::kBacnetUnsetInstance;
     strlcpy(ed.ed.host, d.host, sizeof(ed.ed.host));
     ed.ed.port = d.port;
     ed.ed.bacnet_device_known = true;
     ed.ed.bacnet_device_instance = d.device_instance;
-    ed.ed.rom_known = false;
-    memset(ed.ed.rom, 0, sizeof(ed.ed.rom));
     if (ed.discover_card) lv_obj_add_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
     editor_changed();
     browse_btn_cb(nullptr);
@@ -1355,7 +1356,10 @@ static void discover_poll_cb(lv_timer_t* t)
     lv_timer_delete(ed.discover_timer);
     ed.discover_timer = NULL;
     set_discovering(false);
-    if (s_discover_job.result) render_discover_result(*s_discover_job.result);
+    // The user may have switched away from BACnet while the search ran.
+    if (s_discover_job.result && ed.ed.source == perf::SensorSource::BacnetIp) {
+        render_discover_result(*s_discover_job.result);
+    }
 }
 
 static void discover_btn_cb(lv_event_t*)
@@ -1393,7 +1397,7 @@ static void browse_task(void*)
     if (!s_browse_job.result) {
         s_browse_job.done = true;
         s_browse_job.running = false;
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
     bool ok = ext_temp::browse_blocking(s_browse_job.host, s_browse_job.port, s_browse_job.result,
@@ -1403,7 +1407,7 @@ static void browse_task(void*)
     }
     s_browse_job.done = true;
     s_browse_job.running = false;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 static void browse_pick_cb(lv_event_t* e)
