@@ -5143,32 +5143,46 @@ static esp_err_t perf_bacnet_browse_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    ext_temp::BrowseResult r;
-    if (!ext_temp::browse_blocking(host_buf, port_u, &r, 12000)) {
+    auto* r = (ext_temp::BrowseResult*)heap_caps_calloc(1, sizeof(ext_temp::BrowseResult),
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!r) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    if (!ext_temp::browse_blocking(host_buf, port_u, r, 8000)) {
+        heap_caps_free(r);
         send_json_error(req, "504 Gateway Timeout", "BACnet browse did not finish");
+        return ESP_OK;
+    }
+    if (r->error == ext_temp::Error::Busy) {
+        heap_caps_free(r);
+        send_json_error(req, "409 Conflict", "Another BACnet browse is running");
         return ESP_OK;
     }
     set_json_content_type(req);
     cJSON* resp = cJSON_CreateObject();
-    cJSON_AddBoolToObject(resp, "ok", r.error == ext_temp::Error::None);
-    cJSON_AddStringToObject(resp, "error", ext_temp::error_name(r.error));
-    if (r.error == ext_temp::Error::Rejected) {
-        cJSON_AddNumberToObject(resp, "exception", r.exception);
-        if (r.error_class) cJSON_AddNumberToObject(resp, "error_class", r.error_class);
+    cJSON_AddBoolToObject(resp, "ok", r->error == ext_temp::Error::None);
+    cJSON_AddStringToObject(resp, "error", ext_temp::error_name(r->error));
+    if (r->error == ext_temp::Error::Rejected) {
+        cJSON_AddNumberToObject(resp, "exception", r->exception);
+        if (r->error_class) cJSON_AddNumberToObject(resp, "error_class", r->error_class);
     }
-    cJSON_AddStringToObject(resp, "device_name", r.device_name);
-    cJSON_AddStringToObject(resp, "model_name", r.model_name);
+    cJSON_AddStringToObject(resp, "device_name", r->device_name);
+    cJSON_AddStringToObject(resp, "model_name", r->model_name);
+    cJSON_AddNumberToObject(resp, "total_objects", (double)r->total_objects);
+    cJSON_AddNumberToObject(resp, "scanned", (double)r->scanned);
+    cJSON_AddBoolToObject(resp, "truncated", r->truncated);
     cJSON* arr = cJSON_AddArrayToObject(resp, "sensors");
-    for (size_t i = 0; i < r.count; i++) {
+    for (size_t i = 0; i < r->count; i++) {
         cJSON* s = cJSON_CreateObject();
-        cJSON_AddStringToObject(s, "object_type", perf::bacnet_object_type_name(r.sensors[i].object_type));
-        cJSON_AddNumberToObject(s, "object_instance", (double)r.sensors[i].object_instance);
-        cJSON_AddStringToObject(s, "object_name", r.sensors[i].object_name);
-        cJSON_AddNumberToObject(s, "celsius", perf_round2(r.sensors[i].celsius));
-        cJSON_AddNumberToObject(s, "units", r.sensors[i].units);
-        cJSON_AddNumberToObject(s, "reliability", r.sensors[i].reliability);
-        if (r.sensors[i].rom_valid) {
-            cJSON_AddStringToObject(s, "rom_id", r.sensors[i].rom_hex);
+        cJSON_AddStringToObject(s, "object_type", perf::bacnet_object_type_name(r->sensors[i].object_type));
+        cJSON_AddNumberToObject(s, "object_instance", (double)r->sensors[i].object_instance);
+        cJSON_AddStringToObject(s, "object_name", r->sensors[i].object_name);
+        cJSON_AddNumberToObject(s, "celsius", perf_round2(r->sensors[i].celsius));
+        cJSON_AddNumberToObject(s, "units", r->sensors[i].units);
+        cJSON_AddNumberToObject(s, "reliability", r->sensors[i].reliability);
+        if (r->sensors[i].rom_valid) {
+            cJSON_AddStringToObject(s, "rom_id", r->sensors[i].rom_hex);
         } else {
             cJSON_AddNullToObject(s, "rom_id");
         }
@@ -5178,6 +5192,7 @@ static esp_err_t perf_bacnet_browse_post_handler(httpd_req_t* req)
     httpd_resp_sendstr(req, json_str);
     free(json_str);
     cJSON_Delete(resp);
+    heap_caps_free(r);
     return ESP_OK;
 }
 

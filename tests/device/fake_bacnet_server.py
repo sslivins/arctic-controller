@@ -148,10 +148,12 @@ def bvlc(apdu: bytes) -> bytes:
 
 
 class FakeBacnetServer:
-    def __init__(self, host: str, port: int, device_instance: int = 1234) -> None:
+    def __init__(self, host: str, port: int, device_instance: int = 1234,
+                 huge_object_count: int = 0) -> None:
         self.host = host
         self.port = port
         self.device_instance = device_instance
+        self.huge_object_count = huge_object_count
         self.device_name = "Thermux Test"
         self.model_name = "Thermux"
         self.objects: list[tuple[int, int]] = [(OBJ_DEVICE, device_instance)]
@@ -163,6 +165,27 @@ class FakeBacnetServer:
         self.objects += [(OBJ_AI, i) for i in self.analogs]
         self.drop = False
 
+    @property
+    def object_count(self) -> int:
+        return self.huge_object_count or len(self.objects)
+
+    def object_at_index(self, array_index: int) -> tuple[int, int]:
+        if array_index < 1 or array_index > self.object_count:
+            raise KeyError(("object-list", array_index))
+        if not self.huge_object_count:
+            return self.objects[array_index - 1]
+        if array_index == 1:
+            return OBJ_DEVICE, self.device_instance
+        return OBJ_AI, array_index - 1
+
+    def generated_analog(self, instance: int) -> Analog:
+        if instance in self.analogs:
+            return self.analogs[instance]
+        if self.huge_object_count and 1 <= instance < self.huge_object_count:
+            return Analog(instance, f"Generated sensor {instance}", 20.0 + (instance % 10) / 10.0,
+                          UNITS_C, 0, f"28FF{instance & 0xFFFFFFFFFFFF:012X}"[-16:])
+        raise KeyError((OBJ_AI, instance))
+
     def property_value(self, obj_type: int, instance: int, prop: int, array_index: int | None) -> bytes:
         if obj_type == OBJ_DEVICE and instance in (self.device_instance, 4194303):
             if prop == PROP_OBJECT_IDENTIFIER:
@@ -173,13 +196,13 @@ class FakeBacnetServer:
                 return app_string(self.model_name)
             if prop == PROP_OBJECT_LIST:
                 if array_index == 0:
-                    return app_unsigned(len(self.objects))
+                    return app_unsigned(self.object_count)
                 if array_index is not None:
-                    obj = self.objects[array_index - 1]
+                    obj = self.object_at_index(array_index)
                     return app_oid(*obj)
                 return b"".join(app_oid(*obj) for obj in self.objects)
-        if obj_type == OBJ_AI and instance in self.analogs:
-            a = self.analogs[instance]
+        if obj_type == OBJ_AI:
+            a = self.generated_analog(instance)
             if prop == PROP_OBJECT_IDENTIFIER:
                 return app_oid(OBJ_AI, instance)
             if prop == PROP_OBJECT_NAME:
@@ -259,8 +282,11 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=47808)
     parser.add_argument("--device-instance", type=int, default=1234)
+    parser.add_argument("--huge-object-count", type=int, default=0,
+                        help="Claim this many Object_List entries and generate AIs lazily")
     args = parser.parse_args()
-    FakeBacnetServer(args.host, args.port, args.device_instance).serve_forever()
+    FakeBacnetServer(args.host, args.port, args.device_instance,
+                     args.huge_object_count).serve_forever()
 
 
 if __name__ == "__main__":

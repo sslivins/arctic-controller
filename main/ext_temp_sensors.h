@@ -84,6 +84,9 @@ struct BrowseResult {
     char model_name[41];
     BrowseSensor sensors[64];
     size_t count;
+    uint32_t total_objects;
+    uint32_t scanned;
+    bool truncated;
 };
 
 // Loads settings and, when `allow_worker` and a sensor needs it, starts the

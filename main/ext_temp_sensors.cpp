@@ -26,6 +26,9 @@ const char* TAG = "ext_temp";
 
 constexpr uint32_t kPollMs = 10000;
 constexpr uint32_t kIoTimeoutMs = 1500;
+constexpr uint32_t kBrowseMaxMs = 8000;
+constexpr uint32_t kBrowseMaxObjects = 512;
+constexpr size_t kBrowseMaxResults = 64;
 // BACnet ReadPropertyMultiple parsing keeps a 1500-byte datagram plus a small
 // property list on the worker stack. The task uses PSRAM, so this modest bump
 // avoids tight-stack failures without increasing internal-RAM pressure.
@@ -62,6 +65,7 @@ uint32_t s_test_ticket = 0;
 uint32_t s_test_done_ticket = 0;
 perf::SensorConfig s_test_cfg;
 TestResult s_test_result;
+bool s_browse_busy = false;
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
@@ -958,16 +962,36 @@ static Error bacnet_read_property(BacnetClient& c, bacnet::ObjectType type, uint
     return Error::Protocol;
 }
 
-bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_t /*timeout_ms*/)
+bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms)
 {
     *out = {};
-    if (!host || !perf::host_valid(host) || port == 0) {
-        out->error = Error::Resolve;
+    if (!s_mutex) {
+        out->error = Error::Busy;
         return true;
     }
+    lock();
+    if (s_browse_busy) {
+        unlock();
+        out->error = Error::Busy;
+        return true;
+    }
+    s_browse_busy = true;
+    unlock();
+    auto finish = [&]() {
+        lock();
+        s_browse_busy = false;
+        unlock();
+        return true;
+    };
+    if (!host || !perf::host_valid(host) || port == 0) {
+        out->error = Error::Resolve;
+        return finish();
+    }
+    uint32_t budget_ms = timeout_ms > 0 && timeout_ms < kBrowseMaxMs ? timeout_ms : kBrowseMaxMs;
+    const uint32_t deadline = now_ms() + budget_ms;
     BacnetClient c;
     out->error = network_up() ? c.open(host, port) : Error::Connect;
-    if (out->error != Error::None) return true;
+    if (out->error != Error::None) return finish();
 
     bacnet::Value v;
     // Direct unicast does not need a configured device instance: ask the
@@ -979,7 +1003,7 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
     if (out->error == Error::None && v.type == bacnet::ValueType::ObjectId) {
         device_instance = v.object.instance;
     } else if (out->error != Error::None) {
-        return true;
+        return finish();
     }
 
     if (bacnet_read_property(c, bacnet::ObjectType::Device, device_instance, bacnet::PROP_OBJECT_NAME,
@@ -998,15 +1022,20 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
                                       &out->error_class);
     if (out->error != Error::None || v.type != bacnet::ValueType::Unsigned) {
         if (out->error == Error::None) out->error = Error::Protocol;
-        return true;
+        return finish();
     }
-    uint32_t total = v.u;
-    if (total > 128) total = 128;
+    out->total_objects = v.u;
+    uint32_t scan_limit = out->total_objects;
+    if (scan_limit > kBrowseMaxObjects) scan_limit = kBrowseMaxObjects;
     const uint32_t props[] = {bacnet::PROP_OBJECT_NAME, bacnet::PROP_PRESENT_VALUE,
                               bacnet::PROP_UNITS, bacnet::PROP_RELIABILITY,
                               bacnet::PROP_DESCRIPTION};
-    for (uint32_t idx = 1; idx <= total && out->count < sizeof(out->sensors) / sizeof(out->sensors[0]);
-         ++idx) {
+    for (uint32_t idx = 1; idx <= scan_limit && out->count < kBrowseMaxResults; ++idx) {
+        if (static_cast<int32_t>(now_ms() - deadline) >= 0) {
+            out->truncated = true;
+            break;
+        }
+        out->scanned = idx;
         if (bacnet_read_property(c, bacnet::ObjectType::Device, device_instance,
                                  bacnet::PROP_OBJECT_LIST, idx, true, &v, &out->exception,
                                  &out->error_class) != Error::None ||
@@ -1078,8 +1107,12 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
         bs.celsius = bacnet_to_celsius(bs.celsius, bs.units);
         ++out->count;
     }
+    if (out->total_objects > out->scanned || out->scanned >= kBrowseMaxObjects ||
+        out->count >= kBrowseMaxResults) {
+        out->truncated = true;
+    }
     out->error = Error::None;
-    return true;
+    return finish();
 }
 
 }  // namespace ext_temp

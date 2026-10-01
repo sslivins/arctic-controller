@@ -3114,8 +3114,18 @@ paths:
                     type: string
                   model_name:
                     type: string
+                  total_objects:
+                    type: integer
+                    description: Object_List count claimed by the BACnet device
+                  scanned:
+                    type: integer
+                    description: Number of Object_List entries inspected before caps/time budget stopped the scan
+                  truncated:
+                    type: boolean
+                    description: True when the result hit the 64-sensor cap, 512-object scan cap, or time budget
                   sensors:
                     type: array
+                    maxItems: 64
                     items:
                       $ref: '#/components/schemas/BacnetPerformanceSensor'
         '400':
@@ -3124,6 +3134,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PerformanceInvalid'
+        '409':
+          description: Another BACnet browse is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '504':
           description: The test did not finish in time
           content:

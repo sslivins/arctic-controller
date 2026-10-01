@@ -163,18 +163,22 @@ class FakeThermux:
 class FakeBacnet:
     """fake_bacnet_server.py in a subprocess that tests can stop and restart."""
 
-    def __init__(self, advertise_host: str):
+    def __init__(self, advertise_host: str, huge_object_count: int = 0):
         self.host = advertise_host
         self.port = _free_port()
         self.proc = None
+        self.huge_object_count = huge_object_count
 
     @property
     def addr(self):
         return self.host, self.port
 
     def start(self):
+        args = [sys.executable, "-u", str(FAKE_BACNET_SERVER), "--port", str(self.port)]
+        if self.huge_object_count:
+            args += ["--huge-object-count", str(self.huge_object_count)]
         self.proc = subprocess.Popen(
-            [sys.executable, "-u", str(FAKE_BACNET_SERVER), "--port", str(self.port)],
+            args,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
         line = self.proc.stdout.readline()
@@ -242,6 +246,16 @@ def bacnet_fake(bacnet_server):
     if bacnet_server.proc is None:
         bacnet_server.start()
     return bacnet_server.addr
+
+
+@pytest.fixture
+def huge_bacnet_fake(device: DeviceClient, saved_perf):
+    host = os.environ.get("ARCTIC_FAKE_BACNET_HOST") or os.environ.get("ARCTIC_FAKE_MODBUS_HOST") \
+        or _local_ip_towards(urlparse(device.base_url).hostname)
+    server = FakeBacnet(host, huge_object_count=1_000_000)
+    server.start()
+    yield server.addr
+    server.stop()
 
 
 def _open_perf_screen(device: DeviceClient):
@@ -392,6 +406,29 @@ class TestSensorTest:
         assert set(names) >= {"Supply tank", "Return tank", "Faulted sensor"}
         assert names["Supply tank"]["object_instance"] == 3
         assert names["Return tank"]["celsius"] == pytest.approx(20.0, abs=0.05)
+        assert body["total_objects"] == 4
+        assert body["truncated"] is False
+
+    def test_bacnet_browse_huge_object_list_is_bounded(self, device: DeviceClient,
+                                                       huge_bacnet_fake):
+        status_before = device.session.get(_url(device, "/api/status"),
+                                           timeout=device.timeout).json()
+        host, port = huge_bacnet_fake
+        r = device.session.post(_url(device, "/api/performance/bacnet/browse"),
+                                json={"host": host, "port": port}, timeout=15)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True, body
+        assert body["total_objects"] == 1_000_000
+        assert body["truncated"] is True
+        assert body["scanned"] <= 512
+        assert len(body["sensors"]) <= 64
+        assert device.session.get(_url(device, "/api/health"),
+                                  timeout=device.timeout).status_code == 200
+        status_after = device.session.get(_url(device, "/api/status"),
+                                          timeout=device.timeout).json()
+        assert status_after["free_heap"] > 100_000
+        assert status_after["free_heap"] > status_before["free_heap"] - 80_000
 
     def test_bacnet_units_fault_and_bad_object(self, device: DeviceClient, bacnet_fake):
         good_f = _test_read(device, _bacnet(bacnet_fake, 4)).json()
