@@ -41,6 +41,9 @@ struct SensorConfig {
     RegisterType reg_type;
     BacnetObjectType bacnet_type;
     uint32_t bacnet_instance;
+    bool bacnet_device_known;
+    uint32_t bacnet_device_instance;
+    char bacnet_object_name[41];
     ValueType value_type;
     int8_t scale_exp;  // value = raw * 10^scale_exp; 0..-3
     NoReading no_reading;
@@ -67,6 +70,7 @@ constexpr uint16_t kDefaultBacnetPort = 47808;
 constexpr uint8_t kDefaultUnitId = 1;
 constexpr uint32_t kBacnetInstanceMax = 4194302;
 constexpr uint32_t kBacnetDeviceWildcard = 4194303;
+constexpr uint32_t kBacnetUnsetInstance = kBacnetDeviceWildcard;
 
 // Readings outside this range are treated as no reading.
 constexpr float kMinPlausibleC = -40.0f;
@@ -108,12 +112,12 @@ enum class DecodeResult : uint8_t { Ok, NoReading, OutOfRange };
 // Decode `regs` (register_count() of them) into degrees C.
 DecodeResult decode_value(const SensorConfig& s, const uint16_t* regs, float* out_c);
 
-// Versioned blob with CRC. deserialize() returns false (and leaves `out`
-// untouched) on a wrong size, version, CRC, or an invalid result.
+// Versioned v1 blob with CRC. Keep this byte-for-byte compatible with #322:
+// BACnet extension state is stored under a separate NVS key so rollback sees
+// BACnet slots as HeatPump rather than rejecting the whole blob.
 constexpr size_t kSensorBlobV1Size = 1 + kHostMax + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + kRomLen;
-constexpr size_t kSensorBlobV2Size = 1 + kHostMax + 2 + 1 + 2 + 1 + 1 + 4 + 1 + 1 + 1 + 1 + kRomLen;
 constexpr size_t kBlobV1Size = 1 + 2 + 1 + 1 + kSlotCount * kSensorBlobV1Size + 4;
-constexpr size_t kBlobSize = 1 + 2 + 1 + 1 + kSlotCount * kSensorBlobV2Size + 4;
+constexpr size_t kBlobSize = kBlobV1Size;
 void serialize(const Settings& s, uint8_t* buf);
 bool deserialize(const uint8_t* buf, size_t len, Settings* out);
 

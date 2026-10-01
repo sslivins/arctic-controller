@@ -226,9 +226,9 @@ static void test_blob_roundtrip_and_corruption() {
     CHECK(out.fluid == arctic::LoopFluid::PropyleneGlycol);
     CHECK(out.glycol_pct == 35);
     CHECK(same_source(out.sensors[0], s.sensors[0]));
-    CHECK(same_source(out.sensors[1], s.sensors[1]));
-    CHECK(out.sensors[1].bacnet_type == BacnetObjectType::AnalogValue);
-    CHECK(out.sensors[1].bacnet_instance == 42);
+    CHECK(out.sensors[1].source == SensorSource::ModbusTcp);
+    CHECK(out.sensors[1].bacnet_type == BacnetObjectType::AnalogInput);
+    CHECK(out.sensors[1].bacnet_instance == kBacnetUnsetInstance);
     CHECK(out.sensors[0].rom_known && out.sensors[0].rom[7] == 0x2F);
     CHECK(!out.sensors[1].rom_known);
 
@@ -292,7 +292,7 @@ static void test_blob_v1_migrates() {
     CHECK(out.sensors[0].unit_id == 7);
     CHECK(out.sensors[0].address == 103);
     CHECK(out.sensors[0].bacnet_type == BacnetObjectType::AnalogInput);
-    CHECK(out.sensors[0].bacnet_instance == 103);
+    CHECK(out.sensors[0].bacnet_instance == kBacnetUnsetInstance);
     CHECK(out.sensors[0].rom_known && out.sensors[0].rom[7] == 0xA7);
 }
 
@@ -317,6 +317,32 @@ static void test_nvs_persistence() {
     s.flow_lpm_x10 = 500;
     CHECK(!save(s));
     CHECK(load().flow_lpm_x10 == 380);
+
+    s = load();
+    s.sensors[0] = bacnet_sensor("thermux.local", 1);
+    s.sensors[0].bacnet_device_known = true;
+    s.sensors[0].bacnet_device_instance = 179878;
+    std::strcpy(s.sensors[0].bacnet_object_name, "Master Return");
+    s.sensors[0].rom_known = true;
+    for (size_t i = 0; i < kRomLen; ++i) s.sensors[0].rom[i] = (uint8_t)(0x28 + i);
+    CHECK(save(s));
+    back = load();
+    CHECK(back.sensors[0].source == SensorSource::BacnetIp);
+    CHECK(back.sensors[0].bacnet_instance == 1);
+    CHECK(back.sensors[0].bacnet_device_known);
+    CHECK(back.sensors[0].bacnet_device_instance == 179878);
+    CHECK(std::strcmp(back.sensors[0].bacnet_object_name, "Master Return") == 0);
+    CHECK(back.sensors[0].rom_known && back.sensors[0].rom[7] == 0x2F);
+
+    uint8_t primary[kBlobSize];
+    serialize(s, primary);
+    Settings rollback = defaults();
+    CHECK(deserialize(primary, sizeof(primary), &rollback));
+    CHECK(rollback.sensors[0].source == SensorSource::HeatPump);
+
+    nvs_fake::seed_blob("perf", "bacnet", std::vector<uint8_t>(16, 0xAB));
+    back = load();
+    CHECK(back.sensors[0].source == SensorSource::HeatPump);
 
     // Garbage in NVS -> defaults, not a half-parsed struct.
     nvs_fake::seed_blob("perf", "cfg", std::vector<uint8_t>(kBlobSize, 0xAB));

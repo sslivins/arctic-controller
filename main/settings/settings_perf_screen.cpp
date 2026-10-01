@@ -373,8 +373,17 @@ static void format_sensor_sub(const perf::SensorConfig& c, char* buf, size_t siz
     if (c.source == perf::SensorSource::HeatPump) {
         snprintf(buf, size, "%s", i18n_get(STR_PERF_SUB_HEAT_PUMP));
     } else if (c.source == perf::SensorSource::BacnetIp) {
-        snprintf(buf, size, "BACnet/IP \xC2\xB7 %s \xC2\xB7 AI %lu", c.host,
-                 (unsigned long)c.bacnet_instance);
+        const char* typ = c.bacnet_type == perf::BacnetObjectType::AnalogValue ? "AV" : "AI";
+        if (c.bacnet_instance == perf::kBacnetUnsetInstance) {
+            snprintf(buf, size, "BACnet/IP \xC2\xB7 %s:%u \xC2\xB7 --", c.host,
+                     (unsigned)c.port);
+        } else if (c.bacnet_object_name[0]) {
+            snprintf(buf, size, "BACnet/IP \xC2\xB7 %s:%u \xC2\xB7 %s", c.host,
+                     (unsigned)c.port, c.bacnet_object_name);
+        } else {
+            snprintf(buf, size, "BACnet/IP \xC2\xB7 %s:%u \xC2\xB7 %s %lu", c.host,
+                     (unsigned)c.port, typ, (unsigned long)c.bacnet_instance);
+        }
     } else {
         snprintf(buf, size, "Modbus \xC2\xB7 %s \xC2\xB7 reg %u", c.host, (unsigned)c.address);
     }
@@ -404,7 +413,10 @@ static bool sensor_differs(const perf::SensorConfig& a, const perf::SensorConfig
            a.port != b.port || a.unit_id != b.unit_id || a.address != b.address ||
            a.reg_type != b.reg_type || a.bacnet_type != b.bacnet_type ||
            a.bacnet_instance != b.bacnet_instance || a.value_type != b.value_type ||
-           a.scale_exp != b.scale_exp || a.no_reading != b.no_reading;
+           a.scale_exp != b.scale_exp || a.no_reading != b.no_reading ||
+           a.bacnet_device_known != b.bacnet_device_known ||
+           (a.bacnet_device_known && a.bacnet_device_instance != b.bacnet_device_instance) ||
+           strncmp(a.bacnet_object_name, b.bacnet_object_name, sizeof(a.bacnet_object_name)) != 0;
 }
 
 // ============================================================================
@@ -900,7 +912,11 @@ static void editor_refresh(void)
         if (ed.browse_card) lv_obj_add_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
     }
     if (bacnet) {
-        snprintf(buf, sizeof(buf), "%lu", (unsigned long)c.bacnet_instance);
+        if (c.bacnet_instance == perf::kBacnetUnsetInstance) {
+            snprintf(buf, sizeof(buf), "--");
+        } else {
+            snprintf(buf, sizeof(buf), "%lu", (unsigned long)c.bacnet_instance);
+        }
     } else {
         snprintf(buf, sizeof(buf), "%u", (unsigned)c.address);
     }
@@ -1134,6 +1150,16 @@ static void browse_pick_cb(lv_event_t* e)
     ed.ed.source = perf::SensorSource::BacnetIp;
     ed.ed.bacnet_type = s.object_type;
     ed.ed.bacnet_instance = s.object_instance;
+    ed.ed.bacnet_device_known = s_browse_job.result->device_instance_known;
+    ed.ed.bacnet_device_instance = s_browse_job.result->device_instance;
+    strlcpy(ed.ed.bacnet_object_name, s.object_name, sizeof(ed.ed.bacnet_object_name));
+    if (s.rom_valid) {
+        for (size_t i = 0; i < perf::kRomLen; ++i) {
+            char tmp[3] = {s.rom_hex[2 * i], s.rom_hex[2 * i + 1], 0};
+            ed.ed.rom[i] = (uint8_t)strtoul(tmp, NULL, 16);
+        }
+        ed.ed.rom_known = true;
+    }
     editor_changed();
 }
 
@@ -1265,11 +1291,12 @@ static void source_seg_cb(lv_event_t* e)
     perf::SensorSource old = s.source;
     s.source = idx == 2 ? perf::SensorSource::BacnetIp
                         : (idx == 1 ? perf::SensorSource::ModbusTcp : perf::SensorSource::HeatPump);
-    if (old != s.source && s.source == perf::SensorSource::BacnetIp && s.port == perf::kDefaultPort) {
-        s.port = perf::kDefaultBacnetPort;
-    } else if (old != s.source && s.source == perf::SensorSource::ModbusTcp &&
-               s.port == perf::kDefaultBacnetPort) {
-        s.port = perf::kDefaultPort;
+    if (old != s.source) {
+        if (s.source == perf::SensorSource::BacnetIp) {
+            s.port = perf::kDefaultBacnetPort;
+        } else if (s.source == perf::SensorSource::ModbusTcp) {
+            s.port = perf::kDefaultPort;
+        }
     }
     editor_changed();
 }
@@ -1712,7 +1739,10 @@ static void open_text_entry(Field f)
         default:
             title_id = STR_PERF_REGISTER;
             if (ed.ed.source == perf::SensorSource::BacnetIp) {
-                snprintf(value, sizeof(value), "%lu", (unsigned long)ed.ed.bacnet_instance);
+                snprintf(value, sizeof(value), "%lu",
+                         (unsigned long)(ed.ed.bacnet_instance == perf::kBacnetUnsetInstance
+                                             ? 0
+                                             : ed.ed.bacnet_instance));
             } else {
                 snprintf(value, sizeof(value), "%u", (unsigned)ed.ed.address);
             }
@@ -1752,7 +1782,10 @@ static void open_text_entry(Field f)
         lv_textarea_set_accepted_chars(
             te.ta, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_");
     } else {
-        lv_textarea_set_max_length(te.ta, 5);
+        lv_textarea_set_max_length(te.ta, f == Field::Register &&
+                                              ed.ed.source == perf::SensorSource::BacnetIp
+                                          ? 7
+                                          : 5);
         lv_textarea_set_accepted_chars(te.ta, "0123456789");
     }
     lv_textarea_set_text(te.ta, value);

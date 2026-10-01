@@ -20,6 +20,8 @@
 
 namespace ext_temp {
 
+bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms);
+
 namespace {
 
 const char* TAG = "ext_temp";
@@ -37,6 +39,12 @@ constexpr uint8_t kBacnetUnitsC = 62;
 constexpr uint8_t kBacnetUnitsF = 64;
 constexpr uint8_t kBacnetUnitsK = 63;
 constexpr uint8_t kBacnetReliabilityNoFault = 0;
+constexpr uint32_t kBacnetReliabilityUnknown = 0xFFFFFFFFu;
+
+void log_stack_watermark(const char* phase) {
+    ESP_LOGI(TAG, "external sensor worker stack high-water after %s: %u words",
+             phase, (unsigned)uxTaskGetStackHighWaterMark(NULL));
+}
 
 enum class ThermuxState : uint8_t { Unknown, Yes, No };
 
@@ -66,6 +74,12 @@ uint32_t s_test_done_ticket = 0;
 perf::SensorConfig s_test_cfg;
 TestResult s_test_result;
 bool s_browse_busy = false;
+bool s_browse_pending = false;
+uint32_t s_browse_ticket = 0;
+uint32_t s_browse_done_ticket = 0;
+char s_browse_host[perf::kHostMax] = {};
+uint16_t s_browse_port = 0;
+BrowseResult* s_browse_out = nullptr;
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
@@ -310,30 +324,35 @@ public:
         memcpy(&addr_, res->ai_addr, res->ai_addrlen);
         addr_len_ = res->ai_addrlen;
         freeaddrinfo(res);
+        if (connect(fd_, reinterpret_cast<struct sockaddr*>(&addr_), addr_len_) != 0) {
+            close();
+            return Error::Connect;
+        }
         struct timeval tv = {kIoTimeoutMs / 1000, (kIoTimeoutMs % 1000) * 1000};
         setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        snprintf(host_, sizeof(host_), "%s", host);
+        port_ = port;
         return Error::None;
+    }
+
+    bool is_open_to(const char* host, uint16_t port) const {
+        return fd_ >= 0 && port_ == port && strcmp(host_, host) == 0;
     }
 
     Error request(const uint8_t* req, size_t req_len, uint8_t* resp, size_t resp_cap, size_t* resp_len) {
         if (fd_ < 0) return Error::Connect;
         for (int attempt = 0; attempt < 2; ++attempt) {
-            if (sendto(fd_, req, req_len, 0, reinterpret_cast<struct sockaddr*>(&addr_), addr_len_) !=
-                static_cast<int>(req_len)) {
+            if (send(fd_, req, req_len, 0) != static_cast<int>(req_len)) {
                 return Error::Timeout;
             }
-            for (;;) {
-                struct sockaddr_storage from = {};
-                socklen_t from_len = sizeof(from);
-                int n = recvfrom(fd_, resp, resp_cap, 0, reinterpret_cast<struct sockaddr*>(&from), &from_len);
-                if (n <= 0) break;
-                if (from_len == addr_len_ && memcmp(&from, &addr_, addr_len_) == 0) {
-                    *resp_len = static_cast<size_t>(n);
-                    return Error::None;
-                }
+            int n = recv(fd_, resp, resp_cap, 0);
+            if (n > 0) {
+                *resp_len = static_cast<size_t>(n);
+                return Error::None;
             }
         }
+        close();
         return Error::Timeout;
     }
 
@@ -348,6 +367,8 @@ private:
     int fd_ = -1;
     struct sockaddr_storage addr_ = {};
     socklen_t addr_len_ = 0;
+    char host_[sizeof(perf::SensorConfig::host)] = {};
+    uint16_t port_ = 0;
 };
 
 struct BacnetRead {
@@ -358,7 +379,10 @@ struct BacnetRead {
     char object_name[41] = {};
     char rom_hex[17] = {};
     uint32_t units = 0;
-    uint32_t reliability = 0;
+    uint32_t reliability = kBacnetReliabilityUnknown;
+    bool reliability_known = false;
+    bool device_known = false;
+    uint32_t device_instance = perf::kBacnetDeviceWildcard;
 };
 
 void map_bacnet_parse(bacnet::Parse p, const bacnet::ErrorInfo& info, BacnetRead* out) {
@@ -376,8 +400,104 @@ void map_bacnet_parse(bacnet::Parse p, const bacnet::ErrorInfo& info, BacnetRead
     }
 }
 
+Error bacnet_read_property_value(BacnetClient& c, bacnet::ObjectType type, uint32_t instance,
+                                 uint32_t prop, bacnet::Value* value, uint8_t* exception,
+                                 uint8_t* error_class) {
+    uint8_t invoke = ++s_bacnet_invoke;
+    if (invoke == 0) invoke = ++s_bacnet_invoke;
+    uint8_t req[128];
+    size_t req_len = 0;
+    if (!bacnet::build_read_property(invoke, type, instance, prop, 0, false, req, sizeof(req),
+                                     &req_len)) {
+        return Error::Protocol;
+    }
+    uint8_t resp[bacnet::kMaxFrame];
+    size_t resp_len = 0;
+    Error e = c.request(req, req_len, resp, sizeof(resp), &resp_len);
+    if (e != Error::None) return e;
+    bacnet::Value v;
+    bacnet::ErrorInfo info;
+    bacnet::Parse p = bacnet::parse_read_property_ack(resp, resp_len, invoke, prop, value, &info);
+    if (p == bacnet::Parse::Ok) return Error::None;
+    if (p == bacnet::Parse::Error) {
+        if (exception) *exception = info.error_code;
+        if (error_class) *error_class = info.error_class;
+        return Error::Rejected;
+    }
+    if (p == bacnet::Parse::Reject || p == bacnet::Parse::Abort) {
+        if (exception) *exception = info.reason;
+        return Error::Rejected;
+    }
+    return Error::Protocol;
+}
+
+void apply_bacnet_value(uint32_t prop, const bacnet::Value& v, BacnetRead* out,
+                        bool* have_value, bool* have_units, bool* have_status,
+                        uint8_t* status_bits) {
+    switch (prop) {
+        case bacnet::PROP_OBJECT_NAME:
+            if (v.type == bacnet::ValueType::String) strlcpy(out->object_name, v.str, sizeof(out->object_name));
+            break;
+        case bacnet::PROP_PRESENT_VALUE:
+            if (v.type == bacnet::ValueType::Real) {
+                out->celsius = v.real;
+                *have_value = true;
+            }
+            break;
+        case bacnet::PROP_UNITS:
+            if (v.type == bacnet::ValueType::Enumerated) {
+                out->units = v.u;
+                *have_units = true;
+            }
+            break;
+        case bacnet::PROP_STATUS_FLAGS:
+            if (v.type == bacnet::ValueType::BitString && v.bit_count >= 4) {
+                *status_bits = v.bits;
+                *have_status = true;
+            }
+            break;
+        case bacnet::PROP_RELIABILITY:
+            if (v.type == bacnet::ValueType::Enumerated) {
+                out->reliability = v.u;
+                out->reliability_known = true;
+            }
+            break;
+        case bacnet::PROP_DESCRIPTION:
+            if (v.type == bacnet::ValueType::String && is_hex16(v.str)) {
+                strlcpy(out->rom_hex, v.str, sizeof(out->rom_hex));
+            }
+            break;
+    }
+}
+
+BacnetRead bacnet_read_device_instance(BacnetClient& c) {
+    BacnetRead out;
+    bacnet::Value v;
+    uint8_t exc = 0, cls = 0;
+    out.error = bacnet_read_property_value(c, bacnet::ObjectType::Device, bacnet::kDeviceWildcard,
+                                           bacnet::PROP_OBJECT_IDENTIFIER, &v, &exc, &cls);
+    out.exception = exc;
+    out.error_class = cls;
+    if (out.error != Error::None) return out;
+    if (v.type == bacnet::ValueType::ObjectId && v.object.type == bacnet::ObjectType::Device) {
+        out.device_known = true;
+        out.device_instance = v.object.instance;
+    } else {
+        out.error = Error::Protocol;
+    }
+    return out;
+}
+
 BacnetRead bacnet_read_value(BacnetClient& c, const perf::SensorConfig& cfg) {
     BacnetRead out;
+    BacnetRead dev = bacnet_read_device_instance(c);
+    if (dev.error != Error::None) return dev;
+    out.device_known = dev.device_known;
+    out.device_instance = dev.device_instance;
+    if (cfg.bacnet_device_known && out.device_instance != cfg.bacnet_device_instance) {
+        out.error = Error::WrongDevice;
+        return out;
+    }
     const uint32_t props[] = {bacnet::PROP_OBJECT_NAME, bacnet::PROP_PRESENT_VALUE,
                               bacnet::PROP_UNITS, bacnet::PROP_STATUS_FLAGS,
                               bacnet::PROP_RELIABILITY, bacnet::PROP_DESCRIPTION};
@@ -403,45 +523,39 @@ BacnetRead bacnet_read_value(BacnetClient& c, const perf::SensorConfig& cfg) {
                                                                sizeof(values) / sizeof(values[0]),
                                                                &count, &info);
     if (p != bacnet::Parse::Ok) {
-        map_bacnet_parse(p, info, &out);
-        return out;
+        if (p != bacnet::Parse::Reject && p != bacnet::Parse::Error) {
+            map_bacnet_parse(p, info, &out);
+            return out;
+        }
+        count = 0;
+        for (uint32_t prop : props) {
+            bacnet::Value v;
+            uint8_t exc = 0, cls = 0;
+            Error e = bacnet_read_property_value(c, bacnet_object_type(cfg), cfg.bacnet_instance,
+                                                 prop, &v, &exc, &cls);
+            if (e == Error::None && count < sizeof(values) / sizeof(values[0])) {
+                values[count].object = {bacnet_object_type(cfg), cfg.bacnet_instance};
+                values[count].property = prop;
+                values[count].value = v;
+                ++count;
+            } else if (prop == bacnet::PROP_PRESENT_VALUE || prop == bacnet::PROP_UNITS ||
+                       prop == bacnet::PROP_STATUS_FLAGS) {
+                out.error = e;
+                out.exception = exc;
+                out.error_class = cls;
+                return out;
+            }
+        }
     }
-    bool have_value = false, have_units = false;
+    bool have_value = false, have_units = false, have_status = false;
     uint8_t status_bits = 0;
     for (size_t i = 0; i < count; ++i) {
         if (values[i].error) {
             if (values[i].property == bacnet::PROP_PRESENT_VALUE) out.error = Error::NoReading;
             continue;
         }
-        const bacnet::Value& v = values[i].value;
-        switch (values[i].property) {
-            case bacnet::PROP_OBJECT_NAME:
-                if (v.type == bacnet::ValueType::String) strlcpy(out.object_name, v.str, sizeof(out.object_name));
-                break;
-            case bacnet::PROP_PRESENT_VALUE:
-                if (v.type == bacnet::ValueType::Real) {
-                    out.celsius = v.real;
-                    have_value = true;
-                }
-                break;
-            case bacnet::PROP_UNITS:
-                if (v.type == bacnet::ValueType::Enumerated) {
-                    out.units = v.u;
-                    have_units = true;
-                }
-                break;
-            case bacnet::PROP_STATUS_FLAGS:
-                if (v.type == bacnet::ValueType::BitString) status_bits = v.bits;
-                break;
-            case bacnet::PROP_RELIABILITY:
-                if (v.type == bacnet::ValueType::Enumerated) out.reliability = v.u;
-                break;
-            case bacnet::PROP_DESCRIPTION:
-                if (v.type == bacnet::ValueType::String && is_hex16(v.str)) {
-                    strlcpy(out.rom_hex, v.str, sizeof(out.rom_hex));
-                }
-                break;
-        }
+        apply_bacnet_value(values[i].property, values[i].value, &out, &have_value, &have_units,
+                           &have_status, &status_bits);
     }
     if (out.error != Error::None) return out;
     if (!have_value) {
@@ -449,7 +563,10 @@ BacnetRead bacnet_read_value(BacnetClient& c, const perf::SensorConfig& cfg) {
     } else if (!have_units || (out.units != kBacnetUnitsC && out.units != kBacnetUnitsF &&
                               out.units != kBacnetUnitsK)) {
         out.error = Error::Units;
-    } else if (out.reliability != kBacnetReliabilityNoFault || bacnet_status_fault(status_bits)) {
+    } else if (!have_status) {
+        out.error = Error::Protocol;
+    } else if ((out.reliability_known && out.reliability != kBacnetReliabilityNoFault) ||
+               bacnet_status_fault(status_bits)) {
         out.error = Error::NoReading;
     } else {
         out.celsius = bacnet_to_celsius(out.celsius, out.units);
@@ -475,16 +592,13 @@ void poll_bacnet_slot(int i, const perf::SensorConfig& cfg, bool net_up) {
         if (r.error == Error::None) r = bacnet_read_value(c, cfg);
     }
 
-    bool learned = false;
     uint8_t rom[perf::kRomLen] = {};
     if (r.error == Error::None && is_hex16(r.rom_hex)) {
         rom_from_hex(r.rom_hex, rom);
         lock();
         const perf::SensorConfig& cur = s_settings.sensors[i];
         if (perf::same_source(cur, cfg)) {
-            if (!cur.rom_known) {
-                learned = true;
-            } else if (memcmp(cur.rom, rom, perf::kRomLen) != 0) {
+            if (cur.rom_known && memcmp(cur.rom, rom, perf::kRomLen) != 0) {
                 r.error = Error::SensorChanged;
             }
         }
@@ -500,6 +614,8 @@ void poll_bacnet_slot(int i, const perf::SensorConfig& cfg, bool net_up) {
         slot.status.error_class = r.error_class;
         strlcpy(slot.status.object_name, r.object_name, sizeof(slot.status.object_name));
         strlcpy(slot.status.rom_hex, r.rom_hex, sizeof(slot.status.rom_hex));
+        slot.status.bacnet_device_known = r.device_known;
+        slot.status.bacnet_device_instance = r.device_instance;
         slot.thermux = ThermuxState::No;
         if (r.error == Error::None) {
             slot.status.has_reading = true;
@@ -508,11 +624,6 @@ void poll_bacnet_slot(int i, const perf::SensorConfig& cfg, bool net_up) {
             s_selector.on_reading(static_cast<perf::Slot>(i), now, r.celsius);
         } else {
             s_selector.on_error(static_cast<perf::Slot>(i), now);
-        }
-        if (learned) {
-            s_settings.sensors[i].rom_known = true;
-            memcpy(s_settings.sensors[i].rom, rom, perf::kRomLen);
-            s_save_pending = true;
         }
     }
     unlock();
@@ -621,6 +732,9 @@ void run_test(const perf::SensorConfig& requested, TestResult* out) {
         out->celsius = r.celsius;
         out->bacnet_units = r.units;
         out->bacnet_reliability = r.reliability;
+        out->bacnet_reliability_known = r.reliability_known;
+        out->bacnet_device_known = r.device_known;
+        out->bacnet_device_instance = r.device_instance;
         strlcpy(out->object_name, r.object_name, sizeof(out->object_name));
         if (is_hex16(r.rom_hex)) {
             out->rom_valid = true;
@@ -694,6 +808,25 @@ void worker(void*) {
             s_test_done_ticket = ticket;
             s_test_pending = false;
             unlock();
+            log_stack_watermark("test");
+        }
+
+        lock();
+        bool browse = s_browse_pending;
+        uint32_t browse_ticket = s_browse_ticket;
+        char browse_host[perf::kHostMax];
+        strlcpy(browse_host, s_browse_host, sizeof(browse_host));
+        uint16_t browse_port = s_browse_port;
+        BrowseResult* browse_out = s_browse_out;
+        unlock();
+        if (browse && browse_out) {
+            run_browse_internal(browse_host, browse_port, browse_out, kBrowseMaxMs);
+            lock();
+            s_browse_done_ticket = browse_ticket;
+            s_browse_pending = false;
+            s_browse_busy = false;
+            unlock();
+            log_stack_watermark("browse");
         }
 
         if (static_cast<int32_t>(now_ms() - next_poll) < 0) continue;
@@ -732,6 +865,7 @@ void worker(void*) {
             if (ci != i) s_conns[i].close();
             poll_slot(i, sc, s_conns[ci], net_up);
         }
+        log_stack_watermark("poll");
         next_poll = now_ms() + kPollMs;
     }
 }
@@ -775,6 +909,7 @@ const char* error_name(Error e) {
         case Error::NoReading: return "no_reading";
         case Error::OutOfRange: return "out_of_range";
         case Error::SensorChanged: return "sensor_changed";
+        case Error::WrongDevice: return "wrong_device";
         case Error::Busy: return "busy";
     }
     return "unknown";
@@ -833,11 +968,16 @@ perf::Invalid apply_settings(const perf::Settings& in, const bool sensor_edited[
         perf::SensorConfig& s = next.sensors[i];
         const perf::SensorConfig& cur = s_settings.sensors[i];
         if (sensor_edited[i] || !perf::same_source(s, cur)) {
-            s.rom_known = false;
-            memset(s.rom, 0, sizeof(s.rom));
+            if (s.source != perf::SensorSource::BacnetIp) {
+                s.rom_known = false;
+                memset(s.rom, 0, sizeof(s.rom));
+            }
         } else {
             s.rom_known = cur.rom_known;
             memcpy(s.rom, cur.rom, sizeof(s.rom));
+            s.bacnet_device_known = cur.bacnet_device_known;
+            s.bacnet_device_instance = cur.bacnet_device_instance;
+            strlcpy(s.bacnet_object_name, cur.bacnet_object_name, sizeof(s.bacnet_object_name));
         }
         if (sensor_edited[i] || !perf::same_source(s, cur) || s.scale_exp != cur.scale_exp ||
             s.no_reading != cur.no_reading) {
@@ -924,7 +1064,8 @@ bool test_blocking(const perf::SensorConfig& cfg, TestResult* out, uint32_t time
         return true;
     }
     uint32_t start = now_ms();
-    while (now_ms() - start < timeout_ms) {
+    uint32_t wait_ms = timeout_ms + 1500;
+    while (now_ms() - start < wait_ms) {
         if (test_result(ticket, out)) return true;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -962,27 +1103,10 @@ static Error bacnet_read_property(BacnetClient& c, bacnet::ObjectType type, uint
     return Error::Protocol;
 }
 
-bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms)
+bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms)
 {
     *out = {};
-    if (!s_mutex) {
-        out->error = Error::Busy;
-        return true;
-    }
-    lock();
-    if (s_browse_busy) {
-        unlock();
-        out->error = Error::Busy;
-        return true;
-    }
-    s_browse_busy = true;
-    unlock();
-    auto finish = [&]() {
-        lock();
-        s_browse_busy = false;
-        unlock();
-        return true;
-    };
+    auto finish = [&]() { return true; };
     if (!host || !perf::host_valid(host) || port == 0) {
         out->error = Error::Resolve;
         return finish();
@@ -1002,6 +1126,8 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
     uint32_t device_instance = bacnet::kDeviceWildcard;
     if (out->error == Error::None && v.type == bacnet::ValueType::ObjectId) {
         device_instance = v.object.instance;
+        out->device_instance_known = true;
+        out->device_instance = device_instance;
     } else if (out->error != Error::None) {
         return finish();
     }
@@ -1029,7 +1155,7 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
     if (scan_limit > kBrowseMaxObjects) scan_limit = kBrowseMaxObjects;
     const uint32_t props[] = {bacnet::PROP_OBJECT_NAME, bacnet::PROP_PRESENT_VALUE,
                               bacnet::PROP_UNITS, bacnet::PROP_RELIABILITY,
-                              bacnet::PROP_DESCRIPTION};
+                              bacnet::PROP_STATUS_FLAGS, bacnet::PROP_DESCRIPTION};
     for (uint32_t idx = 1; idx <= scan_limit && out->count < kBrowseMaxResults; ++idx) {
         if (static_cast<int32_t>(now_ms() - deadline) >= 0) {
             out->truncated = true;
@@ -1069,7 +1195,9 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
         BrowseSensor& bs = out->sensors[out->count];
         bs.object_type = perf_bacnet_type(v.object.type);
         bs.object_instance = v.object.instance;
-        bool have_value = false, have_units = false;
+        bool have_value = false, have_units = false, have_status = false;
+        uint8_t status_bits = 0;
+        bs.reliability = kBacnetReliabilityUnknown;
         for (size_t j = 0; j < nvals; ++j) {
             if (vals[j].error) continue;
             const bacnet::Value& pv = vals[j].value;
@@ -1090,7 +1218,16 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
                     }
                     break;
                 case bacnet::PROP_RELIABILITY:
-                    if (pv.type == bacnet::ValueType::Enumerated) bs.reliability = pv.u;
+                    if (pv.type == bacnet::ValueType::Enumerated) {
+                        bs.reliability = pv.u;
+                        bs.reliability_known = true;
+                    }
+                    break;
+                case bacnet::PROP_STATUS_FLAGS:
+                    if (pv.type == bacnet::ValueType::BitString && pv.bit_count >= 4) {
+                        status_bits = pv.bits;
+                        have_status = true;
+                    }
                     break;
                 case bacnet::PROP_DESCRIPTION:
                     if (pv.type == bacnet::ValueType::String && is_hex16(pv.str)) {
@@ -1100,11 +1237,14 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
                     break;
             }
         }
-        if (!have_value || !have_units ||
+        if (!have_units ||
             (bs.units != kBacnetUnitsC && bs.units != kBacnetUnitsF && bs.units != kBacnetUnitsK)) {
             continue;
         }
-        bs.celsius = bacnet_to_celsius(bs.celsius, bs.units);
+        if (have_value) bs.celsius = bacnet_to_celsius(bs.celsius, bs.units);
+        bs.available = have_value && have_status && !bacnet_status_fault(status_bits) &&
+                       (!bs.reliability_known || bs.reliability == kBacnetReliabilityNoFault) &&
+                       bs.celsius >= perf::kMinPlausibleC && bs.celsius <= perf::kMaxPlausibleC;
         ++out->count;
     }
     if (out->total_objects > out->scanned || out->scanned >= kBrowseMaxObjects ||
@@ -1113,6 +1253,44 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
     }
     out->error = Error::None;
     return finish();
+}
+
+bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms)
+{
+    *out = {};
+    if (!s_mutex) {
+        out->error = Error::Busy;
+        return true;
+    }
+    ensure_worker();
+    if (!s_task) {
+        out->error = Error::Busy;
+        return true;
+    }
+    lock();
+    if (s_browse_busy) {
+        unlock();
+        out->error = Error::Busy;
+        return true;
+    }
+    s_browse_busy = true;
+    s_browse_pending = true;
+    s_browse_out = out;
+    strlcpy(s_browse_host, host ? host : "", sizeof(s_browse_host));
+    s_browse_port = port;
+    uint32_t ticket = ++s_browse_ticket;
+    if (ticket == 0) ticket = ++s_browse_ticket;
+    unlock();
+    xTaskNotifyGive(s_task);
+    uint32_t start = now_ms();
+    while (now_ms() - start < timeout_ms) {
+        lock();
+        bool done = s_browse_done_ticket == ticket;
+        unlock();
+        if (done) return true;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return false;
 }
 
 }  // namespace ext_temp

@@ -3077,7 +3077,12 @@ paths:
       description: |
         Reads a BACnet/IP device's Object_List and returns up to 64 Analog
         Input/Analog Value objects with names, values, units, reliability, and
-        ROM IDs when the Description is a 16-digit Thermux sensor ID.
+        ROM IDs when the Description is a 16-digit Thermux sensor ID. This is
+        direct BACnet/IP unicast to the device's own socket on the same routed
+        IP network; BBMD, foreign-device registration, routed NPDU source/dest
+        fields, Who-Is discovery, and SubscribeCOV are not used. Browse is
+        bounded (fixed storage, capped Object_List scan, and an overall time
+        budget); `truncated` indicates that the list was capped.
       operationId: browseBacnetPerformanceSensors
       security:
       - apiKey: []
@@ -4110,6 +4115,8 @@ components:
         device refused the read (see `exception`). `no_reading`: the register
         holds its "no reading" value. `sensor_changed`: a different Thermux
         sensor is now on this channel; save the sensor again to accept it.
+        `wrong_device`: the BACnet device instance at this host:port no longer
+        matches the saved binding.
     PerformanceSensorInput:
       type: object
       description: Temperature sensor settings; any subset when updating.
@@ -4149,7 +4156,18 @@ components:
           type: integer
           minimum: 0
           maximum: 4194302
-          description: BACnet object instance when `source` is `bacnet_ip`
+          nullable: true
+          description: Required BACnet object instance when `source` is `bacnet_ip`; null means unset
+        device_instance:
+          type: integer
+          minimum: 0
+          maximum: 4194302
+          nullable: true
+          description: BACnet Device object instance learned by Find/Test and used to detect wrong devices
+        object_name:
+          type: string
+          nullable: true
+          description: BACnet object display name; not used as identity
         value_type:
           type: string
           enum: [int16, uint16, float32, float32_swapped]
@@ -4186,10 +4204,17 @@ components:
           type: string
         celsius:
           type: number
+          nullable: true
+          description: Current value after unit conversion, or null when the object is unavailable
         units:
           type: integer
         reliability:
           type: integer
+          nullable: true
+          description: BACnet reliability enum; null when the property is not present
+        available:
+          type: boolean
+          description: False when reliability/status flags indicate no usable reading
         rom_id:
           type: string
           nullable: true

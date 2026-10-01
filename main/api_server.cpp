@@ -4703,7 +4703,21 @@ static cJSON* perf_sensor_json(const perf::SensorConfig& s)
     cJSON_AddNumberToObject(o, "register", s.address);
     cJSON_AddStringToObject(o, "register_type", perf::register_type_name(s.reg_type));
     cJSON_AddStringToObject(o, "object_type", perf::bacnet_object_type_name(s.bacnet_type));
-    cJSON_AddNumberToObject(o, "object_instance", (double)s.bacnet_instance);
+    if (s.bacnet_instance == perf::kBacnetUnsetInstance) {
+        cJSON_AddNullToObject(o, "object_instance");
+    } else {
+        cJSON_AddNumberToObject(o, "object_instance", (double)s.bacnet_instance);
+    }
+    if (s.bacnet_device_known) {
+        cJSON_AddNumberToObject(o, "device_instance", (double)s.bacnet_device_instance);
+    } else {
+        cJSON_AddNullToObject(o, "device_instance");
+    }
+    if (s.bacnet_object_name[0]) {
+        cJSON_AddStringToObject(o, "object_name", s.bacnet_object_name);
+    } else {
+        cJSON_AddNullToObject(o, "object_name");
+    }
     cJSON_AddStringToObject(o, "value_type", perf::value_type_name(s.value_type));
     cJSON_AddNumberToObject(o, "scale", perf_scale_value(s.scale_exp));
     cJSON_AddStringToObject(o, "no_reading", perf::no_reading_name(s.no_reading));
@@ -4727,12 +4741,12 @@ static const char* perf_sensor_merge(const cJSON* o, perf::SensorConfig* s)
     if ((v = cJSON_GetObjectItem(o, "source"))) {
         perf::SensorSource old = s->source;
         if (!cJSON_IsString(v) || !perf::parse_source(v->valuestring, &s->source)) return "source";
-        if (old != s->source && s->source == perf::SensorSource::BacnetIp &&
-            s->port == perf::kDefaultPort) {
-            s->port = perf::kDefaultBacnetPort;
-        } else if (old != s->source && s->source == perf::SensorSource::ModbusTcp &&
-                   s->port == perf::kDefaultBacnetPort) {
-            s->port = perf::kDefaultPort;
+        if (old != s->source) {
+            if (s->source == perf::SensorSource::BacnetIp) {
+                s->port = perf::kDefaultBacnetPort;
+            } else if (s->source == perf::SensorSource::ModbusTcp) {
+                s->port = perf::kDefaultPort;
+            }
         }
     }
     if ((v = cJSON_GetObjectItem(o, "host"))) {
@@ -4763,12 +4777,60 @@ static const char* perf_sensor_merge(const cJSON* o, perf::SensorConfig* s)
             return "object_type";
     }
     if ((v = cJSON_GetObjectItem(o, "object_instance"))) {
-        if (!cJSON_IsNumber(v) || v->valuedouble < 0 ||
+        if (cJSON_IsNull(v)) {
+            s->bacnet_instance = perf::kBacnetUnsetInstance;
+        } else if (!cJSON_IsNumber(v) || v->valuedouble < 0 ||
             v->valuedouble > (double)perf::kBacnetInstanceMax ||
             v->valuedouble != (double)(long)v->valuedouble) {
             return "object_instance";
+        } else {
+            s->bacnet_instance = (uint32_t)v->valuedouble;
         }
-        s->bacnet_instance = (uint32_t)v->valuedouble;
+    }
+    if ((v = cJSON_GetObjectItem(o, "device_instance"))) {
+        if (cJSON_IsNull(v)) {
+            s->bacnet_device_known = false;
+            s->bacnet_device_instance = perf::kBacnetDeviceWildcard;
+        } else if (!cJSON_IsNumber(v) || v->valuedouble < 0 ||
+                   v->valuedouble > (double)perf::kBacnetInstanceMax ||
+                   v->valuedouble != (double)(long)v->valuedouble) {
+            return "device_instance";
+        } else {
+            s->bacnet_device_known = true;
+            s->bacnet_device_instance = (uint32_t)v->valuedouble;
+        }
+    }
+    if ((v = cJSON_GetObjectItem(o, "object_name"))) {
+        if (cJSON_IsNull(v)) {
+            s->bacnet_object_name[0] = '\0';
+        } else if (!cJSON_IsString(v)) {
+            return "object_name";
+        } else {
+            strlcpy(s->bacnet_object_name, v->valuestring, sizeof(s->bacnet_object_name));
+        }
+    }
+    if ((v = cJSON_GetObjectItem(o, "rom_id"))) {
+        if (cJSON_IsNull(v)) {
+            s->rom_known = false;
+            memset(s->rom, 0, sizeof(s->rom));
+        } else if (!cJSON_IsString(v) || strlen(v->valuestring) != 16) {
+            return "rom_id";
+        } else {
+            for (size_t i = 0; i < perf::kRomLen; ++i) {
+                char hi = v->valuestring[2 * i];
+                char lo = v->valuestring[2 * i + 1];
+                auto nib = [](char c, uint8_t* out) -> bool {
+                    if (c >= '0' && c <= '9') { *out = (uint8_t)(c - '0'); return true; }
+                    if (c >= 'a' && c <= 'f') { *out = (uint8_t)(c - 'a' + 10); return true; }
+                    if (c >= 'A' && c <= 'F') { *out = (uint8_t)(c - 'A' + 10); return true; }
+                    return false;
+                };
+                uint8_t h = 0, l = 0;
+                if (!nib(hi, &h) || !nib(lo, &l)) return "rom_id";
+                s->rom[i] = (uint8_t)((h << 4) | l);
+            }
+            s->rom_known = true;
+        }
     }
     if ((v = cJSON_GetObjectItem(o, "value_type"))) {
         if (!cJSON_IsString(v) || !perf::parse_value_type(v->valuestring, &s->value_type))
@@ -5097,7 +5159,16 @@ static esp_err_t perf_test_post_handler(httpd_req_t* req)
     }
     if (r.object_name[0]) cJSON_AddStringToObject(resp, "object_name", r.object_name);
     if (r.bacnet_units) cJSON_AddNumberToObject(resp, "units", r.bacnet_units);
-    cJSON_AddNumberToObject(resp, "reliability", r.bacnet_reliability);
+    if (r.bacnet_reliability_known) {
+        cJSON_AddNumberToObject(resp, "reliability", r.bacnet_reliability);
+    } else {
+        cJSON_AddNullToObject(resp, "reliability");
+    }
+    if (r.bacnet_device_known) {
+        cJSON_AddNumberToObject(resp, "device_instance", (double)r.bacnet_device_instance);
+    } else {
+        cJSON_AddNullToObject(resp, "device_instance");
+    }
     if (r.rom_valid && !r.thermux) cJSON_AddStringToObject(resp, "rom_id", r.rom_hex);
     char* json_str = cJSON_PrintUnformatted(resp);
     httpd_resp_sendstr(req, json_str);
@@ -5160,38 +5231,74 @@ static esp_err_t perf_bacnet_browse_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
     set_json_content_type(req);
-    cJSON* resp = cJSON_CreateObject();
-    cJSON_AddBoolToObject(resp, "ok", r->error == ext_temp::Error::None);
-    cJSON_AddStringToObject(resp, "error", ext_temp::error_name(r->error));
-    if (r->error == ext_temp::Error::Rejected) {
-        cJSON_AddNumberToObject(resp, "exception", r->exception);
-        if (r->error_class) cJSON_AddNumberToObject(resp, "error_class", r->error_class);
+    auto send_json_string = [&](const char* s) -> bool {
+        cJSON* item = cJSON_CreateString(s ? s : "");
+        if (!item) return false;
+        char* text = cJSON_PrintUnformatted(item);
+        cJSON_Delete(item);
+        if (!text) return false;
+        bool ok = send_chunk(req, text, strlen(text));
+        free(text);
+        return ok;
+    };
+    char chunk[256];
+    int n = snprintf(chunk, sizeof(chunk),
+                     "{\"ok\":%s,\"error\":\"%s\",\"device_name\":",
+                     r->error == ext_temp::Error::None ? "true" : "false",
+                     ext_temp::error_name(r->error));
+    if (n > 0) send_chunk(req, chunk, (size_t)n);
+    send_json_string(r->device_name);
+    send_chunk(req, ",\"model_name\":", 14);
+    send_json_string(r->model_name);
+    if (r->device_instance_known) {
+        n = snprintf(chunk, sizeof(chunk), ",\"device_instance\":%lu",
+                     (unsigned long)r->device_instance);
+    } else {
+        n = snprintf(chunk, sizeof(chunk), ",\"device_instance\":null");
     }
-    cJSON_AddStringToObject(resp, "device_name", r->device_name);
-    cJSON_AddStringToObject(resp, "model_name", r->model_name);
-    cJSON_AddNumberToObject(resp, "total_objects", (double)r->total_objects);
-    cJSON_AddNumberToObject(resp, "scanned", (double)r->scanned);
-    cJSON_AddBoolToObject(resp, "truncated", r->truncated);
-    cJSON* arr = cJSON_AddArrayToObject(resp, "sensors");
+    if (n > 0) send_chunk(req, chunk, (size_t)n);
+    n = snprintf(chunk, sizeof(chunk),
+                 ",\"total_objects\":%lu,\"scanned\":%lu,\"truncated\":%s,\"sensors\":[",
+                 (unsigned long)r->total_objects, (unsigned long)r->scanned,
+                 r->truncated ? "true" : "false");
+    if (n > 0) send_chunk(req, chunk, (size_t)n);
     for (size_t i = 0; i < r->count; i++) {
-        cJSON* s = cJSON_CreateObject();
-        cJSON_AddStringToObject(s, "object_type", perf::bacnet_object_type_name(r->sensors[i].object_type));
-        cJSON_AddNumberToObject(s, "object_instance", (double)r->sensors[i].object_instance);
-        cJSON_AddStringToObject(s, "object_name", r->sensors[i].object_name);
-        cJSON_AddNumberToObject(s, "celsius", perf_round2(r->sensors[i].celsius));
-        cJSON_AddNumberToObject(s, "units", r->sensors[i].units);
-        cJSON_AddNumberToObject(s, "reliability", r->sensors[i].reliability);
-        if (r->sensors[i].rom_valid) {
-            cJSON_AddStringToObject(s, "rom_id", r->sensors[i].rom_hex);
+        const auto& s = r->sensors[i];
+        if (i) send_chunk(req, ",", 1);
+        n = snprintf(chunk, sizeof(chunk), "{\"object_type\":\"%s\",\"object_instance\":%lu,"
+                     "\"object_name\":",
+                     perf::bacnet_object_type_name(s.object_type),
+                     (unsigned long)s.object_instance);
+        if (n > 0) send_chunk(req, chunk, (size_t)n);
+        send_json_string(s.object_name);
+        n = snprintf(chunk, sizeof(chunk), ",\"available\":%s,\"celsius\":",
+                     s.available ? "true" : "false");
+        if (n > 0) send_chunk(req, chunk, (size_t)n);
+        if (s.available) {
+            n = snprintf(chunk, sizeof(chunk), "%.2f", perf_round2(s.celsius));
         } else {
-            cJSON_AddNullToObject(s, "rom_id");
+            n = snprintf(chunk, sizeof(chunk), "null");
         }
-        cJSON_AddItemToArray(arr, s);
+        if (n > 0) send_chunk(req, chunk, (size_t)n);
+        n = snprintf(chunk, sizeof(chunk), ",\"units\":%lu,\"reliability\":",
+                     (unsigned long)s.units);
+        if (n > 0) send_chunk(req, chunk, (size_t)n);
+        if (s.reliability_known) {
+            n = snprintf(chunk, sizeof(chunk), "%lu", (unsigned long)s.reliability);
+        } else {
+            n = snprintf(chunk, sizeof(chunk), "null");
+        }
+        if (n > 0) send_chunk(req, chunk, (size_t)n);
+        send_chunk(req, ",\"rom_id\":", 10);
+        if (s.rom_valid) {
+            send_json_string(s.rom_hex);
+        } else {
+            send_chunk(req, "null", 4);
+        }
+        send_chunk(req, "}", 1);
     }
-    char* json_str = cJSON_PrintUnformatted(resp);
-    httpd_resp_sendstr(req, json_str);
-    free(json_str);
-    cJSON_Delete(resp);
+    send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, NULL, 0);
     heap_caps_free(r);
     return ESP_OK;
 }

@@ -154,7 +154,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_screen_performance.py`](test_screen_performance.py) | 11 | Render budget (300 ms) for all screen transitions, heavy state, leak detection |
 | [`test_event_log_screen.py`](test_event_log_screen.py) | 10 | Event log sub-screen: navigation, title, events, clear via API |
 | [`test_navigation.py`](test_navigation.py) | 10 | Settings sub-screen navigation and back buttons |
-| [`test_performance.py`](test_performance.py) | 37 | Heat output/COP settings: API validation, Modbus TCP and BACnet/IP sensor test/browse against fake servers started on the runner, bounded huge Object_List browse, Performance screen and sensor editor |
+| [`test_performance.py`](test_performance.py) | 42 | Heat output/COP settings: API validation, Modbus TCP and BACnet/IP sensor test/browse against fake servers started on the runner, BACnet identity/RPM-fallback/health handling, bounded huge Object_List browse, Performance screen and sensor editor |
 | [`test_language.py`](test_language.py) | 7 | Language switching via roller + preferences API |
 | [`test_status_bar.py`](test_status_bar.py) | 6 | WiFi icon, notification badge, dropdown, firmware notification |
 | [`test_firmware.py`](test_firmware.py) | 5 | Version display, GitHub check, mock update states |

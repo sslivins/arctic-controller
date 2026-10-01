@@ -28,6 +28,7 @@ enum class Error : uint8_t {
     NoReading,      // the register holds the "no reading" value
     OutOfRange,     // decoded value outside -40..120 °C
     SensorChanged,  // a different Thermux sensor is now on this channel
+    WrongDevice,    // BACnet device instance no longer matches the saved binding
     Busy,           // a test is already running
 };
 const char* error_name(Error e);
@@ -42,6 +43,8 @@ struct SlotStatus {
     uint8_t error_class;
     char object_name[41];
     char rom_hex[17];
+    bool bacnet_device_known;
+    uint32_t bacnet_device_instance;
 };
 
 struct TestResult {
@@ -63,6 +66,9 @@ struct TestResult {
     char object_name[41];
     uint32_t bacnet_units;
     uint32_t bacnet_reliability;
+    bool bacnet_reliability_known;
+    bool bacnet_device_known;
+    uint32_t bacnet_device_instance;
 };
 
 struct BrowseSensor {
@@ -72,6 +78,8 @@ struct BrowseSensor {
     float celsius;
     uint32_t units;
     uint32_t reliability;
+    bool reliability_known;
+    bool available;
     bool rom_valid;
     char rom_hex[17];
 };
@@ -82,6 +90,8 @@ struct BrowseResult {
     uint8_t error_class;
     char device_name[41];
     char model_name[41];
+    bool device_instance_known;
+    uint32_t device_instance;
     BrowseSensor sensors[64];
     size_t count;
     uint32_t total_objects;

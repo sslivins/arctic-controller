@@ -149,11 +149,13 @@ def bvlc(apdu: bytes) -> bytes:
 
 class FakeBacnetServer:
     def __init__(self, host: str, port: int, device_instance: int = 1234,
-                 huge_object_count: int = 0) -> None:
+                 huge_object_count: int = 0, rpm_unsupported: bool = False,
+                 rom_change: bool = False) -> None:
         self.host = host
         self.port = port
         self.device_instance = device_instance
         self.huge_object_count = huge_object_count
+        self.rpm_unsupported = rpm_unsupported
         self.device_name = "Thermux Test"
         self.model_name = "Thermux"
         self.objects: list[tuple[int, int]] = [(OBJ_DEVICE, device_instance)]
@@ -162,6 +164,8 @@ class FakeBacnetServer:
             4: Analog(4, "Return tank", 68.0, UNITS_F, 0, "28FF6491631603A3"),
             5: Analog(5, "Faulted sensor", 19.0, UNITS_C, 1, "28FF6491631603A4"),
         }
+        if rom_change:
+            self.analogs[3].rom = "28FF64916316FFFF"
         self.objects += [(OBJ_AI, i) for i in self.analogs]
         self.drop = False
 
@@ -234,6 +238,8 @@ class FakeBacnetServer:
         return bvlc(apdu)
 
     def handle_rpm(self, invoke: int, data: bytes) -> bytes:
+        if self.rpm_unsupported:
+            return bvlc(bytes([0x60, invoke, 9]))  # Reject: unrecognized-service
         obj, pos = read_ctx(data, 0, 0)
         if data[pos] != 0x1E:
             raise CodecError("missing property-list opening tag")
@@ -251,7 +257,11 @@ class FakeBacnetServer:
 
     def serve_forever(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind((self.host, self.port))
+        try:
+            sock.bind((self.host, self.port))
+        except OSError as exc:
+            raise SystemExit(f"failed to bind UDP {self.host}:{self.port}: {exc}") from exc
+        self.port = sock.getsockname()[1]
         sock.setblocking(False)
         print(f"fake BACnet server listening on {self.host}:{self.port}", flush=True)
         try:
@@ -279,14 +289,21 @@ class FakeBacnetServer:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=47808)
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--device-instance", type=int, default=1234)
+    parser.add_argument("--wrong-device-instance", action="store_true",
+                        help="Use a different device instance than the tests normally expect")
     parser.add_argument("--huge-object-count", type=int, default=0,
                         help="Claim this many Object_List entries and generate AIs lazily")
+    parser.add_argument("--rpm-unsupported", action="store_true",
+                        help="Reject RPM so clients must fall back to individual ReadProperty")
+    parser.add_argument("--rom-change", action="store_true",
+                        help="Serve a different ROM ID for AI 3")
     args = parser.parse_args()
-    FakeBacnetServer(args.host, args.port, args.device_instance,
-                     args.huge_object_count).serve_forever()
+    instance = args.device_instance + 1 if args.wrong_device_instance else args.device_instance
+    FakeBacnetServer(args.host, args.port, instance, args.huge_object_count,
+                     args.rpm_unsupported, args.rom_change).serve_forever()
 
 
 if __name__ == "__main__":

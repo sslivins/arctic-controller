@@ -115,6 +115,7 @@ Parse parse_header(const uint8_t* buf, size_t len, uint8_t invoke, uint8_t servi
     uint16_t total = static_cast<uint16_t>((buf[2] << 8) | buf[3]);
     if (total < 7 || total > len) return total > len ? Parse::Incomplete : Parse::BadFrame;
     if (buf[4] != kNpduVersion) return Parse::BadFrame;
+    if ((buf[5] & 0x28) != 0) return Parse::BadFrame;
     h->pdu = buf[6] & 0xF0;
     if (h->pdu == kComplexAck) {
         if (total < 9) return Parse::Incomplete;
