@@ -108,6 +108,12 @@ const char* wifi_mgr_get_connected_ssid(void);
 bool wifi_mgr_get_ip_addr(char* buf, size_t buf_len);
 
 /**
+ * @brief Get current IPv4 address/netmask in network byte order.
+ * @return true if connected and both values are available.
+ */
+bool wifi_mgr_get_ip_info(uint32_t* ip_out, uint32_t* netmask_out);
+
+/**
  * @brief Get current connection signal strength (RSSI)
  * @return RSSI in dBm (typically -30 to -90), 0 if not connected
  */

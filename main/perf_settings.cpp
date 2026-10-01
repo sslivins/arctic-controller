@@ -14,7 +14,11 @@ namespace {
 const char* TAG = "perf_settings";
 const char* kNvsNamespace = "perf";
 const char* kNvsKey = "cfg";
+const char* kNvsBacnetKey = "bacnet";
 constexpr uint8_t kBlobVersion = 1;
+constexpr uint8_t kBacnetExtVersion = 1;
+constexpr size_t kBacnetExtSlotSize = 1 + kHostMax + 2 + 1 + 4 + 1 + 4 + 41 + 1 + kRomLen;
+constexpr size_t kBacnetExtSize = 1 + 4 + kSlotCount * kBacnetExtSlotSize + 4;
 
 void put_u16(uint8_t*& p, uint16_t v) {
     *p++ = static_cast<uint8_t>(v >> 8);
@@ -23,6 +27,18 @@ void put_u16(uint8_t*& p, uint16_t v) {
 uint16_t get_u16(const uint8_t*& p) {
     uint16_t v = static_cast<uint16_t>((p[0] << 8) | p[1]);
     p += 2;
+    return v;
+}
+void put_u32(uint8_t*& p, uint32_t v) {
+    *p++ = static_cast<uint8_t>(v >> 24);
+    *p++ = static_cast<uint8_t>(v >> 16);
+    *p++ = static_cast<uint8_t>(v >> 8);
+    *p++ = static_cast<uint8_t>(v & 0xFF);
+}
+uint32_t get_u32(const uint8_t*& p) {
+    uint32_t v = (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) |
+                 (static_cast<uint32_t>(p[2]) << 8) | p[3];
+    p += 4;
     return v;
 }
 
@@ -54,6 +70,7 @@ bool lookup_value(const NameMap (&map)[N], const char* s, uint8_t* out) {
 const NameMap kSources[] = {
     {static_cast<uint8_t>(SensorSource::HeatPump), "heat_pump"},
     {static_cast<uint8_t>(SensorSource::ModbusTcp), "modbus_tcp"},
+    {static_cast<uint8_t>(SensorSource::BacnetIp), "bacnet_ip"},
 };
 const NameMap kFluids[] = {
     {static_cast<uint8_t>(arctic::LoopFluid::Water), "water"},
@@ -63,6 +80,10 @@ const NameMap kFluids[] = {
 const NameMap kRegisterTypes[] = {
     {static_cast<uint8_t>(RegisterType::Input), "input"},
     {static_cast<uint8_t>(RegisterType::Holding), "holding"},
+};
+const NameMap kBacnetObjectTypes[] = {
+    {static_cast<uint8_t>(BacnetObjectType::AnalogInput), "analog_input"},
+    {static_cast<uint8_t>(BacnetObjectType::AnalogValue), "analog_value"},
 };
 const NameMap kValueTypes[] = {
     {static_cast<uint8_t>(ValueType::Int16), "int16"},
@@ -95,6 +116,11 @@ SensorConfig default_sensor() {
     s.unit_id = kDefaultUnitId;
     s.address = 0;
     s.reg_type = RegisterType::Input;
+    s.bacnet_type = BacnetObjectType::AnalogInput;
+    s.bacnet_instance = kBacnetUnsetInstance;
+    s.bacnet_device_known = false;
+    s.bacnet_device_instance = kBacnetDeviceWildcard;
+    s.bacnet_object_name[0] = '\0';
     s.value_type = ValueType::Int16;
     s.scale_exp = -2;
     s.no_reading = NoReading::X8000;
@@ -133,19 +159,29 @@ uint16_t register_count(ValueType t) {
 }
 
 Invalid validate_sensor(const SensorConfig& s) {
-    if (s.source != SensorSource::HeatPump && s.source != SensorSource::ModbusTcp) {
+    if (s.source != SensorSource::HeatPump && s.source != SensorSource::ModbusTcp &&
+        s.source != SensorSource::BacnetIp) {
         return Invalid::Source;
     }
-    // The Modbus fields are kept while the heat pump's own sensor is selected,
+    // The network fields are kept while the heat pump's own sensor is selected,
     // so switching back restores them; they must still be well-formed.
     size_t len = strnlen(s.host, kHostMax);
     if (len >= kHostMax) return Invalid::Host;
-    if (s.source == SensorSource::ModbusTcp || len > 0) {
+    if (s.source == SensorSource::ModbusTcp || s.source == SensorSource::BacnetIp || len > 0) {
         if (!host_valid(s.host)) return Invalid::Host;
     }
     if (s.port == 0) return Invalid::Port;
     if (static_cast<uint8_t>(s.reg_type) > static_cast<uint8_t>(RegisterType::Holding)) {
         return Invalid::RegisterType;
+    }
+    if (static_cast<uint8_t>(s.bacnet_type) > static_cast<uint8_t>(BacnetObjectType::AnalogValue)) {
+        return Invalid::BacnetObjectType;
+    }
+    if (s.source == SensorSource::BacnetIp) {
+        if (s.bacnet_instance > kBacnetInstanceMax) return Invalid::BacnetObjectInstance;
+    } else if (s.bacnet_instance != kBacnetUnsetInstance &&
+               s.bacnet_instance > kBacnetInstanceMax) {
+        return Invalid::BacnetObjectInstance;
     }
     if (static_cast<uint8_t>(s.value_type) > static_cast<uint8_t>(ValueType::Float32Swapped)) {
         return Invalid::ValueType;
@@ -186,6 +222,8 @@ const char* invalid_name(Invalid v) {
         case Invalid::Port: return "port";
         case Invalid::Register: return "register";
         case Invalid::RegisterType: return "register_type";
+        case Invalid::BacnetObjectType: return "object_type";
+        case Invalid::BacnetObjectInstance: return "object_instance";
         case Invalid::ValueType: return "value_type";
         case Invalid::Scale: return "scale";
         case Invalid::NoReading: return "no_reading";
@@ -196,6 +234,9 @@ const char* invalid_name(Invalid v) {
 bool same_source(const SensorConfig& a, const SensorConfig& b) {
     return a.source == b.source && strncmp(a.host, b.host, kHostMax) == 0 && a.port == b.port &&
            a.unit_id == b.unit_id && a.address == b.address && a.reg_type == b.reg_type &&
+           a.bacnet_type == b.bacnet_type && a.bacnet_instance == b.bacnet_instance &&
+           a.bacnet_device_known == b.bacnet_device_known &&
+           (!a.bacnet_device_known || a.bacnet_device_instance == b.bacnet_device_instance) &&
            a.value_type == b.value_type;
 }
 
@@ -239,7 +280,9 @@ void serialize(const Settings& s, uint8_t* buf) {
     *p++ = static_cast<uint8_t>(s.fluid);
     *p++ = s.glycol_pct;
     for (const auto& sensor : s.sensors) {
-        *p++ = static_cast<uint8_t>(sensor.source);
+        SensorSource stored_source =
+            sensor.source == SensorSource::BacnetIp ? SensorSource::HeatPump : sensor.source;
+        *p++ = static_cast<uint8_t>(stored_source);
         memset(p, 0, kHostMax);
         strncpy(reinterpret_cast<char*>(p), sensor.host, kHostMax - 1);
         p += kHostMax;
@@ -259,10 +302,11 @@ void serialize(const Settings& s, uint8_t* buf) {
 }
 
 bool deserialize(const uint8_t* buf, size_t len, Settings* out) {
-    if (!buf || len != kBlobSize || buf[0] != kBlobVersion) return false;
+    if (!buf) return false;
+    if (len != kBlobV1Size || buf[0] != kBlobVersion) return false;
     uint32_t stored = 0;
-    memcpy(&stored, buf + kBlobSize - 4, sizeof(stored));
-    if (esp_crc32_le(0, buf, kBlobSize - 4) != stored) return false;
+    memcpy(&stored, buf + len - 4, sizeof(stored));
+    if (esp_crc32_le(0, buf, static_cast<uint32_t>(len - 4)) != stored) return false;
 
     Settings s{};
     const uint8_t* p = buf + 1;
@@ -278,6 +322,11 @@ bool deserialize(const uint8_t* buf, size_t len, Settings* out) {
         sensor.unit_id = *p++;
         sensor.address = get_u16(p);
         sensor.reg_type = static_cast<RegisterType>(*p++);
+        sensor.bacnet_type = BacnetObjectType::AnalogInput;
+        sensor.bacnet_instance = kBacnetUnsetInstance;
+        sensor.bacnet_device_known = false;
+        sensor.bacnet_device_instance = kBacnetDeviceWildcard;
+        sensor.bacnet_object_name[0] = '\0';
         sensor.value_type = static_cast<ValueType>(*p++);
         sensor.scale_exp = static_cast<int8_t>(*p++);
         sensor.no_reading = static_cast<NoReading>(*p++);
@@ -290,6 +339,78 @@ bool deserialize(const uint8_t* buf, size_t len, Settings* out) {
     return true;
 }
 
+void serialize_bacnet_ext(const Settings& s, uint32_t primary_crc, uint8_t* buf) {
+    uint8_t* p = buf;
+    *p++ = kBacnetExtVersion;
+    put_u32(p, primary_crc);
+    for (const auto& sensor : s.sensors) {
+        *p++ = sensor.source == SensorSource::BacnetIp ? 1 : 0;
+        memset(p, 0, kHostMax);
+        strncpy(reinterpret_cast<char*>(p), sensor.host, kHostMax - 1);
+        p += kHostMax;
+        put_u16(p, sensor.port);
+        *p++ = static_cast<uint8_t>(sensor.bacnet_type);
+        put_u32(p, sensor.bacnet_instance);
+        *p++ = sensor.bacnet_device_known ? 1 : 0;
+        put_u32(p, sensor.bacnet_device_instance);
+        memset(p, 0, 41);
+        strncpy(reinterpret_cast<char*>(p), sensor.bacnet_object_name, 40);
+        p += 41;
+        *p++ = sensor.rom_known ? 1 : 0;
+        memcpy(p, sensor.rom, kRomLen);
+        p += kRomLen;
+    }
+    uint32_t crc = esp_crc32_le(0, buf, static_cast<uint32_t>(p - buf));
+    memcpy(p, &crc, sizeof(crc));
+}
+
+bool deserialize_bacnet_ext(const uint8_t* buf, size_t len, uint32_t primary_crc, Settings* s) {
+    if (!buf || len != kBacnetExtSize || buf[0] != kBacnetExtVersion) return false;
+    uint32_t stored = 0;
+    memcpy(&stored, buf + len - 4, sizeof(stored));
+    if (esp_crc32_le(0, buf, static_cast<uint32_t>(len - 4)) != stored) return false;
+    const uint8_t* p = buf + 1;
+    if (get_u32(p) != primary_crc) return false;
+    Settings merged = *s;
+    for (size_t i = 0; i < kSlotCount; ++i) {
+        auto& sensor = merged.sensors[i];
+        bool enabled = *p++ != 0;
+        char host[kHostMax];
+        memcpy(host, p, kHostMax);
+        host[kHostMax - 1] = '\0';
+        p += kHostMax;
+        uint16_t port = get_u16(p);
+        BacnetObjectType type = static_cast<BacnetObjectType>(*p++);
+        uint32_t instance = get_u32(p);
+        bool device_known = *p++ != 0;
+        uint32_t device_instance = get_u32(p);
+        char object_name[41];
+        memcpy(object_name, p, sizeof(object_name));
+        object_name[40] = '\0';
+        p += 41;
+        bool rom_known = *p++ != 0;
+        uint8_t rom[kRomLen];
+        memcpy(rom, p, kRomLen);
+        p += kRomLen;
+        if (!enabled || sensor.source != SensorSource::HeatPump) continue;
+        sensor.source = SensorSource::BacnetIp;
+        strncpy(sensor.host, host, kHostMax);
+        sensor.host[kHostMax - 1] = '\0';
+        sensor.port = port;
+        sensor.bacnet_type = type;
+        sensor.bacnet_instance = instance;
+        sensor.bacnet_device_known = device_known;
+        sensor.bacnet_device_instance = device_known ? device_instance : kBacnetDeviceWildcard;
+        strncpy(sensor.bacnet_object_name, object_name, sizeof(sensor.bacnet_object_name));
+        sensor.bacnet_object_name[40] = '\0';
+        sensor.rom_known = rom_known;
+        memcpy(sensor.rom, rom, kRomLen);
+    }
+    if (validate(merged) != Invalid::None) return false;
+    *s = merged;
+    return true;
+}
+
 Settings load() {
     Settings s = defaults();
     nvs_handle_t h;
@@ -297,11 +418,22 @@ Settings load() {
     uint8_t buf[kBlobSize];
     size_t len = sizeof(buf);
     esp_err_t err = nvs_get_blob(h, kNvsKey, buf, &len);
-    nvs_close(h);
-    if (err != ESP_OK) return s;
+    if (err != ESP_OK) {
+        nvs_close(h);
+        return s;
+    }
     if (!deserialize(buf, len, &s)) {
+        nvs_close(h);
         ESP_LOGW(TAG, "Stored heat output settings unreadable; using defaults");
         return defaults();
+    }
+    uint8_t ext[kBacnetExtSize];
+    len = sizeof(ext);
+    err = nvs_get_blob(h, kNvsBacnetKey, ext, &len);
+    nvs_close(h);
+    uint32_t primary_crc = esp_crc32_le(0, buf, static_cast<uint32_t>(sizeof(buf) - 4));
+    if (err == ESP_OK && !deserialize_bacnet_ext(ext, len, primary_crc, &s)) {
+        ESP_LOGW(TAG, "Stored BACnet COP extension unreadable; using heat pump sensors for BACnet slots");
     }
     return s;
 }
@@ -310,9 +442,13 @@ bool save(const Settings& s) {
     if (validate(s) != Invalid::None) return false;
     uint8_t buf[kBlobSize];
     serialize(s, buf);
+    uint32_t primary_crc = esp_crc32_le(0, buf, static_cast<uint32_t>(sizeof(buf) - 4));
     nvs_handle_t h;
     if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return false;
     esp_err_t err = nvs_set_blob(h, kNvsKey, buf, sizeof(buf));
+    uint8_t ext[kBacnetExtSize];
+    serialize_bacnet_ext(s, primary_crc, ext);
+    if (err == ESP_OK) err = nvs_set_blob(h, kNvsBacnetKey, ext, sizeof(ext));
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err != ESP_OK) {
@@ -324,7 +460,9 @@ bool save(const Settings& s) {
 
 bool uses_network(const Settings& s) {
     for (const auto& sensor : s.sensors) {
-        if (sensor.source == SensorSource::ModbusTcp) return true;
+        if (sensor.source == SensorSource::ModbusTcp || sensor.source == SensorSource::BacnetIp) {
+            return true;
+        }
     }
     return false;
 }
@@ -334,12 +472,18 @@ const char* fluid_name(arctic::LoopFluid f) { return lookup_name(kFluids, static
 const char* register_type_name(RegisterType t) {
     return lookup_name(kRegisterTypes, static_cast<uint8_t>(t));
 }
+const char* bacnet_object_type_name(BacnetObjectType t) {
+    return lookup_name(kBacnetObjectTypes, static_cast<uint8_t>(t));
+}
 const char* value_type_name(ValueType t) { return lookup_name(kValueTypes, static_cast<uint8_t>(t)); }
 const char* no_reading_name(NoReading n) { return lookup_name(kNoReadings, static_cast<uint8_t>(n)); }
 bool parse_source(const char* s, SensorSource* out) { return parse_enum(kSources, s, out); }
 bool parse_fluid(const char* s, arctic::LoopFluid* out) { return parse_enum(kFluids, s, out); }
 bool parse_register_type(const char* s, RegisterType* out) {
     return parse_enum(kRegisterTypes, s, out);
+}
+bool parse_bacnet_object_type(const char* s, BacnetObjectType* out) {
+    return parse_enum(kBacnetObjectTypes, s, out);
 }
 bool parse_value_type(const char* s, ValueType* out) { return parse_enum(kValueTypes, s, out); }
 bool parse_no_reading(const char* s, NoReading* out) { return parse_enum(kNoReadings, s, out); }

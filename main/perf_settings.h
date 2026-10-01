@@ -14,8 +14,9 @@
 
 namespace perf {
 
-enum class SensorSource : uint8_t { HeatPump = 0, ModbusTcp = 1 };
+enum class SensorSource : uint8_t { HeatPump = 0, ModbusTcp = 1, BacnetIp = 2 };
 enum class RegisterType : uint8_t { Input = 0, Holding = 1 };
+enum class BacnetObjectType : uint8_t { AnalogInput = 0, AnalogValue = 1 };
 enum class ValueType : uint8_t {
     Int16 = 0,
     Uint16 = 1,
@@ -38,6 +39,11 @@ struct SensorConfig {
     uint8_t unit_id;
     uint16_t address;
     RegisterType reg_type;
+    BacnetObjectType bacnet_type;
+    uint32_t bacnet_instance;
+    bool bacnet_device_known;
+    uint32_t bacnet_device_instance;
+    char bacnet_object_name[41];
     ValueType value_type;
     int8_t scale_exp;  // value = raw * 10^scale_exp; 0..-3
     NoReading no_reading;
@@ -60,7 +66,11 @@ constexpr uint16_t kFlowDefaultX10 = 400; // 40 L/min
 constexpr uint8_t kGlycolStep = 5;
 constexpr uint8_t kGlycolDefault = 30;
 constexpr uint16_t kDefaultPort = 502;
+constexpr uint16_t kDefaultBacnetPort = 47808;
 constexpr uint8_t kDefaultUnitId = 1;
+constexpr uint32_t kBacnetInstanceMax = 4194302;
+constexpr uint32_t kBacnetDeviceWildcard = 4194303;
+constexpr uint32_t kBacnetUnsetInstance = kBacnetDeviceWildcard;
 
 // Readings outside this range are treated as no reading.
 constexpr float kMinPlausibleC = -40.0f;
@@ -79,6 +89,8 @@ enum class Invalid : uint8_t {
     Port,
     Register,
     RegisterType,
+    BacnetObjectType,
+    BacnetObjectInstance,
     ValueType,
     Scale,
     NoReading,
@@ -90,7 +102,7 @@ const char* invalid_name(Invalid v);  // the API field name, e.g. "host"
 // True for a hostname or IPv4 address made of letters, digits, '.', '-', '_'.
 bool host_valid(const char* host);
 
-// Same Modbus source (host, port, unit, register, register type, value type).
+// Same sensor identity. Scale/no-reading/learned ROM are deliberately excluded.
 bool same_source(const SensorConfig& a, const SensorConfig& b);
 
 // Registers the value spans (1 or 2).
@@ -100,9 +112,12 @@ enum class DecodeResult : uint8_t { Ok, NoReading, OutOfRange };
 // Decode `regs` (register_count() of them) into degrees C.
 DecodeResult decode_value(const SensorConfig& s, const uint16_t* regs, float* out_c);
 
-// Versioned blob with CRC. deserialize() returns false (and leaves `out`
-// untouched) on a wrong size, version, CRC, or an invalid result.
-constexpr size_t kBlobSize = 1 + 2 + 1 + 1 + kSlotCount * (1 + kHostMax + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + kRomLen) + 4;
+// Versioned v1 blob with CRC. Keep this byte-for-byte compatible with #322:
+// BACnet extension state is stored under a separate NVS key so rollback sees
+// BACnet slots as HeatPump rather than rejecting the whole blob.
+constexpr size_t kSensorBlobV1Size = 1 + kHostMax + 2 + 1 + 2 + 1 + 1 + 1 + 1 + 1 + kRomLen;
+constexpr size_t kBlobV1Size = 1 + 2 + 1 + 1 + kSlotCount * kSensorBlobV1Size + 4;
+constexpr size_t kBlobSize = kBlobV1Size;
 void serialize(const Settings& s, uint8_t* buf);
 bool deserialize(const uint8_t* buf, size_t len, Settings* out);
 
@@ -114,14 +129,16 @@ bool save(const Settings& s);
 // Whether any sensor reads over the network.
 bool uses_network(const Settings& s);
 
-const char* source_name(SensorSource s);   // "heat_pump" / "modbus_tcp"
+const char* source_name(SensorSource s);   // "heat_pump" / "modbus_tcp" / "bacnet_ip"
 const char* fluid_name(arctic::LoopFluid f);  // "water" / "propylene_glycol" / "ethylene_glycol"
 const char* register_type_name(RegisterType t);  // "input" / "holding"
+const char* bacnet_object_type_name(BacnetObjectType t);  // "analog_input" / "analog_value"
 const char* value_type_name(ValueType t);  // "int16" / "uint16" / "float32" / "float32_swapped"
 const char* no_reading_name(NoReading n);  // "none" / "0x8000" / "0x7fff" / "0xffff"
 bool parse_source(const char* s, SensorSource* out);
 bool parse_fluid(const char* s, arctic::LoopFluid* out);
 bool parse_register_type(const char* s, RegisterType* out);
+bool parse_bacnet_object_type(const char* s, BacnetObjectType* out);
 bool parse_value_type(const char* s, ValueType* out);
 bool parse_no_reading(const char* s, NoReading* out);
 

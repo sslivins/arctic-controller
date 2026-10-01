@@ -493,7 +493,7 @@ static void applyMaconMapping() {
 
     // Estimated performance (thermal output + COP). The mainboard reports no
     // flow (only a flow switch), so flow and loop fluid come from the user's
-    // settings. Supply/return come from external Modbus sensors when they are
+    // settings. Supply/return come from external network sensors when they are
     // configured and healthy, otherwise from the unit's whole-degree readings.
     // The macon library owns the physics.
     const perf::Settings perf_cfg = ext_temp::settings();
@@ -504,8 +504,14 @@ static void applyMaconMapping() {
     float return_c = static_cast<float>(ms.inlet_c);
     const bool external = sel.source == perf::PerfSource::External;
     if (external) {
-        if (perf_cfg.sensors[0].source == perf::SensorSource::ModbusTcp) supply_c = sel.supply_c;
-        if (perf_cfg.sensors[1].source == perf::SensorSource::ModbusTcp) return_c = sel.return_c;
+        if (perf_cfg.sensors[0].source == perf::SensorSource::ModbusTcp ||
+            perf_cfg.sensors[0].source == perf::SensorSource::BacnetIp) {
+            supply_c = sel.supply_c;
+        }
+        if (perf_cfg.sensors[1].source == perf::SensorSource::ModbusTcp ||
+            perf_cfg.sensors[1].source == perf::SensorSource::BacnetIp) {
+            return_c = sel.return_c;
+        }
     }
     const arctic::PerformanceInputs perf_in = arctic::loop_performance_inputs(
         perf_cfg.flow_lpm_x10 / 10.0f, perf_cfg.fluid, perf_cfg.glycol_pct,

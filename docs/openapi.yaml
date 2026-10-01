@@ -2969,7 +2969,7 @@ paths:
       - HeatPump
       summary: Test a temperature sensor
       description: |
-        Reads a Modbus TCP sensor once without saving anything, so a sensor
+        Reads a Modbus TCP or BACnet/IP sensor once without saving anything, so a sensor
         can be checked before it is saved. Fields not given come from the saved
         sensor for `slot`, or from the defaults. Takes up to a few seconds.
         When the device is a Thermux and the register is one of its
@@ -3015,10 +3015,26 @@ paths:
                       tries the other one.
                   exception:
                     type: integer
-                    description: Modbus exception code, when `error` is `exception`
+                    description: Modbus exception code, or BACnet error/reject/abort code
+                  error_class:
+                    type: integer
+                    description: BACnet error class, when returned with `rejected`
                   celsius:
                     type: number
                     nullable: true
+                  object_name:
+                    type: string
+                    description: BACnet object name, when available
+                  units:
+                    type: integer
+                    description: BACnet engineering-units enum, when available
+                  reliability:
+                    type: integer
+                    description: BACnet reliability enum, when available
+                  rom_id:
+                    type: string
+                    nullable: true
+                    description: BACnet Description when it is a 16-digit ROM ID
                   thermux:
                     type: object
                     nullable: true
@@ -3053,8 +3069,183 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/performance/bacnet/browse:
+    post:
+      tags:
+      - HeatPump
+      summary: Browse BACnet/IP temperature sensors
+      description: |
+        Reads a BACnet/IP device's Object_List and returns up to 64 Analog
+        Input/Analog Value objects with names, values, units, reliability, and
+        ROM IDs when the Description is a 16-digit Thermux sensor ID. This is
+        direct BACnet/IP unicast to the device's own socket on the same routed
+        IP network; BBMD, foreign-device registration, routed NPDU source/dest
+        fields, Who-Is discovery, and SubscribeCOV are not used. Browse is
+        bounded (fixed storage, capped Object_List scan, and an overall time
+        budget); `truncated` indicates that the list was capped.
+      operationId: browseBacnetPerformanceSensors
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host]
+              additionalProperties: false
+              properties:
+                host:
+                  type: string
+                  maxLength: 63
+                  pattern: '^[A-Za-z0-9_](?:(?:[A-Za-z0-9_-]|\.[A-Za-z0-9_-])*\.?[A-Za-z0-9_])?$'
+                  description: IPv4 address or host name (`.local` names resolve over mDNS)
+                port:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                  default: 47808
+      responses:
+        '200':
+          description: Browse finished; check `ok`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  error:
+                    $ref: '#/components/schemas/PerformanceSensorError'
+                  device_name:
+                    type: string
+                  model_name:
+                    type: string
+                  device_instance:
+                    type: integer
+                    nullable: true
+                    description: BACnet Device object instance returned by the endpoint
+                  total_objects:
+                    type: integer
+                    description: Object_List count claimed by the BACnet device
+                  scanned:
+                    type: integer
+                    description: Number of Object_List entries inspected before caps/time budget stopped the scan
+                  truncated:
+                    type: boolean
+                    description: True when the result hit the 64-sensor cap, 512-object scan cap, or time budget
+                  sensors:
+                    type: array
+                    maxItems: 64
+                    items:
+                      $ref: '#/components/schemas/BacnetPerformanceSensor'
+        '400':
+          description: Invalid host or port
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceInvalid'
+        '413':
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another BACnet browse is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '504':
-          description: The test did not finish in time
+          description: The browse did not finish in time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/performance/bacnet/discover:
+    post:
+      tags:
+      - HeatPump
+      summary: Discover BACnet/IP devices
+      description: |
+        Sends BACnet Who-Is on the controller's own Wi-Fi subnet and on the
+        limited broadcast address, then returns up to 16 I-Am responders. Device
+        names and model names are read directly from each responder when time
+        remains. Discovery is local-subnet only; BBMD, foreign-device
+        registration, and routed BACnet discovery are not supported.
+      operationId: discoverBacnetPerformanceDevices
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: Discovery finished; check `ok`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  error:
+                    $ref: '#/components/schemas/PerformanceSensorError'
+                  truncated:
+                    type: boolean
+                    description: True when more than 16 devices responded
+                  devices:
+                    type: array
+                    maxItems: 16
+                    items:
+                      type: object
+                      properties:
+                        host:
+                          type: string
+                          description: Source IPv4 address from the I-Am response
+                        port:
+                          type: integer
+                          minimum: 1
+                          maximum: 65535
+                          description: Source UDP port from the I-Am response
+                        device_instance:
+                          type: integer
+                          minimum: 0
+                          maximum: 4194302
+                        device_name:
+                          type: string
+                        model_name:
+                          type: string
+                        vendor_id:
+                          type: integer
+        '400':
+          description: Malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceInvalid'
+        '413':
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Another BACnet browse or discovery is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Discovery did not finish in time
           content:
             application/json:
               schema:
@@ -4016,20 +4207,22 @@ components:
   schemas:
     PerformanceSensorError:
       type: string
-      enum: [none, not_read, resolve, connect, timeout, protocol, exception, no_reading, out_of_range, sensor_changed, busy]
+      enum: [none, not_read, resolve, connect, timeout, protocol, exception, rejected, units, no_reading, out_of_range, sensor_changed, wrong_device, busy]
       description: |
         Result of the latest read. `resolve`: the host name didn't resolve.
         `connect`: nothing answered on that address and port. `exception`: the
         device refused the read (see `exception`). `no_reading`: the register
         holds its "no reading" value. `sensor_changed`: a different Thermux
         sensor is now on this channel; save the sensor again to accept it.
+        `wrong_device`: the BACnet device instance at this host:port no longer
+        matches the saved binding.
     PerformanceSensorInput:
       type: object
       description: Temperature sensor settings; any subset when updating.
       properties:
         source:
           type: string
-          enum: [heat_pump, modbus_tcp]
+          enum: [heat_pump, modbus_tcp, bacnet_ip]
         host:
           type: string
           maxLength: 63
@@ -4053,6 +4246,27 @@ components:
           type: string
           enum: [input, holding]
           default: input
+        object_type:
+          type: string
+          enum: [analog_input, analog_value]
+          default: analog_input
+          description: BACnet object type when `source` is `bacnet_ip`
+        object_instance:
+          type: integer
+          minimum: 0
+          maximum: 4194302
+          nullable: true
+          description: Required BACnet object instance when `source` is `bacnet_ip`; null means unset
+        device_instance:
+          type: integer
+          minimum: 0
+          maximum: 4194302
+          nullable: true
+          description: BACnet Device object instance learned by Find/Test and used to detect wrong devices
+        object_name:
+          type: string
+          nullable: true
+          description: BACnet object display name; not used as identity
         value_type:
           type: string
           enum: [int16, uint16, float32, float32_swapped]
@@ -4077,6 +4291,32 @@ components:
             type: string
             nullable: true
             description: Thermux sensor ID remembered for this channel
+    BacnetPerformanceSensor:
+      type: object
+      properties:
+        object_type:
+          type: string
+          enum: [analog_input, analog_value]
+        object_instance:
+          type: integer
+        object_name:
+          type: string
+        celsius:
+          type: number
+          nullable: true
+          description: Current value after unit conversion, or null when the object is unavailable
+        units:
+          type: integer
+        reliability:
+          type: integer
+          nullable: true
+          description: BACnet reliability enum; null when the property is not present
+        available:
+          type: boolean
+          description: False when reliability/status flags indicate no usable reading
+        rom_id:
+          type: string
+          nullable: true
     PerformanceConfig:
       type: object
       properties:
@@ -4144,6 +4384,12 @@ components:
                     $ref: '#/components/schemas/PerformanceSensorError'
                   exception:
                     type: integer
+                  error_class:
+                    type: integer
+                  object_name:
+                    type: string
+                  rom_id:
+                    type: string
     PerformanceInvalid:
       type: object
       properties:

@@ -23,6 +23,8 @@ register map — all wire/register/fault/scaling/bus knowledge lives behind
 
 ## COP / Energy Monitoring
 
+- [x] Add BACnet/IP external COP sensors with sensor browse by object name
+- [x] Add local-subnet BACnet/IP device discovery for COP sensor setup
 - [ ] Add configurable water flow rate setting (default ~20 L/min, user adjusts to match their circulator pump)
 - [ ] Store flow rate in NVS so it persists across reboots
 - [ ] Start polling saturation temp registers (2111-2113) — currently skipped in `pollTemperatures()`
