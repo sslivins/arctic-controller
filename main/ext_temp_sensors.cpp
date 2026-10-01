@@ -26,7 +26,7 @@ namespace {
 
 const char* TAG = "ext_temp";
 
-constexpr uint32_t kPollMs = 10000;
+constexpr uint32_t kPollMs = 15000;
 constexpr uint32_t kIoTimeoutMs = 1500;
 constexpr uint32_t kBrowseMaxMs = 8000;
 constexpr uint32_t kBrowseMaxObjects = 512;

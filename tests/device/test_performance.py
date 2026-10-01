@@ -39,8 +39,9 @@ FLOAT_REG, FLOAT_C = 500, 45.5
 READ_ERROR_REG = 106      # channel 6 reports a read error
 UNMAPPED_INPUT_REG = 50   # not served: Modbus exception 2
 
-# The worker polls every 10 s and each step is bounded to 1.5 s.
-POLL_TIMEOUT = 30.0
+# The worker polls every 15 s and each step is bounded to 1.5 s; allow two
+# poll intervals plus HTTP/device scheduling margin.
+POLL_TIMEOUT = 45.0
 
 PERSISTED_SENSOR_FIELDS = (
     "source", "host", "port", "unit_id", "register", "register_type",

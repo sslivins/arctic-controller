@@ -2,9 +2,9 @@
  * External supply/return temperature sensors over Modbus TCP, for the heat
  * output & COP estimate.
  *
- * A background worker polls any sensor set to Modbus TCP every few seconds
- * and feeds perf::SourceSelector. Nothing here holds the UI or RS-485 locks;
- * consumers only take a short internal mutex.
+ * A background worker polls any sensor set to Modbus TCP or BACnet/IP every
+ * 15 seconds and feeds perf::SourceSelector. Nothing here holds the UI or
+ * RS-485 locks; consumers only take a short internal mutex.
  */
 #pragma once
 
