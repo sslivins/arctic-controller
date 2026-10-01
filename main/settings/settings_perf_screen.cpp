@@ -23,6 +23,9 @@
 #include "../perf_settings.h"
 #include "../perf_source.h"
 #include <esp_log.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,6 +44,8 @@ static const char* TAG = "perf_screen";
 static constexpr uint32_t kSaveDelayMs = 800;
 static constexpr uint32_t kTestPollMs = 200;
 static constexpr uint32_t kTestTimeoutMs = 10000;
+static constexpr uint32_t kBrowsePollMs = 200;
+static constexpr uint32_t kBrowseTimeoutMs = 9000;
 static constexpr uint16_t kFlowStepX10 = 10;
 
 enum class Field : uint8_t { Host, Port, UnitId, Register };
@@ -65,6 +70,11 @@ struct Editor {
     lv_obj_t* scale_roller;
     lv_obj_t* nr_roller;
     lv_obj_t* nr_row;
+    lv_obj_t* browse_btn;
+    lv_obj_t* browse_lbl;
+    lv_obj_t* browse_card;
+    lv_obj_t* browse_list;
+    lv_obj_t* browse_note;
     lv_obj_t* test_btn;
     lv_obj_t* test_lbl;
     lv_obj_t* result_card;
@@ -75,6 +85,11 @@ struct Editor {
     uint32_t ticket;
     lv_timer_t* test_timer;
     uint32_t test_started_ms;
+    lv_timer_t* browse_timer;
+    uint32_t browse_started_ms;
+    ext_temp::BrowseResult* browse_result;
+    volatile bool browse_done;
+    volatile bool browse_running;
 };
 
 struct TextEntry {
@@ -119,6 +134,16 @@ typedef struct {
 
 static perf_screen_state_t s_state = {};
 
+struct BrowseJob {
+    volatile bool running;
+    volatile bool done;
+    char host[perf::kHostMax];
+    uint16_t port;
+    ext_temp::BrowseResult* result;
+};
+
+static BrowseJob s_browse_job = {};
+
 // ============================================================================
 // Forward Declarations
 // ============================================================================
@@ -131,6 +156,14 @@ static void open_editor(int slot);
 static void close_editor(void);
 static void open_text_entry(Field f);
 static void close_text_entry(void);
+
+static void free_browse_result_if_idle(void)
+{
+    if (!s_browse_job.running && s_browse_job.result) {
+        heap_caps_free(s_browse_job.result);
+        s_browse_job.result = NULL;
+    }
+}
 
 // ============================================================================
 // Small helpers
@@ -458,8 +491,10 @@ void perf_screen_close(void)
 
     if (s_state.save_pending) save_general();
     if (s_state.editor.test_timer) lv_timer_delete(s_state.editor.test_timer);
+    if (s_state.editor.browse_timer) lv_timer_delete(s_state.editor.browse_timer);
     if (s_state.live_timer) lv_timer_delete(s_state.live_timer);
     if (s_state.save_timer) lv_timer_delete(s_state.save_timer);
+    free_browse_result_if_idle();
 
     // The editor and keyboard entry are children of the screen, which is
     // auto-deleted by the next screen load.
@@ -855,6 +890,15 @@ static void editor_refresh(void)
     lv_label_set_text(ed.port_val, buf);
     snprintf(buf, sizeof(buf), "%u", (unsigned)c.unit_id);
     lv_label_set_text(ed.unit_val, buf);
+    lv_obj_t* unit_col = lv_obj_get_parent(lv_obj_get_parent(ed.unit_val));
+    if (bacnet) {
+        lv_obj_add_flag(unit_col, LV_OBJ_FLAG_HIDDEN);
+        if (ed.browse_btn) lv_obj_remove_flag(ed.browse_btn, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(unit_col, LV_OBJ_FLAG_HIDDEN);
+        if (ed.browse_btn) lv_obj_add_flag(ed.browse_btn, LV_OBJ_FLAG_HIDDEN);
+        if (ed.browse_card) lv_obj_add_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
+    }
     if (bacnet) {
         snprintf(buf, sizeof(buf), "%lu", (unsigned long)c.bacnet_instance);
     } else {
@@ -862,7 +906,8 @@ static void editor_refresh(void)
     }
     lv_label_set_text(ed.reg_val, buf);
 
-    set_segment(ed.regtype_btn, c.reg_type == perf::RegisterType::Holding ? 1 : 0);
+    set_segment(ed.regtype_btn, bacnet ? (c.bacnet_type == perf::BacnetObjectType::AnalogValue ? 1 : 0)
+                                       : (c.reg_type == perf::RegisterType::Holding ? 1 : 0));
     lv_roller_set_selected(ed.vt_roller, static_cast<uint32_t>(c.value_type), LV_ANIM_OFF);
     lv_roller_set_selected(ed.scale_roller, (uint32_t)(-c.scale_exp), LV_ANIM_OFF);
     lv_roller_set_selected(ed.nr_roller, static_cast<uint32_t>(c.no_reading), LV_ANIM_OFF);
@@ -874,10 +919,15 @@ static void editor_refresh(void)
         lv_obj_remove_state(ed.nr_roller, LV_STATE_DISABLED);
     }
 
-    snprintf(buf, sizeof(buf), "%s \xC2\xB7 %s \xC2\xB7 %s",
-             i18n_get(c.reg_type == perf::RegisterType::Holding ? STR_PERF_REG_HOLDING
-                                                                : STR_PERF_REG_INPUT),
-             value_type_text(c.value_type), kScaleText[-c.scale_exp]);
+    if (bacnet) {
+        snprintf(buf, sizeof(buf), "%s \xC2\xB7 %s", i18n_get(STR_PERF_BACNET_OBJECT),
+                 c.bacnet_type == perf::BacnetObjectType::AnalogValue ? "AV" : "AI");
+    } else {
+        snprintf(buf, sizeof(buf), "%s \xC2\xB7 %s \xC2\xB7 %s",
+                 i18n_get(c.reg_type == perf::RegisterType::Holding ? STR_PERF_REG_HOLDING
+                                                                    : STR_PERF_REG_INPUT),
+                 value_type_text(c.value_type), kScaleText[-c.scale_exp]);
+    }
     lv_label_set_text(ed.adv_summary, buf);
     lv_label_set_text(ed.adv_chevron, ed.adv_open ? LV_SYMBOL_UP : LV_SYMBOL_DOWN);
     if (ed.adv_open) {
@@ -1045,6 +1095,169 @@ static void test_btn_cb(lv_event_t* e)
     set_testing(true);
 }
 
+static void set_browsing(bool browsing)
+{
+    Editor& ed = s_state.editor;
+    if (!ed.browse_btn || !ed.browse_lbl) return;
+    lv_label_set_text(ed.browse_lbl, i18n_get(browsing ? STR_PERF_FINDING_SENSORS : STR_PERF_FIND_SENSORS));
+    if (browsing) {
+        lv_obj_add_state(ed.browse_btn, LV_STATE_DISABLED);
+    } else {
+        lv_obj_remove_state(ed.browse_btn, LV_STATE_DISABLED);
+    }
+}
+
+static void browse_task(void*)
+{
+    if (!s_browse_job.result) {
+        s_browse_job.done = true;
+        s_browse_job.running = false;
+        vTaskDelete(NULL);
+        return;
+    }
+    bool ok = ext_temp::browse_blocking(s_browse_job.host, s_browse_job.port, s_browse_job.result,
+                                        kBrowseTimeoutMs - 500);
+    if (!ok && s_browse_job.result->error == ext_temp::Error::None) {
+        s_browse_job.result->error = ext_temp::Error::Timeout;
+    }
+    s_browse_job.done = true;
+    s_browse_job.running = false;
+    vTaskDelete(NULL);
+}
+
+static void browse_pick_cb(lv_event_t* e)
+{
+    intptr_t idx = (intptr_t)lv_event_get_user_data(e);
+    if (!s_browse_job.result || idx < 0 || (size_t)idx >= s_browse_job.result->count) return;
+    const ext_temp::BrowseSensor& s = s_browse_job.result->sensors[idx];
+    Editor& ed = s_state.editor;
+    ed.ed.source = perf::SensorSource::BacnetIp;
+    ed.ed.bacnet_type = s.object_type;
+    ed.ed.bacnet_instance = s.object_instance;
+    editor_changed();
+}
+
+static void render_browse_result(const ext_temp::BrowseResult& r)
+{
+    Editor& ed = s_state.editor;
+    if (!ed.browse_card || !ed.browse_list || !ed.browse_note) return;
+    lv_obj_clean(ed.browse_list);
+    lv_label_set_text(ed.browse_note, "");
+    lv_obj_add_flag(ed.browse_note, LV_OBJ_FLAG_HIDDEN);
+
+    if (r.error != ext_temp::Error::None) {
+        const char* msg = i18n_get(STR_PERF_ERR_PROTOCOL);
+        switch (r.error) {
+            case ext_temp::Error::Resolve: msg = i18n_get(STR_PERF_ERR_RESOLVE); break;
+            case ext_temp::Error::Connect: msg = i18n_get(STR_PERF_ERR_CONNECT); break;
+            case ext_temp::Error::Timeout: msg = i18n_get(STR_PERF_ERR_TIMEOUT); break;
+            case ext_temp::Error::Busy: msg = i18n_get(STR_PERF_ERR_BUSY); break;
+            default: break;
+        }
+        make_label(ed.browse_list, msg, FONT_NORMAL, COLOR_PERF_WARN);
+        lv_obj_remove_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    if (r.count == 0) {
+        make_label(ed.browse_list, i18n_get(STR_PERF_NO_BACNET_SENSORS), FONT_NORMAL, COLOR_TEXT_DIM);
+        lv_obj_remove_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    char line[96];
+    for (size_t i = 0; i < r.count; ++i) {
+        const ext_temp::BrowseSensor& s = r.sensors[i];
+        lv_obj_t* row = lv_btn_create(ed.browse_list);
+        lv_obj_set_size(row, LV_PCT(100), 68);
+        lv_obj_set_style_bg_color(row, COLOR_PERF_ROW, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(row, COLOR_PERF_ROW_PRESSED, LV_STATE_PRESSED);
+        lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(row, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_hor(row, 16, LV_PART_MAIN);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_user_data(row, (void*)"perf_bacnet_sensor");
+        lv_obj_add_event_cb(row, browse_pick_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+
+        const char* name = s.object_name[0] ? s.object_name : "--";
+        snprintf(line, sizeof(line), "%s \xE2\x80\x94 %.1f %s", name,
+                 (double)to_display_temp(s.celsius), app_prefs_temp_unit_str());
+        lv_obj_t* lbl = make_label(row, line, FONT_NORMAL, COLOR_TEXT);
+        lv_obj_set_width(lbl, LV_PCT(100));
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+    }
+
+    if (r.truncated) {
+        char note[192];
+        snprintf(note, sizeof(note), i18n_get(STR_PERF_BACNET_SHOWING_FIRST), (unsigned)r.count);
+        size_t n = strlen(note);
+        if (n + 2 < sizeof(note)) {
+            note[n++] = '\n';
+            note[n] = '\0';
+            snprintf(note + n, sizeof(note) - n, "%s", i18n_get(STR_PERF_BACNET_TOO_MANY));
+        }
+        lv_label_set_text(ed.browse_note, note);
+        lv_obj_remove_flag(ed.browse_note, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_remove_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_scroll_to_view_recursive(ed.browse_card, LV_ANIM_ON);
+}
+
+static void browse_poll_cb(lv_timer_t* t)
+{
+    (void)t;
+    Editor& ed = s_state.editor;
+    if (!s_browse_job.done && lv_tick_elaps(ed.browse_started_ms) < kBrowseTimeoutMs) return;
+    if (!s_browse_job.done && s_browse_job.result) {
+        s_browse_job.result->error = ext_temp::Error::Timeout;
+        s_browse_job.done = true;
+    }
+    lv_timer_delete(ed.browse_timer);
+    ed.browse_timer = NULL;
+    set_browsing(false);
+    if (s_browse_job.result) render_browse_result(*s_browse_job.result);
+}
+
+static void browse_btn_cb(lv_event_t* e)
+{
+    (void)e;
+    Editor& ed = s_state.editor;
+    if (ed.ed.source != perf::SensorSource::BacnetIp || ed.browse_timer) return;
+    editor_hide_result();
+    if (!perf::host_valid(ed.ed.host)) {
+        editor_show_error(i18n_get(STR_PERF_INVALID_HOST));
+        return;
+    }
+    if (s_browse_job.running) {
+        editor_show_error(i18n_get(STR_PERF_ERR_BUSY));
+        return;
+    }
+    free_browse_result_if_idle();
+    s_browse_job.result = (ext_temp::BrowseResult*)heap_caps_calloc(
+        1, sizeof(ext_temp::BrowseResult), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_browse_job.result) {
+        editor_show_error(i18n_get(STR_PERF_SAVE_FAILED));
+        return;
+    }
+    snprintf(s_browse_job.host, sizeof(s_browse_job.host), "%s", ed.ed.host);
+    s_browse_job.port = ed.ed.port;
+    s_browse_job.done = false;
+    s_browse_job.running = true;
+    if (xTaskCreateWithCaps(browse_task, "perf_browse", 8192, NULL, 5, NULL,
+                            MALLOC_CAP_SPIRAM) != pdPASS) {
+        s_browse_job.running = false;
+        free_browse_result_if_idle();
+        editor_show_error(i18n_get(STR_PERF_SAVE_FAILED));
+        return;
+    }
+    lv_obj_add_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
+    ed.browse_started_ms = lv_tick_get();
+    ed.browse_timer = lv_timer_create(browse_poll_cb, kBrowsePollMs, NULL);
+    set_browsing(true);
+}
+
 static void source_seg_cb(lv_event_t* e)
 {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
@@ -1064,7 +1277,12 @@ static void source_seg_cb(lv_event_t* e)
 static void regtype_seg_cb(lv_event_t* e)
 {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
-    s_state.editor.ed.reg_type = idx == 1 ? perf::RegisterType::Holding : perf::RegisterType::Input;
+    if (s_state.editor.ed.source == perf::SensorSource::BacnetIp) {
+        s_state.editor.ed.bacnet_type =
+            idx == 1 ? perf::BacnetObjectType::AnalogValue : perf::BacnetObjectType::AnalogInput;
+    } else {
+        s_state.editor.ed.reg_type = idx == 1 ? perf::RegisterType::Holding : perf::RegisterType::Input;
+    }
     editor_changed();
 }
 
@@ -1263,6 +1481,32 @@ static void open_editor(int slot)
         lv_obj_set_flex_grow(c, 1);
     }
 
+    ed.browse_btn = make_button(ed.modbus_group, i18n_get(STR_PERF_FIND_SENSORS), "perf_bacnet_browse",
+                                COLOR_BTN_SECONDARY, COLOR_TEXT, browse_btn_cb, NULL);
+    lv_obj_set_size(ed.browse_btn, LV_PCT(100), 72);
+    lv_obj_set_style_bg_opa(ed.browse_btn, LV_OPA_50, LV_STATE_DISABLED);
+    ed.browse_lbl = lv_obj_get_child(ed.browse_btn, 0);
+
+    ed.browse_card = lv_obj_create(ed.modbus_group);
+    lv_obj_set_size(ed.browse_card, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(ed.browse_card, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ed.browse_card, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(ed.browse_card, COLOR_SEG_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_radius(ed.browse_card, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(ed.browse_card, 16, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(ed.browse_card, 12, LV_PART_MAIN);
+    lv_obj_set_flex_flow(ed.browse_card, LV_FLEX_FLOW_COLUMN);
+    disable_scrolling(ed.browse_card);
+    lv_obj_set_user_data(ed.browse_card, (void*)"perf_bacnet_results");
+    ed.browse_list = make_column(ed.browse_card, 8);
+    lv_obj_set_user_data(ed.browse_list, (void*)"perf_bacnet_list");
+    ed.browse_note = make_label(ed.browse_card, "", UI_FONT_SMALL, COLOR_TEXT_DIM);
+    lv_obj_set_width(ed.browse_note, LV_PCT(100));
+    lv_label_set_long_mode(ed.browse_note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_user_data(ed.browse_note, (void*)"perf_bacnet_note");
+    lv_obj_add_flag(ed.browse_note, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
+
     // Advanced (collapsed by default)
     lv_obj_t* adv = lv_obj_create(ed.modbus_group);
     lv_obj_set_size(adv, LV_PCT(100), 72);
@@ -1365,8 +1609,10 @@ static void close_editor(void)
     Editor& ed = s_state.editor;
     close_text_entry();
     if (ed.test_timer) lv_timer_delete(ed.test_timer);
+    if (ed.browse_timer) lv_timer_delete(ed.browse_timer);
     if (ed.root) lv_obj_delete(ed.root);
     ed = {};
+    free_browse_result_if_idle();
 }
 
 // ============================================================================

@@ -442,13 +442,13 @@ static void test_bacnet_parse_rpm_ack() {
     frame[pos++] = (uint8_t)(oid >> 24); frame[pos++] = (uint8_t)(oid >> 16);
     frame[pos++] = (uint8_t)(oid >> 8); frame[pos++] = (uint8_t)oid;
     frame[pos++] = 0x1E;
-    frame[pos++] = 0x09; frame[pos++] = bacnet::PROP_OBJECT_NAME; frame[pos++] = 0x1E;
+    frame[pos++] = 0x29; frame[pos++] = bacnet::PROP_OBJECT_NAME; frame[pos++] = 0x4E;
     const char name[] = "Supply";
     frame[pos++] = 0x75; frame[pos++] = (uint8_t)(sizeof(name)); frame[pos++] = 0;
     std::memcpy(frame + pos, name, sizeof(name) - 1); pos += sizeof(name) - 1;
-    frame[pos++] = 0x1F;
-    frame[pos++] = 0x09; frame[pos++] = bacnet::PROP_UNITS; frame[pos++] = 0x1E;
-    frame[pos++] = 0x91; frame[pos++] = 62; frame[pos++] = 0x1F;
+    frame[pos++] = 0x4F;
+    frame[pos++] = 0x29; frame[pos++] = bacnet::PROP_UNITS; frame[pos++] = 0x4E;
+    frame[pos++] = 0x91; frame[pos++] = 62; frame[pos++] = 0x4F;
     frame[pos++] = 0x1F;
     frame[2] = (uint8_t)(pos >> 8); frame[3] = (uint8_t)pos;
     bacnet::PropertyValue vals[4];

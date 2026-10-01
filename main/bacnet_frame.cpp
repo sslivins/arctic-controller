@@ -275,15 +275,15 @@ bool read_context_object(const uint8_t* buf, size_t len, size_t* pos, uint8_t wa
 bool read_property_result(const uint8_t* buf, size_t len, size_t* pos, ObjectId obj,
                           PropertyValue* pv) {
     uint32_t prop = 0;
-    if (!read_context_uint(buf, len, pos, 0, &prop)) return false;
+    if (!read_context_uint(buf, len, pos, 2, &prop)) return false;
     pv->object = obj;
     pv->property = prop;
     if (*pos >= len) return false;
-    if (is_open(buf[*pos], 2)) {
+    if (is_open(buf[*pos], 5)) {
         ++*pos;
         uint32_t cls = 0, code = 0;
         if (!read_context_uint(buf, len, pos, 0, &cls) || !read_context_uint(buf, len, pos, 1, &code) ||
-            *pos >= len || !is_close(buf[*pos], 2)) {
+            *pos >= len || !is_close(buf[*pos], 5)) {
             return false;
         }
         ++*pos;
@@ -292,10 +292,10 @@ bool read_property_result(const uint8_t* buf, size_t len, size_t* pos, ObjectId 
         pv->error_info.error_code = static_cast<uint8_t>(code);
         return true;
     }
-    if (!is_open(buf[*pos], 1)) return false;
+    if (!is_open(buf[*pos], 4)) return false;
     ++*pos;
     if (!decode_app_value(buf, len, pos, &pv->value)) return false;
-    if (*pos >= len || !is_close(buf[*pos], 1)) return false;
+    if (*pos >= len || !is_close(buf[*pos], 4)) return false;
     ++*pos;
     return true;
 }

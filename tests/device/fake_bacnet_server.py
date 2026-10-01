@@ -245,7 +245,7 @@ class FakeBacnetServer:
         obj_type, instance = obj >> 22, obj & 0x3FFFFF
         result = bytes([0x30, invoke, SVC_RPM]) + ctx_oid(0, obj_type, instance) + opening(1)
         for prop in props:
-            result += ctx(0, prop) + opening(1) + self.property_value(obj_type, instance, prop, None) + closing(1)
+            result += ctx(2, prop) + opening(4) + self.property_value(obj_type, instance, prop, None) + closing(4)
         result += closing(1)
         return bvlc(result)
 
