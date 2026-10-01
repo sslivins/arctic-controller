@@ -59,6 +59,7 @@ idf_component_register(
         "perf_settings.cpp"
         "perf_source.cpp"
         "mbtcp_frame.cpp"
+        "bacnet_frame.cpp"
         "ext_temp_sensors.cpp"
         "heatpump_errors.cpp"
         "fault_help_links.cpp"

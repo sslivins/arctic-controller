@@ -48,6 +48,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/perf_settings.cpp
   ${MAIN_DIR}/perf_source.cpp
   ${MAIN_DIR}/mbtcp_frame.cpp
+  ${MAIN_DIR}/bacnet_frame.cpp
 )
 
 # The macon parameter table and its guardrail are linked REAL rather than
