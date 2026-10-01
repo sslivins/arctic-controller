@@ -147,6 +147,10 @@ def bvlc(apdu: bytes) -> bytes:
     return b"\x81\x0a" + total.to_bytes(2, "big") + body
 
 
+def error_reply(invoke: int, svc: int, error_class: int = 1, error_code: int = 31) -> bytes:
+    return bvlc(bytes([0x50, invoke, svc]) + app_enum(error_class) + app_enum(error_code))
+
+
 class FakeBacnetServer:
     def __init__(self, host: str, port: int, device_instance: int = 1234,
                  huge_object_count: int = 0, rpm_unsupported: bool = False,
@@ -230,7 +234,10 @@ class FakeBacnetServer:
         if pos < len(data):
             array_index, pos = read_ctx(data, pos, 2)
         obj_type, instance = obj >> 22, obj & 0x3FFFFF
-        value = self.property_value(obj_type, instance, prop, array_index)
+        try:
+            value = self.property_value(obj_type, instance, prop, array_index)
+        except KeyError:
+            return error_reply(invoke, SVC_RP)
         apdu = bytes([0x30, invoke, SVC_RP]) + ctx_oid(0, obj_type, instance) + ctx(1, prop)
         if array_index is not None:
             apdu += ctx(2, array_index)
@@ -251,7 +258,11 @@ class FakeBacnetServer:
         obj_type, instance = obj >> 22, obj & 0x3FFFFF
         result = bytes([0x30, invoke, SVC_RPM]) + ctx_oid(0, obj_type, instance) + opening(1)
         for prop in props:
-            result += ctx(2, prop) + opening(4) + self.property_value(obj_type, instance, prop, None) + closing(4)
+            try:
+                value = self.property_value(obj_type, instance, prop, None)
+            except KeyError:
+                return error_reply(invoke, SVC_RPM)
+            result += ctx(2, prop) + opening(4) + value + closing(4)
         result += closing(1)
         return bvlc(result)
 

@@ -180,6 +180,12 @@ class FakeBacnet:
     def addr(self):
         return self.host, self.port
 
+    def restart(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+        self.stop()
+        self.start()
+
     def start(self):
         args = [sys.executable, "-u", str(FAKE_BACNET_SERVER), "--port", str(self.port)]
         if self.huge_object_count:
@@ -302,6 +308,22 @@ def _display_temp(device: DeviceClient, celsius: float) -> float:
     return celsius
 
 
+def _screen_text_contains(device: DeviceClient, text: str) -> bool:
+    for w in device.widgets:
+        if text in (w.text or "") or text in (w.text_en or ""):
+            return True
+    return False
+
+
+def _set_perf_entry(device: DeviceClient, field_tag: str, value: str) -> None:
+    device.click(tag=field_tag)
+    assert device.wait_for_widget(tag="perf_entry_input", timeout=5.0)
+    device.type_text("perf_entry_input", value)
+    device.click(tag="perf_entry_save")
+    device.wait_until("performance editor text entry closed",
+                      lambda: not device.has_widget(tag="perf_entry"), timeout=5.0)
+
+
 # ---------------------------------------------------------------------------
 # API contract
 # ---------------------------------------------------------------------------
@@ -391,6 +413,14 @@ class TestConfigApi:
         }}})
         assert r.status_code == 200, r.text
         assert r.json()["sensors"]["supply"]["port"] == 502
+
+    def test_bacnet_save_requires_object_instance(self, device: DeviceClient, bacnet_fake):
+        host, port = bacnet_fake
+        r = _put_config(device, {"sensors": {"supply": {
+            "source": "bacnet_ip", "host": host, "port": port,
+        }}})
+        assert r.status_code == 400, r.text
+        assert r.json() == {"error": "Invalid value", "field": "object_instance"}
 
 
 # ---------------------------------------------------------------------------
@@ -500,7 +530,7 @@ class TestSensorTest:
 
         bad = _test_read(device, _bacnet(bacnet_fake, 99)).json()
         assert bad["ok"] is False, bad
-        assert bad["error"] in ("rejected", "protocol", "no_reading", "timeout")
+        assert bad["error"] == "rejected"
 
     def test_input_falls_back_to_holding(self, device: DeviceClient, fake):
         body = _test_read(device, _modbus(fake, FLOAT_REG, value_type="float32", scale=1,
@@ -561,6 +591,15 @@ def _configure_both(device: DeviceClient, fake):
     return r.json()
 
 
+def _configure_both_bacnet(device: DeviceClient, fake):
+    r = _put_config(device, {"sensors": {
+        "supply": _bacnet(fake, 3),
+        "return": _bacnet(fake, 4),
+    }})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
 def _wait_readings(device: DeviceClient, timeout: float = POLL_TIMEOUT) -> dict:
     def both_read():
         s = _get_config(device)["status"]["sensors"]
@@ -597,12 +636,39 @@ class TestPolling:
         st = cfg["status"]
         assert st["pending"] or st["source"] == "external", st
 
+    def test_bacnet_configured_sensors_are_read(self, device: DeviceClient, bacnet_fake):
+        cfg = _configure_both_bacnet(device, bacnet_fake)
+        assert cfg["sensors"]["supply"]["rom_id"] is None
+        assert cfg["status"]["sensors"]["supply"]["configured"] is True
+
+        cfg = _wait_readings(device)
+        s = cfg["status"]["sensors"]
+        assert s["supply"]["celsius"] == pytest.approx(21.4, abs=0.05)
+        assert s["return"]["celsius"] == pytest.approx(20.0, abs=0.05)
+        st = _wait_source(device, "external", "BACnet estimate to switch to external sensors")
+        assert st["fallback"] is False, st
+
     def test_thermux_sensor_id_is_learned(self, device: DeviceClient, fake):
         _configure_both(device, fake)
         device.wait_until(
             "supply sensor ID learned",
             lambda: _get_config(device)["sensors"]["supply"]["rom_id"] == SUPPLY_ROM,
             timeout=POLL_TIMEOUT, poll=1.0)
+
+    def test_bacnet_polling_does_not_persist_ram_learned_rom(self, device: DeviceClient, bacnet_fake):
+        r = _put_config(device, {"sensors": {
+            "supply": _bacnet(bacnet_fake, 3),
+            "return": {"source": "heat_pump"},
+        }})
+        assert r.status_code == 200, r.text
+        device.wait_until(
+            "BACnet supply sensor read without persisted identity",
+            lambda: _get_config(device)["status"]["sensors"]["supply"]["error"] == "none",
+            timeout=POLL_TIMEOUT, poll=1.0)
+        saved = _get_config(device)["sensors"]["supply"]
+        assert saved["source"] == "bacnet_ip"
+        assert saved["rom_id"] is None
+        assert saved["device_instance"] is None
 
     def test_losing_the_sensor_falls_back_and_recovers(self, device: DeviceClient, thermux, fake):
         """External -> sensor drops -> heat pump -> sensor back -> external."""
@@ -628,6 +694,56 @@ class TestPolling:
         # Demo mode can start a settle hold, which blanks the estimate.
         if not st["settling"]:
             assert st["cop"] is not None, st
+
+    def test_bacnet_dropout_falls_back_and_recovers(self, device: DeviceClient, bacnet_server,
+                                                    bacnet_fake):
+        _configure_both_bacnet(device, bacnet_fake)
+        _wait_source(device, "external", "estimate to switch to BACnet sensors")
+        bacnet_server.stop()
+        try:
+            device.wait_until(
+                "BACnet sensors report the lost connection",
+                lambda: all(v["error"] in ("connect", "timeout") for v in
+                            _get_config(device)["status"]["sensors"].values()),
+                timeout=POLL_TIMEOUT, poll=1.0)
+            st = _get_config(device)["status"]
+            assert st["source"] == "heat_pump", st
+            assert st["fallback"] is True, st
+        finally:
+            bacnet_server.start()
+        _wait_readings(device)
+        st = _wait_source(device, "external", "estimate to switch back to BACnet sensors")
+        assert st["fallback"] is False, st
+
+    def test_bacnet_sensor_changed_falls_back(self, device: DeviceClient, bacnet_server,
+                                              bacnet_fake):
+        identity = _test_read(device, _bacnet(bacnet_fake, 3)).json()
+        assert identity["ok"] is True, identity
+        supply = _bacnet(
+            bacnet_fake, 3,
+            device_instance=identity["device_instance"],
+            object_name=identity["object_name"],
+            rom_id=identity["rom_id"],
+        )
+        r = _put_config(device, {"sensors": {
+            "supply": supply,
+            "return": _bacnet(bacnet_fake, 4),
+        }})
+        assert r.status_code == 200, r.text
+        _wait_readings(device)
+
+        bacnet_server.restart(rom_change=True)
+        try:
+            device.wait_until(
+                "BACnet sensor-changed error reported",
+                lambda: _get_config(device)["status"]["sensors"]["supply"]["error"] ==
+                "sensor_changed",
+                timeout=POLL_TIMEOUT, poll=1.0)
+            st = _get_config(device)["status"]
+            assert st["source"] == "heat_pump", st
+            assert st["fallback"] is True, st
+        finally:
+            bacnet_server.restart(rom_change=False)
 
 
 # ---------------------------------------------------------------------------
@@ -712,6 +828,37 @@ class TestScreen:
         device.wait_until("editor closed",
                           lambda: not device.has_widget(tag="perf_editor"), timeout=5.0)
         assert _get_config(device)["sensors"]["supply"]["register_type"] == "input"
+
+    def test_editor_bacnet_browse_pick_saves_identity(self, device: DeviceClient, bacnet_fake):
+        r = _put_config(device, {"sensors": _heat_pump_sensors()})
+        assert r.status_code == 200, r.text
+        host, port = bacnet_fake
+        _open_perf_screen(device)
+        device.click(tag="perf_sensor_supply")
+        assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
+
+        device.click(tag="perf_src_bacnet")
+        assert device.wait_for_widget(tag="perf_bacnet_browse", timeout=5.0)
+        _set_perf_entry(device, "perf_host", host)
+        _set_perf_entry(device, "perf_port", str(port))
+
+        device.click(tag="perf_bacnet_browse")
+        assert device.wait_until("BACnet browse list shows Supply tank",
+                                 lambda: _screen_text_contains(device, "Supply tank"),
+                                 timeout=30.0, poll=0.5)
+        device.click(label_contains="Supply tank")
+        device.click(tag="perf_editor_save")
+        device.wait_until("editor closed",
+                          lambda: not device.has_widget(tag="perf_editor"), timeout=5.0)
+
+        saved = _get_config(device)["sensors"]["supply"]
+        assert saved["source"] == "bacnet_ip"
+        assert saved["object_instance"] == 3
+        assert saved["device_instance"] == 1234
+        assert saved["rom_id"] == "28FF6491631603A2"
+        device.wait_until("main BACnet card row shows the picked object name",
+                          lambda: _screen_text_contains(device, "Supply tank"),
+                          timeout=5.0)
 
     def test_editor_switches_back_to_heat_pump(self, device: DeviceClient, fake):
         _configure_both(device, fake)
