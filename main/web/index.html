@@ -463,6 +463,8 @@
     .perf-adv { margin: 0 0 14px; }
     .perf-adv > .grid { padding: 14px 14px 0; gap: 0 14px; }
     .perf-test { margin-top: 12px; }
+    .perf-test > strong { display: block; margin-bottom: 8px; }
+    .perf-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
     .perf-test.ok { border-left: 4px solid var(--cp-success); padding: 12px 14px; background: var(--cp-surface-soft); border-radius: 0 10px 10px 0; }
     .spinner-inline { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
     .btn-spinner { display: inline-block; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; }
@@ -1306,7 +1308,7 @@
       const browse = state.perfBrowses[slot];
       return (browse?.running ? `<div class="perf-test"><span class="spinner-inline"></span> Finding sensors…</div>` :
         browse?.failed ? `<div class="perf-test notice bad">${esc(browse.failed)}</div>` :
-        browse?.result ? `<div class="perf-test ok"><strong>${browse.result.sensors.length ? "Choose a sensor" : "No sensors found at this address"}</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed — enter the object number under Advanced.</div>` : ""}${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-rom-id="${esc(x.rom_id || "")}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} — ${x.available ? perfTemp(x.celsius) : "unavailable"}</button>`).join("")}</div>` : "");
+        browse?.result ? `<div class="perf-test ok"><strong>${browse.result.sensors.length ? "Choose a sensor" : "No sensors found at this address"}</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed — enter the object number under Advanced.</div>` : ""}<div class="perf-choices">${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-rom-id="${esc(x.rom_id || "")}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} — ${x.available ? perfTemp(x.celsius) : "unavailable"}</button>`).join("")}</div></div>` : "");
     }
     function perfDiscoverHtml(slot) {
       const d = state.perfDiscovers[slot];
@@ -1315,7 +1317,7 @@
       if (d.failed) return `<div class="perf-test notice bad">${esc(d.failed)}</div>`;
       if (!d.result) return "";
       const devices = d.result.devices || [];
-      return `<div class="perf-test ok"><strong>${devices.length ? "Devices found" : "No BACnet devices found on this network"}</strong>${d.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${devices.length} devices.</div>` : ""}${devices.map((x, i) => `<button class="btn" type="button" data-action="perf-pick-bacnet-device" data-slot="${slot}" data-host="${esc(x.host)}" data-port="${esc(x.port)}" data-device-instance="${esc(x.device_instance ?? "")}">${esc(x.device_name || "BACnet device")} · ${esc(x.host)}<br><span class="metric-sub">Device ${esc(x.device_instance ?? "")}${x.model_name ? ` · ${esc(x.model_name)}` : ""}</span></button>`).join("")}<button class="btn" type="button" data-action="perf-bacnet-manual" data-slot="${slot}">Enter address manually</button></div>`;
+      return `<div class="perf-test ok"><strong>${devices.length ? "Devices found" : "No BACnet devices found on this network"}</strong>${d.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${devices.length} devices.</div>` : ""}<div class="perf-choices">${devices.map((x, i) => `<button class="btn" type="button" data-action="perf-pick-bacnet-device" data-slot="${slot}" data-host="${esc(x.host)}" data-port="${esc(x.port)}" data-device-instance="${esc(x.device_instance ?? "")}">${esc(x.device_name || "BACnet device")} · ${esc(x.host)}<br><span class="metric-sub">Device ${esc(x.device_instance ?? "")}${x.model_name ? ` · ${esc(x.model_name)}` : ""}</span></button>`).join("")}<button class="btn" type="button" data-action="perf-bacnet-manual" data-slot="${slot}">Enter address manually</button></div></div>`;
     }
     function performanceSettings() {
       const p = state.perf;
