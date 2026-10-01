@@ -149,12 +149,16 @@ cJSON* createStateObject(const HeatPumpState& hp)
         cJSON_AddNullToObject(readings, "dc_voltage");
     }
     cJSON_AddNumberToObject(readings, "power_w", hp.realtime_power_w);
+    // Always a number: pymacon rejects a null thermal_w.
     cJSON_AddNumberToObject(readings, "thermal_w", hp.thermal_w);
     if (hp.cop_valid) {
         cJSON_AddNumberToObject(readings, "cop", hp.cop_x100 / 100.0);
     } else {
         cJSON_AddNullToObject(readings, "cop");
     }
+    cJSON_AddNumberToObject(readings, "flow_lpm", hp.flow_lpm_x10 / 10.0);
+    cJSON_AddStringToObject(readings, "perf_source", hp.perf_external ? "external" : "heat_pump");
+    cJSON_AddBoolToObject(readings, "perf_fallback", hp.perf_fallback);
 
     cJSON* error = cJSON_AddObjectToObject(state, "error");
     cJSON_AddBoolToObject(error, "active", hp.hasAnyError());

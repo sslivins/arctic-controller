@@ -3,6 +3,7 @@
  * REST API Server with mDNS, Web Interface, and Authentication
  */
 #include "sdkconfig.h"
+#include <cmath>
 #include "api_server.h"
 #include "settings/settings_display_screen.h"
 #include "app_preferences.h"
@@ -32,6 +33,7 @@
 #include "macon_fields.h"  // arctic::macon_*_fingerprint (bus-library compatibility)
 #endif
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
+#include "ext_temp_sensors.h"  // heat output & COP settings, external sensors
 #include "heatpump_errors.h"
 #include "history_storage.h"
 #include "system_restart.h"
@@ -174,6 +176,9 @@ static esp_err_t heatpump_windows_handler(httpd_req_t* req);
 static esp_err_t heatpump_advanced_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req);
+static esp_err_t perf_config_get_handler(httpd_req_t* req);
+static esp_err_t perf_config_put_handler(httpd_req_t* req);
+static esp_err_t perf_test_post_handler(httpd_req_t* req);
 static esp_err_t heatpump_power_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
@@ -1052,6 +1057,30 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_advanced_put_uri);
+
+    httpd_uri_t perf_config_get_uri = {
+        .uri = "/api/performance/config",
+        .method = HTTP_GET,
+        .handler = perf_config_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(perf_config_get_uri);
+
+    httpd_uri_t perf_config_put_uri = {
+        .uri = "/api/performance/config",
+        .method = HTTP_PUT,
+        .handler = perf_config_put_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(perf_config_put_uri);
+
+    httpd_uri_t perf_test_uri = {
+        .uri = "/api/performance/test",
+        .method = HTTP_POST,
+        .handler = perf_test_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(perf_test_uri);
     
     // PUT /api/heatpump/power - Set power on/off
     httpd_uri_t heatpump_power_uri = {
@@ -4204,6 +4233,11 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
         cJSON_AddNullToObject(readings, "heat_out");
         cJSON_AddNullToObject(readings, "cop");
     }
+    cJSON_AddNumberToObject(readings, "flow_lpm", hp.flow_lpm_x10 / 10.0);
+    cJSON_AddStringToObject(readings, "perf_source", hp.perf_external ? "external" : "heat_pump");
+    cJSON_AddBoolToObject(readings, "perf_fallback", hp.perf_fallback);
+    cJSON_AddBoolToObject(readings, "perf_pending", hp.perf_pending);
+    cJSON_AddBoolToObject(readings, "perf_settling", hp.perf_settling);
     
     // Errors
     cJSON_AddBoolToObject(root, "has_error", hp.hasAnyError());
@@ -4624,6 +4658,411 @@ static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+// ---- Heat output & COP settings (/api/performance/...) ----
+
+static const char* const kPerfSlotKeys[perf::kSlotCount] = {"supply", "return"};
+
+static double perf_scale_value(int8_t scale_exp)
+{
+    double v = 1.0;
+    for (int8_t i = 0; i > scale_exp; i--) v /= 10.0;
+    return v;
+}
+
+static void perf_rom_hex(const uint8_t rom[perf::kRomLen], char out[17])
+{
+    static const char* kHex = "0123456789ABCDEF";
+    for (size_t i = 0; i < perf::kRomLen; i++) {
+        out[i * 2] = kHex[rom[i] >> 4];
+        out[i * 2 + 1] = kHex[rom[i] & 0x0F];
+    }
+    out[16] = '\0';
+}
+
+static double perf_round2(float c)
+{
+    return (double)lround((double)c * 100.0) / 100.0;
+}
+
+static cJSON* perf_sensor_json(const perf::SensorConfig& s)
+{
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "source", perf::source_name(s.source));
+    cJSON_AddStringToObject(o, "host", s.host);
+    cJSON_AddNumberToObject(o, "port", s.port);
+    cJSON_AddNumberToObject(o, "unit_id", s.unit_id);
+    cJSON_AddNumberToObject(o, "register", s.address);
+    cJSON_AddStringToObject(o, "register_type", perf::register_type_name(s.reg_type));
+    cJSON_AddStringToObject(o, "value_type", perf::value_type_name(s.value_type));
+    cJSON_AddNumberToObject(o, "scale", perf_scale_value(s.scale_exp));
+    cJSON_AddStringToObject(o, "no_reading", perf::no_reading_name(s.no_reading));
+    if (s.rom_known) {
+        char hex[17];
+        perf_rom_hex(s.rom, hex);
+        cJSON_AddStringToObject(o, "rom_id", hex);
+    } else {
+        cJSON_AddNullToObject(o, "rom_id");
+    }
+    return o;
+}
+
+// Merge the fields present in `o` into `s`. Returns the offending field name,
+// or nullptr when everything present parsed. Range checks are left to
+// perf::validate_sensor().
+static const char* perf_sensor_merge(const cJSON* o, perf::SensorConfig* s)
+{
+    if (!cJSON_IsObject(o)) return "sensor";
+    const cJSON* v;
+    if ((v = cJSON_GetObjectItem(o, "source"))) {
+        if (!cJSON_IsString(v) || !perf::parse_source(v->valuestring, &s->source)) return "source";
+    }
+    if ((v = cJSON_GetObjectItem(o, "host"))) {
+        if (!cJSON_IsString(v) || strlen(v->valuestring) >= perf::kHostMax) return "host";
+        strlcpy(s->host, v->valuestring, sizeof(s->host));
+    }
+    if ((v = cJSON_GetObjectItem(o, "port"))) {
+        if (!cJSON_IsNumber(v) || v->valuedouble < 1 || v->valuedouble > 65535 ||
+            v->valuedouble != (double)(long)v->valuedouble) return "port";
+        s->port = (uint16_t)v->valuedouble;
+    }
+    if ((v = cJSON_GetObjectItem(o, "unit_id"))) {
+        if (!cJSON_IsNumber(v) || v->valuedouble < 0 || v->valuedouble > 255 ||
+            v->valuedouble != (double)(long)v->valuedouble) return "unit_id";
+        s->unit_id = (uint8_t)v->valuedouble;
+    }
+    if ((v = cJSON_GetObjectItem(o, "register"))) {
+        if (!cJSON_IsNumber(v) || v->valuedouble < 0 || v->valuedouble > 65535 ||
+            v->valuedouble != (double)(long)v->valuedouble) return "register";
+        s->address = (uint16_t)v->valuedouble;
+    }
+    if ((v = cJSON_GetObjectItem(o, "register_type"))) {
+        if (!cJSON_IsString(v) || !perf::parse_register_type(v->valuestring, &s->reg_type))
+            return "register_type";
+    }
+    if ((v = cJSON_GetObjectItem(o, "value_type"))) {
+        if (!cJSON_IsString(v) || !perf::parse_value_type(v->valuestring, &s->value_type))
+            return "value_type";
+    }
+    if ((v = cJSON_GetObjectItem(o, "scale"))) {
+        if (!cJSON_IsNumber(v)) return "scale";
+        bool found = false;
+        for (int8_t e = 0; e >= -3; e--) {
+            double want = perf_scale_value(e);
+            if (fabs(v->valuedouble - want) <= want * 1e-6) {
+                s->scale_exp = e;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return "scale";
+    }
+    if ((v = cJSON_GetObjectItem(o, "no_reading"))) {
+        if (!cJSON_IsString(v) || !perf::parse_no_reading(v->valuestring, &s->no_reading))
+            return "no_reading";
+    }
+    return nullptr;
+}
+
+static void send_perf_invalid(httpd_req_t* req, const char* field)
+{
+    httpd_resp_set_status(req, "400 Bad Request");
+    set_json_content_type(req);
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "error", "Invalid value");
+    cJSON_AddStringToObject(root, "field", field);
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+}
+
+// Reads a JSON body of at most `max` bytes. Sends the error itself and
+// returns nullptr on failure.
+static cJSON* perf_read_json_body(httpd_req_t* req, size_t max)
+{
+    if (req->content_len == 0) {
+        send_json_error(req, "400 Bad Request", "Empty request body");
+        return nullptr;
+    }
+    if (req->content_len > max) {
+        send_json_error(req, "413 Payload Too Large", "Request body too large");
+        return nullptr;
+    }
+    char* body = (char*)malloc(req->content_len + 1);
+    if (!body) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return nullptr;
+    }
+    size_t got = 0;
+    while (got < req->content_len) {
+        int r = httpd_req_recv(req, body + got, req->content_len - got);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (r <= 0) {
+            free(body);
+            send_json_error(req, "400 Bad Request", "Incomplete request body");
+            return nullptr;
+        }
+        got += (size_t)r;
+    }
+    body[got] = '\0';
+    cJSON* root = cJSON_Parse(body);
+    free(body);
+    if (!root) send_json_error(req, "400 Bad Request", "Invalid JSON");
+    return root;
+}
+
+static cJSON* perf_config_json(void)
+{
+    const perf::Settings s = ext_temp::settings();
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "flow_lpm", s.flow_lpm_x10 / 10.0);
+    cJSON_AddStringToObject(root, "fluid", perf::fluid_name(s.fluid));
+    cJSON_AddNumberToObject(root, "glycol_pct", s.glycol_pct);
+    cJSON* sensors = cJSON_AddObjectToObject(root, "sensors");
+    for (int i = 0; i < perf::kSlotCount; i++) {
+        cJSON_AddItemToObject(sensors, kPerfSlotKeys[i], perf_sensor_json(s.sensors[i]));
+    }
+
+    cJSON* limits = cJSON_AddObjectToObject(root, "limits");
+    cJSON_AddNumberToObject(limits, "flow_min_lpm", perf::kFlowMinX10 / 10.0);
+    cJSON_AddNumberToObject(limits, "flow_max_lpm", perf::kFlowMaxX10 / 10.0);
+    cJSON_AddNumberToObject(limits, "glycol_max_pct", arctic::kGlycolPctMax);
+    cJSON_AddNumberToObject(limits, "glycol_step_pct", perf::kGlycolStep);
+
+    // Live view: where the estimate's temperatures come from right now, and
+    // the latest reading of each external sensor.
+    const arctic::HeatPumpState hp = arctic::getState();
+    cJSON* st = cJSON_AddObjectToObject(root, "status");
+    cJSON_AddStringToObject(st, "source", hp.perf_external ? "external" : "heat_pump");
+    cJSON_AddBoolToObject(st, "fallback", hp.perf_fallback);
+    cJSON_AddBoolToObject(st, "pending", hp.perf_pending);
+    cJSON_AddBoolToObject(st, "settling", hp.perf_settling);
+    if (hp.cop_valid) {
+        cJSON_AddNumberToObject(st, "heat_out", hp.thermal_w);
+        cJSON_AddNumberToObject(st, "cop", hp.cop_x100 / 100.0);
+    } else {
+        cJSON_AddNullToObject(st, "heat_out");
+        cJSON_AddNullToObject(st, "cop");
+    }
+    ext_temp::SlotStatus slots[perf::kSlotCount];
+    ext_temp::slot_status(slots);
+    cJSON* ss = cJSON_AddObjectToObject(st, "sensors");
+    for (int i = 0; i < perf::kSlotCount; i++) {
+        cJSON* o = cJSON_AddObjectToObject(ss, kPerfSlotKeys[i]);
+        cJSON_AddBoolToObject(o, "configured", slots[i].configured);
+        if (slots[i].has_reading) {
+            cJSON_AddNumberToObject(o, "celsius", perf_round2(slots[i].celsius));
+            cJSON_AddNumberToObject(o, "age_s", slots[i].age_s);
+        } else {
+            cJSON_AddNullToObject(o, "celsius");
+            cJSON_AddNullToObject(o, "age_s");
+        }
+        cJSON_AddStringToObject(o, "error", ext_temp::error_name(slots[i].error));
+        if (slots[i].error == ext_temp::Error::Exception) {
+            cJSON_AddNumberToObject(o, "exception", slots[i].exception);
+        }
+    }
+    return root;
+}
+
+static void send_perf_config(httpd_req_t* req)
+{
+    set_json_content_type(req);
+    cJSON* root = perf_config_json();
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
+}
+
+// GET /api/performance/config
+static esp_err_t perf_config_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    send_perf_config(req);
+    return ESP_OK;
+}
+
+// PUT /api/performance/config - partial update. Any sensor object present
+// counts as edited (its learned Thermux sensor ID is forgotten).
+static esp_err_t perf_config_put_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    cJSON* root = perf_read_json_body(req, 2048);
+    if (!root) return ESP_OK;
+
+    perf::Settings s = ext_temp::settings();
+    bool edited[perf::kSlotCount] = {false, false};
+    const char* bad = nullptr;
+    bool any = false;
+    const cJSON* v;
+    if (!cJSON_IsObject(root)) bad = "body";
+    if (!bad && (v = cJSON_GetObjectItem(root, "flow_lpm"))) {
+        any = true;
+        if (!cJSON_IsNumber(v) || v->valuedouble < 0 || v->valuedouble > 100000) {
+            bad = "flow_lpm";
+        } else {
+            s.flow_lpm_x10 = (uint16_t)lround(v->valuedouble * 10.0);
+        }
+    }
+    if (!bad && (v = cJSON_GetObjectItem(root, "fluid"))) {
+        any = true;
+        if (!cJSON_IsString(v) || !perf::parse_fluid(v->valuestring, &s.fluid)) bad = "fluid";
+    }
+    if (!bad && (v = cJSON_GetObjectItem(root, "glycol_pct"))) {
+        any = true;
+        if (!cJSON_IsNumber(v) || v->valuedouble < 0 || v->valuedouble > 100 ||
+            v->valuedouble != (double)(long)v->valuedouble) {
+            bad = "glycol_pct";
+        } else {
+            s.glycol_pct = (uint8_t)v->valuedouble;
+        }
+    }
+    const cJSON* sensors = bad ? nullptr : cJSON_GetObjectItem(root, "sensors");
+    if (sensors) {
+        any = true;
+        if (!cJSON_IsObject(sensors)) bad = "sensors";
+        for (int i = 0; !bad && i < perf::kSlotCount; i++) {
+            const cJSON* so = cJSON_GetObjectItem(sensors, kPerfSlotKeys[i]);
+            if (!so) continue;
+            edited[i] = true;
+            bad = perf_sensor_merge(so, &s.sensors[i]);
+        }
+    }
+    cJSON_Delete(root);
+    if (bad) {
+        send_perf_invalid(req, bad);
+        return ESP_OK;
+    }
+    if (!any) {
+        send_json_error(req, "400 Bad Request", "No supported settings supplied");
+        return ESP_OK;
+    }
+
+    bool saved = false;
+    perf::Invalid inv = ext_temp::apply_settings(s, edited, &saved);
+    if (inv != perf::Invalid::None) {
+        send_perf_invalid(req, perf::invalid_name(inv));
+        return ESP_OK;
+    }
+    if (!saved) {
+        send_json_error(req, "500 Internal Server Error", "Unable to save settings");
+        return ESP_OK;
+    }
+    send_perf_config(req);
+    return ESP_OK;
+}
+
+static const char* perf_thermux_status_name(uint8_t st)
+{
+    switch ((perf::thermux::ChannelStatus)st) {
+        case perf::thermux::ChannelStatus::Ok: return "ok";
+        case perf::thermux::ChannelStatus::Unassigned: return "unassigned";
+        case perf::thermux::ChannelStatus::Missing: return "missing";
+        case perf::thermux::ChannelStatus::ReadError: return "read_error";
+        case perf::thermux::ChannelStatus::Stale: return "stale";
+    }
+    return "unknown";
+}
+
+// POST /api/performance/test - read a sensor configuration once, without
+// saving it. Body: {"slot": "supply"?, "sensor": {...}}. Fields not given
+// come from the saved sensor for `slot`, or from the defaults.
+static esp_err_t perf_test_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    cJSON* root = perf_read_json_body(req, 1024);
+    if (!root) return ESP_OK;
+
+    perf::SensorConfig cfg = perf::default_sensor();
+    const char* bad = cJSON_IsObject(root) ? nullptr : "body";
+    const cJSON* slot = bad ? nullptr : cJSON_GetObjectItem(root, "slot");
+    if (slot) {
+        int idx = -1;
+        if (cJSON_IsString(slot)) {
+            for (int i = 0; i < perf::kSlotCount; i++) {
+                if (strcmp(slot->valuestring, kPerfSlotKeys[i]) == 0) idx = i;
+            }
+        }
+        if (idx < 0) {
+            bad = "slot";
+        } else {
+            cfg = ext_temp::settings().sensors[idx];
+        }
+    }
+    const cJSON* so = bad ? nullptr : cJSON_GetObjectItem(root, "sensor");
+    if (so) bad = perf_sensor_merge(so, &cfg);
+    cJSON_Delete(root);
+    if (bad) {
+        send_perf_invalid(req, bad);
+        return ESP_OK;
+    }
+    // Testing is about the Modbus settings; the source switch doesn't matter.
+    cfg.source = perf::SensorSource::ModbusTcp;
+    perf::Invalid inv = perf::validate_sensor(cfg);
+    if (inv != perf::Invalid::None) {
+        send_perf_invalid(req, perf::invalid_name(inv));
+        return ESP_OK;
+    }
+
+    // Blocks this (single) httpd task; the worker bounds each step to ~1.5 s.
+    ext_temp::TestResult r = {};
+    if (!ext_temp::test_blocking(cfg, &r, 8000)) {
+        send_json_error(req, "504 Gateway Timeout", "Sensor test did not finish");
+        return ESP_OK;
+    }
+    if (r.error == ext_temp::Error::Busy) {
+        send_json_error(req, "409 Conflict", "Another sensor test is running");
+        return ESP_OK;
+    }
+
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    const bool ok = r.error == ext_temp::Error::None;
+    cJSON_AddBoolToObject(resp, "ok", ok);
+    cJSON_AddStringToObject(resp, "error", ext_temp::error_name(r.error));
+    cJSON_AddStringToObject(resp, "register_type", perf::register_type_name(r.reg_type));
+    if (r.error == ext_temp::Error::Exception) {
+        cJSON_AddNumberToObject(resp, "exception", r.exception);
+    }
+    if (ok) {
+        cJSON_AddNumberToObject(resp, "celsius", perf_round2(r.celsius));
+    } else {
+        cJSON_AddNullToObject(resp, "celsius");
+    }
+    if (r.thermux) {
+        cJSON* t = cJSON_AddObjectToObject(resp, "thermux");
+        cJSON_AddNumberToObject(t, "channel", r.channel);
+        cJSON_AddStringToObject(t, "status", perf_thermux_status_name(r.thermux_status));
+        if (r.thermux_age_s == 65535) {
+            cJSON_AddNullToObject(t, "age_s");
+        } else {
+            cJSON_AddNumberToObject(t, "age_s", r.thermux_age_s);
+        }
+        if (r.rom_valid) {
+            cJSON_AddStringToObject(t, "rom_id", r.rom_hex);
+        } else {
+            cJSON_AddNullToObject(t, "rom_id");
+        }
+    } else {
+        cJSON_AddNullToObject(resp, "thermux");
+    }
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
 // PUT /api/heatpump/power - Set power on/off
 // Body: { "on": true/false }
 static esp_err_t heatpump_power_put_handler(httpd_req_t* req)
@@ -4975,6 +5414,13 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
         snprintf(line, sizeof(line), "Reading,COP (est),,,%u.%02u,\r\n", hp.cop_x100 / 100, hp.cop_x100 % 100);
         httpd_resp_sendstr_chunk(req, line);
     }
+    snprintf(line, sizeof(line), "Reading,Assumed Flow,,,%u.%u,L/min\r\n",
+             hp.flow_lpm_x10 / 10, hp.flow_lpm_x10 % 10);
+    httpd_resp_sendstr_chunk(req, line);
+    snprintf(line, sizeof(line), "Reading,Estimate Temperatures,,,%s%s,\r\n",
+             hp.perf_external ? "external" : "heat_pump",
+             hp.perf_fallback ? " (fallback)" : hp.perf_pending ? " (pending)" : (hp.perf_settling ? " (settling)" : ""));
+    httpd_resp_sendstr_chunk(req, line);
 
     // --- Component Status (derived by the macon library from live registers) ---
     #define DIAG_BOOL(name_str, val) \

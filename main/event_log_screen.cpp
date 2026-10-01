@@ -14,7 +14,7 @@
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "i18n/i18n.h"
-#include "settings/keyboard_maps.h"
+#include "settings/ui_keyboard.h"
 #include <ctype.h>
 #include <esp_log.h>
 #include <esp_system.h>
@@ -1085,18 +1085,11 @@ static void create_search_overlay() {
     lv_obj_set_user_data(state.search_textarea, (void*)"event_search_input");
     lv_obj_set_style_text_font(state.search_textarea, UI_FONT_BODY, LV_PART_MAIN);
 
-    lv_obj_t* keyboard = lv_keyboard_create(state.search_overlay);
-    lv_obj_set_size(keyboard, LV_PCT(100), LV_PCT(25));
+    lv_obj_t* keyboard = ui_keyboard_create(state.search_overlay, state.search_textarea,
+                                            UiKeyboardKind::Text, COLOR_CARD_BG);
     lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, -25);
-    lv_obj_set_style_bg_color(keyboard, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_text_font(keyboard, UI_FONT_BODY, LV_PART_ITEMS);
     lv_obj_set_user_data(keyboard, (void*)"event_search_keyboard");
-    lv_keyboard_set_textarea(keyboard, state.search_textarea);
     lv_obj_add_event_cb(keyboard, search_apply_cb, LV_EVENT_READY, nullptr);
-    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lc, kb_ctrl_lc);
-    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_uc, kb_ctrl_uc);
-    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec);
-    lv_keyboard_set_popovers(keyboard, true);
 
     lv_obj_t* action_bar = lv_obj_create(state.search_overlay);
     lv_obj_set_size(action_bar, LV_PCT(100), 110);

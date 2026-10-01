@@ -12,8 +12,9 @@ the simulator's `outlet_water_temp` is the controller's
 """
 
 
-import pytest
+import time
 
+import pytest
 from conftest import BUS_TIMEOUT, LEASE_OWNER, controller_macon_identity, wait_until
 
 # simulator field -> path in the controller's GET /api/heatpump/status
@@ -54,6 +55,21 @@ def _get(d, path):
 
 def _active(device):
     return device.get_heatpump_errors().get("active") or []
+
+
+def _set_fault_with_diag(sim, setter):
+    """Apply a sim fault; return a diag() for wait_until that tells a slow
+    simulator HTTP call apart from a slow controller poll rate."""
+    before = sim.bus_stats()["requests_handled"]
+    t0 = time.monotonic()
+    setter()
+    set_s = time.monotonic() - t0
+
+    def diag():
+        polls = sim.bus_stats()["requests_handled"] - before
+        return (f"sim set took {set_s:.1f}s; controller polled the sim {polls}x in "
+                f"{time.monotonic() - t0:.1f}s")
+    return diag
 
 
 # ---------------------------------------------------------------------------
@@ -169,12 +185,13 @@ def test_fault_code_round_trip(sim, device, fault_entry):
     name + severity; clearing it moves it to history with a cleared time."""
     assert fault_entry, "simulator fault catalog unavailable"
     code = fault_entry["code"]
-    sim.set_fault(code, True)
+    diag = _set_fault_with_diag(sim, lambda: sim.set_fault(code, True))
 
     def shown():
         mine = [e for e in _active(device) if e["code"] == code]
         return mine if len(mine) == len(fault_entry["sites"]) else None
-    entries = wait_until(shown, desc=f"controller to show all {len(fault_entry['sites'])} site(s) of {code}")
+    entries = wait_until(shown, desc=f"controller to show all {len(fault_entry['sites'])} site(s) of {code}",
+                         diag=diag)
     want = {(s["label"], s["severity"]) for s in fault_entry["sites"]}
     assert {(e["name"], e["severity"]) for e in entries} == want
 
@@ -188,10 +205,10 @@ def test_fault_code_round_trip(sim, device, fault_entry):
 def test_fault_site_round_trip(sim, device, fault_site):
     """One specific bit: the controller reports exactly that one entry."""
     assert fault_site, "simulator fault catalog unavailable"
-    sim.set_fault_site(fault_site["site"], True)
+    diag = _set_fault_with_diag(sim, lambda: sim.set_fault_site(fault_site["site"], True))
     entries = wait_until(
         lambda: [e for e in _active(device) if e["code"] == fault_site["code"]] or None,
-        desc=f"controller to show site {fault_site['site']} ({fault_site['code']})")
+        desc=f"controller to show site {fault_site['site']} ({fault_site['code']})", diag=diag)
     assert len(entries) == 1
     assert entries[0]["name"] == fault_site["label"]
     assert entries[0]["severity"] == fault_site["severity"]

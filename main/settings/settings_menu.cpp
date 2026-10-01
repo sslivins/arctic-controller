@@ -15,7 +15,9 @@
 #include "settings_home_assistant_screen.h"
 #include "settings_security_screen.h"
 #include "settings_web_screen.h"
-#include "keyboard_maps.h"
+#include "settings_perf_screen.h"
+#include "../ext_temp_sensors.h"
+#include "ui_keyboard.h"
 #include "settings_types.h"  // For settings_wifi_network_t
 #include "../ui_common.h"  // For ui_create_close_button
 #include "../ui_overlay.h"
@@ -66,6 +68,7 @@ typedef enum {
     SETTINGS_HOME_ASSISTANT,
     SETTINGS_SECURITY,
     SETTINGS_WEB,
+    SETTINGS_PERF,
     SETTINGS_COUNT
 } settings_item_t;
 
@@ -418,6 +421,14 @@ static void row_click_cb(lv_event_t* e)
         web_screen_create(&web_cfg);
         state.sub_screen_active = true;
         state.active_sub_screen = SETTINGS_WEB;
+    } else if (strcmp(tag, "settings_perf") == 0) {
+        ESP_LOGI(TAG, "Opening Heat output & COP settings...");
+        perf_screen_config_t perf_cfg = {
+            .on_back = settings_menu_show,
+        };
+        perf_screen_create(&perf_cfg);
+        state.sub_screen_active = true;
+        state.active_sub_screen = SETTINGS_PERF;
     } else if (strcmp(tag, "settings_device_name") == 0) {
         show_name_dialog();
     } else if (strcmp(tag, "settings_factory_reset") == 0) {
@@ -512,16 +523,9 @@ static void show_name_dialog(void)
     lv_obj_add_flag(state.name_error_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_user_data(state.name_error_label, (void*)"device_name_error");
 
-    state.name_keyboard = lv_keyboard_create(state.name_dialog);
-    lv_obj_set_size(state.name_keyboard, LV_PCT(100), LV_PCT(25));
+    state.name_keyboard = ui_keyboard_create(state.name_dialog, state.name_textarea,
+                                             UiKeyboardKind::Text, COLOR_CARD);
     lv_obj_align(state.name_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(state.name_keyboard, COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_text_font(state.name_keyboard, FONT_NORMAL, LV_PART_ITEMS);
-    lv_keyboard_set_textarea(state.name_keyboard, state.name_textarea);
-    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, kb_map_lc, kb_ctrl_lc);
-    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, kb_map_uc, kb_ctrl_uc);
-    lv_keyboard_set_map(state.name_keyboard, LV_KEYBOARD_MODE_SPECIAL, kb_map_spec, kb_ctrl_spec);
-    lv_keyboard_set_popovers(state.name_keyboard, true);
     lv_obj_add_event_cb(state.name_keyboard, name_keyboard_ready_cb, LV_EVENT_READY, NULL);
 
     lv_obj_t* action_bar = lv_obj_create(state.name_dialog);
@@ -720,6 +724,19 @@ static void create_menu_list(void)
         i18n_get(STR_SETTINGS_HOME_ASSISTANT),
         "settings_home_assistant");
 
+    state.rows[SETTINGS_PERF] = create_settings_row(
+        state.list_container, LV_SYMBOL_CHARGE,
+        i18n_get(STR_SETTINGS_PERF),
+        "settings_perf");
+    if (perf::uses_network(ext_temp::settings())) {
+        lv_obj_t* perf_value = lv_label_create(state.rows[SETTINGS_PERF]);
+        lv_label_set_text(perf_value, i18n_get(STR_PERF_ROW_MODBUS));
+        lv_obj_set_style_text_font(perf_value, FONT_NORMAL, LV_PART_MAIN);
+        lv_obj_set_style_text_color(perf_value, COLOR_ACCENT, LV_PART_MAIN);
+        lv_obj_set_user_data(perf_value, (void*)"perf_row_value");
+        lv_obj_align(perf_value, LV_ALIGN_RIGHT_MID, -60, 0);
+    }
+
     state.rows[SETTINGS_SECURITY] = create_settings_row(
         state.list_container, LV_SYMBOL_KEYBOARD,
         i18n_get(STR_SETTINGS_SECURITY),
@@ -897,6 +914,9 @@ void settings_menu_force_close(lv_obj_t* return_screen)
                 break;
             case SETTINGS_WEB:
                 web_screen_close();
+                break;
+            case SETTINGS_PERF:
+                perf_screen_close();
                 break;
             default: break;
         }

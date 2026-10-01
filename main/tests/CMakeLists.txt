@@ -45,6 +45,9 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/location_manager.cpp
   ${MAIN_DIR}/app_preferences.cpp
   ${MAIN_DIR}/advanced_params.cpp
+  ${MAIN_DIR}/perf_settings.cpp
+  ${MAIN_DIR}/perf_source.cpp
+  ${MAIN_DIR}/mbtcp_frame.cpp
 )
 
 # The macon parameter table and its guardrail are linked REAL rather than
@@ -55,6 +58,7 @@ set(MAIN_HOST_SRCS
 set(MACON_HOST_SRCS
   ${MACON_DIR}/src/macon_advanced_params.cpp
   ${MACON_DIR}/src/macon_faults.cpp
+  ${MACON_DIR}/src/macon_fluid.cpp
 )
 
 add_library(arctic_main_host STATIC
@@ -166,3 +170,10 @@ add_test(NAME app_preferences COMMAND test_app_preferences)
 add_executable(test_advanced_params test_advanced_params.cpp)
 target_link_libraries(test_advanced_params PRIVATE arctic_main_host)
 add_test(NAME advanced_params COMMAND test_advanced_params)
+
+# Heat output & COP from external sensors: settings, Modbus TCP framing,
+# value decoding and the external/heat-pump source selector. All pure logic;
+# the sockets live in ext_temp_sensors.cpp, which is exercised on the device.
+add_executable(test_perf test_perf.cpp)
+target_link_libraries(test_perf PRIVATE arctic_main_host)
+add_test(NAME perf COMMAND test_perf)

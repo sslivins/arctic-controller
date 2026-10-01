@@ -8,6 +8,7 @@
 #include "settings_time_screen.h"
 #include "settings_menu.h"
 #include "settings_common.h"
+#include "ui_keyboard.h"
 #include "time_manager.h"
 #include "location_manager.h"
 #include "weather.h"
@@ -717,12 +718,9 @@ static void open_search_dialog(void)
     lv_obj_set_style_pad_row(s_state.search_results_list, 8, LV_PART_MAIN);
 
     // Keyboard at bottom - 25% height
-    s_state.search_keyboard = lv_keyboard_create(s_state.search_dialog);
-    lv_obj_set_size(s_state.search_keyboard, LV_PCT(100), LV_PCT(25));
+    s_state.search_keyboard = ui_keyboard_create(s_state.search_dialog, s_state.search_textarea,
+                                                 UiKeyboardKind::Text, COLOR_CARD);
     lv_obj_align(s_state.search_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_bg_color(s_state.search_keyboard, COLOR_CARD, LV_PART_MAIN);
-    lv_obj_set_style_text_font(s_state.search_keyboard, FONT_NORMAL, LV_PART_ITEMS);
-    lv_keyboard_set_textarea(s_state.search_keyboard, s_state.search_textarea);
 
     // Debounce timer (paused; restarted on each keystroke)
     s_state.search_debounce_timer = lv_timer_create(search_debounce_cb, 450, NULL);
