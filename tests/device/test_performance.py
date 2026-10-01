@@ -640,8 +640,12 @@ def _wait_source(device: DeviceClient, source: str, desc: str) -> dict:
 
 
 def _wait_fallback(device: DeviceClient) -> dict:
+    # Wait on the fallback flag itself: before the sensors' first minute of
+    # good readings the source is already "heat_pump" (pending), so waiting on
+    # the source alone can read a status from before the error was seen.
     device.wait_until("estimate to fall back to the heat pump",
-                      lambda: _get_config(device)["status"]["source"] == "heat_pump",
+                      lambda: (lambda st: st["source"] == "heat_pump" and st["fallback"])(
+                          _get_config(device)["status"]),
                       timeout=30.0, poll=1.0)
     return _get_config(device)["status"]
 
@@ -863,6 +867,9 @@ class TestScreen:
         assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
 
         _pick_perf_source(device, "perf_src_bacnet")
+        # Picking BACnet starts a device search; skip it and type the address.
+        assert device.wait_for_widget(tag="perf_bacnet_manual", timeout=20.0)
+        device.click(tag="perf_bacnet_manual")
         assert device.wait_for_widget(tag="perf_bacnet_browse", timeout=5.0)
         _set_perf_entry(device, "perf_host", host)
         _set_perf_entry(device, "perf_port", str(port))

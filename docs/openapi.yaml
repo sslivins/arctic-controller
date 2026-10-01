@@ -3094,6 +3094,7 @@ paths:
             schema:
               type: object
               required: [host]
+              additionalProperties: false
               properties:
                 host:
                   type: string
