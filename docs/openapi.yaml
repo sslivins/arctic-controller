@@ -3145,6 +3145,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PerformanceInvalid'
+        '413':
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: Another BACnet browse is running
           content:
@@ -3225,6 +3231,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PerformanceInvalid'
+        '413':
+          description: Request body too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
           description: Another BACnet browse or discovery is running
           content:

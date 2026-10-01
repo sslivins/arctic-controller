@@ -1576,7 +1576,7 @@ static void source_pick_cb(lv_event_t* e)
     }
     if (s_state.editor.source_list) lv_obj_add_flag(s_state.editor.source_list, LV_OBJ_FLAG_HIDDEN);
     editor_changed();
-    if (s.source == perf::SensorSource::BacnetIp && s.host[0] == '\0') {
+    if (s.source == perf::SensorSource::BacnetIp && (old != s.source || s.host[0] == '\0')) {
         discover_btn_cb(nullptr);
     }
 }

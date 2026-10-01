@@ -914,6 +914,8 @@ class TestScreen:
         assert saved["device_instance"] == 1234
 
     def test_editor_bacnet_manual_mode(self, device: DeviceClient, bacnet_fake):
+        r = _put_config(device, {"sensors": _heat_pump_sensors()})
+        assert r.status_code == 200, r.text
         _open_perf_screen(device)
         device.click(tag="perf_sensor_supply")
         assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
