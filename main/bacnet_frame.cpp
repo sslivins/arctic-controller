@@ -447,9 +447,21 @@ Parse parse_i_am(const uint8_t* buf, size_t len, IAm* out) {
     }
     uint16_t total = static_cast<uint16_t>((buf[2] << 8) | buf[3]);
     if (total > len) return Parse::Incomplete;
-    if (total < 12 || buf[4] != kNpduVersion || (buf[5] & 0x28) != 0) return Parse::BadFrame;
-    if ((buf[6] & 0xF0) != 0x10 || buf[7] != kServiceIAm) return Parse::WrongService;
-    size_t pos = 8;
+    if (total < 12 || buf[4] != kNpduVersion) return Parse::BadFrame;
+    const uint8_t control = buf[5];
+    if (control & 0x08) return Parse::BadFrame;  // source specifier means routed BACnet
+    size_t pos = 6;
+    if (control & 0x20) {
+        if (pos + 4 > total) return Parse::Incomplete;
+        pos += 2;  // DNET
+        uint8_t dlen = buf[pos++];
+        if (pos + dlen + 1 > total) return Parse::Incomplete;
+        pos += dlen;  // DADR, absent for global broadcast
+        pos += 1;     // hop count
+    }
+    if (pos + 2 > total) return Parse::Incomplete;
+    if ((buf[pos] & 0xF0) != 0x10 || buf[pos + 1] != kServiceIAm) return Parse::WrongService;
+    pos += 2;
     uint32_t obj = 0;
     if (!read_app_uint_tag(buf, total, &pos, 12, &obj)) return Parse::BadFrame;
     if ((obj >> 22) != static_cast<uint32_t>(ObjectType::Device)) return Parse::BadFrame;

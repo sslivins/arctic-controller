@@ -453,6 +453,23 @@ static void test_bacnet_who_is_i_am() {
     CHECK(out.segmentation == 3);
     CHECK(out.vendor_id == 15);
     CHECK(bacnet::parse_i_am(i_am, sizeof(i_am) - 1, &out) == bacnet::Parse::Incomplete);
+
+    const uint8_t thermux_spare_i_am[] = {
+        0x81, 0x0B, 0x00, 0x19, 0x01, 0x20, 0xFF, 0xFF, 0x00, 0xFF, 0x10, 0x00,
+        0xC4, 0x02, 0x00, 0x00, 0xCD, 0x22, 0x05, 0xC4, 0x91, 0x03, 0x22, 0x01,
+        0x04,
+    };
+    CHECK(bacnet::parse_i_am(thermux_spare_i_am, sizeof(thermux_spare_i_am), &out) ==
+          bacnet::Parse::Ok);
+    CHECK(out.device_instance == 205);
+    CHECK(out.max_apdu == 1476);
+    CHECK(out.segmentation == 3);
+    CHECK(out.vendor_id == 260);
+
+    uint8_t who_is_echo[sizeof(who_is)];
+    std::memcpy(who_is_echo, who_is, sizeof(who_is));
+    CHECK(bacnet::parse_i_am(who_is_echo, sizeof(who_is_echo), &out) == bacnet::Parse::Incomplete ||
+          bacnet::parse_i_am(who_is_echo, sizeof(who_is_echo), &out) == bacnet::Parse::WrongService);
 }
 
 static void test_bacnet_parse_read_property_ack() {
@@ -499,6 +516,10 @@ static void test_bacnet_parse_read_property_ack() {
     bacnet::ObjectId expected{bacnet::ObjectType::AnalogInput, 3};
     CHECK(bacnet::parse_read_property_ack(frame, pos, 0x22, bacnet::PROP_PRESENT_VALUE, &v, &err,
                                           &expected) == bacnet::Parse::Ok);
+    frame[5] = 0x20;
+    CHECK(bacnet::parse_read_property_ack(frame, pos, 0x22, bacnet::PROP_PRESENT_VALUE, &v, &err,
+                                          &expected) == bacnet::Parse::BadFrame);
+    frame[5] = 0x00;
     expected.instance = 4;
     CHECK(bacnet::parse_read_property_ack(frame, pos, 0x22, bacnet::PROP_PRESENT_VALUE, &v, &err,
                                           &expected) == bacnet::Parse::BadFrame);
