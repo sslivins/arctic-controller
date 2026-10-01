@@ -23,6 +23,8 @@ enum class Error : uint8_t {
     Timeout,        // connected but no (complete) reply
     Protocol,       // malformed or mismatched reply
     Exception,      // the device answered with a Modbus exception
+    Rejected,       // BACnet Error/Reject/Abort response
+    Units,          // BACnet object uses unsupported engineering units
     NoReading,      // the register holds the "no reading" value
     OutOfRange,     // decoded value outside -40..120 °C
     SensorChanged,  // a different Thermux sensor is now on this channel
@@ -36,12 +38,16 @@ struct SlotStatus {
     float celsius;     // latest good reading (unfiltered)
     uint32_t age_s;    // since that reading
     Error error;       // result of the latest attempt
-    uint8_t exception; // Modbus exception code when error == Exception
+    uint8_t exception; // Modbus exception or BACnet error/reject/abort code
+    uint8_t error_class;
+    char object_name[41];
+    char rom_hex[17];
 };
 
 struct TestResult {
     Error error;
     uint8_t exception;
+    uint8_t error_class;
     float celsius;
     // The register type that answered. When the requested one is rejected as
     // an illegal function/address, the test tries the other one.
@@ -54,6 +60,30 @@ struct TestResult {
     uint16_t thermux_age_s;  // 65535 = never read
     bool rom_valid;
     char rom_hex[17];
+    char object_name[41];
+    uint32_t bacnet_units;
+    uint32_t bacnet_reliability;
+};
+
+struct BrowseSensor {
+    perf::BacnetObjectType object_type;
+    uint32_t object_instance;
+    char object_name[41];
+    float celsius;
+    uint32_t units;
+    uint32_t reliability;
+    bool rom_valid;
+    char rom_hex[17];
+};
+
+struct BrowseResult {
+    Error error;
+    uint8_t exception;
+    uint8_t error_class;
+    char device_name[41];
+    char model_name[41];
+    BrowseSensor sensors[64];
+    size_t count;
 };
 
 // Loads settings and, when `allow_worker` and a sensor needs it, starts the
@@ -86,5 +116,7 @@ uint32_t test_start(const perf::SensorConfig& cfg);
 bool test_result(uint32_t ticket, TestResult* out);
 // Convenience for the HTTP handler: start and wait up to `timeout_ms`.
 bool test_blocking(const perf::SensorConfig& cfg, TestResult* out, uint32_t timeout_ms);
+
+bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms);
 
 }  // namespace ext_temp

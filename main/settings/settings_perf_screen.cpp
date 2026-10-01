@@ -50,7 +50,7 @@ struct Editor {
     int slot;
     perf::SensorConfig ed;
 
-    lv_obj_t* src_btn[2];
+    lv_obj_t* src_btn[3];
     lv_obj_t* modbus_group;
     lv_obj_t* host_val;
     lv_obj_t* port_val;
@@ -263,9 +263,52 @@ static void make_segment(lv_obj_t* parent, const char* a, const char* b, const c
     }
 }
 
+static void make_segment3(lv_obj_t* parent, const char* a, const char* b, const char* c,
+                          const char* tag_a, const char* tag_b, const char* tag_c,
+                          lv_event_cb_t cb, lv_obj_t* btn_out[3])
+{
+    lv_obj_t* seg = lv_obj_create(parent);
+    lv_obj_set_size(seg, LV_PCT(100), 72);
+    lv_obj_set_style_bg_color(seg, COLOR_SEG_BG, LV_PART_MAIN);
+    lv_obj_set_style_border_color(seg, COLOR_SEG_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(seg, 2, LV_PART_MAIN);
+    lv_obj_set_style_radius(seg, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(seg, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(seg, 6, LV_PART_MAIN);
+    lv_obj_set_flex_flow(seg, LV_FLEX_FLOW_ROW);
+    disable_scrolling(seg);
+
+    const char* texts[3] = {a, b, c};
+    const char* tags[3] = {tag_a, tag_b, tag_c};
+    for (int i = 0; i < 3; ++i) {
+        lv_obj_t* btn = make_button(seg, texts[i], tags[i], COLOR_ACCENT, COLOR_TEXT_DIM, cb,
+                                    (void*)(intptr_t)i);
+        lv_obj_set_height(btn, LV_PCT(100));
+        lv_obj_set_flex_grow(btn, 1);
+        lv_obj_set_style_radius(btn, 10, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(btn, COLOR_ACCENT, LV_STATE_CHECKED);
+        btn_out[i] = btn;
+    }
+}
+
 static void set_segment(lv_obj_t* const btns[2], int selected)
 {
     for (int i = 0; i < 2; ++i) {
+        bool on = i == selected;
+        lv_obj_set_style_bg_opa(btns[i], on ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_t* lbl = lv_obj_get_child(btns[i], 0);
+        lv_obj_set_style_text_color(lbl, on ? COLOR_ON_ACCENT : COLOR_TEXT_DIM, LV_PART_MAIN);
+        if (on) {
+            lv_obj_add_state(btns[i], LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(btns[i], LV_STATE_CHECKED);
+        }
+    }
+}
+
+static void set_segment3(lv_obj_t* const btns[3], int selected)
+{
+    for (int i = 0; i < 3; ++i) {
         bool on = i == selected;
         lv_obj_set_style_bg_opa(btns[i], on ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_t* lbl = lv_obj_get_child(btns[i], 0);
@@ -296,6 +339,9 @@ static void format_sensor_sub(const perf::SensorConfig& c, char* buf, size_t siz
 {
     if (c.source == perf::SensorSource::HeatPump) {
         snprintf(buf, size, "%s", i18n_get(STR_PERF_SUB_HEAT_PUMP));
+    } else if (c.source == perf::SensorSource::BacnetIp) {
+        snprintf(buf, size, "BACnet/IP \xC2\xB7 %s \xC2\xB7 AI %lu", c.host,
+                 (unsigned long)c.bacnet_instance);
     } else {
         snprintf(buf, size, "Modbus \xC2\xB7 %s \xC2\xB7 reg %u", c.host, (unsigned)c.address);
     }
@@ -323,7 +369,8 @@ static bool sensor_differs(const perf::SensorConfig& a, const perf::SensorConfig
 {
     return a.source != b.source || strncmp(a.host, b.host, perf::kHostMax) != 0 ||
            a.port != b.port || a.unit_id != b.unit_id || a.address != b.address ||
-           a.reg_type != b.reg_type || a.value_type != b.value_type ||
+           a.reg_type != b.reg_type || a.bacnet_type != b.bacnet_type ||
+           a.bacnet_instance != b.bacnet_instance || a.value_type != b.value_type ||
            a.scale_exp != b.scale_exp || a.no_reading != b.no_reading;
 }
 
@@ -794,8 +841,9 @@ static void editor_refresh(void)
     Editor& ed = s_state.editor;
     const perf::SensorConfig& c = ed.ed;
     bool modbus = c.source == perf::SensorSource::ModbusTcp;
-    set_segment(ed.src_btn, modbus ? 1 : 0);
-    if (modbus) {
+    bool bacnet = c.source == perf::SensorSource::BacnetIp;
+    set_segment3(ed.src_btn, bacnet ? 2 : (modbus ? 1 : 0));
+    if (modbus || bacnet) {
         lv_obj_remove_flag(ed.modbus_group, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(ed.modbus_group, LV_OBJ_FLAG_HIDDEN);
@@ -807,7 +855,11 @@ static void editor_refresh(void)
     lv_label_set_text(ed.port_val, buf);
     snprintf(buf, sizeof(buf), "%u", (unsigned)c.unit_id);
     lv_label_set_text(ed.unit_val, buf);
-    snprintf(buf, sizeof(buf), "%u", (unsigned)c.address);
+    if (bacnet) {
+        snprintf(buf, sizeof(buf), "%lu", (unsigned long)c.bacnet_instance);
+    } else {
+        snprintf(buf, sizeof(buf), "%u", (unsigned)c.address);
+    }
     lv_label_set_text(ed.reg_val, buf);
 
     set_segment(ed.regtype_btn, c.reg_type == perf::RegisterType::Holding ? 1 : 0);
@@ -981,7 +1033,6 @@ static void test_btn_cb(lv_event_t* e)
         return;
     }
     perf::SensorConfig cfg = ed.ed;
-    cfg.source = perf::SensorSource::ModbusTcp;
     ed.ticket = ext_temp::test_start(cfg);
     if (ed.ticket == 0) {
         ext_temp::TestResult r = {};
@@ -997,7 +1048,16 @@ static void test_btn_cb(lv_event_t* e)
 static void source_seg_cb(lv_event_t* e)
 {
     int idx = (int)(intptr_t)lv_event_get_user_data(e);
-    s_state.editor.ed.source = idx == 1 ? perf::SensorSource::ModbusTcp : perf::SensorSource::HeatPump;
+    perf::SensorConfig& s = s_state.editor.ed;
+    perf::SensorSource old = s.source;
+    s.source = idx == 2 ? perf::SensorSource::BacnetIp
+                        : (idx == 1 ? perf::SensorSource::ModbusTcp : perf::SensorSource::HeatPump);
+    if (old != s.source && s.source == perf::SensorSource::BacnetIp && s.port == perf::kDefaultPort) {
+        s.port = perf::kDefaultBacnetPort;
+    } else if (old != s.source && s.source == perf::SensorSource::ModbusTcp &&
+               s.port == perf::kDefaultBacnetPort) {
+        s.port = perf::kDefaultPort;
+    }
     editor_changed();
 }
 
@@ -1182,8 +1242,9 @@ static void open_editor(int slot)
     // Source
     lv_obj_t* src_col = make_column(body, 10);
     make_label(src_col, i18n_get(STR_PERF_SOURCE), UI_FONT_SMALL, COLOR_TEXT_DIM);
-    make_segment(src_col, i18n_get(STR_PERF_OPT_HEAT_PUMP), i18n_get(STR_PERF_OPT_MODBUS),
-                 "perf_src_heat_pump", "perf_src_modbus", source_seg_cb, ed.src_btn);
+    make_segment3(src_col, i18n_get(STR_PERF_OPT_HEAT_PUMP), i18n_get(STR_PERF_OPT_MODBUS),
+                  i18n_get(STR_PERF_OPT_BACNET), "perf_src_heat_pump", "perf_src_modbus",
+                  "perf_src_bacnet", source_seg_cb, ed.src_btn);
 
     // Modbus TCP details
     ed.modbus_group = make_column(body, 20);
@@ -1359,6 +1420,9 @@ static void entry_save_cb(lv_event_t* e)
         uint32_t hi = 65535;
         if (te.field == Field::Port) lo = 1;
         if (te.field == Field::UnitId) hi = 255;
+        if (te.field == Field::Register && ed.ed.source == perf::SensorSource::BacnetIp) {
+            hi = perf::kBacnetInstanceMax;
+        }
         uint32_t v = 0;
         if (!parse_uint(text, lo, hi, &v)) {
             snprintf(buf, sizeof(buf), i18n_get(STR_PERF_INVALID_NUMBER), (unsigned)lo, (unsigned)hi);
@@ -1367,7 +1431,13 @@ static void entry_save_cb(lv_event_t* e)
         }
         if (te.field == Field::Port) ed.ed.port = (uint16_t)v;
         if (te.field == Field::UnitId) ed.ed.unit_id = (uint8_t)v;
-        if (te.field == Field::Register) ed.ed.address = (uint16_t)v;
+        if (te.field == Field::Register) {
+            if (ed.ed.source == perf::SensorSource::BacnetIp) {
+                ed.ed.bacnet_instance = v;
+            } else {
+                ed.ed.address = (uint16_t)v;
+            }
+        }
     }
     close_text_entry();
     editor_changed();
@@ -1395,7 +1465,11 @@ static void open_text_entry(Field f)
         case Field::Register:
         default:
             title_id = STR_PERF_REGISTER;
-            snprintf(value, sizeof(value), "%u", (unsigned)ed.ed.address);
+            if (ed.ed.source == perf::SensorSource::BacnetIp) {
+                snprintf(value, sizeof(value), "%lu", (unsigned long)ed.ed.bacnet_instance);
+            } else {
+                snprintf(value, sizeof(value), "%u", (unsigned)ed.ed.address);
+            }
             break;
     }
 

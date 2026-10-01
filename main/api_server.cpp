@@ -179,6 +179,7 @@ static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req);
 static esp_err_t perf_config_get_handler(httpd_req_t* req);
 static esp_err_t perf_config_put_handler(httpd_req_t* req);
 static esp_err_t perf_test_post_handler(httpd_req_t* req);
+static esp_err_t perf_bacnet_browse_post_handler(httpd_req_t* req);
 static esp_err_t heatpump_power_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
@@ -1081,6 +1082,14 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(perf_test_uri);
+
+    httpd_uri_t perf_bacnet_browse_uri = {
+        .uri = "/api/performance/bacnet/browse",
+        .method = HTTP_POST,
+        .handler = perf_bacnet_browse_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(perf_bacnet_browse_uri);
     
     // PUT /api/heatpump/power - Set power on/off
     httpd_uri_t heatpump_power_uri = {
@@ -4693,6 +4702,8 @@ static cJSON* perf_sensor_json(const perf::SensorConfig& s)
     cJSON_AddNumberToObject(o, "unit_id", s.unit_id);
     cJSON_AddNumberToObject(o, "register", s.address);
     cJSON_AddStringToObject(o, "register_type", perf::register_type_name(s.reg_type));
+    cJSON_AddStringToObject(o, "object_type", perf::bacnet_object_type_name(s.bacnet_type));
+    cJSON_AddNumberToObject(o, "object_instance", (double)s.bacnet_instance);
     cJSON_AddStringToObject(o, "value_type", perf::value_type_name(s.value_type));
     cJSON_AddNumberToObject(o, "scale", perf_scale_value(s.scale_exp));
     cJSON_AddStringToObject(o, "no_reading", perf::no_reading_name(s.no_reading));
@@ -4714,7 +4725,15 @@ static const char* perf_sensor_merge(const cJSON* o, perf::SensorConfig* s)
     if (!cJSON_IsObject(o)) return "sensor";
     const cJSON* v;
     if ((v = cJSON_GetObjectItem(o, "source"))) {
+        perf::SensorSource old = s->source;
         if (!cJSON_IsString(v) || !perf::parse_source(v->valuestring, &s->source)) return "source";
+        if (old != s->source && s->source == perf::SensorSource::BacnetIp &&
+            s->port == perf::kDefaultPort) {
+            s->port = perf::kDefaultBacnetPort;
+        } else if (old != s->source && s->source == perf::SensorSource::ModbusTcp &&
+                   s->port == perf::kDefaultBacnetPort) {
+            s->port = perf::kDefaultPort;
+        }
     }
     if ((v = cJSON_GetObjectItem(o, "host"))) {
         if (!cJSON_IsString(v) || strlen(v->valuestring) >= perf::kHostMax) return "host";
@@ -4738,6 +4757,18 @@ static const char* perf_sensor_merge(const cJSON* o, perf::SensorConfig* s)
     if ((v = cJSON_GetObjectItem(o, "register_type"))) {
         if (!cJSON_IsString(v) || !perf::parse_register_type(v->valuestring, &s->reg_type))
             return "register_type";
+    }
+    if ((v = cJSON_GetObjectItem(o, "object_type"))) {
+        if (!cJSON_IsString(v) || !perf::parse_bacnet_object_type(v->valuestring, &s->bacnet_type))
+            return "object_type";
+    }
+    if ((v = cJSON_GetObjectItem(o, "object_instance"))) {
+        if (!cJSON_IsNumber(v) || v->valuedouble < 0 ||
+            v->valuedouble > (double)perf::kBacnetInstanceMax ||
+            v->valuedouble != (double)(long)v->valuedouble) {
+            return "object_instance";
+        }
+        s->bacnet_instance = (uint32_t)v->valuedouble;
     }
     if ((v = cJSON_GetObjectItem(o, "value_type"))) {
         if (!cJSON_IsString(v) || !perf::parse_value_type(v->valuestring, &s->value_type))
@@ -4858,8 +4889,16 @@ static cJSON* perf_config_json(void)
             cJSON_AddNullToObject(o, "age_s");
         }
         cJSON_AddStringToObject(o, "error", ext_temp::error_name(slots[i].error));
-        if (slots[i].error == ext_temp::Error::Exception) {
+        if (slots[i].object_name[0]) {
+            cJSON_AddStringToObject(o, "object_name", slots[i].object_name);
+        }
+        if (slots[i].rom_hex[0]) {
+            cJSON_AddStringToObject(o, "rom_id", slots[i].rom_hex);
+        }
+        if (slots[i].error == ext_temp::Error::Exception ||
+            slots[i].error == ext_temp::Error::Rejected) {
             cJSON_AddNumberToObject(o, "exception", slots[i].exception);
+            if (slots[i].error_class) cJSON_AddNumberToObject(o, "error_class", slots[i].error_class);
         }
     }
     return root;
@@ -5006,8 +5045,7 @@ static esp_err_t perf_test_post_handler(httpd_req_t* req)
         send_perf_invalid(req, bad);
         return ESP_OK;
     }
-    // Testing is about the Modbus settings; the source switch doesn't matter.
-    cfg.source = perf::SensorSource::ModbusTcp;
+    if (cfg.source == perf::SensorSource::HeatPump) cfg.source = perf::SensorSource::ModbusTcp;
     perf::Invalid inv = perf::validate_sensor(cfg);
     if (inv != perf::Invalid::None) {
         send_perf_invalid(req, perf::invalid_name(inv));
@@ -5031,8 +5069,9 @@ static esp_err_t perf_test_post_handler(httpd_req_t* req)
     cJSON_AddBoolToObject(resp, "ok", ok);
     cJSON_AddStringToObject(resp, "error", ext_temp::error_name(r.error));
     cJSON_AddStringToObject(resp, "register_type", perf::register_type_name(r.reg_type));
-    if (r.error == ext_temp::Error::Exception) {
+    if (r.error == ext_temp::Error::Exception || r.error == ext_temp::Error::Rejected) {
         cJSON_AddNumberToObject(resp, "exception", r.exception);
+        if (r.error_class) cJSON_AddNumberToObject(resp, "error_class", r.error_class);
     }
     if (ok) {
         cJSON_AddNumberToObject(resp, "celsius", perf_round2(r.celsius));
@@ -5055,6 +5094,85 @@ static esp_err_t perf_test_post_handler(httpd_req_t* req)
         }
     } else {
         cJSON_AddNullToObject(resp, "thermux");
+    }
+    if (r.object_name[0]) cJSON_AddStringToObject(resp, "object_name", r.object_name);
+    if (r.bacnet_units) cJSON_AddNumberToObject(resp, "units", r.bacnet_units);
+    cJSON_AddNumberToObject(resp, "reliability", r.bacnet_reliability);
+    if (r.rom_valid && !r.thermux) cJSON_AddStringToObject(resp, "rom_id", r.rom_hex);
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// POST /api/performance/bacnet/browse - discover readable BACnet temperature
+// objects by name. Body: {"host":"thermux.local","port":47808?}
+static esp_err_t perf_bacnet_browse_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    cJSON* root = perf_read_json_body(req, 512);
+    if (!root) return ESP_OK;
+    const cJSON* host = cJSON_GetObjectItem(root, "host");
+    const cJSON* port = cJSON_GetObjectItem(root, "port");
+    char host_buf[perf::kHostMax] = {};
+    uint16_t port_u = perf::kDefaultBacnetPort;
+    const char* bad = nullptr;
+    if (!cJSON_IsObject(root)) {
+        bad = "body";
+    } else if (!cJSON_IsString(host) || strlen(host->valuestring) >= sizeof(host_buf) ||
+               !perf::host_valid(host->valuestring)) {
+        bad = "host";
+    } else {
+        strlcpy(host_buf, host->valuestring, sizeof(host_buf));
+    }
+    if (!bad && port) {
+        if (!cJSON_IsNumber(port) || port->valuedouble < 1 || port->valuedouble > 65535 ||
+            port->valuedouble != (double)(long)port->valuedouble) {
+            bad = "port";
+        } else {
+            port_u = (uint16_t)port->valuedouble;
+        }
+    }
+    cJSON_Delete(root);
+    if (bad) {
+        send_perf_invalid(req, bad);
+        return ESP_OK;
+    }
+
+    ext_temp::BrowseResult r;
+    if (!ext_temp::browse_blocking(host_buf, port_u, &r, 12000)) {
+        send_json_error(req, "504 Gateway Timeout", "BACnet browse did not finish");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "ok", r.error == ext_temp::Error::None);
+    cJSON_AddStringToObject(resp, "error", ext_temp::error_name(r.error));
+    if (r.error == ext_temp::Error::Rejected) {
+        cJSON_AddNumberToObject(resp, "exception", r.exception);
+        if (r.error_class) cJSON_AddNumberToObject(resp, "error_class", r.error_class);
+    }
+    cJSON_AddStringToObject(resp, "device_name", r.device_name);
+    cJSON_AddStringToObject(resp, "model_name", r.model_name);
+    cJSON* arr = cJSON_AddArrayToObject(resp, "sensors");
+    for (size_t i = 0; i < r.count; i++) {
+        cJSON* s = cJSON_CreateObject();
+        cJSON_AddStringToObject(s, "object_type", perf::bacnet_object_type_name(r.sensors[i].object_type));
+        cJSON_AddNumberToObject(s, "object_instance", (double)r.sensors[i].object_instance);
+        cJSON_AddStringToObject(s, "object_name", r.sensors[i].object_name);
+        cJSON_AddNumberToObject(s, "celsius", perf_round2(r.sensors[i].celsius));
+        cJSON_AddNumberToObject(s, "units", r.sensors[i].units);
+        cJSON_AddNumberToObject(s, "reliability", r.sensors[i].reliability);
+        if (r.sensors[i].rom_valid) {
+            cJSON_AddStringToObject(s, "rom_id", r.sensors[i].rom_hex);
+        } else {
+            cJSON_AddNullToObject(s, "rom_id");
+        }
+        cJSON_AddItemToArray(arr, s);
     }
     char* json_str = cJSON_PrintUnformatted(resp);
     httpd_resp_sendstr(req, json_str);

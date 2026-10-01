@@ -30,6 +30,7 @@ import pytest
 from device_client import DeviceClient
 
 FAKE_SERVER = Path(__file__).with_name("fake_modbus_server.py")
+FAKE_BACNET_SERVER = Path(__file__).with_name("fake_bacnet_server.py")
 
 # What the fake Thermux serves (see fake_modbus_server.py).
 SUPPLY_REG, SUPPLY_C, SUPPLY_ROM = 104, 22.69, "28FF9A2B0F1C0412"
@@ -43,7 +44,7 @@ POLL_TIMEOUT = 30.0
 
 PERSISTED_SENSOR_FIELDS = (
     "source", "host", "port", "unit_id", "register", "register_type",
-    "value_type", "scale", "no_reading",
+    "object_type", "object_instance", "value_type", "scale", "no_reading",
 )
 
 
@@ -93,6 +94,16 @@ def _modbus(fake, register: int, **overrides) -> dict:
         "source": "modbus_tcp", "host": host, "port": port, "unit_id": 1,
         "register": register, "register_type": "input", "value_type": "int16",
         "scale": 0.01, "no_reading": "0x8000",
+    }
+    sensor.update(overrides)
+    return sensor
+
+
+def _bacnet(fake, instance: int = 3, **overrides) -> dict:
+    host, port = fake
+    sensor = {
+        "source": "bacnet_ip", "host": host, "port": port,
+        "object_type": "analog_input", "object_instance": instance,
     }
     sensor.update(overrides)
     return sensor
@@ -149,6 +160,39 @@ class FakeThermux:
         self.proc = None
 
 
+class FakeBacnet:
+    """fake_bacnet_server.py in a subprocess that tests can stop and restart."""
+
+    def __init__(self, advertise_host: str):
+        self.host = advertise_host
+        self.port = _free_port()
+        self.proc = None
+
+    @property
+    def addr(self):
+        return self.host, self.port
+
+    def start(self):
+        self.proc = subprocess.Popen(
+            [sys.executable, "-u", str(FAKE_BACNET_SERVER), "--port", str(self.port)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        line = self.proc.stdout.readline()
+        if "fake BACnet server" not in line:
+            self.stop()
+            pytest.fail(f"fake BACnet server did not start on port {self.port}: {line!r}")
+
+    def stop(self):
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait(timeout=5)
+        self.proc = None
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -180,6 +224,24 @@ def fake(thermux):
     if thermux.proc is None:
         thermux.start()
     return thermux.addr
+
+
+@pytest.fixture(scope="module")
+def bacnet_server(device: DeviceClient, saved_perf):
+    host = os.environ.get("ARCTIC_FAKE_BACNET_HOST") or os.environ.get("ARCTIC_FAKE_MODBUS_HOST") \
+        or _local_ip_towards(urlparse(device.base_url).hostname)
+    server = FakeBacnet(host)
+    server.start()
+    yield server
+    _put_config(device, {"sensors": _heat_pump_sensors()})
+    server.stop()
+
+
+@pytest.fixture
+def bacnet_fake(bacnet_server):
+    if bacnet_server.proc is None:
+        bacnet_server.start()
+    return bacnet_server.addr
 
 
 def _open_perf_screen(device: DeviceClient):
@@ -234,6 +296,8 @@ class TestConfigApi:
         ({"sensors": {"supply": {"unit_id": 256}}}, "unit_id"),
         ({"sensors": {"supply": {"register_type": "coil"}}}, "register_type"),
         ({"sensors": {"supply": {"value_type": "int32"}}}, "value_type"),
+        ({"sensors": {"supply": {"object_type": "binary_input"}}}, "object_type"),
+        ({"sensors": {"supply": {"object_instance": 4194303}}}, "object_instance"),
         ({"sensors": {"supply": {"scale": 0.5}}}, "scale"),
         ({"sensors": {"supply": {"no_reading": "0x1234"}}}, "no_reading"),
         ({"sensors": {"supply": {"source": "modbus_tcp", "host": ""}}}, "host"),
@@ -295,6 +359,52 @@ class TestSensorTest:
         assert body["ok"] is True, body
         assert body["celsius"] == pytest.approx(FLOAT_C, abs=0.01)
         assert body["thermux"] is None
+
+    def test_bacnet_round_trip_and_test(self, device: DeviceClient, bacnet_fake):
+        sensor = _bacnet(bacnet_fake, 3)
+        r = _put_config(device, {"sensors": {"supply": sensor}})
+        assert r.status_code == 200, r.text
+        saved = _get_config(device)["sensors"]["supply"]
+        assert saved["source"] == "bacnet_ip"
+        assert saved["object_type"] == "analog_input"
+        assert saved["object_instance"] == 3
+
+        r = _test_read(device, sensor)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True, body
+        assert body["error"] == "none"
+        assert body["celsius"] == pytest.approx(21.4, abs=0.05)
+        assert body["object_name"] == "Supply tank"
+        assert body["units"] == 62
+        assert body["reliability"] == 0
+        assert body["rom_id"] == "28FF6491631603A2"
+
+    def test_bacnet_browse(self, device: DeviceClient, bacnet_fake):
+        host, port = bacnet_fake
+        r = device.session.post(_url(device, "/api/performance/bacnet/browse"),
+                                json={"host": host, "port": port}, timeout=15)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True, body
+        assert body["device_name"] == "Thermux Test"
+        names = {s["object_name"]: s for s in body["sensors"]}
+        assert set(names) >= {"Supply tank", "Return tank", "Faulted sensor"}
+        assert names["Supply tank"]["object_instance"] == 3
+        assert names["Return tank"]["celsius"] == pytest.approx(20.0, abs=0.05)
+
+    def test_bacnet_units_fault_and_bad_object(self, device: DeviceClient, bacnet_fake):
+        good_f = _test_read(device, _bacnet(bacnet_fake, 4)).json()
+        assert good_f["ok"] is True, good_f
+        assert good_f["celsius"] == pytest.approx(20.0, abs=0.05)
+
+        fault = _test_read(device, _bacnet(bacnet_fake, 5)).json()
+        assert fault["ok"] is False, fault
+        assert fault["error"] == "no_reading"
+
+        bad = _test_read(device, _bacnet(bacnet_fake, 99)).json()
+        assert bad["ok"] is False, bad
+        assert bad["error"] in ("rejected", "protocol", "no_reading", "timeout")
 
     def test_input_falls_back_to_holding(self, device: DeviceClient, fake):
         body = _test_read(device, _modbus(fake, FLOAT_REG, value_type="float32", scale=1,

@@ -2969,7 +2969,7 @@ paths:
       - HeatPump
       summary: Test a temperature sensor
       description: |
-        Reads a Modbus TCP sensor once without saving anything, so a sensor
+        Reads a Modbus TCP or BACnet/IP sensor once without saving anything, so a sensor
         can be checked before it is saved. Fields not given come from the saved
         sensor for `slot`, or from the defaults. Takes up to a few seconds.
         When the device is a Thermux and the register is one of its
@@ -3015,10 +3015,26 @@ paths:
                       tries the other one.
                   exception:
                     type: integer
-                    description: Modbus exception code, when `error` is `exception`
+                    description: Modbus exception code, or BACnet error/reject/abort code
+                  error_class:
+                    type: integer
+                    description: BACnet error class, when returned with `rejected`
                   celsius:
                     type: number
                     nullable: true
+                  object_name:
+                    type: string
+                    description: BACnet object name, when available
+                  units:
+                    type: integer
+                    description: BACnet engineering-units enum, when available
+                  reliability:
+                    type: integer
+                    description: BACnet reliability enum, when available
+                  rom_id:
+                    type: string
+                    nullable: true
+                    description: BACnet Description when it is a 16-digit ROM ID
                   thermux:
                     type: object
                     nullable: true
@@ -3053,6 +3069,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/performance/bacnet/browse:
+    post:
+      tags:
+      - HeatPump
+      summary: Browse BACnet/IP temperature sensors
+      description: |
+        Reads a BACnet/IP device's Object_List and returns up to 64 Analog
+        Input/Analog Value objects with names, values, units, reliability, and
+        ROM IDs when the Description is a 16-digit Thermux sensor ID.
+      operationId: browseBacnetPerformanceSensors
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host]
+              properties:
+                host:
+                  type: string
+                  maxLength: 63
+                port:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                  default: 47808
+      responses:
+        '200':
+          description: Browse finished; check `ok`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  error:
+                    $ref: '#/components/schemas/PerformanceSensorError'
+                  device_name:
+                    type: string
+                  model_name:
+                    type: string
+                  sensors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BacnetPerformanceSensor'
+        '400':
+          description: Invalid host or port
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PerformanceInvalid'
         '504':
           description: The test did not finish in time
           content:
@@ -4016,7 +4087,7 @@ components:
   schemas:
     PerformanceSensorError:
       type: string
-      enum: [none, not_read, resolve, connect, timeout, protocol, exception, no_reading, out_of_range, sensor_changed, busy]
+      enum: [none, not_read, resolve, connect, timeout, protocol, exception, rejected, units, no_reading, out_of_range, sensor_changed, busy]
       description: |
         Result of the latest read. `resolve`: the host name didn't resolve.
         `connect`: nothing answered on that address and port. `exception`: the
@@ -4029,7 +4100,7 @@ components:
       properties:
         source:
           type: string
-          enum: [heat_pump, modbus_tcp]
+          enum: [heat_pump, modbus_tcp, bacnet_ip]
         host:
           type: string
           maxLength: 63
@@ -4053,6 +4124,16 @@ components:
           type: string
           enum: [input, holding]
           default: input
+        object_type:
+          type: string
+          enum: [analog_input, analog_value]
+          default: analog_input
+          description: BACnet object type when `source` is `bacnet_ip`
+        object_instance:
+          type: integer
+          minimum: 0
+          maximum: 4194302
+          description: BACnet object instance when `source` is `bacnet_ip`
         value_type:
           type: string
           enum: [int16, uint16, float32, float32_swapped]
@@ -4077,6 +4158,25 @@ components:
             type: string
             nullable: true
             description: Thermux sensor ID remembered for this channel
+    BacnetPerformanceSensor:
+      type: object
+      properties:
+        object_type:
+          type: string
+          enum: [analog_input, analog_value]
+        object_instance:
+          type: integer
+        object_name:
+          type: string
+        celsius:
+          type: number
+        units:
+          type: integer
+        reliability:
+          type: integer
+        rom_id:
+          type: string
+          nullable: true
     PerformanceConfig:
       type: object
       properties:
@@ -4144,6 +4244,12 @@ components:
                     $ref: '#/components/schemas/PerformanceSensorError'
                   exception:
                     type: integer
+                  error_class:
+                    type: integer
+                  object_name:
+                    type: string
+                  rom_id:
+                    type: string
     PerformanceInvalid:
       type: object
       properties:

@@ -14,6 +14,7 @@
 #include <lwip/netdb.h>
 #include <lwip/sockets.h>
 
+#include "bacnet_frame.h"
 #include "mbtcp_frame.h"
 #include "wifi_manager.h"
 
@@ -25,7 +26,14 @@ const char* TAG = "ext_temp";
 
 constexpr uint32_t kPollMs = 10000;
 constexpr uint32_t kIoTimeoutMs = 1500;
-constexpr uint32_t kWorkerStack = 4608;
+// BACnet ReadPropertyMultiple parsing keeps a 1500-byte datagram plus a small
+// property list on the worker stack. The task uses PSRAM, so this modest bump
+// avoids tight-stack failures without increasing internal-RAM pressure.
+constexpr uint32_t kWorkerStack = 6144;
+constexpr uint8_t kBacnetUnitsC = 62;
+constexpr uint8_t kBacnetUnitsF = 64;
+constexpr uint8_t kBacnetUnitsK = 63;
+constexpr uint8_t kBacnetReliabilityNoFault = 0;
 
 enum class ThermuxState : uint8_t { Unknown, Yes, No };
 
@@ -46,6 +54,7 @@ perf::Settings s_settings;
 perf::SourceSelector s_selector;
 Slot s_slots[perf::kSlotCount];
 uint16_t s_transaction = 0;
+uint8_t s_bacnet_invoke = 0;
 
 // Test request/response, guarded by s_mutex.
 bool s_test_pending = false;
@@ -229,10 +238,285 @@ bool transport_error(Error e) {
            e == Error::Protocol;
 }
 
+bool is_hex16(const char* s) {
+    if (!s) return false;
+    for (int i = 0; i < 16; ++i) {
+        char c = s[i];
+        bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!ok) return false;
+    }
+    return s[16] == '\0';
+}
+
+uint8_t hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+    if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
+    return static_cast<uint8_t>(c - 'A' + 10);
+}
+
+void rom_from_hex(const char* hex, uint8_t rom[perf::kRomLen]) {
+    for (size_t i = 0; i < perf::kRomLen; ++i) {
+        rom[i] = static_cast<uint8_t>((hex_nibble(hex[2 * i]) << 4) | hex_nibble(hex[2 * i + 1]));
+    }
+}
+
+perf::BacnetObjectType perf_bacnet_type(bacnet::ObjectType t) {
+    return t == bacnet::ObjectType::AnalogValue ? perf::BacnetObjectType::AnalogValue
+                                                : perf::BacnetObjectType::AnalogInput;
+}
+
+bacnet::ObjectType bacnet_object_type(const perf::SensorConfig& cfg) {
+    return cfg.bacnet_type == perf::BacnetObjectType::AnalogValue ? bacnet::ObjectType::AnalogValue
+                                                                  : bacnet::ObjectType::AnalogInput;
+}
+
+float bacnet_to_celsius(float v, uint32_t units) {
+    if (units == kBacnetUnitsF) return (v - 32.0f) * 5.0f / 9.0f;
+    if (units == kBacnetUnitsK) return v - 273.15f;
+    return v;
+}
+
+bool bacnet_status_fault(uint8_t bits) {
+    // BACnet status-flags bit order is MSB first in the first octet:
+    // in-alarm, fault, overridden, out-of-service.
+    return (bits & 0x40) != 0 || (bits & 0x10) != 0;
+}
+
+class BacnetClient {
+public:
+    ~BacnetClient() { close(); }
+
+    Error open(const char* host, uint16_t port) {
+        close();
+        struct addrinfo hints = {};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        char port_s[6];
+        snprintf(port_s, sizeof(port_s), "%u", port);
+        struct addrinfo* res = nullptr;
+        if (getaddrinfo(host, port_s, &hints, &res) != 0 || res == nullptr) {
+            if (res) freeaddrinfo(res);
+            return Error::Resolve;
+        }
+        fd_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (fd_ < 0) {
+            freeaddrinfo(res);
+            return Error::Connect;
+        }
+        memcpy(&addr_, res->ai_addr, res->ai_addrlen);
+        addr_len_ = res->ai_addrlen;
+        freeaddrinfo(res);
+        struct timeval tv = {kIoTimeoutMs / 1000, (kIoTimeoutMs % 1000) * 1000};
+        setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        return Error::None;
+    }
+
+    Error request(const uint8_t* req, size_t req_len, uint8_t* resp, size_t resp_cap, size_t* resp_len) {
+        if (fd_ < 0) return Error::Connect;
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            if (sendto(fd_, req, req_len, 0, reinterpret_cast<struct sockaddr*>(&addr_), addr_len_) !=
+                static_cast<int>(req_len)) {
+                return Error::Timeout;
+            }
+            for (;;) {
+                struct sockaddr_storage from = {};
+                socklen_t from_len = sizeof(from);
+                int n = recvfrom(fd_, resp, resp_cap, 0, reinterpret_cast<struct sockaddr*>(&from), &from_len);
+                if (n <= 0) break;
+                if (from_len == addr_len_ && memcmp(&from, &addr_, addr_len_) == 0) {
+                    *resp_len = static_cast<size_t>(n);
+                    return Error::None;
+                }
+            }
+        }
+        return Error::Timeout;
+    }
+
+    void close() {
+        if (fd_ >= 0) {
+            ::close(fd_);
+            fd_ = -1;
+        }
+    }
+
+private:
+    int fd_ = -1;
+    struct sockaddr_storage addr_ = {};
+    socklen_t addr_len_ = 0;
+};
+
+struct BacnetRead {
+    Error error = Error::None;
+    uint8_t exception = 0;
+    uint8_t error_class = 0;
+    float celsius = 0.0f;
+    char object_name[41] = {};
+    char rom_hex[17] = {};
+    uint32_t units = 0;
+    uint32_t reliability = 0;
+};
+
+void map_bacnet_parse(bacnet::Parse p, const bacnet::ErrorInfo& info, BacnetRead* out) {
+    if (p == bacnet::Parse::Error) {
+        out->error = Error::Rejected;
+        out->error_class = info.error_class;
+        out->exception = info.error_code;
+    } else if (p == bacnet::Parse::Reject || p == bacnet::Parse::Abort) {
+        out->error = Error::Rejected;
+        out->exception = info.reason;
+    } else if (p == bacnet::Parse::NotFound) {
+        out->error = Error::NoReading;
+    } else {
+        out->error = Error::Protocol;
+    }
+}
+
+BacnetRead bacnet_read_value(BacnetClient& c, const perf::SensorConfig& cfg) {
+    BacnetRead out;
+    const uint32_t props[] = {bacnet::PROP_OBJECT_NAME, bacnet::PROP_PRESENT_VALUE,
+                              bacnet::PROP_UNITS, bacnet::PROP_STATUS_FLAGS,
+                              bacnet::PROP_RELIABILITY, bacnet::PROP_DESCRIPTION};
+    uint8_t invoke = ++s_bacnet_invoke;
+    if (invoke == 0) invoke = ++s_bacnet_invoke;
+    uint8_t req[256];
+    size_t req_len = 0;
+    if (!bacnet::build_read_property_multiple(invoke, bacnet_object_type(cfg), cfg.bacnet_instance,
+                                              props, sizeof(props) / sizeof(props[0]), req,
+                                              sizeof(req), &req_len)) {
+        out.error = Error::Protocol;
+        return out;
+    }
+    uint8_t resp[bacnet::kMaxFrame];
+    size_t resp_len = 0;
+    out.error = c.request(req, req_len, resp, sizeof(resp), &resp_len);
+    if (out.error != Error::None) return out;
+
+    bacnet::PropertyValue values[8];
+    size_t count = 0;
+    bacnet::ErrorInfo info;
+    bacnet::Parse p = bacnet::parse_read_property_multiple_ack(resp, resp_len, invoke, values,
+                                                               sizeof(values) / sizeof(values[0]),
+                                                               &count, &info);
+    if (p != bacnet::Parse::Ok) {
+        map_bacnet_parse(p, info, &out);
+        return out;
+    }
+    bool have_value = false, have_units = false;
+    uint8_t status_bits = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (values[i].error) {
+            if (values[i].property == bacnet::PROP_PRESENT_VALUE) out.error = Error::NoReading;
+            continue;
+        }
+        const bacnet::Value& v = values[i].value;
+        switch (values[i].property) {
+            case bacnet::PROP_OBJECT_NAME:
+                if (v.type == bacnet::ValueType::String) strlcpy(out.object_name, v.str, sizeof(out.object_name));
+                break;
+            case bacnet::PROP_PRESENT_VALUE:
+                if (v.type == bacnet::ValueType::Real) {
+                    out.celsius = v.real;
+                    have_value = true;
+                }
+                break;
+            case bacnet::PROP_UNITS:
+                if (v.type == bacnet::ValueType::Enumerated) {
+                    out.units = v.u;
+                    have_units = true;
+                }
+                break;
+            case bacnet::PROP_STATUS_FLAGS:
+                if (v.type == bacnet::ValueType::BitString) status_bits = v.bits;
+                break;
+            case bacnet::PROP_RELIABILITY:
+                if (v.type == bacnet::ValueType::Enumerated) out.reliability = v.u;
+                break;
+            case bacnet::PROP_DESCRIPTION:
+                if (v.type == bacnet::ValueType::String && is_hex16(v.str)) {
+                    strlcpy(out.rom_hex, v.str, sizeof(out.rom_hex));
+                }
+                break;
+        }
+    }
+    if (out.error != Error::None) return out;
+    if (!have_value) {
+        out.error = Error::NoReading;
+    } else if (!have_units || (out.units != kBacnetUnitsC && out.units != kBacnetUnitsF &&
+                              out.units != kBacnetUnitsK)) {
+        out.error = Error::Units;
+    } else if (out.reliability != kBacnetReliabilityNoFault || bacnet_status_fault(status_bits)) {
+        out.error = Error::NoReading;
+    } else {
+        out.celsius = bacnet_to_celsius(out.celsius, out.units);
+        if (!(out.celsius >= perf::kMinPlausibleC && out.celsius <= perf::kMaxPlausibleC)) {
+            out.error = Error::OutOfRange;
+        }
+    }
+    return out;
+}
+
 // Worker-owned connections kept open between polls: reconnecting every poll
 // leaves a TIME_WAIT socket behind each time, which holds a steady few KB of
 // scarce internal RAM, and needlessly churns the sensor's connection slots.
 Connection s_conns[perf::kSlotCount];
+
+void poll_bacnet_slot(int i, const perf::SensorConfig& cfg, bool net_up) {
+    BacnetRead r;
+    if (!net_up) {
+        r.error = Error::Connect;
+    } else {
+        BacnetClient c;
+        r.error = c.open(cfg.host, cfg.port);
+        if (r.error == Error::None) r = bacnet_read_value(c, cfg);
+    }
+
+    bool learned = false;
+    uint8_t rom[perf::kRomLen] = {};
+    if (r.error == Error::None && is_hex16(r.rom_hex)) {
+        rom_from_hex(r.rom_hex, rom);
+        lock();
+        const perf::SensorConfig& cur = s_settings.sensors[i];
+        if (perf::same_source(cur, cfg)) {
+            if (!cur.rom_known) {
+                learned = true;
+            } else if (memcmp(cur.rom, rom, perf::kRomLen) != 0) {
+                r.error = Error::SensorChanged;
+            }
+        }
+        unlock();
+    }
+
+    uint32_t now = now_ms();
+    lock();
+    if (perf::same_source(s_settings.sensors[i], cfg)) {
+        Slot& slot = s_slots[i];
+        slot.status.error = r.error;
+        slot.status.exception = r.exception;
+        slot.status.error_class = r.error_class;
+        strlcpy(slot.status.object_name, r.object_name, sizeof(slot.status.object_name));
+        strlcpy(slot.status.rom_hex, r.rom_hex, sizeof(slot.status.rom_hex));
+        slot.thermux = ThermuxState::No;
+        if (r.error == Error::None) {
+            slot.status.has_reading = true;
+            slot.status.celsius = r.celsius;
+            slot.last_ok_ms = now;
+            s_selector.on_reading(static_cast<perf::Slot>(i), now, r.celsius);
+        } else {
+            s_selector.on_error(static_cast<perf::Slot>(i), now);
+        }
+        if (learned) {
+            s_settings.sensors[i].rom_known = true;
+            memcpy(s_settings.sensors[i].rom, rom, perf::kRomLen);
+            s_save_pending = true;
+        }
+    }
+    unlock();
+    if (r.error != Error::None) {
+        ESP_LOGD(TAG, "BACnet sensor %d (%s:%u object %lu): %s", i, cfg.host, cfg.port,
+                 (unsigned long)cfg.bacnet_instance, error_name(r.error));
+    }
+}
 
 void poll_slot(int i, const perf::SensorConfig& cfg, Connection& c, bool net_up) {
     ValueRead r = {Error::Connect, 0, 0.0f};
@@ -319,6 +603,27 @@ void run_test(const perf::SensorConfig& requested, TestResult* out) {
     out->error = Error::None;
     out->thermux_age_s = 0xFFFF;
     out->reg_type = requested.reg_type;
+    if (requested.source == perf::SensorSource::BacnetIp) {
+        BacnetClient c;
+        Error e = network_up() ? c.open(requested.host, requested.port) : Error::Connect;
+        if (e != Error::None) {
+            out->error = e;
+            return;
+        }
+        BacnetRead r = bacnet_read_value(c, requested);
+        out->error = r.error;
+        out->exception = r.exception;
+        out->error_class = r.error_class;
+        out->celsius = r.celsius;
+        out->bacnet_units = r.units;
+        out->bacnet_reliability = r.reliability;
+        strlcpy(out->object_name, r.object_name, sizeof(out->object_name));
+        if (is_hex16(r.rom_hex)) {
+            out->rom_valid = true;
+            strlcpy(out->rom_hex, r.rom_hex, sizeof(out->rom_hex));
+        }
+        return;
+    }
     Connection c;
     Error e = network_up() ? c.open(requested.host, requested.port) : Error::Connect;
     if (e != Error::None) {
@@ -401,6 +706,11 @@ void worker(void*) {
         unlock();
         for (int i = 0; i < perf::kSlotCount; ++i) {
             const perf::SensorConfig& sc = cfg.sensors[i];
+            if (sc.source == perf::SensorSource::BacnetIp) {
+                s_conns[i].close();
+                poll_bacnet_slot(i, sc, net_up);
+                continue;
+            }
             if (sc.source != perf::SensorSource::ModbusTcp) {
                 s_conns[i].close();
                 continue;
@@ -439,7 +749,8 @@ void reset_slots_locked() {
     for (int i = 0; i < perf::kSlotCount; ++i) {
         s_slots[i] = {};
         s_slots[i].status.configured =
-            s_settings.sensors[i].source == perf::SensorSource::ModbusTcp;
+            s_settings.sensors[i].source == perf::SensorSource::ModbusTcp ||
+            s_settings.sensors[i].source == perf::SensorSource::BacnetIp;
         s_slots[i].status.error = Error::NotRead;
     }
 }
@@ -455,6 +766,8 @@ const char* error_name(Error e) {
         case Error::Timeout: return "timeout";
         case Error::Protocol: return "protocol";
         case Error::Exception: return "exception";
+        case Error::Rejected: return "rejected";
+        case Error::Units: return "units";
         case Error::NoReading: return "no_reading";
         case Error::OutOfRange: return "out_of_range";
         case Error::SensorChanged: return "sensor_changed";
@@ -564,7 +877,8 @@ perf::Selection choose_source(const perf::HeatPumpContext& hp) {
     lock();
     bool configured[perf::kSlotCount];
     for (int i = 0; i < perf::kSlotCount; ++i) {
-        configured[i] = s_settings.sensors[i].source == perf::SensorSource::ModbusTcp;
+        configured[i] = s_settings.sensors[i].source == perf::SensorSource::ModbusTcp ||
+                        s_settings.sensors[i].source == perf::SensorSource::BacnetIp;
     }
     perf::Selection sel = s_selector.evaluate(now_ms(), configured, hp);
     unlock();
@@ -611,6 +925,161 @@ bool test_blocking(const perf::SensorConfig& cfg, TestResult* out, uint32_t time
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     return false;
+}
+
+static Error bacnet_read_property(BacnetClient& c, bacnet::ObjectType type, uint32_t instance,
+                                  uint32_t prop, uint32_t array_index, bool has_array_index,
+                                  bacnet::Value* value, uint8_t* exception, uint8_t* error_class)
+{
+    uint8_t invoke = ++s_bacnet_invoke;
+    if (invoke == 0) invoke = ++s_bacnet_invoke;
+    uint8_t req[128];
+    size_t req_len = 0;
+    if (!bacnet::build_read_property(invoke, type, instance, prop, array_index, has_array_index,
+                                     req, sizeof(req), &req_len)) {
+        return Error::Protocol;
+    }
+    uint8_t resp[bacnet::kMaxFrame];
+    size_t resp_len = 0;
+    Error e = c.request(req, req_len, resp, sizeof(resp), &resp_len);
+    if (e != Error::None) return e;
+    bacnet::ErrorInfo info;
+    bacnet::Parse p = bacnet::parse_read_property_ack(resp, resp_len, invoke, prop, value, &info);
+    if (p == bacnet::Parse::Ok) return Error::None;
+    if (p == bacnet::Parse::Error) {
+        if (exception) *exception = info.error_code;
+        if (error_class) *error_class = info.error_class;
+        return Error::Rejected;
+    }
+    if (p == bacnet::Parse::Reject || p == bacnet::Parse::Abort) {
+        if (exception) *exception = info.reason;
+        return Error::Rejected;
+    }
+    return Error::Protocol;
+}
+
+bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_t /*timeout_ms*/)
+{
+    *out = {};
+    if (!host || !perf::host_valid(host) || port == 0) {
+        out->error = Error::Resolve;
+        return true;
+    }
+    BacnetClient c;
+    out->error = network_up() ? c.open(host, port) : Error::Connect;
+    if (out->error != Error::None) return true;
+
+    bacnet::Value v;
+    // Direct unicast does not need a configured device instance: ask the
+    // wildcard device for its object identifier first, then page Object_List.
+    out->error = bacnet_read_property(c, bacnet::ObjectType::Device, bacnet::kDeviceWildcard,
+                                      bacnet::PROP_OBJECT_IDENTIFIER, 0, false, &v,
+                                      &out->exception, &out->error_class);
+    uint32_t device_instance = bacnet::kDeviceWildcard;
+    if (out->error == Error::None && v.type == bacnet::ValueType::ObjectId) {
+        device_instance = v.object.instance;
+    } else if (out->error != Error::None) {
+        return true;
+    }
+
+    if (bacnet_read_property(c, bacnet::ObjectType::Device, device_instance, bacnet::PROP_OBJECT_NAME,
+                             0, false, &v, &out->exception, &out->error_class) == Error::None &&
+        v.type == bacnet::ValueType::String) {
+        strlcpy(out->device_name, v.str, sizeof(out->device_name));
+    }
+    if (bacnet_read_property(c, bacnet::ObjectType::Device, device_instance, bacnet::PROP_MODEL_NAME,
+                             0, false, &v, &out->exception, &out->error_class) == Error::None &&
+        v.type == bacnet::ValueType::String) {
+        strlcpy(out->model_name, v.str, sizeof(out->model_name));
+    }
+
+    out->error = bacnet_read_property(c, bacnet::ObjectType::Device, device_instance,
+                                      bacnet::PROP_OBJECT_LIST, 0, true, &v, &out->exception,
+                                      &out->error_class);
+    if (out->error != Error::None || v.type != bacnet::ValueType::Unsigned) {
+        if (out->error == Error::None) out->error = Error::Protocol;
+        return true;
+    }
+    uint32_t total = v.u;
+    if (total > 128) total = 128;
+    const uint32_t props[] = {bacnet::PROP_OBJECT_NAME, bacnet::PROP_PRESENT_VALUE,
+                              bacnet::PROP_UNITS, bacnet::PROP_RELIABILITY,
+                              bacnet::PROP_DESCRIPTION};
+    for (uint32_t idx = 1; idx <= total && out->count < sizeof(out->sensors) / sizeof(out->sensors[0]);
+         ++idx) {
+        if (bacnet_read_property(c, bacnet::ObjectType::Device, device_instance,
+                                 bacnet::PROP_OBJECT_LIST, idx, true, &v, &out->exception,
+                                 &out->error_class) != Error::None ||
+            v.type != bacnet::ValueType::ObjectId) {
+            continue;
+        }
+        if (v.object.type != bacnet::ObjectType::AnalogInput &&
+            v.object.type != bacnet::ObjectType::AnalogValue) {
+            continue;
+        }
+        uint8_t invoke = ++s_bacnet_invoke;
+        if (invoke == 0) invoke = ++s_bacnet_invoke;
+        uint8_t req[192];
+        size_t req_len = 0;
+        if (!bacnet::build_read_property_multiple(invoke, v.object.type, v.object.instance, props,
+                                                  sizeof(props) / sizeof(props[0]), req,
+                                                  sizeof(req), &req_len)) {
+            continue;
+        }
+        uint8_t resp[bacnet::kMaxFrame];
+        size_t resp_len = 0;
+        if (c.request(req, req_len, resp, sizeof(resp), &resp_len) != Error::None) continue;
+        bacnet::PropertyValue vals[8];
+        size_t nvals = 0;
+        bacnet::ErrorInfo info;
+        if (bacnet::parse_read_property_multiple_ack(resp, resp_len, invoke, vals,
+                                                     sizeof(vals) / sizeof(vals[0]), &nvals,
+                                                     &info) != bacnet::Parse::Ok) {
+            continue;
+        }
+        BrowseSensor& bs = out->sensors[out->count];
+        bs.object_type = perf_bacnet_type(v.object.type);
+        bs.object_instance = v.object.instance;
+        bool have_value = false, have_units = false;
+        for (size_t j = 0; j < nvals; ++j) {
+            if (vals[j].error) continue;
+            const bacnet::Value& pv = vals[j].value;
+            switch (vals[j].property) {
+                case bacnet::PROP_OBJECT_NAME:
+                    if (pv.type == bacnet::ValueType::String) strlcpy(bs.object_name, pv.str, sizeof(bs.object_name));
+                    break;
+                case bacnet::PROP_PRESENT_VALUE:
+                    if (pv.type == bacnet::ValueType::Real) {
+                        bs.celsius = pv.real;
+                        have_value = true;
+                    }
+                    break;
+                case bacnet::PROP_UNITS:
+                    if (pv.type == bacnet::ValueType::Enumerated) {
+                        bs.units = pv.u;
+                        have_units = true;
+                    }
+                    break;
+                case bacnet::PROP_RELIABILITY:
+                    if (pv.type == bacnet::ValueType::Enumerated) bs.reliability = pv.u;
+                    break;
+                case bacnet::PROP_DESCRIPTION:
+                    if (pv.type == bacnet::ValueType::String && is_hex16(pv.str)) {
+                        bs.rom_valid = true;
+                        strlcpy(bs.rom_hex, pv.str, sizeof(bs.rom_hex));
+                    }
+                    break;
+            }
+        }
+        if (!have_value || !have_units ||
+            (bs.units != kBacnetUnitsC && bs.units != kBacnetUnitsF && bs.units != kBacnetUnitsK)) {
+            continue;
+        }
+        bs.celsius = bacnet_to_celsius(bs.celsius, bs.units);
+        ++out->count;
+    }
+    out->error = Error::None;
+    return true;
 }
 
 }  // namespace ext_temp

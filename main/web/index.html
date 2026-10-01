@@ -584,7 +584,7 @@
       locationSearch: { query: "", busy: false, error: "", results: null },
       notifications: [], notifOpen: false,
       ha: {}, haTimer: null,
-      perf: null, perfTimer: null, perfTests: {},
+      perf: null, perfTimer: null, perfTests: {}, perfBrowses: {},
       settingsLoaded: false, settingsPromise: null,
       logs: [], logSeq: 0, logLevel: "V", logTimer: null, pollTimer: null,
       powerHoldTimer: null, powerHolding: false
@@ -1172,7 +1172,7 @@
     const perfFieldNames = {
       flow_lpm: "flow rate", fluid: "loop fluid", glycol_pct: "glycol concentration", source: "source", host: "device address",
       port: "port", unit_id: "unit ID", register: "register", register_type: "register type", value_type: "value type",
-      scale: "scale", no_reading: "no-reading value"
+      object_type: "object type", object_instance: "object instance", scale: "scale", no_reading: "no-reading value"
     };
     const perfIsFloat = vt => vt === "float32" || vt === "float32_swapped";
     function perfTemp(celsius) {
@@ -1211,6 +1211,8 @@
         timeout: "Connected, but the device didn't answer. Check the unit ID.",
         protocol: "The device sent a reply this controller doesn't understand.",
         exception: `The device turned the request down (Modbus exception ${exception ?? "?"}). Check the register and register type.`,
+        rejected: `The device turned the BACnet request down (${exception ?? "?"}). Check the selected object.`,
+        units: "The BACnet object doesn't use °C, °F, or K.",
         no_reading: "Connected, but the sensor has no reading right now.",
         out_of_range: "The value read isn't a believable temperature. Check the value type and scale.",
         sensor_changed: "A different sensor is now on this channel. Save this sensor again to accept it.",
@@ -1230,9 +1232,9 @@
     function perfReadingHtml(slot) {
       const cfg = state.perf?.sensors?.[slot] || {};
       const live = state.perf?.status?.sensors?.[slot] || {};
-      if (cfg.source !== "modbus_tcp") return "";
+      if (cfg.source !== "modbus_tcp" && cfg.source !== "bacnet_ip") return "";
       if (live.celsius != null && (live.error === "none" || !live.error))
-        return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>`;
+        return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>${live.object_name ? `<div class="metric-sub">${esc(live.object_name)}</div>` : ""}`;
       return `<div class="kv"><span>Latest reading</span><strong>--</strong></div><p class="metric-sub perf-warn">${esc(perfError(live.error, live.exception, null))}</p>`;
     }
     function perfTestHtml(slot) {
@@ -1245,6 +1247,8 @@
       const lines = [];
       if (tm) lines.push(`Thermux found · channel ${tm.channel}${tm.age_s != null ? ` · read ${tm.age_s} s ago` : ""}`);
       if (tm && tm.rom_id) lines.push(`Sensor ID ${esc(tm.rom_id)}`);
+      if (r.object_name) lines.push(`BACnet object · ${esc(r.object_name)}`);
+      if (r.rom_id && !tm) lines.push(`Sensor ID ${esc(r.rom_id)}`);
       if (t.switched) lines.push(`Register type set to ${r.register_type === "holding" ? "Holding" : "Input"}`);
       if (r.ok) {
         return `<div class="perf-test ok"><strong>Reading OK · ${perfTemp(r.celsius)}</strong>${lines.map(l => `<div class="metric-sub">${l}</div>`).join("")}</div>`;
@@ -1254,18 +1258,31 @@
     function perfSensorCard(slot, title) {
       const s = state.perf.sensors[slot] || {};
       const modbus = s.source === "modbus_tcp";
+      const bacnet = s.source === "bacnet_ip";
+      const network = modbus || bacnet;
       const float = perfIsFloat(s.value_type);
+      const browse = state.perfBrowses[slot];
+      const badge = bacnet ? "BACnet/IP" : (modbus ? "Modbus TCP" : "Heat pump's own sensor");
+      const browseHtml = !bacnet ? "" : (browse?.running ? `<div class="perf-test"><span class="spinner-inline"></span> Finding sensors…</div>` :
+        browse?.failed ? `<div class="perf-test notice bad">${esc(browse.failed)}</div>` :
+        browse?.result ? `<div class="perf-test ok"><strong>${browse.result.sensors.length ? "Choose a sensor" : "No sensors found at this address"}</strong>${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} — ${perfTemp(x.celsius)}</button>`).join("")}</div>` : "");
       return `<section class="card"><form data-form="perf-sensor" data-slot="${slot}">
-        <div class="card-head"><h2>${esc(title)}</h2><span class="badge ${modbus ? "good" : ""}">${modbus ? "Modbus TCP" : "Heat pump's own sensor"}</span></div>
-        <div class="field"><label>Source</label><select name="source" data-perf="source">${perfOptions([["heat_pump", "Heat pump sensor"], ["modbus_tcp", "Modbus TCP"]], s.source)}</select></div>
-        <div class="perf-modbus" ${modbus ? "" : "hidden"}>
+        <div class="card-head"><h2>${esc(title)}</h2><span class="badge ${network ? "good" : ""}">${badge}</span></div>
+        <div class="field"><label>Source</label><select name="source" data-perf="source">${perfOptions([["heat_pump", "Heat pump sensor"], ["modbus_tcp", "Modbus TCP"], ["bacnet_ip", "BACnet/IP"]], s.source)}</select></div>
+        <div class="perf-modbus" ${network ? "" : "hidden"}>
           <div class="field"><label>Device address (IP or hostname)</label><input name="host" maxlength="63" value="${esc(s.host || "")}" placeholder="e.g. thermux.local" autocomplete="off" spellcheck="false"></div>
           <div class="grid grid-3 perf-nums">
-            <div class="field"><label>Port</label><input name="port" type="number" min="1" max="65535" value="${esc(s.port ?? 502)}"></div>
-            <div class="field"><label>Unit ID</label><input name="unit_id" type="number" min="0" max="255" value="${esc(s.unit_id ?? 1)}"></div>
-            <div class="field"><label>Register</label><input name="register" type="number" min="0" max="65535" value="${esc(s.register ?? 0)}"></div>
+            <div class="field"><label>Port</label><input name="port" type="number" min="1" max="65535" value="${esc(s.port ?? (bacnet ? 47808 : 502))}"></div>
+            <div class="field perf-modbus-only" ${modbus ? "" : "hidden"}><label>Unit ID</label><input name="unit_id" type="number" min="0" max="255" value="${esc(s.unit_id ?? 1)}"></div>
+            <div class="field perf-modbus-only" ${modbus ? "" : "hidden"}><label>Register</label><input name="register" type="number" min="0" max="65535" value="${esc(s.register ?? 0)}"></div>
+            <div class="field perf-bacnet-only" ${bacnet ? "" : "hidden"}><label>Object instance</label><input name="object_instance" type="number" min="0" max="4194302" value="${esc(s.object_instance ?? 0)}"></div>
           </div>
-          <details class="ap-group perf-adv"><summary>Advanced</summary>
+          <div class="perf-bacnet-only" ${bacnet ? "" : "hidden"} style="margin:10px 0">
+            <div class="field"><label>Object type</label><select name="object_type">${perfOptions([["analog_input", "Analog input"], ["analog_value", "Analog value"]], s.object_type || "analog_input")}</select></div>
+            <button class="btn" type="button" data-action="perf-browse-bacnet" data-slot="${slot}">Find sensors</button>
+            ${browseHtml}
+          </div>
+          <details class="ap-group perf-adv perf-modbus-only" ${modbus ? "" : "hidden"}><summary>Advanced</summary>
             <div class="grid grid-2">
               <div class="field"><label>Register type</label><select name="register_type">${perfOptions([["input", "Input"], ["holding", "Holding"]], s.register_type)}</select></div>
               <div class="field"><label>Value type</label><select name="value_type" data-perf="value_type">${perfOptions(perfValueTypes, s.value_type)}</select></div>
@@ -1277,7 +1294,7 @@
         </div>
         <div id="perf-test-${slot}">${perfTestHtml(slot)}</div>
         <div class="btn-row" style="margin-top:14px">
-          <button class="btn" type="button" data-action="perf-test" data-slot="${slot}" ${modbus ? "" : "hidden"}>Test sensor</button>
+          <button class="btn" type="button" data-action="perf-test" data-slot="${slot}" ${network ? "" : "hidden"}>Test sensor</button>
           <button class="btn primary" type="submit">Save</button></div>
       </form></section>`;
     }
@@ -1726,13 +1743,20 @@
     function stopPerfPolling() { if (state.perfTimer) clearInterval(state.perfTimer); state.perfTimer = null; }
     function perfSensorBody(form) {
       const data = new FormData(form);
-      if (data.get("source") !== "modbus_tcp") return { source: "heat_pump" };
-      const body = {
-        source: "modbus_tcp", host: String(data.get("host") || "").trim(),
-        port: Number(data.get("port")), unit_id: Number(data.get("unit_id")), register: Number(data.get("register")),
-        register_type: data.get("register_type"), value_type: data.get("value_type"), scale: Number(data.get("scale"))
-      };
-      body.no_reading = perfIsFloat(body.value_type) ? "none" : data.get("no_reading");
+      const source = data.get("source");
+      if (source === "heat_pump") return { source: "heat_pump" };
+      const body = { source, host: String(data.get("host") || "").trim(), port: Number(data.get("port")) };
+      if (source === "bacnet_ip") {
+        body.object_type = data.get("object_type") || "analog_input";
+        body.object_instance = Number(data.get("object_instance"));
+      } else {
+        body.unit_id = Number(data.get("unit_id"));
+        body.register = Number(data.get("register"));
+        body.register_type = data.get("register_type");
+        body.value_type = data.get("value_type");
+        body.scale = Number(data.get("scale"));
+        body.no_reading = perfIsFloat(body.value_type) ? "none" : data.get("no_reading");
+      }
       if (!body.host) throw new Error("Enter an IP address or hostname.");
       return body;
     }
@@ -2197,6 +2221,33 @@
         }
         return;
       }
+      if (action === "perf-browse-bacnet") {
+        const slot = el.dataset.slot;
+        const form = el.closest("form");
+        const data = new FormData(form);
+        const host = String(data.get("host") || "").trim();
+        const port = Number(data.get("port") || 47808);
+        state.perfBrowses[slot] = { running: true };
+        render();
+        try {
+          state.perfBrowses[slot] = {
+            result: await api("/api/performance/bacnet/browse", jsonOptions("POST", { host, port }))
+          };
+        } catch (error) {
+          state.perfBrowses[slot] = { failed: perfInvalidMessage(error) };
+        }
+        render();
+        return;
+      }
+      if (action === "perf-pick-bacnet") {
+        const form = el.closest("form");
+        const type = form.querySelector('[name="object_type"]');
+        const inst = form.querySelector('[name="object_instance"]');
+        if (type) type.value = el.dataset.objectType || "analog_input";
+        if (inst) inst.value = el.dataset.objectInstance || "0";
+        toast(`Selected ${el.dataset.objectName || "BACnet sensor"}`, "good");
+        return;
+      }
       if (action === "ha-pair") {
         const data = await mutate("/api/ha/pair", { method: "POST" }, "Pairing started");
         const code = data.code || "";
@@ -2311,9 +2362,14 @@
         if (field) { field.classList.toggle("is-disabled", water); field.querySelector("input").disabled = water; }
       }
       if (perfField === "source") {
-        const form = event.target.form, modbus = event.target.value === "modbus_tcp";
-        form.querySelector(".perf-modbus").hidden = !modbus;
-        form.querySelector('[data-action="perf-test"]').hidden = !modbus;
+        const form = event.target.form, modbus = event.target.value === "modbus_tcp", bacnet = event.target.value === "bacnet_ip", network = modbus || bacnet;
+        form.querySelector(".perf-modbus").hidden = !network;
+        form.querySelectorAll(".perf-modbus-only").forEach(x => x.hidden = !modbus);
+        form.querySelectorAll(".perf-bacnet-only").forEach(x => x.hidden = !bacnet);
+        form.querySelector('[data-action="perf-test"]').hidden = !network;
+        const port = form.querySelector('[name="port"]');
+        if (port && bacnet && (!port.value || port.value === "502")) port.value = "47808";
+        if (port && modbus && port.value === "47808") port.value = "502";
       }
       if (perfField === "value_type") {
         const select = event.target.form.querySelector('select[name="no_reading"]');
