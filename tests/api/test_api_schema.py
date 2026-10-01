@@ -117,6 +117,7 @@ SKIP_NON_GET = {
     "/api/time/sync",               # POST triggers NTP sync
     "/api/events",                  # DELETE clears event log
     "/api/logs",                    # DELETE clears log buffer
+    "/api/logs/coredump",           # DELETE erases the crash dump CI collects after the run
     "/api/heatpump/power",          # PUT toggles power
     "/api/heatpump/mode",           # PUT changes operating mode
     "/api/heatpump/setpoints",      # PUT changes temperature setpoints

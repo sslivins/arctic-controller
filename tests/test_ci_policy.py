@@ -285,6 +285,7 @@ DEV_OK = {
     "BUILD": "success",
     "DEVICE": "success",
     "REUSE": "skipped",
+    "DECODE": "skipped",
     "DEDUP": "false",
 }
 
@@ -293,6 +294,7 @@ DEV_REUSE = {
     "BUILD": "skipped",
     "DEVICE": "skipped",
     "REUSE": "success",
+    "DECODE": "skipped",
     "DEDUP": "true",
 }
 
@@ -301,6 +303,7 @@ DEV_REUSE = {
     "env,reason",
     [
         (DEV_OK, "physical suite ran and passed"),
+        ({**DEV_OK, "DECODE": "success"}, "a core dump from before the tests was decoded"),
         (DEV_REUSE, "validated tree reused, attestation re-emitted"),
     ],
 )
@@ -325,6 +328,9 @@ def test_device_gate_accepts_valid_outcomes(env, reason):
         ({"DEDUP": ""}, "empty dedup must not be treated as false"),
         ({"DEDUP": "maybe"}, "non-literal dedup"),
         ({"REUSE": "success"}, "reuse ran although dedup=false"),
+        ({"DECODE": "failure"}, "a saved core dump could not be decoded"),
+        ({"DECODE": "cancelled"}, "core dump decoding cancelled"),
+        ({"DECODE": ""}, "empty decode result"),
     ],
 )
 def test_device_gate_rejects_invalid_outcomes(override, reason):
@@ -337,6 +343,7 @@ def test_device_gate_rejects_invalid_outcomes(override, reason):
     [
         ({"REUSE": "failure"}, "dedup claimed but the attestation was not re-emitted"),
         ({"BUILD": "success", "DEVICE": "success"}, "dedup claimed but the suite ran"),
+        ({"DECODE": "success"}, "dedup claimed but a core dump was decoded"),
     ],
 )
 def test_device_gate_rejects_invalid_reuse_outcomes(override, reason):

@@ -3484,6 +3484,83 @@ paths:
 
         '400':
           $ref: '#/components/responses/BadRequest'
+  /api/logs/coredump:
+    get:
+      tags:
+      - Logs
+      summary: Download the core dump saved by the last crash
+      description: |
+        When the firmware panics or the task watchdog fires, it saves an ELF
+        core dump (every task's registers and stack) to the `coredump` flash
+        partition before rebooting. This returns that dump as raw bytes.
+
+        Decode it against the ELF of the firmware that crashed:
+        `esp-coredump info_corefile -t raw -c coredump.bin arctic_controller.elf`.
+
+        Returns 404 when no dump is saved, or when the device is on a
+        partition table without a `coredump` partition.
+      operationId: getCoreDump
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Raw core dump
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No core dump saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    delete:
+      tags:
+      - Logs
+      summary: Erase the saved core dump
+      description: Erases the saved core dump. Succeeds when there is none.
+      operationId: deleteCoreDump
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Core dump erased
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: The flash erase failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/screenshot:
     get:
       tags:

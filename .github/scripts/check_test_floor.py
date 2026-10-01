@@ -100,6 +100,9 @@ BENIGN_SKIP_PATTERNS = [
     r"not a ci build",
     r"arctic_flash_method unset",
     r"ota slot not applicable",
+    # The core-dump erase test must not destroy a real crash dump that CI
+    # collects after the run.
+    r"real core dump is saved",
 ]
 
 # Deliberate, tracked gaps: the test is skipped because the feature or the

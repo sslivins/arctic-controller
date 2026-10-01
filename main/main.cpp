@@ -59,6 +59,7 @@
 #include "log_buffer.h"
 #include "log_persist.h"
 #include "ext_temp_sensors.h"
+#include "crash_dump.h"
 #include "esp_task_wdt.h"
 #include <cJSON.h>
 
@@ -310,6 +311,7 @@ extern "C" void app_main(void)
     // wedge/crash from the prior boot. The background snapshot task is started
     // later, once the network stack is up.
     log_persist_init();
+    crash_dump_report_at_boot();
 
     // Persistent boot/reset stats: count brownouts across reboots (NVS) and
     // drop a durable event-log entry when THIS boot was caused by a brownout,
