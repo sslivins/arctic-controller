@@ -54,6 +54,7 @@ struct Editor {
     lv_obj_t* root;
     int slot;
     perf::SensorConfig ed;
+    perf::SensorConfig tested;  // what the running test was started with
 
     lv_obj_t* src_btn[3];
     lv_obj_t* modbus_group;
@@ -1070,6 +1071,19 @@ static void render_test_result(const ext_temp::TestResult& r, bool reg_type_swit
     show_result(false, title, body);
 }
 
+// The fields a test result describes. The rest of the editor stays usable while
+// a test runs, so a result only applies if these haven't changed meanwhile.
+static bool same_test_target(const perf::SensorConfig& a, const perf::SensorConfig& b)
+{
+    if (a.source != b.source || a.port != b.port || strncmp(a.host, b.host, perf::kHostMax) != 0) {
+        return false;
+    }
+    if (a.source == perf::SensorSource::BacnetIp) {
+        return a.bacnet_type == b.bacnet_type && a.bacnet_instance == b.bacnet_instance;
+    }
+    return a.unit_id == b.unit_id && a.address == b.address && a.value_type == b.value_type;
+}
+
 static void test_poll_cb(lv_timer_t* t)
 {
     (void)t;
@@ -1085,13 +1099,14 @@ static void test_poll_cb(lv_timer_t* t)
     ed.test_timer = NULL;
     ed.ticket = 0;
     set_testing(false);
+    bool current = same_test_target(ed.tested, ed.ed);
     // The test found the value in the other register table: use that.
-    bool switched = done && r.reg_type != ed.ed.reg_type;
+    bool switched = done && current && r.reg_type != ed.ed.reg_type;
     if (switched) {
         ed.ed.reg_type = r.reg_type;
         editor_refresh();
     }
-    if (done && r.error == ext_temp::Error::None &&
+    if (done && current && r.error == ext_temp::Error::None &&
         ed.ed.source == perf::SensorSource::BacnetIp && r.bacnet_device_known) {
         ed.ed.bacnet_device_known = true;
         ed.ed.bacnet_device_instance = r.bacnet_device_instance;
@@ -1125,6 +1140,7 @@ static void test_btn_cb(lv_event_t* e)
         return;
     }
     perf::SensorConfig cfg = ed.ed;
+    ed.tested = cfg;
     ed.ticket = ext_temp::test_start(cfg);
     if (ed.ticket == 0) {
         ext_temp::TestResult r = {};
