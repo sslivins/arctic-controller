@@ -417,7 +417,7 @@ class TestConfigApi:
     def test_bacnet_save_requires_object_instance(self, device: DeviceClient, bacnet_fake):
         host, port = bacnet_fake
         r = _put_config(device, {"sensors": {"supply": {
-            "source": "bacnet_ip", "host": host, "port": port,
+            "source": "bacnet_ip", "host": host, "port": port, "object_instance": None,
         }}})
         assert r.status_code == 400, r.text
         assert r.json() == {"error": "Invalid value", "field": "object_instance"}
@@ -500,7 +500,7 @@ class TestSensorTest:
 
     def test_bacnet_browse_huge_object_list_is_bounded(self, device: DeviceClient,
                                                        huge_bacnet_fake):
-        status_before = device.session.get(_url(device, "/api/status"),
+        status_before = device.session.get(_url(device, "/api/info"),
                                            timeout=device.timeout).json()
         host, port = huge_bacnet_fake
         r = device.session.post(_url(device, "/api/performance/bacnet/browse"),
@@ -514,7 +514,7 @@ class TestSensorTest:
         assert len(body["sensors"]) <= 64
         assert device.session.get(_url(device, "/api/health"),
                                   timeout=device.timeout).status_code == 200
-        status_after = device.session.get(_url(device, "/api/status"),
+        status_after = device.session.get(_url(device, "/api/info"),
                                           timeout=device.timeout).json()
         assert status_after["free_heap"] > 100_000
         assert status_after["free_heap"] > status_before["free_heap"] - 80_000

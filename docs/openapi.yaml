@@ -3098,6 +3098,8 @@ paths:
                 host:
                   type: string
                   maxLength: 63
+                  pattern: '^[A-Za-z0-9_](?:(?:[A-Za-z0-9_-]|\.[A-Za-z0-9_-])*\.?[A-Za-z0-9_])?$'
+                  description: IPv4 address or host name (`.local` names resolve over mDNS)
                 port:
                   type: integer
                   minimum: 1

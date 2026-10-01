@@ -165,7 +165,7 @@ class FakeBacnetServer:
         self.objects: list[tuple[int, int]] = [(OBJ_DEVICE, device_instance)]
         self.analogs = {
             3: Analog(3, "Supply tank", 21.4, UNITS_C, 0, "28FF6491631603A2"),
-            4: Analog(4, "Return tank", 68.0, UNITS_F, 0, "28FF6491631603A3"),
+            4: Analog(4, "Return tank", 20.0, UNITS_F, 0, "28FF6491631603A3"),
             5: Analog(5, "Faulted sensor", 19.0, UNITS_C, 1, "28FF6491631603A4"),
         }
         if rom_change:
