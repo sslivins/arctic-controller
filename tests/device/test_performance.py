@@ -619,6 +619,13 @@ def _wait_source(device: DeviceClient, source: str, desc: str) -> dict:
     return _get_config(device)["status"]
 
 
+def _wait_fallback(device: DeviceClient) -> dict:
+    device.wait_until("estimate to fall back to the heat pump",
+                      lambda: _get_config(device)["status"]["source"] == "heat_pump",
+                      timeout=30.0, poll=1.0)
+    return _get_config(device)["status"]
+
+
 class TestPolling:
 
     def test_configured_sensors_are_read(self, device: DeviceClient, fake):
@@ -681,10 +688,10 @@ class TestPolling:
                 lambda: all(v["error"] in ("connect", "timeout") for v in
                             _get_config(device)["status"]["sensors"].values()),
                 timeout=POLL_TIMEOUT, poll=1.0)
-            st = _get_config(device)["status"]
             # The last reading stays visible (with its age), but the estimate
-            # must not be using it.
-            assert st["source"] == "heat_pump", st
+            # must stop using it. The source is re-chosen on each heat pump
+            # poll, so allow a few cycles after the sensor errors show.
+            st = _wait_fallback(device)
             assert st["fallback"] is True, st
         finally:
             thermux.start()
@@ -706,8 +713,7 @@ class TestPolling:
                 lambda: all(v["error"] in ("connect", "timeout") for v in
                             _get_config(device)["status"]["sensors"].values()),
                 timeout=POLL_TIMEOUT, poll=1.0)
-            st = _get_config(device)["status"]
-            assert st["source"] == "heat_pump", st
+            st = _wait_fallback(device)
             assert st["fallback"] is True, st
         finally:
             bacnet_server.start()
@@ -739,8 +745,7 @@ class TestPolling:
                 lambda: _get_config(device)["status"]["sensors"]["supply"]["error"] ==
                 "sensor_changed",
                 timeout=POLL_TIMEOUT, poll=1.0)
-            st = _get_config(device)["status"]
-            assert st["source"] == "heat_pump", st
+            st = _wait_fallback(device)
             assert st["fallback"] is True, st
         finally:
             bacnet_server.restart(rom_change=False)
