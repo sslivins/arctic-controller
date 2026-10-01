@@ -45,7 +45,7 @@ static constexpr uint32_t kSaveDelayMs = 800;
 static constexpr uint32_t kTestPollMs = 200;
 static constexpr uint32_t kTestTimeoutMs = 10000;
 static constexpr uint32_t kBrowsePollMs = 200;
-static constexpr uint32_t kBrowseTimeoutMs = 9000;
+static constexpr uint32_t kBrowseTimeoutMs = 26000;
 static constexpr uint16_t kFlowStepX10 = 10;
 
 enum class Field : uint8_t { Host, Port, UnitId, Register };
@@ -163,6 +163,16 @@ static void free_browse_result_if_idle(void)
         heap_caps_free(s_browse_job.result);
         s_browse_job.result = NULL;
     }
+}
+
+static void clear_editor_bacnet_identity()
+{
+    perf::SensorConfig& s = s_state.editor.ed;
+    s.bacnet_device_known = false;
+    s.bacnet_device_instance = perf::kBacnetDeviceWildcard;
+    s.bacnet_object_name[0] = '\0';
+    s.rom_known = false;
+    memset(s.rom, 0, sizeof(s.rom));
 }
 
 // ============================================================================
@@ -1081,6 +1091,22 @@ static void test_poll_cb(lv_timer_t* t)
         ed.ed.reg_type = r.reg_type;
         editor_refresh();
     }
+    if (done && r.error == ext_temp::Error::None &&
+        ed.ed.source == perf::SensorSource::BacnetIp && r.bacnet_device_known) {
+        ed.ed.bacnet_device_known = true;
+        ed.ed.bacnet_device_instance = r.bacnet_device_instance;
+        strlcpy(ed.ed.bacnet_object_name, r.object_name, sizeof(ed.ed.bacnet_object_name));
+        if (r.rom_valid) {
+            for (size_t i = 0; i < perf::kRomLen; ++i) {
+                char tmp[3] = {r.rom_hex[2 * i], r.rom_hex[2 * i + 1], 0};
+                ed.ed.rom[i] = (uint8_t)strtoul(tmp, NULL, 16);
+            }
+            ed.ed.rom_known = true;
+        } else {
+            ed.ed.rom_known = false;
+            memset(ed.ed.rom, 0, sizeof(ed.ed.rom));
+        }
+    }
     render_test_result(r, switched);
 }
 
@@ -1292,6 +1318,7 @@ static void source_seg_cb(lv_event_t* e)
     s.source = idx == 2 ? perf::SensorSource::BacnetIp
                         : (idx == 1 ? perf::SensorSource::ModbusTcp : perf::SensorSource::HeatPump);
     if (old != s.source) {
+        clear_editor_bacnet_identity();
         if (s.source == perf::SensorSource::BacnetIp) {
             s.port = perf::kDefaultBacnetPort;
         } else if (s.source == perf::SensorSource::ModbusTcp) {
@@ -1307,6 +1334,7 @@ static void regtype_seg_cb(lv_event_t* e)
     if (s_state.editor.ed.source == perf::SensorSource::BacnetIp) {
         s_state.editor.ed.bacnet_type =
             idx == 1 ? perf::BacnetObjectType::AnalogValue : perf::BacnetObjectType::AnalogInput;
+        clear_editor_bacnet_identity();
     } else {
         s_state.editor.ed.reg_type = idx == 1 ? perf::RegisterType::Holding : perf::RegisterType::Input;
     }
@@ -1354,8 +1382,6 @@ static void editor_save_cb(lv_event_t* e)
 
     perf::Settings cur = ext_temp::settings();
     perf::SensorConfig next = ed.ed;
-    next.rom_known = cur.sensors[ed.slot].rom_known;
-    memcpy(next.rom, cur.sensors[ed.slot].rom, sizeof(next.rom));
     bool edited[perf::kSlotCount] = {false, false};
     edited[ed.slot] = sensor_differs(cur.sensors[ed.slot], next);
     if (!edited[ed.slot]) {
@@ -1687,6 +1713,10 @@ static void entry_save_cb(lv_event_t* e)
             entry_error(i18n_get(STR_PERF_INVALID_HOST));
             return;
         }
+        if (ed.ed.source == perf::SensorSource::BacnetIp &&
+            strncmp(ed.ed.host, buf, sizeof(ed.ed.host)) != 0) {
+            clear_editor_bacnet_identity();
+        }
         snprintf(ed.ed.host, sizeof(ed.ed.host), "%s", buf);
     } else {
         uint32_t lo = 0;
@@ -1702,10 +1732,16 @@ static void entry_save_cb(lv_event_t* e)
             entry_error(buf);
             return;
         }
-        if (te.field == Field::Port) ed.ed.port = (uint16_t)v;
+        if (te.field == Field::Port) {
+            if (ed.ed.source == perf::SensorSource::BacnetIp && ed.ed.port != (uint16_t)v) {
+                clear_editor_bacnet_identity();
+            }
+            ed.ed.port = (uint16_t)v;
+        }
         if (te.field == Field::UnitId) ed.ed.unit_id = (uint8_t)v;
         if (te.field == Field::Register) {
             if (ed.ed.source == perf::SensorSource::BacnetIp) {
+                if (ed.ed.bacnet_instance != v) clear_editor_bacnet_identity();
                 ed.ed.bacnet_instance = v;
             } else {
                 ed.ed.address = (uint16_t)v;

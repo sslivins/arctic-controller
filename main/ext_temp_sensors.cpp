@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <esp_log.h>
+#include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/idf_additions.h>
@@ -35,6 +36,8 @@ constexpr size_t kBrowseMaxResults = 64;
 // property list on the worker stack. The task uses PSRAM, so this modest bump
 // avoids tight-stack failures without increasing internal-RAM pressure.
 constexpr uint32_t kWorkerStack = 6144;
+constexpr uint8_t kBacnetServiceReadProperty = 12;
+constexpr uint8_t kBacnetServiceReadPropertyMultiple = 14;
 constexpr uint8_t kBacnetUnitsC = 62;
 constexpr uint8_t kBacnetUnitsF = 64;
 constexpr uint8_t kBacnetUnitsK = 63;
@@ -79,7 +82,28 @@ uint32_t s_browse_ticket = 0;
 uint32_t s_browse_done_ticket = 0;
 char s_browse_host[perf::kHostMax] = {};
 uint16_t s_browse_port = 0;
-BrowseResult* s_browse_out = nullptr;
+bool s_browse_cancel = false;
+
+struct WorkerContext {
+    uint8_t tx[bacnet::kMaxFrame];
+    uint8_t rx[bacnet::kMaxFrame];
+    bacnet::PropertyValue values[8];
+    BrowseResult browse_result;
+};
+
+WorkerContext* s_ctx = nullptr;
+
+bool ensure_context() {
+    if (s_ctx) return true;
+    s_ctx = static_cast<WorkerContext*>(
+        heap_caps_calloc(1, sizeof(WorkerContext), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!s_ctx) {
+        s_ctx = static_cast<WorkerContext*>(
+            heap_caps_calloc(1, sizeof(WorkerContext), MALLOC_CAP_8BIT));
+    }
+    if (!s_ctx) ESP_LOGE(TAG, "Failed to allocate external sensor worker context");
+    return s_ctx != nullptr;
+}
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
@@ -93,6 +117,13 @@ bool network_up() {
 
 void lock() { xSemaphoreTake(s_mutex, portMAX_DELAY); }
 void unlock() { xSemaphoreGive(s_mutex); }
+
+bool browse_cancelled() {
+    lock();
+    bool cancelled = s_browse_cancel;
+    unlock();
+    return cancelled;
+}
 
 uint8_t function_code(perf::RegisterType t) {
     return t == perf::RegisterType::Holding ? mbtcp::kFcReadHolding : mbtcp::kFcReadInput;
@@ -328,9 +359,6 @@ public:
             close();
             return Error::Connect;
         }
-        struct timeval tv = {kIoTimeoutMs / 1000, (kIoTimeoutMs % 1000) * 1000};
-        setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
         snprintf(host_, sizeof(host_), "%s", host);
         port_ = port;
         return Error::None;
@@ -340,16 +368,31 @@ public:
         return fd_ >= 0 && port_ == port && strcmp(host_, host) == 0;
     }
 
-    Error request(const uint8_t* req, size_t req_len, uint8_t* resp, size_t resp_cap, size_t* resp_len) {
+    Error request(const uint8_t* req, size_t req_len, uint8_t expected_invoke,
+                  uint8_t expected_service, const bacnet::ObjectId& expected_object,
+                  uint32_t deadline_ms, uint8_t* resp, size_t resp_cap, size_t* resp_len) {
         if (fd_ < 0) return Error::Connect;
+        uint8_t drain[16];
+        while (recv(fd_, drain, sizeof(drain), MSG_DONTWAIT) > 0) {}
         for (int attempt = 0; attempt < 2; ++attempt) {
+            int32_t remaining = static_cast<int32_t>(deadline_ms - now_ms());
+            if (remaining <= 0) break;
+            uint32_t wait_ms = remaining < (int32_t)kIoTimeoutMs ? (uint32_t)remaining : kIoTimeoutMs;
+            struct timeval tv = {static_cast<time_t>(wait_ms / 1000),
+                                 static_cast<suseconds_t>((wait_ms % 1000) * 1000)};
+            setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
             if (send(fd_, req, req_len, 0) != static_cast<int>(req_len)) {
                 return Error::Timeout;
             }
-            int n = recv(fd_, resp, resp_cap, 0);
-            if (n > 0) {
-                *resp_len = static_cast<size_t>(n);
-                return Error::None;
+            while (static_cast<int32_t>(deadline_ms - now_ms()) > 0) {
+                int n = recv(fd_, resp, resp_cap, 0);
+                if (n <= 0) break;
+                if (bacnet::frame_matches_object(resp, static_cast<size_t>(n), expected_invoke,
+                                                 expected_service, expected_object)) {
+                    *resp_len = static_cast<size_t>(n);
+                    return Error::None;
+                }
             }
         }
         close();
@@ -402,22 +445,26 @@ void map_bacnet_parse(bacnet::Parse p, const bacnet::ErrorInfo& info, BacnetRead
 
 Error bacnet_read_property_value(BacnetClient& c, bacnet::ObjectType type, uint32_t instance,
                                  uint32_t prop, bacnet::Value* value, uint8_t* exception,
-                                 uint8_t* error_class) {
+                                 uint8_t* error_class, uint32_t deadline_ms = 0) {
     uint8_t invoke = ++s_bacnet_invoke;
     if (invoke == 0) invoke = ++s_bacnet_invoke;
-    uint8_t req[128];
     size_t req_len = 0;
-    if (!bacnet::build_read_property(invoke, type, instance, prop, 0, false, req, sizeof(req),
-                                     &req_len)) {
+    if (!deadline_ms) deadline_ms = now_ms() + 2 * kIoTimeoutMs;
+    size_t resp_len = 0;
+    if (!s_ctx) return Error::Protocol;
+    uint8_t* req = s_ctx->tx;
+    uint8_t* resp = s_ctx->rx;
+    if (!bacnet::build_read_property(invoke, type, instance, prop, 0, false, req,
+                                     bacnet::kMaxFrame, &req_len)) {
         return Error::Protocol;
     }
-    uint8_t resp[bacnet::kMaxFrame];
-    size_t resp_len = 0;
-    Error e = c.request(req, req_len, resp, sizeof(resp), &resp_len);
+    bacnet::ObjectId expected{type, instance};
+    Error e = c.request(req, req_len, invoke, kBacnetServiceReadProperty, expected, deadline_ms,
+                        resp, bacnet::kMaxFrame, &resp_len);
     if (e != Error::None) return e;
-    bacnet::Value v;
     bacnet::ErrorInfo info;
-    bacnet::Parse p = bacnet::parse_read_property_ack(resp, resp_len, invoke, prop, value, &info);
+    bacnet::Parse p = bacnet::parse_read_property_ack(resp, resp_len, invoke, prop, value, &info,
+                                                      &expected);
     if (p == bacnet::Parse::Ok) return Error::None;
     if (p == bacnet::Parse::Error) {
         if (exception) *exception = info.error_code;
@@ -503,25 +550,30 @@ BacnetRead bacnet_read_value(BacnetClient& c, const perf::SensorConfig& cfg) {
                               bacnet::PROP_RELIABILITY, bacnet::PROP_DESCRIPTION};
     uint8_t invoke = ++s_bacnet_invoke;
     if (invoke == 0) invoke = ++s_bacnet_invoke;
-    uint8_t req[256];
-    size_t req_len = 0;
-    if (!bacnet::build_read_property_multiple(invoke, bacnet_object_type(cfg), cfg.bacnet_instance,
-                                              props, sizeof(props) / sizeof(props[0]), req,
-                                              sizeof(req), &req_len)) {
+    if (!s_ctx) {
         out.error = Error::Protocol;
         return out;
     }
-    uint8_t resp[bacnet::kMaxFrame];
+    uint8_t* req = s_ctx->tx;
+    uint8_t* resp = s_ctx->rx;
+    bacnet::PropertyValue* values = s_ctx->values;
+    size_t req_len = 0;
+    if (!bacnet::build_read_property_multiple(invoke, bacnet_object_type(cfg), cfg.bacnet_instance,
+                                              props, sizeof(props) / sizeof(props[0]), req,
+                                              bacnet::kMaxFrame, &req_len)) {
+        out.error = Error::Protocol;
+        return out;
+    }
     size_t resp_len = 0;
-    out.error = c.request(req, req_len, resp, sizeof(resp), &resp_len);
+    bacnet::ObjectId expected{bacnet_object_type(cfg), cfg.bacnet_instance};
+    out.error = c.request(req, req_len, invoke, kBacnetServiceReadPropertyMultiple, expected,
+                          now_ms() + 2 * kIoTimeoutMs, resp, bacnet::kMaxFrame, &resp_len);
     if (out.error != Error::None) return out;
 
-    bacnet::PropertyValue values[8];
     size_t count = 0;
     bacnet::ErrorInfo info;
     bacnet::Parse p = bacnet::parse_read_property_multiple_ack(resp, resp_len, invoke, values,
-                                                               sizeof(values) / sizeof(values[0]),
-                                                               &count, &info);
+                                                               8, &count, &info, &expected);
     if (p != bacnet::Parse::Ok) {
         if (p != bacnet::Parse::Reject && p != bacnet::Parse::Error) {
             map_bacnet_parse(p, info, &out);
@@ -533,7 +585,7 @@ BacnetRead bacnet_read_value(BacnetClient& c, const perf::SensorConfig& cfg) {
             uint8_t exc = 0, cls = 0;
             Error e = bacnet_read_property_value(c, bacnet_object_type(cfg), cfg.bacnet_instance,
                                                  prop, &v, &exc, &cls);
-            if (e == Error::None && count < sizeof(values) / sizeof(values[0])) {
+            if (e == Error::None && count < 8) {
                 values[count].object = {bacnet_object_type(cfg), cfg.bacnet_instance};
                 values[count].property = prop;
                 values[count].value = v;
@@ -817,14 +869,14 @@ void worker(void*) {
         char browse_host[perf::kHostMax];
         strlcpy(browse_host, s_browse_host, sizeof(browse_host));
         uint16_t browse_port = s_browse_port;
-        BrowseResult* browse_out = s_browse_out;
         unlock();
-        if (browse && browse_out) {
-            run_browse_internal(browse_host, browse_port, browse_out, kBrowseMaxMs);
+        if (browse && s_ctx) {
+            run_browse_internal(browse_host, browse_port, &s_ctx->browse_result, kBrowseMaxMs);
             lock();
-            s_browse_done_ticket = browse_ticket;
+            if (!s_browse_cancel) s_browse_done_ticket = browse_ticket;
             s_browse_pending = false;
             s_browse_busy = false;
+            s_browse_cancel = false;
             unlock();
             log_stack_watermark("browse");
         }
@@ -872,6 +924,7 @@ void worker(void*) {
 
 void ensure_worker() {
     if (s_task || !s_worker_allowed) return;
+    if (!ensure_context()) return;
     // PSRAM stack, like the weather and HA workers: a resident internal-RAM
     // stack created this early fragments the internal heap enough that the
     // HTTPS server can't get its task stack (ESP_ERR_HTTPD_TASK).
@@ -891,6 +944,28 @@ void reset_slots_locked() {
             s_settings.sensors[i].source == perf::SensorSource::BacnetIp;
         s_slots[i].status.error = Error::NotRead;
     }
+}
+
+bool bacnet_endpoint_changed(const perf::SensorConfig& a, const perf::SensorConfig& b) {
+    return a.source != b.source || strncmp(a.host, b.host, perf::kHostMax) != 0 ||
+           a.port != b.port || a.bacnet_type != b.bacnet_type ||
+           a.bacnet_instance != b.bacnet_instance;
+}
+
+bool same_bacnet_identity(const perf::SensorConfig& a, const perf::SensorConfig& b) {
+    return a.bacnet_device_known == b.bacnet_device_known &&
+           (!a.bacnet_device_known || a.bacnet_device_instance == b.bacnet_device_instance) &&
+           strncmp(a.bacnet_object_name, b.bacnet_object_name, sizeof(a.bacnet_object_name)) == 0 &&
+           a.rom_known == b.rom_known &&
+           (!a.rom_known || memcmp(a.rom, b.rom, sizeof(a.rom)) == 0);
+}
+
+void clear_bacnet_identity(perf::SensorConfig& s) {
+    s.bacnet_device_known = false;
+    s.bacnet_device_instance = perf::kBacnetDeviceWildcard;
+    s.bacnet_object_name[0] = '\0';
+    s.rom_known = false;
+    memset(s.rom, 0, sizeof(s.rom));
 }
 
 }  // namespace
@@ -967,10 +1042,14 @@ perf::Invalid apply_settings(const perf::Settings& in, const bool sensor_edited[
     for (int i = 0; i < perf::kSlotCount; ++i) {
         perf::SensorConfig& s = next.sensors[i];
         const perf::SensorConfig& cur = s_settings.sensors[i];
+        if (s.source == perf::SensorSource::BacnetIp) {
+            if (bacnet_endpoint_changed(s, cur) && same_bacnet_identity(s, cur)) {
+                clear_bacnet_identity(s);
+            }
+        }
         if (sensor_edited[i] || !perf::same_source(s, cur)) {
             if (s.source != perf::SensorSource::BacnetIp) {
-                s.rom_known = false;
-                memset(s.rom, 0, sizeof(s.rom));
+                clear_bacnet_identity(s);
             }
         } else {
             s.rom_known = cur.rom_known;
@@ -1074,22 +1153,28 @@ bool test_blocking(const perf::SensorConfig& cfg, TestResult* out, uint32_t time
 
 static Error bacnet_read_property(BacnetClient& c, bacnet::ObjectType type, uint32_t instance,
                                   uint32_t prop, uint32_t array_index, bool has_array_index,
-                                  bacnet::Value* value, uint8_t* exception, uint8_t* error_class)
+                                  bacnet::Value* value, uint8_t* exception, uint8_t* error_class,
+                                  uint32_t deadline_ms)
 {
+    if (static_cast<int32_t>(deadline_ms - now_ms()) <= 0) return Error::Timeout;
     uint8_t invoke = ++s_bacnet_invoke;
     if (invoke == 0) invoke = ++s_bacnet_invoke;
-    uint8_t req[128];
+    if (!s_ctx) return Error::Protocol;
+    uint8_t* req = s_ctx->tx;
+    uint8_t* resp = s_ctx->rx;
     size_t req_len = 0;
     if (!bacnet::build_read_property(invoke, type, instance, prop, array_index, has_array_index,
-                                     req, sizeof(req), &req_len)) {
+                                     req, bacnet::kMaxFrame, &req_len)) {
         return Error::Protocol;
     }
-    uint8_t resp[bacnet::kMaxFrame];
     size_t resp_len = 0;
-    Error e = c.request(req, req_len, resp, sizeof(resp), &resp_len);
+    bacnet::ObjectId expected{type, instance};
+    Error e = c.request(req, req_len, invoke, kBacnetServiceReadProperty, expected, deadline_ms,
+                        resp, bacnet::kMaxFrame, &resp_len);
     if (e != Error::None) return e;
     bacnet::ErrorInfo info;
-    bacnet::Parse p = bacnet::parse_read_property_ack(resp, resp_len, invoke, prop, value, &info);
+    bacnet::Parse p = bacnet::parse_read_property_ack(resp, resp_len, invoke, prop, value, &info,
+                                                      &expected);
     if (p == bacnet::Parse::Ok) return Error::None;
     if (p == bacnet::Parse::Error) {
         if (exception) *exception = info.error_code;
@@ -1122,7 +1207,7 @@ bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uin
     // wildcard device for its object identifier first, then page Object_List.
     out->error = bacnet_read_property(c, bacnet::ObjectType::Device, bacnet::kDeviceWildcard,
                                       bacnet::PROP_OBJECT_IDENTIFIER, 0, false, &v,
-                                      &out->exception, &out->error_class);
+                                      &out->exception, &out->error_class, deadline);
     uint32_t device_instance = bacnet::kDeviceWildcard;
     if (out->error == Error::None && v.type == bacnet::ValueType::ObjectId) {
         device_instance = v.object.instance;
@@ -1133,19 +1218,19 @@ bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uin
     }
 
     if (bacnet_read_property(c, bacnet::ObjectType::Device, device_instance, bacnet::PROP_OBJECT_NAME,
-                             0, false, &v, &out->exception, &out->error_class) == Error::None &&
+                             0, false, &v, &out->exception, &out->error_class, deadline) == Error::None &&
         v.type == bacnet::ValueType::String) {
         strlcpy(out->device_name, v.str, sizeof(out->device_name));
     }
     if (bacnet_read_property(c, bacnet::ObjectType::Device, device_instance, bacnet::PROP_MODEL_NAME,
-                             0, false, &v, &out->exception, &out->error_class) == Error::None &&
+                             0, false, &v, &out->exception, &out->error_class, deadline) == Error::None &&
         v.type == bacnet::ValueType::String) {
         strlcpy(out->model_name, v.str, sizeof(out->model_name));
     }
 
     out->error = bacnet_read_property(c, bacnet::ObjectType::Device, device_instance,
                                       bacnet::PROP_OBJECT_LIST, 0, true, &v, &out->exception,
-                                      &out->error_class);
+                                      &out->error_class, deadline);
     if (out->error != Error::None || v.type != bacnet::ValueType::Unsigned) {
         if (out->error == Error::None) out->error = Error::Protocol;
         return finish();
@@ -1157,6 +1242,10 @@ bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uin
                               bacnet::PROP_UNITS, bacnet::PROP_RELIABILITY,
                               bacnet::PROP_STATUS_FLAGS, bacnet::PROP_DESCRIPTION};
     for (uint32_t idx = 1; idx <= scan_limit && out->count < kBrowseMaxResults; ++idx) {
+        if (browse_cancelled()) {
+            out->error = Error::Timeout;
+            return finish();
+        }
         if (static_cast<int32_t>(now_ms() - deadline) >= 0) {
             out->truncated = true;
             break;
@@ -1164,7 +1253,7 @@ bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uin
         out->scanned = idx;
         if (bacnet_read_property(c, bacnet::ObjectType::Device, device_instance,
                                  bacnet::PROP_OBJECT_LIST, idx, true, &v, &out->exception,
-                                 &out->error_class) != Error::None ||
+                                 &out->error_class, deadline) != Error::None ||
             v.type != bacnet::ValueType::ObjectId) {
             continue;
         }
@@ -1174,22 +1263,28 @@ bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uin
         }
         uint8_t invoke = ++s_bacnet_invoke;
         if (invoke == 0) invoke = ++s_bacnet_invoke;
-        uint8_t req[192];
+        if (!s_ctx || static_cast<int32_t>(deadline - now_ms()) <= 0) {
+            out->truncated = true;
+            break;
+        }
+        uint8_t* req = s_ctx->tx;
+        uint8_t* resp = s_ctx->rx;
+        bacnet::PropertyValue* vals = s_ctx->values;
         size_t req_len = 0;
         if (!bacnet::build_read_property_multiple(invoke, v.object.type, v.object.instance, props,
                                                   sizeof(props) / sizeof(props[0]), req,
-                                                  sizeof(req), &req_len)) {
+                                                  bacnet::kMaxFrame, &req_len)) {
             continue;
         }
-        uint8_t resp[bacnet::kMaxFrame];
         size_t resp_len = 0;
-        if (c.request(req, req_len, resp, sizeof(resp), &resp_len) != Error::None) continue;
-        bacnet::PropertyValue vals[8];
+        bacnet::ObjectId expected{v.object.type, v.object.instance};
+        if (c.request(req, req_len, invoke, kBacnetServiceReadPropertyMultiple, expected,
+                      deadline, resp, bacnet::kMaxFrame, &resp_len) != Error::None) continue;
         size_t nvals = 0;
         bacnet::ErrorInfo info;
         if (bacnet::parse_read_property_multiple_ack(resp, resp_len, invoke, vals,
-                                                     sizeof(vals) / sizeof(vals[0]), &nvals,
-                                                     &info) != bacnet::Parse::Ok) {
+                                                     8, &nvals, &info, &expected) !=
+            bacnet::Parse::Ok) {
             continue;
         }
         BrowseSensor& bs = out->sensors[out->count];
@@ -1275,7 +1370,7 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
     }
     s_browse_busy = true;
     s_browse_pending = true;
-    s_browse_out = out;
+    s_browse_cancel = false;
     strlcpy(s_browse_host, host ? host : "", sizeof(s_browse_host));
     s_browse_port = port;
     uint32_t ticket = ++s_browse_ticket;
@@ -1286,10 +1381,14 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
     while (now_ms() - start < timeout_ms) {
         lock();
         bool done = s_browse_done_ticket == ticket;
+        if (done && s_ctx) *out = s_ctx->browse_result;
         unlock();
         if (done) return true;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
+    lock();
+    if (s_browse_done_ticket != ticket) s_browse_cancel = true;
+    unlock();
     return false;
 }
 

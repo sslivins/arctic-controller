@@ -5220,7 +5220,7 @@ static esp_err_t perf_bacnet_browse_post_handler(httpd_req_t* req)
         send_json_error(req, "500 Internal Server Error", "Out of memory");
         return ESP_OK;
     }
-    if (!ext_temp::browse_blocking(host_buf, port_u, r, 8000)) {
+    if (!ext_temp::browse_blocking(host_buf, port_u, r, 25000)) {
         heap_caps_free(r);
         send_json_error(req, "504 Gateway Timeout", "BACnet browse did not finish");
         return ESP_OK;

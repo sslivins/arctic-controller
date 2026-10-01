@@ -18,7 +18,7 @@ const char* kNvsBacnetKey = "bacnet";
 constexpr uint8_t kBlobVersion = 1;
 constexpr uint8_t kBacnetExtVersion = 1;
 constexpr size_t kBacnetExtSlotSize = 1 + kHostMax + 2 + 1 + 4 + 1 + 4 + 41 + 1 + kRomLen;
-constexpr size_t kBacnetExtSize = 1 + kSlotCount * kBacnetExtSlotSize + 4;
+constexpr size_t kBacnetExtSize = 1 + 4 + kSlotCount * kBacnetExtSlotSize + 4;
 
 void put_u16(uint8_t*& p, uint16_t v) {
     *p++ = static_cast<uint8_t>(v >> 8);
@@ -339,9 +339,10 @@ bool deserialize(const uint8_t* buf, size_t len, Settings* out) {
     return true;
 }
 
-void serialize_bacnet_ext(const Settings& s, uint8_t* buf) {
+void serialize_bacnet_ext(const Settings& s, uint32_t primary_crc, uint8_t* buf) {
     uint8_t* p = buf;
     *p++ = kBacnetExtVersion;
+    put_u32(p, primary_crc);
     for (const auto& sensor : s.sensors) {
         *p++ = sensor.source == SensorSource::BacnetIp ? 1 : 0;
         memset(p, 0, kHostMax);
@@ -363,14 +364,16 @@ void serialize_bacnet_ext(const Settings& s, uint8_t* buf) {
     memcpy(p, &crc, sizeof(crc));
 }
 
-bool deserialize_bacnet_ext(const uint8_t* buf, size_t len, Settings* s) {
+bool deserialize_bacnet_ext(const uint8_t* buf, size_t len, uint32_t primary_crc, Settings* s) {
     if (!buf || len != kBacnetExtSize || buf[0] != kBacnetExtVersion) return false;
     uint32_t stored = 0;
     memcpy(&stored, buf + len - 4, sizeof(stored));
     if (esp_crc32_le(0, buf, static_cast<uint32_t>(len - 4)) != stored) return false;
     const uint8_t* p = buf + 1;
+    if (get_u32(p) != primary_crc) return false;
     Settings merged = *s;
-    for (auto& sensor : merged.sensors) {
+    for (size_t i = 0; i < kSlotCount; ++i) {
+        auto& sensor = merged.sensors[i];
         bool enabled = *p++ != 0;
         char host[kHostMax];
         memcpy(host, p, kHostMax);
@@ -389,7 +392,7 @@ bool deserialize_bacnet_ext(const uint8_t* buf, size_t len, Settings* s) {
         uint8_t rom[kRomLen];
         memcpy(rom, p, kRomLen);
         p += kRomLen;
-        if (!enabled) continue;
+        if (!enabled || sensor.source != SensorSource::HeatPump) continue;
         sensor.source = SensorSource::BacnetIp;
         strncpy(sensor.host, host, kHostMax);
         sensor.host[kHostMax - 1] = '\0';
@@ -428,7 +431,8 @@ Settings load() {
     len = sizeof(ext);
     err = nvs_get_blob(h, kNvsBacnetKey, ext, &len);
     nvs_close(h);
-    if (err == ESP_OK && !deserialize_bacnet_ext(ext, len, &s)) {
+    uint32_t primary_crc = esp_crc32_le(0, buf, static_cast<uint32_t>(sizeof(buf) - 4));
+    if (err == ESP_OK && !deserialize_bacnet_ext(ext, len, primary_crc, &s)) {
         ESP_LOGW(TAG, "Stored BACnet COP extension unreadable; using heat pump sensors for BACnet slots");
     }
     return s;
@@ -438,11 +442,12 @@ bool save(const Settings& s) {
     if (validate(s) != Invalid::None) return false;
     uint8_t buf[kBlobSize];
     serialize(s, buf);
+    uint32_t primary_crc = esp_crc32_le(0, buf, static_cast<uint32_t>(sizeof(buf) - 4));
     nvs_handle_t h;
     if (nvs_open(kNvsNamespace, NVS_READWRITE, &h) != ESP_OK) return false;
     esp_err_t err = nvs_set_blob(h, kNvsKey, buf, sizeof(buf));
     uint8_t ext[kBacnetExtSize];
-    serialize_bacnet_ext(s, ext);
+    serialize_bacnet_ext(s, primary_crc, ext);
     if (err == ESP_OK) err = nvs_set_blob(h, kNvsBacnetKey, ext, sizeof(ext));
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);

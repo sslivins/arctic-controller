@@ -72,7 +72,7 @@ bool closing(uint8_t* out, size_t cap, size_t* pos, uint8_t tag) {
 }
 
 bool begin(uint8_t invoke, uint8_t service, uint8_t* out, size_t cap, size_t* pos) {
-    if (cap < 8) return false;
+    if (cap < 10) return false;
     *pos = 0;
     out[(*pos)++] = kBvlcType;
     out[(*pos)++] = kBvlcOriginalUnicast;
@@ -409,7 +409,7 @@ bool build_read_property_multiple(uint8_t invoke, ObjectType type, uint32_t inst
 }
 
 Parse parse_read_property_ack(const uint8_t* buf, size_t len, uint8_t invoke, uint32_t property,
-                              Value* out, ErrorInfo* err) {
+                              Value* out, ErrorInfo* err, const ObjectId* expected_object) {
     Header h;
     Parse p = parse_header(buf, len, invoke, kServiceReadProperty, &h, err);
     if (p != Parse::Ok) return p;
@@ -419,6 +419,12 @@ Parse parse_read_property_ack(const uint8_t* buf, size_t len, uint8_t invoke, ui
     uint32_t prop = 0;
     if (!read_context_object(buf, total, &pos, 0, &oid) ||
         !read_context_uint(buf, total, &pos, 1, &prop)) {
+        return Parse::BadFrame;
+    }
+    if (expected_object &&
+        (oid.type != expected_object->type ||
+         (expected_object->instance != kDeviceWildcard &&
+          oid.instance != expected_object->instance))) {
         return Parse::BadFrame;
     }
     if (prop != property) return Parse::WrongService;
@@ -435,7 +441,7 @@ Parse parse_read_property_ack(const uint8_t* buf, size_t len, uint8_t invoke, ui
 
 Parse parse_read_property_multiple_ack(const uint8_t* buf, size_t len, uint8_t invoke,
                                        PropertyValue* out, size_t cap, size_t* count,
-                                       ErrorInfo* err) {
+                                       ErrorInfo* err, const ObjectId* expected_object) {
     *count = 0;
     Header h;
     Parse p = parse_header(buf, len, invoke, kServiceReadPropertyMultiple, &h, err);
@@ -445,6 +451,12 @@ Parse parse_read_property_multiple_ack(const uint8_t* buf, size_t len, uint8_t i
     while (pos < total) {
         ObjectId obj;
         if (!read_context_object(buf, total, &pos, 0, &obj) || pos >= total || !is_open(buf[pos], 1)) {
+            return Parse::BadFrame;
+        }
+        if (expected_object &&
+            (obj.type != expected_object->type ||
+             (expected_object->instance != kDeviceWildcard &&
+              obj.instance != expected_object->instance))) {
             return Parse::BadFrame;
         }
         ++pos;
@@ -457,6 +469,28 @@ Parse parse_read_property_multiple_ack(const uint8_t* buf, size_t len, uint8_t i
         ++pos;
     }
     return Parse::Ok;
+}
+
+bool frame_matches(const uint8_t* buf, size_t len, uint8_t invoke, uint8_t service) {
+    Header h;
+    ErrorInfo err;
+    Parse p = parse_header(buf, len, invoke, service, &h, &err);
+    return p == Parse::Ok || p == Parse::Error || p == Parse::Reject || p == Parse::Abort;
+}
+
+bool frame_matches_object(const uint8_t* buf, size_t len, uint8_t invoke, uint8_t service,
+                          const ObjectId& expected) {
+    Header h;
+    ErrorInfo err;
+    Parse p = parse_header(buf, len, invoke, service, &h, &err);
+    if (p == Parse::Error || p == Parse::Reject || p == Parse::Abort) return true;
+    if (p != Parse::Ok) return false;
+    size_t total = static_cast<uint16_t>((buf[2] << 8) | buf[3]);
+    size_t pos = h.pos;
+    ObjectId oid;
+    if (!read_context_object(buf, total, &pos, 0, &oid)) return false;
+    return oid.type == expected.type &&
+           (expected.instance == kDeviceWildcard || oid.instance == expected.instance);
 }
 
 const char* parse_name(Parse p) {

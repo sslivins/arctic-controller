@@ -3119,6 +3119,10 @@ paths:
                     type: string
                   model_name:
                     type: string
+                  device_instance:
+                    type: integer
+                    nullable: true
+                    description: BACnet Device object instance returned by the endpoint
                   total_objects:
                     type: integer
                     description: Object_List count claimed by the BACnet device
@@ -3146,7 +3150,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '504':
-          description: The test did not finish in time
+          description: The browse did not finish in time
           content:
             application/json:
               schema:
@@ -4108,7 +4112,7 @@ components:
   schemas:
     PerformanceSensorError:
       type: string
-      enum: [none, not_read, resolve, connect, timeout, protocol, exception, rejected, units, no_reading, out_of_range, sensor_changed, busy]
+      enum: [none, not_read, resolve, connect, timeout, protocol, exception, rejected, units, no_reading, out_of_range, sensor_changed, wrong_device, busy]
       description: |
         Result of the latest read. `resolve`: the host name didn't resolve.
         `connect`: nothing answered on that address and port. `exception`: the

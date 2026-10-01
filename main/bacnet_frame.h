@@ -121,11 +121,15 @@ bool build_read_property_multiple(uint8_t invoke, ObjectType type, uint32_t inst
                                   uint8_t* out, size_t cap, size_t* out_len);
 
 Parse parse_read_property_ack(const uint8_t* buf, size_t len, uint8_t invoke, uint32_t property,
-                              Value* out, ErrorInfo* err);
+                              Value* out, ErrorInfo* err, const ObjectId* expected_object = nullptr);
 
 Parse parse_read_property_multiple_ack(const uint8_t* buf, size_t len, uint8_t invoke,
                                        PropertyValue* out, size_t cap, size_t* count,
-                                       ErrorInfo* err);
+                                       ErrorInfo* err, const ObjectId* expected_object = nullptr);
+
+bool frame_matches(const uint8_t* buf, size_t len, uint8_t invoke, uint8_t service);
+bool frame_matches_object(const uint8_t* buf, size_t len, uint8_t invoke, uint8_t service,
+                          const ObjectId& expected);
 
 const char* parse_name(Parse p);
 uint32_t object_id_word(ObjectType type, uint32_t instance);

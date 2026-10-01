@@ -340,6 +340,20 @@ static void test_nvs_persistence() {
     CHECK(deserialize(primary, sizeof(primary), &rollback));
     CHECK(rollback.sensors[0].source == SensorSource::HeatPump);
 
+    Settings old_fw_reconfigured = rollback;
+    old_fw_reconfigured.flow_lpm_x10 = 420;
+    old_fw_reconfigured.sensors[0] = default_sensor();
+    serialize(old_fw_reconfigured, primary);
+    nvs_fake::seed_blob("perf", "cfg", std::vector<uint8_t>(primary, primary + sizeof(primary)));
+    std::vector<uint8_t> seeded;
+    CHECK(nvs_fake::peek_blob("perf", "cfg", &seeded));
+    CHECK(seeded == std::vector<uint8_t>(primary, primary + sizeof(primary)));
+    back = load();
+    CHECK(back.flow_lpm_x10 == 420);
+    CHECK(back.sensors[0].source == SensorSource::HeatPump);
+    CHECK(!back.sensors[0].bacnet_device_known);
+    CHECK(!back.sensors[0].rom_known);
+
     nvs_fake::seed_blob("perf", "bacnet", std::vector<uint8_t>(16, 0xAB));
     back = load();
     CHECK(back.sensors[0].source == SensorSource::HeatPump);
@@ -412,6 +426,8 @@ static void test_bacnet_build_read_property() {
                                       bacnet::PROP_OBJECT_LIST, 0, true, req, sizeof(req), &len));
     CHECK(req[15] == 0x19 && req[16] == bacnet::PROP_OBJECT_LIST);
     CHECK(req[17] == 0x29 && req[18] == 0x00);
+    CHECK(!bacnet::build_read_property(0x24, bacnet::ObjectType::AnalogInput, 3,
+                                       bacnet::PROP_PRESENT_VALUE, 0, false, req, 9, &len));
 }
 
 static void test_bacnet_parse_read_property_ack() {
@@ -455,6 +471,12 @@ static void test_bacnet_parse_read_property_ack() {
                                           &err) == bacnet::Parse::Incomplete);
     CHECK(bacnet::parse_read_property_ack(frame, pos, 0x23, bacnet::PROP_PRESENT_VALUE, &v, &err) ==
           bacnet::Parse::WrongInvoke);
+    bacnet::ObjectId expected{bacnet::ObjectType::AnalogInput, 3};
+    CHECK(bacnet::parse_read_property_ack(frame, pos, 0x22, bacnet::PROP_PRESENT_VALUE, &v, &err,
+                                          &expected) == bacnet::Parse::Ok);
+    expected.instance = 4;
+    CHECK(bacnet::parse_read_property_ack(frame, pos, 0x22, bacnet::PROP_PRESENT_VALUE, &v, &err,
+                                          &expected) == bacnet::Parse::BadFrame);
 }
 
 static void test_bacnet_parse_rpm_ack() {
@@ -486,6 +508,12 @@ static void test_bacnet_parse_rpm_ack() {
     CHECK(vals[0].property == bacnet::PROP_OBJECT_NAME);
     CHECK(std::strcmp(vals[0].value.str, "Supply") == 0);
     CHECK(vals[1].property == bacnet::PROP_UNITS && vals[1].value.u == 62);
+    bacnet::ObjectId expected{bacnet::ObjectType::AnalogInput, 7};
+    CHECK(bacnet::parse_read_property_multiple_ack(frame, pos, 0x30, vals, 4, &count, &err,
+                                                   &expected) == bacnet::Parse::Ok);
+    expected.instance = 8;
+    CHECK(bacnet::parse_read_property_multiple_ack(frame, pos, 0x30, vals, 4, &count, &err,
+                                                   &expected) == bacnet::Parse::BadFrame);
     frame[3] = (uint8_t)(pos + 1);
     CHECK(bacnet::parse_read_property_multiple_ack(frame, pos, 0x30, vals, 4, &count, &err) ==
           bacnet::Parse::Incomplete);

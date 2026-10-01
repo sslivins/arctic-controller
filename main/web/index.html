@@ -1261,29 +1261,26 @@
       const bacnet = s.source === "bacnet_ip";
       const network = modbus || bacnet;
       const float = perfIsFloat(s.value_type);
-      const browse = state.perfBrowses[slot];
       const badge = bacnet ? "BACnet/IP" : (modbus ? "Modbus TCP" : "Heat pump's own sensor");
-      const browseHtml = !bacnet ? "" : (browse?.running ? `<div class="perf-test"><span class="spinner-inline"></span> Finding sensors…</div>` :
-        browse?.failed ? `<div class="perf-test notice bad">${esc(browse.failed)}</div>` :
-        browse?.result ? `<div class="perf-test ok"><strong>${browse.result.sensors.length ? "Choose a sensor" : "No sensors found at this address"}</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed — enter the object number under Advanced.</div>` : ""}${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-rom-id="${esc(x.rom_id || "")}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} — ${x.available ? perfTemp(x.celsius) : "unavailable"}</button>`).join("")}</div>` : "");
+      const browseHtml = perfBrowseHtml(slot);
       return `<section class="card"><form data-form="perf-sensor" data-slot="${slot}">
         <div class="card-head"><h2>${esc(title)}</h2><span class="badge ${network ? "good" : ""}">${badge}</span></div>
         <div class="field"><label>Source</label><select name="source" data-perf="source">${perfOptions([["heat_pump", "Heat pump sensor"], ["modbus_tcp", "Modbus TCP"], ["bacnet_ip", "BACnet/IP"]], s.source)}</select></div>
         <div class="perf-modbus" ${network ? "" : "hidden"}>
-          <div class="field"><label>Device address (IP or hostname)</label><input name="host" maxlength="63" value="${esc(s.host || "")}" placeholder="e.g. thermux.local" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label>Device address (IP or hostname)</label><input name="host" data-perf="bacnet_identity" maxlength="63" value="${esc(s.host || "")}" placeholder="e.g. thermux.local" autocomplete="off" spellcheck="false"></div>
           <div class="grid grid-3 perf-nums">
-            <div class="field"><label>Port</label><input name="port" type="number" min="1" max="65535" value="${esc(s.port ?? (bacnet ? 47808 : 502))}"></div>
+            <div class="field"><label>Port</label><input name="port" data-perf="bacnet_identity" type="number" min="1" max="65535" value="${esc(s.port ?? (bacnet ? 47808 : 502))}"></div>
             <div class="field perf-modbus-only" ${modbus ? "" : "hidden"}><label>Unit ID</label><input name="unit_id" type="number" min="0" max="255" value="${esc(s.unit_id ?? 1)}"></div>
             <div class="field perf-modbus-only" ${modbus ? "" : "hidden"}><label>Register</label><input name="register" type="number" min="0" max="65535" value="${esc(s.register ?? 0)}"></div>
-            <div class="field perf-bacnet-only" ${bacnet ? "" : "hidden"}><label>Object instance</label><input name="object_instance" type="number" min="0" max="4194302" value="${esc(s.object_instance ?? "")}"></div>
+            <div class="field perf-bacnet-only" ${bacnet ? "" : "hidden"}><label>Object instance</label><input name="object_instance" data-perf="bacnet_identity" type="number" min="0" max="4194302" value="${esc(s.object_instance ?? "")}"></div>
           </div>
           <div class="perf-bacnet-only" ${bacnet ? "" : "hidden"} style="margin:10px 0">
-            <div class="field"><label>Object type</label><select name="object_type">${perfOptions([["analog_input", "Analog input"], ["analog_value", "Analog value"]], s.object_type || "analog_input")}</select></div>
+            <div class="field"><label>Object type</label><select name="object_type" data-perf="bacnet_identity">${perfOptions([["analog_input", "Analog input"], ["analog_value", "Analog value"]], s.object_type || "analog_input")}</select></div>
             <input type="hidden" name="device_instance" value="${esc(s.device_instance ?? "")}">
             <input type="hidden" name="object_name" value="${esc(s.object_name || "")}">
             <input type="hidden" name="rom_id" value="${esc(s.rom_id || "")}">
             <button class="btn" type="button" data-action="perf-browse-bacnet" data-slot="${slot}">Find sensors</button>
-            ${browseHtml}
+            <div id="perf-browse-${slot}">${browseHtml}</div>
           </div>
           <details class="ap-group perf-adv perf-modbus-only" ${modbus ? "" : "hidden"}><summary>Advanced</summary>
             <div class="grid grid-2">
@@ -1300,6 +1297,12 @@
           <button class="btn" type="button" data-action="perf-test" data-slot="${slot}" ${network ? "" : "hidden"}>Test sensor</button>
           <button class="btn primary" type="submit">Save</button></div>
       </form></section>`;
+    }
+    function perfBrowseHtml(slot) {
+      const browse = state.perfBrowses[slot];
+      return (browse?.running ? `<div class="perf-test"><span class="spinner-inline"></span> Finding sensors…</div>` :
+        browse?.failed ? `<div class="perf-test notice bad">${esc(browse.failed)}</div>` :
+        browse?.result ? `<div class="perf-test ok"><strong>${browse.result.sensors.length ? "Choose a sensor" : "No sensors found at this address"}</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed — enter the object number under Advanced.</div>` : ""}${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-rom-id="${esc(x.rom_id || "")}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} — ${x.available ? perfTemp(x.celsius) : "unavailable"}</button>`).join("")}</div>` : "");
     }
     function performanceSettings() {
       const p = state.perf;
@@ -2223,6 +2226,20 @@
           const regSelect = form.querySelector('[name="register_type"]');
           const switched = regSelect && result.register_type && result.register_type !== regSelect.value;
           if (switched) regSelect.value = result.register_type;
+          const stillSameBacnet =
+            form.querySelector('[name="source"]')?.value === "bacnet_ip" &&
+            String(form.querySelector('[name="host"]')?.value || "").trim() === String(sensor.host || "") &&
+            Number(form.querySelector('[name="port"]')?.value || 47808) === Number(sensor.port || 47808) &&
+            form.querySelector('[name="object_type"]')?.value === String(sensor.object_type || "analog_input") &&
+            String(form.querySelector('[name="object_instance"]')?.value || "") === String(sensor.object_instance ?? "");
+          if (result.ok && sensor.source === "bacnet_ip" && result.device_instance != null && stillSameBacnet) {
+            const deviceInst = form.querySelector('[name="device_instance"]');
+            const objectName = form.querySelector('[name="object_name"]');
+            const romId = form.querySelector('[name="rom_id"]');
+            if (deviceInst) deviceInst.value = String(result.device_instance);
+            if (objectName) objectName.value = result.object_name || "";
+            if (romId) romId.value = result.rom_id || "";
+          }
           state.perfTests[slot] = { result, switched };
         } catch (error) {
           state.perfTests[slot] = { failed: perfInvalidMessage(error) };
@@ -2235,19 +2252,23 @@
       if (action === "perf-browse-bacnet") {
         const slot = el.dataset.slot;
         const form = el.closest("form");
+        const box = () => form.querySelector(`#perf-browse-${slot}`);
         const data = new FormData(form);
         const host = String(data.get("host") || "").trim();
         const port = Number(data.get("port") || 47808);
         state.perfBrowses[slot] = { running: true };
-        render();
+        if (box()) box().innerHTML = perfBrowseHtml(slot);
+        el.disabled = true;
         try {
           state.perfBrowses[slot] = {
             result: await api("/api/performance/bacnet/browse", jsonOptions("POST", { host, port }))
           };
         } catch (error) {
           state.perfBrowses[slot] = { failed: perfInvalidMessage(error) };
+        } finally {
+          el.disabled = false;
+          if (box()) box().innerHTML = perfBrowseHtml(slot);
         }
-        render();
         return;
       }
       if (action === "perf-pick-bacnet") {
@@ -2384,9 +2405,17 @@
         form.querySelectorAll(".perf-modbus-only").forEach(x => x.hidden = !modbus);
         form.querySelectorAll(".perf-bacnet-only").forEach(x => x.hidden = !bacnet);
         form.querySelector('[data-action="perf-test"]').hidden = !network;
+        form.querySelector('[name="device_instance"]').value = "";
+        form.querySelector('[name="object_name"]').value = "";
+        form.querySelector('[name="rom_id"]').value = "";
         const port = form.querySelector('[name="port"]');
         if (port && bacnet) port.value = "47808";
         if (port && modbus) port.value = "502";
+      }
+      if (perfField === "bacnet_identity" && event.target.form?.querySelector('[name="source"]')?.value === "bacnet_ip") {
+        event.target.form.querySelector('[name="device_instance"]').value = "";
+        event.target.form.querySelector('[name="object_name"]').value = "";
+        event.target.form.querySelector('[name="rom_id"]').value = "";
       }
       if (perfField === "value_type") {
         const select = event.target.form.querySelector('select[name="no_reading"]');
