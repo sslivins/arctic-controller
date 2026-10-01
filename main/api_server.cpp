@@ -180,6 +180,7 @@ static esp_err_t perf_config_get_handler(httpd_req_t* req);
 static esp_err_t perf_config_put_handler(httpd_req_t* req);
 static esp_err_t perf_test_post_handler(httpd_req_t* req);
 static esp_err_t perf_bacnet_browse_post_handler(httpd_req_t* req);
+static esp_err_t perf_bacnet_discover_post_handler(httpd_req_t* req);
 static esp_err_t heatpump_power_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_mode_put_handler(httpd_req_t* req);
 static esp_err_t heatpump_setpoints_put_handler(httpd_req_t* req);
@@ -1090,6 +1091,14 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(perf_bacnet_browse_uri);
+
+    httpd_uri_t perf_bacnet_discover_uri = {
+        .uri = "/api/performance/bacnet/discover",
+        .method = HTTP_POST,
+        .handler = perf_bacnet_discover_post_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(perf_bacnet_discover_uri);
     
     // PUT /api/heatpump/power - Set power on/off
     httpd_uri_t heatpump_power_uri = {
@@ -5295,6 +5304,73 @@ static esp_err_t perf_bacnet_browse_post_handler(httpd_req_t* req)
         } else {
             send_chunk(req, "null", 4);
         }
+        send_chunk(req, "}", 1);
+    }
+    send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, NULL, 0);
+    heap_caps_free(r);
+    return ESP_OK;
+}
+
+static esp_err_t perf_bacnet_discover_post_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    if (req->content_len > 0) {
+        cJSON* root = perf_read_json_body(req, 128);
+        if (!root) return ESP_OK;
+        bool ok = cJSON_IsObject(root);
+        cJSON_Delete(root);
+        if (!ok) {
+            send_perf_invalid(req, "body");
+            return ESP_OK;
+        }
+    }
+    auto* r = (ext_temp::DiscoverResult*)heap_caps_calloc(1, sizeof(ext_temp::DiscoverResult),
+                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!r) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    if (!ext_temp::discover_blocking(r, 12000)) {
+        heap_caps_free(r);
+        send_json_error(req, "504 Gateway Timeout", "BACnet discovery did not finish");
+        return ESP_OK;
+    }
+    if (r->error == ext_temp::Error::Busy) {
+        heap_caps_free(r);
+        send_json_error(req, "409 Conflict", "Another BACnet operation is running");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+    auto send_json_string = [&](const char* s) -> bool {
+        cJSON* item = cJSON_CreateString(s ? s : "");
+        if (!item) return false;
+        char* text = cJSON_PrintUnformatted(item);
+        cJSON_Delete(item);
+        if (!text) return false;
+        bool ok = send_chunk(req, text, strlen(text));
+        free(text);
+        return ok;
+    };
+    char chunk[256];
+    int n = snprintf(chunk, sizeof(chunk), "{\"ok\":%s,\"error\":\"%s\",\"truncated\":%s,\"devices\":[",
+                     r->error == ext_temp::Error::None ? "true" : "false",
+                     ext_temp::error_name(r->error), r->truncated ? "true" : "false");
+    if (n > 0) send_chunk(req, chunk, (size_t)n);
+    for (size_t i = 0; i < r->count; ++i) {
+        const auto& d = r->devices[i];
+        if (i) send_chunk(req, ",", 1);
+        n = snprintf(chunk, sizeof(chunk), "{\"host\":\"%s\",\"port\":%u,\"device_instance\":%lu,"
+                     "\"vendor_id\":%lu,\"device_name\":",
+                     d.host, (unsigned)d.port, (unsigned long)d.device_instance,
+                     (unsigned long)d.vendor_id);
+        if (n > 0) send_chunk(req, chunk, (size_t)n);
+        send_json_string(d.device_name);
+        send_chunk(req, ",\"model_name\":", 14);
+        send_json_string(d.model_name);
         send_chunk(req, "}", 1);
     }
     send_chunk(req, "]}", 2);

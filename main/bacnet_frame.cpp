@@ -7,6 +7,7 @@ namespace {
 
 constexpr uint8_t kBvlcType = 0x81;
 constexpr uint8_t kBvlcOriginalUnicast = 0x0A;
+constexpr uint8_t kBvlcOriginalBroadcast = 0x0B;
 constexpr uint8_t kNpduVersion = 0x01;
 constexpr uint8_t kNpduExpectingReply = 0x04;
 constexpr uint8_t kConfirmedRequest = 0x00;
@@ -17,6 +18,8 @@ constexpr uint8_t kAbortPdu = 0x70;
 constexpr uint8_t kMaxSegmentsMaxApdu = 0x05;  // no segmentation accepted, max APDU 1476
 constexpr uint8_t kServiceReadProperty = 12;
 constexpr uint8_t kServiceReadPropertyMultiple = 14;
+constexpr uint8_t kServiceIAm = 0;
+constexpr uint8_t kServiceWhoIs = 8;
 constexpr uint32_t kArrayAll = 0xFFFFFFFFu;
 
 bool context_tag(uint8_t* out, size_t cap, size_t* pos, uint8_t tag, uint32_t value) {
@@ -406,6 +409,59 @@ bool build_read_property_multiple(uint8_t invoke, ObjectType type, uint32_t inst
     }
     if (!closing(out, cap, &pos, 1)) return false;
     return finish(out, pos, out_len);
+}
+
+bool build_who_is(uint8_t* out, size_t cap, size_t* out_len) {
+    if (cap < 8 || !out || !out_len) return false;
+    out[0] = kBvlcType;
+    out[1] = kBvlcOriginalBroadcast;
+    out[2] = 0;
+    out[3] = 8;
+    out[4] = kNpduVersion;
+    out[5] = 0;
+    out[6] = 0x10;  // unconfirmed request
+    out[7] = kServiceWhoIs;
+    *out_len = 8;
+    return true;
+}
+
+static bool read_app_uint_tag(const uint8_t* buf, size_t total, size_t* pos, uint8_t tag,
+                              uint32_t* out) {
+    if (*pos >= total || (buf[*pos] >> 4) != tag) return false;
+    size_t n = buf[(*pos)++] & 0x07;
+    if (n == 5) {
+        if (*pos >= total) return false;
+        n = buf[(*pos)++];
+    }
+    if (n == 0 || n > 4 || *pos + n > total) return false;
+    *out = read_be(buf + *pos, n);
+    *pos += n;
+    return true;
+}
+
+Parse parse_i_am(const uint8_t* buf, size_t len, IAm* out) {
+    if (!buf || !out || len < 12) return Parse::Incomplete;
+    if (buf[0] != kBvlcType ||
+        (buf[1] != kBvlcOriginalUnicast && buf[1] != kBvlcOriginalBroadcast)) {
+        return Parse::BadFrame;
+    }
+    uint16_t total = static_cast<uint16_t>((buf[2] << 8) | buf[3]);
+    if (total > len) return Parse::Incomplete;
+    if (total < 12 || buf[4] != kNpduVersion || (buf[5] & 0x28) != 0) return Parse::BadFrame;
+    if ((buf[6] & 0xF0) != 0x10 || buf[7] != kServiceIAm) return Parse::WrongService;
+    size_t pos = 8;
+    uint32_t obj = 0;
+    if (!read_app_uint_tag(buf, total, &pos, 12, &obj)) return Parse::BadFrame;
+    if ((obj >> 22) != static_cast<uint32_t>(ObjectType::Device)) return Parse::BadFrame;
+    IAm iam{};
+    iam.device_instance = obj & 0x3FFFFF;
+    if (!read_app_uint_tag(buf, total, &pos, 2, &iam.max_apdu) ||
+        !read_app_uint_tag(buf, total, &pos, 9, &iam.segmentation) ||
+        !read_app_uint_tag(buf, total, &pos, 2, &iam.vendor_id)) {
+        return Parse::BadFrame;
+    }
+    *out = iam;
+    return Parse::Ok;
 }
 
 Parse parse_read_property_ack(const uint8_t* buf, size_t len, uint8_t invoke, uint32_t property,

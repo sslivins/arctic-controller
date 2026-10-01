@@ -130,6 +130,22 @@ class TestSettingsWorkspace:
         expect(card.locator('input[name="object_instance"]')).to_have_value("3")
         expect(card.locator('select[name="object_type"]')).to_have_value("analog_input")
 
+    def test_performance_bacnet_discover_pick(self, dashboard_page: Page):
+        dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"127.0.0.1","port":47809,"device_instance":1234,"device_name":"Thermux Test","model_name":"Thermux","vendor_id":15}]}'))
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux Test","model_name":"Thermux","device_instance":1234,"sensors":[{"object_type":"analog_input","object_instance":3,"object_name":"Supply tank","celsius":21.4,"units":62,"reliability":0,"rom_id":"28FF6491631603A2"}]}'))
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        card.locator('select[name="source"]').select_option("bacnet_ip")
+        card.get_by_role("button", name="Find devices").click()
+        card.get_by_role("button", name=re.compile("Thermux Test")).click()
+        expect(card.locator('input[name="host"]')).to_have_value("127.0.0.1")
+        expect(card.locator('input[name="port"]')).to_have_value("47809")
+        expect(card.get_by_role("button", name=re.compile("Supply tank"))).to_be_visible()
+
     def test_performance_sensor_test_reports_connect_error(self, dashboard_page: Page):
         """Nothing listens on the controller's own port 1, so the test must
         come back with the friendly connection error rather than hang."""

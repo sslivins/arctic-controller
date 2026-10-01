@@ -384,6 +384,21 @@ bool wifi_mgr_get_ip_addr(char* buf, size_t buf_len)
     return true;
 }
 
+bool wifi_mgr_get_ip_info(uint32_t* ip_out, uint32_t* netmask_out)
+{
+    if (wifi_state.state != WIFI_MGR_STATE_CONNECTED || wifi_state.sta_netif == NULL ||
+        ip_out == NULL || netmask_out == NULL) {
+        return false;
+    }
+    esp_netif_ip_info_t info = {};
+    if (esp_netif_get_ip_info(wifi_state.sta_netif, &info) != ESP_OK || info.ip.addr == 0) {
+        return false;
+    }
+    *ip_out = info.ip.addr;
+    *netmask_out = info.netmask.addr;
+    return true;
+}
+
 int8_t wifi_mgr_get_rssi(void)
 {
     if (wifi_state.state != WIFI_MGR_STATE_CONNECTED) {

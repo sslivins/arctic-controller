@@ -22,6 +22,7 @@
 namespace ext_temp {
 
 bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms);
+bool run_discover_internal(DiscoverResult* out, uint32_t timeout_ms);
 
 namespace {
 
@@ -30,6 +31,8 @@ const char* TAG = "ext_temp";
 constexpr uint32_t kPollMs = 15000;
 constexpr uint32_t kIoTimeoutMs = 1500;
 constexpr uint32_t kBrowseMaxMs = 8000;
+constexpr uint32_t kDiscoverMaxMs = 5000;
+constexpr uint32_t kDiscoverListenMs = 3000;
 constexpr uint32_t kBrowseMaxObjects = 512;
 constexpr size_t kBrowseMaxResults = 64;
 // BACnet ReadPropertyMultiple parsing keeps a 1500-byte datagram plus a small
@@ -83,12 +86,18 @@ uint32_t s_browse_done_ticket = 0;
 char s_browse_host[perf::kHostMax] = {};
 uint16_t s_browse_port = 0;
 bool s_browse_cancel = false;
+bool s_discover_busy = false;
+bool s_discover_pending = false;
+uint32_t s_discover_ticket = 0;
+uint32_t s_discover_done_ticket = 0;
+bool s_discover_cancel = false;
 
 struct WorkerContext {
     uint8_t tx[bacnet::kMaxFrame];
     uint8_t rx[bacnet::kMaxFrame];
     bacnet::PropertyValue values[8];
     BrowseResult browse_result;
+    DiscoverResult discover_result;
 };
 
 WorkerContext* s_ctx = nullptr;
@@ -121,6 +130,13 @@ void unlock() { xSemaphoreGive(s_mutex); }
 bool browse_cancelled() {
     lock();
     bool cancelled = s_browse_cancel;
+    unlock();
+    return cancelled;
+}
+
+bool discover_cancelled() {
+    lock();
+    bool cancelled = s_discover_cancel;
     unlock();
     return cancelled;
 }
@@ -864,6 +880,21 @@ void worker(void*) {
         }
 
         lock();
+        bool discover = s_discover_pending;
+        uint32_t discover_ticket = s_discover_ticket;
+        unlock();
+        if (discover && s_ctx) {
+            run_discover_internal(&s_ctx->discover_result, kDiscoverMaxMs);
+            lock();
+            if (!s_discover_cancel) s_discover_done_ticket = discover_ticket;
+            s_discover_pending = false;
+            s_discover_busy = false;
+            s_discover_cancel = false;
+            unlock();
+            log_stack_watermark("discover");
+        }
+
+        lock();
         bool browse = s_browse_pending;
         uint32_t browse_ticket = s_browse_ticket;
         char browse_host[perf::kHostMax];
@@ -1350,6 +1381,130 @@ bool run_browse_internal(const char* host, uint16_t port, BrowseResult* out, uin
     return finish();
 }
 
+static bool discover_add(DiscoverResult* out, const char* host, uint16_t port,
+                         const bacnet::IAm& iam) {
+    for (size_t i = 0; i < out->count; ++i) {
+        const auto& d = out->devices[i];
+        if (d.port == port && d.device_instance == iam.device_instance &&
+            strcmp(d.host, host) == 0) {
+            return true;
+        }
+    }
+    if (out->count >= sizeof(out->devices) / sizeof(out->devices[0])) {
+        out->truncated = true;
+        return false;
+    }
+    DiscoverDevice& d = out->devices[out->count++];
+    strlcpy(d.host, host, sizeof(d.host));
+    d.port = port;
+    d.device_instance = iam.device_instance;
+    d.vendor_id = iam.vendor_id;
+    return true;
+}
+
+bool run_discover_internal(DiscoverResult* out, uint32_t timeout_ms)
+{
+    *out = {};
+    if (!network_up() || !s_ctx) {
+        out->error = Error::Connect;
+        return true;
+    }
+    uint32_t budget_ms = timeout_ms > 0 && timeout_ms < kDiscoverMaxMs ? timeout_ms : kDiscoverMaxMs;
+    const uint32_t deadline = now_ms() + budget_ms;
+    uint32_t ip = 0, mask = 0;
+    wifi_mgr_get_ip_info(&ip, &mask);
+
+    int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (fd < 0) {
+        out->error = Error::Connect;
+        return true;
+    }
+    int one = 1;
+    setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &one, sizeof(one));
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    sockaddr_in bind_addr = {};
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    bind_addr.sin_port = htons(bacnet::kDefaultPort);
+    if (bind(fd, reinterpret_cast<sockaddr*>(&bind_addr), sizeof(bind_addr)) != 0) {
+        bind_addr.sin_port = 0;
+        if (bind(fd, reinterpret_cast<sockaddr*>(&bind_addr), sizeof(bind_addr)) != 0) {
+            ::close(fd);
+            out->error = Error::Connect;
+            return true;
+        }
+    }
+
+    size_t who_len = 0;
+    if (!bacnet::build_who_is(s_ctx->tx, bacnet::kMaxFrame, &who_len)) {
+        ::close(fd);
+        out->error = Error::Protocol;
+        return true;
+    }
+    auto send_bcast = [&](uint32_t addr) {
+        sockaddr_in dst = {};
+        dst.sin_family = AF_INET;
+        dst.sin_port = htons(bacnet::kDefaultPort);
+        dst.sin_addr.s_addr = addr;
+        sendto(fd, s_ctx->tx, who_len, 0, reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
+    };
+    if (ip && mask) send_bcast(htonl(ntohl(ip) | ~ntohl(mask)));
+    send_bcast(htonl(INADDR_BROADCAST));
+
+    uint32_t listen_deadline = now_ms() + kDiscoverListenMs;
+    if (static_cast<int32_t>(listen_deadline - deadline) > 0) listen_deadline = deadline;
+    while (static_cast<int32_t>(listen_deadline - now_ms()) > 0) {
+        if (discover_cancelled()) {
+            out->error = Error::Timeout;
+            ::close(fd);
+            return true;
+        }
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd, &rfds);
+        uint32_t wait_ms = static_cast<uint32_t>(listen_deadline - now_ms());
+        if (wait_ms > 250) wait_ms = 250;
+        timeval tv = {static_cast<time_t>(wait_ms / 1000),
+                      static_cast<suseconds_t>((wait_ms % 1000) * 1000)};
+        int sel = select(fd + 1, &rfds, nullptr, nullptr, &tv);
+        if (sel <= 0) continue;
+        sockaddr_in src = {};
+        socklen_t slen = sizeof(src);
+        int n = recvfrom(fd, s_ctx->rx, bacnet::kMaxFrame, 0, reinterpret_cast<sockaddr*>(&src), &slen);
+        if (n <= 0) continue;
+        if (src.sin_addr.s_addr == ip) continue;
+        bacnet::IAm iam;
+        if (bacnet::parse_i_am(s_ctx->rx, static_cast<size_t>(n), &iam) != bacnet::Parse::Ok) {
+            continue;
+        }
+        char host[16] = {};
+        inet_ntop(AF_INET, &src.sin_addr, host, sizeof(host));
+        discover_add(out, host, ntohs(src.sin_port), iam);
+    }
+    ::close(fd);
+
+    for (size_t i = 0; i < out->count && static_cast<int32_t>(deadline - now_ms()) > 0; ++i) {
+        BacnetClient c;
+        if (c.open(out->devices[i].host, out->devices[i].port) != Error::None) continue;
+        bacnet::Value v;
+        uint8_t exc = 0, cls = 0;
+        if (bacnet_read_property_value(c, bacnet::ObjectType::Device, out->devices[i].device_instance,
+                                       bacnet::PROP_OBJECT_NAME, &v, &exc, &cls, deadline) ==
+                Error::None &&
+            v.type == bacnet::ValueType::String) {
+            strlcpy(out->devices[i].device_name, v.str, sizeof(out->devices[i].device_name));
+        }
+        if (bacnet_read_property_value(c, bacnet::ObjectType::Device, out->devices[i].device_instance,
+                                       bacnet::PROP_MODEL_NAME, &v, &exc, &cls, deadline) ==
+                Error::None &&
+            v.type == bacnet::ValueType::String) {
+            strlcpy(out->devices[i].model_name, v.str, sizeof(out->devices[i].model_name));
+        }
+    }
+    out->error = Error::None;
+    return true;
+}
+
 bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms)
 {
     *out = {};
@@ -1363,7 +1518,7 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
         return true;
     }
     lock();
-    if (s_browse_busy) {
+    if (s_browse_busy || s_discover_busy) {
         unlock();
         out->error = Error::Busy;
         return true;
@@ -1388,6 +1543,46 @@ bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_
     }
     lock();
     if (s_browse_done_ticket != ticket) s_browse_cancel = true;
+    unlock();
+    return false;
+}
+
+bool discover_blocking(DiscoverResult* out, uint32_t timeout_ms)
+{
+    *out = {};
+    if (!s_mutex) {
+        out->error = Error::Busy;
+        return true;
+    }
+    ensure_worker();
+    if (!s_task) {
+        out->error = Error::Busy;
+        return true;
+    }
+    lock();
+    if (s_discover_busy || s_browse_busy) {
+        unlock();
+        out->error = Error::Busy;
+        return true;
+    }
+    s_discover_busy = true;
+    s_discover_pending = true;
+    s_discover_cancel = false;
+    uint32_t ticket = ++s_discover_ticket;
+    if (ticket == 0) ticket = ++s_discover_ticket;
+    unlock();
+    xTaskNotifyGive(s_task);
+    uint32_t start = now_ms();
+    while (now_ms() - start < timeout_ms) {
+        lock();
+        bool done = s_discover_done_ticket == ticket;
+        if (done && s_ctx) *out = s_ctx->discover_result;
+        unlock();
+        if (done) return true;
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    lock();
+    if (s_discover_done_ticket != ticket) s_discover_cancel = true;
     unlock();
     return false;
 }

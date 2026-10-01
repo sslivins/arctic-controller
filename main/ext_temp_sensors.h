@@ -99,6 +99,22 @@ struct BrowseResult {
     bool truncated;
 };
 
+struct DiscoverDevice {
+    char host[16];
+    uint16_t port;
+    uint32_t device_instance;
+    uint32_t vendor_id;
+    char device_name[41];
+    char model_name[41];
+};
+
+struct DiscoverResult {
+    Error error;
+    DiscoverDevice devices[16];
+    size_t count;
+    bool truncated;
+};
+
 // Loads settings and, when `allow_worker` and a sensor needs it, starts the
 // worker. Call once at boot, after NVS.
 void init(bool allow_worker);
@@ -131,5 +147,6 @@ bool test_result(uint32_t ticket, TestResult* out);
 bool test_blocking(const perf::SensorConfig& cfg, TestResult* out, uint32_t timeout_ms);
 
 bool browse_blocking(const char* host, uint16_t port, BrowseResult* out, uint32_t timeout_ms);
+bool discover_blocking(DiscoverResult* out, uint32_t timeout_ms);
 
 }  // namespace ext_temp

@@ -430,6 +430,31 @@ static void test_bacnet_build_read_property() {
                                        bacnet::PROP_PRESENT_VALUE, 0, false, req, 9, &len));
 }
 
+static void test_bacnet_who_is_i_am() {
+    uint8_t frame[64];
+    size_t len = 0;
+    CHECK(bacnet::build_who_is(frame, sizeof(frame), &len));
+    const uint8_t who_is[] = {0x81, 0x0B, 0x00, 0x08, 0x01, 0x00, 0x10, 0x08};
+    CHECK(len == sizeof(who_is));
+    CHECK(std::memcmp(frame, who_is, sizeof(who_is)) == 0);
+    CHECK(!bacnet::build_who_is(frame, 7, &len));
+
+    const uint8_t i_am[] = {
+        0x81, 0x0B, 0x00, 0x14, 0x01, 0x00, 0x10, 0x00,
+        0xC4, 0x02, 0x00, 0x04, 0xD2,  // device 1234
+        0x22, 0x05, 0xC4,              // max APDU 1476
+        0x91, 0x03,                    // segmented-both
+        0x21, 0x0F                     // vendor 15
+    };
+    bacnet::IAm out;
+    CHECK(bacnet::parse_i_am(i_am, sizeof(i_am), &out) == bacnet::Parse::Ok);
+    CHECK(out.device_instance == 1234);
+    CHECK(out.max_apdu == 1476);
+    CHECK(out.segmentation == 3);
+    CHECK(out.vendor_id == 15);
+    CHECK(bacnet::parse_i_am(i_am, sizeof(i_am) - 1, &out) == bacnet::Parse::Incomplete);
+}
+
 static void test_bacnet_parse_read_property_ack() {
     uint8_t frame[128];
     size_t pos = 0;
@@ -743,6 +768,7 @@ int main() {
         {"build_read", test_build_read},
         {"parse_read", test_parse_read},
         {"bacnet_build_read_property", test_bacnet_build_read_property},
+        {"bacnet_who_is_i_am", test_bacnet_who_is_i_am},
         {"bacnet_parse_read_property_ack", test_bacnet_parse_read_property_ack},
         {"bacnet_parse_rpm_ack", test_bacnet_parse_rpm_ack},
         {"median_window", test_median_window},

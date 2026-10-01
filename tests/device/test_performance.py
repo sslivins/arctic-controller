@@ -324,6 +324,12 @@ def _set_perf_entry(device: DeviceClient, field_tag: str, value: str) -> None:
                       lambda: not device.has_widget(tag="perf_entry"), timeout=5.0)
 
 
+def _pick_perf_source(device: DeviceClient, source_tag: str) -> None:
+    device.click(tag="perf_source_row")
+    assert device.wait_for_widget(tag=source_tag, timeout=5.0)
+    device.click(tag=source_tag)
+
+
 # ---------------------------------------------------------------------------
 # API contract
 # ---------------------------------------------------------------------------
@@ -497,6 +503,20 @@ class TestSensorTest:
         assert names["Faulted sensor"]["reliability"] == 1
         assert body["total_objects"] == 4
         assert body["truncated"] is False
+
+    def test_bacnet_discover_finds_fake_device(self, device: DeviceClient, bacnet_fake):
+        _host, port = bacnet_fake
+        r = device.session.post(_url(device, "/api/performance/bacnet/discover"),
+                                json={}, timeout=15)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True, body
+        matches = [
+            d for d in body["devices"]
+            if d.get("device_instance") == 1234 and int(d.get("port", 0)) == port
+        ]
+        assert matches, body
+        assert matches[0]["device_name"] == "Thermux Test"
 
     def test_bacnet_browse_huge_object_list_is_bounded(self, device: DeviceClient,
                                                        huge_bacnet_fake):
@@ -842,7 +862,7 @@ class TestScreen:
         device.click(tag="perf_sensor_supply")
         assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
 
-        device.click(tag="perf_src_bacnet")
+        _pick_perf_source(device, "perf_src_bacnet")
         assert device.wait_for_widget(tag="perf_bacnet_browse", timeout=5.0)
         _set_perf_entry(device, "perf_host", host)
         _set_perf_entry(device, "perf_port", str(port))
@@ -865,12 +885,50 @@ class TestScreen:
                           lambda: _screen_text_contains(device, "Supply tank"),
                           timeout=5.0)
 
+    def test_editor_bacnet_discover_pick_device_then_sensor(self, device: DeviceClient, bacnet_fake):
+        r = _put_config(device, {"sensors": _heat_pump_sensors()})
+        assert r.status_code == 200, r.text
+        host, port = bacnet_fake
+        _open_perf_screen(device)
+        device.click(tag="perf_sensor_supply")
+        assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
+
+        _pick_perf_source(device, "perf_src_bacnet")
+        assert device.wait_until("BACnet discovery finds fake",
+                                 lambda: _screen_text_contains(device, "Thermux Test"),
+                                 timeout=20.0, poll=0.5)
+        device.click(label_contains="Thermux Test")
+        assert device.wait_until("BACnet sensor list shows Supply tank",
+                                 lambda: _screen_text_contains(device, "Supply tank"),
+                                 timeout=20.0, poll=0.5)
+        device.click(label_contains="Supply tank")
+        device.click(tag="perf_editor_save")
+        device.wait_until("editor closed after BACnet discovery save",
+                          lambda: not device.has_widget(tag="perf_editor"), timeout=5.0)
+
+        saved = _get_config(device)["sensors"]["supply"]
+        assert saved["source"] == "bacnet_ip"
+        assert saved["host"] == host
+        assert saved["port"] == port
+        assert saved["object_instance"] == 3
+        assert saved["device_instance"] == 1234
+
+    def test_editor_bacnet_manual_mode(self, device: DeviceClient, bacnet_fake):
+        _open_perf_screen(device)
+        device.click(tag="perf_sensor_supply")
+        assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
+        _pick_perf_source(device, "perf_src_bacnet")
+        assert device.wait_for_widget(tag="perf_bacnet_manual", timeout=20.0)
+        device.click(tag="perf_bacnet_manual")
+        assert device.wait_for_widget(tag="perf_host", timeout=5.0)
+        device.click(tag="perf_editor_cancel")
+
     def test_editor_switches_back_to_heat_pump(self, device: DeviceClient, fake):
         _configure_both(device, fake)
         _open_perf_screen(device)
         device.click(tag="perf_sensor_return")
         assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
-        device.click(tag="perf_src_heat_pump")
+        _pick_perf_source(device, "perf_src_heat_pump")
         device.wait_until("Modbus fields hidden",
                           lambda: not device.has_widget(tag="perf_host"), timeout=3.0)
         device.click(tag="perf_editor_save")

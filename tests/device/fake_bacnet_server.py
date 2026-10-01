@@ -31,6 +31,8 @@ PROP_STATUS_FLAGS = 111
 PROP_UNITS = 117
 SVC_RP = 12
 SVC_RPM = 14
+SVC_I_AM = 0
+SVC_WHO_IS = 8
 UNITS_C = 62
 UNITS_F = 64
 
@@ -145,6 +147,22 @@ def bvlc(apdu: bytes) -> bytes:
     body = b"\x01\x00" + apdu
     total = len(body) + 4
     return b"\x81\x0a" + total.to_bytes(2, "big") + body
+
+
+def bvlc_broadcast(apdu: bytes) -> bytes:
+    body = b"\x01\x00" + apdu
+    total = len(body) + 4
+    return b"\x81\x0b" + total.to_bytes(2, "big") + body
+
+
+def i_am(device_instance: int, vendor_id: int = 15) -> bytes:
+    return bvlc_broadcast(
+        bytes([0x10, SVC_I_AM]) +
+        app_oid(OBJ_DEVICE, device_instance) +
+        app_unsigned(1476) +
+        app_enum(3) +
+        app_unsigned(vendor_id)
+    )
 
 
 def error_reply(invoke: int, svc: int, error_class: int = 1, error_code: int = 31) -> bytes:
@@ -268,34 +286,52 @@ class FakeBacnetServer:
 
     def serve_forever(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         try:
             sock.bind((self.host, self.port))
         except OSError as exc:
             raise SystemExit(f"failed to bind UDP {self.host}:{self.port}: {exc}") from exc
         self.port = sock.getsockname()[1]
         sock.setblocking(False)
+        discover_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        discover_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        discover_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            discover_sock.bind(("0.0.0.0", 47808))
+        except OSError as exc:
+            sock.close()
+            raise SystemExit(f"failed to bind UDP 0.0.0.0:47808 for discovery: {exc}") from exc
+        discover_sock.setblocking(False)
         print(f"fake BACnet server listening on {self.host}:{self.port}", flush=True)
         try:
             while True:
-                readable, _, _ = select.select([sock], [], [], 0.2)
+                readable, _, _ = select.select([sock, discover_sock], [], [], 0.2)
                 if not readable:
                     continue
-                data, addr = sock.recvfrom(2048)
-                if self.drop:
-                    continue
-                try:
-                    invoke, svc, payload = parse_request(data)
-                    if svc == SVC_RP:
-                        reply = self.handle_rp(invoke, payload)
-                    elif svc == SVC_RPM:
-                        reply = self.handle_rpm(invoke, payload)
-                    else:
+                for ready in readable:
+                    data, addr = ready.recvfrom(2048)
+                    if self.drop:
                         continue
-                    sock.sendto(reply, addr)
-                except Exception as exc:  # keep the fake alive for malformed probes
-                    print(f"ignored BACnet packet from {addr}: {exc}", flush=True)
+                    try:
+                        if ready is discover_sock:
+                            if (len(data) >= 8 and data[0] == 0x81 and data[4:8] == b"\x01\x00\x10\x08"):
+                                reply = i_am(self.device_instance)
+                                sock.sendto(reply, ("255.255.255.255", 47808))
+                                sock.sendto(reply, addr)
+                            continue
+                        invoke, svc, payload = parse_request(data)
+                        if svc == SVC_RP:
+                            reply = self.handle_rp(invoke, payload)
+                        elif svc == SVC_RPM:
+                            reply = self.handle_rpm(invoke, payload)
+                        else:
+                            continue
+                        sock.sendto(reply, addr)
+                    except Exception as exc:  # keep the fake alive for malformed probes
+                        print(f"ignored BACnet packet from {addr}: {exc}", flush=True)
         finally:
             sock.close()
+            discover_sock.close()
 
 
 def main() -> None:

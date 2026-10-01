@@ -3158,6 +3158,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/performance/bacnet/discover:
+    post:
+      tags:
+      - HeatPump
+      summary: Discover BACnet/IP devices
+      description: |
+        Sends BACnet Who-Is on the controller's own Wi-Fi subnet and on the
+        limited broadcast address, then returns up to 16 I-Am responders. Device
+        names and model names are read directly from each responder when time
+        remains. Discovery is local-subnet only; BBMD, foreign-device
+        registration, and routed BACnet discovery are not supported.
+      operationId: discoverBacnetPerformanceDevices
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '200':
+          description: Discovery finished; check `ok`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  error:
+                    $ref: '#/components/schemas/PerformanceSensorError'
+                  truncated:
+                    type: boolean
+                    description: True when more than 16 devices responded
+                  devices:
+                    type: array
+                    maxItems: 16
+                    items:
+                      type: object
+                      properties:
+                        host:
+                          type: string
+                          description: Source IPv4 address from the I-Am response
+                        port:
+                          type: integer
+                          minimum: 1
+                          maximum: 65535
+                          description: Source UDP port from the I-Am response
+                        device_instance:
+                          type: integer
+                          minimum: 0
+                          maximum: 4194302
+                        device_name:
+                          type: string
+                        model_name:
+                          type: string
+                        vendor_id:
+                          type: integer
+        '409':
+          description: Another BACnet browse or discovery is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Discovery did not finish in time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/heatpump/demo:
     patch:
       tags:

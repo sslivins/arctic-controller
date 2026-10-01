@@ -82,10 +82,11 @@ The controller talks to the heat pump through the shared
 
 COP supply/return temperatures can use the heat pump's own sensors or external
 Modbus TCP / BACnet/IP temperature sensors. BACnet/IP support is direct unicast
-to the device's own socket on the same routed IP network; it does not use Who-Is
-discovery, BBMD/foreign-device routing, routed NPDU source/destination fields, or
-SubscribeCOV. The controller binds saved BACnet sensors to the Device instance
-and object instance, with the Thermux ROM ID used when available.
+to the device's own socket on the same routed IP network, with local-subnet
+Who-Is/I-Am discovery to help pick the device. It does not use BBMD/foreign-device
+routing, routed NPDU source/destination fields, or SubscribeCOV. The controller
+binds saved BACnet sensors to the Device instance and object instance, with the
+Thermux ROM ID used when available.
 
 ### Control
 - Working mode and the cooling and hot-water setpoints, from the device, web UI,

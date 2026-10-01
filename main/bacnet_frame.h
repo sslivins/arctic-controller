@@ -90,6 +90,13 @@ struct PropertyValue {
     Value value{};
 };
 
+struct IAm {
+    uint32_t device_instance = 0;
+    uint32_t max_apdu = 0;
+    uint32_t segmentation = 0;
+    uint32_t vendor_id = 0;
+};
+
 class Writer {
 public:
     Writer(uint8_t* buf, size_t cap) : buf_(buf), cap_(cap) {}
@@ -119,6 +126,9 @@ bool build_read_property(uint8_t invoke, ObjectType type, uint32_t instance, uin
 bool build_read_property_multiple(uint8_t invoke, ObjectType type, uint32_t instance,
                                   const uint32_t* properties, size_t property_count,
                                   uint8_t* out, size_t cap, size_t* out_len);
+
+bool build_who_is(uint8_t* out, size_t cap, size_t* out_len);
+Parse parse_i_am(const uint8_t* buf, size_t len, IAm* out);
 
 Parse parse_read_property_ack(const uint8_t* buf, size_t len, uint8_t invoke, uint32_t property,
                               Value* out, ErrorInfo* err, const ObjectId* expected_object = nullptr);
