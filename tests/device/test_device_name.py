@@ -81,9 +81,12 @@ class TestDeviceNameSettings:
         assert device.wait_for_widget(tag="device_name_settings_value", timeout=5.0)
 
         value = device.find_widget(tag="device_name_settings_value")
+        row = device.find_widget(tag="settings_device_name")
         assert value is not None
+        assert row is not None
         assert value.text == "Not set"
         assert "Up to 30 characters" not in value.text
+        assert value.x + value.w <= row.x + row.w - 45
 
         device.click(tag="settings_close")
         assert device.wait_for_widget(tag="settings", timeout=5.0)
@@ -94,8 +97,11 @@ class TestDeviceNameSettings:
         assert device.wait_for_widget(tag="device_name_settings_value", timeout=5.0)
 
         value = device.find_widget(tag="device_name_settings_value")
+        row = device.find_widget(tag="settings_device_name")
         assert value is not None
+        assert row is not None
         assert value.text == NAME
+        assert value.x + value.w <= row.x + row.w - 45
 
     def test_settings_row_value_stays_single_line_for_max_length_name(
         self, device: DeviceClient

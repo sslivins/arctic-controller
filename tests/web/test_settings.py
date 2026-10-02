@@ -1,5 +1,6 @@
 """Tests for the settings workspace."""
 
+import json
 import re
 
 from playwright.sync_api import Page, expect
@@ -16,6 +17,19 @@ def open_settings(page: Page, section: str):
     # that was still spinning rather than one that was genuinely missing.
     page.locator(".settings-layout .spinner").wait_for(state="detached",
                                                        timeout=30000)
+
+
+def perf_config(supply=None, return_=None):
+    hp = {"source": "heat_pump", "host": "", "port": 502, "unit_id": 1,
+          "register": 0, "register_type": "input", "object_type": "analog_input",
+          "object_instance": None, "value_type": "int16", "scale": 0.01,
+          "no_reading": "0x8000", "device_instance": None, "device_name": None,
+          "object_name": None, "rom_id": None}
+    return {"flow_lpm": 40, "fluid": "water", "glycol_pct": 0,
+            "limits": {"flow_min_lpm": 1, "flow_max_lpm": 300, "glycol_max_pct": 60,
+                       "glycol_step_pct": 5},
+            "status": {},
+            "sensors": {"supply": supply or dict(hp), "return": return_ or dict(hp)}}
 
 
 class TestSettingsWorkspace:
@@ -162,6 +176,61 @@ class TestSettingsWorkspace:
         expect(card.locator('input[name="host"]')).to_have_value("127.0.0.1")
         expect(card.locator('input[name="port"]')).to_have_value("47809")
         expect(card.get_by_role("button", name=re.compile("Supply tank"))).to_be_visible()
+
+    def test_performance_bacnet_draft_survives_discovery_pick_and_save(self, dashboard_page: Page):
+        current = perf_config()
+        saved_payloads = []
+
+        def performance_config(route):
+            nonlocal current
+            if route.request.method == "PUT":
+                body = route.request.post_data_json()
+                saved_payloads.append(body)
+                sensor = body["sensors"]["supply"]
+                current = perf_config(supply={**current["sensors"]["supply"], **sensor})
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(current))
+
+        dashboard_page.route("**/api/performance/config", performance_config)
+        dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"192.168.1.205","port":47808,"device_instance":205,"device_name":"Thermux Spare","model_name":"Thermux","vendor_id":15}]}'))
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux Spare","model_name":"Thermux","device_instance":205,"sensors":[{"object_type":"analog_input","object_instance":4,"object_name":"Sensor B","celsius":21.8,"units":62,"reliability":0,"rom_id":"28FF6491631603A2"}],"truncated":false}'))
+
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        card.locator('select[name="source"]').select_option("bacnet_ip")
+
+        expect(card.locator('select[name="source"]')).to_have_value("bacnet_ip")
+        pick_device = card.get_by_role("button", name=re.compile("Thermux Spare"))
+        expect(pick_device).to_be_visible(timeout=10000)
+        assert pick_device.is_visible()
+        assert card.locator("#perf-discover-supply").is_visible()
+
+        pick_device.click()
+        expect(card.get_by_text(re.compile(r"Device.*Thermux Spare"))).to_be_visible()
+        sensor = card.get_by_role("button", name=re.compile("Sensor B"))
+        expect(sensor).to_be_visible()
+        assert sensor.is_visible()
+
+        sensor.click()
+        expect(card.get_by_text(re.compile(r"Device.*Thermux Spare"))).to_be_visible()
+        expect(card.get_by_text(re.compile(r"Sensor.*Sensor B"))).to_be_visible()
+        expect(card.get_by_role("button", name="Test sensor")).to_be_visible()
+
+        card.get_by_role("button", name="Save").click()
+        expect.poll(lambda: len(saved_payloads)).to_be(1)
+        saved = saved_payloads[0]["sensors"]["supply"]
+        assert saved["source"] == "bacnet_ip"
+        assert saved["host"] == "192.168.1.205"
+        assert saved["port"] == 47808
+        assert saved["device_instance"] == 205
+        assert saved["device_name"] == "Thermux Spare"
+        assert saved["object_type"] == "analog_input"
+        assert saved["object_instance"] == 4
+        assert saved["object_name"] == "Sensor B"
+        assert saved["rom_id"] == "28FF6491631603A2"
 
     def test_performance_sensor_test_reports_connect_error(self, dashboard_page: Page):
         """Nothing listens on the controller's own port 1, so the test must
