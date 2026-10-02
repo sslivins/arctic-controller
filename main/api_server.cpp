@@ -4722,6 +4722,11 @@ static cJSON* perf_sensor_json(const perf::SensorConfig& s)
     } else {
         cJSON_AddNullToObject(o, "device_instance");
     }
+    if (s.bacnet_device_name[0]) {
+        cJSON_AddStringToObject(o, "device_name", s.bacnet_device_name);
+    } else {
+        cJSON_AddNullToObject(o, "device_name");
+    }
     if (s.bacnet_object_name[0]) {
         cJSON_AddStringToObject(o, "object_name", s.bacnet_object_name);
     } else {
@@ -4807,6 +4812,15 @@ static const char* perf_sensor_merge(const cJSON* o, perf::SensorConfig* s)
         } else {
             s->bacnet_device_known = true;
             s->bacnet_device_instance = (uint32_t)v->valuedouble;
+        }
+    }
+    if ((v = cJSON_GetObjectItem(o, "device_name"))) {
+        if (cJSON_IsNull(v)) {
+            s->bacnet_device_name[0] = '\0';
+        } else if (!cJSON_IsString(v) || strlen(v->valuestring) >= perf::kBacnetDeviceNameMax) {
+            return "device_name";
+        } else {
+            strlcpy(s->bacnet_device_name, v->valuestring, sizeof(s->bacnet_device_name));
         }
     }
     if ((v = cJSON_GetObjectItem(o, "object_name"))) {

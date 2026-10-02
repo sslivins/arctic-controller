@@ -67,6 +67,12 @@ struct Editor {
     lv_obj_t* unit_val;
     lv_obj_t* reg_col;
     lv_obj_t* reg_val;
+    lv_obj_t* device_summary;
+    lv_obj_t* device_summary_text;
+    lv_obj_t* sensor_summary;
+    lv_obj_t* sensor_summary_text;
+    lv_obj_t* adv_row;
+    lv_obj_t* regtype_col;
     lv_obj_t* adv_summary;
     lv_obj_t* adv_chevron;
     lv_obj_t* adv_body;
@@ -106,6 +112,7 @@ struct Editor {
     volatile bool discover_done;
     volatile bool discover_running;
     bool manual_mode;
+    bool manual_object_mode;
 };
 
 struct TextEntry {
@@ -180,6 +187,7 @@ static void open_editor(int slot);
 static void close_editor(void);
 static void open_text_entry(Field f);
 static void close_text_entry(void);
+static void editor_changed(void);
 
 static void free_browse_result_if_idle(void)
 {
@@ -202,6 +210,7 @@ static void clear_editor_bacnet_identity()
     perf::SensorConfig& s = s_state.editor.ed;
     s.bacnet_device_known = false;
     s.bacnet_device_instance = perf::kBacnetDeviceWildcard;
+    s.bacnet_device_name[0] = '\0';
     s.bacnet_object_name[0] = '\0';
     s.rom_known = false;
     memset(s.rom, 0, sizeof(s.rom));
@@ -489,6 +498,7 @@ static bool sensor_differs(const perf::SensorConfig& a, const perf::SensorConfig
            a.scale_exp != b.scale_exp || a.no_reading != b.no_reading ||
            a.bacnet_device_known != b.bacnet_device_known ||
            (a.bacnet_device_known && a.bacnet_device_instance != b.bacnet_device_instance) ||
+           strncmp(a.bacnet_device_name, b.bacnet_device_name, sizeof(a.bacnet_device_name)) != 0 ||
            strncmp(a.bacnet_object_name, b.bacnet_object_name, sizeof(a.bacnet_object_name)) != 0;
 }
 
@@ -958,6 +968,70 @@ static void back_btn_cb(lv_event_t* e)
 // Sensor editor
 // ============================================================================
 
+
+static void discover_btn_cb(lv_event_t*);
+static void browse_btn_cb(lv_event_t*);
+
+static void bacnet_change_device_cb(lv_event_t*)
+{
+    Editor& ed = s_state.editor;
+    if (ed.ed.source != perf::SensorSource::BacnetIp) return;
+    clear_editor_bacnet_identity();
+    ed.ed.bacnet_instance = perf::kBacnetUnsetInstance;
+    ed.manual_mode = false;
+    ed.manual_object_mode = false;
+    editor_changed();
+    discover_btn_cb(nullptr);
+}
+
+static void bacnet_change_sensor_cb(lv_event_t*)
+{
+    Editor& ed = s_state.editor;
+    if (ed.ed.source != perf::SensorSource::BacnetIp) return;
+    ed.ed.bacnet_instance = perf::kBacnetUnsetInstance;
+    ed.ed.bacnet_object_name[0] = '\0';
+    ed.ed.rom_known = false;
+    memset(ed.ed.rom, 0, sizeof(ed.ed.rom));
+    ed.manual_object_mode = false;
+    editor_changed();
+    browse_btn_cb(nullptr);
+}
+
+static void bacnet_manual_object_cb(lv_event_t*)
+{
+    Editor& ed = s_state.editor;
+    ed.manual_object_mode = true;
+    editor_changed();
+    if (ed.reg_col) lv_obj_scroll_to_view_recursive(ed.reg_col, LV_ANIM_ON);
+}
+
+static lv_obj_t* make_summary_row(lv_obj_t* parent, const char* tag, const char* title, lv_event_cb_t cb,
+                                  lv_obj_t** text_out)
+{
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_color(row, COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
+    lv_obj_set_style_border_color(row, COLOR_SEG_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(row, 16, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(row, 12, LV_PART_MAIN);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    disable_scrolling(row);
+    lv_obj_set_user_data(row, (void*)tag);
+    make_label(row, title, FONT_NORMAL, COLOR_TEXT_DIM);
+    lv_obj_t* text = make_label(row, "", FONT_NORMAL, COLOR_TEXT);
+    lv_obj_set_flex_grow(text, 1);
+    lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
+    lv_obj_t* change = make_button(row, i18n_get(STR_PERF_CHANGE),
+                                   strstr(tag, "device") ? "perf_bacnet_device_change" : "perf_bacnet_sensor_change",
+                                   COLOR_BTN_SECONDARY, COLOR_TEXT, cb, NULL);
+    lv_obj_set_size(change, 150, 56);
+    *text_out = text;
+    return row;
+}
+
 static void editor_refresh(void)
 {
     Editor& ed = s_state.editor;
@@ -984,7 +1058,12 @@ static void editor_refresh(void)
         lv_obj_add_flag(ed.modbus_group, LV_OBJ_FLAG_HIDDEN);
     }
 
-    char buf[96];
+    const bool bacnet_has_device = bacnet && c.host[0] != '\0';
+    const bool bacnet_has_sensor = bacnet && c.bacnet_instance != perf::kBacnetUnsetInstance;
+    const bool bacnet_summary = bacnet && bacnet_has_device && bacnet_has_sensor && !ed.manual_mode &&
+                                !ed.manual_object_mode && !ed.browse_timer && !ed.discover_timer;
+
+    char buf[160];
     lv_label_set_text(ed.host_val, c.host);
     snprintf(buf, sizeof(buf), "%u", (unsigned)c.port);
     lv_label_set_text(ed.port_val, buf);
@@ -993,14 +1072,53 @@ static void editor_refresh(void)
     lv_obj_t* unit_col = lv_obj_get_parent(lv_obj_get_parent(ed.unit_val));
     if (bacnet) {
         lv_obj_add_flag(unit_col, LV_OBJ_FLAG_HIDDEN);
-        if (ed.browse_btn) lv_obj_remove_flag(ed.browse_btn, LV_OBJ_FLAG_HIDDEN);
-        if (ed.discover_btn) lv_obj_remove_flag(ed.discover_btn, LV_OBJ_FLAG_HIDDEN);
+        if (ed.discover_btn) lv_obj_add_flag(ed.discover_btn, LV_OBJ_FLAG_HIDDEN);
+        if (ed.browse_btn) {
+            if (ed.manual_mode) lv_obj_remove_flag(ed.browse_btn, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(ed.browse_btn, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (ed.host_col) {
+            if (ed.manual_mode) lv_obj_remove_flag(ed.host_col, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(ed.host_col, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_t* port_col = lv_obj_get_child(ed.trio, 0);
+        if (port_col) {
+            if (ed.manual_mode) lv_obj_remove_flag(port_col, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(port_col, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (ed.reg_col) {
+            if (ed.manual_object_mode) lv_obj_remove_flag(ed.reg_col, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(ed.reg_col, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (ed.trio) {
+            if (ed.manual_mode || ed.manual_object_mode) lv_obj_remove_flag(ed.trio, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(ed.trio, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (ed.adv_row) lv_obj_add_flag(ed.adv_row, LV_OBJ_FLAG_HIDDEN);
+        if (ed.adv_body) {
+            if (ed.manual_object_mode) lv_obj_remove_flag(ed.adv_body, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(ed.adv_body, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (ed.device_summary) {
+            if (bacnet_summary) lv_obj_remove_flag(ed.device_summary, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(ed.device_summary, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (ed.sensor_summary) {
+            if (bacnet_summary) lv_obj_remove_flag(ed.sensor_summary, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(ed.sensor_summary, LV_OBJ_FLAG_HIDDEN);
+        }
     } else {
         lv_obj_remove_flag(unit_col, LV_OBJ_FLAG_HIDDEN);
+        if (ed.host_col) lv_obj_remove_flag(ed.host_col, LV_OBJ_FLAG_HIDDEN);
+        if (ed.trio) lv_obj_remove_flag(ed.trio, LV_OBJ_FLAG_HIDDEN);
+        if (ed.reg_col) lv_obj_remove_flag(ed.reg_col, LV_OBJ_FLAG_HIDDEN);
         if (ed.browse_btn) lv_obj_add_flag(ed.browse_btn, LV_OBJ_FLAG_HIDDEN);
         if (ed.discover_btn) lv_obj_add_flag(ed.discover_btn, LV_OBJ_FLAG_HIDDEN);
         if (ed.discover_card) lv_obj_add_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
         if (ed.browse_card) lv_obj_add_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
+        if (ed.device_summary) lv_obj_add_flag(ed.device_summary, LV_OBJ_FLAG_HIDDEN);
+        if (ed.sensor_summary) lv_obj_add_flag(ed.sensor_summary, LV_OBJ_FLAG_HIDDEN);
+        if (ed.adv_row) lv_obj_remove_flag(ed.adv_row, LV_OBJ_FLAG_HIDDEN);
     }
     if (bacnet) {
         if (c.bacnet_instance == perf::kBacnetUnsetInstance) {
@@ -1015,6 +1133,24 @@ static void editor_refresh(void)
     if (ed.reg_col) {
         lv_obj_t* lbl = lv_obj_get_child(ed.reg_col, 0);
         if (lbl) lv_label_set_text(lbl, i18n_get(bacnet ? STR_PERF_OBJECT : STR_PERF_REGISTER));
+    }
+
+    if (bacnet && ed.device_summary_text) {
+        const bool default_port = c.port == perf::kDefaultBacnetPort;
+        if (c.bacnet_device_name[0]) {
+            snprintf(buf, sizeof(buf), default_port ? "%s \xC2\xB7 %s" : "%s \xC2\xB7 %s:%u",
+                     c.bacnet_device_name, c.host, (unsigned)c.port);
+        } else {
+            snprintf(buf, sizeof(buf), default_port ? "%s" : "%s:%u", c.host, (unsigned)c.port);
+        }
+        lv_label_set_text(ed.device_summary_text, buf);
+    }
+    if (bacnet && ed.sensor_summary_text) {
+        if (c.bacnet_object_name[0]) snprintf(buf, sizeof(buf), "%s", c.bacnet_object_name);
+        else snprintf(buf, sizeof(buf), "%s %lu",
+                      c.bacnet_type == perf::BacnetObjectType::AnalogValue ? "Analog value" : "Analog input",
+                      (unsigned long)c.bacnet_instance);
+        lv_label_set_text(ed.sensor_summary_text, buf);
     }
 
     set_segment(ed.regtype_btn, bacnet ? (c.bacnet_type == perf::BacnetObjectType::AnalogValue ? 1 : 0)
@@ -1041,10 +1177,12 @@ static void editor_refresh(void)
     }
     lv_label_set_text(ed.adv_summary, buf);
     lv_label_set_text(ed.adv_chevron, ed.adv_open ? LV_SYMBOL_UP : LV_SYMBOL_DOWN);
-    if (ed.adv_open) {
-        lv_obj_remove_flag(ed.adv_body, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(ed.adv_body, LV_OBJ_FLAG_HIDDEN);
+    if (!bacnet) {
+        if (ed.adv_open) {
+            lv_obj_remove_flag(ed.adv_body, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(ed.adv_body, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 
@@ -1244,6 +1382,12 @@ static void set_browsing(bool browsing)
     lv_label_set_text(ed.browse_lbl, i18n_get(browsing ? STR_PERF_FINDING_SENSORS : STR_PERF_FIND_SENSORS));
     if (browsing) {
         lv_obj_add_state(ed.browse_btn, LV_STATE_DISABLED);
+        if (ed.browse_card && ed.browse_list) {
+            lv_obj_clean(ed.browse_list);
+            make_label(ed.browse_list, i18n_get(STR_PERF_SENSOR), FONT_NORMAL, COLOR_TEXT);
+            make_label(ed.browse_list, i18n_get(STR_PERF_FINDING_SENSORS), FONT_NORMAL, COLOR_TEXT_DIM);
+            lv_obj_remove_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
+        }
     } else {
         lv_obj_remove_state(ed.browse_btn, LV_STATE_DISABLED);
     }
@@ -1259,6 +1403,12 @@ static void set_discovering(bool searching)
                                                   : i18n_get(STR_PERF_FIND_DEVICES));
     if (searching) {
         lv_obj_add_state(ed.discover_btn, LV_STATE_DISABLED);
+        if (ed.discover_card && ed.discover_list) {
+            lv_obj_clean(ed.discover_list);
+            make_label(ed.discover_list, i18n_get(STR_PERF_DEVICE), FONT_NORMAL, COLOR_TEXT);
+            make_label(ed.discover_list, i18n_get(STR_PERF_SEARCHING), FONT_NORMAL, COLOR_TEXT_DIM);
+            lv_obj_remove_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
+        }
     } else {
         lv_obj_remove_state(ed.discover_btn, LV_STATE_DISABLED);
     }
@@ -1294,6 +1444,7 @@ static void discover_pick_cb(lv_event_t* e)
     ed.ed.port = d.port;
     ed.ed.bacnet_device_known = true;
     ed.ed.bacnet_device_instance = d.device_instance;
+    strlcpy(ed.ed.bacnet_device_name, d.device_name, sizeof(ed.ed.bacnet_device_name));
     if (ed.discover_card) lv_obj_add_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
     editor_changed();
     browse_btn_cb(nullptr);
@@ -1303,7 +1454,10 @@ static void manual_cb(lv_event_t*)
 {
     Editor& ed = s_state.editor;
     ed.manual_mode = true;
+    ed.manual_object_mode = false;
+    if (ed.ed.port == 0) ed.ed.port = perf::kDefaultBacnetPort;
     if (ed.discover_card) lv_obj_add_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
+    editor_changed();
     if (ed.host_col) lv_obj_scroll_to_view_recursive(ed.host_col, LV_ANIM_ON);
 }
 
@@ -1316,11 +1470,13 @@ static void render_discover_result(const ext_temp::DiscoverResult& r)
         const char* msg = r.error == ext_temp::Error::Timeout ? i18n_get(STR_PERF_ERR_TIMEOUT)
                                                               : i18n_get(STR_PERF_ERR_CONNECT);
         make_label(ed.discover_list, msg, FONT_NORMAL, COLOR_PERF_WARN);
+        make_picker_row(ed.discover_list, i18n_get(STR_PERF_SEARCH_AGAIN), "perf_bacnet_search_again", false, discover_btn_cb, NULL);
+        make_picker_row(ed.discover_list, i18n_get(STR_PERF_BACNET_MANUAL), "perf_bacnet_manual", false, manual_cb, NULL);
         lv_obj_remove_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
         return;
     }
     make_label(ed.discover_list,
-               r.count ? i18n_get(STR_PERF_DEVICES_FOUND) : i18n_get(STR_PERF_NO_BACNET_DEVICES),
+               r.count ? i18n_get(STR_PERF_DEVICE) : i18n_get(STR_PERF_NO_BACNET_DEVICES),
                FONT_NORMAL, r.count ? COLOR_TEXT : COLOR_TEXT_DIM);
     char line[96];
     static const char* kDeviceTags[16] = {
@@ -1338,6 +1494,8 @@ static void render_discover_result(const ext_temp::DiscoverResult& r)
         make_picker_row(ed.discover_list, line, i < 16 ? kDeviceTags[i] : "perf_bacnet_device", false, discover_pick_cb,
                         (void*)(intptr_t)i);
     }
+    make_picker_row(ed.discover_list, i18n_get(STR_PERF_SEARCH_AGAIN), "perf_bacnet_search_again", false,
+                    discover_btn_cb, NULL);
     make_picker_row(ed.discover_list, i18n_get(STR_PERF_BACNET_MANUAL), "perf_bacnet_manual", false,
                     manual_cb, NULL);
     lv_obj_remove_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
@@ -1421,6 +1579,9 @@ static void browse_pick_cb(lv_event_t* e)
     ed.ed.bacnet_instance = s.object_instance;
     ed.ed.bacnet_device_known = s_browse_job.result->device_instance_known;
     ed.ed.bacnet_device_instance = s_browse_job.result->device_instance;
+    if (s_browse_job.result->device_name[0]) {
+        strlcpy(ed.ed.bacnet_device_name, s_browse_job.result->device_name, sizeof(ed.ed.bacnet_device_name));
+    }
     strlcpy(ed.ed.bacnet_object_name, s.object_name, sizeof(ed.ed.bacnet_object_name));
     if (s.rom_valid) {
         for (size_t i = 0; i < perf::kRomLen; ++i) {
@@ -1454,12 +1615,16 @@ static void render_browse_result(const ext_temp::BrowseResult& r)
             default: break;
         }
         make_label(ed.browse_list, msg, FONT_NORMAL, COLOR_PERF_WARN);
+        make_picker_row(ed.browse_list, i18n_get(STR_PERF_BACNET_MANUAL_OBJECT), "perf_bacnet_manual_object", false,
+                        bacnet_manual_object_cb, NULL);
         lv_obj_remove_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
         return;
     }
 
     if (r.count == 0) {
         make_label(ed.browse_list, i18n_get(STR_PERF_NO_BACNET_SENSORS), FONT_NORMAL, COLOR_TEXT_DIM);
+        make_picker_row(ed.browse_list, i18n_get(STR_PERF_BACNET_MANUAL_OBJECT), "perf_bacnet_manual_object", false,
+                        bacnet_manual_object_cb, NULL);
         lv_obj_remove_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
         return;
     }
@@ -1476,6 +1641,9 @@ static void render_browse_result(const ext_temp::BrowseResult& r)
         make_picker_row(ed.browse_list, line, "perf_bacnet_sensor", selected, browse_pick_cb,
                         (void*)(intptr_t)i);
     }
+
+    make_picker_row(ed.browse_list, i18n_get(STR_PERF_BACNET_MANUAL_OBJECT), "perf_bacnet_manual_object", false,
+                    bacnet_manual_object_cb, NULL);
 
     if (r.truncated) {
         char note[192];
@@ -1570,6 +1738,8 @@ static void source_pick_cb(lv_event_t* e)
         clear_editor_bacnet_identity();
         if (s.source == perf::SensorSource::BacnetIp) {
             s.port = perf::kDefaultBacnetPort;
+            s_state.editor.manual_mode = false;
+            s_state.editor.manual_object_mode = false;
         } else if (s.source == perf::SensorSource::ModbusTcp) {
             s.port = perf::kDefaultPort;
         }
@@ -1795,6 +1965,13 @@ static void open_editor(int slot)
                     ed.ed.source == perf::SensorSource::BacnetIp, source_pick_cb, (void*)2);
     lv_obj_add_flag(ed.source_list, LV_OBJ_FLAG_HIDDEN);
 
+    ed.device_summary = make_summary_row(body, "perf_bacnet_device_summary", i18n_get(STR_PERF_DEVICE),
+                                         bacnet_change_device_cb, &ed.device_summary_text);
+    ed.sensor_summary = make_summary_row(body, "perf_bacnet_sensor_summary", i18n_get(STR_PERF_SENSOR),
+                                         bacnet_change_sensor_cb, &ed.sensor_summary_text);
+    lv_obj_add_flag(ed.device_summary, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ed.sensor_summary, LV_OBJ_FLAG_HIDDEN);
+
     // Modbus TCP details
     ed.modbus_group = make_column(body, 20);
     ed.host_col = make_field(ed.modbus_group, i18n_get(STR_PERF_HOST), "perf_host", Field::Host,
@@ -1867,6 +2044,7 @@ static void open_editor(int slot)
 
     // Advanced (collapsed by default)
     lv_obj_t* adv = lv_obj_create(ed.modbus_group);
+    ed.adv_row = adv;
     lv_obj_set_size(adv, LV_PCT(100), 72);
     lv_obj_set_style_bg_color(adv, COLOR_CARD, LV_PART_MAIN);
     lv_obj_set_style_bg_color(adv, COLOR_PERF_ROW_PRESSED, LV_STATE_PRESSED);
@@ -1889,6 +2067,7 @@ static void open_editor(int slot)
 
     ed.adv_body = make_column(ed.modbus_group, 20);
     lv_obj_t* rt_col = make_column(ed.adv_body, 10);
+    ed.regtype_col = rt_col;
     make_label(rt_col, i18n_get(STR_PERF_REG_TYPE), UI_FONT_SMALL, COLOR_TEXT_DIM);
     char reg_a[48];
     char reg_b[48];

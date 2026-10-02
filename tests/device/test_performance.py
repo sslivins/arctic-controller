@@ -46,7 +46,7 @@ POLL_TIMEOUT = 45.0
 PERSISTED_SENSOR_FIELDS = (
     "source", "host", "port", "unit_id", "register", "register_type",
     "object_type", "object_instance", "value_type", "scale", "no_reading",
-    "device_instance", "object_name", "rom_id",
+    "device_instance", "device_name", "object_name", "rom_id",
 )
 
 
@@ -474,6 +474,13 @@ class TestSensorTest:
         assert body["device_instance"] == 1234
         assert body["rom_id"] == "28FF6491631603A2"
 
+    def test_bacnet_device_name_round_trips(self, device: DeviceClient, bacnet_fake):
+        sensor = _bacnet(bacnet_fake, 3, device_name="Thermux Test")
+        r = _put_config(device, {"sensors": {"supply": sensor, "return": {"source": "heat_pump"}}})
+        assert r.status_code == 200, r.text
+        saved = _get_config(device)["sensors"]["supply"]
+        assert saved["device_name"] == "Thermux Test"
+
     def test_bacnet_rpm_unsupported_falls_back_to_read_property(self, device: DeviceClient,
                                                                  rpm_unsupported_bacnet_fake):
         body = _test_read(device, _bacnet(rpm_unsupported_bacnet_fake, 3)).json()
@@ -807,6 +814,18 @@ class TestScreen:
         assert device.wait_for_screen("settings", timeout=5.0)
         assert device.wait_for_widget(tag="perf_row_value", timeout=5.0), \
             "settings row does not show that external sensors are in use"
+        assert "Modbus" in device.find_widget(tag="perf_row_value").text
+
+    def test_menu_row_marks_bacnet_sensors(self, device: DeviceClient, bacnet_fake):
+        r = _put_config(device, {"sensors": {
+            "supply": _bacnet(bacnet_fake, 3, device_name="Thermux Test"),
+            "return": {"source": "heat_pump"},
+        }})
+        assert r.status_code == 200, r.text
+        device.click(tag="settings")
+        assert device.wait_for_screen("settings", timeout=5.0)
+        assert device.wait_for_widget(tag="perf_row_value", timeout=5.0)
+        assert "BACnet" in device.find_widget(tag="perf_row_value").text
 
     def test_sensor_rows_show_external_readings(self, device: DeviceClient, fake):
         _configure_both(device, fake)
@@ -858,6 +877,25 @@ class TestScreen:
                           lambda: not device.has_widget(tag="perf_editor"), timeout=5.0)
         assert _get_config(device)["sensors"]["supply"]["register_type"] == "input"
 
+    def test_editor_saved_bacnet_opens_summary_and_changes(self, device: DeviceClient, bacnet_fake):
+        r = _put_config(device, {"sensors": {
+            "supply": _bacnet(bacnet_fake, 3, device_instance=1234, device_name="Thermux Test",
+                                object_name="Supply tank"),
+            "return": {"source": "heat_pump"},
+        }})
+        assert r.status_code == 200, r.text
+        _open_perf_screen(device)
+        device.click(tag="perf_sensor_supply")
+        assert device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
+        assert device.wait_for_widget(tag="perf_bacnet_sensor_summary", timeout=5.0)
+        assert not device.has_widget(tag="perf_host")
+        device.click(tag="perf_bacnet_sensor_change")
+        assert device.wait_until("sensor browse starts",
+                                 lambda: _screen_text_contains(device, "Finding sensors") or
+                                 _screen_text_contains(device, "Supply tank"),
+                                 timeout=20.0, poll=0.5)
+        device.click(tag="perf_editor_cancel")
+
     def test_editor_bacnet_browse_pick_saves_identity(self, device: DeviceClient, bacnet_fake):
         r = _put_config(device, {"sensors": _heat_pump_sensors()})
         assert r.status_code == 200, r.text
@@ -885,6 +923,7 @@ class TestScreen:
 
         saved = _get_config(device)["sensors"]["supply"]
         assert saved["source"] == "bacnet_ip"
+        assert saved["device_name"] in (None, "Thermux Test")
         assert saved["object_instance"] == 3
         assert saved["device_instance"] == 1234
         assert saved["rom_id"] == "28FF6491631603A2"
@@ -915,6 +954,7 @@ class TestScreen:
 
         saved = _get_config(device)["sensors"]["supply"]
         assert saved["source"] == "bacnet_ip"
+        assert saved["device_name"] == "Thermux Test"
         assert saved["host"] == host
         assert saved["port"] == port
         assert saved["object_instance"] == 3

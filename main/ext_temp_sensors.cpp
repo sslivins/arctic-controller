@@ -994,6 +994,7 @@ bool same_bacnet_identity(const perf::SensorConfig& a, const perf::SensorConfig&
 void clear_bacnet_identity(perf::SensorConfig& s) {
     s.bacnet_device_known = false;
     s.bacnet_device_instance = perf::kBacnetDeviceWildcard;
+    s.bacnet_device_name[0] = '\0';
     s.bacnet_object_name[0] = '\0';
     s.rom_known = false;
     memset(s.rom, 0, sizeof(s.rom));
@@ -1087,10 +1088,11 @@ perf::Invalid apply_settings(const perf::Settings& in, const bool sensor_edited[
             memcpy(s.rom, cur.rom, sizeof(s.rom));
             s.bacnet_device_known = cur.bacnet_device_known;
             s.bacnet_device_instance = cur.bacnet_device_instance;
+            strlcpy(s.bacnet_device_name, cur.bacnet_device_name, sizeof(s.bacnet_device_name));
             strlcpy(s.bacnet_object_name, cur.bacnet_object_name, sizeof(s.bacnet_object_name));
         }
-        if (sensor_edited[i] || !perf::same_source(s, cur) || s.scale_exp != cur.scale_exp ||
-            s.no_reading != cur.no_reading) {
+        if (!perf::same_source(s, cur) || s.scale_exp != cur.scale_exp ||
+            s.no_reading != cur.no_reading || !same_bacnet_identity(s, cur)) {
             sensors_changed = true;
         }
     }

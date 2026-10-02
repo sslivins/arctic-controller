@@ -31,6 +31,7 @@ constexpr int kSlotCount = 2;
 
 constexpr size_t kHostMax = 64;  // including the terminator
 constexpr size_t kRomLen = 8;
+constexpr size_t kBacnetDeviceNameMax = 64;
 
 struct SensorConfig {
     SensorSource source;
@@ -43,6 +44,7 @@ struct SensorConfig {
     uint32_t bacnet_instance;
     bool bacnet_device_known;
     uint32_t bacnet_device_instance;
+    char bacnet_device_name[kBacnetDeviceNameMax];
     char bacnet_object_name[41];
     ValueType value_type;
     int8_t scale_exp;  // value = raw * 10^scale_exp; 0..-3

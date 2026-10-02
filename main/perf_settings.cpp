@@ -16,8 +16,10 @@ const char* kNvsNamespace = "perf";
 const char* kNvsKey = "cfg";
 const char* kNvsBacnetKey = "bacnet";
 constexpr uint8_t kBlobVersion = 1;
-constexpr uint8_t kBacnetExtVersion = 1;
-constexpr size_t kBacnetExtSlotSize = 1 + kHostMax + 2 + 1 + 4 + 1 + 4 + 41 + 1 + kRomLen;
+constexpr uint8_t kBacnetExtVersion = 2;
+constexpr size_t kBacnetExtV1SlotSize = 1 + kHostMax + 2 + 1 + 4 + 1 + 4 + 41 + 1 + kRomLen;
+constexpr size_t kBacnetExtSlotSize = kBacnetExtV1SlotSize + kBacnetDeviceNameMax;
+constexpr size_t kBacnetExtV1Size = 1 + 4 + kSlotCount * kBacnetExtV1SlotSize + 4;
 constexpr size_t kBacnetExtSize = 1 + 4 + kSlotCount * kBacnetExtSlotSize + 4;
 
 void put_u16(uint8_t*& p, uint16_t v) {
@@ -120,6 +122,7 @@ SensorConfig default_sensor() {
     s.bacnet_instance = kBacnetUnsetInstance;
     s.bacnet_device_known = false;
     s.bacnet_device_instance = kBacnetDeviceWildcard;
+    s.bacnet_device_name[0] = '\0';
     s.bacnet_object_name[0] = '\0';
     s.value_type = ValueType::Int16;
     s.scale_exp = -2;
@@ -326,6 +329,7 @@ bool deserialize(const uint8_t* buf, size_t len, Settings* out) {
         sensor.bacnet_instance = kBacnetUnsetInstance;
         sensor.bacnet_device_known = false;
         sensor.bacnet_device_instance = kBacnetDeviceWildcard;
+        sensor.bacnet_device_name[0] = '\0';
         sensor.bacnet_object_name[0] = '\0';
         sensor.value_type = static_cast<ValueType>(*p++);
         sensor.scale_exp = static_cast<int8_t>(*p++);
@@ -353,6 +357,9 @@ void serialize_bacnet_ext(const Settings& s, uint32_t primary_crc, uint8_t* buf)
         put_u32(p, sensor.bacnet_instance);
         *p++ = sensor.bacnet_device_known ? 1 : 0;
         put_u32(p, sensor.bacnet_device_instance);
+        memset(p, 0, kBacnetDeviceNameMax);
+        strncpy(reinterpret_cast<char*>(p), sensor.bacnet_device_name, kBacnetDeviceNameMax - 1);
+        p += kBacnetDeviceNameMax;
         memset(p, 0, 41);
         strncpy(reinterpret_cast<char*>(p), sensor.bacnet_object_name, 40);
         p += 41;
@@ -365,7 +372,9 @@ void serialize_bacnet_ext(const Settings& s, uint32_t primary_crc, uint8_t* buf)
 }
 
 bool deserialize_bacnet_ext(const uint8_t* buf, size_t len, uint32_t primary_crc, Settings* s) {
-    if (!buf || len != kBacnetExtSize || buf[0] != kBacnetExtVersion) return false;
+    if (!buf || (len != kBacnetExtSize && len != kBacnetExtV1Size)) return false;
+    const bool v1 = buf[0] == 1 && len == kBacnetExtV1Size;
+    if (!v1 && (buf[0] != kBacnetExtVersion || len != kBacnetExtSize)) return false;
     uint32_t stored = 0;
     memcpy(&stored, buf + len - 4, sizeof(stored));
     if (esp_crc32_le(0, buf, static_cast<uint32_t>(len - 4)) != stored) return false;
@@ -384,6 +393,12 @@ bool deserialize_bacnet_ext(const uint8_t* buf, size_t len, uint32_t primary_crc
         uint32_t instance = get_u32(p);
         bool device_known = *p++ != 0;
         uint32_t device_instance = get_u32(p);
+        char device_name[kBacnetDeviceNameMax] = {};
+        if (!v1) {
+            memcpy(device_name, p, sizeof(device_name));
+            device_name[kBacnetDeviceNameMax - 1] = '\0';
+            p += kBacnetDeviceNameMax;
+        }
         char object_name[41];
         memcpy(object_name, p, sizeof(object_name));
         object_name[40] = '\0';
@@ -401,6 +416,8 @@ bool deserialize_bacnet_ext(const uint8_t* buf, size_t len, uint32_t primary_crc
         sensor.bacnet_instance = instance;
         sensor.bacnet_device_known = device_known;
         sensor.bacnet_device_instance = device_known ? device_instance : kBacnetDeviceWildcard;
+        strncpy(sensor.bacnet_device_name, device_name, sizeof(sensor.bacnet_device_name));
+        sensor.bacnet_device_name[kBacnetDeviceNameMax - 1] = '\0';
         strncpy(sensor.bacnet_object_name, object_name, sizeof(sensor.bacnet_object_name));
         sensor.bacnet_object_name[40] = '\0';
         sensor.rom_known = rom_known;

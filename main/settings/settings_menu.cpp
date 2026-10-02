@@ -728,9 +728,17 @@ static void create_menu_list(void)
         state.list_container, LV_SYMBOL_CHARGE,
         i18n_get(STR_SETTINGS_PERF),
         "settings_perf");
-    if (perf::uses_network(ext_temp::settings())) {
+    perf::Settings perf_cfg = ext_temp::settings();
+    if (perf::uses_network(perf_cfg)) {
+        bool uses_modbus = false;
+        bool uses_bacnet = false;
+        for (const auto& sensor : perf_cfg.sensors) {
+            uses_modbus = uses_modbus || sensor.source == perf::SensorSource::ModbusTcp;
+            uses_bacnet = uses_bacnet || sensor.source == perf::SensorSource::BacnetIp;
+        }
         lv_obj_t* perf_value = lv_label_create(state.rows[SETTINGS_PERF]);
-        lv_label_set_text(perf_value, i18n_get(STR_PERF_ROW_MODBUS));
+        lv_label_set_text(perf_value, i18n_get(uses_modbus && uses_bacnet ? STR_PERF_ROW_MIXED :
+                                               (uses_bacnet ? STR_PERF_ROW_BACNET : STR_PERF_ROW_MODBUS)));
         lv_obj_set_style_text_font(perf_value, FONT_NORMAL, LV_PART_MAIN);
         lv_obj_set_style_text_color(perf_value, COLOR_ACCENT, LV_PART_MAIN);
         lv_obj_set_user_data(perf_value, (void*)"perf_row_value");

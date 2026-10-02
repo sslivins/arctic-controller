@@ -109,10 +109,13 @@ class TestSettingsWorkspace:
         card.locator('select[name="value_type"]').select_option("int16")
         expect(card.locator('select[name="no_reading"]')).to_be_enabled()
         card.locator('select[name="source"]').select_option("bacnet_ip")
+        expect(card.locator('input[name="host"]')).to_be_hidden()
+        expect(card.get_by_text("Device")).to_be_visible()
+        card.get_by_role("button", name="Enter address manually").click()
         expect(card.locator('input[name="host"]')).to_be_visible()
-        expect(card.locator('input[name="object_instance"]')).to_be_visible()
-        expect(card.locator('select[name="object_type"]')).to_be_visible()
         expect(card.get_by_role("button", name="Find sensors")).to_be_visible()
+        expect(card.locator('input[name="object_instance"]')).to_be_hidden()
+        expect(card.locator('select[name="object_type"]')).to_be_hidden()
         expect(card.locator('input[name="unit_id"]')).to_be_hidden()
         card.locator('select[name="source"]').select_option("heat_pump")
         expect(card.locator('input[name="host"]')).to_be_hidden()
@@ -124,11 +127,26 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "Heat output & COP")
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
         card.locator('select[name="source"]').select_option("bacnet_ip")
+        card.get_by_role("button", name="Enter address manually").click()
         card.locator('input[name="host"]').fill("127.0.0.1")
         card.get_by_role("button", name="Find sensors").click()
         card.get_by_role("button", name=re.compile("Supply tank")).click()
         expect(card.locator('input[name="object_instance"]')).to_have_value("3")
         expect(card.locator('select[name="object_type"]')).to_have_value("analog_input")
+
+    def test_performance_bacnet_manual_object_path(self, dashboard_page: Page):
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux Test","model_name":"Thermux","device_instance":1234,"sensors":[],"truncated":false}'))
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        card.locator('select[name="source"]').select_option("bacnet_ip")
+        card.get_by_role("button", name="Enter address manually").click()
+        card.locator('input[name="host"]').fill("127.0.0.1")
+        card.get_by_role("button", name="Find sensors").click()
+        card.get_by_role("button", name="Enter object manually").click()
+        expect(card.locator('input[name="object_instance"]')).to_be_visible()
+        expect(card.locator('select[name="object_type"]')).to_be_visible()
 
     def test_performance_bacnet_discover_pick(self, dashboard_page: Page):
         dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
@@ -140,7 +158,6 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "Heat output & COP")
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
         card.locator('select[name="source"]').select_option("bacnet_ip")
-        card.get_by_role("button", name="Find devices").click()
         card.get_by_role("button", name=re.compile("Thermux Test")).click()
         expect(card.locator('input[name="host"]')).to_have_value("127.0.0.1")
         expect(card.locator('input[name="port"]')).to_have_value("47809")
