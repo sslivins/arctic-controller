@@ -92,6 +92,9 @@ Future optimizations:
       layout issue that caused the original hang at 128 items.
 - [ ] Consider logging compressor frequency changes (e.g. significant jumps or thresholds)
 - [ ] Consider logging fan speed changes (RPM thresholds or level transitions)
+- [x] Heat pump problems entry in the notification bell (device + web): one
+      persistent entry (saved to flash) naming the latest fault and the count
+      since the last acknowledge; tapping it acknowledges and opens Error Status
 
 ## Main Screen Layout Redesign
 

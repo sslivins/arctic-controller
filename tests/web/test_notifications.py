@@ -105,6 +105,40 @@ class TestNotificationBellWeb:
             after = dashboard_page.evaluate(
                 "() => fetch('/api/notifications').then(r => r.json())"
             )
-            assert "brownout" not in [n["key"] for n in after["notifications"]]
         finally:
+            _reset_notifications(base_url)
+
+    def test_heatpump_fault_notification_opens_errors_and_acknowledges(
+        self, dashboard_page: Page, base_url: str
+    ):
+        _reset_notifications(base_url)
+        try:
+            r = requests.post(f"{base_url}/api/test/inject-fault",
+                              json={"code": "P06", "active": True}, timeout=10, verify=False)
+            r.raise_for_status()
+            for _ in range(20):
+                data = dashboard_page.evaluate(
+                    "() => fetch('/api/notifications').then(r => r.json())"
+                )
+                if "heatpump_fault" in [n["key"] for n in data["notifications"]]:
+                    break
+                dashboard_page.wait_for_timeout(500)
+            else:
+                raise AssertionError("heatpump_fault never appeared in /api/notifications")
+
+            dashboard_page.reload(wait_until="domcontentloaded")
+            dashboard_page.wait_for_selector(".rail", timeout=10000)
+            dashboard_page.locator(".notif-btn").click()
+            dashboard_page.locator(".notif-item", has_text="Heat pump problem").click()
+
+            # Lands on the Errors page...
+            expect(dashboard_page.get_by_role("heading", name="Errors", exact=True)).to_be_visible()
+            # ...and acknowledges the entry.
+            after = dashboard_page.evaluate(
+                "() => fetch('/api/notifications').then(r => r.json())"
+            )
+            assert "heatpump_fault" not in [n["key"] for n in after["notifications"]]
+        finally:
+            requests.post(f"{base_url}/api/test/inject-fault",
+                          json={"code": "P06", "active": False}, timeout=10, verify=False)
             _reset_notifications(base_url)
