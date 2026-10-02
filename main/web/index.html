@@ -476,6 +476,7 @@
     .perf-not-listed { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--cp-border); color: var(--cp-text-muted); }
     .link-btn { border: 0; background: none; padding: 0; color: var(--cp-link); font: inherit; font-weight: 600; cursor: pointer; }
     .link-btn:hover { text-decoration: underline; }
+    .perf-back { margin-top: 10px; }
     .perf-test.ok { border-left: 4px solid var(--cp-success); padding: 12px 14px; background: var(--cp-surface-soft); border-radius: 0 10px 10px 0; }
     .spinner-inline { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
     .btn-spinner { display: inline-block; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; }
@@ -1250,7 +1251,7 @@
       if (cfg.source === "bacnet_ip") {
         // The live reading belongs to the saved sensor, not the one being picked.
         const m = perfMode(slot);
-        if (m.deviceStep || m.sensorStep || m.manualAddress || m.manualObject || state.perfDiscovers[slot] || state.perfBrowses[slot]) return "";
+        if (m.picked || m.deviceStep || m.sensorStep || m.manualAddress || m.manualObject || state.perfDiscovers[slot] || state.perfBrowses[slot]) return "";
       }
       if (live.celsius != null && (live.error === "none" || !live.error))
         return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>${live.object_name ? `<div class="metric-sub">${esc(live.object_name)}</div>` : ""}`;
@@ -1290,7 +1291,10 @@
       const sensorStep = bacnet && !savedSummary && !manualObject && !!s.host && ((!hasBacnetObject && !deviceStep) || mode.sensorStep || state.perfBrowses[slot]);
       const showBacnetAddress = bacnet && manualAddress;
       const deviceSummary = bacnet && !!s.host && !deviceStep && !manualAddress;
-      const canTest = modbus || (bacnet && !!s.host && hasBacnetObject && !deviceStep && !manualAddress && (!sensorStep || manualObject));
+      // A sensor picked from the browse list was just read; only a manually
+      // entered BACnet object needs a test.
+      const canTest = modbus || (bacnet && !!s.host && hasBacnetObject && manualObject);
+      const pickedReading = mode.picked ? ` · ${mode.picked.available ? perfTemp(mode.picked.celsius) : "unavailable"}` : "";
       const browseHtml = perfBrowseHtml(slot);
       const discoverHtml = perfDiscoverHtml(slot);
       return `<section class="card"><form data-form="perf-sensor" data-slot="${slot}">
@@ -1312,9 +1316,9 @@
             <button type="button" data-action="perf-discover-bacnet" data-slot="${slot}" hidden>Search again</button>
             <button type="button" data-action="perf-browse-bacnet" data-slot="${slot}" hidden>Find sensors</button>
             ${deviceSummary ? `<div class="perf-summary"><span class="label">Device</span><strong>${esc(perfDeviceText(s))}</strong><button class="btn" type="button" data-action="perf-change-bacnet-device" data-slot="${slot}">Change</button></div>` : ""}
-            ${savedSummary ? `<div class="perf-summary"><span class="label">Sensor</span><strong>${esc(perfSensorText(s))}</strong><button class="btn" type="button" data-action="perf-change-bacnet-sensor" data-slot="${slot}">Change</button></div>` : ""}
+            ${savedSummary ? `<div class="perf-summary"><span class="label">Sensor</span><strong>${esc(perfSensorText(s))}${pickedReading}</strong><button class="btn" type="button" data-action="perf-change-bacnet-sensor" data-slot="${slot}">Change</button></div>` : ""}
             ${deviceStep ? `<div id="perf-discover-${slot}">${discoverHtml}</div>` : `<div id="perf-discover-${slot}" hidden></div>`}
-            ${manualAddress ? `<div class="perf-choices"><button class="btn" type="button" data-action="perf-browse-bacnet" data-slot="${slot}">Find sensors</button><button class="btn" type="button" data-action="perf-discover-bacnet" data-slot="${slot}">Search again</button></div>` : ""}
+            ${manualAddress ? `<div class="perf-choices"><button class="btn" type="button" data-action="perf-browse-bacnet" data-slot="${slot}">Find sensors</button></div><div class="perf-back"><button class="link-btn" type="button" data-action="perf-discover-bacnet" data-slot="${slot}">Back to search</button></div>` : ""}
             ${sensorStep ? `<div id="perf-browse-${slot}">${browseHtml}</div>` : `<div id="perf-browse-${slot}" hidden></div>`}
             ${manualObject ? `<div class="field"><label>Object type</label><select name="object_type" data-perf="bacnet_identity">${perfOptions([["analog_input", "Analog input"], ["analog_value", "Analog value"]], s.object_type || "analog_input")}</select></div><div class="field"><label>Object instance</label><input name="object_instance" data-perf="bacnet_identity" type="number" min="0" max="4194302" value="${esc(s.object_instance ?? "")}"></div>` : `<select name="object_type" data-perf="bacnet_identity" hidden>${perfOptions([["analog_input", "Analog input"], ["analog_value", "Analog value"]], s.object_type || "analog_input")}</select>`}
           </div>
@@ -1340,7 +1344,7 @@
       if (browse?.running) return `<div class="perf-test"><strong>Sensor</strong><span class="spinner-inline"></span> Finding sensors…</div>`;
       if (browse?.failed) return `<div class="perf-test notice bad">${esc(browse.failed)}${manual}</div>`;
       if (browse?.result && !browse.result.sensors.length) return `<div class="perf-test ok"><strong>No sensors found at this address</strong>${manual}</div>`;
-      if (browse?.result) return `<div class="perf-test ok"><strong>Sensor</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed.</div>` : ""}<div class="perf-choices">${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-device-name="${esc(browse.result.device_name || "")}" data-rom-id="${esc(x.rom_id || "")}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} · ${x.available ? perfTemp(x.celsius) : "unavailable"}</button>`).join("")}</div><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual-object" data-slot="${slot}">Enter object manually</button></div></div>`;
+      if (browse?.result) return `<div class="perf-test ok"><strong>Sensor</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed.</div>` : ""}<div class="perf-choices">${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-device-name="${esc(browse.result.device_name || "")}" data-rom-id="${esc(x.rom_id || "")}" data-celsius="${esc(x.celsius ?? "")}" data-available="${x.available ? "1" : ""}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} · ${x.available ? perfTemp(x.celsius) : "unavailable"}</button>`).join("")}</div><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual-object" data-slot="${slot}">Enter object manually</button></div></div>`;
       return `<div class="perf-test"><strong>Sensor</strong><span class="spinner-inline"></span> Finding sensors…</div>`;
     }
     function perfDiscoverHtml(slot) {
@@ -2457,7 +2461,7 @@
         const slot = el.dataset.slot;
         const form = el.closest("form");
         if (form) perfCaptureDraft(form);
-        perfSetMode(slot, { sensorStep: true, manualObject: true });
+        perfSetMode(slot, { sensorStep: true, manualObject: true, picked: null });
         render();
         document.querySelector(`form[data-form="perf-sensor"][data-slot="${slot}"] [name="object_instance"]`)?.focus();
         return;
@@ -2469,7 +2473,7 @@
           perfCaptureDraft(form);
           perfClearIdentityDraft(slot);
         }
-        perfSetMode(slot, { deviceStep: true, sensorStep: false, manualAddress: false, manualObject: false });
+        perfSetMode(slot, { deviceStep: true, sensorStep: false, manualAddress: false, manualObject: false, picked: null });
         render();
         document.querySelector(`form[data-form="perf-sensor"][data-slot="${slot}"] [data-action="perf-discover-bacnet"]`)?.click();
         return;
@@ -2478,7 +2482,7 @@
         const slot = el.dataset.slot;
         const form = el.closest("form");
         if (form) perfCaptureDraft(form);
-        perfSetMode(slot, { deviceStep: false, sensorStep: true, manualObject: false });
+        perfSetMode(slot, { deviceStep: false, sensorStep: true, manualObject: false, picked: null });
         render();
         document.querySelector(`form[data-form="perf-sensor"][data-slot="${slot}"] [data-action="perf-browse-bacnet"]`)?.click();
         return;
@@ -2498,7 +2502,8 @@
         if (objectName) objectName.value = el.dataset.objectName || "";
         if (romId) romId.value = el.dataset.romId || "";
         perfCaptureDraft(form);
-        perfSetMode(el.dataset.slot, { deviceStep: false, sensorStep: false, manualAddress: false, manualObject: false });
+        perfSetMode(el.dataset.slot, { deviceStep: false, sensorStep: false, manualAddress: false, manualObject: false,
+          picked: { available: !!el.dataset.available, celsius: Number(el.dataset.celsius) } });
         delete state.perfBrowses[el.dataset.slot];
         toast(`Selected ${el.dataset.objectName || "BACnet sensor"}`, "good");
         render();
@@ -2607,7 +2612,7 @@
         const test = perfForm.querySelector('[data-action="perf-test"]');
         if (test) {
           test.hidden = draft.source === "bacnet_ip"
-            ? !(draft.host && perfHasBacnetObject(draft))
+            ? !(perfMode(perfForm.dataset.slot).manualObject && draft.host && perfHasBacnetObject(draft))
             : draft.source !== "modbus_tcp";
         }
       }

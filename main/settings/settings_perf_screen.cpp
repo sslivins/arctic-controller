@@ -115,6 +115,10 @@ struct Editor {
     volatile bool discover_running;
     bool manual_mode;
     bool manual_object_mode;
+    // Reading shown in the BACnet sensor summary: from the browse list when
+    // picked, or the live reading of the saved sensor when the editor opens.
+    bool summary_reading_valid;
+    float summary_celsius;
 };
 
 struct TextEntry {
@@ -216,6 +220,7 @@ static void clear_editor_bacnet_identity()
     s.bacnet_object_name[0] = '\0';
     s.rom_known = false;
     memset(s.rom, 0, sizeof(s.rom));
+    s_state.editor.summary_reading_valid = false;
 }
 
 // ============================================================================
@@ -1053,6 +1058,7 @@ static void bacnet_change_sensor_cb(lv_event_t*)
     ed.ed.rom_known = false;
     memset(ed.ed.rom, 0, sizeof(ed.ed.rom));
     ed.manual_object_mode = false;
+    ed.summary_reading_valid = false;
     editor_changed();
     browse_btn_cb(nullptr);
 }
@@ -1061,6 +1067,7 @@ static void bacnet_manual_object_cb(lv_event_t*)
 {
     Editor& ed = s_state.editor;
     ed.manual_object_mode = true;
+    ed.summary_reading_valid = false;
     editor_changed();
     if (ed.reg_col) lv_obj_scroll_to_view_recursive(ed.reg_col, LV_ANIM_ON);
 }
@@ -1136,7 +1143,7 @@ static void editor_refresh(void)
         lv_obj_add_flag(unit_col, LV_OBJ_FLAG_HIDDEN);
         if (ed.discover_lbl) {
             lv_label_set_text(ed.discover_lbl,
-                              i18n_get(ed.manual_mode ? STR_PERF_SEARCH_AGAIN : STR_PERF_FIND_DEVICES));
+                              i18n_get(ed.manual_mode ? STR_PERF_BACK_TO_SEARCH : STR_PERF_FIND_DEVICES));
         }
         if (ed.discover_btn) {
             lv_obj_set_user_data(ed.discover_btn, (void*)(ed.manual_mode ? "perf_bacnet_search_again"
@@ -1238,6 +1245,11 @@ static void editor_refresh(void)
         else snprintf(buf, sizeof(buf), "%s %lu",
                       c.bacnet_type == perf::BacnetObjectType::AnalogValue ? "Analog value" : "Analog input",
                       (unsigned long)c.bacnet_instance);
+        if (ed.summary_reading_valid) {
+            size_t n = strlen(buf);
+            snprintf(buf + n, sizeof(buf) - n, " \xC2\xB7 %.1f %s", (double)to_display_temp(ed.summary_celsius),
+                     app_prefs_temp_unit_str());
+        }
         lv_label_set_text(ed.sensor_summary_text, buf);
     }
 
@@ -1277,7 +1289,9 @@ static void editor_refresh(void)
         }
     }
     if (ed.test_btn) {
-        if (modbus || (bacnet && bacnet_has_device && bacnet_has_sensor)) {
+        // A sensor picked from the browse list was just read, so only a
+        // manually entered BACnet object needs a test.
+        if (modbus || (bacnet && bacnet_has_device && bacnet_has_sensor && ed.manual_object_mode)) {
             lv_obj_remove_flag(ed.test_btn, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(ed.test_btn, LV_OBJ_FLAG_HIDDEN);
@@ -1690,6 +1704,8 @@ static void browse_pick_cb(lv_event_t* e)
         strlcpy(ed.ed.bacnet_device_name, s_browse_job.result->device_name, sizeof(ed.ed.bacnet_device_name));
     }
     strlcpy(ed.ed.bacnet_object_name, s.object_name, sizeof(ed.ed.bacnet_object_name));
+    ed.summary_reading_valid = true;
+    ed.summary_celsius = s.celsius;
     if (s.rom_valid) {
         for (size_t i = 0; i < perf::kRomLen; ++i) {
             char tmp[3] = {s.rom_hex[2 * i], s.rom_hex[2 * i + 1], 0};
@@ -2011,6 +2027,14 @@ static void open_editor(int slot)
     ed.slot = slot;
     ed.ed = ext_temp::settings().sensors[slot];
     if (ed.ed.port == 0) ed.ed.port = perf::kDefaultPort;
+    if (ed.ed.source == perf::SensorSource::BacnetIp) {
+        ext_temp::SlotStatus st[perf::kSlotCount];
+        ext_temp::slot_status(st);
+        if (st[slot].has_reading && st[slot].error == ext_temp::Error::None) {
+            ed.summary_reading_valid = true;
+            ed.summary_celsius = st[slot].celsius;
+        }
+    }
 
     lv_display_t* disp = lv_display_get_default();
     int32_t screen_h = lv_display_get_vertical_resolution(disp);
@@ -2125,9 +2149,17 @@ static void open_editor(int slot)
     ed.discover_btn = make_button(ed.modbus_group, i18n_get(STR_PERF_FIND_DEVICES),
                                   "perf_bacnet_discover", COLOR_BTN_SECONDARY, COLOR_TEXT,
                                   discover_btn_cb, NULL);
-    lv_obj_set_size(ed.discover_btn, LV_PCT(100), 72);
-    lv_obj_set_style_bg_opa(ed.discover_btn, LV_OPA_50, LV_STATE_DISABLED);
+    // Only shown in manual-address mode, as a link back to the device search.
+    lv_obj_set_size(ed.discover_btn, LV_PCT(100), 60);
+    lv_obj_set_style_bg_opa(ed.discover_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(ed.discover_btn, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(ed.discover_btn, COLOR_PERF_ROW_PRESSED, LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(ed.discover_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ed.discover_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(ed.discover_btn, 0, LV_PART_MAIN);
     ed.discover_lbl = lv_obj_get_child(ed.discover_btn, 0);
+    lv_obj_set_style_text_color(ed.discover_lbl, COLOR_ACCENT, LV_PART_MAIN);
+    lv_obj_align(ed.discover_lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
     ed.discover_card = lv_obj_create(ed.modbus_group);
     lv_obj_set_size(ed.discover_card, LV_PCT(100), LV_SIZE_CONTENT);

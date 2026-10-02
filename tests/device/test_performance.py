@@ -951,6 +951,7 @@ class TestScreen:
         assert device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
         assert device.wait_for_widget(tag="perf_bacnet_sensor_summary", timeout=5.0)
         assert not device.has_widget(tag="perf_host")
+        assert not device.has_widget(tag="perf_test")
         device.click(tag="perf_bacnet_sensor_change")
         assert device.wait_until("sensor browse starts",
                                  lambda: _screen_text_contains(device, "Finding sensors") or
@@ -979,6 +980,12 @@ class TestScreen:
                                  lambda: _screen_text_contains(device, "Supply tank"),
                                  timeout=30.0, poll=0.5)
         device.click(label_contains="Supply tank")
+        # The pick already read the sensor: its reading replaces Test sensor.
+        assert device.wait_for_widget(tag="perf_bacnet_sensor_summary", timeout=5.0)
+        assert device.wait_until("sensor summary shows the picked reading",
+                                 lambda: _screen_text_contains(device, "Supply tank \u00b7"),
+                                 timeout=5.0)
+        assert not device.has_widget(tag="perf_test")
         device.click(tag="perf_editor_save")
         device.wait_until("editor closed",
                           lambda: not device.has_widget(tag="perf_editor"), timeout=5.0)
@@ -1108,6 +1115,11 @@ class TestScreen:
             assert device.wait_for_widget(tag="perf_bacnet_search_again", timeout=5.0)
             assert not device.has_widget(tag="perf_bacnet_device_summary")
             assert not device.has_widget(tag="perf_test")
+            # Going back to the search is a link below Find sensors.
+            back = device.find_widget(tag="perf_bacnet_search_again")
+            find = device.find_widget(tag="perf_bacnet_browse")
+            assert back.y > find.y + find.h
+            assert _screen_text_contains(device, "Back to search")
 
             device.click(tag="perf_bacnet_search_again")
             assert device.wait_until("BACnet discovery restarted from manual address",
