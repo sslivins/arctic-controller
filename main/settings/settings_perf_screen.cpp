@@ -1083,6 +1083,8 @@ static void editor_refresh(void)
                               i18n_get(ed.manual_mode ? STR_PERF_SEARCH_AGAIN : STR_PERF_FIND_DEVICES));
         }
         if (ed.discover_btn) {
+            lv_obj_set_user_data(ed.discover_btn, (void*)(ed.manual_mode ? "perf_bacnet_search_again"
+                                                                         : "perf_bacnet_discover"));
             if (ed.manual_mode) lv_obj_remove_flag(ed.discover_btn, LV_OBJ_FLAG_HIDDEN);
             else lv_obj_add_flag(ed.discover_btn, LV_OBJ_FLAG_HIDDEN);
         }

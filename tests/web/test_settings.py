@@ -51,6 +51,28 @@ def assert_summary_change_buttons_inline(device_row, sensor_row):
     assert sensor_box["y"] <= sensor_change["y"] <= sensor_box["y"] + sensor_box["height"]
 
 
+def request_json(request):
+    data = request.post_data_json
+    return data() if callable(data) else data
+
+
+def route_perf_config(page: Page, current=None, saved_payloads=None):
+    state = {"current": current or perf_config()}
+
+    def handler(route):
+        if route.request.method == "PUT":
+            body = request_json(route.request)
+            if saved_payloads is not None:
+                saved_payloads.append(body)
+            state["current"] = body
+        route.fulfill(status=200, content_type="application/json",
+                      body=json.dumps(state["current"]))
+
+    page.route("**/api/performance/config", handler)
+    return state
+
+
+
 class TestSettingsWorkspace:
     def test_all_sections_present(self, dashboard_page: Page):
         dashboard_page.locator('button[aria-label="Settings"]').click()
@@ -116,6 +138,7 @@ class TestSettingsWorkspace:
 
     def test_performance_controls(self, dashboard_page: Page):
         """Nothing here is saved: the checks only drive the form in place."""
+        route_perf_config(dashboard_page)
         open_settings(dashboard_page, "Heat output & COP")
         expect(dashboard_page.get_by_role("heading", name="Current estimate")).to_be_visible()
         flow = dashboard_page.locator('input[name="flow_lpm"]')
@@ -143,7 +166,7 @@ class TestSettingsWorkspace:
         expect(card.locator('select[name="no_reading"]')).to_be_enabled()
         card.locator('select[name="source"]').select_option("bacnet_ip")
         expect(card.locator('input[name="host"]')).to_be_hidden()
-        expect(card.get_by_text("Device")).to_be_visible()
+        expect(card.locator("strong", has_text=re.compile("^Device$"))).to_be_visible()
         card.get_by_role("button", name="Enter address manually").click()
         expect(card.locator('input[name="host"]')).to_be_visible()
         expect(card.get_by_role("button", name="Find sensors")).to_be_visible()
@@ -154,6 +177,7 @@ class TestSettingsWorkspace:
         expect(card.locator('input[name="host"]')).to_be_hidden()
 
     def test_performance_bacnet_browse_pick(self, dashboard_page: Page):
+        route_perf_config(dashboard_page)
         dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
             status=200, content_type="application/json",
             body='{"ok":true,"error":"none","device_name":"Thermux Test","model_name":"Thermux","sensors":[{"object_type":"analog_input","object_instance":3,"object_name":"Supply tank","celsius":21.4,"units":62,"reliability":0,"rom_id":"28FF6491631603A2"}]}'))
@@ -168,6 +192,7 @@ class TestSettingsWorkspace:
         expect(card.locator('select[name="object_type"]')).to_have_value("analog_input")
 
     def test_performance_bacnet_manual_object_path(self, dashboard_page: Page):
+        route_perf_config(dashboard_page)
         dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
             status=200, content_type="application/json",
             body='{"ok":true,"error":"none","device_name":"Thermux Test","model_name":"Thermux","device_instance":1234,"sensors":[],"truncated":false}'))
@@ -182,6 +207,7 @@ class TestSettingsWorkspace:
         expect(card.locator('select[name="object_type"]')).to_be_visible()
 
     def test_performance_bacnet_discover_pick(self, dashboard_page: Page):
+        route_perf_config(dashboard_page)
         dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
             status=200, content_type="application/json",
             body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"127.0.0.1","port":47809,"device_instance":1234,"device_name":"Thermux Test","model_name":"Thermux","vendor_id":15}]}'))
@@ -197,19 +223,10 @@ class TestSettingsWorkspace:
         expect(card.get_by_role("button", name=re.compile("Supply tank"))).to_be_visible()
 
     def test_performance_bacnet_draft_survives_discovery_pick_and_save(self, dashboard_page: Page):
-        current = perf_config(supply=heat_pump_sensor_with_stale_network_fields())
         saved_payloads = []
-
-        def performance_config(route):
-            nonlocal current
-            if route.request.method == "PUT":
-                body = route.request.post_data_json()
-                saved_payloads.append(body)
-                sensor = body["sensors"]["supply"]
-                current = perf_config(supply={**current["sensors"]["supply"], **sensor})
-            route.fulfill(status=200, content_type="application/json", body=json.dumps(current))
-
-        dashboard_page.route("**/api/performance/config", performance_config)
+        route_perf_config(dashboard_page,
+                          perf_config(supply=heat_pump_sensor_with_stale_network_fields()),
+                          saved_payloads)
         dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
             status=200, content_type="application/json",
             body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"192.168.1.205","port":47808,"device_instance":205,"device_name":"Thermux Spare","model_name":"Thermux","vendor_id":15}]}'))
@@ -250,8 +267,10 @@ class TestSettingsWorkspace:
         dashboard_page.set_viewport_size({"width": 1000, "height": 900})
         assert_summary_change_buttons_inline(device_row, sensor_row)
 
-        card.get_by_role("button", name="Save").click()
-        expect.poll(lambda: len(saved_payloads)).to_be(1)
+        with dashboard_page.expect_response(
+                lambda r: r.request.method == "PUT" and r.url.endswith("/api/performance/config")):
+            card.get_by_role("button", name="Save").click()
+        assert saved_payloads
         saved = saved_payloads[0]["sensors"]["supply"]
         assert saved["source"] == "bacnet_ip"
         assert saved["host"] == "192.168.1.205"
@@ -264,15 +283,10 @@ class TestSettingsWorkspace:
         assert saved["rom_id"] == "28FF6491631603A2"
 
     def test_performance_bacnet_manual_object_order_and_validation(self, dashboard_page: Page):
-        current = perf_config(supply=heat_pump_sensor_with_stale_network_fields())
         saved_payloads = []
-
-        def performance_config(route):
-            if route.request.method == "PUT":
-                saved_payloads.append(route.request.post_data_json())
-            route.fulfill(status=200, content_type="application/json", body=json.dumps(current))
-
-        dashboard_page.route("**/api/performance/config", performance_config)
+        route_perf_config(dashboard_page,
+                          perf_config(supply=heat_pump_sensor_with_stale_network_fields()),
+                          saved_payloads)
         dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
             status=200, content_type="application/json",
             body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"192.168.1.205","port":47808,"device_instance":205,"device_name":"Thermux Spare","model_name":"Thermux","vendor_id":15}]}'))
@@ -307,9 +321,12 @@ class TestSettingsWorkspace:
     def test_performance_sensor_test_reports_connect_error(self, dashboard_page: Page):
         """Nothing listens on the controller's own port 1, so the test must
         come back with the friendly connection error rather than hang."""
+        route_perf_config(dashboard_page)
         open_settings(dashboard_page, "Heat output & COP")
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="return"]')
         card.locator('select[name="source"]').select_option("modbus_tcp")
+        expect(card.locator('select[name="source"]')).to_have_value("modbus_tcp")
+        expect(card.locator('input[name="host"]')).to_be_visible()
         card.locator('input[name="host"]').fill("127.0.0.1")
         card.locator('input[name="port"]').fill("1")
         card.get_by_role("button", name="Test sensor").click()
@@ -320,12 +337,15 @@ class TestSettingsWorkspace:
     def test_performance_sensor_test_adopts_register_type(self, dashboard_page: Page):
         """When the test finds the value in the other register table, the form
         switches to it so Save stores what worked."""
+        route_perf_config(dashboard_page)
         dashboard_page.route("**/api/performance/test", lambda route: route.fulfill(
             status=200, content_type="application/json",
             body='{"ok":true,"error":"none","register_type":"holding","celsius":45.5,"thermux":null}'))
         open_settings(dashboard_page, "Heat output & COP")
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="return"]')
         card.locator('select[name="source"]').select_option("modbus_tcp")
+        expect(card.locator('select[name="source"]')).to_have_value("modbus_tcp")
+        expect(card.locator('input[name="host"]')).to_be_visible()
         card.locator('input[name="host"]').fill("127.0.0.1")
         card.get_by_role("button", name="Test sensor").click()
         result = card.locator("#perf-test-return")

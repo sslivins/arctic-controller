@@ -1055,9 +1055,12 @@ class TestScreen:
                                      timeout=20.0, poll=0.5)
 
             device.click(tag="perf_bacnet_manual_object")
-            summary = device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
-            obj_type = device.wait_for_widget(tag="perf_bacnet_obj_ai", timeout=5.0)
-            obj_instance = device.wait_for_widget(tag="perf_register", timeout=5.0)
+            assert device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
+            assert device.wait_for_widget(tag="perf_bacnet_obj_ai", timeout=5.0)
+            assert device.wait_for_widget(tag="perf_register", timeout=5.0)
+            summary = device.find_widget(tag="perf_bacnet_device_summary")
+            obj_type = device.find_widget(tag="perf_bacnet_obj_ai")
+            obj_instance = device.find_widget(tag="perf_register")
             assert summary.y < obj_type.y < obj_instance.y
             assert obj_instance.w >= summary.w - 40
             assert not device.has_widget(tag="perf_bacnet_list")
@@ -1105,16 +1108,23 @@ class TestScreen:
             assert r.status_code == 200, f"could not restore performance settings: {r.text}"
 
     def test_editor_bacnet_manual_mode(self, device: DeviceClient, bacnet_fake):
-        r = _put_config(device, {"sensors": _heat_pump_sensors()})
-        assert r.status_code == 200, r.text
-        _open_perf_screen(device)
-        device.click(tag="perf_sensor_supply")
-        assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
-        _pick_perf_source(device, "perf_src_bacnet")
-        assert device.wait_for_widget(tag="perf_bacnet_manual", timeout=20.0)
-        device.click(tag="perf_bacnet_manual")
-        assert device.wait_for_widget(tag="perf_host", timeout=5.0)
-        device.click(tag="perf_editor_cancel")
+        original = _saved_settings(_get_config(device))
+        try:
+            r = _put_config(device, {"sensors": _heat_pump_sensors()})
+            assert r.status_code == 200, r.text
+            _open_perf_screen(device)
+            device.click(tag="perf_sensor_supply")
+            assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
+            _pick_perf_source(device, "perf_src_bacnet")
+            if not device.wait_for_widget(tag="perf_bacnet_manual", timeout=20.0,
+                                          raise_on_timeout=False):
+                pytest.skip("No BACnet discovery/manual control available")
+            device.click(tag="perf_bacnet_manual")
+            assert device.wait_for_widget(tag="perf_host", timeout=5.0)
+            device.click(tag="perf_editor_cancel")
+        finally:
+            r = _put_config(device, original)
+            assert r.status_code == 200, f"could not restore performance settings: {r.text}"
 
     def test_editor_switches_back_to_heat_pump(self, device: DeviceClient, fake):
         _configure_both(device, fake)

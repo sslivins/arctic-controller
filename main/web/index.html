@@ -2373,14 +2373,12 @@
         const slot = el.dataset.slot;
         const form = el.closest("form");
         perfCaptureDraft(form);
-        const box = () => form.querySelector(`#perf-browse-${slot}`);
         const data = new FormData(form);
         const host = String(data.get("host") || "").trim();
         const port = Number(data.get("port") || 47808);
         perfSetMode(slot, { deviceStep: false, sensorStep: true, manualAddress: false, manualObject: false });
         state.perfBrowses[slot] = { running: true };
-        if (box()) box().innerHTML = perfBrowseHtml(slot);
-        el.disabled = true;
+        render();
         try {
           state.perfBrowses[slot] = {
             result: await api("/api/performance/bacnet/browse", jsonOptions("POST", { host, port }))
@@ -2388,8 +2386,7 @@
         } catch (error) {
           state.perfBrowses[slot] = { failed: perfInvalidMessage(error) };
         } finally {
-          el.disabled = false;
-          if (box()) box().innerHTML = perfBrowseHtml(slot);
+          render();
         }
         return;
       }
@@ -2397,11 +2394,9 @@
         const slot = el.dataset.slot;
         const form = el.closest("form");
         if (form) perfCaptureDraft(form);
-        const box = () => form.querySelector(`#perf-discover-${slot}`);
         perfSetMode(slot, { deviceStep: true, manualAddress: false, manualObject: false });
         state.perfDiscovers[slot] = { running: true };
-        if (box()) box().innerHTML = perfDiscoverHtml(slot);
-        el.disabled = true;
+        render();
         try {
           state.perfDiscovers[slot] = {
             result: await api("/api/performance/bacnet/discover", jsonOptions("POST", {}))
@@ -2409,8 +2404,7 @@
         } catch (error) {
           state.perfDiscovers[slot] = { failed: perfInvalidMessage(error) };
         } finally {
-          el.disabled = false;
-          if (box()) box().innerHTML = perfDiscoverHtml(slot);
+          render();
         }
         return;
       }
@@ -2624,6 +2618,9 @@
         const form = event.target.form, modbus = event.target.value === "modbus_tcp", bacnet = event.target.value === "bacnet_ip", network = modbus || bacnet;
         const slot = form?.dataset.slot;
         form.querySelector(".perf-modbus").hidden = !network;
+        form.querySelector(".perf-address").hidden = !modbus;
+        form.querySelector(".perf-nums").hidden = !modbus;
+        form.querySelector(".perf-port").hidden = !modbus;
         form.querySelectorAll(".perf-modbus-only").forEach(x => x.hidden = !modbus);
         form.querySelectorAll(".perf-bacnet-only").forEach(x => x.hidden = !bacnet);
         form.querySelector('[data-action="perf-test"]').hidden = bacnet || !network;
