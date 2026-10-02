@@ -1241,6 +1241,11 @@
       const cfg = state.perf?.sensors?.[slot] || {};
       const live = state.perf?.status?.sensors?.[slot] || {};
       if (cfg.source !== "modbus_tcp" && cfg.source !== "bacnet_ip") return "";
+      if (cfg.source === "bacnet_ip") {
+        // The live reading belongs to the saved sensor, not the one being picked.
+        const m = perfMode(slot);
+        if (m.deviceStep || m.sensorStep || m.manualAddress || m.manualObject || state.perfDiscovers[slot] || state.perfBrowses[slot]) return "";
+      }
       if (live.celsius != null && (live.error === "none" || !live.error))
         return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>${live.object_name ? `<div class="metric-sub">${esc(live.object_name)}</div>` : ""}`;
       return `<div class="kv"><span>Latest reading</span><strong>--</strong></div><p class="metric-sub perf-warn">${esc(perfError(live.error, live.exception, null))}</p>`;
@@ -1273,13 +1278,13 @@
       const badge = bacnet ? "BACnet/IP" : (modbus ? "Modbus TCP" : "Heat pump's own sensor");
       const hasBacnetObject = perfHasBacnetObject(s);
       const savedSummary = bacnet && s.host && hasBacnetObject && !mode.deviceStep && !mode.sensorStep && !mode.manualAddress && !mode.manualObject;
-      const deviceStep = bacnet && !savedSummary && (!s.host || mode.deviceStep || state.perfDiscovers[slot]);
+      const deviceStep = bacnet && !savedSummary && !mode.manualAddress && (!s.host || mode.deviceStep || state.perfDiscovers[slot]);
       const manualAddress = bacnet && !!mode.manualAddress;
       const manualObject = bacnet && !!mode.manualObject;
       const sensorStep = bacnet && !savedSummary && !manualObject && !!s.host && ((!hasBacnetObject && !deviceStep) || mode.sensorStep || state.perfBrowses[slot]);
       const showBacnetAddress = bacnet && manualAddress;
       const deviceSummary = bacnet && !!s.host && !deviceStep && !manualAddress;
-      const canTest = modbus || (bacnet && !!s.host && hasBacnetObject);
+      const canTest = modbus || (bacnet && !!s.host && hasBacnetObject && !deviceStep && !manualAddress && (!sensorStep || manualObject));
       const browseHtml = perfBrowseHtml(slot);
       const discoverHtml = perfDiscoverHtml(slot);
       return `<section class="card"><form data-form="perf-sensor" data-slot="${slot}">
