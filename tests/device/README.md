@@ -138,7 +138,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (291 UI tests + 9 screenshot API tests + 10 HTTPS tests + 292 REST API tests + 60 web tests + API contract tests)
+### Test Files (294 UI tests + 9 screenshot API tests + 10 HTTPS tests + 292 REST API tests + 61 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
@@ -157,6 +157,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_performance.py`](test_performance.py) | 56 | Heat output/COP settings: API validation, Modbus TCP and BACnet/IP sensor test/browse/discovery against fake servers started on the runner, BACnet identity/RPM-fallback/health handling, bounded huge Object_List browse, Performance screen and sensor editor |
 | [`test_language.py`](test_language.py) | 7 | Language switching via roller + preferences API |
 | [`test_status_bar.py`](test_status_bar.py) | 6 | WiFi icon, notification badge, dropdown, firmware notification |
+| [`test_fault_notification.py`](test_fault_notification.py) | 3 | Heat pump problems bell entry: raise, count updates, tap opens Error Status, clear endpoint |
 | [`test_firmware.py`](test_firmware.py) | 5 | Version display, GitHub check, mock update states |
 | [`test_timezone.py`](test_timezone.py) | 5 | Timezone roller, time preview, preferences |
 | [`test_time_format.py`](test_time_format.py) | 6 | 12h/24h toggle, status bar display, history range label |

@@ -42,6 +42,7 @@
 #include "fault_help_links.h"
 #include "factory_reset.h"
 #include "boot_stats.h"
+#include "fault_notice.h"
 #include "log_buffer.h"
 #include "log_persist.h"
 #include "crash_dump.h"
@@ -195,6 +196,7 @@ static esp_err_t notifications_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
 static esp_err_t brownout_clear_handler(httpd_req_t* req);
+static esp_err_t fault_notice_clear_handler(httpd_req_t* req);
 static esp_err_t display_brightness_get_handler(httpd_req_t* req);
 static esp_err_t display_brightness_put_handler(httpd_req_t* req);
 static esp_err_t preferences_get_handler(httpd_req_t* req);
@@ -1209,6 +1211,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(brownout_clear_uri);
+
+    // POST /api/heatpump/fault-notice/clear - Acknowledge heat pump problems
+    httpd_uri_t fault_notice_clear_uri = {
+        .uri = "/api/heatpump/fault-notice/clear",
+        .method = HTTP_POST,
+        .handler = fault_notice_clear_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(fault_notice_clear_uri);
 
     // GET /api/display/brightness - Get current display brightness
     httpd_uri_t display_brightness_uri = {
@@ -5845,6 +5856,7 @@ static const char* notify_type_key(status_bar_notify_type_t type)
         case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:   return "wifi_unstable";
         case STATUS_BAR_NOTIFY_LOW_BATTERY:     return "low_battery";
         case STATUS_BAR_NOTIFY_BROWNOUT:        return "brownout";
+        case STATUS_BAR_NOTIFY_HEATPUMP_FAULT:  return "heatpump_fault";
         default:                                return "unknown";
     }
 }
@@ -5872,6 +5884,19 @@ static esp_err_t notifications_get_handler(httpd_req_t* req)
         cJSON_AddNumberToObject(n, "type", (double)items[i].type);
         cJSON_AddStringToObject(n, "key", notify_type_key(items[i].type));
         cJSON_AddStringToObject(n, "message", items[i].message);
+        if (items[i].type == STATUS_BAR_NOTIFY_HEATPUMP_FAULT) {
+            // Structured copy so clients need not parse the message.
+            fault_notice_t fn;
+            if (fault_notice_get(&fn)) {
+                cJSON* f = cJSON_AddObjectToObject(n, "fault");
+                const arctic::MaconFaultBit* bit = arctic::macon_fault_bit_for_site(fn.latest_site);
+                cJSON_AddNumberToObject(f, "count", fn.count);
+                cJSON_AddStringToObject(f, "latest_code", bit ? bit->code : "");
+                cJSON_AddStringToObject(f, "latest_name", bit ? bit->label : "");
+                cJSON_AddNumberToObject(f, "first_at", (double)fn.first);
+                cJSON_AddNumberToObject(f, "latest_at", (double)fn.latest);
+            }
+        }
         cJSON_AddItemToArray(arr, n);
     }
 
@@ -6350,6 +6375,24 @@ static esp_err_t brownout_clear_handler(httpd_req_t* req)
     // from the web/API dismisses the bell everywhere.
     bsp_display_lock(0);
     status_bar_clear_notification(STATUS_BAR_NOTIFY_BROWNOUT);
+    bsp_display_unlock();
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// POST /api/heatpump/fault-notice/clear - Acknowledge the heat pump problems
+// notification (forgets the saved summary as well)
+static esp_err_t fault_notice_clear_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+
+    fault_notice_clear();
+    bsp_display_lock(0);
+    status_bar_clear_notification(STATUS_BAR_NOTIFY_HEATPUMP_FAULT);
     bsp_display_unlock();
     httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;

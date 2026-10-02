@@ -100,6 +100,8 @@ static const char* strings_en[STR_COUNT] = {
     [STR_NOTIFY_FW_VERSION_AVAILABLE] = "Firmware v%s available",
     [STR_NOTIFY_BROWNOUT] = "Power dip detected – check the power supply",
     [STR_NOTIFY_BROWNOUT_COUNT] = "Power dip detected (%s) – check the power supply",
+    [STR_NOTIFY_HP_FAULT_ONE] = "Heat pump problem: %s %s",
+    [STR_NOTIFY_HP_FAULT_MANY] = "%s heat pump problems – latest %s",
     
     // Time Panel
     [STR_TIME_TITLE] = "Date & Time",
@@ -631,6 +633,8 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_NOTIFY_FW_VERSION_AVAILABLE] = "Firmware v%s disponible",
     [STR_NOTIFY_BROWNOUT] = "Baisse de tension détectée – vérifiez l'alimentation",
     [STR_NOTIFY_BROWNOUT_COUNT] = "Baisse de tension détectée (%s) – vérifiez l'alimentation",
+    [STR_NOTIFY_HP_FAULT_ONE] = "Problème de pompe à chaleur : %s %s",
+    [STR_NOTIFY_HP_FAULT_MANY] = "%s problèmes de pompe à chaleur – dernier : %s",
     
     // Time Panel
     [STR_TIME_TITLE] = "Date et heure",
@@ -1163,6 +1167,8 @@ static const char* strings_es[STR_COUNT] = {
     [STR_NOTIFY_FW_VERSION_AVAILABLE] = "Firmware v%s disponible",
     [STR_NOTIFY_BROWNOUT] = "Caída de tensión detectada – revisa la alimentación",
     [STR_NOTIFY_BROWNOUT_COUNT] = "Caída de tensión detectada (%s) – revisa la alimentación",
+    [STR_NOTIFY_HP_FAULT_ONE] = "Problema de la bomba de calor: %s %s",
+    [STR_NOTIFY_HP_FAULT_MANY] = "%s problemas de la bomba de calor – último: %s",
     
     // Time Panel
     [STR_TIME_TITLE] = "Fecha y hora",
@@ -1657,12 +1663,20 @@ void i18n_init(void)
 
 const char* i18n_get(string_id_t id)
 {
+    return i18n_get_lang(id, s_current_language);
+}
+
+const char* i18n_get_lang(string_id_t id, language_t lang)
+{
     if (id >= STR_COUNT) {
         return "???";
     }
+    if (lang >= LANG_COUNT) {
+        lang = LANG_ENGLISH;
+    }
     
-    // Try current language first
-    const char* str = string_tables[s_current_language][id];
+    // Try the requested language first
+    const char* str = string_tables[lang][id];
     if (str != NULL) {
         return str;
     }
@@ -1963,13 +1977,18 @@ static const keyed_translation_t s_keyed_translations[] = {
 
 const char* i18n_get_key(const char* key, const char* english_fallback)
 {
+    return i18n_get_key_lang(key, english_fallback, s_current_language);
+}
+
+const char* i18n_get_key_lang(const char* key, const char* english_fallback, language_t lang)
+{
     // English (and any missing key) always resolves to the library source text.
-    if (!key || s_current_language == LANG_ENGLISH) {
+    if (!key || lang == LANG_ENGLISH || lang >= LANG_COUNT) {
         return english_fallback;
     }
     for (const keyed_translation_t* e = s_keyed_translations; e->key != NULL; ++e) {
         if (strcmp(e->key, key) == 0) {
-            const char* t = (s_current_language == LANG_FRENCH) ? e->fr : e->es;
+            const char* t = (lang == LANG_FRENCH) ? e->fr : e->es;
             if (t != NULL && t[0] != '\0') {
                 return t;
             }

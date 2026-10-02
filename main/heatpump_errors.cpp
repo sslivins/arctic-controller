@@ -9,10 +9,12 @@
  */
 #include "heatpump_errors.h"
 #include "fault_help_links.h"
+#include "fault_notice.h"
 #include "heatpump_controller.h"
 #include "macon_faults.h"
 #include <cJSON.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -215,9 +217,17 @@ bool describeFaultCode(const char* code, const char** name_out,
 }
 
 void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
-                        uint8_t fault_elec, uint8_t fault_ref) {
+                        uint8_t fault_elec, uint8_t fault_ref, bool notify) {
     time_t now = time(nullptr);
+    const uint32_t mono_s = (uint32_t)(esp_timer_get_time() / 1000000);
     ErrorStateLock lock;
+
+    // The first call after boot diffs against all-zero registers, so every
+    // fault already active on the heat pump shows up as "appeared". Tell the
+    // fault notice so it can avoid counting a fault again across a reboot.
+    static bool s_seen_first_reading = false;
+    const bool at_boot = !s_seen_first_reading;
+    s_seen_first_reading = true;
 
     // Decode previous and current fault bytes into opaque fault sites, then diff
     // by site id. The controller never inspects register/bit here — the library
@@ -245,6 +255,7 @@ void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
             setFirstSeen(cur_f[i].site, now);
             ESP_LOGW(TAG, "Error SET: %s - %s", cur_f[i].code, cur_f[i].label);
             addHistoryEntry(cur_f[i].code, false, 0);
+            if (notify) fault_notice_record(cur_f[i].site, now, mono_s, at_boot);
         }
     }
 

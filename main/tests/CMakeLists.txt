@@ -40,6 +40,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/event_log.cpp
   ${MAIN_DIR}/log_persist.cpp
   ${MAIN_DIR}/boot_stats.cpp
+  ${MAIN_DIR}/fault_notice.cpp
   ${MAIN_DIR}/time_manager.cpp
   ${MAIN_DIR}/iana_tz.cpp
   ${MAIN_DIR}/location_manager.cpp
@@ -138,6 +139,12 @@ add_test(NAME log_persist COMMAND test_log_persist)
 add_executable(test_boot_stats test_boot_stats.cpp)
 target_link_libraries(test_boot_stats PRIVATE arctic_main_host)
 add_test(NAME boot_stats COMMAND test_boot_stats)
+
+# The "heat pump problems" bell entry: count, flash write throttle, restore on
+# reboot (forked children, like boot_stats) and the localized text.
+add_executable(test_fault_notice test_fault_notice.cpp)
+target_link_libraries(test_fault_notice PRIVATE arctic_main_host)
+add_test(NAME fault_notice COMMAND test_fault_notice)
 
 # time_manager needs the doctored clock for the same reason event_log does, but
 # for the opposite branch: is_synced() must be able to read a pre-2024 clock so
