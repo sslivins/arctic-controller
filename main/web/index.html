@@ -725,6 +725,7 @@
       wifi_unstable:   { icon: "📶", route: ["settings", "wifi"] },
       low_battery:     { icon: "🔋", route: null },
       brownout:        { icon: "⚡", route: ["events", null] },
+      heatpump_fault:  { icon: "⚠️", route: ["errors", null] },
       unknown:         { icon: "🔔", route: null },
     };
     function notifBell() {
@@ -2221,6 +2222,11 @@
           // does not re-raise, and drop it from the current list immediately.
           await api("/api/brownout/clear", { method: "POST" }).catch(() => {});
           state.notifications = state.notifications.filter(x => x.key !== "brownout");
+        }
+        if (n && n.key === "heatpump_fault") {
+          // Acknowledge the heat pump problems; the Errors page has the details.
+          await api("/api/heatpump/fault-notice/clear", { method: "POST" }).catch(() => {});
+          state.notifications = state.notifications.filter(x => x.key !== "heatpump_fault");
         }
         const meta = n && (NOTIF_META[n.key] || NOTIF_META.unknown);
         if (meta && meta.route) await navigate(meta.route[0], meta.route[1]);

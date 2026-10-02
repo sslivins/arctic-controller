@@ -38,6 +38,14 @@ void i18n_init(void);
 const char* i18n_get(string_id_t id);
 
 /**
+ * @brief Get a string in an explicit language (English fallback if missing)
+ *
+ * Lets one formatter produce both the English text reported by the web API and
+ * the translated device text, whatever the current device language is.
+ */
+const char* i18n_get_lang(string_id_t id, language_t lang);
+
+/**
  * @brief Translate a keyed, library-sourced string to the current language.
  *
  * The macon library is the single source of truth for English text (parameter
@@ -55,6 +63,11 @@ const char* i18n_get(string_id_t id);
  * @return Localized string, or `english_fallback` when untranslated.
  */
 const char* i18n_get_key(const char* key, const char* english_fallback);
+
+/**
+ * @brief i18n_get_key() for an explicit language
+ */
+const char* i18n_get_key_lang(const char* key, const char* english_fallback, language_t lang);
 
 /**
  * @brief Get current language

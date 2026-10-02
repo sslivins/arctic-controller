@@ -106,6 +106,8 @@ typedef enum {
     STR_NOTIFY_FW_VERSION_AVAILABLE,
     STR_NOTIFY_BROWNOUT,
     STR_NOTIFY_BROWNOUT_COUNT,
+    STR_NOTIFY_HP_FAULT_ONE,
+    STR_NOTIFY_HP_FAULT_MANY,
     
     // ========================================================================
     // Time Panel

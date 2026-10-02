@@ -43,6 +43,7 @@
 #include "heatpump_temps_screen.h"
 #include "heatpump_control_screen.h"
 #include "heatpump_errors_screen.h"
+#include "fault_notice.h"
 #include "event_log.h"
 #include "event_log_screen.h"
 #include "history_storage.h"
@@ -1936,6 +1937,9 @@ static esp_err_t notification_mock_post_handler(httpd_req_t* req)
 static esp_err_t notification_mock_reset_post_handler(httpd_req_t* req)
 {
     CHECK_SESSION_LOCK(req);
+    // Also forget any heat pump problem notice, or the bell would re-raise it
+    // from fault_notice on its next sync.
+    fault_notice_clear();
     bsp_display_lock(0);
     status_bar_clear_all_notifications();
     bsp_display_unlock();

@@ -10,6 +10,7 @@
 #include "app_preferences.h"
 #include "fonts/fonts.h"
 #include "i18n/i18n.h"
+#include "fault_notice.h"
 #include <esp_log.h>
 #include <string.h>
 #include <stdio.h>
@@ -38,7 +39,7 @@ static const char* TAG = "status_bar";
 #define FONT_DROPDOWN_TEXT    (&montserrat_24_latin)    // Translated text in dropdown
 
 // Maximum notification message length
-#define NOTIFY_MSG_MAX_LEN 64
+#define NOTIFY_MSG_MAX_LEN 128
 #define NOTIFY_DETAIL_MAX_LEN 24
 
 // Notification item storage
@@ -662,7 +663,7 @@ static void show_dropdown(void)
     
     // Create the dropdown panel inside the overlay
     lv_obj_t* panel = lv_obj_create(bar_state.notify_dropdown);
-    lv_obj_set_size(panel, 500, count * 90 + 30 + 44);  // heading + 90px per item + padding
+    lv_obj_set_size(panel, 500, LV_SIZE_CONTENT);  // heading + one row per item
     lv_obj_align(panel, LV_ALIGN_TOP_RIGHT, -25, STATUS_BAR_HEIGHT + 10);
     lv_obj_set_style_bg_color(panel, lv_color_hex(COLOR_DROPDOWN_BG), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(panel, LV_OPA_COVER, LV_PART_MAIN);
@@ -699,9 +700,18 @@ static void show_dropdown(void)
             continue;
         }
         
-        // Create item button
+        // Create item button. Content height (min 80 px) so a long message
+        // that wraps onto a third line still fits inside its row.
         lv_obj_t* item = lv_btn_create(panel);
-        lv_obj_set_size(item, LV_PCT(100), 80);
+        lv_obj_set_width(item, LV_PCT(100));
+        lv_obj_set_height(item, LV_SIZE_CONTENT);
+        lv_obj_set_style_min_height(item, 80, LV_PART_MAIN);
+        lv_obj_set_style_pad_ver(item, 8, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(item, 10, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(item, 10, LV_PART_MAIN);
+        lv_obj_set_style_pad_column(item, 18, LV_PART_MAIN);
+        lv_obj_set_flex_flow(item, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(item, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_bg_color(item, lv_color_hex(COLOR_DROPDOWN_BG), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(item, LV_OPA_0, LV_PART_MAIN);
         lv_obj_set_style_bg_color(item, lv_color_hex(COLOR_ITEM_HOVER), LV_STATE_PRESSED);
@@ -717,6 +727,7 @@ static void show_dropdown(void)
             case STATUS_BAR_NOTIFY_WIFI_UNSTABLE:   item_tag = "notify_item_wifi";     break;
             case STATUS_BAR_NOTIFY_LOW_BATTERY:     item_tag = "notify_item_battery";  break;
             case STATUS_BAR_NOTIFY_BROWNOUT:        item_tag = "notify_item_brownout"; break;
+            case STATUS_BAR_NOTIFY_HEATPUMP_FAULT:  item_tag = "notify_item_heatpump_fault"; break;
             default: break;
         }
         lv_obj_set_user_data(item, (void*)item_tag);
@@ -736,13 +747,15 @@ static void show_dropdown(void)
             case STATUS_BAR_NOTIFY_BROWNOUT:
                 icon_text = LV_SYMBOL_CHARGE;
                 break;
+            case STATUS_BAR_NOTIFY_HEATPUMP_FAULT:
+                icon_text = LV_SYMBOL_WARNING;
+                break;
             default:
                 break;
         }
         lv_label_set_text(icon, icon_text);
         lv_obj_set_style_text_font(icon, FONT_DROPDOWN_ICON, LV_PART_MAIN);
         lv_obj_set_style_text_color(icon, lv_color_hex(COLOR_NOTIFY), LV_PART_MAIN);
-        lv_obj_align(icon, LV_ALIGN_LEFT_MID, 10, 0);
         
         // Message label. The stored message is English (it is also what the
         // web API reports), so on the device show the translated text unless
@@ -750,9 +763,16 @@ static void show_dropdown(void)
         lv_obj_t* label = lv_label_create(item);
         const notification_item_t* n = &bar_state.notifications[i];
         const bool has_detail = n->detail[0] != '\0';
-        char msg_buf[128];
+        char msg_buf[NOTIFY_MSG_MAX_LEN * 2];
         const char* msg = n->message;
-        if (msg[0] == '\0' || i18n_get_language() != LANG_ENGLISH) {
+        if (i == STATUS_BAR_NOTIFY_HEATPUMP_FAULT) {
+            // Built live so it follows the current language.
+            fault_notice_t fn;
+            if (fault_notice_get(&fn) &&
+                fault_notice_format(msg_buf, sizeof(msg_buf), &fn, i18n_get_language()) > 0) {
+                msg = msg_buf;
+            }
+        } else if (msg[0] == '\0' || i18n_get_language() != LANG_ENGLISH) {
             switch (i) {
                 case STATUS_BAR_NOTIFY_FIRMWARE_UPDATE:
                     if (has_detail) {
@@ -786,10 +806,9 @@ static void show_dropdown(void)
         lv_label_set_text(label, msg);
         lv_obj_set_style_text_font(label, FONT_DROPDOWN_TEXT, LV_PART_MAIN);
         lv_obj_set_style_text_color(label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
-        // Room to the right of the icon; long translations wrap onto a second line.
-        lv_obj_set_width(label, 390);
+        // Fills the row right of the icon; long text wraps onto more lines.
+        lv_obj_set_flex_grow(label, 1);
         lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-        lv_obj_align(label, LV_ALIGN_LEFT_MID, 60, 0);
     }
     
     ESP_LOGI(TAG, "Notification dropdown shown with %d items", count);

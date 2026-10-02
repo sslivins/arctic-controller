@@ -53,6 +53,7 @@
 #include "app_preferences.h"
 #include "event_log.h"
 #include "boot_stats.h"
+#include "fault_notice.h"
 #include "wifi_supervisor.h"
 #include "telemetry_history.h"
 #include "ui_common.h"
@@ -117,6 +118,31 @@ static void on_settings_close(void);
 static void on_wifi_screen_close(void);  // For WiFi opened from status bar
 static void wifi_init_task(void* param);
 static void on_update_check_complete(bool update_available, const char* new_version);
+
+// Heat pump fault notice -> notification bell. The notice itself lives in
+// fault_notice (written by the poll path); the bell mirrors it from the LVGL
+// timer below so status-bar calls stay on the UI task.
+static uint32_t s_fault_notice_rev = 0;             // revision last shown in the bell
+static lv_obj_t* s_fault_notice_return_screen = nullptr;
+
+// Runs on the LVGL task with the display lock held.
+static void sync_fault_notice_bell(void)
+{
+    fault_notice_tick((uint32_t)(esp_timer_get_time() / 1000000));
+    const uint32_t rev = fault_notice_revision();
+    if (rev == s_fault_notice_rev) return;
+    s_fault_notice_rev = rev;
+    fault_notice_t fn;
+    if (fault_notice_get(&fn)) {
+        // The stored message is English (it is what /api/notifications
+        // reports); the dropdown builds its own text in the device language.
+        char msg[128];
+        fault_notice_format(msg, sizeof(msg), &fn, LANG_ENGLISH);
+        status_bar_add_notification(STATUS_BAR_NOTIFY_HEATPUMP_FAULT, msg);
+    } else {
+        status_bar_clear_notification(STATUS_BAR_NOTIFY_HEATPUMP_FAULT);
+    }
+}
 
 // Flag to track when to show main UI
 static bool show_main_ui = false;
@@ -320,6 +346,10 @@ extern "C" void app_main(void)
     // NVS, which was initialized above.
     boot_stats_init(reset_reason);
     event_log_record_reset_reason(reset_reason);
+
+    // Heat pump problems the user has not acknowledged yet (NVS), so the bell
+    // shows them again after a reboot or firmware update.
+    fault_notice_init();
 
     // Crash-loop recovery: if the device has crash-rebooted repeatedly, boot
     // into SAFE MODE and skip optional/risky subsystems (e.g. demo mode) so a
@@ -633,6 +663,14 @@ void create_ui(void)
         snprintf(count, sizeof(count), "%lu", (unsigned long)brownouts);
         status_bar_add_notification_detail(STATUS_BAR_NOTIFY_BROWNOUT, msg, count);
     }
+
+    // Heat pump problems: show any restored from NVS now, then keep the bell in
+    // step with new faults and with acknowledgements made from the web UI.
+    sync_fault_notice_bell();
+    lv_timer_create([](lv_timer_t* t) {
+        (void)t;
+        sync_fault_notice_bell();
+    }, 1000, NULL);
 }
 
 // ============================================================================
@@ -954,6 +992,26 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
             // notification already cleared above.)
             boot_stats_clear();
             break;
+
+        case STATUS_BAR_NOTIFY_HEATPUMP_FAULT: {
+            // Acknowledge the problems (also forgets the saved copy) and show
+            // the error screen, which has the details and the history.
+            fault_notice_clear();
+            s_fault_notice_rev = fault_notice_revision();
+            bsp_display_lock(0);
+            if (!heatpump_errors_is_shown()) {
+                s_fault_notice_return_screen = lv_scr_act();
+                heatpump_errors_show([]() {
+                    if (s_fault_notice_return_screen) {
+                        lv_screen_load_anim(s_fault_notice_return_screen, LV_SCR_LOAD_ANIM_NONE,
+                                            0, 0, true);
+                        s_fault_notice_return_screen = nullptr;
+                    }
+                });
+            }
+            bsp_display_unlock();
+            break;
+        }
 
         default:
             mclog::tagWarn(TAG, "Unknown notification type: {}", (int)type);

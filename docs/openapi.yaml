@@ -835,8 +835,9 @@ paths:
       summary: Active status-bar notifications
       description: |
         Returns the notifications currently shown on the on-device status-bar
-        bell (firmware update available, unstable WiFi, low battery). The web
-        dashboard uses this to mirror the device notification bell.
+        bell (firmware update available, unstable WiFi, low battery, power dip,
+        heat pump problems). The web dashboard uses this to mirror the device
+        notification bell.
       operationId: getNotifications
       security:
       - apiKey: []
@@ -860,17 +861,42 @@ paths:
                       properties:
                         type:
                           type: integer
-                          description: Numeric notification type (0=firmware, 1=wifi, 2=battery)
+                          description: Numeric notification type (0=firmware, 1=wifi, 2=battery, 3=brownout, 4=heat pump fault)
                           example: 0
                         key:
                           type: string
-                          enum: [firmware_update, wifi_unstable, low_battery, brownout, unknown]
+                          enum: [firmware_update, wifi_unstable, low_battery, brownout, heatpump_fault, unknown]
                           description: Stable, language-independent notification key
                           example: firmware_update
                         message:
                           type: string
-                          description: Human-readable notification message
+                          description: Human-readable notification message (English)
                           example: Firmware v2.11.13 available
+                        fault:
+                          type: object
+                          description: |
+                            Only for `heatpump_fault`. Heat pump faults seen
+                            since the notification was last acknowledged. It
+                            is saved on the device, so it survives a reboot.
+                          properties:
+                            count:
+                              type: integer
+                              description: Number of fault onsets (stops at 9999)
+                              example: 3
+                            latest_code:
+                              type: string
+                              example: P06
+                            latest_name:
+                              type: string
+                              example: Refrigerant pressure too low
+                            first_at:
+                              type: integer
+                              description: Unix time of the first fault; 0 if the clock was not set
+                              example: 1782915240
+                            latest_at:
+                              type: integer
+                              description: Unix time of the latest fault; 0 if the clock was not set
+                              example: 1782998040
         '401':
           description: Unauthorized
           content:
@@ -3408,6 +3434,39 @@ paths:
       responses:
         '200':
           description: Brownout statistics cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/heatpump/fault-notice/clear:
+    post:
+      tags:
+      - HeatPump
+      summary: Acknowledge the heat pump problems notification
+      description: |
+        Clears the "heat pump problems" bell entry and forgets its saved
+        summary (count, first and latest fault). The next fault starts a new
+        one. Does not touch the error history or the event log.
+      operationId: clearFaultNotice
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Notification acknowledged
           content:
             application/json:
               schema:

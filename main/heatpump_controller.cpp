@@ -380,8 +380,9 @@ void initDemoState() {
     const uint8_t f_ref  = s_state.fault_ref;
     xSemaphoreGive(s_state_mutex);
 
-    // Seed error history with the current fault state.
-    updateErrorHistory(f_run, f_ee, f_comp, f_elec, f_ref);
+    // Seed error history with the current fault state. Not a new problem, so
+    // the demo's canned fault does not raise the bell on every boot.
+    updateErrorHistory(f_run, f_ee, f_comp, f_elec, f_ref, false);
 
     // Also seed some cleared historical errors
     populateDemoErrorHistory();

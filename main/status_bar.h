@@ -33,6 +33,7 @@ typedef enum {
     STATUS_BAR_NOTIFY_WIFI_UNSTABLE,        // WiFi connection is unstable
     STATUS_BAR_NOTIFY_LOW_BATTERY,          // Low battery warning
     STATUS_BAR_NOTIFY_BROWNOUT,             // Brownout reset detected (power sag)
+    STATUS_BAR_NOTIFY_HEATPUMP_FAULT,       // Heat pump fault(s) since last acknowledged (fault_notice)
     STATUS_BAR_NOTIFY_MAX
 } status_bar_notify_type_t;
 
@@ -119,7 +120,7 @@ uint8_t status_bar_get_notify_count(void);
  */
 typedef struct {
     status_bar_notify_type_t type;  // Notification type
-    char message[64];               // Human-readable message
+    char message[128];              // Human-readable message (English)
 } status_bar_notification_snapshot_t;
 
 /**
