@@ -1042,6 +1042,13 @@ class TestScreen:
                 pytest.skip("No BACnet device discoverable on the CI network")
             assert not device.has_widget(tag="perf_bacnet_device_summary")
             assert not device.has_widget(tag="perf_test")
+            # Refresh sits in the list header, manual entry as a link under the list.
+            refresh = device.find_widget(tag="perf_bacnet_search_again")
+            first_device = device.find_widget(tag="perf_bacnet_device_0")
+            manual = device.find_widget(tag="perf_bacnet_manual")
+            assert refresh.y + refresh.h <= first_device.y
+            assert refresh.w < first_device.w / 3
+            assert manual.y > first_device.y + first_device.h
             device.click(label_contains="Thermux Test")
 
             assert device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
@@ -1053,6 +1060,10 @@ class TestScreen:
             assert device.wait_until("BACnet sensor list shows Supply tank",
                                      lambda: _screen_text_contains(device, "Supply tank"),
                                      timeout=20.0, poll=0.5)
+            first_sensor = device.find_widget(tag="perf_bacnet_sensor")
+            manual_object = device.find_widget(tag="perf_bacnet_manual_object")
+            assert manual_object.y > first_sensor.y + first_sensor.h
+            assert _screen_text_contains(device, "Not listed?")
 
             device.click(tag="perf_bacnet_manual_object")
             assert device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)

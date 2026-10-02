@@ -438,6 +438,62 @@ static lv_obj_t* make_picker_row(lv_obj_t* parent, const char* text, const char*
     return row;
 }
 
+// Section title with an optional refresh icon at the right edge, so refresh
+// never reads as one of the list's choices.
+static void make_list_header(lv_obj_t* parent, const char* title, lv_event_cb_t refresh_cb)
+{
+    lv_obj_t* row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    make_label(row, title, FONT_NORMAL, COLOR_TEXT);
+    if (!refresh_cb) return;
+    lv_obj_t* btn = lv_btn_create(row);
+    lv_obj_set_size(btn, 64, 64);
+    lv_obj_set_style_bg_color(btn, COLOR_PERF_ROW, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn, COLOR_PERF_ROW_PRESSED, LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, 32, LV_PART_MAIN);
+    lv_obj_set_user_data(btn, (void*)"perf_bacnet_search_again");
+    lv_obj_add_event_cb(btn, refresh_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t* icon = make_label(btn, LV_SYMBOL_REFRESH, FONT_NORMAL, COLOR_ACCENT);
+    lv_obj_center(icon);
+}
+
+// "Not listed? <action>" below a divider: an escape hatch, not a list choice.
+static void make_not_listed_link(lv_obj_t* parent, const char* action, const char* tag, lv_event_cb_t cb)
+{
+    lv_obj_t* div = lv_obj_create(parent);
+    lv_obj_set_size(div, LV_PCT(100), 1);
+    lv_obj_set_style_bg_color(div, COLOR_SEG_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(div, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(div, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(div, 0, LV_PART_MAIN);
+    lv_obj_remove_flag(div, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* link = lv_btn_create(parent);
+    lv_obj_set_size(link, LV_PCT(100), 60);
+    lv_obj_set_style_bg_opa(link, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(link, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(link, COLOR_PERF_ROW_PRESSED, LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(link, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(link, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(link, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(link, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(link, 10, LV_PART_MAIN);
+    lv_obj_set_flex_flow(link, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(link, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_user_data(link, (void*)tag);
+    lv_obj_add_event_cb(link, cb, LV_EVENT_CLICKED, NULL);
+    make_label(link, i18n_get(STR_PERF_NOT_LISTED), FONT_NORMAL, COLOR_TEXT_DIM);
+    make_label(link, action, FONT_NORMAL, COLOR_ACCENT);
+}
+
 static float to_display_temp(float c)
 {
     return app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT ? c * 9.0f / 5.0f + 32.0f : c;
@@ -1518,9 +1574,17 @@ static void render_discover_result(const ext_temp::DiscoverResult& r)
         lv_obj_remove_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    make_label(ed.discover_list,
-               r.count ? i18n_get(STR_PERF_DEVICE) : i18n_get(STR_PERF_NO_BACNET_DEVICES),
-               FONT_NORMAL, r.count ? COLOR_TEXT : COLOR_TEXT_DIM);
+    if (r.count == 0) {
+        make_label(ed.discover_list, i18n_get(STR_PERF_NO_BACNET_DEVICES), FONT_NORMAL, COLOR_TEXT_DIM);
+        make_picker_row(ed.discover_list, i18n_get(STR_PERF_SEARCH_AGAIN), "perf_bacnet_search_again", false,
+                        discover_btn_cb, NULL);
+        make_picker_row(ed.discover_list, i18n_get(STR_PERF_BACNET_MANUAL), "perf_bacnet_manual", false,
+                        manual_cb, NULL);
+        lv_obj_remove_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_scroll_to_view_recursive(ed.discover_card, LV_ANIM_ON);
+        return;
+    }
+    make_list_header(ed.discover_list, i18n_get(STR_PERF_DEVICE), discover_btn_cb);
     char line[96];
     static const char* kDeviceTags[16] = {
         "perf_bacnet_device_0", "perf_bacnet_device_1", "perf_bacnet_device_2",
@@ -1537,10 +1601,7 @@ static void render_discover_result(const ext_temp::DiscoverResult& r)
         make_picker_row(ed.discover_list, line, i < 16 ? kDeviceTags[i] : "perf_bacnet_device", false, discover_pick_cb,
                         (void*)(intptr_t)i);
     }
-    make_picker_row(ed.discover_list, i18n_get(STR_PERF_SEARCH_AGAIN), "perf_bacnet_search_again", false,
-                    discover_btn_cb, NULL);
-    make_picker_row(ed.discover_list, i18n_get(STR_PERF_BACNET_MANUAL), "perf_bacnet_manual", false,
-                    manual_cb, NULL);
+    make_not_listed_link(ed.discover_list, i18n_get(STR_PERF_BACNET_MANUAL), "perf_bacnet_manual", manual_cb);
     lv_obj_remove_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
     lv_obj_scroll_to_view_recursive(ed.discover_card, LV_ANIM_ON);
 }
@@ -1689,8 +1750,8 @@ static void render_browse_result(const ext_temp::BrowseResult& r)
                         (void*)(intptr_t)i);
     }
 
-    make_picker_row(ed.browse_list, i18n_get(STR_PERF_BACNET_MANUAL_OBJECT), "perf_bacnet_manual_object", false,
-                    bacnet_manual_object_cb, NULL);
+    make_not_listed_link(ed.browse_list, i18n_get(STR_PERF_BACNET_MANUAL_OBJECT), "perf_bacnet_manual_object",
+                         bacnet_manual_object_cb);
 
     if (r.truncated) {
         char note[192];

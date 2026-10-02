@@ -318,6 +318,49 @@ class TestSettingsWorkspace:
         expect(dashboard_page.locator(".toast.bad")).to_contain_text("Choose a BACnet object")
         assert saved_payloads == []
 
+    def test_performance_bacnet_list_actions_are_separate_from_choices(self, dashboard_page: Page):
+        route_perf_config(dashboard_page)
+        dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"ok": True, "error": "none", "truncated": False, "devices": [
+                {"host": f"10.0.0.{i}", "port": 47808, "device_instance": 100 + i,
+                 "device_name": f"Thermux {i}", "model_name": "Thermux", "vendor_id": 15}
+                for i in range(10)]})))
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux 0","device_instance":100,"sensors":[{"object_type":"analog_input","object_instance":1,"object_name":"Sensor A","celsius":21.1,"units":62,"reliability":0,"rom_id":""}],"truncated":false}'))
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        card.locator('select[name="source"]').select_option("bacnet_ip")
+
+        choices = card.locator("#perf-discover-supply .perf-choices")
+        expect(choices.locator('[data-action="perf-pick-bacnet-device"]')).to_have_count(10)
+        expect(choices.locator('[data-action="perf-discover-bacnet"]')).to_have_count(0)
+        expect(choices.locator('[data-action="perf-bacnet-manual"]')).to_have_count(0)
+        refresh = card.locator('#perf-discover-supply .perf-list-head [data-action="perf-discover-bacnet"]')
+        expect(refresh).to_have_attribute("aria-label", "Search again")
+        expect(card.locator("#perf-discover-supply .perf-not-listed")).to_contain_text("Not listed?")
+        expect(card.locator('#perf-discover-supply .perf-not-listed [data-action="perf-bacnet-manual"]')).to_be_visible()
+
+        card.get_by_role("button", name=re.compile("Thermux 0")).click()
+        sensors = card.locator("#perf-browse-supply .perf-choices")
+        expect(sensors.locator('[data-action="perf-pick-bacnet"]')).to_have_count(1)
+        expect(sensors.locator('[data-action="perf-bacnet-manual-object"]')).to_have_count(0)
+        expect(card.locator('#perf-browse-supply .perf-not-listed [data-action="perf-bacnet-manual-object"]')).to_be_visible()
+
+    def test_performance_bacnet_no_devices_offers_plain_actions(self, dashboard_page: Page):
+        route_perf_config(dashboard_page)
+        dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","truncated":false,"devices":[]}'))
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        card.locator('select[name="source"]').select_option("bacnet_ip")
+        expect(card.get_by_text("No BACnet devices found")).to_be_visible(timeout=10000)
+        expect(card.locator('.perf-choices [data-action="perf-discover-bacnet"]')).to_be_visible()
+        expect(card.locator('.perf-choices [data-action="perf-bacnet-manual"]')).to_be_visible()
+        expect(card.locator(".perf-not-listed")).to_have_count(0)
+
     def test_performance_bacnet_change_device_manual_address_is_clean(self, dashboard_page: Page):
         saved = perf_config()["sensors"]["supply"]
         saved.update({"source": "bacnet_ip", "host": "192.168.1.205", "port": 47808,
