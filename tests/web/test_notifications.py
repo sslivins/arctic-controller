@@ -116,15 +116,14 @@ class TestNotificationBellWeb:
             r = requests.post(f"{base_url}/api/test/inject-fault",
                               json={"code": "P06", "active": True}, timeout=10, verify=False)
             r.raise_for_status()
-            for _ in range(20):
-                data = dashboard_page.evaluate(
-                    "() => fetch('/api/notifications').then(r => r.json())"
-                )
-                if "heatpump_fault" in [n["key"] for n in data["notifications"]]:
-                    break
-                dashboard_page.wait_for_timeout(500)
-            else:
-                raise AssertionError("heatpump_fault never appeared in /api/notifications")
+            # The bell mirrors the notice from a 1 s UI timer.
+            dashboard_page.wait_for_function(
+                """async () => {
+                    const d = await fetch('/api/notifications').then(r => r.json());
+                    return d.notifications.some(n => n.key === 'heatpump_fault');
+                }""",
+                timeout=10000,
+            )
 
             dashboard_page.reload(wait_until="domcontentloaded")
             dashboard_page.wait_for_selector(".rail", timeout=10000)

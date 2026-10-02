@@ -73,14 +73,22 @@ constexpr time_t T_OCT02_0814 = 1790928840;
 constexpr time_t T_OCT03_1705 = 1791047100;
 constexpr time_t T_UNSET = 1000;  // RTC not set yet
 
-uint16_t site_of(const char* code) {
-    const arctic::MaconFaultBit* bits[4] = {};
-    size_t n = arctic::macon_fault_bits_for_code(code, bits, 4);
-    if (n == 0 || !bits[0]) {
-        std::fprintf(stderr, "  no site for %s\n", code);
+// Faults are named by semantic id; codes come from the library at runtime so
+// the controller tree never bakes in OEM codes (see test_opaque_macon_controller).
+constexpr arctic::MaconFaultId LOW_PRESSURE = arctic::MaconFaultId::LowPressureProtection;
+constexpr arctic::MaconFaultId DISCHARGE_SENSOR = arctic::MaconFaultId::DischargeSensor;
+
+uint16_t site_of(arctic::MaconFaultId id) {
+    arctic::MaconFaultSiteId site = 0;
+    if (arctic::macon_fault_sites_for_id(id, &site, 1) == 0 || site == 0) {
+        std::fprintf(stderr, "  no site for fault id %u\n", (unsigned)id);
         std::exit(2);
     }
-    return arctic::macon_fault_site_id(bits[0]->reg, bits[0]->bit);
+    return site;
+}
+
+std::string code_of(arctic::MaconFaultId id) {
+    return arctic::macon_fault_bit_for_site(site_of(id))->code;
 }
 
 size_t writes() { return (size_t)nvs_fake::call_count(nvs_fake::Op::SetBlob); }
@@ -119,14 +127,14 @@ void test_first_fault_written_immediately() {
     fresh();
     const uint32_t rev0 = fault_notice_revision();
     CHECK(!fault_notice_get(nullptr));
-    fault_notice_record(site_of("P06"), T_OCT02_0814, 100, false);
+    fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814, 100, false);
 
     fault_notice_t n;
     CHECK(fault_notice_get(&n));
     CHECK_EQ_INT(n.count, 1);
     CHECK_EQ_INT(n.first, T_OCT02_0814);
     CHECK_EQ_INT(n.latest, T_OCT02_0814);
-    CHECK_EQ_INT(n.latest_site, site_of("P06"));
+    CHECK_EQ_INT(n.latest_site, site_of(LOW_PRESSURE));
     CHECK(fault_notice_revision() != rev0);
     CHECK_EQ_INT(writes(), 1);
     CHECK(saved());
@@ -135,12 +143,12 @@ void test_first_fault_written_immediately() {
 void test_later_faults_are_throttled() {
     std::puts("later faults: batched to one write per flush interval");
     fresh();
-    fault_notice_record(site_of("P06"), T_OCT02_0814, 100, false);
+    fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814, 100, false);
     CHECK_EQ_INT(writes(), 1);
 
     // A flapping fault: 50 more onsets within the interval -> no writes.
     for (uint32_t i = 1; i <= 50; ++i) {
-        fault_notice_record(site_of("P06"), T_OCT02_0814 + i, 100 + i, false);
+        fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814 + i, 100 + i, false);
         fault_notice_tick(100 + i);
     }
     CHECK_EQ_INT(writes(), 1);
@@ -155,7 +163,7 @@ void test_later_faults_are_throttled() {
     CHECK_EQ_INT(writes(), 2);
 
     // A fault long after the last write is written straight away.
-    fault_notice_record(site_of("E01"), T_OCT03_1705, 100 + 6 * FAULT_NOTICE_FLUSH_INTERVAL_S,
+    fault_notice_record(site_of(DISCHARGE_SENSOR), T_OCT03_1705, 100 + 6 * FAULT_NOTICE_FLUSH_INTERVAL_S,
                         false);
     CHECK_EQ_INT(writes(), 3);
 
@@ -164,14 +172,14 @@ void test_later_faults_are_throttled() {
     CHECK_EQ_INT(n.count, 52);
     CHECK_EQ_INT(n.first, T_OCT02_0814);
     CHECK_EQ_INT(n.latest, T_OCT03_1705);
-    CHECK_EQ_INT(n.latest_site, site_of("E01"));
+    CHECK_EQ_INT(n.latest_site, site_of(DISCHARGE_SENSOR));
 }
 
 void test_count_saturates() {
     std::puts("count stops at FAULT_NOTICE_COUNT_MAX");
     fresh();
     for (uint32_t i = 0; i < FAULT_NOTICE_COUNT_MAX + 25; ++i) {
-        fault_notice_record(site_of("P06"), T_OCT02_0814, 100, false);
+        fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814, 100, false);
     }
     fault_notice_t n;
     fault_notice_get(&n);
@@ -183,7 +191,7 @@ void test_count_saturates() {
 void test_unset_clock_stored_as_zero() {
     std::puts("faults before the clock is set are stored without a time");
     fresh();
-    fault_notice_record(site_of("P06"), T_UNSET, 5, false);
+    fault_notice_record(site_of(LOW_PRESSURE), T_UNSET, 5, false);
     fault_notice_t n;
     fault_notice_get(&n);
     CHECK_EQ_INT(n.first, 0);
@@ -193,7 +201,7 @@ void test_unset_clock_stored_as_zero() {
 void test_clear_erases_flash() {
     std::puts("clear: forgets the notice in RAM and in flash");
     fresh();
-    fault_notice_record(site_of("P06"), T_OCT02_0814, 100, false);
+    fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814, 100, false);
     CHECK(saved());
     const uint32_t rev = fault_notice_revision();
     fault_notice_clear();
@@ -208,7 +216,7 @@ void test_clear_erases_flash() {
     // The next fault starts a fresh notice and is written at once, even
     // though the previous write was moments ago.
     const size_t before = writes();
-    fault_notice_record(site_of("E01"), T_OCT03_1705, 110, false);
+    fault_notice_record(site_of(DISCHARGE_SENSOR), T_OCT03_1705, 110, false);
     fault_notice_t n;
     fault_notice_get(&n);
     CHECK_EQ_INT(n.count, 1);
@@ -220,7 +228,7 @@ void test_failed_write_is_retried() {
     std::puts("a failed write stays dirty and is retried by tick");
     fresh();
     nvs_fake::fail_next(nvs_fake::Op::SetBlob, ESP_FAIL);
-    fault_notice_record(site_of("P06"), T_OCT02_0814, 100, false);
+    fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814, 100, false);
     CHECK(fault_notice_get(nullptr));  // still shown in RAM
     CHECK(!saved());
     fault_notice_tick(100 + FAULT_NOTICE_FLUSH_INTERVAL_S);
@@ -230,8 +238,8 @@ void test_failed_write_is_retried() {
 void test_survives_reboot() {
     std::puts("reboot: a saved notice is restored with its count and times");
     fresh();
-    fault_notice_record(site_of("P06"), T_OCT02_0814, 100, false);
-    fault_notice_record(site_of("E01"), T_OCT03_1705, 200, false);
+    fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814, 100, false);
+    fault_notice_record(site_of(DISCHARGE_SENSOR), T_OCT03_1705, 200, false);
     fault_notice_tick(100 + FAULT_NOTICE_FLUSH_INTERVAL_S);
 
     int child = after_reboot([] {
@@ -240,7 +248,7 @@ void test_survives_reboot() {
         CHECK_EQ_INT(n.count, 2);
         CHECK_EQ_INT(n.first, T_OCT02_0814);
         CHECK_EQ_INT(n.latest, T_OCT03_1705);
-        CHECK_EQ_INT(n.latest_site, site_of("E01"));
+        CHECK_EQ_INT(n.latest_site, site_of(DISCHARGE_SENSOR));
     });
     CHECK_EQ_INT(child, 0);
 }
@@ -248,8 +256,8 @@ void test_survives_reboot() {
 void test_unflushed_faults_lost_on_reboot_but_notice_kept() {
     std::puts("reboot before a flush: the notice survives (count may lag)");
     fresh();
-    fault_notice_record(site_of("P06"), T_OCT02_0814, 100, false);
-    fault_notice_record(site_of("P06"), T_OCT02_0814 + 60, 160, false);  // not yet written
+    fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814, 100, false);
+    fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814 + 60, 160, false);  // not yet written
 
     int child = after_reboot([] {
         fault_notice_t n;
@@ -262,11 +270,11 @@ void test_unflushed_faults_lost_on_reboot_but_notice_kept() {
 void test_at_boot_fault_not_double_counted() {
     std::puts("a fault still active at boot is not counted again");
     fresh();
-    fault_notice_record(site_of("P06"), T_OCT02_0814, 100, false);
+    fault_notice_record(site_of(LOW_PRESSURE), T_OCT02_0814, 100, false);
 
     int child = after_reboot([] {
         const size_t w = writes();
-        fault_notice_record(site_of("P06"), T_OCT03_1705, 3, true);
+        fault_notice_record(site_of(LOW_PRESSURE), T_OCT03_1705, 3, true);
         fault_notice_t n;
         fault_notice_get(&n);
         CHECK_EQ_INT(n.count, 1);
@@ -279,7 +287,7 @@ void test_at_boot_fault_not_double_counted() {
     // is active at boot is new to the user and does raise the bell.
     fault_notice_clear();
     child = after_reboot([] {
-        fault_notice_record(site_of("P06"), T_OCT03_1705, 3, true);
+        fault_notice_record(site_of(LOW_PRESSURE), T_OCT03_1705, 3, true);
         fault_notice_t n;
         CHECK(fault_notice_get(&n));
         CHECK_EQ_INT(n.count, 1);
@@ -310,10 +318,11 @@ const char* fmt(const fault_notice_t& n, language_t lang) {
 
 void test_format() {
     std::puts("format: one / many, EN/FR/ES, no dates");
-    const arctic::MaconFaultBit* p06 = arctic::macon_fault_bit_for_site(site_of("P06"));
-    const std::string name_en = p06->label;
-    const std::string name_fr = i18n_get_key_lang(p06->label_msg_id, p06->label, LANG_FRENCH);
-    const std::string name_es = i18n_get_key_lang(p06->label_msg_id, p06->label, LANG_SPANISH);
+    const arctic::MaconFaultBit* bit = arctic::macon_fault_bit_for_site(site_of(LOW_PRESSURE));
+    const std::string code = bit->code;
+    const std::string name_en = bit->label;
+    const std::string name_fr = i18n_get_key_lang(bit->label_msg_id, bit->label, LANG_FRENCH);
+    const std::string name_es = i18n_get_key_lang(bit->label_msg_id, bit->label, LANG_SPANISH);
     CHECK(name_fr != name_en);  // label is actually translated
     CHECK(name_es != name_en);
 
@@ -321,23 +330,23 @@ void test_format() {
     one.pending = true;
     one.count = 1;
     one.first = one.latest = T_OCT02_0814;
-    one.latest_site = site_of("P06");
+    one.latest_site = site_of(LOW_PRESSURE);
 
-    CHECK_EQ_STR(fmt(one, LANG_ENGLISH), "Heat pump problem: P06 " + name_en);
-    CHECK_EQ_STR(fmt(one, LANG_FRENCH), "Probl\xC3\xA8me de pompe \xC3\xA0 chaleur : P06 " + name_fr);
-    CHECK_EQ_STR(fmt(one, LANG_SPANISH), "Problema de la bomba de calor: P06 " + name_es);
+    CHECK_EQ_STR(fmt(one, LANG_ENGLISH), "Heat pump problem: " + code + " " + name_en);
+    CHECK_EQ_STR(fmt(one, LANG_FRENCH), "Probl\xC3\xA8me de pompe \xC3\xA0 chaleur : " + code + " " + name_fr);
+    CHECK_EQ_STR(fmt(one, LANG_SPANISH), "Problema de la bomba de calor: " + code + " " + name_es);
 
     // Text does not depend on whether the clock was set.
     fault_notice_t one_no_time = one;
     one_no_time.first = one_no_time.latest = 0;
-    CHECK_EQ_STR(fmt(one_no_time, LANG_ENGLISH), "Heat pump problem: P06 " + name_en);
+    CHECK_EQ_STR(fmt(one_no_time, LANG_ENGLISH), "Heat pump problem: " + code + " " + name_en);
 
     fault_notice_t many = one;
     many.count = 3;
     many.latest = T_OCT03_1705;
-    CHECK_EQ_STR(fmt(many, LANG_ENGLISH), "3 heat pump problems \xE2\x80\x93 latest P06");
+    CHECK_EQ_STR(fmt(many, LANG_ENGLISH), "3 heat pump problems \xE2\x80\x93 latest " + code);
     CHECK_EQ_STR(fmt(many, LANG_SPANISH),
-                 "3 problemas de la bomba de calor \xE2\x80\x93 \xC3\xBAltimo: P06");
+                 "3 problemas de la bomba de calor \xE2\x80\x93 \xC3\xBAltimo: " + code);
 
     // Nothing pending -> empty; tiny buffers are truncated, not overrun.
     fault_notice_t none = {};
