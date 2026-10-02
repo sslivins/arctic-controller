@@ -44,6 +44,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_SETTINGS_CONTROLLER_NAME] = "Controller name",
     [STR_CONTROLLER_NAME_TITLE] = "Controller name",
     [STR_CONTROLLER_NAME_HINT] = "Up to 30 characters",
+    [STR_CONTROLLER_NAME_NOT_SET] = "Not set",
     [STR_CONTROLLER_NAME_INVALID] = "Use 30 displayable characters or fewer.",
     [STR_SETTINGS_FACTORY_RESET] = "Factory Reset",
     
@@ -568,6 +569,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_SETTINGS_CONTROLLER_NAME] = "Nom du contrôleur",
     [STR_CONTROLLER_NAME_TITLE] = "Nom du contrôleur",
     [STR_CONTROLLER_NAME_HINT] = "Jusqu'à 30 caractères",
+    [STR_CONTROLLER_NAME_NOT_SET] = "Non défini",
     [STR_CONTROLLER_NAME_INVALID] = "Utilisez 30 caractères affichables ou moins.",
     [STR_SETTINGS_FACTORY_RESET] = "Réinitialisation",
     
@@ -1093,6 +1095,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_SETTINGS_CONTROLLER_NAME] = "Nombre del controlador",
     [STR_CONTROLLER_NAME_TITLE] = "Nombre del controlador",
     [STR_CONTROLLER_NAME_HINT] = "Hasta 30 caracteres",
+    [STR_CONTROLLER_NAME_NOT_SET] = "Sin definir",
     [STR_CONTROLLER_NAME_INVALID] = "Usa 30 caracteres visibles o menos.",
     [STR_SETTINGS_FACTORY_RESET] = "Restablecer de fábrica",
     

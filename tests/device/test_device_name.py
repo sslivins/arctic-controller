@@ -72,6 +72,18 @@ class TestDeviceNameHome:
 
 
 class TestDeviceNameSettings:
+    def test_empty_settings_row_shows_not_set(self, device: DeviceClient):
+        device.update_preferences(device_name="")
+
+        device.click(tag="settings")
+        assert device.wait_for_screen("settings", timeout=5.0)
+        assert device.wait_for_widget(tag="device_name_settings_value", timeout=5.0)
+
+        value = device.find_widget(tag="device_name_settings_value")
+        assert value is not None
+        assert value.text == "Not set"
+        assert "Up to 30 characters" not in value.text
+
     def test_settings_row_value_stays_single_line_for_max_length_name(
         self, device: DeviceClient
     ):

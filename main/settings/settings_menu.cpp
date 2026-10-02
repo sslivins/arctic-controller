@@ -481,7 +481,7 @@ static void name_save_cb(lv_event_t* e)
     heatpump_screen_update_device_name();
     if (state.device_name_value_label) {
         lv_label_set_text(state.device_name_value_label,
-                          normalized[0] ? normalized : i18n_get(STR_CONTROLLER_NAME_HINT));
+                          normalized[0] ? normalized : i18n_get(STR_CONTROLLER_NAME_NOT_SET));
     }
     dismiss_name_dialog();
 }
@@ -768,7 +768,7 @@ static void create_menu_list(void)
     lv_obj_set_style_max_width(state.device_name_value_label, 270, LV_PART_MAIN);
     lv_obj_set_user_data(state.device_name_value_label, (void*)"device_name_settings_value");
     lv_label_set_text(state.device_name_value_label,
-                      current_name[0] ? current_name : i18n_get(STR_CONTROLLER_NAME_HINT));
+                      current_name[0] ? current_name : i18n_get(STR_CONTROLLER_NAME_NOT_SET));
     lv_obj_align(state.device_name_value_label, LV_ALIGN_RIGHT_MID, -60, 0);
     
     // Demo Mode toggle
