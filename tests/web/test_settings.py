@@ -32,6 +32,25 @@ def perf_config(supply=None, return_=None):
             "sensors": {"supply": supply or dict(hp), "return": return_ or dict(hp)}}
 
 
+def heat_pump_sensor_with_stale_network_fields():
+    sensor = perf_config()["sensors"]["supply"]
+    sensor.update({"source": "heat_pump", "host": "192.168.9.3", "port": 502,
+                   "object_instance": 7, "device_name": "Old device",
+                   "object_name": "Old sensor"})
+    return sensor
+
+
+def assert_summary_change_buttons_inline(device_row, sensor_row):
+    device_box = device_row.bounding_box()
+    sensor_box = sensor_row.bounding_box()
+    device_change = device_row.get_by_role("button", name="Change").bounding_box()
+    sensor_change = sensor_row.get_by_role("button", name="Change").bounding_box()
+    assert device_box and sensor_box and device_change and sensor_change
+    assert abs(device_change["width"] - sensor_change["width"]) < 1
+    assert device_box["y"] <= device_change["y"] <= device_box["y"] + device_box["height"]
+    assert sensor_box["y"] <= sensor_change["y"] <= sensor_box["y"] + sensor_box["height"]
+
+
 class TestSettingsWorkspace:
     def test_all_sections_present(self, dashboard_page: Page):
         dashboard_page.locator('button[aria-label="Settings"]').click()
@@ -178,7 +197,7 @@ class TestSettingsWorkspace:
         expect(card.get_by_role("button", name=re.compile("Supply tank"))).to_be_visible()
 
     def test_performance_bacnet_draft_survives_discovery_pick_and_save(self, dashboard_page: Page):
-        current = perf_config()
+        current = perf_config(supply=heat_pump_sensor_with_stale_network_fields())
         saved_payloads = []
 
         def performance_config(route):
@@ -203,21 +222,33 @@ class TestSettingsWorkspace:
         card.locator('select[name="source"]').select_option("bacnet_ip")
 
         expect(card.locator('select[name="source"]')).to_have_value("bacnet_ip")
+        expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
+        expect(card.get_by_text(re.compile(r"Device.*192\.168\.9\.3"))).to_have_count(0)
         pick_device = card.get_by_role("button", name=re.compile("Thermux Spare"))
         expect(pick_device).to_be_visible(timeout=10000)
         assert pick_device.is_visible()
         assert card.locator("#perf-discover-supply").is_visible()
+        expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
 
         pick_device.click()
-        expect(card.get_by_text(re.compile(r"Device.*Thermux Spare"))).to_be_visible()
+        device_row = card.locator(".perf-summary", has_text="Device")
+        expect(device_row).to_contain_text("Thermux Spare")
         sensor = card.get_by_role("button", name=re.compile("Sensor B"))
         expect(sensor).to_be_visible()
         assert sensor.is_visible()
+        expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
 
         sensor.click()
-        expect(card.get_by_text(re.compile(r"Device.*Thermux Spare"))).to_be_visible()
-        expect(card.get_by_text(re.compile(r"Sensor.*Sensor B"))).to_be_visible()
+        device_row = card.locator(".perf-summary", has_text="Device")
+        sensor_row = card.locator(".perf-summary", has_text="Sensor")
+        expect(device_row).to_contain_text("Thermux Spare")
+        expect(sensor_row).to_contain_text("Sensor B")
         expect(card.get_by_role("button", name="Test sensor")).to_be_visible()
+        assert_summary_change_buttons_inline(device_row, sensor_row)
+        dashboard_page.set_viewport_size({"width": 430, "height": 900})
+        assert_summary_change_buttons_inline(device_row, sensor_row)
+        dashboard_page.set_viewport_size({"width": 1000, "height": 900})
+        assert_summary_change_buttons_inline(device_row, sensor_row)
 
         card.get_by_role("button", name="Save").click()
         expect.poll(lambda: len(saved_payloads)).to_be(1)
@@ -231,6 +262,47 @@ class TestSettingsWorkspace:
         assert saved["object_instance"] == 4
         assert saved["object_name"] == "Sensor B"
         assert saved["rom_id"] == "28FF6491631603A2"
+
+    def test_performance_bacnet_manual_object_order_and_validation(self, dashboard_page: Page):
+        current = perf_config(supply=heat_pump_sensor_with_stale_network_fields())
+        saved_payloads = []
+
+        def performance_config(route):
+            if route.request.method == "PUT":
+                saved_payloads.append(route.request.post_data_json())
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(current))
+
+        dashboard_page.route("**/api/performance/config", performance_config)
+        dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"192.168.1.205","port":47808,"device_instance":205,"device_name":"Thermux Spare","model_name":"Thermux","vendor_id":15}]}'))
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux Spare","model_name":"Thermux","device_instance":205,"sensors":[],"truncated":false}'))
+
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        card.locator('select[name="source"]').select_option("bacnet_ip")
+        card.get_by_role("button", name=re.compile("Thermux Spare")).click()
+        card.get_by_role("button", name="Enter object manually").click()
+
+        device_row = card.locator(".perf-summary", has_text="Device")
+        object_type = card.locator('select[name="object_type"]')
+        object_instance = card.locator('input[name="object_instance"]')
+        expect(device_row).to_contain_text("Thermux Spare")
+        expect(object_type).to_be_visible()
+        expect(object_instance).to_be_visible()
+        expect(object_instance).to_have_value("")
+        device_box = device_row.bounding_box()
+        type_box = object_type.bounding_box()
+        instance_box = object_instance.bounding_box()
+        assert device_box and type_box and instance_box
+        assert device_box["y"] < type_box["y"] < instance_box["y"]
+        expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
+
+        card.get_by_role("button", name="Save").click()
+        expect(dashboard_page.locator(".toast.bad")).to_contain_text("Choose a BACnet object")
+        assert saved_payloads == []
 
     def test_performance_sensor_test_reports_connect_error(self, dashboard_page: Page):
         """Nothing listens on the controller's own port 1, so the test must

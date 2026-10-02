@@ -115,6 +115,19 @@ def _heat_pump_sensors() -> dict:
     return {"supply": {"source": "heat_pump"}, "return": {"source": "heat_pump"}}
 
 
+def _heat_pump_sensors_with_stale_network() -> dict:
+    sensors = _heat_pump_sensors()
+    sensors["supply"] = {
+        "source": "heat_pump",
+        "host": "192.168.9.3",
+        "port": 502,
+        "object_instance": 7,
+        "device_name": "Old device",
+        "object_name": "Old sensor",
+    }
+    return sensors
+
+
 def _local_ip_towards(device_host: str) -> str:
     """This machine's address on the route to the device (no packets sent)."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -686,6 +699,24 @@ class TestPolling:
         st = _wait_source(device, "external", "BACnet estimate to switch to external sensors")
         assert st["fallback"] is False, st
 
+    def test_bacnet_browse_does_not_starve_configured_polling(self, device: DeviceClient,
+                                                              bacnet_fake):
+        host, port = bacnet_fake
+        _configure_both_bacnet(device, bacnet_fake)
+
+        for _ in range(2):
+            r = device.session.post(_url(device, "/api/performance/bacnet/browse"),
+                                    json={"host": host, "port": port}, timeout=12)
+            assert r.status_code == 200, r.text
+            assert r.json()["ok"] is True
+
+        cfg = _wait_readings(device)
+        s = cfg["status"]["sensors"]
+        assert s["supply"]["error"] == "none", s["supply"]
+        assert s["return"]["error"] == "none", s["return"]
+        assert s["supply"]["celsius"] == pytest.approx(21.4, abs=0.05)
+        assert s["return"]["celsius"] == pytest.approx(20.0, abs=0.05)
+
     def test_thermux_sensor_id_is_learned(self, device: DeviceClient, fake):
         _configure_both(device, fake)
         device.wait_until(
@@ -996,17 +1027,21 @@ class TestScreen:
     ):
         original = _saved_settings(_get_config(device))
         try:
-            r = _put_config(device, {"sensors": _heat_pump_sensors()})
+            r = _put_config(device, {"sensors": _heat_pump_sensors_with_stale_network()})
             assert r.status_code == 200, r.text
             _open_perf_screen(device)
             device.click(tag="perf_sensor_supply")
             assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
 
             _pick_perf_source(device, "perf_src_bacnet")
+            assert not device.has_widget(tag="perf_bacnet_device_summary")
+            assert not device.has_widget(tag="perf_test")
             if not device.wait_until("BACnet discovery finds a device",
                                      lambda: _screen_text_contains(device, "Thermux Test"),
                                      timeout=20.0, poll=0.5, raise_on_timeout=False):
                 pytest.skip("No BACnet device discoverable on the CI network")
+            assert not device.has_widget(tag="perf_bacnet_device_summary")
+            assert not device.has_widget(tag="perf_test")
             device.click(label_contains="Thermux Test")
 
             assert device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
@@ -1020,9 +1055,11 @@ class TestScreen:
                                      timeout=20.0, poll=0.5)
 
             device.click(tag="perf_bacnet_manual_object")
-            assert device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
-            assert device.wait_for_widget(tag="perf_bacnet_obj_ai", timeout=5.0)
-            assert device.wait_for_widget(tag="perf_register", timeout=5.0)
+            summary = device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
+            obj_type = device.wait_for_widget(tag="perf_bacnet_obj_ai", timeout=5.0)
+            obj_instance = device.wait_for_widget(tag="perf_register", timeout=5.0)
+            assert summary.y < obj_type.y < obj_instance.y
+            assert obj_instance.w >= summary.w - 40
             assert not device.has_widget(tag="perf_bacnet_list")
             assert not device.has_widget(tag="perf_reg_input")
             assert not device.has_widget(tag="perf_value_type")
@@ -1039,20 +1076,23 @@ class TestScreen:
     ):
         original = _saved_settings(_get_config(device))
         try:
-            r = _put_config(device, {"sensors": _heat_pump_sensors()})
+            r = _put_config(device, {"sensors": _heat_pump_sensors_with_stale_network()})
             assert r.status_code == 200, r.text
             _open_perf_screen(device)
             device.click(tag="perf_sensor_supply")
             assert device.wait_for_widget(tag="perf_editor", timeout=5.0)
 
             _pick_perf_source(device, "perf_src_bacnet")
+            assert not device.has_widget(tag="perf_bacnet_device_summary")
             if not device.wait_for_widget(tag="perf_bacnet_manual", timeout=20.0,
                                           raise_on_timeout=False):
                 pytest.skip("No BACnet discovery/manual control available")
+            assert not device.has_widget(tag="perf_bacnet_device_summary")
             device.click(tag="perf_bacnet_manual")
             assert device.wait_for_widget(tag="perf_host", timeout=5.0)
             assert device.wait_for_widget(tag="perf_bacnet_browse", timeout=5.0)
             assert device.wait_for_widget(tag="perf_bacnet_search_again", timeout=5.0)
+            assert not device.has_widget(tag="perf_bacnet_device_summary")
             assert not device.has_widget(tag="perf_test")
 
             device.click(tag="perf_bacnet_search_again")

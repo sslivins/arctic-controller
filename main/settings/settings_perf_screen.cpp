@@ -979,6 +979,8 @@ static void bacnet_change_device_cb(lv_event_t*)
     Editor& ed = s_state.editor;
     if (ed.ed.source != perf::SensorSource::BacnetIp) return;
     clear_editor_bacnet_identity();
+    ed.ed.host[0] = '\0';
+    ed.ed.port = perf::kDefaultBacnetPort;
     ed.ed.bacnet_instance = perf::kBacnetUnsetInstance;
     ed.manual_mode = false;
     ed.manual_object_mode = false;
@@ -1098,12 +1100,21 @@ static void editor_refresh(void)
             else lv_obj_add_flag(port_col, LV_OBJ_FLAG_HIDDEN);
         }
         if (ed.reg_col) {
-            if (ed.manual_object_mode) lv_obj_remove_flag(ed.reg_col, LV_OBJ_FLAG_HIDDEN);
-            else lv_obj_add_flag(ed.reg_col, LV_OBJ_FLAG_HIDDEN);
+            if (ed.manual_object_mode) {
+                lv_obj_remove_flag(ed.reg_col, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_width(ed.reg_col, LV_PCT(100));
+                lv_obj_set_flex_grow(ed.reg_col, 0);
+            } else {
+                lv_obj_add_flag(ed.reg_col, LV_OBJ_FLAG_HIDDEN);
+            }
         }
         if (ed.trio) {
-            if (ed.manual_mode || ed.manual_object_mode) lv_obj_remove_flag(ed.trio, LV_OBJ_FLAG_HIDDEN);
-            else lv_obj_add_flag(ed.trio, LV_OBJ_FLAG_HIDDEN);
+            if (ed.manual_mode || ed.manual_object_mode) {
+                lv_obj_remove_flag(ed.trio, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_style_pad_column(ed.trio, ed.manual_object_mode ? 0 : 30, LV_PART_MAIN);
+            } else {
+                lv_obj_add_flag(ed.trio, LV_OBJ_FLAG_HIDDEN);
+            }
         }
         if (ed.adv_row) lv_obj_add_flag(ed.adv_row, LV_OBJ_FLAG_HIDDEN);
         if (ed.adv_body) lv_obj_add_flag(ed.adv_body, LV_OBJ_FLAG_HIDDEN);
@@ -1125,6 +1136,11 @@ static void editor_refresh(void)
         if (ed.host_col) lv_obj_remove_flag(ed.host_col, LV_OBJ_FLAG_HIDDEN);
         if (ed.trio) lv_obj_remove_flag(ed.trio, LV_OBJ_FLAG_HIDDEN);
         if (ed.reg_col) lv_obj_remove_flag(ed.reg_col, LV_OBJ_FLAG_HIDDEN);
+        if (ed.reg_col) {
+            lv_obj_set_width(ed.reg_col, 0);
+            lv_obj_set_flex_grow(ed.reg_col, 1);
+        }
+        if (ed.trio) lv_obj_set_style_pad_column(ed.trio, 30, LV_PART_MAIN);
         if (ed.browse_btn) lv_obj_add_flag(ed.browse_btn, LV_OBJ_FLAG_HIDDEN);
         if (ed.discover_btn) lv_obj_add_flag(ed.discover_btn, LV_OBJ_FLAG_HIDDEN);
         if (ed.discover_card) lv_obj_add_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
@@ -1769,7 +1785,10 @@ static void source_pick_cb(lv_event_t* e)
     if (old != s.source) {
         clear_editor_bacnet_identity();
         if (s.source == perf::SensorSource::BacnetIp) {
+            s.host[0] = '\0';
             s.port = perf::kDefaultBacnetPort;
+            s.bacnet_instance = perf::kBacnetUnsetInstance;
+            s.bacnet_type = perf::BacnetObjectType::AnalogInput;
             s_state.editor.manual_mode = false;
             s_state.editor.manual_object_mode = false;
         } else if (s.source == perf::SensorSource::ModbusTcp) {
@@ -2012,6 +2031,13 @@ static void open_editor(int slot)
     ed.host_col = make_field(ed.modbus_group, i18n_get(STR_PERF_HOST), "perf_host", Field::Host,
                              &ed.host_val);
 
+    ed.bacnet_objtype_col = make_column(ed.modbus_group, 10);
+    make_label(ed.bacnet_objtype_col, i18n_get(STR_PERF_OBJECT_TYPE), UI_FONT_SMALL, COLOR_TEXT_DIM);
+    make_segment(ed.bacnet_objtype_col, i18n_get(STR_PERF_ANALOG_INPUT),
+                 i18n_get(STR_PERF_ANALOG_VALUE), "perf_bacnet_obj_ai",
+                 "perf_bacnet_obj_av", regtype_seg_cb, ed.bacnet_objtype_btn);
+    lv_obj_add_flag(ed.bacnet_objtype_col, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_t* trio = make_plain(ed.modbus_group);
     ed.trio = trio;
     lv_obj_set_size(trio, LV_PCT(100), LV_SIZE_CONTENT);
@@ -2076,13 +2102,6 @@ static void open_editor(int slot)
     lv_obj_set_user_data(ed.browse_note, (void*)"perf_bacnet_note");
     lv_obj_add_flag(ed.browse_note, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ed.browse_card, LV_OBJ_FLAG_HIDDEN);
-
-    ed.bacnet_objtype_col = make_column(ed.modbus_group, 10);
-    make_label(ed.bacnet_objtype_col, i18n_get(STR_PERF_OBJECT_TYPE), UI_FONT_SMALL, COLOR_TEXT_DIM);
-    make_segment(ed.bacnet_objtype_col, i18n_get(STR_PERF_ANALOG_INPUT),
-                 i18n_get(STR_PERF_ANALOG_VALUE), "perf_bacnet_obj_ai",
-                 "perf_bacnet_obj_av", regtype_seg_cb, ed.bacnet_objtype_btn);
-    lv_obj_add_flag(ed.bacnet_objtype_col, LV_OBJ_FLAG_HIDDEN);
 
     // Advanced (collapsed by default)
     lv_obj_t* adv = lv_obj_create(ed.modbus_group);
