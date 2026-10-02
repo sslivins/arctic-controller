@@ -808,24 +808,55 @@ class TestScreen:
         device.wait_until("flow saved",
                           lambda: _get_config(device)["flow_lpm"] == 41, timeout=5.0, poll=0.5)
 
-    def test_menu_row_marks_external_sensors(self, device: DeviceClient, fake):
-        _configure_both(device, fake)
-        device.click(tag="settings")
-        assert device.wait_for_screen("settings", timeout=5.0)
-        assert device.wait_for_widget(tag="perf_row_value", timeout=5.0), \
-            "settings row does not show that external sensors are in use"
-        assert "Modbus" in device.find_widget(tag="perf_row_value").text
+    def test_menu_row_shows_external_sensor_sources(
+        self, device: DeviceClient, fake, bacnet_fake
+    ):
+        original = _saved_settings(_get_config(device))
 
-    def test_menu_row_marks_bacnet_sensors(self, device: DeviceClient, bacnet_fake):
-        r = _put_config(device, {"sensors": {
-            "supply": _bacnet(bacnet_fake, 3, device_name="Thermux Test"),
-            "return": {"source": "heat_pump"},
-        }})
-        assert r.status_code == 200, r.text
-        device.click(tag="settings")
-        assert device.wait_for_screen("settings", timeout=5.0)
-        assert device.wait_for_widget(tag="perf_row_value", timeout=5.0)
-        assert "BACnet" in device.find_widget(tag="perf_row_value").text
+        def assert_perf_row_value(expected: Optional[str]) -> None:
+            device.click(tag="settings")
+            assert device.wait_for_screen("settings", timeout=5.0)
+            assert device.wait_for_widget(tag="settings_perf", timeout=5.0)
+            if expected is None:
+                assert device.find_widget(tag="perf_row_value") is None
+                device.click(tag="settings_close")
+                assert device.wait_for_widget(tag="settings", timeout=5.0)
+                return
+            assert device.wait_for_widget(tag="perf_row_value", timeout=5.0)
+            value = device.find_widget(tag="perf_row_value")
+            assert value is not None
+            assert value.text == expected
+            device.click(tag="settings_close")
+            assert device.wait_for_widget(tag="settings", timeout=5.0)
+
+        try:
+            r = _put_config(device, {"sensors": {
+                "supply": _bacnet(bacnet_fake, 3, device_name="Thermux Test"),
+                "return": _bacnet(bacnet_fake, 4, device_name="Thermux Test"),
+            }})
+            assert r.status_code == 200, r.text
+            assert_perf_row_value("BACnet")
+
+            r = _put_config(device, {"sensors": {
+                "supply": _modbus(fake, SUPPLY_REG),
+                "return": _modbus(fake, RETURN_REG),
+            }})
+            assert r.status_code == 200, r.text
+            assert_perf_row_value("Modbus")
+
+            r = _put_config(device, {"sensors": {
+                "supply": _modbus(fake, SUPPLY_REG),
+                "return": _bacnet(bacnet_fake, 4, device_name="Thermux Test"),
+            }})
+            assert r.status_code == 200, r.text
+            assert_perf_row_value("Modbus + BACnet")
+
+            r = _put_config(device, {"sensors": _heat_pump_sensors()})
+            assert r.status_code == 200, r.text
+            assert_perf_row_value(None)
+        finally:
+            r = _put_config(device, original)
+            assert r.status_code == 200, f"could not restore performance settings: {r.text}"
 
     def test_sensor_rows_show_external_readings(self, device: DeviceClient, fake):
         _configure_both(device, fake)
