@@ -13,12 +13,13 @@ MAX_LENGTH_NAME = "Radiant Floor Heat Pump 123456"
 
 @pytest.fixture(autouse=True)
 def _restore_device_name(device: DeviceClient):
+    original = device.get_preferences().get("device_name", "")
     try:
         device.update_preferences(device_name="")
     except Exception:
         pass
     yield
-    device.update_preferences(device_name="")
+    device.update_preferences(device_name=original)
 
 
 def _name_widget(device: DeviceClient):
@@ -72,6 +73,37 @@ class TestDeviceNameHome:
 
 
 class TestDeviceNameSettings:
+    def test_settings_row_shows_not_set_then_saved_name(self, device: DeviceClient):
+        row_name = "Heat Pump 1"
+        device.update_preferences(device_name="")
+
+        device.click(tag="settings")
+        assert device.wait_for_screen("settings", timeout=5.0)
+        assert device.wait_for_widget(tag="device_name_settings_value", timeout=5.0)
+
+        value = device.find_widget(tag="device_name_settings_value")
+        row = device.find_widget(tag="settings_device_name")
+        assert value is not None
+        assert row is not None
+        assert value.text == "Not set"
+        assert "Up to 30 characters" not in value.text
+        assert value.x + value.w <= row.x + row.w - 45
+
+        device.click(tag="settings_close")
+        assert device.wait_for_widget(tag="settings", timeout=5.0)
+
+        device.update_preferences(device_name=row_name)
+        device.click(tag="settings")
+        assert device.wait_for_screen("settings", timeout=5.0)
+        assert device.wait_for_widget(tag="device_name_settings_value", timeout=5.0)
+
+        value = device.find_widget(tag="device_name_settings_value")
+        row = device.find_widget(tag="settings_device_name")
+        assert value is not None
+        assert row is not None
+        assert value.text == row_name
+        assert value.x + value.w <= row.x + row.w - 45
+
     def test_settings_row_value_stays_single_line_for_max_length_name(
         self, device: DeviceClient
     ):

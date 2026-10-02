@@ -322,6 +322,7 @@ static void test_nvs_persistence() {
     s.sensors[0] = bacnet_sensor("thermux.local", 1);
     s.sensors[0].bacnet_device_known = true;
     s.sensors[0].bacnet_device_instance = 179878;
+    std::strcpy(s.sensors[0].bacnet_device_name, "Thermux Main");
     std::strcpy(s.sensors[0].bacnet_object_name, "Master Return");
     s.sensors[0].rom_known = true;
     for (size_t i = 0; i < kRomLen; ++i) s.sensors[0].rom[i] = (uint8_t)(0x28 + i);
@@ -331,6 +332,7 @@ static void test_nvs_persistence() {
     CHECK(back.sensors[0].bacnet_instance == 1);
     CHECK(back.sensors[0].bacnet_device_known);
     CHECK(back.sensors[0].bacnet_device_instance == 179878);
+    CHECK(std::strcmp(back.sensors[0].bacnet_device_name, "Thermux Main") == 0);
     CHECK(std::strcmp(back.sensors[0].bacnet_object_name, "Master Return") == 0);
     CHECK(back.sensors[0].rom_known && back.sensors[0].rom[7] == 0x2F);
 

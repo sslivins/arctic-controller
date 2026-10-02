@@ -481,7 +481,7 @@ static void name_save_cb(lv_event_t* e)
     heatpump_screen_update_device_name();
     if (state.device_name_value_label) {
         lv_label_set_text(state.device_name_value_label,
-                          normalized[0] ? normalized : i18n_get(STR_CONTROLLER_NAME_HINT));
+                          normalized[0] ? normalized : i18n_get(STR_CONTROLLER_NAME_NOT_SET));
     }
     dismiss_name_dialog();
 }
@@ -728,9 +728,17 @@ static void create_menu_list(void)
         state.list_container, LV_SYMBOL_CHARGE,
         i18n_get(STR_SETTINGS_PERF),
         "settings_perf");
-    if (perf::uses_network(ext_temp::settings())) {
+    perf::Settings perf_cfg = ext_temp::settings();
+    if (perf::uses_network(perf_cfg)) {
+        bool uses_modbus = false;
+        bool uses_bacnet = false;
+        for (const auto& sensor : perf_cfg.sensors) {
+            uses_modbus = uses_modbus || sensor.source == perf::SensorSource::ModbusTcp;
+            uses_bacnet = uses_bacnet || sensor.source == perf::SensorSource::BacnetIp;
+        }
         lv_obj_t* perf_value = lv_label_create(state.rows[SETTINGS_PERF]);
-        lv_label_set_text(perf_value, i18n_get(STR_PERF_ROW_MODBUS));
+        lv_label_set_text(perf_value, i18n_get(uses_modbus && uses_bacnet ? STR_PERF_ROW_MIXED :
+                                               (uses_bacnet ? STR_PERF_ROW_BACNET : STR_PERF_ROW_MODBUS)));
         lv_obj_set_style_text_font(perf_value, FONT_NORMAL, LV_PART_MAIN);
         lv_obj_set_style_text_color(perf_value, COLOR_ACCENT, LV_PART_MAIN);
         lv_obj_set_user_data(perf_value, (void*)"perf_row_value");
@@ -758,9 +766,10 @@ static void create_menu_list(void)
     lv_label_set_long_mode(state.device_name_value_label, LV_LABEL_LONG_DOT);
     lv_obj_set_size(state.device_name_value_label, 270, 34);
     lv_obj_set_style_max_width(state.device_name_value_label, 270, LV_PART_MAIN);
+    lv_obj_set_style_text_align(state.device_name_value_label, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
     lv_obj_set_user_data(state.device_name_value_label, (void*)"device_name_settings_value");
     lv_label_set_text(state.device_name_value_label,
-                      current_name[0] ? current_name : i18n_get(STR_CONTROLLER_NAME_HINT));
+                      current_name[0] ? current_name : i18n_get(STR_CONTROLLER_NAME_NOT_SET));
     lv_obj_align(state.device_name_value_label, LV_ALIGN_RIGHT_MID, -60, 0);
     
     // Demo Mode toggle

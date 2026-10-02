@@ -4263,6 +4263,11 @@ components:
           maximum: 4194302
           nullable: true
           description: BACnet Device object instance learned by Find/Test and used to detect wrong devices
+        device_name:
+          type: string
+          maxLength: 63
+          nullable: true
+          description: BACnet Device object name from discovery or browse; display-only and not sensor identity
         object_name:
           type: string
           nullable: true

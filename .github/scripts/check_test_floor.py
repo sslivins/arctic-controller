@@ -103,6 +103,11 @@ BENIGN_SKIP_PATTERNS = [
     # The core-dump erase test must not destroy a real crash dump that CI
     # collects after the run.
     r"real core dump is saved",
+    # The BACnet picker can only exercise discovery on networks where a device
+    # (or the test fake) is reachable; the UI behaviour is not applicable
+    # otherwise.
+    r"no bacnet device discoverable",
+    r"no bacnet discovery/manual control available",
 ]
 
 # Deliberate, tracked gaps: the test is skipped because the feature or the
