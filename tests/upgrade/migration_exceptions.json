@@ -1,0 +1,4 @@
+{
+  "_comment": "Intentional changes to how a release reports data written by the previous release. Each entry silences the upgrade migration check for one path (a settings endpoint key such as '/api/preferences.language', an event key such as '/api/events.details.from', or a history field such as '/api/heatpump/temperature-history.samples.mode'). Every entry needs a reason. Remove entries once the release they describe has shipped.",
+  "ignore": []
+}
