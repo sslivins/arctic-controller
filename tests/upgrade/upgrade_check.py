@@ -233,19 +233,27 @@ def cmd_seed(dev: Device, args) -> int:
 
     # Start from an empty log so the comparison is about data written here.
     dev.write("DELETE", EVENTS)
-    mode = (dev.get("/api/heatpump/status") or {}).get("mode")
+    # Events are logged when the controller sees its state change, so every
+    # write must be a real change (a wiped device may already sit at any given
+    # setpoint) and must be seen before the next one (an off/on pair inside one
+    # update would never be noticed).
+    status = dev.get("/api/heatpump/status") or {}
+    sp = status.get("setpoints") or {}
     writes = [
-        ("/api/heatpump/mode", {"mode": "heating" if mode == "cooling" else "cooling"}),
-        ("/api/heatpump/setpoints", {"heating": 41, "hot_water": 49}),
-        ("/api/heatpump/power", {"on": False}),
-        ("/api/heatpump/power", {"on": True}),
+        ("/api/heatpump/mode", {"mode": "heating" if status.get("mode") == "cooling" else "cooling"}),
+        ("/api/heatpump/setpoints", {"heating": 40 if sp.get("heating") == 41 else 41}),
+        ("/api/heatpump/setpoints", {"hot_water": 48 if sp.get("hot_water") == 49 else 49}),
+        ("/api/heatpump/power", {"on": not status.get("unit_on", True)}),
+        ("/api/heatpump/power", {"on": bool(status.get("unit_on", True))}),
     ]
     for path, body in writes:
+        count = len(read_events(dev))
         r = dev.req("PUT", path, body)
         if r.status_code != 200 or not r.json().get("success"):
             raise CheckError(f"PUT {path} {body} -> HTTP {r.status_code}: {r.text[:200]}")
-    events = wait_until(lambda: (lambda e: e if len(e) >= len(writes) else None)(read_events(dev)),
-                        30, f"at least {len(writes)} events to be logged")
+        wait_until(lambda: len(read_events(dev)) > count or None, 30,
+                   f"an event to be logged for PUT {path} {body}")
+    events = read_events(dev)
     print(f"event log holds {len(events)} event(s): {[e['type'] for e in events]}")
 
     def history():
