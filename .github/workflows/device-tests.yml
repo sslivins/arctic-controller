@@ -367,13 +367,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
           WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
-          ARCTIC_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
         run: |
           set -euo pipefail
           if [ -z "${CONTROLLER_PORT:-}" ]; then
             echo "::error::No controller serial port detected; cannot install the release baseline."
             exit 1
           fi
+          # A fresh key per run, in the firmware's own format (32 hex chars).
+          # A key of any other length is discarded on boot and replaced with a
+          # random one, which would leave every request below unauthorized.
+          ARCTIC_API_KEY=$(openssl rand -hex 16)
+          echo "::add-mask::$ARCTIC_API_KEY"
+          export ARCTIC_API_KEY
 
           # Erasing a chip with flash encryption or secure boot enabled would
           # brick it, so refuse unless the eFuses say both are off.
