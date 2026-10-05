@@ -251,8 +251,7 @@ jobs:
         # The device's credentials are NOT the ARCTIC_USERNAME/ARCTIC_PASSWORD
         # secrets: device-tests.yml provisions isolated per-run credentials, so
         # whichever job ran last left its own behind and a login with the
-        # secrets 401s. Mirror the proven "Sync API key from device (pre-OTA)"
-        # step in device-tests.yml and first reset them to known values through
+        # secrets 401s. So first reset them to known values through
         # the unauthenticated, test-only /api/test/credentials endpoint
         # (CONFIG_TEST_ENDPOINTS), then log in.
         run: |

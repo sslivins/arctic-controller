@@ -346,71 +346,20 @@ jobs:
         env:
           CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
 
-      - name: Sync API key from device (pre-OTA)
-        run: |
-          # Authenticate to the device that is CURRENTLY running (the previous
-          # build) so the OTA upload below can present a valid API key. The
-          # device's credentials are unknown at this point (a prior run set its
-          # own isolated test creds), so we first reset them to known values via
-          # the unauthenticated test-only endpoint /api/test/credentials, exactly
-          # like the post-flash "Provision isolated test credentials" step. We
-          # then log in and read the device's API key. Without this the upload
-          # 401s and the job silently falls back to a USB flash, which does NOT
-          # exercise the A/B OTA pending-verify path — so rollback would never be
-          # tested and a rolled-back broken build could pass. Real OTA is what
-          # the identity gate is meant to guard, so make OTA the primary path.
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          TEST_USERNAME="arctic"
-          TEST_PASSWORD="ArcticTest!2026"
-          BODY="{\"username\": \"$TEST_USERNAME\", \"password\": \"$TEST_PASSWORD\"}"
-          DEVICE_KEY=""
-
-          for i in $(seq 1 6); do
-            # (Re)set the running firmware's credentials to known values. This is
-            # a test-only endpoint (CONFIG_TEST_ENDPOINTS) and needs no auth.
-            curl -sk --connect-timeout 3 --max-time 8 \
-              -X POST "$ARCTIC_URL_HTTPS/api/test/credentials" \
-              -H "Content-Type: application/json" \
-              -d "$BODY" > /dev/null 2>&1 || true
-
-            JAR=$(mktemp)
-            curl -sk -c "$JAR" --connect-timeout 3 --max-time 8 \
-              -X POST "$ARCTIC_URL_HTTPS/login" \
-              -H "Content-Type: application/json" \
-              -d "{\"username\": \"$TEST_USERNAME\", \"password\": \"$TEST_PASSWORD\"}" > /dev/null 2>&1 || true
-            RESP=$(curl -sk -b "$JAR" --connect-timeout 3 --max-time 8 \
-              "$ARCTIC_URL_HTTPS/api/auth/apikey" 2>/dev/null) || true
-            rm -f "$JAR"
-            DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
-
-            if [ -n "$DEVICE_KEY" ]; then
-              break
-            fi
-            sleep 2
-          done
-
-          if [ -n "$DEVICE_KEY" ]; then
-            echo "ARCTIC_API_KEY=$DEVICE_KEY" >> $GITHUB_ENV
-            echo "Synced API key from device (OTA will authenticate)"
-          else
-            echo "WARNING: Could not read the device API key. The release baseline"
-            echo "below will re-seed NVS with a known key instead."
-          fi
-
-      - name: Install the latest release as the OTA baseline (USB)
+      - name: Install the latest release on a wiped device (USB)
         # Field devices update FROM the current release, so that is where every
-        # OTA below has to start. Without this the bench updates from whatever
-        # the previous CI run left on it (an unreleased build with test
-        # endpoints), and an update that only breaks when installed over the
-        # shipped release would pass unnoticed.
+        # OTA below has to start, and the device has to look like one in the
+        # field: holding only what that release itself wrote. Without the wipe,
+        # NVS, the event journal and the temperature history would all have
+        # been written by the previous CI run's newer test build, and an update
+        # that cannot read the release's own data would pass unnoticed.
         #
-        # Writes the release's bootloader, partition table, otadata and app:
-        # exactly the images a fielded unit has. NVS is deliberately kept. A
-        # field device keeps its settings across an update, and the bench's
-        # NVS also holds its Wi-Fi credentials and the real TLS certificate
-        # deployed by renew-tls-cert.yml. The API key lives in NVS too, so the
-        # key read by the previous step still works against the release. Only
-        # when that read failed is NVS re-seeded with Wi-Fi and a known key.
+        # So the whole flash is erased, then the release's bootloader, partition
+        # table, otadata and app are written along with an NVS image holding
+        # only Wi-Fi and a known API key. Nothing else is lost: every run ends
+        # by deleting any administrator TLS certificate ("Reset device to
+        # baseline TLS/auth state"), so the bench always runs on the identity
+        # certificate the firmware generates itself.
         #
         # No continue-on-error: if the release cannot be installed or does not
         # come up, the field upgrade path cannot be tested, so the run fails.
@@ -418,11 +367,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WIFI_SSID: ${{ secrets.MI_WIFI_SSID }}
           WIFI_PASSWORD: ${{ secrets.MI_WIFI_PASSWORD }}
-          SEED_API_KEY: ${{ secrets.ARCTIC_API_KEY }}
         run: |
           set -euo pipefail
           if [ -z "${CONTROLLER_PORT:-}" ]; then
             echo "::error::No controller serial port detected; cannot install the release baseline."
+            exit 1
+          fi
+          # A fresh key per run, in the firmware's own format (32 hex chars).
+          # A key of any other length is discarded on boot and replaced with a
+          # random one, which would leave every request below unauthorized.
+          ARCTIC_API_KEY=$(openssl rand -hex 16)
+          echo "::add-mask::$ARCTIC_API_KEY"
+          export ARCTIC_API_KEY
+
+          # Erasing a chip with flash encryption or secure boot enabled would
+          # brick it, so refuse unless the eFuses say both are off.
+          EFUSES=$(espefuse.py --port "$CONTROLLER_PORT" --chip esp32p4 summary 2>&1) || {
+            echo "$EFUSES" | tail -20
+            echo "::error::Could not read the controller's eFuses; refusing to erase its flash."
+            exit 1
+          }
+          if ! echo "$EFUSES" | grep -qE '^SPI_BOOT_CRYPT_CNT .*\(0b000\)' \
+             || ! echo "$EFUSES" | grep -qE '^SECURE_BOOT_EN .*= False'; then
+            echo "$EFUSES" | grep -E 'CRYPT_CNT|SECURE_BOOT_EN' || true
+            echo "::error::Flash encryption or secure boot is enabled (or could not be confirmed off); refusing to erase the flash."
             exit 1
           fi
 
@@ -430,27 +398,22 @@ jobs:
           VERSION="${TAG#v}"
           rm -rf /tmp/baseline && mkdir -p /tmp/baseline
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.bin' --dir /tmp/baseline
+          bash .github/scripts/gen_bench_nvs.sh /tmp/baseline/nvs.bin
           ls -l /tmp/baseline
 
-          NVS_ARGS=()
-          if [ -z "${ARCTIC_API_KEY:-}" ]; then
-            echo "::warning::No API key could be read from the running firmware. Re-seeding NVS, which also clears the bench's TLS certificate until renew-tls-cert.yml next runs."
-            ARCTIC_API_KEY="$SEED_API_KEY" bash .github/scripts/gen_bench_nvs.sh /tmp/baseline/nvs.bin
-            NVS_ARGS=(0x9000 /tmp/baseline/nvs.bin)
-            ARCTIC_API_KEY="$SEED_API_KEY"
-            echo "ARCTIC_API_KEY=$SEED_API_KEY" >> "$GITHUB_ENV"
-          fi
-
-          echo "Installing $TAG over USB as the OTA baseline..."
+          echo "Erasing the flash and installing $TAG over USB as the OTA baseline..."
+          esptool.py --port "$CONTROLLER_PORT" --baud 921600 --chip esp32p4 \
+            --before default_reset --after no_reset erase_flash
           esptool.py --port "$CONTROLLER_PORT" --baud 921600 --chip esp32p4 \
             --before default_reset --after hard_reset \
             write_flash --flash_mode dio --flash_size 16MB --flash_freq 80m \
             0x2000  /tmp/baseline/bootloader.bin \
             0x8000  /tmp/baseline/partition-table.bin \
-            "${NVS_ARGS[@]}" \
+            0x9000  /tmp/baseline/nvs.bin \
             0x49000 /tmp/baseline/ota_data_initial.bin \
             0x50000 /tmp/baseline/arctic_controller.bin
           echo "BASELINE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "ARCTIC_API_KEY=$ARCTIC_API_KEY" >> "$GITHUB_ENV"
 
           # The release must come up, authenticate and report its own version,
           # or the OTA below would not be starting from what the field runs.
@@ -471,6 +434,20 @@ jobs:
           done
           echo "::error::The device did not come up running $TAG within 180s of the USB install. Last /api/ota/status: ${LAST:-<unreachable>}"
           exit 1
+
+      - name: Seed the release with data for the upgrade check
+        # The release writes settings, events and temperature history the way
+        # a field unit would, and records what it reports about them. After
+        # the OTA, "Upgrade migration check" requires the new firmware to
+        # report the same. Uses only the production API: the release has no
+        # test endpoints.
+        id: upgrade_seed
+        run: |
+          set -euo pipefail
+          mkdir -p upgrade-check
+          export ARCTIC_URL="${ARCTIC_URL/http:/https:}"
+          python tests/upgrade/upgrade_check.py seed --defaults upgrade-check/defaults.json
+          python tests/upgrade/upgrade_check.py snapshot --out upgrade-check/before.json
 
       - name: Start serial capture for the OTA window
         # The OTA window was the one part of the run with no console coverage:
@@ -884,6 +861,33 @@ jobs:
         env:
           CONTROLLER_USB_SERIAL: ${{ secrets.CONTROLLER_USB_SERIAL }}
 
+      - name: Upgrade migration check
+        # Does the new firmware still read what the release wrote? Every
+        # setting, event and history sample the release reported before the
+        # OTA must be reported unchanged now (tests/upgrade/upgrade_check.py).
+        # Runs before anything below changes the auth config, which is one of
+        # the compared settings, and puts the settings back afterwards so the
+        # suites start from factory values. Skipped if the OTA failed: the USB
+        # fallback rewrites NVS, and that failure is reported on its own.
+        id: upgrade_compare
+        if: steps.upgrade_seed.outcome == 'success' && steps.ota_flash.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set +e -uo pipefail
+          python tests/upgrade/upgrade_check.py compare upgrade-check/before.json \
+            --out upgrade-check/after.json
+          rc=$?
+          python tests/upgrade/upgrade_check.py restore --defaults upgrade-check/defaults.json || rc=1
+          exit $rc
+
+      - name: Upload upgrade check snapshots
+        if: always() && steps.upgrade_seed.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: upgrade-check
+          path: upgrade-check/
+          retention-days: 14
+
       - name: Provision isolated test credentials
         run: |
           TEST_USERNAME="arctic"
@@ -1107,10 +1111,11 @@ jobs:
           PY
 
       - name: Collect and clear any core dump from before the tests
-        # OTA and the USB baseline flash never touch the coredump partition, so
-        # a dump found here was left by an earlier crash (a previous run, or
-        # this build crashing while it was being installed). Keep it, then
-        # erase it so the dump collected after the tests belongs to this run.
+        # The baseline install erases the whole flash, so a dump found here was
+        # left by a crash during this run, before the suites: in the release
+        # while it was being seeded, or in this build while it was being
+        # installed. Keep it, then erase it so the dump collected after the
+        # tests belongs to the suites.
         id: coredump_before
         run: |
           set +e -uo pipefail
@@ -1714,6 +1719,7 @@ jobs:
           steps.api_tests.outcome == 'success' &&
           steps.web_tests.outcome == 'success' &&
           steps.rs485_tests.outcome == 'success' &&
+          steps.upgrade_compare.outcome == 'success' &&
           (
             (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
             github.event_name == 'merge_group' ||
@@ -1732,6 +1738,7 @@ jobs:
           API_OUTCOME: ${{ steps.api_tests.outcome }}
           WEB_OUTCOME: ${{ steps.web_tests.outcome }}
           RS485_OUTCOME: ${{ steps.rs485_tests.outcome }}
+          UPGRADE_OUTCOME: ${{ steps.upgrade_compare.outcome }}
         run: |
           set -euo pipefail
           # Authoritative record that this exact main SHA passed the physical
@@ -1759,6 +1766,7 @@ jobs:
                   "api": os.environ["API_OUTCOME"],
                   "web": os.environ["WEB_OUTCOME"],
                   "rs485": os.environ["RS485_OUTCOME"],
+                  "upgrade": os.environ["UPGRADE_OUTCOME"],
               },
               "test_firmware": {
                   "file": "build/arctic_controller.bin",
@@ -1803,7 +1811,7 @@ jobs:
         run: |
           # With continue-on-error on test steps, we need to explicitly fail the job
           FAILED=false
-          for step_outcome in "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}" "${{ steps.rs485_tests.outcome }}" "${{ steps.ha_tests.outcome }}"; do
+          for step_outcome in "${{ steps.upgrade_compare.outcome }}" "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}" "${{ steps.rs485_tests.outcome }}" "${{ steps.ha_tests.outcome }}"; do
             if [ "$step_outcome" = "failure" ]; then
               FAILED=true
             fi

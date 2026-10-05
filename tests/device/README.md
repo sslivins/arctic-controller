@@ -66,9 +66,17 @@ The pipeline:
 
 1. **Build** (ubuntu-latest) — compiles firmware with `CONFIG_TEST_ENDPOINTS=y`
    using `espressif/esp-idf-ci-action`
-2. **Flash** (self-hosted VM, label `vm-mi`) — uploads firmware via OTA
-   (falls back to USB serial on failure)
-3. **Test** — runs `pytest tests/device/ -v` against the freshly flashed device
+2. **Baseline** (self-hosted VM, label `vm-mi`) — erases the whole flash and
+   installs the latest release over USB with fresh NVS (Wi-Fi + API key), so
+   the device holds only what that release writes, like a field unit
+3. **Seed** — `tests/upgrade/upgrade_check.py` writes non-default settings,
+   events and temperature history on the release and snapshots them
+4. **Flash** — uploads the build under test via OTA (falls back to USB serial
+   on failure, which still fails the run)
+5. **Upgrade migration check** — the new firmware must report everything the
+   release stored unchanged; settings are then put back. Intentional format
+   changes go in `tests/upgrade/migration_exceptions.json` with a reason
+6. **Test** — runs the device, API, web and RS-485 suites
 
 The workflow uses `concurrency: group: device-tests` to serialize runs —
 only one session can use the physical device at a time.
