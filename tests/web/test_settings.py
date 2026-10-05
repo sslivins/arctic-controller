@@ -473,3 +473,31 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "System")
         expect(dashboard_page.get_by_role("button", name="Restart controller")).to_be_visible()
         expect(dashboard_page.get_by_role("button", name="Erase and reset")).to_be_visible()
+
+    def test_factory_reset_uses_themed_dialog_and_needs_typed_phrase(self, dashboard_page: Page):
+        reset_calls = []
+        dashboard_page.route("**/api/factory-reset", lambda route: (reset_calls.append(1), route.abort()))
+        native_dialogs = []
+        dashboard_page.on("dialog", lambda d: (native_dialogs.append(d.message), d.dismiss()))
+        open_settings(dashboard_page, "System")
+
+        dashboard_page.get_by_role("button", name="Erase and reset").click()
+        dialog = dashboard_page.get_by_role("alertdialog")
+        expect(dialog).to_be_visible()
+        expect(dialog).to_contain_text("Factory reset this controller?")
+        erase = dialog.get_by_role("button", name="Erase controller")
+        expect(erase).to_be_disabled()
+        dialog.locator("input").fill("factory")
+        expect(erase).to_be_disabled()
+        dialog.locator("input").fill("factory-reset")
+        expect(erase).to_be_enabled()
+        dialog.get_by_role("button", name="Cancel").click()
+        expect(dialog).to_have_count(0)
+
+        dashboard_page.get_by_role("button", name="Erase and reset").click()
+        expect(dialog).to_be_visible()
+        dashboard_page.keyboard.press("Escape")
+        expect(dialog).to_have_count(0)
+
+        assert not reset_calls
+        assert not native_dialogs
