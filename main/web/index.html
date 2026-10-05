@@ -138,6 +138,9 @@
       border-bottom: 1px solid var(--cp-border);
     }
     .brand { display: flex; align-items: center; gap: 10px; min-width: 210px; font-weight: 700; }
+    /* The top bar has no room for the controller name on narrow screens, so it
+       gets its own line underneath there. */
+    .name-strip { display: none; }
     .brand-mark {
       width: 34px; height: 34px; display: grid; place-items: center;
       border-radius: 10px; background: var(--cp-accent); color: var(--cp-accent-fg);
@@ -496,6 +499,13 @@
       .mobile-nav .nav-link { justify-content: center; flex-direction: column; gap: 2px; padding: 8px 6px; font-size: 11px; min-height: 58px; }
       .brand { min-width: 0; flex: none; }
       .brand span:last-child { display: none; }
+      .name-strip {
+        display: block; position: sticky; top: 64px; z-index: 29;
+        padding: 6px 16px; background: var(--cp-bg-elevated);
+        border-bottom: 1px solid var(--cp-border);
+        font-size: 14px; font-weight: 600; text-align: center;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
       .top-status { gap: 8px; }
       .top-status .status-item.wifi, .top-status .status-item.clock { display: none; }
       .hp-status { width: 18px; height: 44px; justify-content: center; flex: none; }
@@ -759,6 +769,7 @@
             ${state.auth.required ? `<button class="icon-btn signout-btn" data-action="logout" aria-label="Sign out" title="Sign out"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Sign out</title><path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h7v2H5v14h7v2H5Zm11-4-1.375-1.45 2.55-2.55H9v-2h8.175l-2.55-2.55L16 7l5 5-5 5Z"/></svg></button>` : ""}
           </div>
         </header>
+        ${controllerName() ? `<div class="name-strip">${esc(controllerName())}</div>` : ""}
         <div class="layout">
           <aside class="rail">${nav.map(n => navButton(n)).join("")}</aside>
           <main class="main">${state.hp.demo_mode ? `<div class="demo-banner" role="status">Demo mode</div>` : ""}${content}</main>
@@ -1140,7 +1151,7 @@
     function securitySettings() {
       return `<div class="grid"><section class="card"><h2>Authentication</h2>
         <div class="notice">Web login and API-key authentication are always required.</div>
-        <h3 style="margin-top:24px">Credentials</h3><form data-form="credentials"><div class="field"><label>Username</label><input name="username" value="${esc(state.security.username || "arctic")}"></div>
+        <h3 style="margin-top:24px">Credentials</h3><form data-form="credentials"><div class="field"><label>Username</label><input name="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(state.security.username || "arctic")}"></div>
           <div class="field"><label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password"></div><button class="btn" type="submit">Save credentials</button></form>
         <h3 style="margin-top:24px">API key</h3><div class="field"><input readonly value="${esc(state.security.api_key || "")}"></div>
         <div class="btn-row"><button class="btn" data-action="copy-key">Copy</button><button class="btn danger" data-action="regenerate-key">Regenerate</button></div></section>
@@ -1404,7 +1415,7 @@
       return `<div class="login"><form class="card login-card" data-form="login"><div class="brand" style="margin-bottom:20px"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
         <h1>Sign in</h1><p class="metric-sub">Enter the controller credentials.</p>
         ${state.auth.loginError ? `<div class="notice bad" style="margin:0 0 16px">${esc(state.auth.loginError)}</div>` : ""}
-        <div class="field"><label>Username</label><input name="username" autocomplete="username" required></div>
+        <div class="field"><label>Username</label><input name="username" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username" required></div>
         <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
         <button class="btn primary" type="submit">Sign in</button>
         <p style="margin:16px 0 0;text-align:center"><button class="btn" type="button" data-action="forgot-password">Forgot password?</button></p></form></div>`;
@@ -1433,7 +1444,7 @@
           </div>
           <input id="pairing_code" name="pairing_code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
         </div>
-        <div class="field"><label>Username</label><input name="username" value="arctic" autocomplete="username" required></div>
+        <div class="field"><label>Username</label><input name="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="arctic" autocomplete="username" required></div>
         <div class="field"><label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required></div>
         <div class="field"><label>Confirm password</label><input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></div>
         <button class="btn primary" type="submit">Save credentials</button>
