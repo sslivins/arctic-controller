@@ -204,6 +204,10 @@ def cmd_seed(dev: Device, args) -> int:
         dev.write("PATCH", "/api/preferences", {"demo_mode": True})
         reboot(dev)
         print("demo mode on")
+        # History is only recorded once the clock is synced, and the reboot
+        # has to sync it again.
+        wait_until(lambda: (dev.get("/api/time") or {}).get("ntp_synced"), 180,
+                   "the clock to sync again after the reboot")
 
     time_body = {"timezone": SEED_TIMEZONE,
                  "format_24h": not (defaults["/api/time/config"] or {}).get("format_24h", False)}
@@ -256,10 +260,18 @@ def cmd_seed(dev: Device, args) -> int:
     events = read_events(dev)
     print(f"event log holds {len(events)} event(s): {[e['type'] for e in events]}")
 
+    seen = {}
+
     def history():
         h = dev.get(HISTORY)
-        return h if h and len(h.get("samples", [])) >= HISTORY_MIN_SAMPLES else None
-    wait_until(history, 180, f"{HISTORY_MIN_SAMPLES} temperature history samples", poll=5)
+        seen["samples"] = len((h or {}).get("samples", []))
+        return h if h and seen["samples"] >= HISTORY_MIN_SAMPLES else None
+    try:
+        wait_until(history, 240, f"{HISTORY_MIN_SAMPLES} temperature history samples", poll=5)
+    except CheckError as e:
+        t = dev.get("/api/time") or {}
+        raise CheckError(f"{e}; have {seen.get('samples')} sample(s), "
+                         f"ntp_synced={t.get('ntp_synced')}") from None
     print("temperature history has samples")
 
     if skipped:
