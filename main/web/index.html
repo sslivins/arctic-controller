@@ -298,6 +298,9 @@
     .confirm-dialog.restarting { text-align: center; }
     .confirm-dialog.restarting .spinner { margin: 0 auto 14px; width: 32px; height: 32px; border-width: 3px; }
     .confirm-dialog.restarting p { margin: 0; }
+    .confirm-dialog .ask-phrase { display: block; margin: 0 0 20px; color: var(--cp-text-muted); font-size: 15px; }
+    .confirm-dialog .ask-phrase strong { color: var(--cp-text); }
+    .confirm-dialog .ask-phrase input { display: block; width: 100%; margin-top: 8px; }
     /* Inline help disclosure. Toggled by click rather than hover so the same
        control works with a mouse, a keyboard and a touchscreen -- hover has no
        equivalent on a phone. The panel sits in normal flow instead of floating,
@@ -754,10 +757,9 @@
         <button class="icon-btn notif-btn" data-action="notif-toggle" aria-label="Notifications">🔔${badge}</button>
         ${panel}</div>`;
     }
-    function shell(content) {
+    function topbar() {
       const connected = !!state.hp.connected;
-      return `<div class="app">
-        <header class="topbar">
+      return `<header class="topbar">
           <div class="brand"><div class="brand-mark">A</div><span>${esc(controllerTitle())}</span></div>
           <div class="top-status">
             <span class="status-item hp-status" title="${connected ? "Heat pump online" : "Heat pump offline"}" aria-label="${connected ? "Heat pump online" : "Heat pump offline"}"><span class="dot ${connected ? "good" : "bad"}"></span><span class="status-label">${connected ? "Online" : "Offline"}</span></span>
@@ -768,7 +770,16 @@
             <button class="icon-btn" data-route="settings" aria-label="Settings">⚙</button>
             ${state.auth.required ? `<button class="icon-btn signout-btn" data-action="logout" aria-label="Sign out" title="Sign out"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Sign out</title><path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h7v2H5v14h7v2H5Zm11-4-1.375-1.45 2.55-2.55H9v-2h8.175l-2.55-2.55L16 7l5 5-5 5Z"/></svg></button>` : ""}
           </div>
-        </header>
+        </header>`;
+    }
+    // Swap just the top bar, for polls that must not rebuild the page's controls.
+    function refreshTopbar() {
+      const bar = document.querySelector("header.topbar");
+      if (bar) bar.outerHTML = topbar();
+    }
+    function shell(content) {
+      return `<div class="app">
+        ${topbar()}
         ${controllerName() ? `<div class="name-strip">${esc(controllerName())}</div>` : ""}
         <div class="layout">
           <aside class="rail">${nav.map(n => navButton(n)).join("")}</aside>
@@ -1015,11 +1026,23 @@
       const clear = $('[data-action="clear-event-search"]');
       if (clear) clear.hidden = !state.eventFilters.search;
     }
+    function eventCountText() { return `${state.eventTotal} events recorded on this controller.`; }
+    function eventMoreMarkup() {
+      return state.events.length < state.eventTotal ? `<div style="text-align:center;margin-top:16px"><button class="btn" data-action="load-more-events">Load more</button></div>` : "";
+    }
+    // Background refresh: update the data-driven parts in place, never the
+    // toolbar, so search typing and an open filter dropdown are left alone.
+    function refreshEventsLive() {
+      refreshEventResults();
+      const count = $("#event-count"); if (count) count.textContent = eventCountText();
+      const more = $("#event-more"); if (more) more.innerHTML = eventMoreMarkup();
+      refreshTopbar();
+    }
     function eventsPage() {
       const f = state.eventFilters;
       const option = (value, label, current) => `<option value="${value}" ${current === value ? "selected" : ""}>${label}</option>`;
-      return `<div class="page">${pageHead("Events", `${state.eventTotal} events recorded on this controller.`,
-        `<button class="btn danger" data-action="clear-events">Clear events</button>`)}
+      return `<div class="page"><div class="page-head"><div><h1>Events</h1><p id="event-count">${esc(eventCountText())}</p></div>
+        <div class="page-actions"><button class="btn danger" data-action="clear-events">Clear events</button></div></div>
         <div class="event-toolbar">
           <div class="search-field"><input id="event-search" type="search" autocomplete="off"
             placeholder="Search loaded events" value="${esc(f.search)}">
@@ -1031,7 +1054,7 @@
             ["7d", "Last 7 days"], ["boot", "Current boot"]].map(([v, l]) => option(v, l, f.time)).join("")}</select>
         </div>
         <div class="event-list" id="event-list">${eventListMarkup()}</div>
-        ${state.events.length < state.eventTotal ? `<div style="text-align:center;margin-top:16px"><button class="btn" data-action="load-more-events">Load more</button></div>` : ""}
+        <div id="event-more">${eventMoreMarkup()}</div>
       </div>`;
     }
     function errorItem(error) {
@@ -1957,7 +1980,8 @@
           if (state.settingsPage === "performance") { state.perfTests = {}; await loadPerf(); startPerfPolling(); }
         }
       } catch (error) { toast(error.message, "bad"); }
-      if (route === "events" && document.activeElement?.id === "event-search") refreshEventResults();
+      // The toolbar was painted above; don't rebuild it under the user.
+      if (route === "events" && state.route === "events" && $("#event-list")) refreshEventsLive();
       else render();
     }
     async function mutate(url, options, success) {
@@ -2136,6 +2160,37 @@
       return el;
     }
     function closeOverlay() { document.getElementById("overlay")?.remove(); }
+    // Themed stand-in for the browser's built-in confirm and prompt boxes. Resolves true only when
+    // the user confirms (and, with typePhrase, has typed that exact phrase).
+    function askConfirm({ title, message = "", confirmLabel = "Confirm", danger = false, typePhrase = "" }) {
+      return new Promise(resolve => {
+        const el = showOverlay(`<div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ask-title" aria-describedby="ask-msg">
+          <h3 id="ask-title">${esc(title)}</h3>
+          ${message ? `<p id="ask-msg">${esc(message)}</p>` : ""}
+          ${typePhrase ? `<label class="ask-phrase">Type <strong>${esc(typePhrase)}</strong> to confirm
+            <input type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>` : ""}
+          <div class="btn-row"><button type="button" class="btn" data-ask="cancel">Cancel</button>
+            <button type="button" class="btn ${danger ? "danger" : "primary"}" data-ask="ok" ${typePhrase ? "disabled" : ""}>${esc(confirmLabel)}</button></div></div>`);
+        const ok = el.querySelector('[data-ask="ok"]');
+        const input = el.querySelector(".ask-phrase input");
+        const finish = result => { document.removeEventListener("keydown", onKey, true); closeOverlay(); resolve(result); };
+        const onKey = event => {
+          if (event.key === "Escape") { event.preventDefault(); finish(false); }
+          else if (event.key === "Enter" && event.target === input && !ok.disabled) { event.preventDefault(); finish(true); }
+        };
+        document.addEventListener("keydown", onKey, true);
+        el.addEventListener("click", event => {
+          if (event.target === el || event.target.closest('[data-ask="cancel"]')) finish(false);
+          else if (event.target.closest('[data-ask="ok"]') && !ok.disabled) finish(true);
+        });
+        if (input) {
+          input.addEventListener("input", () => { ok.disabled = input.value.trim() !== typePhrase; });
+          input.focus();
+        } else {
+          el.querySelector('[data-ask="cancel"]').focus();
+        }
+      });
+    }
     function confirmDemoMode(enable) {
       const el = showOverlay(`<div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="demo-title">
         <h3 id="demo-title">${enable ? "Turn on demo mode?" : "Turn off demo mode?"}</h3>
@@ -2290,7 +2345,7 @@
         }
       }
       if (action === "load-more-events") { await loadEvents(false); render(); }
-      if (action === "clear-events" && confirm("Clear all operational events?")) {
+      if (action === "clear-events" && await askConfirm({ title: "Clear all events?", message: "This permanently removes the operational event log.", confirmLabel: "Clear events", danger: true })) {
         await mutate("/api/events", { method: "DELETE" }, "Events cleared"); await loadEvents(true); render();
       }
       if (action === "clear-event-search") {
@@ -2299,12 +2354,12 @@
         if (input) { input.value = ""; input.focus(); }
         refreshEventResults();
       }
-      if (action === "clear-error-history" && confirm("Clear error history?")) {
+      if (action === "clear-error-history" && await askConfirm({ title: "Clear error history?", message: "Past errors will be removed. Active errors are not affected.", confirmLabel: "Clear history", danger: true })) {
         await mutate("/api/heatpump/errors/history", { method: "DELETE" }, "Error history cleared");
         state.errors.history = []; render();
       }
       if (action === "scan-wifi") { await mutate("/api/wifi/scan", { method: "POST" }, "WiFi scan started"); setTimeout(loadNetworks, 500); }
-      if (action === "disconnect-wifi" && confirm("Disconnect from WiFi? This page will close.")) await mutate("/api/wifi/disconnect", { method: "POST" });
+      if (action === "disconnect-wifi" && await askConfirm({ title: "Disconnect from WiFi?", message: "The controller will leave this network and this page will stop responding.", confirmLabel: "Disconnect", danger: true })) await mutate("/api/wifi/disconnect", { method: "POST" });
       if (action === "sync-time") { await mutate("/api/time/sync", { method: "POST" }, "Time sync started"); }
       if (action === "toggle-demo-mode") {
         // The delegated click handler's preventDefault() leaves the box as it
@@ -2351,18 +2406,18 @@
         try { state.release = await mutate("/api/ota/releases", {}, "Update check complete"); }
         finally { state.checkingUpdate = false; render(); }
       }
-      if (action === "install-update" && confirm("Download and install this update?")) {
+      if (action === "install-update" && await askConfirm({ title: "Install this update?", message: "The controller downloads the update, installs it, and restarts.", confirmLabel: "Install" })) {
         await mutate("/api/ota/github", { method: "POST" }, "Update started");
         startInstallWatch();
       }
       if (action === "ota-dismiss") { state.otaInstall = null; render(); }
-      if (action === "reboot" && confirm("Restart the controller now?")) await mutate("/api/ota/reboot", { method: "POST" }, "Controller restarting");
+      if (action === "reboot" && await askConfirm({ title: "Restart the controller?", message: "It will be unavailable for about a minute.", confirmLabel: "Restart" })) await mutate("/api/ota/reboot", { method: "POST" }, "Controller restarting");
       if (action === "copy-key") { await navigator.clipboard.writeText(state.security.api_key || ""); toast("API key copied", "good"); }
-      if (action === "regenerate-key" && confirm("Regenerate the API key? Existing integrations will stop working.")) {
+      if (action === "regenerate-key" && await askConfirm({ title: "Regenerate the API key?", message: "Existing integrations using the current key will stop working.", confirmLabel: "Regenerate", danger: true })) {
         const data = await mutate("/api/auth/apikey/regenerate", { method: "POST" }, "API key regenerated");
         state.security.api_key = data.api_key; render();
       }
-      if (action === "delete-tls" && confirm("Delete the TLS certificate?")) {
+      if (action === "delete-tls" && await askConfirm({ title: "Delete the TLS certificate?", message: "A restart is required for this to take effect.", confirmLabel: "Delete", danger: true })) {
         await mutate("/api/tls/certificate", { method: "DELETE" }, "Certificate deleted; restart required"); await loadSettings(); render();
       }
       if (action === "logout") { await api("/logout", { method: "POST" }).catch(() => {}); location.reload(); return; }
@@ -2538,18 +2593,19 @@
         sessionStorage.removeItem("ha_pair_code");
         stopHaPolling(); state.ha = { ...state.ha, code: "", pairing_active: false, remaining_seconds: 0 }; render();
       }
-      if (action === "ha-revoke" && confirm("Revoke Home Assistant pairing? Home Assistant will lose access until you pair again.")) {
+      if (action === "ha-revoke" && await askConfirm({ title: "Revoke Home Assistant pairing?", message: "Home Assistant will lose access until you pair again.", confirmLabel: "Revoke", danger: true })) {
         await mutate("/api/ha/revoke", { method: "POST" }, "Pairing revoked");
         sessionStorage.removeItem("ha_pair_code");
         stopHaPolling(); state.ha = { ...state.ha, paired: false, code: "", pairing_active: false, remaining_seconds: 0 }; render();
       }
       if (action === "refresh-logs") await loadLogs(true);
-      if (action === "clear-logs" && confirm("Clear controller logs?")) {
+      if (action === "clear-logs" && await askConfirm({ title: "Clear controller logs?", confirmLabel: "Clear logs", danger: true })) {
         await mutate("/api/logs", { method: "DELETE" }, "Logs cleared"); state.logs = []; state.logSeq = 0; render();
       }
-      if (action === "factory-reset" && confirm("Factory reset this controller? This cannot be undone.")) {
-        const phrase = prompt('Type "factory-reset" to permanently erase the controller.');
-        if (phrase === "factory-reset") await mutate("/api/factory-reset", jsonOptions("POST", { confirm: phrase }), "Factory reset started");
+      if (action === "factory-reset" && await askConfirm({ title: "Factory reset this controller?",
+        message: "This permanently erases all settings, history, and pairings. It cannot be undone.",
+        confirmLabel: "Erase controller", danger: true, typePhrase: "factory-reset" })) {
+        await mutate("/api/factory-reset", jsonOptions("POST", { confirm: "factory-reset" }), "Factory reset started");
       }
     }
     function startPowerHold(el) {
@@ -2757,10 +2813,8 @@
           const prevNotifCount = (state.notifications || []).length;
           state.notifications = notif.notifications || [];
           if (state.route === "events") {
-            const searchFocused = document.activeElement?.id === "event-search";
             await loadEvents(true);
-            if (searchFocused) refreshEventResults();
-            else render();
+            if (state.route === "events") refreshEventsLive();
           } else if (["home", "status", "errors"].includes(state.route)) render();
           else if (state.notifications.length !== prevNotifCount) render();
           else if (state.route === "settings" && state.settingsPage === "firmware"
