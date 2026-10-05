@@ -298,6 +298,9 @@
     .confirm-dialog.restarting { text-align: center; }
     .confirm-dialog.restarting .spinner { margin: 0 auto 14px; width: 32px; height: 32px; border-width: 3px; }
     .confirm-dialog.restarting p { margin: 0; }
+    .confirm-dialog .ask-phrase { display: block; margin: 0 0 20px; color: var(--cp-text-muted); font-size: 15px; }
+    .confirm-dialog .ask-phrase strong { color: var(--cp-text); }
+    .confirm-dialog .ask-phrase input { display: block; width: 100%; margin-top: 8px; }
     /* Inline help disclosure. Toggled by click rather than hover so the same
        control works with a mouse, a keyboard and a touchscreen -- hover has no
        equivalent on a phone. The panel sits in normal flow instead of floating,
@@ -1008,6 +1011,11 @@
         day = d;
         return heading + eventMarkup(e);
       }).join("");
+    }
+    // A full render() rebuilds the toolbar, which wipes search typing and
+    // closes an open filter dropdown, so refresh only the list while one is in use.
+    function eventFilterInUse() {
+      return ["event-search", "event-category", "event-time"].includes(document.activeElement?.id);
     }
     function refreshEventResults() {
       const list = $("#event-list");
@@ -1957,7 +1965,7 @@
           if (state.settingsPage === "performance") { state.perfTests = {}; await loadPerf(); startPerfPolling(); }
         }
       } catch (error) { toast(error.message, "bad"); }
-      if (route === "events" && document.activeElement?.id === "event-search") refreshEventResults();
+      if (route === "events" && eventFilterInUse()) refreshEventResults();
       else render();
     }
     async function mutate(url, options, success) {
@@ -2136,6 +2144,37 @@
       return el;
     }
     function closeOverlay() { document.getElementById("overlay")?.remove(); }
+    // Themed stand-in for the browser's built-in confirm and prompt boxes. Resolves true only when
+    // the user confirms (and, with typePhrase, has typed that exact phrase).
+    function askConfirm({ title, message = "", confirmLabel = "Confirm", danger = false, typePhrase = "" }) {
+      return new Promise(resolve => {
+        const el = showOverlay(`<div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ask-title" aria-describedby="ask-msg">
+          <h3 id="ask-title">${esc(title)}</h3>
+          ${message ? `<p id="ask-msg">${esc(message)}</p>` : ""}
+          ${typePhrase ? `<label class="ask-phrase">Type <strong>${esc(typePhrase)}</strong> to confirm
+            <input type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>` : ""}
+          <div class="btn-row"><button type="button" class="btn" data-ask="cancel">Cancel</button>
+            <button type="button" class="btn ${danger ? "danger" : "primary"}" data-ask="ok" ${typePhrase ? "disabled" : ""}>${esc(confirmLabel)}</button></div></div>`);
+        const ok = el.querySelector('[data-ask="ok"]');
+        const input = el.querySelector(".ask-phrase input");
+        const finish = result => { document.removeEventListener("keydown", onKey, true); closeOverlay(); resolve(result); };
+        const onKey = event => {
+          if (event.key === "Escape") { event.preventDefault(); finish(false); }
+          else if (event.key === "Enter" && event.target === input && !ok.disabled) { event.preventDefault(); finish(true); }
+        };
+        document.addEventListener("keydown", onKey, true);
+        el.addEventListener("click", event => {
+          if (event.target === el || event.target.closest('[data-ask="cancel"]')) finish(false);
+          else if (event.target.closest('[data-ask="ok"]') && !ok.disabled) finish(true);
+        });
+        if (input) {
+          input.addEventListener("input", () => { ok.disabled = input.value.trim() !== typePhrase; });
+          input.focus();
+        } else {
+          el.querySelector('[data-ask="cancel"]').focus();
+        }
+      });
+    }
     function confirmDemoMode(enable) {
       const el = showOverlay(`<div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="demo-title">
         <h3 id="demo-title">${enable ? "Turn on demo mode?" : "Turn off demo mode?"}</h3>
@@ -2290,7 +2329,7 @@
         }
       }
       if (action === "load-more-events") { await loadEvents(false); render(); }
-      if (action === "clear-events" && confirm("Clear all operational events?")) {
+      if (action === "clear-events" && await askConfirm({ title: "Clear all events?", message: "This permanently removes the operational event log.", confirmLabel: "Clear events", danger: true })) {
         await mutate("/api/events", { method: "DELETE" }, "Events cleared"); await loadEvents(true); render();
       }
       if (action === "clear-event-search") {
@@ -2299,12 +2338,12 @@
         if (input) { input.value = ""; input.focus(); }
         refreshEventResults();
       }
-      if (action === "clear-error-history" && confirm("Clear error history?")) {
+      if (action === "clear-error-history" && await askConfirm({ title: "Clear error history?", message: "Past errors will be removed. Active errors are not affected.", confirmLabel: "Clear history", danger: true })) {
         await mutate("/api/heatpump/errors/history", { method: "DELETE" }, "Error history cleared");
         state.errors.history = []; render();
       }
       if (action === "scan-wifi") { await mutate("/api/wifi/scan", { method: "POST" }, "WiFi scan started"); setTimeout(loadNetworks, 500); }
-      if (action === "disconnect-wifi" && confirm("Disconnect from WiFi? This page will close.")) await mutate("/api/wifi/disconnect", { method: "POST" });
+      if (action === "disconnect-wifi" && await askConfirm({ title: "Disconnect from WiFi?", message: "The controller will leave this network and this page will stop responding.", confirmLabel: "Disconnect", danger: true })) await mutate("/api/wifi/disconnect", { method: "POST" });
       if (action === "sync-time") { await mutate("/api/time/sync", { method: "POST" }, "Time sync started"); }
       if (action === "toggle-demo-mode") {
         // The delegated click handler's preventDefault() leaves the box as it
@@ -2351,18 +2390,18 @@
         try { state.release = await mutate("/api/ota/releases", {}, "Update check complete"); }
         finally { state.checkingUpdate = false; render(); }
       }
-      if (action === "install-update" && confirm("Download and install this update?")) {
+      if (action === "install-update" && await askConfirm({ title: "Install this update?", message: "The controller downloads the update, installs it, and restarts.", confirmLabel: "Install" })) {
         await mutate("/api/ota/github", { method: "POST" }, "Update started");
         startInstallWatch();
       }
       if (action === "ota-dismiss") { state.otaInstall = null; render(); }
-      if (action === "reboot" && confirm("Restart the controller now?")) await mutate("/api/ota/reboot", { method: "POST" }, "Controller restarting");
+      if (action === "reboot" && await askConfirm({ title: "Restart the controller?", message: "It will be unavailable for about a minute.", confirmLabel: "Restart" })) await mutate("/api/ota/reboot", { method: "POST" }, "Controller restarting");
       if (action === "copy-key") { await navigator.clipboard.writeText(state.security.api_key || ""); toast("API key copied", "good"); }
-      if (action === "regenerate-key" && confirm("Regenerate the API key? Existing integrations will stop working.")) {
+      if (action === "regenerate-key" && await askConfirm({ title: "Regenerate the API key?", message: "Existing integrations using the current key will stop working.", confirmLabel: "Regenerate", danger: true })) {
         const data = await mutate("/api/auth/apikey/regenerate", { method: "POST" }, "API key regenerated");
         state.security.api_key = data.api_key; render();
       }
-      if (action === "delete-tls" && confirm("Delete the TLS certificate?")) {
+      if (action === "delete-tls" && await askConfirm({ title: "Delete the TLS certificate?", message: "A restart is required for this to take effect.", confirmLabel: "Delete", danger: true })) {
         await mutate("/api/tls/certificate", { method: "DELETE" }, "Certificate deleted; restart required"); await loadSettings(); render();
       }
       if (action === "logout") { await api("/logout", { method: "POST" }).catch(() => {}); location.reload(); return; }
@@ -2538,18 +2577,19 @@
         sessionStorage.removeItem("ha_pair_code");
         stopHaPolling(); state.ha = { ...state.ha, code: "", pairing_active: false, remaining_seconds: 0 }; render();
       }
-      if (action === "ha-revoke" && confirm("Revoke Home Assistant pairing? Home Assistant will lose access until you pair again.")) {
+      if (action === "ha-revoke" && await askConfirm({ title: "Revoke Home Assistant pairing?", message: "Home Assistant will lose access until you pair again.", confirmLabel: "Revoke", danger: true })) {
         await mutate("/api/ha/revoke", { method: "POST" }, "Pairing revoked");
         sessionStorage.removeItem("ha_pair_code");
         stopHaPolling(); state.ha = { ...state.ha, paired: false, code: "", pairing_active: false, remaining_seconds: 0 }; render();
       }
       if (action === "refresh-logs") await loadLogs(true);
-      if (action === "clear-logs" && confirm("Clear controller logs?")) {
+      if (action === "clear-logs" && await askConfirm({ title: "Clear controller logs?", confirmLabel: "Clear logs", danger: true })) {
         await mutate("/api/logs", { method: "DELETE" }, "Logs cleared"); state.logs = []; state.logSeq = 0; render();
       }
-      if (action === "factory-reset" && confirm("Factory reset this controller? This cannot be undone.")) {
-        const phrase = prompt('Type "factory-reset" to permanently erase the controller.');
-        if (phrase === "factory-reset") await mutate("/api/factory-reset", jsonOptions("POST", { confirm: phrase }), "Factory reset started");
+      if (action === "factory-reset" && await askConfirm({ title: "Factory reset this controller?",
+        message: "This permanently erases all settings, history, and pairings. It cannot be undone.",
+        confirmLabel: "Erase controller", danger: true, typePhrase: "factory-reset" })) {
+        await mutate("/api/factory-reset", jsonOptions("POST", { confirm: "factory-reset" }), "Factory reset started");
       }
     }
     function startPowerHold(el) {
@@ -2733,7 +2773,7 @@
         state.auth.checked = true;
         toast(`Controller unavailable: ${error.message}`, "bad");
       }
-      if (state.route === "events" && document.activeElement?.id === "event-search") refreshEventResults();
+      if (state.route === "events" && eventFilterInUse()) refreshEventResults();
       else render();
       if (state.route === "settings" && state.settingsPage === "diagnostics") startLogPolling();
       if (state.route === "settings" && state.settingsPage === "home_assistant") {
@@ -2757,9 +2797,9 @@
           const prevNotifCount = (state.notifications || []).length;
           state.notifications = notif.notifications || [];
           if (state.route === "events") {
-            const searchFocused = document.activeElement?.id === "event-search";
+            const filterInUse = eventFilterInUse();
             await loadEvents(true);
-            if (searchFocused) refreshEventResults();
+            if (filterInUse || eventFilterInUse()) refreshEventResults();
             else render();
           } else if (["home", "status", "errors"].includes(state.route)) render();
           else if (state.notifications.length !== prevNotifCount) render();

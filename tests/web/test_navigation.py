@@ -87,6 +87,19 @@ class TestNavigation:
         expect(search).to_have_value("")
         expect(clear).to_be_hidden()
 
+    def test_open_filter_dropdown_survives_background_refresh(self, dashboard_page: Page):
+        """An open category/time dropdown has focus; the 5 s poll must not rebuild it (which closed it)."""
+        primary(dashboard_page, "Events").click()
+        for select_id in ("event-category", "event-time"):
+            select = dashboard_page.locator(f"#{select_id}")
+            select.focus()
+            select.evaluate("el => { el.dataset.sameElement = '1'; }")
+            dashboard_page.wait_for_timeout(5500)
+            expect(select).to_be_focused()
+            expect(select).to_have_attribute("data-same-element", "1")
+            select.blur()
+
+
 FAKE_ERRORS = {
     "demo_mode": True, "connected": True, "has_errors": True, "error_count": 2,
     "highest_severity": "critical",
