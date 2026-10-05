@@ -90,11 +90,15 @@ class TestNavigation:
     def test_open_filter_dropdown_survives_background_refresh(self, dashboard_page: Page):
         """An open category/time dropdown has focus; the 5 s poll must not rebuild it (which closed it)."""
         primary(dashboard_page, "Events").click()
+        expect(dashboard_page.locator("#event-list")).to_be_visible()
         for select_id in ("event-category", "event-time"):
             select = dashboard_page.locator(f"#{select_id}")
             select.focus()
             select.evaluate("el => { el.dataset.sameElement = '1'; }")
-            dashboard_page.wait_for_timeout(5500)
+            # Only the background poll fetches events on this page; let it land and be applied.
+            with dashboard_page.expect_request_finished(lambda r: "/api/events?" in r.url, timeout=15000):
+                pass
+            dashboard_page.evaluate("() => new Promise(requestAnimationFrame)")
             expect(select).to_be_focused()
             expect(select).to_have_attribute("data-same-element", "1")
             select.blur()
