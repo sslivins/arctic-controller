@@ -757,10 +757,9 @@
         <button class="icon-btn notif-btn" data-action="notif-toggle" aria-label="Notifications">🔔${badge}</button>
         ${panel}</div>`;
     }
-    function shell(content) {
+    function topbar() {
       const connected = !!state.hp.connected;
-      return `<div class="app">
-        <header class="topbar">
+      return `<header class="topbar">
           <div class="brand"><div class="brand-mark">A</div><span>${esc(controllerTitle())}</span></div>
           <div class="top-status">
             <span class="status-item hp-status" title="${connected ? "Heat pump online" : "Heat pump offline"}" aria-label="${connected ? "Heat pump online" : "Heat pump offline"}"><span class="dot ${connected ? "good" : "bad"}"></span><span class="status-label">${connected ? "Online" : "Offline"}</span></span>
@@ -771,7 +770,16 @@
             <button class="icon-btn" data-route="settings" aria-label="Settings">⚙</button>
             ${state.auth.required ? `<button class="icon-btn signout-btn" data-action="logout" aria-label="Sign out" title="Sign out"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Sign out</title><path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h7v2H5v14h7v2H5Zm11-4-1.375-1.45 2.55-2.55H9v-2h8.175l-2.55-2.55L16 7l5 5-5 5Z"/></svg></button>` : ""}
           </div>
-        </header>
+        </header>`;
+    }
+    // Swap just the top bar, for polls that must not rebuild the page's controls.
+    function refreshTopbar() {
+      const bar = document.querySelector("header.topbar");
+      if (bar) bar.outerHTML = topbar();
+    }
+    function shell(content) {
+      return `<div class="app">
+        ${topbar()}
         ${controllerName() ? `<div class="name-strip">${esc(controllerName())}</div>` : ""}
         <div class="layout">
           <aside class="rail">${nav.map(n => navButton(n)).join("")}</aside>
@@ -1012,22 +1020,29 @@
         return heading + eventMarkup(e);
       }).join("");
     }
-    // A full render() rebuilds the toolbar, which wipes search typing and
-    // closes an open filter dropdown, so refresh only the list while one is in use.
-    function eventFilterInUse() {
-      return ["event-search", "event-category", "event-time"].includes(document.activeElement?.id);
-    }
     function refreshEventResults() {
       const list = $("#event-list");
       if (list) list.innerHTML = eventListMarkup();
       const clear = $('[data-action="clear-event-search"]');
       if (clear) clear.hidden = !state.eventFilters.search;
     }
+    function eventCountText() { return `${state.eventTotal} events recorded on this controller.`; }
+    function eventMoreMarkup() {
+      return state.events.length < state.eventTotal ? `<div style="text-align:center;margin-top:16px"><button class="btn" data-action="load-more-events">Load more</button></div>` : "";
+    }
+    // Background refresh: update the data-driven parts in place, never the
+    // toolbar, so search typing and an open filter dropdown are left alone.
+    function refreshEventsLive() {
+      refreshEventResults();
+      const count = $("#event-count"); if (count) count.textContent = eventCountText();
+      const more = $("#event-more"); if (more) more.innerHTML = eventMoreMarkup();
+      refreshTopbar();
+    }
     function eventsPage() {
       const f = state.eventFilters;
       const option = (value, label, current) => `<option value="${value}" ${current === value ? "selected" : ""}>${label}</option>`;
-      return `<div class="page">${pageHead("Events", `${state.eventTotal} events recorded on this controller.`,
-        `<button class="btn danger" data-action="clear-events">Clear events</button>`)}
+      return `<div class="page"><div class="page-head"><div><h1>Events</h1><p id="event-count">${esc(eventCountText())}</p></div>
+        <div class="page-actions"><button class="btn danger" data-action="clear-events">Clear events</button></div></div>
         <div class="event-toolbar">
           <div class="search-field"><input id="event-search" type="search" autocomplete="off"
             placeholder="Search loaded events" value="${esc(f.search)}">
@@ -1039,7 +1054,7 @@
             ["7d", "Last 7 days"], ["boot", "Current boot"]].map(([v, l]) => option(v, l, f.time)).join("")}</select>
         </div>
         <div class="event-list" id="event-list">${eventListMarkup()}</div>
-        ${state.events.length < state.eventTotal ? `<div style="text-align:center;margin-top:16px"><button class="btn" data-action="load-more-events">Load more</button></div>` : ""}
+        <div id="event-more">${eventMoreMarkup()}</div>
       </div>`;
     }
     function errorItem(error) {
@@ -1965,7 +1980,8 @@
           if (state.settingsPage === "performance") { state.perfTests = {}; await loadPerf(); startPerfPolling(); }
         }
       } catch (error) { toast(error.message, "bad"); }
-      if (route === "events" && eventFilterInUse()) refreshEventResults();
+      // The toolbar was painted above; don't rebuild it under the user.
+      if (route === "events" && state.route === "events" && $("#event-list")) refreshEventsLive();
       else render();
     }
     async function mutate(url, options, success) {
@@ -2773,7 +2789,7 @@
         state.auth.checked = true;
         toast(`Controller unavailable: ${error.message}`, "bad");
       }
-      if (state.route === "events" && eventFilterInUse()) refreshEventResults();
+      if (state.route === "events" && document.activeElement?.id === "event-search") refreshEventResults();
       else render();
       if (state.route === "settings" && state.settingsPage === "diagnostics") startLogPolling();
       if (state.route === "settings" && state.settingsPage === "home_assistant") {
@@ -2797,10 +2813,8 @@
           const prevNotifCount = (state.notifications || []).length;
           state.notifications = notif.notifications || [];
           if (state.route === "events") {
-            const filterInUse = eventFilterInUse();
             await loadEvents(true);
-            if (filterInUse || eventFilterInUse()) refreshEventResults();
-            else render();
+            if (state.route === "events") refreshEventsLive();
           } else if (["home", "status", "errors"].includes(state.route)) render();
           else if (state.notifications.length !== prevNotifCount) render();
           else if (state.route === "settings" && state.settingsPage === "firmware"
