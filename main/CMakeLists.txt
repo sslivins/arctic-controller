@@ -127,6 +127,7 @@ idf_component_register(
         "tuya"
     EMBED_FILES
         "web/index.html.gz"
+        "boot_art/boot_art.bin"
     REQUIRES
         espressif__m5stack_tab5
         lvgl
@@ -166,6 +167,10 @@ add_custom_command(
 )
 add_custom_target(web_assets DEPENDS "${WEB_GZ}")
 add_dependencies(${COMPONENT_LIB} web_assets)
+
+# The boot animation does per-pixel compositing every frame; -O2 is ~15%
+# faster than the project-wide -Os there.
+set_source_files_properties(startup_anim.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 
 # Bake a per-build fingerprint into the firmware so CI can verify, after an OTA,
 # that the device is actually running THE BUILD UNDER TEST and did not silently
