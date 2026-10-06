@@ -5,7 +5,7 @@
  * Fetches the current outside temperature and a WMO weather code for the
  * device's configured location via the free, no-key Open-Meteo forecast API:
  *   https://api.open-meteo.com/v1/forecast?latitude=..&longitude=..
- *          &current=temperature_2m,weather_code&temperature_unit=celsius
+ *          &current=temperature_2m,weather_code,is_day&temperature_unit=celsius
  *
  * Temperature is always fetched and cached in Celsius; the status bar converts
  * to the user-selected unit at render time, so toggling °C/°F updates the
@@ -27,6 +27,7 @@ typedef struct {
     bool  valid;         // true once a fetch has succeeded
     float temp_c;        // current temperature, degrees Celsius
     int   weather_code;  // WMO weather interpretation code
+    bool  is_day;        // false between sunset and sunrise at the location
 } weather_data_t;
 
 /**
@@ -46,9 +47,10 @@ int weather_parse(const char* json, weather_data_t* out);
 
 /**
  * @brief UTF-8 icon glyph (from the weather_icons_32 font) for a WMO code.
+ *        Clear and partly-clear skies show a moon instead of a sun at night.
  *        Never NULL — falls back to a neutral cloud for unknown codes.
  */
-const char* weather_code_icon(int weather_code);
+const char* weather_code_icon(int weather_code, bool is_day);
 
 /**
  * @brief Short human-readable description for a WMO code (e.g. "Snow").

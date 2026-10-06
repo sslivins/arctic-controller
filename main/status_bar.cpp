@@ -79,6 +79,7 @@ static struct {
     bool weather_valid;
     float weather_temp_c;
     int weather_code;
+    bool weather_is_day;
 } bar_state = {};
 
 // Forward declarations
@@ -322,7 +323,8 @@ static void render_weather(void)
     char buf[16];
     snprintf(buf, sizeof(buf), "%d%s", (int)lroundf(shown), app_prefs_temp_unit_str());
 
-    lv_label_set_text(bar_state.weather_icon, weather_code_icon(bar_state.weather_code));
+    lv_label_set_text(bar_state.weather_icon,
+                      weather_code_icon(bar_state.weather_code, bar_state.weather_is_day));
     lv_label_set_text(bar_state.weather_label, buf);
     lv_obj_clear_flag(bar_state.weather_icon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(bar_state.weather_label, LV_OBJ_FLAG_HIDDEN);
@@ -331,11 +333,12 @@ static void render_weather(void)
                     LV_ALIGN_OUT_RIGHT_MID, 8, 0);
 }
 
-void status_bar_set_weather(bool valid, float temp_c, int weather_code)
+void status_bar_set_weather(bool valid, float temp_c, int weather_code, bool is_day)
 {
     bar_state.weather_valid = valid;
     bar_state.weather_temp_c = temp_c;
     bar_state.weather_code = weather_code;
+    bar_state.weather_is_day = is_day;
     render_weather();
 }
 
