@@ -42,16 +42,19 @@ def _reset_geocoding(base_url: str):
     requests.post(f"{base_url}/api/test/geocoding-mock-reset", json={}, timeout=10, verify=False)
 
 
-def _set_weather(base_url: str, temp_c: float, code: int):
-    return _post(base_url, "/api/test/weather-mock",
-                 {"current": {"temperature_2m": temp_c, "weather_code": code}})
+def _set_weather(base_url: str, temp_c: float, code: int, is_day=None):
+    current = {"temperature_2m": temp_c, "weather_code": code}
+    if is_day is not None:
+        current["is_day"] = 1 if is_day else 0
+    return _post(base_url, "/api/test/weather-mock", {"current": current})
 
 
 def _reset_weather(base_url: str):
     requests.post(f"{base_url}/api/test/weather-mock-reset", json={}, timeout=10, verify=False)
 
 
-def _apply_weather(page: Page, base_url: str, temp_c: float, code: int, timeout: float = 40.0):
+def _apply_weather(page: Page, base_url: str, temp_c: float, code: int, timeout: float = 40.0,
+                   is_day=None):
     """Set the weather mock and wait until the device actually reports it.
 
     Posting the mock only *queues* a refresh.  A real fetch that was already
@@ -64,12 +67,13 @@ def _apply_weather(page: Page, base_url: str, temp_c: float, code: int, timeout:
     deadline = time.time() + timeout
     last = None
     while time.time() < deadline:
-        _set_weather(base_url, temp_c, code)
+        _set_weather(base_url, temp_c, code, is_day)
         for _ in range(10):
             time.sleep(1.0)
             last = page.evaluate("() => fetch('/api/weather').then(r => r.json())")
             if (last.get("valid")
                     and last.get("weather_code") == code
+                    and (is_day is None or last.get("is_day") == is_day)
                     and abs(float(last.get("temp_c", 0)) - temp_c) < 0.05):
                 return
             if time.time() >= deadline:
@@ -236,6 +240,23 @@ class TestStatusBarWeather:
             # A single hard-coded glyph for every condition would pass the test
             # above; this is what proves the code actually selects artwork.
             assert snowy != clear
+        finally:
+            _reset_weather(base_url)
+
+    def test_clear_night_draws_a_moon_not_a_sun(self, dashboard_page: Page, base_url: str):
+        try:
+            _apply_weather(dashboard_page, base_url, 5.0, 0, is_day=True)
+            dashboard_page.reload(wait_until="domcontentloaded")
+            weather = dashboard_page.locator(".status-item.wx")
+            expect(weather).to_have_attribute("data-wx-day", "true")
+            day = weather.locator("svg.wx-icon").inner_html()
+
+            _apply_weather(dashboard_page, base_url, 5.0, 0, is_day=False)
+            dashboard_page.reload(wait_until="domcontentloaded")
+            expect(weather).to_have_attribute("data-wx-day", "false")
+            night = weather.locator("svg.wx-icon").inner_html()
+
+            assert day != night
         finally:
             _reset_weather(base_url)
 

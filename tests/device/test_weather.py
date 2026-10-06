@@ -23,7 +23,9 @@ from device_client import DeviceClient
 # WMO code -> expected status-bar icon glyph (FontAwesome PUA codepoints,
 # must match the mapping in main/weather.cpp / the weather_icons_32 font).
 ICON_SUN = "\uf185"          # clear
+ICON_MOON = "\uf186"         # clear, at night
 ICON_CLOUD_SUN = "\uf6c4"    # mainly/partly clear
+ICON_CLOUD_MOON = "\uf6c3"   # mainly/partly clear, at night
 ICON_CLOUD = "\uf0c2"        # overcast
 ICON_FOG = "\uf75f"          # fog
 ICON_RAIN = "\uf73d"         # rain / drizzle / showers
@@ -165,3 +167,21 @@ def test_weather_icon_maps_from_code(device: DeviceClient, code, glyph):
     _wait_weather_icon(device, glyph)
     assert _weather_icon(device) == glyph, \
         f"WMO code {code} expected glyph {glyph!r}, got {_weather_icon(device)!r}"
+
+@pytest.mark.parametrize("code,is_day,glyph", [
+    (0, False, ICON_MOON),
+    (2, False, ICON_CLOUD_MOON),
+    (0, True, ICON_SUN),
+    (2, True, ICON_CLOUD_SUN),
+    (71, False, ICON_SNOW),  # conditions without a sun keep their glyph at night
+])
+def test_weather_icon_follows_day_and_night(device: DeviceClient, code, is_day, glyph):
+    """Clear and partly-clear skies show a moon instead of a sun after dark."""
+    _switch_unit(device, "celsius")
+    device.weather_mock(temp_c=10, weather_code=code, is_day=is_day)
+    _ensure_main(device)
+
+    _wait_weather_value(device, "10°C")
+    _wait_weather_icon(device, glyph)
+    assert _weather_icon(device) == glyph, \
+        f"WMO code {code} is_day={is_day} expected glyph {glyph!r}, got {_weather_icon(device)!r}"
