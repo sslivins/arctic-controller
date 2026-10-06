@@ -103,7 +103,7 @@ uint32_t stored(const char* key) {
 // ------------------------------------------------------------------------
 void a_blank_device_starts_clean() {
     blank_device();
-    boot_stats_init(ESP_RST_POWERON);
+    boot_stats_init(ESP_RST_POWERON, 0);
 
     CHECK_EQ_INT(boot_stats_brownout_count(), 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 0);
@@ -113,7 +113,7 @@ void a_blank_device_starts_clean() {
 
 void a_clean_boot_writes_nothing() {
     blank_device();
-    boot_stats_init(ESP_RST_POWERON);
+    boot_stats_init(ESP_RST_POWERON, 0);
 
     // A normal boot must not touch flash. This runs on every single startup;
     // an unconditional write would burn an NVS page per boot for no reason.
@@ -126,7 +126,7 @@ void a_clean_boot_writes_nothing() {
 // ------------------------------------------------------------------------
 void a_brownout_is_counted_and_persisted() {
     previously(4, 0);
-    boot_stats_init(ESP_RST_BROWNOUT);
+    boot_stats_init(ESP_RST_BROWNOUT, 0);
 
     CHECK_EQ_INT(boot_stats_brownout_count(), 5);
     // Persisted, not just held in RAM: the whole point is that it outlives the
@@ -137,7 +137,7 @@ void a_brownout_is_counted_and_persisted() {
 
 void a_brownout_is_not_a_crash() {
     previously(0, 0);
-    boot_stats_init(ESP_RST_BROWNOUT);
+    boot_stats_init(ESP_RST_BROWNOUT, 0);
 
     // A sagging supply is an environment problem, not a crashing firmware.
     // Counting it toward the crash streak would drop a unit on a weak PSU into
@@ -148,7 +148,7 @@ void a_brownout_is_not_a_crash() {
 
 void a_non_brownout_boot_leaves_the_brownout_count_alone() {
     previously(7, 0);
-    boot_stats_init(ESP_RST_SW);
+    boot_stats_init(ESP_RST_SW, 0);
 
     CHECK_EQ_INT(boot_stats_brownout_count(), 7);
     CHECK_EQ_INT(stored(KEY_BROWNOUT), 7);
@@ -159,7 +159,7 @@ void a_non_brownout_boot_leaves_the_brownout_count_alone() {
 // ------------------------------------------------------------------------
 void a_panic_increments_the_streak() {
     previously(0, 0);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 1);
     CHECK_EQ_INT(stored(KEY_STREAK), 1);
     CHECK(boot_stats_in_safe_mode() == false);
@@ -167,28 +167,61 @@ void a_panic_increments_the_streak() {
 
 void a_task_watchdog_reset_increments_the_streak() {
     previously(0, 0);
-    boot_stats_init(ESP_RST_TASK_WDT);
+    boot_stats_init(ESP_RST_TASK_WDT, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 1);
 }
 
 void an_interrupt_watchdog_reset_increments_the_streak() {
     previously(0, 0);
-    boot_stats_init(ESP_RST_INT_WDT);
+    boot_stats_init(ESP_RST_INT_WDT, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 1);
 }
 
 void an_other_watchdog_reset_increments_the_streak() {
     previously(0, 0);
-    boot_stats_init(ESP_RST_WDT);
+    boot_stats_init(ESP_RST_WDT, 0);
     // This is the reason an HP_WDT_RESET surfaces as (see #210), so it has to
     // count -- a wedge that only ever reports ESP_RST_WDT would otherwise
     // never trip safe mode no matter how many times it looped.
     CHECK_EQ_INT(boot_stats_panic_streak(), 1);
 }
 
+// The RTC watchdog only runs before app_main, so these raw codes mean the chip
+// stalled while starting up -- typically power returning unevenly after an
+// outage. Safe mode can't help a stall the firmware never reached, and counting
+// it would push devices on flaky power toward safe mode for the wrong reason.
+void a_startup_stall_is_not_a_crash_or_a_watchdog_reset() {
+    previously(0, 0);
+    nvs_fake::seed_u32(NS, "wdt_cnt", 2);
+    boot_stats_init(ESP_RST_WDT, 0x10);  // SYS_RWDT, as seen after an outage
+    CHECK_EQ_INT(boot_stats_panic_streak(), 0);
+    CHECK_EQ_INT(stored(KEY_STREAK), 0);
+    CHECK_EQ_INT(boot_stats_watchdog_count(), 2);
+    CHECK_EQ_INT(boot_stats_last_raw_reset_reason(), 0x10);
+    CHECK(boot_stats_in_safe_mode() == false);
+}
+
+void a_runtime_watchdog_reset_still_counts() {
+    previously(0, 0);
+    boot_stats_init(ESP_RST_WDT, 0x07);  // CORE_MWDT: the firmware hung while running
+    CHECK_EQ_INT(boot_stats_panic_streak(), 1);
+    CHECK_EQ_INT(boot_stats_watchdog_count(), 1);
+}
+
+void startup_stall_classification() {
+    CHECK(boot_stats_is_startup_stall(ESP_RST_WDT, 0x10));
+    CHECK(boot_stats_is_startup_stall(ESP_RST_WDT, 0x09));
+    CHECK(boot_stats_is_startup_stall(ESP_RST_WDT, 0x0D));
+    CHECK(!boot_stats_is_startup_stall(ESP_RST_WDT, 0x07));   // CORE_MWDT
+    CHECK(!boot_stats_is_startup_stall(ESP_RST_WDT, 0x0B));   // CPU_MWDT
+    CHECK(!boot_stats_is_startup_stall(ESP_RST_WDT, 0x12));   // SUPER_WDT
+    CHECK(!boot_stats_is_startup_stall(ESP_RST_WDT, 0));      // not captured
+    CHECK(!boot_stats_is_startup_stall(ESP_RST_PANIC, 0x10)); // only refines WDT
+}
+
 void a_deliberate_software_reset_is_not_a_crash() {
     previously(0, 1);
-    boot_stats_init(ESP_RST_SW);
+    boot_stats_init(ESP_RST_SW, 0);
     // An OTA reboot or a user-requested restart must not push the device
     // toward safe mode.
     CHECK_EQ_INT(boot_stats_panic_streak(), 1);
@@ -197,13 +230,13 @@ void a_deliberate_software_reset_is_not_a_crash() {
 
 void an_external_reset_is_not_a_crash() {
     previously(0, 1);
-    boot_stats_init(ESP_RST_EXT);
+    boot_stats_init(ESP_RST_EXT, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 1);
 }
 
 void a_power_cycle_does_not_clear_the_streak() {
     previously(0, 2);
-    boot_stats_init(ESP_RST_POWERON);
+    boot_stats_init(ESP_RST_POWERON, 0);
 
     // This is the documented behaviour and the interesting one: pulling the
     // plug is the first thing anyone tries on a wedged unit, and if that reset
@@ -219,21 +252,21 @@ void a_power_cycle_does_not_clear_the_streak() {
 // ------------------------------------------------------------------------
 void two_consecutive_crashes_do_not_trip_safe_mode() {
     previously(0, 1);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 2);
     CHECK(boot_stats_in_safe_mode() == false);
 }
 
 void the_third_consecutive_crash_trips_safe_mode() {
     previously(0, 2);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), SAFE_MODE_THRESHOLD);
     CHECK(boot_stats_in_safe_mode() == true);
 }
 
 void safe_mode_persists_beyond_the_threshold() {
     previously(0, 9);
-    boot_stats_init(ESP_RST_TASK_WDT);
+    boot_stats_init(ESP_RST_TASK_WDT, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 10);
     // The comparison is >=, not ==: a device that crashed its way well past
     // the threshold must stay in safe mode, not fall back out of it.
@@ -242,7 +275,7 @@ void safe_mode_persists_beyond_the_threshold() {
 
 void a_clean_boot_after_a_long_streak_still_enters_safe_mode() {
     previously(0, SAFE_MODE_THRESHOLD);
-    boot_stats_init(ESP_RST_POWERON);
+    boot_stats_init(ESP_RST_POWERON, 0);
 
     // The streak is not incremented (this boot was clean) but it is still at
     // the threshold, so the device is still in a crash loop as far as anyone
@@ -257,7 +290,7 @@ void a_clean_boot_after_a_long_streak_still_enters_safe_mode() {
 // ------------------------------------------------------------------------
 void a_healthy_boot_clears_the_streak() {
     previously(0, 2);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 3);
 
     CHECK(boot_stats_note_healthy() == true);
@@ -269,7 +302,7 @@ void a_healthy_boot_clears_the_streak() {
 
 void note_healthy_does_not_leave_safe_mode_this_boot() {
     previously(0, 2);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     CHECK(boot_stats_in_safe_mode() == true);
 
     CHECK(boot_stats_note_healthy() == true);
@@ -281,7 +314,7 @@ void note_healthy_does_not_leave_safe_mode_this_boot() {
 
 void note_healthy_on_an_already_clean_device_writes_nothing() {
     previously(0, 0);
-    boot_stats_init(ESP_RST_POWERON);
+    boot_stats_init(ESP_RST_POWERON, 0);
 
     nvs_fake::reset_volatile();
     CHECK(boot_stats_note_healthy() == true);
@@ -292,7 +325,7 @@ void note_healthy_on_an_already_clean_device_writes_nothing() {
 
 void note_healthy_reports_failure_when_nvs_cannot_be_opened() {
     previously(0, 3);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 4);
 
     nvs_fake::fail_next(nvs_fake::Op::Open, ESP_FAIL);
@@ -311,7 +344,7 @@ void note_healthy_reports_failure_when_nvs_cannot_be_opened() {
 
 void note_healthy_reports_failure_when_the_write_fails() {
     previously(0, 3);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
 
     nvs_fake::fail_next(nvs_fake::Op::SetU32, ESP_FAIL);
     CHECK(boot_stats_note_healthy() == false);
@@ -323,7 +356,7 @@ void note_healthy_reports_failure_when_the_write_fails() {
 
 void note_healthy_reports_failure_when_the_commit_fails() {
     previously(0, 3);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
 
     // The set can succeed and the commit still fail; the value is not durable
     // until the commit lands, so this must be treated as a failure too.
@@ -336,7 +369,7 @@ void note_healthy_reports_failure_when_the_commit_fails() {
 
 void a_retry_after_a_failed_persist_succeeds() {
     previously(0, 3);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
 
     nvs_fake::fail_next(nvs_fake::Op::Open, ESP_FAIL);
     CHECK(boot_stats_note_healthy() == false);
@@ -355,7 +388,7 @@ void a_retry_after_a_failed_persist_succeeds() {
 void an_unopenable_nvs_does_not_prevent_booting() {
     previously(2, 5);
     nvs_fake::fail_next(nvs_fake::Op::Open, ESP_FAIL);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     nvs_fake::clear_failures();
 
     // A corrupt or full NVS partition must not brick startup, and it must not
@@ -369,7 +402,7 @@ void an_unopenable_nvs_does_not_prevent_booting() {
 void a_failed_streak_write_still_reports_the_streak_this_boot() {
     previously(0, 2);
     nvs_fake::fail_next(nvs_fake::Op::SetU32, ESP_FAIL, -1);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     nvs_fake::clear_failures();
 
     // The increment could not be persisted, but this boot IS the third crash,
@@ -385,11 +418,11 @@ void a_failed_streak_write_still_reports_the_streak_this_boot() {
 // ------------------------------------------------------------------------
 void a_second_init_is_ignored() {
     previously(0, 0);
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 1);
 
     // Calling init twice must not double-count the same reset.
-    boot_stats_init(ESP_RST_PANIC);
+    boot_stats_init(ESP_RST_PANIC, 0);
     CHECK_EQ_INT(boot_stats_panic_streak(), 1);
     CHECK_EQ_INT(stored(KEY_STREAK), 1);
     CHECK_EQ_INT(boot_stats_last_reset_reason(), ESP_RST_PANIC);
@@ -400,7 +433,7 @@ void a_second_init_is_ignored() {
 // ------------------------------------------------------------------------
 void clear_zeroes_both_counters_in_flash() {
     previously(6, 2);
-    boot_stats_init(ESP_RST_BROWNOUT);
+    boot_stats_init(ESP_RST_BROWNOUT, 0);
     CHECK_EQ_INT(boot_stats_brownout_count(), 7);
 
     boot_stats_clear();
@@ -508,6 +541,12 @@ int main() {
              an_interrupt_watchdog_reset_increments_the_streak);
     SCENARIO("an other watchdog reset increments the streak",
              an_other_watchdog_reset_increments_the_streak);
+    SCENARIO("a startup stall is not a crash or a watchdog reset",
+             a_startup_stall_is_not_a_crash_or_a_watchdog_reset);
+    SCENARIO("a runtime watchdog reset still counts",
+             a_runtime_watchdog_reset_still_counts);
+    SCENARIO("startup stalls are told apart by the raw reset code",
+             startup_stall_classification);
     SCENARIO("a deliberate software reset is not a crash",
              a_deliberate_software_reset_is_not_a_crash);
     SCENARIO("an external reset is not a crash", an_external_reset_is_not_a_crash);

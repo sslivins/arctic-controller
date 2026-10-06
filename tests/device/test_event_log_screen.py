@@ -262,6 +262,21 @@ class TestEventLogDisplay:
         watchdog = next(e for e in events if e["type"] == "watchdog_reset")
         assert watchdog["watchdog"] == "task"
 
+    def test_startup_stall_watchdog_reset_is_reported_as_startup(self, device: DeviceClient):
+        """An RTC-watchdog reset (raw ROM code 0x10) reads as a startup stall."""
+        device.session.delete(f"{device.base_url}/api/events").raise_for_status()
+        # ESP_RST_WDT=7; raw 0x10 = SYS_RWDT, raw 0x07 = CORE_MWDT.
+        for raw in (0x10, 0x07):
+            resp = device.session.post(
+                f"{device.base_url}/api/test/record-reset-reason",
+                json={"reason": 7, "raw_reason": raw},
+            )
+            assert resp.status_code == 200
+
+        events = device.session.get(f"{device.base_url}/api/events").json()["events"]
+        keys = sorted(e["watchdog"] for e in events if e["type"] == "watchdog_reset")
+        assert keys == ["other", "startup"]
+
     def test_events_survive_reboot(self, device: DeviceClient):
         """The raw-flash journal restores events after a software reboot."""
         device.session.delete(f"{device.base_url}/api/events").raise_for_status()

@@ -246,19 +246,15 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
             }
             break;
         }
-        case EVENT_WATCHDOG_RESET:
-            switch ((esp_reset_reason_t)p) {
-                case ESP_RST_INT_WDT:
-                    snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_WATCHDOG_INTERRUPT));
-                    break;
-                case ESP_RST_TASK_WDT:
-                    snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_WATCHDOG_TASK));
-                    break;
-                default:
-                    snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_WATCHDOG_OTHER));
-                    break;
-            }
+        case EVENT_WATCHDOG_RESET: {
+            const char* key = event_watchdog_key(p);
+            string_id_t id = STR_EVENT_WATCHDOG_OTHER;
+            if (strcmp(key, "interrupt") == 0) id = STR_EVENT_WATCHDOG_INTERRUPT;
+            else if (strcmp(key, "task") == 0) id = STR_EVENT_WATCHDOG_TASK;
+            else if (strcmp(key, "startup") == 0) id = STR_EVENT_WATCHDOG_STARTUP;
+            snprintf(buf, buf_size, "%s", i18n_get(id));
             break;
+        }
         case EVENT_NETWORK_RECOVERED:
             switch (p) {
                 case EVENT_NETWORK_RECOVERED_SELF:
