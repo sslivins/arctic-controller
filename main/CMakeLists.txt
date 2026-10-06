@@ -127,6 +127,7 @@ idf_component_register(
         "tuya"
     EMBED_FILES
         "web/index.html.gz"
+        "boot_art/boot_art.bin"
     REQUIRES
         espressif__m5stack_tab5
         lvgl
