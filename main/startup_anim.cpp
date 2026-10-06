@@ -30,6 +30,7 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/idf_additions.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 
@@ -108,7 +109,6 @@ static struct {
     uint8_t* glow_i = nullptr;     // glow intensity per pixel for rows >= GLOW_Y0
     uint32_t* drop_buf = nullptr;
     lv_image_dsc_t drop_dsc = {};
-    uint8_t bg_rgb[ART_H][3] = {};
     int glow_y_min = ART_H;  // first row with any glow
     int glow_level = -1;
     float glow_t = -1.0f;    // time of the last glow redraw
@@ -123,8 +123,6 @@ static struct {
     Icicle icicles[MAX_ICICLES] = {};
     int nicicles = 0;
     int icicle_c0 = 0, icicle_c1 = ICE_W;  // column span of all icicles
-    float top[ICE_W] = {};
-    float wobble[ICE_W] = {};
     int melt_r0 = 0, melt_r1 = 0;  // rows of last frame's melt band (empty when equal)
     float sheen_prev = NAN;        // last drawn sheen position, NAN when none
     float last_shrink = 0.0f;
@@ -139,14 +137,22 @@ static struct {
     SemaphoreHandle_t job_done = nullptr;
     volatile bool worker_quit = false;
     int job[4] = {};
-
-    // Lookup tables replacing per-pixel transcendental math.
-    uint16_t edge_soft[EDGE_LUT_LEN] = {};  // alpha scale, 0..256
-    uint8_t edge_wet_a[EDGE_LUT_LEN] = {};  // wet highlight alpha, 0..255
-    uint8_t edge_wet_c[EDGE_LUT_LEN] = {};  // wet highlight brightening, 0..255
-    uint8_t sheen_lut[2 * SHEEN_HALF + 1] = {};
-    float u_inside[U_LUT] = {}, u_shade[U_LUT] = {}, u_hi[U_LUT] = {};
 } ctx;
+
+// Bulky per-row/per-column state and lookup tables. Allocated in PSRAM for
+// the animation's lifetime only: as statics they cost ~13 KB of internal RAM,
+// which the HTTPS server needs for its task stack.
+struct AnimTables {
+    uint8_t bg_rgb[ART_H][3];
+    float top[ICE_W];
+    float wobble[ICE_W];
+    uint16_t edge_soft[EDGE_LUT_LEN];  // alpha scale, 0..256
+    uint8_t edge_wet_a[EDGE_LUT_LEN];  // wet highlight alpha, 0..255
+    uint8_t edge_wet_c[EDGE_LUT_LEN];  // wet highlight brightening, 0..255
+    uint8_t sheen_lut[2 * SHEEN_HALF + 1];
+    float u_inside[U_LUT], u_shade[U_LUT], u_hi[U_LUT];
+};
+static AnimTables* tab = nullptr;
 
 
 // ---------------------------------------------------------------- helpers ----
@@ -348,7 +354,7 @@ static bool build_background()
     if (!ctx.bg_buf || !ctx.glow_i) return false;
     for (int y = 0; y < ART_H; y++) {
         float f = (float)y / (ART_H - 1);
-        uint8_t* c = ctx.bg_rgb[y];
+        uint8_t* c = tab->bg_rgb[y];
         c[0] = (uint8_t)(BG_TOP_R + (BG_BOT_R - BG_TOP_R) * f + 0.5f);
         c[1] = (uint8_t)(BG_TOP_G + (BG_BOT_G - BG_TOP_G) * f + 0.5f);
         c[2] = (uint8_t)(BG_TOP_B + (BG_BOT_B - BG_TOP_B) * f + 0.5f);
@@ -407,20 +413,20 @@ static void build_luts()
         float soft = d >= 3 ? 1.0f : d / 3.0f;
         float w = (d - 5) / 4;
         float wet = expf(-w * w);
-        ctx.edge_soft[k] = (uint16_t)(soft * 256 + 0.5f);
-        ctx.edge_wet_a[k] = to_opa(wet * 0.4f * soft);
-        ctx.edge_wet_c[k] = to_opa(wet * 0.35f);
+        tab->edge_soft[k] = (uint16_t)(soft * 256 + 0.5f);
+        tab->edge_wet_a[k] = to_opa(wet * 0.4f * soft);
+        tab->edge_wet_c[k] = to_opa(wet * 0.35f);
     }
     for (int o = -SHEEN_HALF; o <= SHEEN_HALF; o++) {
         float s = (float)o / 40.0f;
-        ctx.sheen_lut[o + SHEEN_HALF] = to_opa(expf(-s * s) * 0.35f);
+        tab->sheen_lut[o + SHEEN_HALF] = to_opa(expf(-s * s) * 0.35f);
     }
     for (int i = 0; i < U_LUT; i++) {
         float u = (i + 0.5f) / U_LUT * 2 - 1;
         float hu = (u + 0.42f) / 0.16f;
-        ctx.u_inside[i] = smoothstep(1.0f, 0.75f, fabsf(u));
-        ctx.u_shade[i] = 0.80f + 0.18f * cosf(u * 1.4f) - 0.12f * smoothstep(0.4f, 1.0f, u);
-        ctx.u_hi[i] = expf(-hu * hu);
+        tab->u_inside[i] = smoothstep(1.0f, 0.75f, fabsf(u));
+        tab->u_shade[i] = 0.80f + 0.18f * cosf(u * 1.4f) - 0.12f * smoothstep(0.4f, 1.0f, u);
+        tab->u_hi[i] = expf(-hu * hu);
     }
 }
 
@@ -504,9 +510,9 @@ static void draw_icicle(const Icicle& ic, float L, float hw, int r0, int r1, int
             float u = ((float)(col - x0) - half - cx) / w;
             if (u <= -1.0f || u >= 1.0f) continue;
             int i = (int)((u + 1) * (U_LUT / 2));
-            float hi = ctx.u_hi[i] * hi_k;
-            float a = ctx.u_inside[i] * (a_k + 0.25f * hi) * top_fade;
-            float sh = ctx.u_shade[i] + rings;
+            float hi = tab->u_hi[i] * hi_k;
+            float a = tab->u_inside[i] * (a_k + 0.25f * hi) * top_fade;
+            float sh = tab->u_shade[i] + rings;
             dst[col] = blend565(dst[col], to_opa(0.66f * sh + hi), to_opa(0.85f * sh + hi), to_opa(0.97f * sh + hi),
                                 to_opa(a));
         }
@@ -531,7 +537,7 @@ static void compose_rows(int x0, int y0, int x1, int y1)
 
     for (int y = y0; y < y1; y++) {
         uint16_t* dst = ctx.bg_buf + y * ART_W;
-        const uint8_t* c = ctx.bg_rgb[y];
+        const uint8_t* c = tab->bg_rgb[y];
         if (glvl && y >= ctx.glow_y_min) {
             const uint8_t* gi = ctx.glow_i + (y - GLOW_Y0) * ART_W;
             for (int x = x0; x < x1; x++) {
@@ -566,7 +572,7 @@ static void compose_rows(int x0, int y0, int x1, int y1)
             const int r = y - ICE_Y;
             const int xa = std::max(x0, ICE_X), xb = std::min(x1, ICE_X + ICE_W);
             const uint32_t* src = ctx.ice_base + r * ICE_W - ICE_X;
-            const float* top = ctx.top - ICE_X;
+            const float* top = tab->top - ICE_X;
             const int sheen_off = (r >> 1) - ctx.ice_sx - ICE_X;
             for (int x = xa; x < xb; x++) {
                 uint32_t p = src[x];
@@ -577,15 +583,15 @@ static void compose_rows(int x0, int y0, int x1, int y1)
                 uint32_t add = 0;
                 if (d < 20) {
                     int k = (int)(d * EDGE_LUT_STEPS);
-                    a = (a * ctx.edge_soft[k]) >> 8;
+                    a = (a * tab->edge_soft[k]) >> 8;
                     if (melting) {
-                        a = std::min<uint32_t>(255, a + ctx.edge_wet_a[k]);
-                        add = ctx.edge_wet_c[k];
+                        a = std::min<uint32_t>(255, a + tab->edge_wet_a[k]);
+                        add = tab->edge_wet_c[k];
                     }
                 }
                 if (sheen) {
                     int o = x + sheen_off;
-                    if (o > -SHEEN_HALF && o < SHEEN_HALF) add += ctx.sheen_lut[o + SHEEN_HALF];
+                    if (o > -SHEEN_HALF && o < SHEEN_HALF) add += tab->sheen_lut[o + SHEEN_HALF];
                 }
                 uint32_t rr = (p >> 16) & 0xFF, gg = (p >> 8) & 0xFF, bb = p & 0xFF;
                 if (add) {
@@ -621,7 +627,7 @@ static void compose_worker(void*)
         xSemaphoreGive(ctx.job_done);
     }
     xSemaphoreGive(ctx.job_done);
-    vTaskDelete(nullptr);
+    vTaskSuspend(nullptr);  // deleted by cleanup_animation() (stack is in PSRAM)
 }
 
 static void compose(int x0, int y0, int x1, int y1)
@@ -698,9 +704,9 @@ static void update_ice(float t, float melt, float shrink)
     const float wob = std::min(1.0f, melt * 4);
     float tmin = 1e9f, tmax = -1e9f;
     for (int c = 0; c < ICE_W; c++) {
-        ctx.top[c] = melt * (ICE_H + 40) - 30 + ctx.wobble[c] * wob;
-        tmin = std::min(tmin, ctx.top[c]);
-        tmax = std::max(tmax, ctx.top[c]);
+        tab->top[c] = melt * (ICE_H + 40) - 30 + tab->wobble[c] * wob;
+        tmin = std::min(tmin, tab->top[c]);
+        tmax = std::max(tmax, tab->top[c]);
     }
 
     // Frost sheen: a diagonal glint sweeping across before the melt starts.
@@ -824,6 +830,8 @@ static void render_frame(float t)
 
 static void free_buffers()
 {
+    heap_caps_free(tab);
+    tab = nullptr;
     for (int i = 0; i < ART_COUNT; i++) {
         heap_caps_free(ctx.art_buf[i]);
         ctx.art_buf[i] = nullptr;
@@ -875,6 +883,7 @@ static void cleanup_animation()
         ctx.worker_quit = true;
         xTaskNotifyGive(ctx.worker);
         xSemaphoreTake(ctx.job_done, portMAX_DELAY);
+        vTaskDeleteWithCaps(ctx.worker);
         ctx.worker = nullptr;
     }
     if (ctx.job_done) {
@@ -902,7 +911,8 @@ bool startup_anim_init(void (*on_complete)(void))
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
     s_rng = 0x2545F491u;
-    if (!load_art() || !build_ice_base() || !build_background() || !build_drop()) {
+    tab = (AnimTables*)heap_caps_calloc(1, sizeof(AnimTables), MALLOC_CAP_SPIRAM);
+    if (!tab || !load_art() || !build_ice_base() || !build_background() || !build_drop()) {
         ESP_LOGE(TAG, "startup animation unavailable, skipping");
         free_buffers();
         if (on_complete) on_complete();
@@ -911,8 +921,8 @@ bool startup_anim_init(void (*on_complete)(void))
     build_luts();
     build_icicles();
     for (int c = 0; c < ICE_W; c++) {
-        ctx.wobble[c] = 12 * sinf(c / 61.0f) + 7 * sinf(c / 23.0f + 1.3f);
-        ctx.top[c] = -30;
+        tab->wobble[c] = 12 * sinf(c / 61.0f) + 7 * sinf(c / 23.0f + 1.3f);
+        tab->top[c] = -30;
     }
 
     ctx.bg = make_canvas(scr, ctx.bg_buf, ART_W, ART_H, LV_COLOR_FORMAT_RGB565, 0, 0);
@@ -946,8 +956,8 @@ bool startup_anim_init(void (*on_complete)(void))
     ctx.job_done = xSemaphoreCreateBinary();
     ctx.worker_quit = false;
     if (!ctx.job_done ||
-        xTaskCreatePinnedToCore(compose_worker, "anim_compose", 4096, nullptr, uxTaskPriorityGet(nullptr),
-                                &ctx.worker, 1) != pdPASS) {
+        xTaskCreatePinnedToCoreWithCaps(compose_worker, "anim_compose", 4096, nullptr, uxTaskPriorityGet(nullptr),
+                                        &ctx.worker, 1, MALLOC_CAP_SPIRAM) != pdPASS) {
         ctx.worker = nullptr;
         ESP_LOGW(TAG, "compose worker unavailable, single-core compose");
     }
