@@ -561,6 +561,7 @@ extern "C" void app_main(void)
         if (show_main_ui) {
             bsp_display_lock(0);
             create_ui();
+            startup_anim_release();
             bsp_display_unlock();
             mclog::tagInfo(TAG, "UI Created");
             show_main_ui = false;  // Only create once

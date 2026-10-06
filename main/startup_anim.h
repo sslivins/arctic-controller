@@ -30,4 +30,12 @@ bool startup_anim_is_running(void);
  */
 void startup_anim_stop(void);
 
+/**
+ * @brief Remove the animation's last frame from the screen and free it.
+ *
+ * The final frame stays up after the animation completes so the main UI can
+ * be built underneath it; call this (under the display lock) right after.
+ */
+void startup_anim_release(void);
+
 #endif
