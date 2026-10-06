@@ -4954,7 +4954,7 @@ components:
             - `mode_changed`: `(old_mode << 8) | new_mode`
             - `setpoint_changed`: `(type << 16) | (old_val << 8) | new_val` where type: 0=cooling, 1=heating, 2=hot_water
             - `error_appeared` / `error_cleared`: opaque fault site id
-            - `watchdog_reset`: ESP-IDF reset reason
+            - `watchdog_reset`: `(rom_reset_code << 8) | reason`, where `reason` is the ESP-IDF reset reason and `rom_reset_code` the chip's raw reset code (0 on events recorded before it was kept)
             - `network_recovered`: 0=came back on its own, 1=WiFi reconnect, 2=controller reboot
             - All other events: 0
           example: 0
@@ -4999,8 +4999,11 @@ components:
           example: https://arcticheatpumps.freshdesk.com/support/solutions/articles/000000
         watchdog:
           type: string
-          description: "`watchdog_reset` only: which watchdog reset the controller."
-          enum: [interrupt, task, other]
+          description: |
+            `watchdog_reset` only: which watchdog reset the controller.
+            `startup` means the controller stalled while starting up, before
+            the firmware ran, which most often follows a power interruption.
+          enum: [interrupt, task, startup, other]
           example: task
         recovery:
           type: string

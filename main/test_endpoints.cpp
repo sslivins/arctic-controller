@@ -2123,13 +2123,15 @@ static esp_err_t record_reset_reason_post_handler(httpd_req_t* req)
 
     cJSON* root = cJSON_Parse(body);
     cJSON* reason = root ? cJSON_GetObjectItem(root, "reason") : NULL;
+    cJSON* raw = root ? cJSON_GetObjectItem(root, "raw_reason") : NULL;
     if (!reason || !cJSON_IsNumber(reason)) {
         cJSON_Delete(root);
         send_json_error(req, "400 Bad Request", "Provide numeric 'reason'");
         return ESP_OK;
     }
 
-    event_log_record_reset_reason((esp_reset_reason_t)reason->valueint);
+    event_log_record_reset_reason((esp_reset_reason_t)reason->valueint,
+                                  cJSON_IsNumber(raw) ? (uint32_t)raw->valueint : 0);
     cJSON_Delete(root);
     httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;

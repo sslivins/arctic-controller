@@ -109,8 +109,11 @@ void event_log_record(event_type_t type, uint32_t payload);
 /**
  * @brief Record an abnormal previous-boot reset reason, if applicable.
  *        Normal software, power-on, external, and deep-sleep resets are ignored.
+ *        A watchdog reset's payload is (raw_reason << 8) | reason, so the ROM
+ *        reset code is kept alongside the ESP-IDF reason.
+ * @param raw_reason Value from esp_rom_get_reset_reason(0); 0 if unknown.
  */
-void event_log_record_reset_reason(esp_reset_reason_t reason);
+void event_log_record_reset_reason(esp_reset_reason_t reason, uint32_t raw_reason);
 
 /**
  * @brief Get count of events currently in the buffer.
@@ -189,7 +192,8 @@ const char* event_setpoint_key(uint32_t payload);
 
 /**
  * @brief Stable API key for an EVENT_WATCHDOG_RESET payload
- *        ("interrupt", "task" or "other").
+ *        ("interrupt", "task", "startup" or "other"). "startup" is an RTC
+ *        watchdog reset during startup, most likely a power interruption.
  */
 const char* event_watchdog_key(uint32_t payload);
 

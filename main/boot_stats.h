@@ -17,13 +17,48 @@
 extern "C" {
 #endif
 
+// ESP32-P4 ROM reset codes (soc/reset_reasons.h) for the RTC watchdog. ESP-IDF
+// folds these, together with the main-system watchdogs, into ESP_RST_WDT.
+#define BOOT_RAW_RST_CORE_RWDT 0x09
+#define BOOT_RAW_RST_CPU_RWDT  0x0D
+#define BOOT_RAW_RST_SYS_RWDT  0x10
+
+/**
+ * @brief True if an ESP_RST_WDT reset was the RTC watchdog firing during
+ *        startup rather than a hang of the running firmware.
+ *
+ * The RTC watchdog guards the bootloader and is switched off by ESP-IDF before
+ * app_main, and this firmware never re-arms it. So an RTC-watchdog reset means
+ * the chip stalled while starting up, which is what power coming back unevenly
+ * after an outage tends to cause. The only other source is a panic handler that
+ * hangs while saving its crash dump, which is rare.
+ *
+ * @param reason      Value from esp_reset_reason().
+ * @param raw_reason  Value from esp_rom_get_reset_reason(0); 0 if unknown.
+ */
+static inline bool boot_stats_is_startup_stall(esp_reset_reason_t reason,
+                                               uint32_t raw_reason) {
+    return reason == ESP_RST_WDT &&
+           (raw_reason == BOOT_RAW_RST_CORE_RWDT ||
+            raw_reason == BOOT_RAW_RST_CPU_RWDT ||
+            raw_reason == BOOT_RAW_RST_SYS_RWDT);
+}
+
 /**
  * @brief Initialize persistent boot/reset statistics. Call once at startup,
- *        AFTER NVS has been initialized. Pass the value from
- *        esp_reset_reason(). If the reason is a brownout, the persistent
- *        brownout counter (in NVS) is incremented and committed.
+ *        AFTER NVS has been initialized. Pass the values from
+ *        esp_reset_reason() and esp_rom_get_reset_reason(0). If the reason is
+ *        a brownout, the persistent brownout counter (in NVS) is incremented
+ *        and committed. A startup stall (see boot_stats_is_startup_stall) is
+ *        not counted as a crash or a watchdog reset.
  */
-void boot_stats_init(esp_reset_reason_t reason);
+void boot_stats_init(esp_reset_reason_t reason, uint32_t raw_reason);
+
+/**
+ * @brief The raw ROM reset code for the current boot (as passed to
+ *        boot_stats_init), e.g. 0x10 for an RTC watchdog reset.
+ */
+uint32_t boot_stats_last_raw_reset_reason(void);
 
 /**
  * @brief Total number of brownout resets recorded across all boots (NVS).

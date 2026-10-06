@@ -206,8 +206,11 @@ extern "C" void app_main(void)
     cJSON_Hooks cjson_hooks = { cjson_psram_malloc, cjson_free };
     cJSON_InitHooks(&cjson_hooks);
 
-    // Log reset reason (survives reboot - reads from hardware registers)
+    // Log reset reason (survives reboot - reads from hardware registers).
+    // ESP-IDF folds several hardware watchdogs into ESP_RST_WDT; the raw ROM
+    // code tells a startup stall (often a power blip) from a runtime hang.
     esp_reset_reason_t reset_reason = esp_reset_reason();
+    const uint32_t raw_reset_reason = (uint32_t)esp_rom_get_reset_reason(0);
     const char* reason_str = "UNKNOWN";
     switch (reset_reason) {
         case ESP_RST_POWERON:  reason_str = "POWER_ON"; break;
@@ -228,7 +231,10 @@ extern "C" void app_main(void)
         default: break;
     }
     ESP_LOGW(TAG, "========================================");
-    ESP_LOGW(TAG, "RESET REASON: %s (%d)", reason_str, (int)reset_reason);
+    ESP_LOGW(TAG, "RESET REASON: %s (%d), rst:0x%02lx%s", reason_str, (int)reset_reason,
+             (unsigned long)raw_reset_reason,
+             boot_stats_is_startup_stall(reset_reason, raw_reset_reason)
+                 ? " - startup stalled, likely a power interruption" : "");
     ESP_LOGW(TAG, "Free heap: %lu bytes, min ever: %lu bytes",
              (unsigned long)esp_get_free_heap_size(),
              (unsigned long)esp_get_minimum_free_heap_size());
@@ -344,8 +350,8 @@ extern "C" void app_main(void)
     // so supply sags (e.g. the Tab5 running off the heat-pump RS485 rail) are
     // visible after the fact instead of only on the serial console. Requires
     // NVS, which was initialized above.
-    boot_stats_init(reset_reason);
-    event_log_record_reset_reason(reset_reason);
+    boot_stats_init(reset_reason, raw_reset_reason);
+    event_log_record_reset_reason(reset_reason, raw_reset_reason);
 
     // Heat pump problems the user has not acknowledged yet (NVS), so the bell
     // shows them again after a reboot or firmware update.

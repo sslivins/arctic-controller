@@ -26,9 +26,11 @@ static struct {
     uint32_t watchdog_count;
     bool safe_mode;
     esp_reset_reason_t reason;
-} s = { false, 0, 0, 0, 0, false, ESP_RST_UNKNOWN };
+    uint32_t raw_reason;
+} s = { false, 0, 0, 0, 0, false, ESP_RST_UNKNOWN, 0 };
 
-static bool is_watchdog_reason(esp_reset_reason_t reason) {
+static bool is_watchdog_reason(esp_reset_reason_t reason, uint32_t raw_reason) {
+    if (boot_stats_is_startup_stall(reason, raw_reason)) return false;
     return reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT ||
            reason == ESP_RST_WDT;
 }
@@ -46,14 +48,22 @@ static uint32_t bump_lifetime_counter(nvs_handle_t nvs, const char* key, bool bu
     return cnt;
 }
 
-static bool is_crash_reason(esp_reset_reason_t reason) {
+static bool is_crash_reason(esp_reset_reason_t reason, uint32_t raw_reason) {
+    // A startup stall can't be helped by safe mode: the firmware never ran.
+    if (boot_stats_is_startup_stall(reason, raw_reason)) return false;
     return reason == ESP_RST_PANIC || reason == ESP_RST_TASK_WDT ||
            reason == ESP_RST_INT_WDT || reason == ESP_RST_WDT;
 }
 
-void boot_stats_init(esp_reset_reason_t reason) {
+void boot_stats_init(esp_reset_reason_t reason, uint32_t raw_reason) {
     if (s.initialized) return;
     s.reason = reason;
+    s.raw_reason = raw_reason;
+    if (boot_stats_is_startup_stall(reason, raw_reason)) {
+        ESP_LOGW(TAG, "Startup stalled before the firmware ran (rst:0x%02lx) - "
+                 "likely a power interruption; not counted as a crash",
+                 (unsigned long)raw_reason);
+    }
 
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
@@ -74,7 +84,7 @@ void boot_stats_init(esp_reset_reason_t reason) {
         // boot_stats_note_healthy() once the device proves healthy this boot.
         uint32_t streak = 0;
         nvs_get_u32(nvs, NVS_KEY_PANIC_STREAK, &streak);
-        if (is_crash_reason(reason)) {
+        if (is_crash_reason(reason, raw_reason)) {
             streak++;
             nvs_set_u32(nvs, NVS_KEY_PANIC_STREAK, streak);
             nvs_commit(nvs);
@@ -88,7 +98,7 @@ void boot_stats_init(esp_reset_reason_t reason) {
         s.panic_count = bump_lifetime_counter(nvs, NVS_KEY_PANIC_CNT,
                                               reason == ESP_RST_PANIC);
         s.watchdog_count = bump_lifetime_counter(nvs, NVS_KEY_WDT_CNT,
-                                                 is_watchdog_reason(reason));
+                                                 is_watchdog_reason(reason, raw_reason));
 
         nvs_close(nvs);
     } else {
@@ -138,6 +148,8 @@ bool boot_stats_note_healthy(void) {
 }
 
 esp_reset_reason_t boot_stats_last_reset_reason(void) { return s.reason; }
+
+uint32_t boot_stats_last_raw_reset_reason(void) { return s.raw_reason; }
 
 const char* boot_stats_reset_reason_name(esp_reset_reason_t reason) {
     switch (reason) {

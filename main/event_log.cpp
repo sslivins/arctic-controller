@@ -4,6 +4,7 @@
  */
 
 #include "event_log.h"
+#include "boot_stats.h"
 #include "history_storage.h"
 #include <esp_log.h>
 #include <esp_random.h>
@@ -173,7 +174,7 @@ void event_log_record(event_type_t type, uint32_t payload) {
     }
 }
 
-void event_log_record_reset_reason(esp_reset_reason_t reason) {
+void event_log_record_reset_reason(esp_reset_reason_t reason, uint32_t raw_reason) {
     switch (reason) {
         case ESP_RST_BROWNOUT:
             event_log_record(EVENT_BROWNOUT_RESET, 0);
@@ -185,7 +186,8 @@ void event_log_record_reset_reason(esp_reset_reason_t reason) {
         case ESP_RST_INT_WDT:
         case ESP_RST_TASK_WDT:
         case ESP_RST_WDT:
-            event_log_record(EVENT_WATCHDOG_RESET, (uint32_t)reason);
+            event_log_record(EVENT_WATCHDOG_RESET,
+                             ((raw_reason & 0xFF) << 8) | (uint32_t)reason);
             break;
         default:
             break;
@@ -346,7 +348,11 @@ const char* event_setpoint_key(uint32_t payload) {
 }
 
 const char* event_watchdog_key(uint32_t payload) {
-    switch ((esp_reset_reason_t)payload) {
+    const uint32_t reason = payload & 0xFF;
+    if (boot_stats_is_startup_stall((esp_reset_reason_t)reason, (payload >> 8) & 0xFF)) {
+        return "startup";
+    }
+    switch (reason) {
         case ESP_RST_INT_WDT:  return "interrupt";
         case ESP_RST_TASK_WDT: return "task";
         default:               return "other";

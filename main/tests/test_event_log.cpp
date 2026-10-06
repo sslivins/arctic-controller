@@ -166,6 +166,11 @@ void event_payloads_decode_to_the_documented_api_keys() {
     CHECK(std::strcmp(event_watchdog_key(ESP_RST_INT_WDT), "interrupt") == 0);
     CHECK(std::strcmp(event_watchdog_key(ESP_RST_TASK_WDT), "task") == 0);
     CHECK(std::strcmp(event_watchdog_key(ESP_RST_WDT), "other") == 0);
+    // Raw ROM code in bits 8..15: an RTC-watchdog reset is a startup stall,
+    // a main-watchdog one stays "other".
+    CHECK(std::strcmp(event_watchdog_key((0x10u << 8) | ESP_RST_WDT), "startup") == 0);
+    CHECK(std::strcmp(event_watchdog_key((0x07u << 8) | ESP_RST_WDT), "other") == 0);
+    CHECK(std::strcmp(event_watchdog_key((0x10u << 8) | ESP_RST_TASK_WDT), "task") == 0);
 
     CHECK(std::strcmp(event_network_recovery_key(EVENT_NETWORK_RECOVERED_SELF), "self") == 0);
     CHECK(std::strcmp(event_network_recovery_key(EVENT_NETWORK_RECOVERED_WIFI_BOUNCE), "wifi_bounce") == 0);
@@ -452,7 +457,7 @@ void abnormal_resets_are_recorded_with_the_right_type() {
 
     for (const Case& c : cases) {
         event_log_clear();
-        event_log_record_reset_reason(c.reason);
+        event_log_record_reset_reason(c.reason, 0);
         CHECK_EQ_INT(event_log_count(), 1);
         event_entry_t e = newest();
         CHECK(e.type == c.expected);
@@ -463,6 +468,12 @@ void abnormal_resets_are_recorded_with_the_right_type() {
             CHECK_EQ_INT(e.payload, 0);
         }
     }
+
+    // The raw ROM code rides along so a startup stall stays recognisable.
+    event_log_clear();
+    event_log_record_reset_reason(ESP_RST_WDT, 0x10);
+    CHECK_EQ_INT(event_log_count(), 1);
+    CHECK_EQ_INT(newest().payload, (0x10u << 8) | (uint32_t)ESP_RST_WDT);
 }
 
 void normal_resets_are_not_recorded() {
@@ -472,7 +483,7 @@ void normal_resets_are_not_recorded() {
                                           ESP_RST_DEEPSLEEP, ESP_RST_SDIO};
     for (esp_reset_reason_t r : ignored) {
         event_log_clear();
-        event_log_record_reset_reason(r);
+        event_log_record_reset_reason(r, 0);
         CHECK_EQ_INT(event_log_count(), 0);
     }
 }
