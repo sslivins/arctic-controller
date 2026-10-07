@@ -471,6 +471,7 @@
     .perf-test { margin-top: 12px; }
     .perf-test > strong { display: block; margin-bottom: 8px; }
     .perf-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .perf-pick-select { width: 100%; margin-top: 8px; }
     .perf-summary { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 0; border-top: 1px solid var(--cp-border); }
     .perf-summary:first-child { border-top: 0; }
     .perf-summary .label { color: var(--cp-text-muted); flex: 0 0 auto; }
@@ -1381,7 +1382,7 @@
       if (browse?.running) return `<div class="perf-test"><strong>Sensor</strong><span class="spinner-inline"></span> Finding sensors…</div>`;
       if (browse?.failed) return `<div class="perf-test notice bad">${esc(browse.failed)}${manual}</div>`;
       if (browse?.result && !browse.result.sensors.length) return `<div class="perf-test ok"><strong>No sensors found at this address</strong>${manual}</div>`;
-      if (browse?.result) return `<div class="perf-test ok"><strong>Sensor</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed.</div>` : ""}<div class="perf-choices">${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-device-name="${esc(browse.result.device_name || "")}" data-rom-id="${esc(x.rom_id || "")}" data-celsius="${esc(x.celsius ?? "")}" data-available="${x.available ? "1" : ""}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} · ${x.available ? perfTemp(x.celsius) : "unavailable"}</button>`).join("")}</div><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual-object" data-slot="${slot}">Enter object manually</button></div></div>`;
+      if (browse?.result) return `<div class="perf-test ok"><strong>Sensor</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed.</div>` : ""}<select class="perf-pick-select" aria-label="Sensor"><option value="" selected disabled>Choose a sensor…</option>${browse.result.sensors.map((x, i) => `<option value="${i}" data-pick="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-device-name="${esc(browse.result.device_name || "")}" data-rom-id="${esc(x.rom_id || "")}" data-celsius="${esc(x.celsius ?? "")}" data-available="${x.available ? "1" : ""}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} · ${x.available ? perfTemp(x.celsius) : "unavailable"}</option>`).join("")}</select><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual-object" data-slot="${slot}">Enter object manually</button></div></div>`;
       return `<div class="perf-test"><strong>Sensor</strong><span class="spinner-inline"></span> Finding sensors…</div>`;
     }
     function perfDiscoverHtml(slot) {
@@ -1391,7 +1392,7 @@
       if (!d.result) return "";
       const devices = d.result.devices || [];
       if (!devices.length) return `<div class="perf-test ok"><strong>No BACnet devices found</strong><div class="perf-choices"><button class="btn" type="button" data-action="perf-discover-bacnet" data-slot="${slot}">Search again</button><button class="btn" type="button" data-action="perf-bacnet-manual" data-slot="${slot}">Enter address manually</button></div></div>`;
-      return `<div class="perf-test ok"><div class="perf-list-head"><strong>Device</strong><button class="icon-btn" type="button" data-action="perf-discover-bacnet" data-slot="${slot}" aria-label="Search again" title="Search again"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>${d.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${devices.length} devices.</div>` : ""}<div class="perf-choices">${devices.map((x, i) => `<button class="btn" type="button" data-action="perf-pick-bacnet-device" data-slot="${slot}" data-host="${esc(x.host)}" data-port="${esc(x.port)}" data-device-instance="${esc(x.device_instance ?? "")}" data-device-name="${esc(x.device_name || "")}">${esc(x.device_name || "BACnet device")} · ${esc(x.host)}<br><span class="metric-sub">Device ${esc(x.device_instance ?? "")}${x.model_name ? ` · ${esc(x.model_name)}` : ""}</span></button>`).join("")}</div><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual" data-slot="${slot}">Enter address manually</button></div></div>`;
+      return `<div class="perf-test ok"><div class="perf-list-head"><strong>Device</strong><button class="icon-btn" type="button" data-action="perf-discover-bacnet" data-slot="${slot}" aria-label="Search again" title="Search again"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>${d.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${devices.length} devices.</div>` : ""}<select class="perf-pick-select" aria-label="Device"><option value="" selected disabled>Choose a device…</option>${devices.map((x, i) => `<option value="${i}" data-pick="perf-pick-bacnet-device" data-slot="${slot}" data-host="${esc(x.host)}" data-port="${esc(x.port)}" data-device-instance="${esc(x.device_instance ?? "")}" data-device-name="${esc(x.device_name || "")}">${esc(x.device_name || "BACnet device")} · ${esc(x.host)} (device ${esc(x.device_instance ?? "")}${x.model_name ? ` · ${esc(x.model_name)}` : ""})</option>`).join("")}</select><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual" data-slot="${slot}">Enter address manually</button></div></div>`;
     }
     function performanceSettings() {
       const p = state.perf;
@@ -2693,6 +2694,13 @@
       }
     });
     document.addEventListener("change", event => {
+      if (event.target.matches("select.perf-pick-select")) {
+        const option = event.target.selectedOptions[0];
+        if (option?.dataset.pick) handleAction(option.dataset.pick, option).catch(error => {
+          if (!error.toastShown) toast(error.message, "bad");
+        });
+        return;
+      }
       if (event.target.matches("select.choice-select")) {
         const description = event.target.closest(".choice-editor")?.querySelector(".choice-description");
         const selected = event.target.selectedOptions[0];
