@@ -178,7 +178,8 @@ the suite while it's queued behind another PR does that work twice.
   and don't need to wait.
 - `CONFIG_TEST_ENDPOINTS=y` is set only in `device-tests.yml`, not production builds
 - **Release workflow** (`create-release.yml`) gates on device tests passing and
-  ships 4 binaries: bootloader, partition-table, ota_data_initial, firmware
+  ships 4 binaries (bootloader, partition-table, ota_data_initial, firmware)
+  plus `arctic_controller.elf.gz` for decoding crash dumps from fielded devices
 
 ## After Major Changes — Checklist
 

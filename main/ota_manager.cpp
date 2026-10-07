@@ -827,15 +827,15 @@ bool ota_mgr_check_github_releases(ota_release_info_t* info)
         strncpy(release_info.release_notes, body->valuestring, sizeof(release_info.release_notes) - 1);
     }
     
-    // Find the .bin asset in assets array
+    // Find the app image. Releases also carry bootloader.bin,
+    // partition-table.bin, etc., so match the exact name, not any ".bin".
     cJSON* assets = cJSON_GetObjectItem(root, "assets");
     if (assets && cJSON_IsArray(assets)) {
         cJSON* asset;
         cJSON_ArrayForEach(asset, assets) {
             cJSON* name = cJSON_GetObjectItem(asset, "name");
             if (name && cJSON_IsString(name)) {
-                // Look for .bin file
-                if (strstr(name->valuestring, ".bin") != NULL) {
+                if (strcmp(name->valuestring, "arctic_controller.bin") == 0) {
                     cJSON* download_url = cJSON_GetObjectItem(asset, "browser_download_url");
                     if (download_url && cJSON_IsString(download_url)) {
                         strncpy(release_info.download_url, download_url->valuestring, sizeof(release_info.download_url) - 1);

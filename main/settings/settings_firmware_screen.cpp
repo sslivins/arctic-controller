@@ -559,7 +559,10 @@ static void check_for_updates_task(void* arg)
         } else {
             pending_state = FW_STATE_FAILED;
         }
+        // Worker task: lv_async_call() must hold the LVGL lock.
+        bsp_display_lock(0);
         lv_async_call(async_update_ui_cb, NULL);
+        bsp_display_unlock();
     }
     
     // Must match xTaskCreateWithCaps() so the PSRAM stack is freed.

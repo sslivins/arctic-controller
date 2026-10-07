@@ -24,6 +24,7 @@
 #include <freertos/task.h>
 #include <freertos/idf_additions.h>
 #include <esp_heap_caps.h>
+#include <bsp/m5stack_tab5.h>
 
 static const char* TAG = "time_screen";
 
@@ -810,7 +811,10 @@ static void geocoding_worker(void* arg)
 {
     uint32_t gen = (uint32_t)(intptr_t)arg;
     s_geo_count = geocoding_search(s_geo_query, s_geo_results, MAX_GEO_RESULTS);
+    // Worker task: lv_async_call() must hold the LVGL lock.
+    bsp_display_lock(0);
     lv_async_call(populate_results_cb, (void*)(intptr_t)gen);
+    bsp_display_unlock();
     // Must match xTaskCreateWithCaps() so the PSRAM stack is freed.
     vTaskDeleteWithCaps(NULL);
 }

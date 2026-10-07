@@ -9,6 +9,7 @@
 #include "ui_common.h"
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <bsp/m5stack_tab5.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <limits.h>
@@ -664,7 +665,10 @@ static void query_task(void* data) {
             result->start, result->end, result->samples,
             HISTORY_TELEMETRY_PAGE_CAPACITY, &result->count);
     }
+    // Worker task: lv_async_call() must hold the LVGL lock.
+    bsp_display_lock(0);
     lv_async_call(query_complete, result);
+    bsp_display_unlock();
     vTaskDelete(nullptr);
 }
 
