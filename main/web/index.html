@@ -1373,6 +1373,7 @@
         <div id="perf-test-${slot}">${perfTestHtml(slot)}</div>
         <div class="btn-row" style="margin-top:14px">
           <button class="btn" type="button" data-action="perf-test" data-slot="${slot}" ${canTest ? "" : "hidden"}>Test sensor</button>
+          ${mode.changing ? `<button class="btn" type="button" data-action="perf-cancel-change" data-slot="${slot}">Cancel</button>` : ""}
           <button class="btn primary" type="submit">Save</button></div>
       </form></section>`;
     }
@@ -1900,6 +1901,13 @@
       draft.object_name = "";
       draft.rom_id = "";
       state.perfDrafts[slot] = draft;
+    }
+    // Remember the card before Change so Cancel can restore it, unsaved edits included.
+    function perfRememberBeforeChange(slot) {
+      const mode = perfMode(slot);
+      if (mode.changing) return;
+      const draft = state.perfDrafts[slot];
+      perfSetMode(slot, { changing: { draft: draft ? { ...draft } : null, mode: { ...mode } } });
     }
     function perfClearSlotState(slot) {
       delete state.perfBrowses[slot];
@@ -2469,15 +2477,18 @@
         const host = String(data.get("host") || "").trim();
         const port = Number(data.get("port") || 47808);
         perfSetMode(slot, { deviceStep: false, sensorStep: true, manualAddress: false, manualObject: false });
-        state.perfBrowses[slot] = { running: true };
+        const job = { running: true };
+        state.perfBrowses[slot] = job;
         render();
+        let next;
         try {
-          state.perfBrowses[slot] = {
-            result: await api("/api/performance/bacnet/browse", jsonOptions("POST", { host, port }))
-          };
+          next = { result: await api("/api/performance/bacnet/browse", jsonOptions("POST", { host, port })) };
         } catch (error) {
-          state.perfBrowses[slot] = { failed: perfInvalidMessage(error) };
-        } finally {
+          next = { failed: perfInvalidMessage(error) };
+        }
+        // Cancel may have closed this search while it ran.
+        if (state.perfBrowses[slot] === job) {
+          state.perfBrowses[slot] = next;
           render();
         }
         return;
@@ -2487,15 +2498,17 @@
         const form = el.closest("form");
         if (form) perfCaptureDraft(form);
         perfSetMode(slot, { deviceStep: true, manualAddress: false, manualObject: false });
-        state.perfDiscovers[slot] = { running: true };
+        const job = { running: true };
+        state.perfDiscovers[slot] = job;
         render();
+        let next;
         try {
-          state.perfDiscovers[slot] = {
-            result: await api("/api/performance/bacnet/discover", jsonOptions("POST", {}))
-          };
+          next = { result: await api("/api/performance/bacnet/discover", jsonOptions("POST", {})) };
         } catch (error) {
-          state.perfDiscovers[slot] = { failed: perfInvalidMessage(error) };
-        } finally {
+          next = { failed: perfInvalidMessage(error) };
+        }
+        if (state.perfDiscovers[slot] === job) {
+          state.perfDiscovers[slot] = next;
           render();
         }
         return;
@@ -2546,6 +2559,7 @@
         const form = el.closest("form");
         if (form) {
           perfCaptureDraft(form);
+          perfRememberBeforeChange(slot);
           perfClearIdentityDraft(slot);
         }
         perfSetMode(slot, { deviceStep: true, sensorStep: false, manualAddress: false, manualObject: false, picked: null });
@@ -2556,10 +2570,22 @@
       if (action === "perf-change-bacnet-sensor") {
         const slot = el.dataset.slot;
         const form = el.closest("form");
-        if (form) perfCaptureDraft(form);
+        if (form) {
+          perfCaptureDraft(form);
+          perfRememberBeforeChange(slot);
+        }
         perfSetMode(slot, { deviceStep: false, sensorStep: true, manualObject: false, picked: null });
         render();
         document.querySelector(`form[data-form="perf-sensor"][data-slot="${slot}"] [data-action="perf-browse-bacnet"]`)?.click();
+        return;
+      }
+      if (action === "perf-cancel-change") {
+        const slot = el.dataset.slot;
+        const before = perfMode(slot).changing;
+        perfClearSlotState(slot);
+        if (before?.draft) state.perfDrafts[slot] = before.draft;
+        if (before?.mode) state.perfModes[slot] = before.mode;
+        render();
         return;
       }
       if (action === "perf-pick-bacnet") {

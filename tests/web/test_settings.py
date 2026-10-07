@@ -465,6 +465,52 @@ class TestSettingsWorkspace:
         card.locator('input[name="object_instance"]').fill("7")
         expect(card.get_by_role("button", name="Test sensor")).to_be_visible()
 
+    def test_performance_bacnet_change_can_be_cancelled(self, dashboard_page: Page):
+        saved = perf_config()["sensors"]["supply"]
+        saved.update({"source": "bacnet_ip", "host": "192.168.1.205", "port": 47808,
+                      "object_instance": 0, "device_instance": 205,
+                      "device_name": "Thermux Spare", "object_name": "Sensor B"})
+        payloads = []
+        route_perf_config(dashboard_page, perf_config(supply=saved), payloads)
+        dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"10.0.0.9","port":47808,"device_instance":9,"device_name":"Other","model_name":"Thermux","vendor_id":15}]}'))
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux Spare","model_name":"Thermux","device_instance":205,"sensors":[{"object_type":"analog_input","object_instance":1,"object_name":"Sensor A","celsius":21.1,"units":62,"reliability":0,"available":true,"rom_id":""}],"truncated":false}'))
+
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        cancel = card.get_by_role("button", name="Cancel")
+        sensor_row = card.locator(".perf-summary", has_text="Sensor")
+        device_row = card.locator(".perf-summary", has_text="Device")
+        expect(sensor_row).to_contain_text("Sensor B")
+        expect(cancel).to_have_count(0)
+
+        # Cancel straight out of the sensor list.
+        card.locator('[data-action="perf-change-bacnet-sensor"]').click()
+        expect_pick_option(card, SENSOR_PICK, "Sensor A")
+        cancel.click()
+        expect(sensor_row).to_contain_text("Sensor B")
+        expect(card.locator(SENSOR_PICK)).to_have_count(0)
+        expect(cancel).to_have_count(0)
+
+        # Cancel after picking a different sensor puts the old one back.
+        card.locator('[data-action="perf-change-bacnet-sensor"]').click()
+        pick_option(card, SENSOR_PICK, "Sensor A")
+        expect(sensor_row).to_contain_text("Sensor A")
+        cancel.click()
+        expect(sensor_row).to_contain_text("Sensor B")
+
+        # Changing the device clears the address; Cancel restores it.
+        card.locator('[data-action="perf-change-bacnet-device"]').click()
+        expect_pick_option(card, DEVICE_PICK, "Other")
+        cancel.click()
+        expect(device_row).to_contain_text("Thermux Spare")
+        expect(sensor_row).to_contain_text("Sensor B")
+        expect(card.locator(DEVICE_PICK)).to_have_count(0)
+        assert payloads == []
+
     def test_performance_sensor_test_reports_connect_error(self, dashboard_page: Page):
         """Nothing listens on the controller's own port 1, so the test must
         come back with the friendly connection error rather than hang."""
