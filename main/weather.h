@@ -13,7 +13,7 @@
  *
  * The blocking HTTPS request MUST NOT run on the LVGL/UI task; the service
  * spawns a dedicated worker task and marshals the result back with
- * lv_async_call().
+ * lv_async_call(), taken under the LVGL lock.
  */
 #pragma once
 

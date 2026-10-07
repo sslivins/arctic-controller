@@ -20,6 +20,7 @@
 #include <freertos/idf_additions.h>
 
 #include <lvgl.h>
+#include <bsp/m5stack_tab5.h>
 #include "status_bar.h"
 #include "location_manager.h"
 #include "wifi_manager.h"
@@ -311,7 +312,8 @@ static void apply_result_cb(void* arg)
 }
 
 // Long-lived worker: park on a notification, fetch when signalled, marshal the
-// result back to the LVGL task, then park again. Never touch LVGL here.
+// result back to the LVGL task, then park again. Only lv_async_call() (under
+// the LVGL lock) touches LVGL here.
 static void weather_worker(void* arg)
 {
     (void)arg;
@@ -338,7 +340,12 @@ static void weather_worker(void* arg)
         const bool again = s_refresh_pending;
         s_refresh_pending = false;
         portEXIT_CRITICAL(&s_result_lock);
+        // lv_async_call() adds an LVGL timer, so it needs the LVGL lock like any
+        // other LVGL call. Without it the UI task can run a half-built timer
+        // and jump to garbage (field crash on 3.0.2).
+        bsp_display_lock(0);
         lv_async_call(apply_result_cb, NULL);
+        bsp_display_unlock();
 
         // A refresh asked for while this fetch was running - almost always a
         // location change - would otherwise be dropped, leaving the previous
