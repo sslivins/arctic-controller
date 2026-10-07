@@ -32,7 +32,9 @@ static const char* TAG = "weather";
 
 // UTF-8 glyphs from the weather_icons_32 font (FontAwesome subset).
 #define WX_ICON_SUN            "\xEF\x86\x85"  // glyphs: weather_icons_32 (U+F185 sun)
+#define WX_ICON_MOON           "\xEF\x86\x86"  // glyphs: weather_icons_32 (U+F186 moon)
 #define WX_ICON_CLOUD_SUN      "\xEF\x9B\x84"  // glyphs: weather_icons_32 (U+F6C4 cloud-sun)
+#define WX_ICON_CLOUD_MOON     "\xEF\x9B\x83"  // glyphs: weather_icons_32 (U+F6C3 cloud-moon)
 #define WX_ICON_CLOUD          "\xEF\x83\x82"  // glyphs: weather_icons_32 (U+F0C2 cloud)
 #define WX_ICON_FOG            "\xEF\x9D\x9F"  // glyphs: weather_icons_32 (U+F75F smog)
 #define WX_ICON_RAIN           "\xEF\x9C\xBD"  // glyphs: weather_icons_32 (U+F73D cloud-rain)
@@ -108,11 +110,12 @@ static esp_err_t http_event_handler(esp_http_client_event_t* evt)
 // WMO weather-code mapping
 // (https://open-meteo.com/en/docs — "Weather variable documentation").
 // ---------------------------------------------------------------------------
-const char* weather_code_icon(int code)
+const char* weather_code_icon(int code, bool is_day)
 {
     switch (code) {
-        case 0:                 return WX_ICON_SUN;         // Clear sky
-        case 1: case 2:         return WX_ICON_CLOUD_SUN;   // Mainly/partly clear
+        case 0:                 return is_day ? WX_ICON_SUN : WX_ICON_MOON;  // Clear sky
+        case 1: case 2:                                                      // Mainly/partly clear
+                                return is_day ? WX_ICON_CLOUD_SUN : WX_ICON_CLOUD_MOON;
         case 3:                 return WX_ICON_CLOUD;       // Overcast
         case 45: case 48:       return WX_ICON_FOG;         // Fog
         case 51: case 53: case 55:                          // Drizzle
@@ -172,9 +175,12 @@ int weather_parse(const char* json, weather_data_t* out)
     if (current && cJSON_IsObject(current)) {
         const cJSON* temp = cJSON_GetObjectItemCaseSensitive(current, "temperature_2m");
         const cJSON* wcode = cJSON_GetObjectItemCaseSensitive(current, "weather_code");
+        const cJSON* day = cJSON_GetObjectItemCaseSensitive(current, "is_day");
         if (temp && cJSON_IsNumber(temp)) {
             out->temp_c = (float)temp->valuedouble;
             out->weather_code = (wcode && cJSON_IsNumber(wcode)) ? wcode->valueint : 0;
+            // Open-Meteo sends 1/0. Assume day if it's missing.
+            out->is_day = !(day && cJSON_IsNumber(day) && day->valueint == 0);
             out->valid = true;
             rc = 0;
         }
@@ -204,7 +210,7 @@ int weather_fetch(double lat, double lon, weather_data_t* out)
     // Always request Celsius; the UI converts to the user's unit at render time.
     snprintf(url, sizeof(url),
              WX_HOST "?latitude=%.5f&longitude=%.5f"
-                     "&current=temperature_2m,weather_code&temperature_unit=celsius",
+                     "&current=temperature_2m,weather_code,is_day&temperature_unit=celsius",
              lat, lon);
 
     resp_reset();
@@ -299,7 +305,7 @@ static void apply_result_cb(void* arg)
     (void)arg;
     weather_data_t snapshot;
     if (weather_service_get(&snapshot)) {
-        status_bar_set_weather(true, snapshot.temp_c, snapshot.weather_code);
+        status_bar_set_weather(true, snapshot.temp_c, snapshot.weather_code, snapshot.is_day);
     }
     s_refresh_busy = false;
 }

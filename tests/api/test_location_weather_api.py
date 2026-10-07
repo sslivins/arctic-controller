@@ -306,6 +306,18 @@ class TestWeather:
         data = self._await_weather(lambda d: d.get("valid") and d.get("weather_code") == 0)
         assert data["description"] == "Clear"
 
+    def test_reports_day_or_night(self):
+        assert _post("/api/test/weather-mock",
+                     {"current": {"temperature_2m": 3.0, "weather_code": 0, "is_day": 0}}).status_code == 200
+        data = self._await_weather(lambda d: d.get("valid") and d.get("temp_c") == 3.0)
+        assert data["is_day"] is False
+
+    def test_missing_day_flag_defaults_to_day(self):
+        assert _post("/api/test/weather-mock",
+                     {"current": {"temperature_2m": 4.0, "weather_code": 0}}).status_code == 200
+        data = self._await_weather(lambda d: d.get("valid") and d.get("temp_c") == 4.0)
+        assert data["is_day"] is True
+
     def test_invalid_reading_omits_the_measurements(self):
         # When there is nothing to report the payload must not carry a
         # placeholder temperature that a client would render as real.

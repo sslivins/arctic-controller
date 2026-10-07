@@ -2548,6 +2548,7 @@ static esp_err_t weather_get_handler(httpd_req_t* req)
     if (have) {
         cJSON_AddNumberToObject(root, "temp_c", data.temp_c);
         cJSON_AddNumberToObject(root, "weather_code", data.weather_code);
+        cJSON_AddBoolToObject(root, "is_day", data.is_day);
         cJSON_AddStringToObject(root, "description",
                                 weather_code_desc(data.weather_code));
     }

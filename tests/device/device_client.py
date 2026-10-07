@@ -495,7 +495,7 @@ class DeviceClient:
             raise DeviceError(f"Geocoding mock reset failed ({r.status_code}): {msg}")
         return r.json()
 
-    def weather_mock(self, temp_c: float, weather_code: int) -> dict:
+    def weather_mock(self, temp_c: float, weather_code: int, is_day: Optional[bool] = None) -> dict:
         """POST /api/test/weather-mock — install a canned Open-Meteo forecast.
 
         Makes the status-bar weather resolve deterministically without a network
@@ -504,8 +504,12 @@ class DeviceClient:
         Args:
             temp_c: Current temperature in degrees Celsius.
             weather_code: WMO weather interpretation code (selects the icon).
+            is_day: Open-Meteo day/night flag. None omits it (device assumes day).
         """
-        body = {"current": {"temperature_2m": temp_c, "weather_code": weather_code}}
+        current = {"temperature_2m": temp_c, "weather_code": weather_code}
+        if is_day is not None:
+            current["is_day"] = 1 if is_day else 0
+        body = {"current": current}
         r = self.session.post(
             f"{self.base_url}/api/test/weather-mock",
             json=body,

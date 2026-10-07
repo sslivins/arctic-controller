@@ -625,6 +625,13 @@ paths:
                     type: integer
                     description: WMO weather interpretation code.
                     example: 71
+                  is_day:
+                    type: boolean
+                    description: |
+                      False between sunset and sunrise at the device location.
+                      Clients should draw clear and partly-clear skies with a
+                      moon instead of a sun when this is false.
+                    example: true
                   description:
                     type: string
                     example: Light snow

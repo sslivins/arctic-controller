@@ -689,9 +689,9 @@
     // WMO weather interpretation code -> one of eight pictograms. The device
     // draws these from a bundled LVGL font that a browser has no access to, so
     // the same buckets as weather_code_icon() are redrawn here as inline SVG.
-    function weatherIconKind(code) {
-      if (code === 0) return "sun";
-      if (code === 1 || code === 2) return "cloud-sun";
+    function weatherIconKind(code, isDay) {
+      if (code === 0) return isDay ? "sun" : "moon";
+      if (code === 1 || code === 2) return isDay ? "cloud-sun" : "cloud-moon";
       if (code === 45 || code === 48) return "fog";
       if (code === 95 || code === 96 || code === 99) return "thunder";
       if (code === 71 || code === 73 || code === 75 || code === 77 || code === 85 || code === 86) return "snow";
@@ -699,14 +699,16 @@
       if ((code >= 51 && code <= 63) || code === 80 || code === 81) return "rain";
       return "cloud";
     }
-    function weatherIcon(code) {
-      const kind = weatherIconKind(code);
+    function weatherIcon(code, isDay) {
+      const kind = weatherIconKind(code, isDay);
       const cloud = `<path d="M7 17h9.5a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6 1.2A3.2 3.2 0 0 0 7 17Z"/>`;
       const sun = `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.5 1.5M17.6 17.6l1.5 1.5M19.1 4.9l-1.5 1.5M6.4 17.6l-1.5 1.5"/>`;
       const shapes = {
         "sun": sun,
+        "moon": `<path d="M20 14.5A8 8 0 1 1 10.5 5a6.5 6.5 0 0 0 9.5 9.5Z"/>`,
         "cloud": cloud,
         "cloud-sun": `<circle cx="8.5" cy="7.5" r="3"/><path d="M8.5 1.5v1.5M2 7.5h1.5M4 3l1 1M13 3l-1 1"/>${cloud}`,
+        "cloud-moon": `<path d="M12 6.5A4.2 4.2 0 1 1 6.5 2a3.4 3.4 0 0 0 5.5 4.5Z"/>${cloud}`,
         "fog": `${cloud}<path d="M5 20h9M8 22.5h9"/>`,
         "rain": `${cloud}<path d="M9 19.5l-1 2.5M13 19.5l-1 2.5M17 19.5l-1 2.5"/>`,
         "heavy-rain": `${cloud}<path d="M8 19l-2 4M12 19l-2 4M16 19l-2 4M20 19l-2 4"/>`,
@@ -719,8 +721,8 @@
     function weatherStatus() {
       const w = state.weather;
       if (!w || !w.valid) return "";
-      return `<span class="status-item wx" title="${esc(w.description || "")}" data-wx-code="${esc(String(w.weather_code))}">
-        ${weatherIcon(w.weather_code)}<span>${temp(w.temp_c)}</span></span>`;
+      return `<span class="status-item wx" title="${esc(w.description || "")}" data-wx-code="${esc(String(w.weather_code))}" data-wx-day="${w.is_day !== false}">
+        ${weatherIcon(w.weather_code, w.is_day !== false)}<span>${temp(w.temp_c)}</span></span>`;
     }
     function navButton(item, mobile = false) {
       const [route, icon, label] = item;

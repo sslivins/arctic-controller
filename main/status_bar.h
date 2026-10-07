@@ -145,12 +145,13 @@ void status_bar_update_time(void);
  * @param valid        false hides the weather display (no data / no location).
  * @param temp_c       Current temperature in degrees Celsius.
  * @param weather_code WMO weather interpretation code (selects the icon).
+ * @param is_day       false shows night artwork (moon) for clear skies.
  *
  * The temperature is cached in Celsius and rendered in the user-selected unit
  * (°C/°F per app_prefs_get_temp_unit()), so a unit change re-renders instantly
  * from the cached value without a network refetch.
  */
-void status_bar_set_weather(bool valid, float temp_c, int weather_code);
+void status_bar_set_weather(bool valid, float temp_c, int weather_code, bool is_day);
 
 /**
  * @brief Re-render the cached weather in the currently-selected temperature
