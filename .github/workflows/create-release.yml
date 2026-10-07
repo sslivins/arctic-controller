@@ -263,6 +263,16 @@ jobs:
             build/ota_data_initial.bin
           retention-days: 90
 
+      # Crash dumps from fielded devices can only be decoded against the exact
+      # ELF that was shipped, so keep it with the release rather than in a
+      # 90-day artifact. build/ is root-owned (built in the IDF container).
+      - name: Compress ELF for crash-dump decoding
+        if: ${{ !inputs.dry_run }}
+        run: |
+          mkdir -p dist
+          gzip -9 -c build/arctic_controller.elf > dist/arctic_controller.elf.gz
+          ls -l dist/arctic_controller.elf.gz
+
       - name: Generate changelog from conventional commits
         if: ${{ !inputs.dry_run }}
         run: |
@@ -363,6 +373,7 @@ jobs:
             build/bootloader/bootloader.bin
             build/partition_table/partition-table.bin
             build/ota_data_initial.bin
+            dist/arctic_controller.elf.gz
         env:
           GITHUB_TOKEN: ${{ secrets.ARCTIC_RELEASE_TOKEN }}
 
@@ -382,6 +393,7 @@ jobs:
           echo "- \`bootloader.bin\` - Bootloader" >> $GITHUB_STEP_SUMMARY
           echo "- \`partition-table.bin\` - Partition table" >> $GITHUB_STEP_SUMMARY
           echo "- \`ota_data_initial.bin\` - OTA data partition" >> $GITHUB_STEP_SUMMARY
+          echo "- \`arctic_controller.elf.gz\` - Symbols for decoding crash dumps" >> $GITHUB_STEP_SUMMARY
 
   # Prepare main for the next release only after tests, build, tag, and
   # publication all succeed. The release token is required so the push can
