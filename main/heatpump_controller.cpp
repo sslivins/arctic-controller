@@ -171,10 +171,16 @@ static void detectAndLogStateEvents() {
         if (cur_defrost != s_prev_defrosting) {
             event_log_record(cur_defrost ? EVENT_DEFROST_START : EVENT_DEFROST_END, 0);
         }
+    }
+    {
         // Fault changes: decode the previous and current fault bytes into
         // semantic sites (the library skips the RUN indicator) and diff by
         // opaque site id. The event-log payload is that site id — no register
         // or bit position is handled here.
+        // Unlike the other fields this also runs on the first poll, against an
+        // all-clear baseline: a fault already present at boot is logged as
+        // appeared, so its later clear pairs up (the history charts rebuild
+        // fault spans from these pairs).
         // Keep these large (MAX_ACTIVE_FAULTS-entry, ~1.5 KB each) decode
         // buffers OFF the stack. This runs on the demo-sync task's modest 4 KB
         // stack, and a full fault set plus the event_log calls below would
