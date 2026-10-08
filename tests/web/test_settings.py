@@ -488,6 +488,8 @@ class TestSettingsWorkspace:
         device_row = card.locator(".perf-summary", has_text="Device")
         expect(sensor_row).to_contain_text("Sensor B")
         expect(cancel).to_have_count(0)
+        save = card.get_by_role("button", name="Save")
+        expect(save).to_be_disabled()
 
         # Cancel straight out of the sensor list.
         card.locator('[data-action="perf-change-bacnet-sensor"]').click()
@@ -501,8 +503,10 @@ class TestSettingsWorkspace:
         card.locator('[data-action="perf-change-bacnet-sensor"]').click()
         pick_option(card, SENSOR_PICK, "Sensor A")
         expect(sensor_row).to_contain_text("Sensor A")
+        expect(save).to_be_enabled()
         cancel.click()
         expect(sensor_row).to_contain_text("Sensor B")
+        expect(save).to_be_disabled()
 
         # Changing the device clears the address; Cancel restores it.
         card.locator('[data-action="perf-change-bacnet-device"]').click()
@@ -512,6 +516,26 @@ class TestSettingsWorkspace:
         expect(sensor_row).to_contain_text("Sensor B")
         expect(card.locator(DEVICE_PICK)).to_have_count(0)
         assert payloads == []
+
+    def test_performance_save_is_disabled_until_something_changes(self, dashboard_page: Page):
+        route_perf_config(dashboard_page)
+        open_settings(dashboard_page, "Heat output & COP")
+        flow = dashboard_page.locator('form[data-form="perf-flow"]')
+        flow_save = flow.get_by_role("button", name="Save")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="return"]')
+        card_save = card.get_by_role("button", name="Save")
+        expect(flow_save).to_be_disabled()
+        expect(card_save).to_be_disabled()
+
+        flow.locator('input[name="flow_lpm"]').fill("42")
+        expect(flow_save).to_be_enabled()
+        flow.locator('input[name="flow_lpm"]').fill("40")
+        expect(flow_save).to_be_disabled()
+
+        card.locator('select[name="source"]').select_option("modbus_tcp")
+        expect(card_save).to_be_enabled()
+        card.locator('select[name="source"]').select_option("heat_pump")
+        expect(card_save).to_be_disabled()
 
     def test_performance_sensor_test_reports_connect_error(self, dashboard_page: Page):
         """Nothing listens on the controller's own port 1, so the test must

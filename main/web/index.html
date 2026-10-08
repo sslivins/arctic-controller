@@ -1731,6 +1731,7 @@
         history: historyPage, errors: errorsPage, settings: settingsPage };
       updateDocumentTitle();
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
+      perfSyncSaves();
       if (state.settingsPage === "diagnostics") {
         const logs = $("#log-container"); if (logs) logs.scrollTop = logs.scrollHeight;
       }
@@ -1959,6 +1960,52 @@
       if (!body.host) throw new Error("Enter an IP address or hostname.");
       return body;
     }
+    // The saved sensor in the same shape perfSensorBody() builds from the form.
+    function perfSavedSensorBody(c) {
+      if (!c || !c.source || c.source === "heat_pump") return { source: "heat_pump" };
+      const body = { source: c.source, host: String(c.host || "").trim(), port: Number(c.port) };
+      if (c.source === "bacnet_ip") {
+        body.object_type = c.object_type || "analog_input";
+        body.object_instance = c.object_instance == null ? null : Number(c.object_instance);
+        if (c.device_instance != null && c.device_instance !== "") body.device_instance = Number(c.device_instance);
+        if (c.device_name) body.device_name = c.device_name;
+        if (c.object_name) body.object_name = c.object_name;
+        if (c.rom_id) body.rom_id = c.rom_id;
+      } else {
+        body.unit_id = Number(c.unit_id);
+        body.register = Number(c.register);
+        body.register_type = c.register_type;
+        body.value_type = c.value_type;
+        body.scale = Number(c.scale);
+        body.no_reading = perfIsFloat(c.value_type) ? "none" : c.no_reading;
+      }
+      return body;
+    }
+    function perfSameBody(a, b) {
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      return [...keys].every(k => a[k] === b[k]);
+    }
+    // Grey out Save while the form matches what's saved. An incomplete form
+    // keeps Save live so pressing it explains what's missing.
+    function perfSyncSaves() {
+      const p = state.perf;
+      if (!p) return;
+      document.querySelectorAll('form[data-form="perf-sensor"]').forEach(form => {
+        let same = false;
+        try { same = perfSameBody(perfSensorBody(form), perfSavedSensorBody(p.sensors?.[form.dataset.slot])); } catch (_) {}
+        const btn = form.querySelector('button[type="submit"]');
+        if (btn) btn.disabled = same;
+      });
+      const flow = document.querySelector('form[data-form="perf-flow"]');
+      if (flow) {
+        const data = new FormData(flow);
+        const fluid = data.get("fluid");
+        const same = Number(data.get("flow_lpm")) === Number(p.flow_lpm) && fluid === p.fluid &&
+          (fluid === "water" || Number(data.get("glycol_pct")) === Number(p.glycol_pct));
+        const btn = flow.querySelector('button[type="submit"]');
+        if (btn) btn.disabled = same;
+      }
+    }
     function perfInvalidMessage(error) {
       const m = /Invalid value/i.test(error.message) && error.field ? perfFieldNames[error.field] : null;
       return m ? `Check the ${m}.` : error.message;
@@ -2106,6 +2153,7 @@
         const body = { flow_lpm: Number(data.get("flow_lpm")), fluid: data.get("fluid") };
         if (body.fluid !== "water") body.glycol_pct = Number(data.get("glycol_pct"));
         await perfSave(body, "Flow and fluid saved");
+        perfSyncSaves();
         refreshPerfLive();
       }
       if (type === "perf-sensor") {
@@ -2115,6 +2163,7 @@
         // Replace just this card so edits in progress on the other one survive.
         const title = perfSlots.find(([s]) => s === slot)[1];
         form.closest("section").outerHTML = perfSensorCard(slot, title);
+        perfSyncSaves();
         refreshPerfLive();
       }
       if (type === "brightness") {
@@ -2720,6 +2769,7 @@
             : draft.source !== "modbus_tcp";
         }
       }
+      if (event.target.closest?.('form[data-form^="perf-"]')) perfSyncSaves();
     });
     document.addEventListener("change", event => {
       if (event.target.matches("select.perf-pick-select")) {
@@ -2795,6 +2845,7 @@
         if (float) select.value = "none";
         else if (select.value === "none") select.value = "0x8000";
       }
+      if (event.target.closest?.('form[data-form^="perf-"]')) perfSyncSaves();
     });
     async function navigateFromLocation() {
       routeFromHash();
