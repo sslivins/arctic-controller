@@ -51,6 +51,24 @@ def assert_summary_change_buttons_inline(device_row, sensor_row):
     assert sensor_box["y"] <= sensor_change["y"] <= sensor_box["y"] + sensor_box["height"]
 
 
+DEVICE_PICK = "#perf-discover-supply select.perf-pick-select"
+SENSOR_PICK = "#perf-browse-supply select.perf-pick-select"
+
+
+def expect_pick_option(card, picker: str, text: str):
+    """The dropdown is shown and offers an option containing `text`."""
+    select = card.locator(picker)
+    expect(select).to_be_visible(timeout=10000)
+    expect(select.locator("option[data-pick]", has_text=text)).to_have_count(1)
+    return select
+
+
+def pick_option(card, picker: str, text: str):
+    select = expect_pick_option(card, picker, text)
+    label = next(t for t in select.locator("option[data-pick]").all_inner_texts() if text in t)
+    select.select_option(label=label)
+
+
 def request_json(request):
     data = request.post_data_json
     return data() if callable(data) else data
@@ -187,7 +205,7 @@ class TestSettingsWorkspace:
         card.get_by_role("button", name="Enter address manually").click()
         card.locator('input[name="host"]').fill("127.0.0.1")
         card.get_by_role("button", name="Find sensors").click()
-        card.get_by_role("button", name=re.compile("Supply tank")).click()
+        pick_option(card, SENSOR_PICK, "Supply tank")
         expect(card.locator('input[name="object_instance"]')).to_have_value("3")
         expect(card.locator('select[name="object_type"]')).to_have_value("analog_input")
 
@@ -217,10 +235,10 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "Heat output & COP")
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
         card.locator('select[name="source"]').select_option("bacnet_ip")
-        card.get_by_role("button", name=re.compile("Thermux Test")).click()
+        pick_option(card, DEVICE_PICK, "Thermux Test")
         expect(card.locator('input[name="host"]')).to_have_value("127.0.0.1")
         expect(card.locator('input[name="port"]')).to_have_value("47809")
-        expect(card.get_by_role("button", name=re.compile("Supply tank"))).to_be_visible()
+        expect_pick_option(card, SENSOR_PICK, "Supply tank")
 
     def test_performance_bacnet_draft_survives_discovery_pick_and_save(self, dashboard_page: Page):
         saved_payloads = []
@@ -241,21 +259,17 @@ class TestSettingsWorkspace:
         expect(card.locator('select[name="source"]')).to_have_value("bacnet_ip")
         expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
         expect(card.get_by_text(re.compile(r"Device.*192\.168\.9\.3"))).to_have_count(0)
-        pick_device = card.get_by_role("button", name=re.compile("Thermux Spare"))
-        expect(pick_device).to_be_visible(timeout=10000)
-        assert pick_device.is_visible()
+        expect_pick_option(card, DEVICE_PICK, "Thermux Spare")
         assert card.locator("#perf-discover-supply").is_visible()
         expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
 
-        pick_device.click()
+        pick_option(card, DEVICE_PICK, "Thermux Spare")
         device_row = card.locator(".perf-summary", has_text="Device")
         expect(device_row).to_contain_text("Thermux Spare")
-        sensor = card.get_by_role("button", name=re.compile("Sensor B"))
-        expect(sensor).to_be_visible()
-        assert sensor.is_visible()
+        expect_pick_option(card, SENSOR_PICK, "Sensor B")
         expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
 
-        sensor.click()
+        pick_option(card, SENSOR_PICK, "Sensor B")
         device_row = card.locator(".perf-summary", has_text="Device")
         sensor_row = card.locator(".perf-summary", has_text="Sensor")
         expect(device_row).to_contain_text("Thermux Spare")
@@ -299,7 +313,7 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "Heat output & COP")
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
         card.locator('select[name="source"]').select_option("bacnet_ip")
-        card.get_by_role("button", name=re.compile("Thermux Spare")).click()
+        pick_option(card, DEVICE_PICK, "Thermux Spare")
         card.get_by_role("button", name="Enter object manually").click()
 
         device_row = card.locator(".perf-summary", has_text="Device")
@@ -338,21 +352,44 @@ class TestSettingsWorkspace:
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
         card.locator('select[name="source"]').select_option("bacnet_ip")
 
-        choices = card.locator("#perf-discover-supply .perf-choices")
-        expect(choices.locator('[data-action="perf-pick-bacnet-device"]')).to_have_count(10)
-        expect(choices.locator('[data-action="perf-discover-bacnet"]')).to_have_count(0)
-        expect(choices.locator('[data-action="perf-bacnet-manual"]')).to_have_count(0)
+        devices = expect_pick_option(card, DEVICE_PICK, "Thermux 9")
+        expect(devices.locator("option[data-pick]")).to_have_count(10)
+        expect(devices).to_have_value("")
+        expect(devices.locator("option:checked")).to_have_text("Choose a device…")
+        expect(card.locator('#perf-discover-supply .perf-list-head [data-action="perf-discover-bacnet"]')).to_have_count(1)
         refresh = card.locator('#perf-discover-supply .perf-list-head [data-action="perf-discover-bacnet"]')
         expect(refresh).to_have_attribute("aria-label", "Search again")
         expect(card.locator("#perf-discover-supply .perf-not-listed")).to_contain_text("Not listed?")
         expect(card.locator('#perf-discover-supply .perf-not-listed [data-action="perf-bacnet-manual"]')).to_be_visible()
 
-        card.get_by_role("button", name=re.compile("Thermux 0")).click()
-        sensors = card.locator("#perf-browse-supply .perf-choices")
-        expect(sensors.locator('[data-action="perf-pick-bacnet"]')).to_have_count(1)
-        expect(sensors.locator('[data-action="perf-bacnet-manual-object"]')).to_have_count(0)
+        pick_option(card, DEVICE_PICK, "Thermux 0")
+        sensors = expect_pick_option(card, SENSOR_PICK, "Sensor A")
+        expect(sensors.locator("option[data-pick]")).to_have_count(1)
+        expect(sensors.locator("option:checked")).to_have_text("Choose a sensor…")
         expect(card.locator('#perf-browse-supply .perf-not-listed [data-action="perf-bacnet-manual-object"]')).to_be_visible()
 
+    def test_performance_bacnet_sensor_options_show_readings(self, dashboard_page: Page):
+        route_perf_config(dashboard_page)
+        dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"10.0.0.1","port":47808,"device_instance":7,"device_name":"T0","model_name":"Thermux","vendor_id":15}]}'))
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"ok": True, "error": "none", "device_name": "T0", "device_instance": 7,
+                             "truncated": False, "sensors": [
+                                 {"object_type": "analog_input", "object_instance": 0, "object_name": "HP Return",
+                                  "celsius": 23.5, "units": 62, "reliability": 0, "rom_id": "", "available": True},
+                                 {"object_type": "analog_input", "object_instance": 1, "object_name": "Spare",
+                                  "celsius": None, "units": 62, "reliability": 1, "rom_id": "", "available": False}]})))
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        card.locator('select[name="source"]').select_option("bacnet_ip")
+
+        devices = expect_pick_option(card, DEVICE_PICK, "T0")
+        expect(devices.locator("option[data-pick]")).to_have_text(["T0 · 10.0.0.1 (device 7 · Thermux)"])
+        pick_option(card, DEVICE_PICK, "T0")
+        sensors = expect_pick_option(card, SENSOR_PICK, "HP Return")
+        expect(sensors.locator("option[data-pick]")).to_have_text([re.compile(r"HP Return · 23\.5"), "Spare · unavailable"])
     def test_performance_bacnet_no_devices_offers_plain_actions(self, dashboard_page: Page):
         route_perf_config(dashboard_page)
         dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
@@ -382,9 +419,11 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "Heat output & COP")
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
         expect(card.get_by_text("Latest reading")).to_be_visible()
+        # The live reading's object name matches the Sensor row, so it isn't repeated.
+        expect(card.get_by_text("Sensor B", exact=True)).to_have_count(1)
 
         card.locator('[data-action="perf-change-bacnet-device"]').click()
-        expect(card.get_by_role("button", name=re.compile("Thermux Spare"))).to_be_visible(timeout=10000)
+        expect_pick_option(card, DEVICE_PICK, "Thermux Spare")
         expect(card.get_by_text("Latest reading")).to_have_count(0)
 
         card.get_by_role("button", name="Enter address manually").click()
@@ -398,7 +437,7 @@ class TestSettingsWorkspace:
         back = card.locator('.perf-back .link-btn[data-action="perf-discover-bacnet"]')
         expect(back).to_have_text("Back to search")
         back.click()
-        expect(card.get_by_role("button", name=re.compile("Thermux Spare"))).to_be_visible(timeout=10000)
+        expect_pick_option(card, DEVICE_PICK, "Thermux Spare")
 
     def test_performance_bacnet_test_only_for_manual_object(self, dashboard_page: Page):
         saved = perf_config()["sensors"]["supply"]
@@ -415,9 +454,9 @@ class TestSettingsWorkspace:
         expect(card.locator(".perf-summary", has_text="Sensor")).to_contain_text("Sensor B")
         expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
         card.locator('[data-action="perf-change-bacnet-sensor"]').click()
-        expect(card.get_by_role("button", name=re.compile("Sensor A"))).to_be_visible(timeout=10000)
+        expect_pick_option(card, SENSOR_PICK, "Sensor A")
         expect(card.get_by_role("button", name="Test sensor")).to_be_hidden()
-        card.get_by_role("button", name=re.compile("Sensor A")).click()
+        pick_option(card, SENSOR_PICK, "Sensor A")
         sensor_row = card.locator(".perf-summary", has_text="Sensor")
         expect(sensor_row).to_contain_text("Sensor A")
         expect(sensor_row).to_contain_text("21.1")
@@ -427,6 +466,99 @@ class TestSettingsWorkspace:
         card.get_by_role("button", name="Enter object manually").click()
         card.locator('input[name="object_instance"]').fill("7")
         expect(card.get_by_role("button", name="Test sensor")).to_be_visible()
+
+    def test_performance_bacnet_change_can_be_cancelled(self, dashboard_page: Page):
+        saved = perf_config()["sensors"]["supply"]
+        saved.update({"source": "bacnet_ip", "host": "192.168.1.205", "port": 47808,
+                      "object_instance": 0, "device_instance": 205,
+                      "device_name": "Thermux Spare", "object_name": "Sensor B"})
+        payloads = []
+        route_perf_config(dashboard_page, perf_config(supply=saved), payloads)
+        dashboard_page.route("**/api/performance/bacnet/discover", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","truncated":false,"devices":[{"host":"10.0.0.9","port":47808,"device_instance":9,"device_name":"Other","model_name":"Thermux","vendor_id":15}]}'))
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux Spare","model_name":"Thermux","device_instance":205,"sensors":[{"object_type":"analog_input","object_instance":1,"object_name":"Sensor A","celsius":21.1,"units":62,"reliability":0,"available":true,"rom_id":""}],"truncated":false}'))
+
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        cancel = card.get_by_role("button", name="Cancel")
+        sensor_row = card.locator(".perf-summary", has_text="Sensor")
+        device_row = card.locator(".perf-summary", has_text="Device")
+        expect(sensor_row).to_contain_text("Sensor B")
+        expect(cancel).to_have_count(0)
+        save = card.get_by_role("button", name="Save")
+        expect(save).to_be_disabled()
+
+        # Cancel straight out of the sensor list.
+        card.locator('[data-action="perf-change-bacnet-sensor"]').click()
+        expect_pick_option(card, SENSOR_PICK, "Sensor A")
+        cancel.click()
+        expect(sensor_row).to_contain_text("Sensor B")
+        expect(card.locator(SENSOR_PICK)).to_have_count(0)
+        expect(cancel).to_have_count(0)
+
+        # Cancel after picking a different sensor puts the old one back.
+        card.locator('[data-action="perf-change-bacnet-sensor"]').click()
+        pick_option(card, SENSOR_PICK, "Sensor A")
+        expect(sensor_row).to_contain_text("Sensor A")
+        expect(save).to_be_enabled()
+        cancel.click()
+        expect(sensor_row).to_contain_text("Sensor B")
+        expect(save).to_be_disabled()
+
+        # Changing the device clears the address; Cancel restores it.
+        card.locator('[data-action="perf-change-bacnet-device"]').click()
+        expect_pick_option(card, DEVICE_PICK, "Other")
+        cancel.click()
+        expect(device_row).to_contain_text("Thermux Spare")
+        expect(sensor_row).to_contain_text("Sensor B")
+        expect(card.locator(DEVICE_PICK)).to_have_count(0)
+        assert payloads == []
+
+    def test_performance_repicking_saved_sensor_is_not_a_change(self, dashboard_page: Page):
+        saved = perf_config()["sensors"]["supply"]
+        saved.update({"source": "bacnet_ip", "host": "192.168.1.205", "port": 47808,
+                      "object_instance": 0, "device_instance": 205,
+                      "device_name": "Thermux Spare", "object_name": "Sensor B"})
+        cfg = perf_config(supply=saved)
+        cfg["status"] = {"sensors": {"supply": {"celsius": 22.9, "age_s": 2, "error": "none",
+                                                "object_name": "Sensor B"}}}
+        route_perf_config(dashboard_page, cfg)
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux Spare","model_name":"Thermux","device_instance":205,"sensors":[{"object_type":"analog_input","object_instance":0,"object_name":"Sensor B","celsius":22.9,"units":62,"reliability":0,"available":true,"rom_id":""},{"object_type":"analog_input","object_instance":1,"object_name":"Sensor A","celsius":21.1,"units":62,"reliability":0,"available":true,"rom_id":""}],"truncated":false}'))
+
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        expect(card.get_by_text("Latest reading")).to_be_visible()
+
+        card.locator('[data-action="perf-change-bacnet-sensor"]').click()
+        pick_option(card, SENSOR_PICK, "Sensor B")
+        expect(card.get_by_role("button", name="Cancel")).to_have_count(0)
+        expect(card.get_by_text("Latest reading")).to_be_visible()
+        expect(card.get_by_role("button", name="Save")).to_be_disabled()
+
+    def test_performance_save_is_disabled_until_something_changes(self, dashboard_page: Page):
+        route_perf_config(dashboard_page)
+        open_settings(dashboard_page, "Heat output & COP")
+        flow = dashboard_page.locator('form[data-form="perf-flow"]')
+        flow_save = flow.get_by_role("button", name="Save")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="return"]')
+        card_save = card.get_by_role("button", name="Save")
+        expect(flow_save).to_be_disabled()
+        expect(card_save).to_be_disabled()
+
+        flow.locator('input[name="flow_lpm"]').fill("42")
+        expect(flow_save).to_be_enabled()
+        flow.locator('input[name="flow_lpm"]').fill("40")
+        expect(flow_save).to_be_disabled()
+
+        card.locator('select[name="source"]').select_option("modbus_tcp")
+        expect(card_save).to_be_enabled()
+        card.locator('select[name="source"]').select_option("heat_pump")
+        expect(card_save).to_be_disabled()
 
     def test_performance_sensor_test_reports_connect_error(self, dashboard_page: Page):
         """Nothing listens on the controller's own port 1, so the test must

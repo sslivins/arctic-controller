@@ -343,6 +343,17 @@ def _pick_perf_source(device: DeviceClient, source_tag: str) -> None:
     device.click(tag=source_tag)
 
 
+def _pick_wheel(device: DeviceClient, kind: str, text: str) -> None:
+    """Turn the BACnet sensor wheel to the row containing `text`, then tap Select."""
+    roller = f"perf_bacnet_{kind}_roller"
+    assert device.wait_for_widget(tag=roller, timeout=20.0)
+    count = device.find_widget(tag=roller).option_count or 0
+    for i in range(count):
+        if text in device.set_roller(roller, i).get("selected_text", ""):
+            device.click(tag=f"perf_bacnet_{kind}_select")
+            return
+    raise AssertionError(f"{text!r} not on the {kind} wheel")
+
 # ---------------------------------------------------------------------------
 # API contract
 # ---------------------------------------------------------------------------
@@ -976,10 +987,8 @@ class TestScreen:
         _set_perf_entry(device, "perf_port", str(port))
 
         device.click(tag="perf_bacnet_browse")
-        assert device.wait_until("BACnet browse list shows Supply tank",
-                                 lambda: _screen_text_contains(device, "Supply tank"),
-                                 timeout=30.0, poll=0.5)
-        device.click(label_contains="Supply tank")
+        assert device.wait_for_widget(tag="perf_bacnet_sensor_roller", timeout=30.0)
+        _pick_wheel(device, "sensor", "Supply tank")
         # The pick already read the sensor: its reading replaces Test sensor.
         assert device.wait_for_widget(tag="perf_bacnet_sensor_summary", timeout=5.0)
         assert device.wait_until("sensor summary shows the picked reading",
@@ -1013,10 +1022,8 @@ class TestScreen:
                                  lambda: _screen_text_contains(device, "Thermux Test"),
                                  timeout=20.0, poll=0.5)
         device.click(label_contains="Thermux Test")
-        assert device.wait_until("BACnet sensor list shows Supply tank",
-                                 lambda: _screen_text_contains(device, "Supply tank"),
-                                 timeout=20.0, poll=0.5)
-        device.click(label_contains="Supply tank")
+        assert device.wait_for_widget(tag="perf_bacnet_sensor_roller", timeout=20.0)
+        _pick_wheel(device, "sensor", "Supply tank")
         device.click(tag="perf_editor_save")
         device.wait_until("editor closed after BACnet discovery save",
                           lambda: not device.has_widget(tag="perf_editor"), timeout=5.0)
@@ -1064,12 +1071,10 @@ class TestScreen:
                                      timeout=20.0, poll=0.5)
             assert not device.has_widget(tag="perf_bacnet_sensor_summary")
             assert not device.has_widget(tag="perf_test")
-            assert device.wait_until("BACnet sensor list shows Supply tank",
-                                     lambda: _screen_text_contains(device, "Supply tank"),
-                                     timeout=20.0, poll=0.5)
-            first_sensor = device.find_widget(tag="perf_bacnet_sensor")
+            assert device.wait_for_widget(tag="perf_bacnet_sensor_roller", timeout=20.0)
+            select = device.find_widget(tag="perf_bacnet_sensor_select")
             manual_object = device.find_widget(tag="perf_bacnet_manual_object")
-            assert manual_object.y > first_sensor.y + first_sensor.h
+            assert manual_object.y >= select.y + select.h
             assert _screen_text_contains(device, "Not listed?")
 
             device.click(tag="perf_bacnet_manual_object")

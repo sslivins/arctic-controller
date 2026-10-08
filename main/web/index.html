@@ -471,6 +471,7 @@
     .perf-test { margin-top: 12px; }
     .perf-test > strong { display: block; margin-bottom: 8px; }
     .perf-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .perf-pick-select { width: 100%; margin-top: 8px; }
     .perf-summary { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 0; border-top: 1px solid var(--cp-border); }
     .perf-summary:first-child { border-top: 0; }
     .perf-summary .label { color: var(--cp-text-muted); flex: 0 0 auto; }
@@ -1290,8 +1291,10 @@
         const m = perfMode(slot);
         if (m.picked || m.deviceStep || m.sensorStep || m.manualAddress || m.manualObject || state.perfDiscovers[slot] || state.perfBrowses[slot]) return "";
       }
+      // The Sensor row already shows the saved name; only add the live one if it says more.
+      const liveName = live.object_name && live.object_name !== cfg.object_name ? live.object_name : "";
       if (live.celsius != null && (live.error === "none" || !live.error))
-        return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>${live.object_name ? `<div class="metric-sub">${esc(live.object_name)}</div>` : ""}`;
+        return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>${liveName ? `<div class="metric-sub">${esc(liveName)}</div>` : ""}`;
       return `<div class="kv"><span>Latest reading</span><strong>--</strong></div><p class="metric-sub perf-warn">${esc(perfError(live.error, live.exception, null))}</p>`;
     }
     function perfTestHtml(slot) {
@@ -1372,6 +1375,7 @@
         <div id="perf-test-${slot}">${perfTestHtml(slot)}</div>
         <div class="btn-row" style="margin-top:14px">
           <button class="btn" type="button" data-action="perf-test" data-slot="${slot}" ${canTest ? "" : "hidden"}>Test sensor</button>
+          ${mode.changing ? `<button class="btn" type="button" data-action="perf-cancel-change" data-slot="${slot}">Cancel</button>` : ""}
           <button class="btn primary" type="submit">Save</button></div>
       </form></section>`;
     }
@@ -1381,7 +1385,7 @@
       if (browse?.running) return `<div class="perf-test"><strong>Sensor</strong><span class="spinner-inline"></span> Finding sensors…</div>`;
       if (browse?.failed) return `<div class="perf-test notice bad">${esc(browse.failed)}${manual}</div>`;
       if (browse?.result && !browse.result.sensors.length) return `<div class="perf-test ok"><strong>No sensors found at this address</strong>${manual}</div>`;
-      if (browse?.result) return `<div class="perf-test ok"><strong>Sensor</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed.</div>` : ""}<div class="perf-choices">${browse.result.sensors.map(x => `<button class="btn" type="button" data-action="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-device-name="${esc(browse.result.device_name || "")}" data-rom-id="${esc(x.rom_id || "")}" data-celsius="${esc(x.celsius ?? "")}" data-available="${x.available ? "1" : ""}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} · ${x.available ? perfTemp(x.celsius) : "unavailable"}</button>`).join("")}</div><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual-object" data-slot="${slot}">Enter object manually</button></div></div>`;
+      if (browse?.result) return `<div class="perf-test ok"><strong>Sensor</strong>${browse.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${browse.result.sensors.length} sensors. This device has more objects than can be listed.</div>` : ""}<select class="perf-pick-select" aria-label="Sensor"><option value="" selected disabled>Choose a sensor…</option>${browse.result.sensors.map((x, i) => `<option value="${i}" data-pick="perf-pick-bacnet" data-slot="${slot}" data-object-type="${esc(x.object_type)}" data-object-instance="${esc(x.object_instance)}" data-object-name="${esc(x.object_name)}" data-device-instance="${esc(browse.result.device_instance ?? "")}" data-device-name="${esc(browse.result.device_name || "")}" data-rom-id="${esc(x.rom_id || "")}" data-celsius="${esc(x.celsius ?? "")}" data-available="${x.available ? "1" : ""}">${esc(x.object_name || `${x.object_type} ${x.object_instance}`)} · ${x.available ? perfTemp(x.celsius) : "unavailable"}</option>`).join("")}</select><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual-object" data-slot="${slot}">Enter object manually</button></div></div>`;
       return `<div class="perf-test"><strong>Sensor</strong><span class="spinner-inline"></span> Finding sensors…</div>`;
     }
     function perfDiscoverHtml(slot) {
@@ -1391,7 +1395,7 @@
       if (!d.result) return "";
       const devices = d.result.devices || [];
       if (!devices.length) return `<div class="perf-test ok"><strong>No BACnet devices found</strong><div class="perf-choices"><button class="btn" type="button" data-action="perf-discover-bacnet" data-slot="${slot}">Search again</button><button class="btn" type="button" data-action="perf-bacnet-manual" data-slot="${slot}">Enter address manually</button></div></div>`;
-      return `<div class="perf-test ok"><div class="perf-list-head"><strong>Device</strong><button class="icon-btn" type="button" data-action="perf-discover-bacnet" data-slot="${slot}" aria-label="Search again" title="Search again"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>${d.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${devices.length} devices.</div>` : ""}<div class="perf-choices">${devices.map((x, i) => `<button class="btn" type="button" data-action="perf-pick-bacnet-device" data-slot="${slot}" data-host="${esc(x.host)}" data-port="${esc(x.port)}" data-device-instance="${esc(x.device_instance ?? "")}" data-device-name="${esc(x.device_name || "")}">${esc(x.device_name || "BACnet device")} · ${esc(x.host)}<br><span class="metric-sub">Device ${esc(x.device_instance ?? "")}${x.model_name ? ` · ${esc(x.model_name)}` : ""}</span></button>`).join("")}</div><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual" data-slot="${slot}">Enter address manually</button></div></div>`;
+      return `<div class="perf-test ok"><div class="perf-list-head"><strong>Device</strong><button class="icon-btn" type="button" data-action="perf-discover-bacnet" data-slot="${slot}" aria-label="Search again" title="Search again"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>${d.result.truncated ? `<div class="metric-sub perf-warn">Showing the first ${devices.length} devices.</div>` : ""}<select class="perf-pick-select" aria-label="Device"><option value="" selected disabled>Choose a device…</option>${devices.map((x, i) => `<option value="${i}" data-pick="perf-pick-bacnet-device" data-slot="${slot}" data-host="${esc(x.host)}" data-port="${esc(x.port)}" data-device-instance="${esc(x.device_instance ?? "")}" data-device-name="${esc(x.device_name || "")}">${esc(x.device_name || "BACnet device")} · ${esc(x.host)} (device ${esc(x.device_instance ?? "")}${x.model_name ? ` · ${esc(x.model_name)}` : ""})</option>`).join("")}</select><div class="perf-not-listed">Not listed? <button class="link-btn" type="button" data-action="perf-bacnet-manual" data-slot="${slot}">Enter address manually</button></div></div>`;
     }
     function performanceSettings() {
       const p = state.perf;
@@ -1727,6 +1731,7 @@
         history: historyPage, errors: errorsPage, settings: settingsPage };
       updateDocumentTitle();
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
+      perfSyncSaves();
       if (state.settingsPage === "diagnostics") {
         const logs = $("#log-container"); if (logs) logs.scrollTop = logs.scrollHeight;
       }
@@ -1900,6 +1905,13 @@
       draft.rom_id = "";
       state.perfDrafts[slot] = draft;
     }
+    // Remember the card before Change so Cancel can restore it, unsaved edits included.
+    function perfRememberBeforeChange(slot) {
+      const mode = perfMode(slot);
+      if (mode.changing) return;
+      const draft = state.perfDrafts[slot];
+      perfSetMode(slot, { changing: { draft: draft ? { ...draft } : null, mode: { ...mode } } });
+    }
     function perfClearSlotState(slot) {
       delete state.perfBrowses[slot];
       delete state.perfDiscovers[slot];
@@ -1948,6 +1960,52 @@
       if (!body.host) throw new Error("Enter an IP address or hostname.");
       return body;
     }
+    // The saved sensor in the same shape perfSensorBody() builds from the form.
+    function perfSavedSensorBody(c) {
+      if (!c || !c.source || c.source === "heat_pump") return { source: "heat_pump" };
+      const body = { source: c.source, host: String(c.host || "").trim(), port: Number(c.port) };
+      if (c.source === "bacnet_ip") {
+        body.object_type = c.object_type || "analog_input";
+        body.object_instance = c.object_instance == null ? null : Number(c.object_instance);
+        if (c.device_instance != null && c.device_instance !== "") body.device_instance = Number(c.device_instance);
+        if (c.device_name) body.device_name = c.device_name;
+        if (c.object_name) body.object_name = c.object_name;
+        if (c.rom_id) body.rom_id = c.rom_id;
+      } else {
+        body.unit_id = Number(c.unit_id);
+        body.register = Number(c.register);
+        body.register_type = c.register_type;
+        body.value_type = c.value_type;
+        body.scale = Number(c.scale);
+        body.no_reading = perfIsFloat(c.value_type) ? "none" : c.no_reading;
+      }
+      return body;
+    }
+    function perfSameBody(a, b) {
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      return [...keys].every(k => a[k] === b[k]);
+    }
+    // Grey out Save while the form matches what's saved. An incomplete form
+    // keeps Save live so pressing it explains what's missing.
+    function perfSyncSaves() {
+      const p = state.perf;
+      if (!p) return;
+      document.querySelectorAll('form[data-form="perf-sensor"]').forEach(form => {
+        let same = false;
+        try { same = perfSameBody(perfSensorBody(form), perfSavedSensorBody(p.sensors?.[form.dataset.slot])); } catch (_) {}
+        const btn = form.querySelector('button[type="submit"]');
+        if (btn) btn.disabled = same;
+      });
+      const flow = document.querySelector('form[data-form="perf-flow"]');
+      if (flow) {
+        const data = new FormData(flow);
+        const fluid = data.get("fluid");
+        const same = Number(data.get("flow_lpm")) === Number(p.flow_lpm) && fluid === p.fluid &&
+          (fluid === "water" || Number(data.get("glycol_pct")) === Number(p.glycol_pct));
+        const btn = flow.querySelector('button[type="submit"]');
+        if (btn) btn.disabled = same;
+      }
+    }
     function perfInvalidMessage(error) {
       const m = /Invalid value/i.test(error.message) && error.field ? perfFieldNames[error.field] : null;
       return m ? `Check the ${m}.` : error.message;
@@ -1991,6 +2049,10 @@
       try { const data = await api(url, options); if (success) toast(success, "good"); return data; }
       catch (error) { toast(error.message, "bad"); error.toastShown = true; throw error; }
       finally { state.busy = false; }
+    }
+    // mutate() already toasted its own failure; only toast errors it didn't see.
+    function toastUnlessShown(error) {
+      if (!error.toastShown) toast(error.message, "bad");
     }
     function jsonOptions(method, body) {
       return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -2091,6 +2153,7 @@
         const body = { flow_lpm: Number(data.get("flow_lpm")), fluid: data.get("fluid") };
         if (body.fluid !== "water") body.glycol_pct = Number(data.get("glycol_pct"));
         await perfSave(body, "Flow and fluid saved");
+        perfSyncSaves();
         refreshPerfLive();
       }
       if (type === "perf-sensor") {
@@ -2100,6 +2163,7 @@
         // Replace just this card so edits in progress on the other one survive.
         const title = perfSlots.find(([s]) => s === slot)[1];
         form.closest("section").outerHTML = perfSensorCard(slot, title);
+        perfSyncSaves();
         refreshPerfLive();
       }
       if (type === "brightness") {
@@ -2468,15 +2532,18 @@
         const host = String(data.get("host") || "").trim();
         const port = Number(data.get("port") || 47808);
         perfSetMode(slot, { deviceStep: false, sensorStep: true, manualAddress: false, manualObject: false });
-        state.perfBrowses[slot] = { running: true };
+        const job = { running: true };
+        state.perfBrowses[slot] = job;
         render();
+        let next;
         try {
-          state.perfBrowses[slot] = {
-            result: await api("/api/performance/bacnet/browse", jsonOptions("POST", { host, port }))
-          };
+          next = { result: await api("/api/performance/bacnet/browse", jsonOptions("POST", { host, port })) };
         } catch (error) {
-          state.perfBrowses[slot] = { failed: perfInvalidMessage(error) };
-        } finally {
+          next = { failed: perfInvalidMessage(error) };
+        }
+        // Cancel may have closed this search while it ran.
+        if (state.perfBrowses[slot] === job) {
+          state.perfBrowses[slot] = next;
           render();
         }
         return;
@@ -2486,15 +2553,17 @@
         const form = el.closest("form");
         if (form) perfCaptureDraft(form);
         perfSetMode(slot, { deviceStep: true, manualAddress: false, manualObject: false });
-        state.perfDiscovers[slot] = { running: true };
+        const job = { running: true };
+        state.perfDiscovers[slot] = job;
         render();
+        let next;
         try {
-          state.perfDiscovers[slot] = {
-            result: await api("/api/performance/bacnet/discover", jsonOptions("POST", {}))
-          };
+          next = { result: await api("/api/performance/bacnet/discover", jsonOptions("POST", {})) };
         } catch (error) {
-          state.perfDiscovers[slot] = { failed: perfInvalidMessage(error) };
-        } finally {
+          next = { failed: perfInvalidMessage(error) };
+        }
+        if (state.perfDiscovers[slot] === job) {
+          state.perfDiscovers[slot] = next;
           render();
         }
         return;
@@ -2545,6 +2614,7 @@
         const form = el.closest("form");
         if (form) {
           perfCaptureDraft(form);
+          perfRememberBeforeChange(slot);
           perfClearIdentityDraft(slot);
         }
         perfSetMode(slot, { deviceStep: true, sensorStep: false, manualAddress: false, manualObject: false, picked: null });
@@ -2555,10 +2625,22 @@
       if (action === "perf-change-bacnet-sensor") {
         const slot = el.dataset.slot;
         const form = el.closest("form");
-        if (form) perfCaptureDraft(form);
+        if (form) {
+          perfCaptureDraft(form);
+          perfRememberBeforeChange(slot);
+        }
         perfSetMode(slot, { deviceStep: false, sensorStep: true, manualObject: false, picked: null });
         render();
         document.querySelector(`form[data-form="perf-sensor"][data-slot="${slot}"] [data-action="perf-browse-bacnet"]`)?.click();
+        return;
+      }
+      if (action === "perf-cancel-change") {
+        const slot = el.dataset.slot;
+        const before = perfMode(slot).changing;
+        perfClearSlotState(slot);
+        if (before?.draft) state.perfDrafts[slot] = before.draft;
+        if (before?.mode) state.perfModes[slot] = before.mode;
+        render();
         return;
       }
       if (action === "perf-pick-bacnet") {
@@ -2576,9 +2658,18 @@
         if (objectName) objectName.value = el.dataset.objectName || "";
         if (romId) romId.value = el.dataset.romId || "";
         perfCaptureDraft(form);
-        perfSetMode(el.dataset.slot, { deviceStep: false, sensorStep: false, manualAddress: false, manualObject: false,
+        const slot = el.dataset.slot;
+        let unchanged = false;
+        try { unchanged = perfSameBody(perfSensorBody(form), perfSavedSensorBody(state.perf?.sensors?.[slot])); } catch (_) {}
+        if (unchanged) {
+          // Re-picking the saved sensor isn't an edit: show the saved card again.
+          perfClearSlotState(slot);
+          render();
+          return;
+        }
+        perfSetMode(slot, { deviceStep: false, sensorStep: false, manualAddress: false, manualObject: false,
           picked: { available: !!el.dataset.available, celsius: Number(el.dataset.celsius) } });
-        delete state.perfBrowses[el.dataset.slot];
+        delete state.perfBrowses[slot];
         toast(`Selected ${el.dataset.objectName || "BACnet sensor"}`, "good");
         render();
         return;
@@ -2640,18 +2731,14 @@
       if (settings) { event.preventDefault(); await navigate("settings", settings.dataset.settings); return; }
       const action = event.target.closest("[data-action]");
       if (action && action.dataset.action !== "power-hold") {
-        event.preventDefault(); handleAction(action.dataset.action, action).catch(error => {
-          if (!error.toastShown) toast(error.message, "bad");
-        });
+        event.preventDefault(); handleAction(action.dataset.action, action).catch(toastUnlessShown);
       }
     });
     document.addEventListener("submit", event => {
       const form = event.target.closest("[data-form]");
       if (!form) return;
       event.preventDefault();
-      handleForm(form).catch(error => {
-        if (!error.toastShown) toast(error.message, "bad");
-      });
+      handleForm(form).catch(toastUnlessShown);
     });
     document.addEventListener("keydown", event => {
       if (event.key === "Escape" && document.querySelector('#overlay [data-action="demo-cancel"]')) closeOverlay();
@@ -2691,8 +2778,14 @@
             : draft.source !== "modbus_tcp";
         }
       }
+      if (event.target.closest?.('form[data-form^="perf-"]')) perfSyncSaves();
     });
     document.addEventListener("change", event => {
+      if (event.target.matches("select.perf-pick-select")) {
+        const option = event.target.selectedOptions[0];
+        if (option?.dataset.pick) handleAction(option.dataset.pick, option).catch(toastUnlessShown);
+        return;
+      }
       if (event.target.matches("select.choice-select")) {
         const description = event.target.closest(".choice-editor")?.querySelector(".choice-description");
         const selected = event.target.selectedOptions[0];
@@ -2761,6 +2854,7 @@
         if (float) select.value = "none";
         else if (select.value === "none") select.value = "0x8000";
       }
+      if (event.target.closest?.('form[data-form^="perf-"]')) perfSyncSaves();
     });
     async function navigateFromLocation() {
       routeFromHash();

@@ -92,6 +92,7 @@ struct Editor {
     lv_obj_t* discover_list;
     lv_obj_t* browse_card;
     lv_obj_t* browse_list;
+    lv_obj_t* browse_roller;
     lv_obj_t* browse_note;
     lv_obj_t* test_btn;
     lv_obj_t* test_lbl;
@@ -468,6 +469,47 @@ static void make_list_header(lv_obj_t* parent, const char* title, lv_event_cb_t 
     lv_obj_add_event_cb(btn, refresh_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t* icon = make_label(btn, LV_SYMBOL_REFRESH, FONT_NORMAL, COLOR_ACCENT);
     lv_obj_center(icon);
+}
+
+// Adds one row to a roller's newline-separated options. Roller rows can't
+// ellipsize, so long text is cut to fit the wheel.
+static void append_choice(char* buf, size_t size, size_t* len, const char* text)
+{
+    static constexpr size_t kMaxRow = 38;
+    if (*len + 1 >= size) return;
+    if (*len) buf[(*len)++] = '\n';
+    size_t n = strlen(text);
+    bool cut = n > kMaxRow;
+    if (cut) {
+        n = kMaxRow - 3;
+        while (n && ((uint8_t)text[n] & 0xC0) == 0x80) --n;  // don't split a UTF-8 glyph
+    }
+    if (n > size - *len - 4) n = size - *len - 4;
+    memcpy(buf + *len, text, n);
+    *len += n;
+    if (cut) {
+        memcpy(buf + *len, "...", 3);
+        *len += 3;
+    }
+    buf[*len] = '\0';
+}
+
+// A wheel of choices with a Select button under it. A flicked wheel can stop
+// on a row the user didn't mean, so nothing is picked until Select is tapped.
+static lv_obj_t* make_choice_wheel(lv_obj_t* parent, const char* opts, const char* roller_tag,
+                                   uint32_t rows, uint32_t selected, const char* select_tag,
+                                   lv_event_cb_t select_cb)
+{
+    lv_obj_t* roller = lv_roller_create(parent);
+    lv_roller_set_options(roller, opts, LV_ROLLER_MODE_NORMAL);
+    style_roller(roller, LV_PCT(100));
+    lv_roller_set_visible_row_count(roller, rows);
+    lv_roller_set_selected(roller, selected, LV_ANIM_OFF);
+    lv_obj_set_user_data(roller, (void*)roller_tag);
+    lv_obj_t* btn = make_button(parent, i18n_get(STR_PERF_SELECT), select_tag, COLOR_ACCENT,
+                                COLOR_ON_ACCENT, select_cb, NULL);
+    lv_obj_set_size(btn, LV_PCT(100), 68);
+    return roller;
 }
 
 // "Not listed? <action>" below a divider: an escape hatch, not a list choice.
@@ -1689,12 +1731,13 @@ static void browse_task(void*)
     vTaskDeleteWithCaps(NULL);
 }
 
-static void browse_pick_cb(lv_event_t* e)
+static void browse_pick_cb(lv_event_t*)
 {
-    intptr_t idx = (intptr_t)lv_event_get_user_data(e);
-    if (!s_browse_job.result || idx < 0 || (size_t)idx >= s_browse_job.result->count) return;
-    const ext_temp::BrowseSensor& s = s_browse_job.result->sensors[idx];
     Editor& ed = s_state.editor;
+    if (!ed.browse_roller || !s_browse_job.result) return;
+    size_t idx = lv_roller_get_selected(ed.browse_roller);
+    if (idx >= s_browse_job.result->count) return;
+    const ext_temp::BrowseSensor& s = s_browse_job.result->sensors[idx];
     ed.ed.source = perf::SensorSource::BacnetIp;
     ed.ed.bacnet_type = s.object_type;
     ed.ed.bacnet_instance = s.object_instance;
@@ -1725,6 +1768,7 @@ static void render_browse_result(const ext_temp::BrowseResult& r)
     Editor& ed = s_state.editor;
     if (!ed.browse_card || !ed.browse_list || !ed.browse_note) return;
     lv_obj_clean(ed.browse_list);
+    ed.browse_roller = NULL;
     lv_label_set_text(ed.browse_note, "");
     lv_obj_add_flag(ed.browse_note, LV_OBJ_FLAG_HIDDEN);
     make_label(ed.browse_list, i18n_get(STR_PERF_SENSOR), FONT_NORMAL, COLOR_TEXT);
@@ -1754,17 +1798,29 @@ static void render_browse_result(const ext_temp::BrowseResult& r)
     }
 
     char line[96];
+    const size_t opts_size = r.count * 48 + 1;
+    char* opts = (char*)heap_caps_malloc(opts_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!opts) {
+        editor_show_error(i18n_get(STR_PERF_SAVE_FAILED));
+        return;
+    }
+    size_t len = 0;
+    opts[0] = '\0';
+    uint32_t selected = 0;
     for (size_t i = 0; i < r.count; ++i) {
         const ext_temp::BrowseSensor& s = r.sensors[i];
-        bool selected = ed.ed.source == perf::SensorSource::BacnetIp &&
-                        ed.ed.bacnet_type == s.object_type &&
-                        ed.ed.bacnet_instance == s.object_instance;
+        if (ed.ed.source == perf::SensorSource::BacnetIp && ed.ed.bacnet_type == s.object_type &&
+            ed.ed.bacnet_instance == s.object_instance) {
+            selected = i;
+        }
         const char* name = s.object_name[0] ? s.object_name : "--";
         snprintf(line, sizeof(line), "%s \xE2\x80\x94 %.1f %s", name,
                  (double)to_display_temp(s.celsius), app_prefs_temp_unit_str());
-        make_picker_row(ed.browse_list, line, "perf_bacnet_sensor", selected, browse_pick_cb,
-                        (void*)(intptr_t)i);
+        append_choice(opts, opts_size, &len, line);
     }
+    ed.browse_roller = make_choice_wheel(ed.browse_list, opts, "perf_bacnet_sensor_roller", 5, selected,
+                                         "perf_bacnet_sensor_select", browse_pick_cb);
+    heap_caps_free(opts);
 
     make_not_listed_link(ed.browse_list, i18n_get(STR_PERF_BACNET_MANUAL_OBJECT), "perf_bacnet_manual_object",
                          bacnet_manual_object_cb);
