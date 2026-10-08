@@ -517,6 +517,29 @@ class TestSettingsWorkspace:
         expect(card.locator(DEVICE_PICK)).to_have_count(0)
         assert payloads == []
 
+    def test_performance_repicking_saved_sensor_is_not_a_change(self, dashboard_page: Page):
+        saved = perf_config()["sensors"]["supply"]
+        saved.update({"source": "bacnet_ip", "host": "192.168.1.205", "port": 47808,
+                      "object_instance": 0, "device_instance": 205,
+                      "device_name": "Thermux Spare", "object_name": "Sensor B"})
+        cfg = perf_config(supply=saved)
+        cfg["status"] = {"sensors": {"supply": {"celsius": 22.9, "age_s": 2, "error": "none",
+                                                "object_name": "Sensor B"}}}
+        route_perf_config(dashboard_page, cfg)
+        dashboard_page.route("**/api/performance/bacnet/browse", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body='{"ok":true,"error":"none","device_name":"Thermux Spare","model_name":"Thermux","device_instance":205,"sensors":[{"object_type":"analog_input","object_instance":0,"object_name":"Sensor B","celsius":22.9,"units":62,"reliability":0,"available":true,"rom_id":""},{"object_type":"analog_input","object_instance":1,"object_name":"Sensor A","celsius":21.1,"units":62,"reliability":0,"available":true,"rom_id":""}],"truncated":false}'))
+
+        open_settings(dashboard_page, "Heat output & COP")
+        card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
+        expect(card.get_by_text("Latest reading")).to_be_visible()
+
+        card.locator('[data-action="perf-change-bacnet-sensor"]').click()
+        pick_option(card, SENSOR_PICK, "Sensor B")
+        expect(card.get_by_role("button", name="Cancel")).to_have_count(0)
+        expect(card.get_by_text("Latest reading")).to_be_visible()
+        expect(card.get_by_role("button", name="Save")).to_be_disabled()
+
     def test_performance_save_is_disabled_until_something_changes(self, dashboard_page: Page):
         route_perf_config(dashboard_page)
         open_settings(dashboard_page, "Heat output & COP")

@@ -2658,9 +2658,18 @@
         if (objectName) objectName.value = el.dataset.objectName || "";
         if (romId) romId.value = el.dataset.romId || "";
         perfCaptureDraft(form);
-        perfSetMode(el.dataset.slot, { deviceStep: false, sensorStep: false, manualAddress: false, manualObject: false,
+        const slot = el.dataset.slot;
+        let unchanged = false;
+        try { unchanged = perfSameBody(perfSensorBody(form), perfSavedSensorBody(state.perf?.sensors?.[slot])); } catch (_) {}
+        if (unchanged) {
+          // Re-picking the saved sensor isn't an edit: show the saved card again.
+          perfClearSlotState(slot);
+          render();
+          return;
+        }
+        perfSetMode(slot, { deviceStep: false, sensorStep: false, manualAddress: false, manualObject: false,
           picked: { available: !!el.dataset.available, celsius: Number(el.dataset.celsius) } });
-        delete state.perfBrowses[el.dataset.slot];
+        delete state.perfBrowses[slot];
         toast(`Selected ${el.dataset.objectName || "BACnet sensor"}`, "good");
         render();
         return;
