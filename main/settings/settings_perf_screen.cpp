@@ -90,7 +90,6 @@ struct Editor {
     lv_obj_t* discover_lbl;
     lv_obj_t* discover_card;
     lv_obj_t* discover_list;
-    lv_obj_t* discover_roller;
     lv_obj_t* browse_card;
     lv_obj_t* browse_list;
     lv_obj_t* browse_roller;
@@ -1587,13 +1586,12 @@ static void discover_task(void*)
     vTaskDeleteWithCaps(NULL);
 }
 
-static void discover_pick_cb(lv_event_t*)
+static void discover_pick_cb(lv_event_t* e)
 {
-    Editor& ed = s_state.editor;
-    if (!ed.discover_roller || !s_discover_job.result) return;
-    size_t idx = lv_roller_get_selected(ed.discover_roller);
-    if (idx >= s_discover_job.result->count) return;
+    intptr_t idx = (intptr_t)lv_event_get_user_data(e);
+    if (!s_discover_job.result || idx < 0 || (size_t)idx >= s_discover_job.result->count) return;
     const ext_temp::DiscoverDevice& d = s_discover_job.result->devices[idx];
+    Editor& ed = s_state.editor;
     ed.ed.source = perf::SensorSource::BacnetIp;
     clear_editor_bacnet_identity();
     ed.ed.bacnet_instance = perf::kBacnetUnsetInstance;
@@ -1623,7 +1621,6 @@ static void render_discover_result(const ext_temp::DiscoverResult& r)
     Editor& ed = s_state.editor;
     if (!ed.discover_card || !ed.discover_list) return;
     lv_obj_clean(ed.discover_list);
-    ed.discover_roller = NULL;
     if (r.error != ext_temp::Error::None) {
         const char* msg = r.error == ext_temp::Error::Timeout ? i18n_get(STR_PERF_ERR_TIMEOUT)
                                                               : i18n_get(STR_PERF_ERR_CONNECT);
@@ -1645,17 +1642,21 @@ static void render_discover_result(const ext_temp::DiscoverResult& r)
     }
     make_list_header(ed.discover_list, i18n_get(STR_PERF_DEVICE), discover_btn_cb);
     char line[96];
-    char opts[16 * 48];
-    size_t len = 0;
-    opts[0] = '\0';
+    static const char* kDeviceTags[16] = {
+        "perf_bacnet_device_0", "perf_bacnet_device_1", "perf_bacnet_device_2",
+        "perf_bacnet_device_3", "perf_bacnet_device_4", "perf_bacnet_device_5",
+        "perf_bacnet_device_6", "perf_bacnet_device_7", "perf_bacnet_device_8",
+        "perf_bacnet_device_9", "perf_bacnet_device_10", "perf_bacnet_device_11",
+        "perf_bacnet_device_12", "perf_bacnet_device_13", "perf_bacnet_device_14",
+        "perf_bacnet_device_15",
+    };
     for (size_t i = 0; i < r.count; ++i) {
         const auto& d = r.devices[i];
         snprintf(line, sizeof(line), "%s \xC2\xB7 %s",
                  d.device_name[0] ? d.device_name : i18n_get(STR_PERF_BACNET_DEVICE), d.host);
-        append_choice(opts, sizeof(opts), &len, line);
+        make_picker_row(ed.discover_list, line, i < 16 ? kDeviceTags[i] : "perf_bacnet_device", false, discover_pick_cb,
+                        (void*)(intptr_t)i);
     }
-    ed.discover_roller = make_choice_wheel(ed.discover_list, opts, "perf_bacnet_device_roller", 3, 0,
-                                           "perf_bacnet_device_select", discover_pick_cb);
     make_not_listed_link(ed.discover_list, i18n_get(STR_PERF_BACNET_MANUAL), "perf_bacnet_manual", manual_cb);
     lv_obj_remove_flag(ed.discover_card, LV_OBJ_FLAG_HIDDEN);
     lv_obj_scroll_to_view_recursive(ed.discover_card, LV_ANIM_ON);

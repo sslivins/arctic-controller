@@ -344,7 +344,7 @@ def _pick_perf_source(device: DeviceClient, source_tag: str) -> None:
 
 
 def _pick_wheel(device: DeviceClient, kind: str, text: str) -> None:
-    """Turn the BACnet device/sensor wheel to the row containing `text`, then tap Select."""
+    """Turn the BACnet sensor wheel to the row containing `text`, then tap Select."""
     roller = f"perf_bacnet_{kind}_roller"
     assert device.wait_for_widget(tag=roller, timeout=20.0)
     count = device.find_widget(tag=roller).option_count or 0
@@ -1023,7 +1023,7 @@ class TestScreen:
         assert device.wait_until("BACnet discovery finds fake",
                                  lambda: _screen_text_contains(device, "Thermux Test"),
                                  timeout=20.0, poll=0.5)
-        _pick_wheel(device, "device", "Thermux Test")
+        device.click(label_contains="Thermux Test")
         assert device.wait_until("BACnet sensor list shows Supply tank",
                                  lambda: _screen_text_contains(device, "Supply tank"),
                                  timeout=20.0, poll=0.5)
@@ -1060,17 +1060,14 @@ class TestScreen:
                 pytest.skip("No BACnet device discoverable on the CI network")
             assert not device.has_widget(tag="perf_bacnet_device_summary")
             assert not device.has_widget(tag="perf_test")
-            # Refresh sits in the list header, the wheel's Select under it, then
-            # manual entry as a link under that.
+            # Refresh sits in the list header, manual entry as a link under the list.
             refresh = device.find_widget(tag="perf_bacnet_search_again")
-            wheel = device.find_widget(tag="perf_bacnet_device_roller")
-            select = device.find_widget(tag="perf_bacnet_device_select")
+            first_device = device.find_widget(tag="perf_bacnet_device_0")
             manual = device.find_widget(tag="perf_bacnet_manual")
-            assert refresh.y + refresh.h <= wheel.y
-            assert refresh.w < wheel.w / 3
-            assert select.y >= wheel.y + wheel.h
-            assert manual.y >= select.y + select.h
-            _pick_wheel(device, "device", "Thermux Test")
+            assert refresh.y + refresh.h <= first_device.y
+            assert refresh.w < first_device.w / 3
+            assert manual.y > first_device.y + first_device.h
+            device.click(label_contains="Thermux Test")
 
             assert device.wait_for_widget(tag="perf_bacnet_device_summary", timeout=5.0)
             assert device.wait_until("Sensor heading is shown while browsing",
