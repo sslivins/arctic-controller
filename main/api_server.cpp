@@ -43,6 +43,7 @@
 #include "factory_reset.h"
 #include "boot_stats.h"
 #include "fault_notice.h"
+#include "fault_history.h"
 #include "log_buffer.h"
 #include "log_persist.h"
 #include "crash_dump.h"
@@ -6228,7 +6229,42 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
     }
     free(samples);
 
-    emit("]}", 2);
+    emit("]", 1);
+
+    // Fault spans overlapping the window, so the chart can mark what went
+    // wrong and when. Field names match /api/events' error_appeared details.
+    {
+        fault_interval_t spans[32];
+        const size_t nspans = fault_history_query(start, end, spans, 32);
+        cJSON* faults = cJSON_CreateArray();
+        for (size_t i = 0; faults && i < nspans; i++) {
+            cJSON* f = cJSON_CreateObject();
+            if (!f) break;
+            const arctic::MaconFaultBit* fb = arctic::macon_fault_bit_for_site(
+                static_cast<arctic::MaconFaultSiteId>(spans[i].site));
+            if (fb) {
+                cJSON_AddStringToObject(f, "fault_code", fb->code);
+                cJSON_AddStringToObject(f, "fault_label", fb->label);
+                cJSON_AddStringToObject(f, "help_url", arctic::faultHelpUrl(fb->code));
+            } else {
+                cJSON_AddNullToObject(f, "fault_code");
+                cJSON_AddNullToObject(f, "fault_label");
+                cJSON_AddNullToObject(f, "help_url");
+            }
+            cJSON_AddNumberToObject(f, "start", spans[i].start);
+            if (spans[i].end) cJSON_AddNumberToObject(f, "end", spans[i].end);
+            else cJSON_AddNullToObject(f, "end");
+            cJSON_AddItemToArray(faults, f);
+        }
+        char* fj = faults ? cJSON_PrintUnformatted(faults) : nullptr;
+        emit(",\"faults\":", 10);
+        if (fj) emit(fj, strlen(fj));
+        else emit("[]", 2);
+        if (fj) cJSON_free(fj);
+        if (faults) cJSON_Delete(faults);
+    }
+
+    emit("}", 1);
     flush_out();
     if (out) free(out);
     httpd_resp_send_chunk(req, NULL, 0);

@@ -281,6 +281,12 @@
     .hist-tip { display: none; position: absolute; top: 12px; pointer-events: none; background: var(--cp-surface, #1e293b); border: 1px solid var(--cp-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.6; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
     .hist-tip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: middle; }
     .hist-tip strong { margin-left: 6px; }
+    .hist-tip-fault { color: var(--cp-danger); }
+    .hist-fault-label { fill: var(--cp-danger); font-size: 13px; font-weight: 600; }
+    .hist-faults { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+    .hist-fault-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border: 1px solid var(--cp-border); border-radius: 8px; font-size: 14px; }
+    .hist-fault-row b { color: var(--cp-danger); }
+    .hist-fault-row .hist-muted { margin: 0; white-space: nowrap; }
     .hist-tip-time { color: var(--cp-text-muted); font-size: 12px; }
     .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
     .hist-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
@@ -1630,12 +1636,28 @@
       svg += line("out", "var(--hist-out)", false);
       svg += line("in", "var(--hist-in)", false);
 
+      // Faults: a solid bar along the top edge plus the code, so they never
+      // read as a (red) heating band. Labels that would overlap are dropped;
+      // the bar and the list under the chart still show every fault.
+      const faults = data.faults || [];
+      let labelEnd = -Infinity;
+      for (const f of faults) {
+        const x1 = mapX(f.start), x2 = mapX(f.end ?? end);
+        svg += `<rect class="hist-fault" x="${x1.toFixed(1)}" y="${plotT}" width="${Math.max(3, x2 - x1).toFixed(1)}" height="6" rx="2" fill="var(--cp-danger)"/>`;
+        const label = `⚠ ${f.fault_code || "?"}`;
+        if (x1 >= labelEnd) {
+          const lx = Math.min(x1, plotR - 54);
+          svg += `<text x="${lx.toFixed(1)}" y="${plotT + 22}" class="hist-fault-label">${esc(label)}</text>`;
+          labelEnd = lx + 60;
+        }
+      }
+
       // Hover crosshair: a vertical line plus a dot on each series, driven by
       // histHover() from the pointer position.
       svg += `<g class="hist-hover" style="display:none">
         <line class="hist-hover-line" y1="${plotT}" y2="${plotB}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
         <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/></g>`;
-      histGeom = { W, plotL, plotR, mapX, mapY, samples, series };
+      histGeom = { W, plotL, plotR, mapX, mapY, samples, series, faults: data.faults || [], end };
 
       svg += `</svg>`;
       return svg;
@@ -1671,11 +1693,26 @@
       tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(s.t, true))}</div>
         <div><i style="background:var(--hist-out)"></i>Outlet <strong>${fmt(s.out)}</strong></div>
         <div><i style="background:var(--hist-in)"></i>Inlet <strong>${fmt(s.in)}</strong></div>
-        <div><i style="background:var(--hist-set)"></i>Setpoint <strong>${fmt(s.set)}</strong></div>`;
+        <div><i style="background:var(--hist-set)"></i>Setpoint <strong>${fmt(s.set)}</strong></div>` +
+        g.faults.filter(f => f.start <= s.t && s.t <= (f.end ?? g.end))
+          .map(f => `<div class="hist-tip-fault">⚠ ${esc(f.fault_code || "?")} ${esc(f.fault_label || "")}</div>`).join("");
       tip.style.display = "block";
       const px = x / g.W * rect.width;
       const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
       tip.style.left = `${Math.max(0, left)}px`;
+    }
+    // One row per fault in the window, newest first: what it was, when, how long.
+    function histFaultList(data) {
+      const faults = (data.faults || []).slice().reverse();
+      if (!faults.length) return "";
+      const dur = s => s < 60 ? "<1 min" : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min`;
+      const rows = faults.map(f => {
+        const when = f.end == null ? `${fmtHistClock(f.start, false)} · active`
+          : `${fmtHistClock(f.start, false)} · ${dur(f.end - f.start)}`;
+        const label = f.help_url ? `<a href="${esc(f.help_url)}" target="_blank" rel="noopener">${esc(f.fault_label || "")}</a>` : esc(f.fault_label || "");
+        return `<div class="hist-fault-row"><span><b>⚠ ${esc(f.fault_code || "?")}</b> ${label}</span><span class="hist-muted">${esc(when)}</span></div>`;
+      }).join("");
+      return `<div class="hist-faults">${rows}</div>`;
     }
     function historyPage() {
       const th = state.tempHistory, data = th.data;
@@ -1701,9 +1738,11 @@
               <span><i class="band" style="background:var(--hist-heat)"></i>Heating</span>
               <span><i class="band" style="background:var(--hist-cool)"></i>Cooling</span>
               <span><i class="band" style="background:var(--hist-dhw)"></i>Hot Water</span>
+              <span><i style="background:var(--cp-danger);height:6px"></i>Fault</span>
             </div>
           </div>
           <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>
+          ${histFaultList(data)}
           <div class="hist-nav">
             <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ Earlier</button>
             <button class="btn" data-action="history-latest" ${atLatest ? "disabled" : ""}>Latest</button>
