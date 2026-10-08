@@ -2001,6 +2001,10 @@
       catch (error) { toast(error.message, "bad"); error.toastShown = true; throw error; }
       finally { state.busy = false; }
     }
+    // mutate() already toasted its own failure; only toast errors it didn't see.
+    function toastUnlessShown(error) {
+      if (!error.toastShown) toast(error.message, "bad");
+    }
     function jsonOptions(method, body) {
       return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
     }
@@ -2667,18 +2671,14 @@
       if (settings) { event.preventDefault(); await navigate("settings", settings.dataset.settings); return; }
       const action = event.target.closest("[data-action]");
       if (action && action.dataset.action !== "power-hold") {
-        event.preventDefault(); handleAction(action.dataset.action, action).catch(error => {
-          if (!error.toastShown) toast(error.message, "bad");
-        });
+        event.preventDefault(); handleAction(action.dataset.action, action).catch(toastUnlessShown);
       }
     });
     document.addEventListener("submit", event => {
       const form = event.target.closest("[data-form]");
       if (!form) return;
       event.preventDefault();
-      handleForm(form).catch(error => {
-        if (!error.toastShown) toast(error.message, "bad");
-      });
+      handleForm(form).catch(toastUnlessShown);
     });
     document.addEventListener("keydown", event => {
       if (event.key === "Escape" && document.querySelector('#overlay [data-action="demo-cancel"]')) closeOverlay();
@@ -2722,9 +2722,7 @@
     document.addEventListener("change", event => {
       if (event.target.matches("select.perf-pick-select")) {
         const option = event.target.selectedOptions[0];
-        if (option?.dataset.pick) handleAction(option.dataset.pick, option).catch(error => {
-          if (!error.toastShown) toast(error.message, "bad");
-        });
+        if (option?.dataset.pick) handleAction(option.dataset.pick, option).catch(toastUnlessShown);
         return;
       }
       if (event.target.matches("select.choice-select")) {

@@ -32,4 +32,6 @@ def test_periodic_update_check_is_at_least_hourly():
 def test_mutation_errors_are_not_toasted_twice():
     source = WEB.read_text(encoding="utf-8")
     assert "error.toastShown = true" in source
-    assert source.count("if (!error.toastShown) toast(error.message, \"bad\");") == 2
+    assert source.count("if (!error.toastShown) toast(error.message, \"bad\");") == 1
+    # Action, form and dropdown-pick handlers all route errors through the guard.
+    assert source.count(".catch(toastUnlessShown)") >= 3
