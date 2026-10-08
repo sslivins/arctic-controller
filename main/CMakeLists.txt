@@ -72,6 +72,7 @@ idf_component_register(
         "ui_overlay.cpp"
         "boot_stats.cpp"
         "fault_notice.cpp"
+        "fault_history.cpp"
         "device_diagnostics.cpp"
         "wifi_supervisor.cpp"
         "log_buffer.cpp"
