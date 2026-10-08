@@ -42,6 +42,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/boot_stats.cpp
   ${MAIN_DIR}/fault_notice.cpp
   ${MAIN_DIR}/fault_history.cpp
+  ${MAIN_DIR}/home_stats.cpp
   ${MAIN_DIR}/time_manager.cpp
   ${MAIN_DIR}/iana_tz.cpp
   ${MAIN_DIR}/location_manager.cpp
@@ -192,3 +193,9 @@ add_test(NAME advanced_params COMMAND test_advanced_params)
 add_executable(test_perf test_perf.cpp)
 target_link_libraries(test_perf PRIVATE arctic_main_host)
 add_test(NAME perf COMMAND test_perf)
+
+# Home screen stats: compressor runs, starts per hour and the tank trend from
+# telemetry samples, plus the in-RAM today's-energy integrator. Pure logic.
+add_executable(test_home_stats test_home_stats.cpp)
+target_link_libraries(test_home_stats PRIVATE arctic_main_host)
+add_test(NAME home_stats COMMAND test_home_stats)

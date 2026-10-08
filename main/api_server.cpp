@@ -6201,7 +6201,7 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
 
     for (size_t i = 0; i < count; i++) {
         const history_telemetry_sample_t& s = samples[i];
-        char in_buf[12], out_buf[12], set_buf[12];
+        char in_buf[12], out_buf[12], set_buf[12], tank_buf[12];
         if (s.flags & HISTORY_TELEMETRY_INLET_VALID)
             snprintf(in_buf, sizeof(in_buf), "%d", (int)s.inlet_deci_c);
         else
@@ -6214,14 +6214,18 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
             snprintf(set_buf, sizeof(set_buf), "%d", (int)s.setpoint_deci_c);
         else
             strcpy(set_buf, "null");
+        if (s.flags & HISTORY_TELEMETRY_TANK_VALID)
+            snprintf(tank_buf, sizeof(tank_buf), "%d", (int)s.tank_deci_c);
+        else
+            strcpy(tank_buf, "null");
         bool running = (s.flags & HISTORY_TELEMETRY_COMPRESSOR_VALID) &&
                        (s.flags & HISTORY_TELEMETRY_COMPRESSOR_RUNNING);
         bool conn = (s.flags & HISTORY_TELEMETRY_CONNECTED) != 0;
         n = snprintf(line, sizeof(line),
-                 "%s{\"t\":%u,\"in\":%s,\"out\":%s,\"set\":%s,"
+                 "%s{\"t\":%u,\"in\":%s,\"out\":%s,\"set\":%s,\"tank\":%s,"
                  "\"mode\":%u,\"run\":%s,\"conn\":%s}",
                  i == 0 ? "" : ",", (unsigned)s.timestamp, in_buf, out_buf,
-                 set_buf, (unsigned)s.mode, running ? "true" : "false",
+                 set_buf, tank_buf, (unsigned)s.mode, running ? "true" : "false",
                  conn ? "true" : "false");
         if (n < 0) n = 0;
         if (n > (int)sizeof(line) - 1) n = (int)sizeof(line) - 1;

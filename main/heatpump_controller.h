@@ -67,6 +67,10 @@ struct HeatPumpState {
     uint16_t primary_eev_opening = 0;   // steps
     bool     primary_eev_valid = false;
     uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
+    // Electrical energy used today (local day), integrated from
+    // realtime_power_w since boot; not persisted across reboots.
+    uint32_t energy_today_wh = 0;
+    bool     energy_today_valid = false;
 
     // Estimated performance (owned by the macon library; flow and loop fluid
     // are user settings -- see perf_settings.h). thermal_w is signed:
@@ -145,8 +149,10 @@ struct TelemetrySnapshot {
     bool setpoint_valid = false;
     bool compressor_valid = false;
     bool compressor_running = false;
+    bool tank_valid = false;
     int16_t inlet_c = 0;
     int16_t outlet_c = 0;
+    int16_t tank_c = 0;
     int16_t active_setpoint_c = 0;
     TelemetryOperation operation = TelemetryOperation::UNKNOWN;
 };

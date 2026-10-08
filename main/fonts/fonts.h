@@ -34,6 +34,10 @@ LV_FONT_DECLARE(montserrat_40_misc);
 // WMO-code -> glyph mapping.
 LV_FONT_DECLARE(weather_icons_32);
 
+// Digits and '-' only, for the home screen's big tank temperature.
+// Regenerate with regen_digits_font.ps1.
+LV_FONT_DECLARE(montserrat_220_digits);
+
 // FontAwesome symbols included in the fonts above
 // Lock icon (U+F023 = 61475)
 #define FA_SYMBOL_LOCK "\xEF\x80\xA3"

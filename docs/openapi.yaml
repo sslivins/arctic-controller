@@ -2523,6 +2523,12 @@ paths:
                           type: integer
                           nullable: true
                           description: Active setpoint (deci-Celsius) or null
+                        tank:
+                          type: integer
+                          nullable: true
+                          description: >-
+                            Water tank temperature (deci-Celsius) or null.
+                            Recorded from firmware 3.2.0; older samples are null.
                         mode:
                           type: integer
                           enum: [0, 1, 2, 3]

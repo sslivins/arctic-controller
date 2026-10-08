@@ -391,6 +391,33 @@ void telemetry_round_trips() {
     }
 }
 
+// The tank reading lives in the record's old reserved word: it must round-trip
+// when flagged, and a sample without the flag (as every pre-3.2.0 record is)
+// must read back as "no tank reading", not the erased 0xFFFF.
+void telemetry_tank_reading_round_trips() {
+    fresh_device();
+    history_telemetry_sample_t with_tank = make_sample(1000, 1, 200);
+    with_tank.flags |= HISTORY_TELEMETRY_TANK_VALID;
+    with_tank.tank_deci_c = 455;
+    CHECK_ERR(history_storage_append_telemetry(&with_tank), ESP_OK);
+    history_telemetry_sample_t without_tank = make_sample(1030, 2, 201);
+    without_tank.tank_deci_c = 999;
+    CHECK_ERR(history_storage_append_telemetry(&without_tank), ESP_OK);
+
+    boot();
+    std::vector<history_telemetry_sample_t> out(8);
+    size_t count = 0;
+    CHECK_ERR(history_storage_query_telemetry(0, 0xffffffff, out.data(), out.size(),
+                                              &count),
+              ESP_OK);
+    CHECK(count == 2);
+    CHECK((out[0].flags & HISTORY_TELEMETRY_TANK_VALID) != 0);
+    CHECK(out[0].tank_deci_c == 455);
+    CHECK((out[1].flags & HISTORY_TELEMETRY_TANK_VALID) == 0);
+    CHECK(out[1].tank_deci_c == 0);
+    CHECK(out[1].inlet_deci_c == 201);
+}
+
 void write_five_telemetry_samples() {
     fresh_device();
     for (uint32_t i = 0; i < 5; ++i) {
@@ -609,6 +636,7 @@ int main() {
              expect_three_events_after_failed_compaction);
 
     SCENARIO("telemetry round trips", telemetry_round_trips);
+SCENARIO("telemetry tank reading round trips", telemetry_tank_reading_round_trips);
     SCENARIO("telemetry survives a reboot", write_five_telemetry_samples,
              expect_five_telemetry_samples_after_reboot);
     SCENARIO("telemetry query filters by time window",
