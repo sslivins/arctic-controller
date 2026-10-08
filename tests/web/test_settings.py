@@ -419,6 +419,8 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "Heat output & COP")
         card = dashboard_page.locator('form[data-form="perf-sensor"][data-slot="supply"]')
         expect(card.get_by_text("Latest reading")).to_be_visible()
+        # The live reading's object name matches the Sensor row, so it isn't repeated.
+        expect(card.get_by_text("Sensor B", exact=True)).to_have_count(1)
 
         card.locator('[data-action="perf-change-bacnet-device"]').click()
         expect_pick_option(card, DEVICE_PICK, "Thermux Spare")

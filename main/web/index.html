@@ -1291,8 +1291,10 @@
         const m = perfMode(slot);
         if (m.picked || m.deviceStep || m.sensorStep || m.manualAddress || m.manualObject || state.perfDiscovers[slot] || state.perfBrowses[slot]) return "";
       }
+      // The Sensor row already shows the saved name; only add the live one if it says more.
+      const liveName = live.object_name && live.object_name !== cfg.object_name ? live.object_name : "";
       if (live.celsius != null && (live.error === "none" || !live.error))
-        return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>${live.object_name ? `<div class="metric-sub">${esc(live.object_name)}</div>` : ""}`;
+        return `<div class="kv"><span>Latest reading</span><strong>${perfTemp(live.celsius)}${live.age_s != null ? ` <small class="metric-sub">read ${live.age_s} s ago</small>` : ""}</strong></div>${liveName ? `<div class="metric-sub">${esc(liveName)}</div>` : ""}`;
       return `<div class="kv"><span>Latest reading</span><strong>--</strong></div><p class="metric-sub perf-warn">${esc(perfError(live.error, live.exception, null))}</p>`;
     }
     function perfTestHtml(slot) {
