@@ -1,7 +1,9 @@
 #include "heatpump_history_screen.h"
 
 #include "app_preferences.h"
+#include "fault_history.h"
 #include "fonts/fonts.h"
+#include "macon_faults.h"
 #include "history_storage.h"
 #include "i18n/i18n.h"
 #include "nav_bar.h"
@@ -15,6 +17,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 static constexpr uint32_t WINDOW_SECONDS = 8 * 60 * 60;
@@ -34,6 +37,11 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 #define COLOR_HEATING   lv_color_hex(0xef4444)
 #define COLOR_COOLING   lv_color_hex(0x3b82f6)
 #define COLOR_HOT_WATER lv_color_hex(0xfbbf24)
+// Faults are marked by shape (a bar along the top edge plus the code), not by
+// a band, so the red never reads as heating.
+#define COLOR_FAULT     UI_COLOR_ERROR
+
+static constexpr size_t MAX_FAULTS = 16;
 
 struct QueryResult {
     uint32_t generation;
@@ -42,6 +50,8 @@ struct QueryResult {
     esp_err_t error;
     size_t count;
     history_telemetry_sample_t* samples;
+    size_t fault_count;
+    fault_interval_t faults[MAX_FAULTS];
 };
 
 static struct {
@@ -68,6 +78,11 @@ static struct {
     bool query_running = false;
     bool pending_query = false;
     uint32_t pending_end = 0;
+    lv_obj_t* fault_caption = nullptr;
+    lv_obj_t* fault_caption_code = nullptr;
+    lv_obj_t* fault_caption_text = nullptr;
+    size_t fault_count = 0;
+    fault_interval_t faults[MAX_FAULTS] = {};
 } state;
 
 static void request_window(uint32_t end);
@@ -137,6 +152,35 @@ static void draw_label(lv_layer_t* layer, const lv_area_t& area,
     dsc.text_local = true;
     dsc.align = align;
     lv_draw_label(layer, &dsc, &area);
+}
+
+static void format_clock(char* buf, size_t len, uint32_t timestamp) {
+    time_t t = timestamp;
+    struct tm local = {};
+    localtime_r(&t, &local);
+    if (time_mgr_get_24h_format()) {
+        strftime(buf, len, "%H:%M", &local);
+    } else {
+        int hour12 = local.tm_hour % 12;
+        if (hour12 == 0) hour12 = 12;
+        snprintf(buf, len, "%d:%02d %s", hour12, local.tm_min,
+                 local.tm_hour < 12 ? "AM" : "PM");
+    }
+}
+
+static const char* fault_code(const fault_interval_t& f) {
+    const arctic::MaconFaultBit* fb = arctic::macon_fault_bit_for_site(
+        static_cast<arctic::MaconFaultSiteId>(f.site));
+    return fb != nullptr ? fb->code : "?";
+}
+
+// A still-active fault runs to "now", which is the right edge at most.
+static uint32_t fault_end(const fault_interval_t& f) {
+    if (f.end != 0) return f.end;
+    time_t now;
+    time(&now);
+    uint32_t end = (uint32_t)now;
+    return end > state.window_end || end < f.start ? state.window_end : end;
 }
 
 static bool sample_value(const history_telemetry_sample_t& sample,
@@ -299,17 +343,7 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
     }
 
     char when[12];
-    time_t t = s.timestamp;
-    struct tm local = {};
-    localtime_r(&t, &local);
-    if (time_mgr_get_24h_format()) {
-        strftime(when, sizeof(when), "%H:%M", &local);
-    } else {
-        int hour12 = local.tm_hour % 12;
-        if (hour12 == 0) hour12 = 12;
-        snprintf(when, sizeof(when), "%d:%02d %s", hour12, local.tm_min,
-                 local.tm_hour < 12 ? "AM" : "PM");
-    }
+    format_clock(when, sizeof(when), s.timestamp);
     char outlet[12], inlet[12], setpoint[12];
     format_reading(outlet, sizeof(outlet), s, HISTORY_TELEMETRY_OUTLET_VALID,
                    s.outlet_deci_c);
@@ -318,8 +352,20 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
     format_reading(setpoint, sizeof(setpoint), s,
                    HISTORY_TELEMETRY_SETPOINT_VALID, s.setpoint_deci_c);
 
+    // Faults active at the touched moment, by code (the caption names them).
+    static constexpr int MAX_FAULT_ROWS = 2;
+    char fault_rows[MAX_FAULT_ROWS][16];
+    int fault_row_count = 0;
+    for (size_t f = 0; f < state.fault_count && fault_row_count < MAX_FAULT_ROWS; f++) {
+        if (state.faults[f].start <= s.timestamp &&
+            s.timestamp <= fault_end(state.faults[f])) {
+            snprintf(fault_rows[fault_row_count++], sizeof(fault_rows[0]),
+                     LV_SYMBOL_WARNING " %s", fault_code(state.faults[f]));
+        }
+    }
+
     static constexpr int32_t BOX_W = 250, TIME_H = 30, ROW_H = 30, PAD = 10;
-    static constexpr int32_t BOX_H = 6 + TIME_H + 3 * ROW_H + 8;
+    const int32_t BOX_H = 6 + TIME_H + (3 + fault_row_count) * ROW_H + 8;
     int32_t bx = x + 16;
     if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
     if (bx < plot.x1) bx = plot.x1;
@@ -359,6 +405,59 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
                    &montserrat_24_latin);
         draw_label(layer, row, r.value, UI_COLOR_TEXT, LV_TEXT_ALIGN_RIGHT,
                    &montserrat_24_latin);
+    }
+    for (int f = 0; f < fault_row_count; f++) {
+        row.y1 += ROW_H;
+        row.y2 += ROW_H;
+        draw_label(layer, row, fault_rows[f], COLOR_FAULT, LV_TEXT_ALIGN_LEFT,
+                   &montserrat_24_latin);
+    }
+}
+
+// A bar along the top edge per fault, labelled with its code. Faults whose
+// labels would collide share one label: the code if they are all the same
+// fault, otherwise the count ("×3").
+static void draw_fault_markers(lv_layer_t* layer, const lv_area_t& plot) {
+    static constexpr int32_t BAR_H = 8, LABEL_W = 100;
+    for (size_t i = 0; i < state.fault_count; i++) {
+        const auto& f = state.faults[i];
+        const int32_t x1 = map_x(f.start, plot);
+        int32_t x2 = map_x(fault_end(f), plot);
+        if (x2 < x1 + 3) x2 = x1 + 3;
+        lv_draw_rect_dsc_t bar;
+        lv_draw_rect_dsc_init(&bar);
+        bar.bg_color = COLOR_FAULT;
+        bar.bg_opa = LV_OPA_COVER;
+        bar.radius = 2;
+        const lv_area_t area = {x1, plot.y1, x2, plot.y1 + BAR_H};
+        lv_draw_rect(layer, &bar, &area);
+    }
+
+    size_t i = 0;
+    while (i < state.fault_count) {
+        const int32_t x = map_x(state.faults[i].start, plot);
+        size_t j = i + 1;
+        bool same_code = true;
+        while (j < state.fault_count &&
+               map_x(state.faults[j].start, plot) < x + LABEL_W) {
+            if (state.faults[j].site != state.faults[i].site) same_code = false;
+            j++;
+        }
+        char text[24];
+        if (same_code) {
+            snprintf(text, sizeof(text), LV_SYMBOL_WARNING " %s",
+                     fault_code(state.faults[i]));
+        } else {
+            snprintf(text, sizeof(text), LV_SYMBOL_WARNING " \xC3\x97%u",
+                     (unsigned)(j - i));
+        }
+        int32_t lx = x;
+        if (lx + LABEL_W > plot.x2) lx = plot.x2 - LABEL_W;
+        const lv_area_t label = {lx, plot.y1 + BAR_H + 4, lx + LABEL_W,
+                                 plot.y1 + BAR_H + 34};
+        draw_label(layer, label, text, COLOR_FAULT, LV_TEXT_ALIGN_LEFT,
+                   &montserrat_24_latin);
+        i = j;
     }
 }
 
@@ -553,6 +652,7 @@ static void chart_draw_cb(lv_event_t* event) {
         }
     }
 
+    draw_fault_markers(layer, plot);
     draw_cursor(layer, plot, min_value, max_value);
 }
 
@@ -594,6 +694,50 @@ static void update_navigation() {
     }
 }
 
+// The most recent fault in the window, named in full: what it was, when it
+// started and how long it lasted. Hidden when the window has none.
+static void update_fault_caption() {
+    if (state.fault_caption == nullptr) return;
+    if (state.fault_count == 0) {
+        lv_obj_add_flag(state.fault_caption, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    const fault_interval_t& f = state.faults[state.fault_count - 1];
+    const arctic::MaconFaultBit* fb = arctic::macon_fault_bit_for_site(
+        static_cast<arctic::MaconFaultSiteId>(f.site));
+
+    char code[24];
+    snprintf(code, sizeof(code), LV_SYMBOL_WARNING " %s", fault_code(f));
+    lv_label_set_text(state.fault_caption_code, code);
+
+    char when[12];
+    format_clock(when, sizeof(when), f.start);
+    char duration[24];
+    if (f.end == 0) {
+        snprintf(duration, sizeof(duration), "%s", i18n_get(STR_HISTORY_FAULT_ACTIVE));
+    } else {
+        const uint32_t minutes = (f.end - f.start + 30) / 60;
+        if (minutes < 1) {
+            snprintf(duration, sizeof(duration), "<1 min");
+        } else if (minutes < 60) {
+            snprintf(duration, sizeof(duration), "%lu min", (unsigned long)minutes);
+        } else {
+            snprintf(duration, sizeof(duration), "%lu h %lu min",
+                     (unsigned long)(minutes / 60), (unsigned long)(minutes % 60));
+        }
+    }
+    char more[24] = "";
+    if (state.fault_count > 1) {
+        snprintf(more, sizeof(more), " · +%u", (unsigned)(state.fault_count - 1));
+    }
+    char text[160];
+    snprintf(text, sizeof(text), "%s · %s · %s%s",
+             fb != nullptr ? i18n_get_key(fb->label_msg_id, fb->label) : "",
+             when, duration, more);
+    lv_label_set_text(state.fault_caption_text, text);
+    lv_obj_remove_flag(state.fault_caption, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void start_pending_query_if_needed() {
     if (!state.shown || !state.pending_query || state.query_running) return;
     uint32_t end = state.pending_end;
@@ -615,6 +759,9 @@ static void query_complete(void* data) {
     state.samples = result->samples;
     state.sample_count = result->count;
     state.cursor = -1;
+    state.fault_count = result->fault_count;
+    memcpy(state.faults, result->faults, sizeof(fault_interval_t) * result->fault_count);
+    update_fault_caption();
     heap_caps_free(state.interp_inlet);
     heap_caps_free(state.interp_outlet);
     state.interp_inlet = nullptr;
@@ -665,6 +812,8 @@ static void query_task(void* data) {
             result->start, result->end, result->samples,
             HISTORY_TELEMETRY_PAGE_CAPACITY, &result->count);
     }
+    result->fault_count = fault_history_query(result->start, result->end,
+                                              result->faults, MAX_FAULTS);
     // Worker task: lv_async_call() must hold the LVGL lock.
     bsp_display_lock(0);
     lv_async_call(query_complete, result);
@@ -838,6 +987,8 @@ lv_obj_t* heatpump_history_show(lv_obj_t* parent,
                     i18n_get(STR_HISTORY_LEGEND_COOLING), true);
     add_legend_item(legend_modes, COLOR_HOT_WATER,
                     i18n_get(STR_HISTORY_LEGEND_HOT_WATER), true);
+    add_legend_item(legend_modes, COLOR_FAULT,
+                    i18n_get(STR_HISTORY_LEGEND_FAULT), false);
 
     state.chart = lv_obj_create(state.overlay);
     lv_obj_set_width(state.chart, LV_PCT(100));
@@ -864,6 +1015,25 @@ lv_obj_t* heatpump_history_show(lv_obj_t* parent,
     lv_obj_set_style_text_align(state.status_label, LV_TEXT_ALIGN_CENTER,
                                 LV_PART_MAIN);
     lv_obj_center(state.status_label);
+
+    state.fault_caption = lv_obj_create(state.overlay);
+    lv_obj_remove_style_all(state.fault_caption);
+    lv_obj_set_size(state.fault_caption, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(state.fault_caption, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(state.fault_caption, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(state.fault_caption, 10, LV_PART_MAIN);
+    lv_obj_set_user_data(state.fault_caption, (void*)"temperature_history_fault");
+    lv_obj_add_flag(state.fault_caption, LV_OBJ_FLAG_HIDDEN);
+    state.fault_caption_code = lv_label_create(state.fault_caption);
+    lv_obj_set_style_text_font(state.fault_caption_code, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.fault_caption_code, COLOR_FAULT, LV_PART_MAIN);
+    state.fault_caption_text = lv_label_create(state.fault_caption);
+    lv_obj_set_flex_grow(state.fault_caption_text, 1);
+    lv_label_set_long_mode(state.fault_caption_text, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(state.fault_caption_text, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.fault_caption_text, UI_COLOR_TEXT_DIM,
+                                LV_PART_MAIN);
 
     lv_obj_t* actions = lv_obj_create(state.overlay);
     lv_obj_remove_style_all(actions);
@@ -917,6 +1087,10 @@ void heatpump_history_hide(void) {
     state.previous_button = nullptr;
     state.next_button = nullptr;
     state.latest_button = nullptr;
+    state.fault_caption = nullptr;
+    state.fault_caption_code = nullptr;
+    state.fault_caption_text = nullptr;
+    state.fault_count = 0;
     heap_caps_free(state.samples);
     state.samples = nullptr;
     heap_caps_free(state.interp_inlet);
