@@ -987,9 +987,7 @@ class TestScreen:
         _set_perf_entry(device, "perf_port", str(port))
 
         device.click(tag="perf_bacnet_browse")
-        assert device.wait_until("BACnet browse list shows Supply tank",
-                                 lambda: _screen_text_contains(device, "Supply tank"),
-                                 timeout=30.0, poll=0.5)
+        assert device.wait_for_widget(tag="perf_bacnet_sensor_roller", timeout=30.0)
         _pick_wheel(device, "sensor", "Supply tank")
         # The pick already read the sensor: its reading replaces Test sensor.
         assert device.wait_for_widget(tag="perf_bacnet_sensor_summary", timeout=5.0)
@@ -1024,9 +1022,7 @@ class TestScreen:
                                  lambda: _screen_text_contains(device, "Thermux Test"),
                                  timeout=20.0, poll=0.5)
         device.click(label_contains="Thermux Test")
-        assert device.wait_until("BACnet sensor list shows Supply tank",
-                                 lambda: _screen_text_contains(device, "Supply tank"),
-                                 timeout=20.0, poll=0.5)
+        assert device.wait_for_widget(tag="perf_bacnet_sensor_roller", timeout=20.0)
         _pick_wheel(device, "sensor", "Supply tank")
         device.click(tag="perf_editor_save")
         device.wait_until("editor closed after BACnet discovery save",
@@ -1075,9 +1071,7 @@ class TestScreen:
                                      timeout=20.0, poll=0.5)
             assert not device.has_widget(tag="perf_bacnet_sensor_summary")
             assert not device.has_widget(tag="perf_test")
-            assert device.wait_until("BACnet sensor list shows Supply tank",
-                                     lambda: _screen_text_contains(device, "Supply tank"),
-                                     timeout=20.0, poll=0.5)
+            assert device.wait_for_widget(tag="perf_bacnet_sensor_roller", timeout=20.0)
             select = device.find_widget(tag="perf_bacnet_sensor_select")
             manual_object = device.find_widget(tag="perf_bacnet_manual_object")
             assert manual_object.y >= select.y + select.h
