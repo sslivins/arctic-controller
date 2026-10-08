@@ -84,7 +84,7 @@ def _post(base_url: str, path: str, body: dict | None = None) -> None:
 
 
 class TestHistoryFaultMarkers:
-    def test_fault_is_marked_on_the_chart_and_listed(
+    def test_fault_is_marked_on_the_chart(
         self, dashboard_page: Page, base_url: str
     ):
         _seed_history(base_url)
@@ -100,7 +100,4 @@ class TestHistoryFaultMarkers:
         assert dashboard_page.locator(".hist-chart .hist-fault").count() >= 1
         labels = dashboard_page.locator(".hist-chart .hist-fault-label").all_text_contents()
         assert any("P02" in t for t in labels)
-        # And named in full under the chart.
-        row = dashboard_page.locator(".hist-fault-row", has_text="P02").first
-        expect(row).to_be_visible()
         expect(dashboard_page.locator(".hist-legend", has_text="Fault")).to_be_visible()

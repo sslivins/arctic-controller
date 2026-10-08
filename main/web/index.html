@@ -283,10 +283,6 @@
     .hist-tip strong { margin-left: 6px; }
     .hist-tip-fault { color: var(--cp-danger); }
     .hist-fault-label { fill: var(--cp-danger); font-size: 13px; font-weight: 600; }
-    .hist-faults { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
-    .hist-fault-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border: 1px solid var(--cp-border); border-radius: 8px; font-size: 14px; }
-    .hist-fault-row b { color: var(--cp-danger); }
-    .hist-fault-row .hist-muted { margin: 0; white-space: nowrap; }
     .hist-tip-time { color: var(--cp-text-muted); font-size: 12px; }
     .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
     .hist-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
@@ -1638,7 +1634,7 @@
 
       // Faults: a solid bar along the top edge plus the code, so they never
       // read as a (red) heating band. Labels that would overlap are dropped;
-      // the bar and the list under the chart still show every fault.
+      // the bar and the hover tooltip still show every fault.
       const faults = data.faults || [];
       let labelEnd = -Infinity;
       for (const f of faults) {
@@ -1701,19 +1697,6 @@
       const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
       tip.style.left = `${Math.max(0, left)}px`;
     }
-    // One row per fault in the window, newest first: what it was, when, how long.
-    function histFaultList(data) {
-      const faults = (data.faults || []).slice().reverse();
-      if (!faults.length) return "";
-      const dur = s => s < 60 ? "<1 min" : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min`;
-      const rows = faults.map(f => {
-        const when = f.end == null ? `${fmtHistClock(f.start, false)} · active`
-          : `${fmtHistClock(f.start, false)} · ${dur(f.end - f.start)}`;
-        const label = f.help_url ? `<a href="${esc(f.help_url)}" target="_blank" rel="noopener">${esc(f.fault_label || "")}</a>` : esc(f.fault_label || "");
-        return `<div class="hist-fault-row"><span><b>⚠ ${esc(f.fault_code || "?")}</b> ${label}</span><span class="hist-muted">${esc(when)}</span></div>`;
-      }).join("");
-      return `<div class="hist-faults">${rows}</div>`;
-    }
     function historyPage() {
       const th = state.tempHistory, data = th.data;
       let body;
@@ -1742,7 +1725,6 @@
             </div>
           </div>
           <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>
-          ${histFaultList(data)}
           <div class="hist-nav">
             <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ Earlier</button>
             <button class="btn" data-action="history-latest" ${atLatest ? "disabled" : ""}>Latest</button>

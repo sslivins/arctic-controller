@@ -115,4 +115,3 @@ def test_history_api_and_web_mark_faults_from_the_event_log():
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
     assert "data.faults" in web
     assert "hist-fault-label" in web
-    assert "histFaultList(" in web
