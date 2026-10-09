@@ -177,6 +177,7 @@ struct HomeHistory {
     size_t run_count;
     fault_interval_t faults[CHART_MAX_FAULTS];
     size_t fault_count;
+    size_t fault_total;  // In the window, including any beyond the cap
     home_run_summary_t summary;
 };
 
@@ -712,7 +713,7 @@ static void update_fault_caption(void) {
     if (h.fault_count > 1) {
         char more[32];
         snprintf(more, sizeof(more), i18n_get(STR_HOME_MORE_FAULTS),
-                 (unsigned)(h.fault_count - 1));
+                 (unsigned)(h.fault_total - 1));
         lv_label_set_text(state.fault_caption_more, more);
         lv_obj_clear_flag(state.fault_caption_more, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -753,7 +754,8 @@ static void home_query_task(void* arg) {
         h.loaded = true;
     }
     heap_caps_free(samples);
-    h.fault_count = fault_history_query(h.start, h.end, h.faults, CHART_MAX_FAULTS);
+    h.fault_count = fault_history_query(h.start, h.end, h.faults, CHART_MAX_FAULTS,
+                                        &h.fault_total);
 
     // Worker task: lv_async_call() must hold the LVGL lock.
     bsp_display_lock(0);

@@ -165,9 +165,11 @@ static void cap_keeps_the_newest_spans() {
     // Plus one still active, emitted last.
     e.push_back(ev(T0 + 500, BOOT_A, EVENT_ERROR_APPEARED, 2));
     fault_interval_t out[4];
+    size_t total = 0;
     size_t n = fault_intervals_from_events(e.data(), e.size(), T0, T0 + 9000,
-                                           BOOT_A, out, 4);
+                                           BOOT_A, out, 4, &total);
     CHECK_EQ_U(n, 4);
+    CHECK_EQ_U(total, 11);
     if (n == 4) {
         CHECK_EQ_U(out[0].start, T0 + 70);
         CHECK_EQ_U(out[1].start, T0 + 80);

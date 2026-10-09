@@ -20,10 +20,12 @@ struct Builder {
     fault_interval_t* out;
     size_t cap;
     size_t count = 0;
+    size_t total = 0;
 
     void emit(uint16_t site, uint32_t start, uint32_t end) {
         if (start > window_end) return;
         if (end != 0 && end < window_start) return;
+        ++total;
         if (count < cap) {
             out[count++] = {start, end, site};
             return;
@@ -42,7 +44,9 @@ struct Builder {
 size_t fault_intervals_from_events(const event_entry_t* events, size_t n,
                                    uint32_t window_start, uint32_t window_end,
                                    uint32_t current_boot_id,
-                                   fault_interval_t* out, size_t cap) {
+                                   fault_interval_t* out, size_t cap,
+                                   size_t* total) {
+    if (total) *total = 0;
     if (!out || cap == 0) return 0;
     Builder b{window_start, window_end, out, cap};
     OpenSpan open[kMaxOpen];
@@ -98,11 +102,13 @@ size_t fault_intervals_from_events(const event_entry_t* events, size_t n,
         while (j > 0 && out[j - 1].start > v.start) { out[j] = out[j - 1]; --j; }
         out[j] = v;
     }
+    if (total) *total = b.total;
     return b.count;
 }
 
 size_t fault_history_query(uint32_t window_start, uint32_t window_end,
-                           fault_interval_t* out, size_t cap) {
+                           fault_interval_t* out, size_t cap, size_t* total) {
+    if (total) *total = 0;
     const size_t bytes = sizeof(event_entry_t) * EVENT_LOG_MAX_ENTRIES;
 #ifdef ESP_PLATFORM
     event_entry_t* events = (event_entry_t*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
@@ -121,7 +127,7 @@ size_t fault_history_query(uint32_t window_start, uint32_t window_end,
     }
     const size_t count = fault_intervals_from_events(
         events, got > 0 ? (size_t)got : 0, window_start, window_end,
-        event_log_current_boot_id(), out, cap);
+        event_log_current_boot_id(), out, cap, total);
     free(events);
     return count;
 }

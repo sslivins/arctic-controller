@@ -23,16 +23,20 @@ typedef struct {
  * is closed at the last timed event of that boot. Only a span opened in
  * current_boot_id can be reported as still active.
  *
+ * @param total If non-null, receives how many spans overlap the window,
+ *              including any dropped by the cap.
  * @return Number of spans written (at most cap). When there are more, the
  *         newest (by start) are kept.
  */
 size_t fault_intervals_from_events(const event_entry_t* oldest_first, size_t n,
                                    uint32_t window_start, uint32_t window_end,
                                    uint32_t current_boot_id,
-                                   fault_interval_t* out, size_t cap);
+                                   fault_interval_t* out, size_t cap,
+                                   size_t* total = nullptr);
 
 /**
  * fault_intervals_from_events() over the live event log.
  */
 size_t fault_history_query(uint32_t window_start, uint32_t window_end,
-                           fault_interval_t* out, size_t cap);
+                           fault_interval_t* out, size_t cap,
+                           size_t* total = nullptr);
