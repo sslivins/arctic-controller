@@ -26,6 +26,7 @@
 #include "ui_common.h"
 #include "ui_overlay.h"
 #include <bsp/m5stack_tab5.h>
+#include <cassert>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -187,8 +188,18 @@ struct HomeQuery {
 };
 
 // Outlive the widgets: a query can still be in flight when the screen is
-// rebuilt, and its result must be dropped rather than applied.
-static HomeHistory s_history;
+// rebuilt, and its result must be dropped rather than applied. Lives in PSRAM:
+// internal RAM is scarce and the HTTPS servers need it (#234).
+static HomeHistory& history_store() {
+    static HomeHistory* h = [] {
+        void* p = heap_caps_calloc(1, sizeof(HomeHistory),
+                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (p == nullptr) p = calloc(1, sizeof(HomeHistory));
+        assert(p != nullptr);
+        return new (p) HomeHistory();
+    }();
+    return *h;
+}
 static uint32_t s_generation = 0;
 static bool s_query_running = false;
 static bool s_query_pending = false;
@@ -538,7 +549,7 @@ static int32_t chart_y(int32_t deci_c, int32_t lo, int32_t hi, const lv_area_t& 
 static void chart_draw_cb(lv_event_t* e) {
     lv_layer_t* layer = lv_event_get_layer(e);
     auto* obj = static_cast<lv_obj_t*>(lv_event_get_current_target(e));
-    const HomeHistory& h = s_history;
+    const HomeHistory& h = history_store();
     if (layer == nullptr || obj == nullptr || !h.loaded || h.end <= h.start) return;
 
     lv_area_t area;
@@ -685,7 +696,7 @@ static bool history_has_data(const HomeHistory& h) {
 
 // Most recent fault in the window, with how many others there were.
 static void update_fault_caption(void) {
-    const HomeHistory& h = s_history;
+    const HomeHistory& h = history_store();
     if (h.fault_count == 0) {
         lv_obj_add_flag(state.fault_caption, LV_OBJ_FLAG_HIDDEN);
         return;
@@ -726,7 +737,7 @@ static void home_query_done(void* arg) {
     auto* q = static_cast<HomeQuery*>(arg);
     s_query_running = false;
     if (q->generation == s_generation && state.created) {
-        s_history = q->data;
+        history_store() = q->data;
         if (state.chart) lv_obj_invalidate(state.chart);
         heatpump_screen_update();
     }
@@ -778,7 +789,7 @@ static void request_history(void) {
     state.last_query_ms = lv_tick_get();
     state.queried_once = true;
     s_query_running = true;
-    if (xTaskCreate(home_query_task, "home_query", 6144, q, 3, nullptr) != pdPASS) {
+    if (xTaskCreate(home_query_task, "home_query", 4096, q, 3, nullptr) != pdPASS) {
         ESP_LOGW(TAG, "home history query task failed to start");
         s_query_running = false;
         delete q;
@@ -1348,7 +1359,7 @@ void heatpump_screen_update(void) {
     set_visible(state.hero_sub_value, buf[0] != '\0');
 
     bool show_chart = (hero == HeroState::IDLE || hero == HeroState::STANDBY) &&
-                      history_has_data(s_history);
+                      history_has_data(history_store());
     set_visible(state.chart, show_chart);
     if (show_chart) {
         update_fault_caption();
@@ -1387,7 +1398,7 @@ void heatpump_screen_update(void) {
     set_visible(state.hz.box, running);
 
     // Strip
-    const home_run_summary_t& summary = s_history.summary;
+    const home_run_summary_t& summary = history_store().summary;
     if (running) {
         uint32_t since = summary.current.start;
         if (state.run_since != 0 && (since == 0 || state.run_since > since + 120)) {
@@ -1402,7 +1413,7 @@ void heatpump_screen_update(void) {
 
         char starts[16] = "--";
         bool many = false;
-        if (s_history.loaded) {
+        if (history_store().loaded) {
             snprintf(starts, sizeof(starts), i18n_get(STR_HOME_PER_HOUR),
                      (unsigned)summary.starts_last_hour);
             many = summary.starts_last_hour >= STARTS_WARN_PER_HOUR;
@@ -1418,7 +1429,7 @@ void heatpump_screen_update(void) {
         home_run_t last = summary.last;
         if (summary.current.start != 0) {
             last = summary.current;
-            last.end = state.run_stopped > last.start ? state.run_stopped : s_history.end;
+            last.end = state.run_stopped > last.start ? state.run_stopped : history_store().end;
         }
         if (last.start != 0 && last.end > last.start) {
             char clock[16];

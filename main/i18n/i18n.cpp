@@ -23,7 +23,7 @@ static language_t s_current_language = LANG_ENGLISH;
 // ============================================================================
 
 // English strings (default/fallback)
-static const char* strings_en[STR_COUNT] = {
+static const char* const strings_en[STR_COUNT] = {
     // General / Common
     [STR_OK] = "OK",
     [STR_CANCEL] = "Cancel",
@@ -581,7 +581,7 @@ static const char* strings_en[STR_COUNT] = {
 };
 
 // French strings
-static const char* strings_fr[STR_COUNT] = {
+static const char* const strings_fr[STR_COUNT] = {
     // General / Common
     [STR_OK] = "OK",
     [STR_CANCEL] = "Annuler",
@@ -1140,7 +1140,7 @@ static const char* strings_fr[STR_COUNT] = {
 };
 
 // Spanish strings
-static const char* strings_es[STR_COUNT] = {
+static const char* const strings_es[STR_COUNT] = {
     // General / Common
     [STR_OK] = "OK",
     [STR_CANCEL] = "Cancelar",
@@ -1706,7 +1706,7 @@ static const char* language_names_native[LANG_COUNT] = {
 };
 
 // All string tables indexed by language
-static const char** string_tables[LANG_COUNT] = {
+static const char* const* const string_tables[LANG_COUNT] = {
     [LANG_ENGLISH] = strings_en,
     [LANG_FRENCH] = strings_fr,
     [LANG_SPANISH] = strings_es,
