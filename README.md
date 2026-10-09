@@ -33,7 +33,7 @@ Everything runs locally: no cloud account is needed, and the controller keeps wo
 ## Features
 
 - **Touch UI on the device** - Home dashboard (state, tank temperature, compressor/fan/pump
-  indicators, supply/return/power, and a 24-hour run and fault chart while idle),
+  indicators, supply/return/power, and a 24-hour tank temperature, run and fault chart while idle),
   full status readout, temperature detail, compressor cycle history graph, mode and
   setpoint control, event log, error codes with descriptions, and technician
   P-parameters. Shows the local weather in the status bar. English, French, or Spanish,
