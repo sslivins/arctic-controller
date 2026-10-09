@@ -156,6 +156,27 @@ static void output_is_capped() {
                4);
 }
 
+static void cap_keeps_the_newest_spans() {
+    std::vector<event_entry_t> e;
+    for (uint32_t i = 0; i < 10; ++i) {
+        e.push_back(ev(T0 + i * 10, BOOT_A, EVENT_ERROR_APPEARED, 1));
+        e.push_back(ev(T0 + i * 10 + 5, BOOT_A, EVENT_ERROR_CLEARED, 1));
+    }
+    // Plus one still active, emitted last.
+    e.push_back(ev(T0 + 500, BOOT_A, EVENT_ERROR_APPEARED, 2));
+    fault_interval_t out[4];
+    size_t n = fault_intervals_from_events(e.data(), e.size(), T0, T0 + 9000,
+                                           BOOT_A, out, 4);
+    CHECK_EQ_U(n, 4);
+    if (n == 4) {
+        CHECK_EQ_U(out[0].start, T0 + 70);
+        CHECK_EQ_U(out[1].start, T0 + 80);
+        CHECK_EQ_U(out[2].start, T0 + 90);
+        CHECK_EQ_U(out[3].start, T0 + 500);
+        CHECK_EQ_U(out[3].end, 0);
+    }
+}
+
 int main() {
     pairs_appeared_with_cleared();
     active_fault_in_this_boot_is_open();
@@ -167,6 +188,7 @@ int main() {
     only_spans_overlapping_the_window_are_returned();
     overlapping_faults_are_sorted_by_start();
     output_is_capped();
+    cap_keeps_the_newest_spans();
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;

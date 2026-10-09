@@ -22,10 +22,18 @@ struct Builder {
     size_t count = 0;
 
     void emit(uint16_t site, uint32_t start, uint32_t end) {
-        if (count >= cap) return;
         if (start > window_end) return;
         if (end != 0 && end < window_start) return;
-        out[count++] = {start, end, site};
+        if (count < cap) {
+            out[count++] = {start, end, site};
+            return;
+        }
+        // Full: the newest faults matter most, so evict the oldest.
+        size_t oldest = 0;
+        for (size_t i = 1; i < count; ++i) {
+            if (out[i].start < out[oldest].start) oldest = i;
+        }
+        if (start > out[oldest].start) out[oldest] = {start, end, site};
     }
 };
 

@@ -23,7 +23,8 @@ typedef struct {
  * is closed at the last timed event of that boot. Only a span opened in
  * current_boot_id can be reported as still active.
  *
- * @return Number of spans written (at most cap).
+ * @return Number of spans written (at most cap). When there are more, the
+ *         newest (by start) are kept.
  */
 size_t fault_intervals_from_events(const event_entry_t* oldest_first, size_t n,
                                    uint32_t window_start, uint32_t window_end,
