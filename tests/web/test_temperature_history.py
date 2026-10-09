@@ -76,3 +76,28 @@ class TestTemperatureHistoryWeb:
 
         # Having stepped back, returning to the latest window is now possible.
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
+
+
+def _post(base_url: str, path: str, body: dict | None = None) -> None:
+    r = requests.post(f"{base_url}{path}", json=body, timeout=30, verify=False)
+    r.raise_for_status()
+
+
+class TestHistoryFaultMarkers:
+    def test_fault_is_marked_on_the_chart(
+        self, dashboard_page: Page, base_url: str
+    ):
+        _seed_history(base_url)
+        _post(base_url, "/api/test/inject-fault", {"code": "P02", "active": True})
+        try:
+            _post(base_url, "/api/test/inject-fault", {"code": "P02", "active": False})
+        finally:
+            _post(base_url, "/api/test/clear-faults")
+
+        _open_history(dashboard_page)
+
+        # A full-height red line at the fault onset, labelled with the code.
+        assert dashboard_page.locator(".hist-chart line.hist-fault").count() >= 1
+        labels = dashboard_page.locator(".hist-chart .hist-fault-label").all_text_contents()
+        assert any("P02" in t for t in labels)
+        expect(dashboard_page.locator(".hist-legend", has_text="Fault")).to_be_visible()

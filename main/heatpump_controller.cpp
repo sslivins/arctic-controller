@@ -15,6 +15,8 @@
 #include "macon_faults.h"
 #include "macon_fluid.h"
 #include "ext_temp_sensors.h"
+#include "daily_energy.h"
+#include "time_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -22,6 +24,7 @@
 #include "freertos/semphr.h"
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 static const char* TAG = "arctic";
 
@@ -43,6 +46,8 @@ static uint32_t s_holding_window_ms = 0;
 static uint32_t s_telemetry_window_ms = 0;
 static bool s_inlet_valid = false;
 static bool s_outlet_valid = false;
+static bool s_tank_valid = false;
+static DailyEnergy s_daily_energy;
 static bool s_cooling_setpoint_valid = false;
 static bool s_heating_setpoint_valid = false;
 static bool s_hot_water_setpoint_valid = false;
@@ -171,10 +176,16 @@ static void detectAndLogStateEvents() {
         if (cur_defrost != s_prev_defrosting) {
             event_log_record(cur_defrost ? EVENT_DEFROST_START : EVENT_DEFROST_END, 0);
         }
+    }
+    {
         // Fault changes: decode the previous and current fault bytes into
         // semantic sites (the library skips the RUN indicator) and diff by
         // opaque site id. The event-log payload is that site id — no register
         // or bit position is handled here.
+        // Unlike the other fields this also runs on the first poll, against an
+        // all-clear baseline: a fault already present at boot is logged as
+        // appeared, so its later clear pairs up (the history charts rebuild
+        // fault spans from these pairs).
         // Keep these large (MAX_ACTIVE_FAULTS-entry, ~1.5 KB each) decode
         // buffers OFF the stack. This runs on the demo-sync task's modest 4 KB
         // stack, and a full fault set plus the event_log calls below would
@@ -547,6 +558,7 @@ static void applyMaconMapping() {
 
     s_inlet_valid = ms.inlet_valid;
     s_outlet_valid = ms.outlet_valid;
+    s_tank_valid = ms.water_tank_valid;
     s_cooling_setpoint_valid = ms.cooling_setpoint_valid;
     s_heating_setpoint_valid = ms.heating_setpoint_valid;
     s_heating_setpoint_decoded = ms.heating_setpoint_valid;
@@ -584,6 +596,17 @@ static void applyMaconMapping() {
     // Preferred over the old V*I/10 estimate, which is now 10x low because the
     // library normalises ac_current to whole amps.
     s_state.realtime_power_w    = ms.realtime_power_w;
+    if (time_mgr_is_synced()) {
+        const time_t now_s = time(nullptr);
+        struct tm local;
+        localtime_r(&now_s, &local);
+        s_daily_energy.add(now_s, (local.tm_year + 1900) * 1000 + local.tm_yday,
+                           ms.realtime_power_w);
+    } else {
+        s_daily_energy.pause();
+    }
+    s_state.energy_today_wh    = s_daily_energy.wh();
+    s_state.energy_today_valid = s_daily_energy.valid();
 
     s_state.thermal_w = perf.valid ? perf.thermal_w : 0;
     s_state.cop_x100  = perf.valid ? perf.cop_x100 : 0;
@@ -716,6 +739,8 @@ TelemetrySnapshot getTelemetrySnapshot() {
             snapshot.compressor_running = s_state.isCompressorRunning();
             snapshot.inlet_c = s_state.inlet_water_temp;
             snapshot.outlet_c = s_state.outlet_water_temp;
+            snapshot.tank_valid = snapshot.connected;
+            snapshot.tank_c = s_state.water_tank_temp;
             if (s_state.operation == HeatPumpOperation::COOLING) {
                 snapshot.operation = TelemetryOperation::COOLING;
             } else if (s_state.operation == HeatPumpOperation::HEATING) {
@@ -759,6 +784,9 @@ TelemetrySnapshot getTelemetrySnapshot() {
             snapshot.compressor_valid && s_state.compressor_freq > 0;
         snapshot.inlet_c = s_state.inlet_water_temp;
         snapshot.outlet_c = s_state.outlet_water_temp;
+        snapshot.tank_valid = telemetry_fresh && s_tank_valid &&
+            s_state.water_tank_temp >= -50 && s_state.water_tank_temp <= 150;
+        snapshot.tank_c = s_state.water_tank_temp;
 
         if (telemetry_fresh) {
             if (s_state.operation == HeatPumpOperation::COOLING) {

@@ -62,6 +62,10 @@ static void recorder_task(void*) {
         if (snapshot.setpoint_valid) {
             sample.flags |= HISTORY_TELEMETRY_SETPOINT_VALID;
         }
+        if (snapshot.tank_valid) {
+            sample.flags |= HISTORY_TELEMETRY_TANK_VALID;
+            sample.tank_deci_c = (int16_t)(snapshot.tank_c * 10);
+        }
 
         esp_err_t err = history_storage_append_telemetry(&sample);
         if (err == ESP_OK) {

@@ -2523,6 +2523,12 @@ paths:
                           type: integer
                           nullable: true
                           description: Active setpoint (deci-Celsius) or null
+                        tank:
+                          type: integer
+                          nullable: true
+                          description: >-
+                            Water tank temperature (deci-Celsius) or null.
+                            Recorded from firmware 3.2.0; older samples are null.
                         mode:
                           type: integer
                           enum: [0, 1, 2, 3]
@@ -2533,6 +2539,33 @@ paths:
                         conn:
                           type: boolean
                           description: Whether the heat pump was connected
+                  faults:
+                    type: array
+                    description: >-
+                      Heat pump faults active at any point in the window,
+                      oldest first, paired from the event log's error_appeared
+                      and error_cleared events.
+                    items:
+                      type: object
+                      properties:
+                        fault_code:
+                          type: string
+                          nullable: true
+                          description: Code as shown on the OEM display (e.g. P02)
+                        fault_label:
+                          type: string
+                          nullable: true
+                          description: English description of the fault
+                        help_url:
+                          type: string
+                          nullable: true
+                        start:
+                          type: integer
+                          description: When the fault appeared (Unix epoch seconds)
+                        end:
+                          type: integer
+                          nullable: true
+                          description: When it cleared, or null if still active
         '401':
           description: API key required
           content:

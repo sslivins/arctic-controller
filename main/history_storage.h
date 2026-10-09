@@ -28,6 +28,8 @@ enum {
     HISTORY_TELEMETRY_INLET_VALID = 1 << 3,
     HISTORY_TELEMETRY_OUTLET_VALID = 1 << 4,
     HISTORY_TELEMETRY_SETPOINT_VALID = 1 << 5,
+    // Set only by firmware 3.2.0+; older samples carry no tank reading.
+    HISTORY_TELEMETRY_TANK_VALID = 1 << 6,
 };
 
 typedef struct {
@@ -38,6 +40,8 @@ typedef struct {
     int16_t setpoint_deci_c;
     uint8_t mode;
     uint8_t flags;
+    int16_t tank_deci_c;
+    uint16_t reserved;
 } history_telemetry_sample_t;
 
 esp_err_t history_storage_init(void);

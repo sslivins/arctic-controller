@@ -23,7 +23,7 @@ static language_t s_current_language = LANG_ENGLISH;
 // ============================================================================
 
 // English strings (default/fallback)
-static const char* strings_en[STR_COUNT] = {
+static const char* const strings_en[STR_COUNT] = {
     // General / Common
     [STR_OK] = "OK",
     [STR_CANCEL] = "Cancel",
@@ -254,6 +254,7 @@ static const char* strings_en[STR_COUNT] = {
     [STR_HISTORY_LEGEND_HEATING] = "Heating",
     [STR_HISTORY_LEGEND_COOLING] = "Cooling",
     [STR_HISTORY_LEGEND_HOT_WATER] = "Hot Water",
+    [STR_HISTORY_LEGEND_FAULT] = "Fault",
     [STR_HISTORY_LOADING] = "Loading history...",
     [STR_HISTORY_NO_DATA] = "No cycle history for this period",
     [STR_HISTORY_WAITING_FOR_TIME] = "Waiting for the clock to synchronize",
@@ -555,10 +556,32 @@ static const char* strings_en[STR_COUNT] = {
     [STR_PERF_SAVE_FAILED] = "Couldn't save the settings. Try again.",
     [STR_PERF_CAPTION_HEAT_PUMP] = "Estimate · heat pump sensors",
     [STR_PERF_CAPTION_EXTERNAL] = "Estimate · external sensors",
+    [STR_HOME_HEATING] = "Heating",
+    [STR_HOME_COOLING] = "Cooling",
+    [STR_HOME_DEFROSTING] = "Defrosting",
+    [STR_HOME_IDLE] = "Idle",
+    [STR_HOME_STANDBY] = "Standby",
+    [STR_HOME_FAULT] = "Fault",
+    [STR_HOME_DISCONNECTED] = "Disconnected",
+    [STR_HOME_TANK] = "Tank",
+    [STR_HOME_TANK_TARGET] = "Tank · target",
+    [STR_HOME_AT_SETPOINT] = "at setpoint",
+    [STR_HOME_NO_DEMAND] = "no demand",
+    [STR_HOME_TANK_DEFROST] = "Tank · normal,",
+    [STR_HOME_SUPPLY] = "SUPPLY",
+    [STR_HOME_RETURN] = "RETURN",
+    [STR_HOME_COMPRESSOR] = "COMPRESSOR",
+    [STR_HOME_RUNNING] = "Running",
+    [STR_HOME_STARTS] = "Starts",
+    [STR_HOME_LAST_RUN] = "Last run",
+    [STR_HOME_MINUTES] = "%u min",
+    [STR_HOME_PER_HOUR] = "%u/h",
+    [STR_HOME_NOW] = "now",
+    [STR_HOME_MORE_FAULTS] = "+%u more",
 };
 
 // French strings
-static const char* strings_fr[STR_COUNT] = {
+static const char* const strings_fr[STR_COUNT] = {
     // General / Common
     [STR_OK] = "OK",
     [STR_CANCEL] = "Annuler",
@@ -789,6 +812,7 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_HISTORY_LEGEND_HEATING] = "Chauffage",
     [STR_HISTORY_LEGEND_COOLING] = "Refroidissement",
     [STR_HISTORY_LEGEND_HOT_WATER] = "Eau chaude",
+    [STR_HISTORY_LEGEND_FAULT] = "Défaut",
     [STR_HISTORY_LOADING] = "Chargement de l'historique...",
     [STR_HISTORY_NO_DATA] = "Aucun historique pour cette période",
     [STR_HISTORY_WAITING_FOR_TIME] = "En attente de synchronisation de l'horloge",
@@ -1091,10 +1115,32 @@ static const char* strings_fr[STR_COUNT] = {
     [STR_PERF_SAVE_FAILED] = "Impossible d'enregistrer les réglages. Réessayez.",
     [STR_PERF_CAPTION_HEAT_PUMP] = "Estimation · sondes de la pompe à chaleur",
     [STR_PERF_CAPTION_EXTERNAL] = "Estimation · sondes externes",
+    [STR_HOME_HEATING] = "Chauffage",
+    [STR_HOME_COOLING] = "Refroidissement",
+    [STR_HOME_DEFROSTING] = "Dégivrage",
+    [STR_HOME_IDLE] = "En attente",
+    [STR_HOME_STANDBY] = "Veille",
+    [STR_HOME_FAULT] = "Défaut",
+    [STR_HOME_DISCONNECTED] = "Déconnecté",
+    [STR_HOME_TANK] = "Ballon",
+    [STR_HOME_TANK_TARGET] = "Ballon · consigne",
+    [STR_HOME_AT_SETPOINT] = "à la consigne",
+    [STR_HOME_NO_DEMAND] = "sans demande",
+    [STR_HOME_TANK_DEFROST] = "Ballon · normal,",
+    [STR_HOME_SUPPLY] = "DÉPART",
+    [STR_HOME_RETURN] = "RETOUR",
+    [STR_HOME_COMPRESSOR] = "COMPRESSEUR",
+    [STR_HOME_RUNNING] = "En marche",
+    [STR_HOME_STARTS] = "Démarrages",
+    [STR_HOME_LAST_RUN] = "Dernier cycle",
+    [STR_HOME_MINUTES] = "%u min",
+    [STR_HOME_PER_HOUR] = "%u/h",
+    [STR_HOME_NOW] = "maint.",
+    [STR_HOME_MORE_FAULTS] = "+%u autres",
 };
 
 // Spanish strings
-static const char* strings_es[STR_COUNT] = {
+static const char* const strings_es[STR_COUNT] = {
     // General / Common
     [STR_OK] = "OK",
     [STR_CANCEL] = "Cancelar",
@@ -1325,6 +1371,7 @@ static const char* strings_es[STR_COUNT] = {
     [STR_HISTORY_LEGEND_HEATING] = "Calefacción",
     [STR_HISTORY_LEGEND_COOLING] = "Enfriamiento",
     [STR_HISTORY_LEGEND_HOT_WATER] = "Agua caliente",
+    [STR_HISTORY_LEGEND_FAULT] = "Fallo",
     [STR_HISTORY_LOADING] = "Cargando historial...",
     [STR_HISTORY_NO_DATA] = "No hay historial para este período",
     [STR_HISTORY_WAITING_FOR_TIME] = "Esperando sincronización del reloj",
@@ -1627,6 +1674,28 @@ static const char* strings_es[STR_COUNT] = {
     [STR_PERF_SAVE_FAILED] = "No se pudieron guardar los ajustes. Inténtelo de nuevo.",
     [STR_PERF_CAPTION_HEAT_PUMP] = "Estimación · sensores de la bomba de calor",
     [STR_PERF_CAPTION_EXTERNAL] = "Estimación · sensores externos",
+    [STR_HOME_HEATING] = "Calefacción",
+    [STR_HOME_COOLING] = "Enfriamiento",
+    [STR_HOME_DEFROSTING] = "Descongelando",
+    [STR_HOME_IDLE] = "En espera",
+    [STR_HOME_STANDBY] = "En reposo",
+    [STR_HOME_FAULT] = "Fallo",
+    [STR_HOME_DISCONNECTED] = "Desconectado",
+    [STR_HOME_TANK] = "Tanque",
+    [STR_HOME_TANK_TARGET] = "Tanque · objetivo",
+    [STR_HOME_AT_SETPOINT] = "en consigna",
+    [STR_HOME_NO_DEMAND] = "sin demanda",
+    [STR_HOME_TANK_DEFROST] = "Tanque · normal,",
+    [STR_HOME_SUPPLY] = "IMPULSIÓN",
+    [STR_HOME_RETURN] = "RETORNO",
+    [STR_HOME_COMPRESSOR] = "COMPRESOR",
+    [STR_HOME_RUNNING] = "En marcha",
+    [STR_HOME_STARTS] = "Arranques",
+    [STR_HOME_LAST_RUN] = "Último ciclo",
+    [STR_HOME_MINUTES] = "%u min",
+    [STR_HOME_PER_HOUR] = "%u/h",
+    [STR_HOME_NOW] = "ahora",
+    [STR_HOME_MORE_FAULTS] = "+%u más",
 };
 
 // Language names in their own language (native names)
@@ -1637,7 +1706,7 @@ static const char* language_names_native[LANG_COUNT] = {
 };
 
 // All string tables indexed by language
-static const char** string_tables[LANG_COUNT] = {
+static const char* const* const string_tables[LANG_COUNT] = {
     [LANG_ENGLISH] = strings_en,
     [LANG_FRENCH] = strings_fr,
     [LANG_SPANISH] = strings_es,

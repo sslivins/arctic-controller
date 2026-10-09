@@ -199,28 +199,31 @@ class TestHeroTankFahrenheit:
             f"Expected '{expected_f}' in hero tank, got '{tank.text}'"
 
     def test_hero_tank_shows_f_unit(self, device: DeviceClient):
-        """Hero card should show °F unit symbol."""
+        """Hero card should show the °F unit symbol next to the number."""
         _switch_to_fahrenheit(device)
-        _wait_widget_contains(device, "hero_tank_temp", "°F")
+        _wait_widget_contains(device, "hero_tank_unit", "°F")
 
-        tank = device.find_widget(tag="hero_tank_temp")
-        assert tank is not None, "hero_tank_temp widget not found"
-        assert "°F" in tank.text, \
-            f"Expected '°F' in hero tank, got '{tank.text}'"
+        unit = device.find_widget(tag="hero_tank_unit")
+        assert unit is not None, "hero_tank_unit widget not found"
+        assert unit.text == "°F", \
+            f"Expected '°F' as the hero tank unit, got '{unit.text}'"
 
     def test_hero_tank_celsius_after_restore(self, device: DeviceClient):
         """After toggling back to °C, hero card shows Celsius value."""
         _reset_demo_temps(device)
         _switch_to_fahrenheit(device)
         _switch_to_celsius(device)
-        _wait_widget_contains(device, "hero_tank_temp", "°C")
+        _wait_widget_contains(device, "hero_tank_unit", "°C")
+        _wait_widget_contains(device, "hero_tank_temp", "42")
 
         tank = device.find_widget(tag="hero_tank_temp")
         assert tank is not None, "hero_tank_temp widget not found"
-        assert "42" in tank.text, \
+        assert tank.text == "42", \
             f"Expected '42' in hero tank after restore, got '{tank.text}'"
-        assert "°C" in tank.text, \
-            f"Expected '°C' in hero tank after restore, got '{tank.text}'"
+        unit = device.find_widget(tag="hero_tank_unit")
+        assert unit is not None, "hero_tank_unit widget not found"
+        assert unit.text == "°C", \
+            f"Expected '°C' as the hero tank unit after restore, got '{unit.text}'"
 
 
 # =========================================================================

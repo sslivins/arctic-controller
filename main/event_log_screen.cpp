@@ -1275,6 +1275,16 @@ void event_log_screen_set_active(bool active) {
     }
 }
 
+void event_log_screen_show_problems(void) {
+    state.category_mask = EVENT_CATEGORY_MASK_PROBLEMS;
+    state.time_filter = EVENT_TIME_ALL;
+    state.search_query[0] = '\0';
+    sync_category_buttons();
+    event_log_screen_dismiss_overlays();
+    state.last_count = -1;
+    rebuild_event_list();
+}
+
 void event_log_screen_dismiss_overlays(void) {
     // Search/filter overlays are built once per tab and reused, so dismissing
     // must only hide them -- deleting them here left Search/Filter dead until

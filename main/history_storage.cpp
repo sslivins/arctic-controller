@@ -67,18 +67,32 @@ typedef struct {
     uint32_t committed;
 } telemetry_sector_header_t;
 
+// On-flash sample layout (format version 1). The public sample adds the tank
+// reading, which lives in what used to be the record's reserved word so
+// existing journals stay readable.
+typedef struct {
+    uint32_t timestamp;
+    uint32_t sequence;
+    int16_t inlet_deci_c;
+    int16_t outlet_deci_c;
+    int16_t setpoint_deci_c;
+    uint8_t mode;
+    uint8_t flags;
+} telemetry_flash_sample_t;
+
 typedef struct {
     uint32_t magic;
     uint32_t sequence;
-    history_telemetry_sample_t sample;
-    uint32_t reserved;
+    telemetry_flash_sample_t sample;
+    int16_t tank_deci_c;
+    uint16_t reserved;
     uint32_t crc32;
 } telemetry_record_t;
 
 static_assert(sizeof(event_bank_header_t) == 32, "Unexpected event bank header size");
 static_assert(sizeof(event_journal_record_t) == EVENT_RECORD_SIZE,
               "Event journal records must remain fixed-size");
-static_assert(sizeof(history_telemetry_sample_t) == 16,
+static_assert(sizeof(telemetry_flash_sample_t) == 16,
               "Telemetry samples must remain compact");
 static_assert(sizeof(telemetry_sector_header_t) == TELEMETRY_SECTOR_HEADER_SIZE,
               "Unexpected telemetry sector header size");
@@ -556,6 +570,41 @@ static esp_err_t telemetry_rotate_locked() {
     return ESP_OK;
 }
 
+static void pack_telemetry_record(telemetry_record_t* record,
+                                  const history_telemetry_sample_t* sample,
+                                  uint32_t sequence) {
+    memset(record, 0xFF, sizeof(*record));
+    record->magic = TELEMETRY_RECORD_MAGIC;
+    record->sequence = sequence;
+    record->sample.timestamp = sample->timestamp;
+    record->sample.sequence = sequence;
+    record->sample.inlet_deci_c = sample->inlet_deci_c;
+    record->sample.outlet_deci_c = sample->outlet_deci_c;
+    record->sample.setpoint_deci_c = sample->setpoint_deci_c;
+    record->sample.mode = sample->mode;
+    record->sample.flags = sample->flags;
+    if (sample->flags & HISTORY_TELEMETRY_TANK_VALID) {
+        record->tank_deci_c = sample->tank_deci_c;
+    }
+    record->crc32 = telemetry_record_crc(record);
+}
+
+static history_telemetry_sample_t unpack_telemetry_record(
+    const telemetry_record_t& record) {
+    history_telemetry_sample_t sample = {};
+    sample.timestamp = record.sample.timestamp;
+    sample.sequence = record.sample.sequence;
+    sample.inlet_deci_c = record.sample.inlet_deci_c;
+    sample.outlet_deci_c = record.sample.outlet_deci_c;
+    sample.setpoint_deci_c = record.sample.setpoint_deci_c;
+    sample.mode = record.sample.mode;
+    sample.flags = record.sample.flags;
+    if (sample.flags & HISTORY_TELEMETRY_TANK_VALID) {
+        sample.tank_deci_c = record.tank_deci_c;
+    }
+    return sample;
+}
+
 esp_err_t history_storage_append_telemetry(
     const history_telemetry_sample_t* sample) {
     if (sample == nullptr || sample->timestamp == 0) return ESP_ERR_INVALID_ARG;
@@ -583,13 +632,7 @@ esp_err_t history_storage_append_telemetry(
         }
 
         telemetry_record_t record;
-        memset(&record, 0xFF, sizeof(record));
-        record.magic = TELEMETRY_RECORD_MAGIC;
-        record.sequence = s_telemetry_next_sequence;
-        record.sample = *sample;
-        record.sample.sequence = s_telemetry_next_sequence;
-        record.reserved = 0xFFFFFFFF;
-        record.crc32 = telemetry_record_crc(&record);
+        pack_telemetry_record(&record, sample, s_telemetry_next_sequence);
 
         err = esp_partition_write(
             s_partition,
@@ -669,8 +712,10 @@ esp_err_t history_storage_query_telemetry(
                 record.sample.timestamp >= end_timestamp) {
                 continue;
             }
+            const history_telemetry_sample_t sample =
+                unpack_telemetry_record(record);
             if (*count < capacity) {
-                samples[(*count)++] = record.sample;
+                samples[(*count)++] = sample;
             } else {
                 size_t oldest = 0;
                 for (size_t i = 1; i < *count; i++) {
@@ -678,8 +723,8 @@ esp_err_t history_storage_query_telemetry(
                         oldest = i;
                     }
                 }
-                if (telemetry_sample_compare(&record.sample, &samples[oldest]) > 0) {
-                    samples[oldest] = record.sample;
+                if (telemetry_sample_compare(&sample, &samples[oldest]) > 0) {
+                    samples[oldest] = sample;
                 }
             }
         }
@@ -767,13 +812,7 @@ esp_err_t history_storage_seed_telemetry_for_test(
             if (err != ESP_OK) break;
         }
         telemetry_record_t record;
-        memset(&record, 0xFF, sizeof(record));
-        record.magic = TELEMETRY_RECORD_MAGIC;
-        record.sequence = s_telemetry_next_sequence;
-        record.sample = samples[i];
-        record.sample.sequence = s_telemetry_next_sequence;
-        record.reserved = 0xFFFFFFFF;
-        record.crc32 = telemetry_record_crc(&record);
+        pack_telemetry_record(&record, &samples[i], s_telemetry_next_sequence);
         err = esp_partition_write(
             s_partition,
             telemetry_record_offset(s_telemetry_active_sector,

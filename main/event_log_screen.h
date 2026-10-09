@@ -39,6 +39,12 @@ void event_log_screen_set_active(bool active);
 void event_log_screen_dismiss_overlays(void);
 
 /**
+ * @brief Preset the list to Problems over all time (no search). The caller
+ *        switches to the Events tab.
+ */
+void event_log_screen_show_problems(void);
+
+/**
  * @brief Check if event log screen is visible
  */
 bool event_log_screen_is_shown(void);

@@ -146,20 +146,20 @@ The `conftest.py` session fixture handles this automatically.
 | [`device_client.py`](device_client.py) | Python HTTP client wrapping all 19 test endpoints + production API |
 | [`openapi-test.yaml`](openapi-test.yaml) | OpenAPI 3.0 spec for the test instrumentation API |
 
-### Test Files (294 UI tests + 9 screenshot API tests + 10 HTTPS tests + 292 REST API tests + 61 web tests + API contract tests)
+### Test Files (290 UI tests + 9 screenshot API tests + 10 HTTPS tests + 292 REST API tests + 61 web tests + API contract tests)
 
 | File | Tests | Description |
 |------|-------|-------------|
-| [`test_main_screen.py`](test_main_screen.py) | 20 | Hero card states, tank temp, component dots, performance strip, error card |
+| [`test_main_screen.py`](test_main_screen.py) | 23 | Hero card states, tank temp, component pills, tiles, fault banner |
 | [`test_device_name.py`](test_device_name.py) | 7 | Friendly controller name: Home display, settings row, live updates, glyphs, validation |
 | [`test_error_mapping.py`](test_error_mapping.py) | 33 | Every Macon fault code → correct code + description on UI |
-| [`test_system_screen.py`](test_system_screen.py) | 31 | System sub-screen: temps, flows, component states, section headers |
+| [`test_system_screen.py`](test_system_screen.py) | 18 | System sub-screen: temps, flows, component states, section headers |
 | [`test_fahrenheit.py`](test_fahrenheit.py) | 24 | °F/°C conversion: hero card, temps screen, API preference, math verification |
 | [`test_temps_screen.py`](test_temps_screen.py) | 22 | Temps sub-screen: all temperature rows, labels, values, navigation |
 | [`test_control_screen.py`](test_control_screen.py) | 19 | Control sub-screen: power button, mode buttons, setpoints, P-parameters |
-| [`test_localization.py`](test_localization.py) | 31 | French and Spanish translations on main screen |
+| [`test_localization.py`](test_localization.py) | 29 | French and Spanish translations on main screen |
 | [`test_errors_screen.py`](test_errors_screen.py) | 12 | Errors sub-screen: active/cleared errors, descriptions, clear history |
-| [`test_screen_performance.py`](test_screen_performance.py) | 11 | Render budget (300 ms) for all screen transitions, heavy state, leak detection |
+| [`test_screen_performance.py`](test_screen_performance.py) | 10 | Render budget (300 ms) for all screen transitions, heavy state, leak detection |
 | [`test_event_log_screen.py`](test_event_log_screen.py) | 10 | Event log sub-screen: navigation, title, events, clear via API |
 | [`test_navigation.py`](test_navigation.py) | 10 | Settings sub-screen navigation and back buttons |
 | [`test_performance.py`](test_performance.py) | 56 | Heat output/COP settings: API validation, Modbus TCP and BACnet/IP sensor test/browse/discovery against fake servers started on the runner, BACnet identity/RPM-fallback/health handling, bounded huge Object_List browse, Performance screen and sensor editor |
