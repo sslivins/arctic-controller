@@ -1,6 +1,7 @@
 #include "heatpump_history_screen.h"
 
 #include "app_preferences.h"
+#include "chart_fault_zone.h"
 #include "fault_history.h"
 #include "fonts/fonts.h"
 #include "macon_faults.h"
@@ -34,11 +35,11 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 #define COLOR_INLET     lv_color_hex(0xd946ef)
 #define COLOR_OUTLET    lv_color_hex(0xf1f5f9)
 #define COLOR_SETPOINT  lv_color_hex(0x4ade80)
-#define COLOR_HEATING   lv_color_hex(0xef4444)
+#define COLOR_HEATING   lv_color_hex(0xf97316)
 #define COLOR_COOLING   lv_color_hex(0x3b82f6)
 #define COLOR_HOT_WATER lv_color_hex(0xfbbf24)
-// Faults are marked by shape (a bar along the top edge plus the code), not by
-// a band, so the red never reads as heating.
+// Red is reserved for faults, drawn as hatched zones with a solid start line
+// so they never read as a mode band.
 #define COLOR_FAULT     UI_COLOR_ERROR
 
 static constexpr size_t MAX_FAULTS = 16;
@@ -414,22 +415,17 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
 // A bar along the top edge per fault, labelled with its code. Faults whose
 // labels would collide share one label: the code if they are all the same
 // fault, otherwise the count ("×3").
-static void draw_fault_markers(lv_layer_t* layer, const lv_area_t& plot) {
-    static constexpr int32_t BAR_H = 8, LABEL_W = 100;
+static void draw_fault_zones(lv_layer_t* layer, const lv_area_t& plot) {
     for (size_t i = 0; i < state.fault_count; i++) {
         const auto& f = state.faults[i];
-        const int32_t x1 = map_x(f.start, plot);
-        int32_t x2 = map_x(fault_end(f), plot);
-        if (x2 < x1 + 3) x2 = x1 + 3;
-        lv_draw_rect_dsc_t bar;
-        lv_draw_rect_dsc_init(&bar);
-        bar.bg_color = COLOR_FAULT;
-        bar.bg_opa = LV_OPA_COVER;
-        bar.radius = 2;
-        const lv_area_t area = {x1, plot.y1, x2, plot.y1 + BAR_H};
-        lv_draw_rect(layer, &bar, &area);
+        chart_draw_fault_zone(layer, map_x(f.start, plot),
+                              map_x(fault_end(f), plot), plot.y1, plot.y2,
+                              COLOR_FAULT);
     }
+}
 
+static void draw_fault_labels(lv_layer_t* layer, const lv_area_t& plot) {
+    static constexpr int32_t LABEL_W = 100;
     size_t i = 0;
     while (i < state.fault_count) {
         const int32_t x = map_x(state.faults[i].start, plot);
@@ -448,10 +444,9 @@ static void draw_fault_markers(lv_layer_t* layer, const lv_area_t& plot) {
             snprintf(text, sizeof(text), LV_SYMBOL_WARNING " \xC3\x97%u",
                      (unsigned)(j - i));
         }
-        int32_t lx = x;
+        int32_t lx = x + 6;
         if (lx + LABEL_W > plot.x2) lx = plot.x2 - LABEL_W;
-        const lv_area_t label = {lx, plot.y1 + BAR_H + 4, lx + LABEL_W,
-                                 plot.y1 + BAR_H + 34};
+        const lv_area_t label = {lx, plot.y1 + 4, lx + LABEL_W, plot.y1 + 34};
         draw_label(layer, label, text, COLOR_FAULT, LV_TEXT_ALIGN_LEFT,
                    &montserrat_24_latin);
         i = j;
@@ -529,6 +524,7 @@ static void chart_draw_cb(lv_event_t* event) {
         lv_draw_rect(layer, &band_dsc, &band);
         i = j - 1;
     }
+    draw_fault_zones(layer, plot);
 
     for (int grid = 0; grid <= 5; grid++) {
         int32_t y = plot.y2 -
@@ -649,7 +645,7 @@ static void chart_draw_cb(lv_event_t* event) {
         }
     }
 
-    draw_fault_markers(layer, plot);
+    draw_fault_labels(layer, plot);
     draw_cursor(layer, plot, min_value, max_value);
 }
 

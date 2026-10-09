@@ -50,69 +50,54 @@ LANG_TAGS = {
 # Translation tables — main screen labels
 # ---------------------------------------------------------------------------
 
+# Hero state words. The hero line may append a detail after STATE_SEP
+# ("Défaut · P02", "En attente · à la consigne"), so tests compare the word.
 HERO_STATES = {
-    "English":  {"IDLE": "IDLE",          "FAULT": "FAULT",    "STANDBY": "STANDBY",
-                 "DEFROST": "DEFROST",    "HEATING": "HEATING",
-                 "DISCONNECTED": "DISCONNECTED"},
-    "Français": {"IDLE": "INACTIF",       "FAULT": "PANNE",   "STANDBY": "EN VEILLE",
-                 "DEFROST": "DÉGIVRAGE",  "HEATING": "CHAUFFAGE",
-                 "DISCONNECTED": "DÉCONNECTÉ"},
-    "Español":  {"IDLE": "INACTIVO",      "FAULT": "FALLO",   "STANDBY": "EN ESPERA",
-                 "DEFROST": "DESHIELO", "HEATING": "CALEFACCIÓN",
-                 "DISCONNECTED": "DESCONECTADO"},
+    "English":  {"IDLE": "Idle",          "FAULT": "Fault",   "STANDBY": "Standby",
+                 "DEFROST": "Defrosting", "HEATING": "Heating",
+                 "COOLING": "Cooling",    "DISCONNECTED": "Disconnected"},
+    "Français": {"IDLE": "En attente",    "FAULT": "Défaut",  "STANDBY": "Veille",
+                 "DEFROST": "Dégivrage",  "HEATING": "Chauffage",
+                 "COOLING": "Refroidissement", "DISCONNECTED": "Déconnecté"},
+    "Español":  {"IDLE": "En espera",     "FAULT": "Fallo",   "STANDBY": "En reposo",
+                 "DEFROST": "Descongelando", "HEATING": "Calefacción",
+                 "COOLING": "Enfriamiento", "DISCONNECTED": "Desconectado"},
 }
 
-HERO_MODES = {
-    "English":  {MODE_HEATING: "HEATING", MODE_COOLING: "COOLING",
-                 MODE_HOT_WATER: "HOT WATER"},
-    "Français": {MODE_HEATING: "CHAUFFAGE", MODE_COOLING: "REFROIDISSEMENT",
-                 MODE_HOT_WATER: "EAU CHAUDE"},
-    "Español":  {MODE_HEATING: "CALEFACCIÓN", MODE_COOLING: "ENFRIAMIENTO",
-                 MODE_HOT_WATER: "AGUA CALIENTE"},
+STATE_SEP = " · "
+
+# Labels on the Home component pills (the aux heater pill is hidden while off).
+COMPONENT_PILLS = {
+    "English":  ["Compressor", "Fan", "Pump"],
+    "Français": ["Compresseur", "Ventilateur", "Pompe"],
+    "Español":  ["Compresor", "Ventilador", "Bomba"],
 }
 
-COMPONENT_DOTS = {
-    "English":  ["Compressor", "Fan", "Pump", "Aux Heat"],
-    "Français": ["Compresseur", "Ventilateur", "Pompe", "Appoint"],
-    "Español":  ["Compresor", "Ventilador", "Bomba", "Apoyo"],
+# Tile captions shown in every state (ΔT/COP/compressor tiles only while running).
+TILE_CAPTIONS = {
+    "English":  ["SUPPLY", "RETURN", "POWER"],
+    "Français": ["DÉPART", "RETOUR", "PUISSANCE"],
+    "Español":  ["IMPULSIÓN", "RETORNO", "POTENCIA"],
 }
 
-PERF_STRIP_LABELS = {
-    "English":  ["POWER", "FAN"],
-    "Français": ["PUISSANCE", "VENTILATEUR"],
-    "Español":  ["POTENCIA", "VENTILADOR"],
+# Bottom strip labels while the compressor is not running.
+HOME_STRIP_LABELS = {
+    "English":  ["Last run", "Today"],
+    "Français": ["Dernier cycle", "Aujourd'hui"],
+    "Español":  ["Último ciclo", "Hoy"],
 }
 
-# Fan speed unit on the Home performance strip.
-FAN_SPEED_UNIT = {
-    "English":  "RPM",
-    "Français": "tr/min",
-    "Español":  "rpm",
-}
-
-ERROR_CARD_NO_ERRORS = {
-    "English":  "No active errors",
-    "Français": "Aucune erreur active",
-    "Español":  "Sin errores activos",
-}
-
-# Labels that ARE dynamically refreshed (footer nav, tank description)
+# Caption under the hero tank temperature ("Tank", "Tank · target", ...).
 TANK_DESCRIPTION = {
-    "English":  "Tank Temperature",
-    "Français": "Température du ballon",
-    "Español":  "Temperatura del depósito",
+    "English":  "Tank",
+    "Français": "Ballon",
+    "Español":  "Tanque",
 }
 
 FOOTER_NAV = {
     "English":  ["Status", "Control", "Events"],
     "Français": ["État", "Contrôle", "Événements"],
     "Español":  ["Estado", "Control", "Eventos"],
-}
-
-HOME_PANEL_HEADERS = {
-    "English":  ["Temperatures", "Compressor", "Energy"],
-    "Français": ["Températures", "Compresseur", "Énergie"],
-    "Español":  ["Temperaturas", "Compresor", "Energía"],
 }
 
 DEMO_BANNER = {
@@ -182,26 +167,41 @@ ENGLISH_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _wait_widget_text(device: DeviceClient, tag: str, expected: str, *,
-                      contains: bool = False, timeout: float = 5.0):
-    """Wait for widget ``tag`` to display ``expected`` before asserting.
+def _hero_word(device: DeviceClient):
+    """The hero state word, without any " · detail" suffix (None if absent)."""
+    w = device.find_widget(tag="hero_state")
+    if w is None or w.text is None:
+        return None
+    return w.text.split(STATE_SEP)[0]
 
-    Dynamically-refreshed labels (hero state, error card) update asynchronously
-    after a demo-state or language change. Rather than sleep a fixed UI_SETTLE
-    guess and hope the refresh landed, poll for the exact text. Best-effort
-    (never raises): the caller's own asserts make the final authoritative check
-    with a clear message, so a genuine mismatch still fails loudly.
-    """
-    def _ready() -> bool:
-        w = device.find_widget(tag=tag)
-        if w is None or w.text is None:
-            return False
-        return (expected in w.text) if contains else (w.text == expected)
 
-    op = "contains" if contains else "=="
-    device.wait_until(f"{tag} text {op} {expected!r}", _ready,
-                      timeout=timeout, expect_within=UI_SETTLE,
+def _assert_hero_state(device: DeviceClient, expected: str):
+    """Wait for, then assert, the hero state word."""
+    device.wait_until(f"hero_state word == {expected!r}",
+                      lambda: _hero_word(device) == expected,
+                      timeout=5.0, expect_within=UI_SETTLE,
                       raise_on_timeout=False)
+    word = _hero_word(device)
+    assert word == expected, f"Expected hero state {expected!r}, got {word!r}"
+
+
+def _tank_caption_shown(device: DeviceClient, lang_name: str) -> bool:
+    w = device.find_widget(tag="hero_sub")
+    return (w is not None and w.text is not None
+            and w.text.startswith(TANK_DESCRIPTION[lang_name]))
+
+
+def _open_errors_overlay(device: DeviceClient):
+    """Open the errors overlay via the Home fault banner.
+
+    The banner is hidden while there are no faults, so make sure the demo fault
+    is active first.
+    """
+    device.inject_fault(DEMO_FAULT, True)
+    assert device.wait_for_widget(tag="error_label", timeout=5.0), \
+        "fault banner did not appear after injecting the demo fault"
+    device.click(tag="error_label")
+    assert device.wait_for_screen("errors", timeout=5.0)
 
 
 def _has_text_containing(device: DeviceClient, expected: str) -> bool:
@@ -273,7 +273,7 @@ def _switch_language(device: DeviceClient, lang_name: str):
     # a clear message if a label genuinely fails to translate.
     device.wait_until(
         f"main screen tank description in {lang_name}",
-        lambda: device.has_widget(text=TANK_DESCRIPTION[lang_name]),
+        lambda: _tank_caption_shown(device, lang_name),
         timeout=5.0,
         raise_on_timeout=False,
     )
@@ -312,66 +312,48 @@ class TestFrenchHeroStates:
         _switch_language(device, "Français")
 
     def test_idle_french(self, device: DeviceClient):
-        """IDLE → INACTIF in French."""
+        """Idle → En attente in French."""
         device.clear_all_faults()
         _set_idle(device, working_mode=MODE_HEATING)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["IDLE"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Français"]["IDLE"]
+        _assert_hero_state(device, HERO_STATES["Français"]["IDLE"])
 
     def test_fault_french(self, device: DeviceClient):
-        """FAULT → PANNE in French."""
+        """Fault → Défaut in French."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["FAULT"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Français"]["FAULT"]
+        _assert_hero_state(device, HERO_STATES["Français"]["FAULT"])
 
     def test_standby_french(self, device: DeviceClient):
-        """STANDBY → EN VEILLE in French."""
+        """Standby → Veille in French."""
         device.clear_all_faults()
         device.set_demo_fields(unit_on=0)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["STANDBY"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Français"]["STANDBY"]
+        _assert_hero_state(device, HERO_STATES["Français"]["STANDBY"])
 
     def test_floor_heat_selection_shows_heating_french(self, device: DeviceClient):
         """Heating selection still reports the actual heating operation."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_HEATING)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["HEATING"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Français"]["HEATING"]
+        _assert_hero_state(device, HERO_STATES["Français"]["HEATING"])
 
     def test_cooling_french(self, device: DeviceClient):
-        """COOLING → REFROIDISSEMENT in French."""
+        """Cooling → Refroidissement in French."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_COOLING, cooling_on=1)
-        _wait_widget_text(device, "hero_state", HERO_MODES["Français"][MODE_COOLING])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_MODES["Français"][MODE_COOLING]
+        _assert_hero_state(device, HERO_STATES["Français"]["COOLING"])
 
     def test_hot_water_selection_shows_heating_french(self, device: DeviceClient):
         """Hot-water selection still reports the actual heating operation."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_HOT_WATER)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Français"]["HEATING"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Français"]["HEATING"]
+        _assert_hero_state(device, HERO_STATES["Français"]["HEATING"])
 
 
 # =========================================================================
-# French — Component Dots, Performance Strip, Error Card
+# French — Tank caption, Footer, Static Home Labels
 # =========================================================================
 
 class TestFrenchMainLabels:
-    """Verify tank description, footer nav, and error card in French."""
+    """Verify tank caption, footer nav, and static Home labels in French."""
 
     @pytest.fixture(autouse=True)
     def _switch_to_french(self, device: DeviceClient):
@@ -379,7 +361,7 @@ class TestFrenchMainLabels:
 
     def test_tank_description_french(self, device: DeviceClient):
         """Tank description label translates to French."""
-        assert device.has_widget(text=TANK_DESCRIPTION["Français"]), \
+        assert _tank_caption_shown(device, "Français"), \
             f"French tank description '{TANK_DESCRIPTION['Français']}' not found"
 
     def test_footer_nav_french(self, device: DeviceClient):
@@ -391,31 +373,12 @@ class TestFrenchMainLabels:
     def test_static_home_labels_refresh_french(self, device: DeviceClient):
         """Home labels that are created once still refresh after the language switch."""
         for label in (
-            COMPONENT_DOTS["Français"] +
-            PERF_STRIP_LABELS["Français"] +
-            HOME_PANEL_HEADERS["Français"] +
+            COMPONENT_PILLS["Français"] +
+            TILE_CAPTIONS["Français"] +
+            HOME_STRIP_LABELS["Français"] +
             [DEMO_BANNER["Français"]]
         ):
             _assert_visible_text(device, label)
-
-    def test_fan_speed_unit_french(self, device: DeviceClient):
-        """The fan speed reading uses the French unit, not the English 'RPM'."""
-        _set_running(device)
-        expected = f"{FAN_MED} {FAN_SPEED_UNIT['Français']}"
-        _wait_widget_text(device, "perf_fan", expected, contains=True)
-        w = device.find_widget(tag="perf_fan")
-        assert w is not None and expected in (w.text or ""), \
-            f"Expected '{expected}' in fan speed, got '{w.text if w else None}'"
-
-    def test_error_card_no_errors_french(self, device: DeviceClient):
-        """Error card shows French 'no errors' text."""
-        device.clear_all_faults()
-        _wait_widget_text(device, "error_label", ERROR_CARD_NO_ERRORS["Français"],
-                          contains=True)
-        w = device.find_widget(tag="error_label")
-        assert w is not None
-        assert ERROR_CARD_NO_ERRORS["Français"] in w.text, \
-            f"Expected '{ERROR_CARD_NO_ERRORS['Français']}' in error label, got '{w.text}'"
 
 
 # =========================================================================
@@ -430,66 +393,48 @@ class TestSpanishHeroStates:
         _switch_language(device, "Español")
 
     def test_idle_spanish(self, device: DeviceClient):
-        """IDLE → INACTIVO in Spanish."""
+        """Idle → En espera in Spanish."""
         device.clear_all_faults()
         _set_idle(device, working_mode=MODE_HEATING)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["IDLE"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Español"]["IDLE"]
+        _assert_hero_state(device, HERO_STATES["Español"]["IDLE"])
 
     def test_fault_spanish(self, device: DeviceClient):
-        """FAULT → FALLO in Spanish."""
+        """Fault → Fallo in Spanish."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["FAULT"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Español"]["FAULT"]
+        _assert_hero_state(device, HERO_STATES["Español"]["FAULT"])
 
     def test_standby_spanish(self, device: DeviceClient):
-        """STANDBY → EN ESPERA in Spanish."""
+        """Standby → En reposo in Spanish."""
         device.clear_all_faults()
         device.set_demo_fields(unit_on=0)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["STANDBY"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Español"]["STANDBY"]
+        _assert_hero_state(device, HERO_STATES["Español"]["STANDBY"])
 
     def test_floor_heat_selection_shows_heating_spanish(self, device: DeviceClient):
         """Heating selection still reports the actual heating operation."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_HEATING)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["HEATING"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Español"]["HEATING"]
+        _assert_hero_state(device, HERO_STATES["Español"]["HEATING"])
 
     def test_cooling_spanish(self, device: DeviceClient):
-        """COOLING → ENFRIAMIENTO in Spanish."""
+        """Cooling → Enfriamiento in Spanish."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_COOLING, cooling_on=1)
-        _wait_widget_text(device, "hero_state", HERO_MODES["Español"][MODE_COOLING])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_MODES["Español"][MODE_COOLING]
+        _assert_hero_state(device, HERO_STATES["Español"]["COOLING"])
 
     def test_hot_water_selection_shows_heating_spanish(self, device: DeviceClient):
         """Hot-water selection still reports the actual heating operation."""
         device.clear_all_faults()
         _set_running(device, working_mode=MODE_HOT_WATER)
-        _wait_widget_text(device, "hero_state", HERO_STATES["Español"]["HEATING"])
-        w = device.find_widget(tag="hero_state")
-        assert w is not None
-        assert w.text == HERO_STATES["Español"]["HEATING"]
+        _assert_hero_state(device, HERO_STATES["Español"]["HEATING"])
 
 
 # =========================================================================
-# Spanish — Component Dots, Performance Strip, Error Card
+# Spanish — Tank caption, Footer, Static Home Labels
 # =========================================================================
 
 class TestSpanishMainLabels:
-    """Verify tank description, footer nav, and error card in Spanish."""
+    """Verify tank caption, footer nav, and static Home labels in Spanish."""
 
     @pytest.fixture(autouse=True)
     def _switch_to_spanish(self, device: DeviceClient):
@@ -497,7 +442,7 @@ class TestSpanishMainLabels:
 
     def test_tank_description_spanish(self, device: DeviceClient):
         """Tank description label translates to Spanish."""
-        assert device.has_widget(text=TANK_DESCRIPTION["Español"]), \
+        assert _tank_caption_shown(device, "Español"), \
             f"Spanish tank description '{TANK_DESCRIPTION['Español']}' not found"
 
     def test_footer_nav_spanish(self, device: DeviceClient):
@@ -509,31 +454,12 @@ class TestSpanishMainLabels:
     def test_static_home_labels_refresh_spanish(self, device: DeviceClient):
         """Home labels that are created once still refresh after the language switch."""
         for label in (
-            COMPONENT_DOTS["Español"] +
-            PERF_STRIP_LABELS["Español"] +
-            HOME_PANEL_HEADERS["Español"] +
+            COMPONENT_PILLS["Español"] +
+            TILE_CAPTIONS["Español"] +
+            HOME_STRIP_LABELS["Español"] +
             [DEMO_BANNER["Español"]]
         ):
             _assert_visible_text(device, label)
-
-    def test_fan_speed_unit_spanish(self, device: DeviceClient):
-        """The fan speed reading uses the Spanish unit, not the English 'RPM'."""
-        _set_running(device)
-        expected = f"{FAN_MED} {FAN_SPEED_UNIT['Español']}"
-        _wait_widget_text(device, "perf_fan", expected, contains=True)
-        w = device.find_widget(tag="perf_fan")
-        assert w is not None and expected in (w.text or ""), \
-            f"Expected '{expected}' in fan speed, got '{w.text if w else None}'"
-
-    def test_error_card_no_errors_spanish(self, device: DeviceClient):
-        """Error card shows Spanish 'no errors' text."""
-        device.clear_all_faults()
-        _wait_widget_text(device, "error_label", ERROR_CARD_NO_ERRORS["Español"],
-                          contains=True)
-        w = device.find_widget(tag="error_label")
-        assert w is not None
-        assert ERROR_CARD_NO_ERRORS["Español"] in w.text, \
-            f"Expected '{ERROR_CARD_NO_ERRORS['Español']}' in error label, got '{w.text}'"
 
 
 @pytest.mark.parametrize("lang_name", ["Français", "Español"])
@@ -567,9 +493,7 @@ def test_tabs_settings_and_overlays_refresh_after_touch_language_change(
 
     device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0)
-    device.clear_all_faults()
-    device.click(tag="error_label")
-    assert device.wait_for_screen("errors", timeout=5.0)
+    _open_errors_overlay(device)
     for label in ERRORS_OVERLAY_LABELS[lang_name]:
         _assert_visible_text(device, label)
     _assert_all_text_drawable(device, "errors overlay")
@@ -595,11 +519,9 @@ def test_tabs_settings_and_overlays_refresh_after_touch_language_change(
 @pytest.mark.parametrize("lang_name", ["Français", "Español"])
 def test_fault_cards_translate_severity_and_month(device: DeviceClient, lang_name: str):
     """Severity and start date on fault cards follow the device language (#304)."""
-    # The autouse fixture leaves the demo fault active, so there is always at
-    # least one card with a real start time.
+    # The demo fault gives at least one card with a real start time.
     _switch_language(device, lang_name)
-    device.click(tag="error_label")
-    assert device.wait_for_screen("errors", timeout=5.0)
+    _open_errors_overlay(device)
     try:
         device.wait_until(
             "fault cards rendered",
@@ -688,11 +610,11 @@ def test_rest_language_preference_refreshes_visible_ui(
     device.wait_until(
         f"home label refreshed to {lang_name}",
         lambda: _has_text_containing(device, DEMO_BANNER[lang_name])
-                and _has_text_containing(device, COMPONENT_DOTS[lang_name][0]),
+                and _has_text_containing(device, COMPONENT_PILLS[lang_name][0]),
         timeout=5.0,
     )
-    for label in (DEMO_BANNER[lang_name], COMPONENT_DOTS[lang_name][0],
-                  PERF_STRIP_LABELS[lang_name][0], FOOTER_NAV[lang_name][0]):
+    for label in (DEMO_BANNER[lang_name], COMPONENT_PILLS[lang_name][0],
+                  TILE_CAPTIONS[lang_name][0], FOOTER_NAV[lang_name][0]):
         _assert_visible_text(device, label)
 
 # Category chips on the Events tab, in the order they are laid out.
@@ -718,7 +640,7 @@ def _assert_labels_readable(device: DeviceClient, labels: list[str], where: str)
 def test_component_row_and_event_chips_stay_readable(device: DeviceClient, lang_name: str):
     """Full words fit on the Home component row and Events chips without tiny text."""
     _switch_language(device, lang_name)
-    _assert_labels_readable(device, COMPONENT_DOTS[lang_name], "home component row")
+    _assert_labels_readable(device, COMPONENT_PILLS[lang_name], "home component row")
 
     device.click(tag="nav_events")
     assert device.wait_for_screen("event_log", timeout=5.0)

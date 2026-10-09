@@ -83,7 +83,7 @@
       --hist-out: #334155;
       --hist-in: #c026d3;
       --hist-set: #16a34a;
-      --hist-heat: #ef4444;
+      --hist-heat: #f97316;
       --hist-cool: #3b82f6;
       --hist-dhw: #f59e0b;
     }
@@ -112,7 +112,7 @@
       --hist-out: #f1f5f9;
       --hist-in: #d946ef;
       --hist-set: #4ade80;
-      --hist-heat: #ef4444;
+      --hist-heat: #f97316;
       --hist-cool: #3b82f6;
       --hist-dhw: #fbbf24;
     }
@@ -1555,6 +1555,20 @@
         i = j;
       }
 
+      // Fault zones (matches the device): a faint hatched fill over the
+      // fault's span plus a solid full-height line where it started. Red is
+      // reserved for faults; heating bands are orange.
+      const faults = data.faults || [];
+      svg += `<defs><pattern id="hist-hatch" patternUnits="userSpaceOnUse" width="12" height="12" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="12" stroke="var(--cp-danger)" stroke-width="2" opacity="0.4"/></pattern></defs>`;
+      for (const f of faults) {
+        const x1 = Math.max(plotL, mapX(f.start)), x2 = Math.min(plotR, mapX(f.end ?? end));
+        if (x2 - x1 >= 8) {
+          svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="var(--cp-danger)" opacity="0.1"/>`;
+          svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="url(#hist-hatch)"/>`;
+        }
+        svg += `<line class="hist-fault" x1="${x1.toFixed(1)}" y1="${plotT}" x2="${x1.toFixed(1)}" y2="${plotB}" stroke="var(--cp-danger)" stroke-width="2" opacity="0.7"/>`;
+      }
+
       // Horizontal gridlines + y-axis temperature labels.
       for (let g = 0; g <= 5; g++) {
         const y = plotB - g / 5 * plotH;
@@ -1632,14 +1646,11 @@
       svg += line("out", "var(--hist-out)", false);
       svg += line("in", "var(--hist-in)", false);
 
-      // Faults: a solid bar along the top edge plus the code, so they never
-      // read as a (red) heating band. Labels that would overlap are dropped;
-      // the bar and the hover tooltip still show every fault.
-      const faults = data.faults || [];
+      // Fault codes beside each fault line. Labels that would overlap are
+      // dropped; the line and the hover tooltip still show every fault.
       let labelEnd = -Infinity;
       for (const f of faults) {
-        const x1 = mapX(f.start), x2 = mapX(f.end ?? end);
-        svg += `<rect class="hist-fault" x="${x1.toFixed(1)}" y="${plotT}" width="${Math.max(3, x2 - x1).toFixed(1)}" height="6" rx="2" fill="var(--cp-danger)"/>`;
+        const x1 = Math.max(plotL, mapX(f.start)) + 6;
         const label = `⚠ ${f.fault_code || "?"}`;
         if (x1 >= labelEnd) {
           const lx = Math.min(x1, plotR - 54);
@@ -1721,7 +1732,7 @@
               <span><i class="band" style="background:var(--hist-heat)"></i>Heating</span>
               <span><i class="band" style="background:var(--hist-cool)"></i>Cooling</span>
               <span><i class="band" style="background:var(--hist-dhw)"></i>Hot Water</span>
-              <span><i style="background:var(--cp-danger);height:6px"></i>Fault</span>
+              <span><i style="background:var(--cp-danger);width:3px;height:14px"></i>Fault</span>
             </div>
           </div>
           <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>

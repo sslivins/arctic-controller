@@ -25,7 +25,7 @@ static constexpr uint32_t T0 = 1'800'000'000;
 static constexpr uint32_t STEP = HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
 
 // One sample per character from T0: 'H' heating run, 'C' cooling run,
-// '.' stopped, ' ' no sample (a gap).
+// 'U' compressor running with an unknown mode, '.' stopped, ' ' no sample.
 static std::vector<history_telemetry_sample_t> timeline(const char* s,
                                                         uint32_t t0 = T0) {
     std::vector<history_telemetry_sample_t> v;
@@ -34,10 +34,11 @@ static std::vector<history_telemetry_sample_t> timeline(const char* s,
         history_telemetry_sample_t x = {};
         x.timestamp = t0 + i * STEP;
         x.flags = HISTORY_TELEMETRY_COMPRESSOR_VALID;
-        if (s[i] == 'H' || s[i] == 'C') {
+        if (s[i] == 'H' || s[i] == 'C' || s[i] == 'U') {
             x.flags |= HISTORY_TELEMETRY_COMPRESSOR_RUNNING;
-            x.mode = s[i] == 'H' ? HISTORY_TELEMETRY_MODE_HEATING
-                                 : HISTORY_TELEMETRY_MODE_COOLING;
+            x.mode = s[i] == 'H'   ? HISTORY_TELEMETRY_MODE_HEATING
+                     : s[i] == 'C' ? HISTORY_TELEMETRY_MODE_COOLING
+                                   : HISTORY_TELEMETRY_MODE_UNKNOWN;
         }
         v.push_back(x);
     }
@@ -124,6 +125,16 @@ static void setpoint_and_mode() {
     CHECK_EQ_L(sum.last.mode, HISTORY_TELEMETRY_MODE_COOLING);
 }
 
+static void unknown_mode_is_not_a_run() {
+    // Matches the cycle-history chart, which ignores unknown-mode samples.
+    auto v = timeline("UUU.UUHH.");
+    home_run_t out[4];
+    home_run_summary_t sum;
+    CHECK_EQ_L(runs(v, T0 + 9 * STEP, out, 4, &sum), 1);
+    CHECK_EQ_L(out[0].start, T0 + 6 * STEP);
+    CHECK_EQ_L(out[0].mode, HISTORY_TELEMETRY_MODE_HEATING);
+}
+
 static void tank_series_averages_buckets() {
     auto v = timeline("........");
     for (size_t i = 0; i < v.size(); i++) {
@@ -175,6 +186,7 @@ int main() {
     stale_open_run_is_not_current();
     starts_only_count_the_last_hour();
     setpoint_and_mode();
+    unknown_mode_is_not_a_run();
     tank_series_averages_buckets();
     daily_energy_integrates_and_resets();
     if (g_failures) {

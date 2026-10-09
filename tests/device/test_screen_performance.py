@@ -40,6 +40,14 @@ def _inject_all_faults(device: DeviceClient):
         device.inject_fault(code, True)
 
 
+def _wait_fault_banner(device: DeviceClient):
+    """Wait for the Home fault banner, the entry point to the errors screen.
+
+    The banner is hidden while no fault is active, so callers inject one first.
+    """
+    device.wait_for_widget(tag="error_label", timeout=5.0)
+
+
 def _active_error_codes(device: DeviceClient) -> set:
     """Fault codes the firmware poll loop currently reports as active."""
     errors = device.get_heatpump_errors()
@@ -109,7 +117,10 @@ class TestNavScreenPerformance:
         device.click(tag="nav_home")
 
     def test_errors_screen_render(self, device: DeviceClient):
-        """Errors screen opens within budget (no active errors)."""
+        """Errors screen opens within budget (single demo fault)."""
+        # The fault banner only shows while a fault is active.
+        device.inject_fault("P02", True)
+        _wait_fault_banner(device)
         result = device.click(tag="error_label")
         _assert_under_budget(result, "errors")
         device.wait_for_screen("errors", timeout=5.0)
@@ -168,6 +179,7 @@ class TestHeavyStatePerformance:
         )
 
         try:
+            _wait_fault_banner(device)
             result = device.click(tag="error_label")
             us = _assert_under_budget(
                 result, "errors_heavy", ERROR_INITIAL_BUDGET_US
@@ -210,6 +222,7 @@ class TestHeavyStatePerformance:
                 timeout=10.0,
             )
 
+            _wait_fault_banner(device)
             result = device.click(tag="error_label")
             us = _assert_under_budget(
                 result, "errors_with_history", ERROR_INITIAL_BUDGET_US

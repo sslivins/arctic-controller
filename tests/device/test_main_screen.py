@@ -1,5 +1,5 @@
 """
-Test: Main Screen — Hero Card, Component Dots, Performance Strip, Error Card
+Test: Main Screen — Hero Card, Component Pills, Tiles, Fault Banner
 
 Uses the demo mode test API to inject specific heat pump states and verifies
 that the main screen UI updates accordingly.
@@ -9,7 +9,7 @@ registers, so there is no fictional "status1" bitfield. Tests drive named
 demo fields instead of raw register bits:
   compressor -> compressor_freq (>0 = running)
   fan bars   -> fan_speed RPM (reg2003 raw ×10; getFanSpeedLevel buckets)
-  fan dot    -> fan_on
+  fan pill   -> fan_on
   pump       -> pump_on
 Faults are injected by their Macon code via inject_fault()/clear_all_faults().
 
@@ -31,8 +31,13 @@ MODE_COOLING       = 0
 MODE_HEATING = 1
 MODE_HOT_WATER     = 5
 
-# Inactive dot color
-COLOR_INACTIVE = "#444444"
+# Unlit component pill / fan bar color (COLOR_TRACK). A lit pill or bar takes
+# the hero accent color instead.
+COLOR_INACTIVE = "#2b3a5c"
+
+# The hero state line may carry a detail suffix after this separator,
+# e.g. "Fault · P02" or "Idle · at setpoint".
+STATE_SEP = " · "
 
 # Default demo fault (matches initDemoState()).
 DEMO_FAULT = "P02"
@@ -53,9 +58,14 @@ def _wait(device: DeviceClient, predicate, description: str):
                       expect_within=UI_SETTLE, raise_on_timeout=False)
 
 
+def _hero_word(w) -> str:
+    """The state word of the hero state line, without any detail suffix."""
+    return (w.text_en or w.text or "").split(STATE_SEP)[0]
+
+
 def _hero_text(device: DeviceClient, expected: str) -> bool:
     w = device.find_widget(tag="hero_state")
-    return w is not None and (w.text_en or w.text) == expected
+    return w is not None and _hero_word(w) == expected
 
 
 def _text_has(device: DeviceClient, tag: str, needle: str) -> bool:
@@ -63,12 +73,12 @@ def _text_has(device: DeviceClient, tag: str, needle: str) -> bool:
     return w is not None and w.text is not None and needle in w.text
 
 
-def _dot_active(device: DeviceClient, tag: str) -> bool:
+def _lit(device: DeviceClient, tag: str) -> bool:
     w = device.find_widget(tag=tag)
     return w is not None and w.bg_color != COLOR_INACTIVE
 
 
-def _dot_inactive(device: DeviceClient, tag: str) -> bool:
+def _unlit(device: DeviceClient, tag: str) -> bool:
     w = device.find_widget(tag=tag)
     return w is not None and w.bg_color == COLOR_INACTIVE
 
@@ -117,76 +127,71 @@ def _ensure_demo_defaults(device: DeviceClient):
 # =========================================================================
 
 class TestHeroState:
-    """Verify the hero card shows the correct operating mode."""
+    """Verify the hero card shows the correct operating state."""
 
-    def test_hero_shows_fault_with_error(self, device: DeviceClient):
-        """With an active fault, hero should show FAULT."""
-        # Default demo state has the P02 fault active, so hero = FAULT
-        _wait(device, lambda: _hero_text(device, "FAULT"),
-              "hero_state == FAULT")
+    def _assert_hero(self, device: DeviceClient, expected: str):
         hero = device.find_widget(tag="hero_state")
         assert hero is not None, "hero_state widget not found"
-        label = hero.text_en or hero.text
-        assert label == "FAULT", f"Expected 'FAULT', got '{label}'"
+        assert _hero_word(hero) == expected, \
+            f"Expected hero state '{expected}', got '{hero.text}'"
+        return hero
+
+    def test_hero_shows_fault_with_error(self, device: DeviceClient):
+        """With an active fault, hero should show 'Fault · <code>'."""
+        # Default demo state has the P02 fault active, so hero = Fault
+        _wait(device, lambda: _hero_text(device, "Fault"),
+              "hero_state == Fault")
+        hero = self._assert_hero(device, "Fault")
+        assert hero.text.endswith(f"{STATE_SEP}{DEMO_FAULT}"), \
+            f"Expected the fault code after the state, got '{hero.text}'"
 
     def test_hero_shows_floor_heat(self, device: DeviceClient):
-        """A running heating cycle should show the actual HEATING operation."""
+        """A running heating cycle should show the actual Heating operation."""
         device.clear_all_faults()
         _running(device)
-        _wait(device, lambda: _hero_text(device, "HEATING"),
-              "hero_state == HEATING (floor heat)")
-        hero = device.find_widget(tag="hero_state")
-        assert hero is not None
-        label = hero.text_en or hero.text
-        assert label == "HEATING", f"Expected 'HEATING', got '{label}'"
+        _wait(device, lambda: _hero_text(device, "Heating"),
+              "hero_state == Heating (floor heat)")
+        self._assert_hero(device, "Heating")
 
     def test_hero_shows_cooling(self, device: DeviceClient):
-        """Switching to cooling mode with compressor on should show COOLING."""
+        """Switching to cooling mode with compressor on should show Cooling."""
         device.clear_all_faults()
         # Cooling operation is decoded from the reversing-valve bit (reg2129
         # bit2 = cooling_on), not the selected working_mode, so set both.
         _running(device, working_mode=MODE_COOLING, cooling_on=1)
-        _wait(device, lambda: _hero_text(device, "COOLING"),
-              "hero_state == COOLING")
-        hero = device.find_widget(tag="hero_state")
-        assert hero is not None
-        label = hero.text_en or hero.text
-        assert label == "COOLING", f"Expected 'COOLING', got '{label}'"
+        _wait(device, lambda: _hero_text(device, "Cooling"),
+              "hero_state == Cooling")
+        self._assert_hero(device, "Cooling")
 
     def test_hero_shows_hot_water(self, device: DeviceClient):
         """Hot-water selection still reports the actual heating operation."""
         device.clear_all_faults()
         _running(device, working_mode=MODE_HOT_WATER)
-        _wait(device, lambda: _hero_text(device, "HEATING"),
-              "hero_state == HEATING (hot water)")
-        hero = device.find_widget(tag="hero_state")
-        assert hero is not None
-        label = hero.text_en or hero.text
-        assert label == "HEATING", f"Expected 'HEATING', got '{label}'"
+        _wait(device, lambda: _hero_text(device, "Heating"),
+              "hero_state == Heating (hot water)")
+        self._assert_hero(device, "Heating")
 
     def test_hero_shows_idle(self, device: DeviceClient):
-        """Unit on, no faults, compressor off should show IDLE."""
+        """Unit on, no faults, compressor off should show Idle (plus the why)."""
         device.clear_all_faults()
         device.set_demo_fields(unit_on=1, compressor_freq=0, fan_on=0,
                                fan_speed=FAN_OFF, pump_on=1)
-        _wait(device, lambda: _hero_text(device, "IDLE"),
-              "hero_state == IDLE")
-        hero = device.find_widget(tag="hero_state")
-        assert hero is not None
+        _wait(device, lambda: _hero_text(device, "Idle"),
+              "hero_state == Idle")
+        hero = self._assert_hero(device, "Idle")
         label = hero.text_en or hero.text
-        assert label == "IDLE", f"Expected 'IDLE', got '{label}'"
+        if STATE_SEP in label:
+            assert label.split(STATE_SEP, 1)[1] in ("at setpoint", "no demand"), \
+                f"Unexpected idle detail in '{label}'"
 
     def test_hero_shows_standby(self, device: DeviceClient):
-        """Unit off should show STANDBY."""
+        """Unit off should show Standby."""
         device.clear_all_faults()
         device.set_demo_fields(unit_on=0, compressor_freq=0, fan_on=0,
                                fan_speed=FAN_OFF, pump_on=0)
-        _wait(device, lambda: _hero_text(device, "STANDBY"),
-              "hero_state == STANDBY")
-        hero = device.find_widget(tag="hero_state")
-        assert hero is not None
-        label = hero.text_en or hero.text
-        assert label == "STANDBY", f"Expected 'STANDBY', got '{label}'"
+        _wait(device, lambda: _hero_text(device, "Standby"),
+              "hero_state == Standby")
+        self._assert_hero(device, "Standby")
 
 
 # =========================================================================
@@ -197,185 +202,172 @@ class TestHeroTankTemp:
     """Verify the hero card displays the tank temperature correctly."""
 
     def test_tank_temp_displayed(self, device: DeviceClient):
-        """Tank temp should be shown as a number with unit."""
+        """Tank temp is the bare number; the unit sits in its own label."""
         device.clear_all_faults()
         device.set_demo_fields(water_tank_temp=50)
         _wait(device, lambda: _text_has(device, "hero_tank_temp", "50"),
               "hero_tank_temp shows 50")
         tank = device.find_widget(tag="hero_tank_temp")
         assert tank is not None, "hero_tank_temp widget not found"
-        assert "50" in tank.text, f"Expected '50' in tank text, got '{tank.text}'"
+        assert tank.text == "50", f"Expected '50' in tank text, got '{tank.text}'"
+        unit = device.find_widget(tag="hero_tank_unit")
+        assert unit is not None, "hero_tank_unit widget not found"
+        assert unit.text in ("°C", "°F"), f"Unexpected tank unit '{unit.text}'"
+
+    def test_tank_caption_shown(self, device: DeviceClient):
+        """The caption under the number names the tank."""
+        sub = device.find_widget(tag="hero_sub")
+        assert sub is not None, "hero_sub widget not found"
+        assert (sub.text_en or sub.text).startswith("Tank"), \
+            f"Expected the tank caption, got '{sub.text}'"
 
 
 # =========================================================================
-# Component Dots
+# Component Pills
 # =========================================================================
 
-class TestComponentDots:
-    """Verify component indicator dots reflect run state."""
+class TestComponentPills:
+    """Verify the component indicator pills reflect run state."""
 
-    def test_compressor_dot_on(self, device: DeviceClient):
-        """Compressor running should light the compressor dot."""
+    def _assert_bars(self, device: DeviceClient, lit: int):
+        for i in range(1, 4):
+            bar = device.find_widget(tag=f"home_ind_fan_bar_{i}")
+            assert bar is not None, f"home_ind_fan_bar_{i} widget not found"
+            if i <= lit:
+                assert bar.bg_color != COLOR_INACTIVE, \
+                    f"Bar {i} should be lit ({lit} bars), got {bar.bg_color}"
+            else:
+                assert bar.bg_color == COLOR_INACTIVE, \
+                    f"Bar {i} should be unlit ({lit} bars), got {bar.bg_color}"
+
+    def _wait_bars(self, device: DeviceClient, lit: int):
+        _wait(device, lambda: all(
+                  (_lit if i <= lit else _unlit)(device, f"home_ind_fan_bar_{i}")
+                  for i in range(1, 4)),
+              f"fan bars = {lit} lit")
+
+    def test_compressor_pill_on(self, device: DeviceClient):
+        """Compressor running should light the compressor pill."""
         device.clear_all_faults()
         _running(device)
-        _wait(device, lambda: _dot_active(device, "comp_dot"),
-              "comp_dot active")
-        dot = device.find_widget(tag="comp_dot")
-        assert dot is not None, "comp_dot widget not found"
-        assert dot.bg_color != COLOR_INACTIVE, \
-            f"Compressor dot should be active, got bg_color={dot.bg_color}"
+        _wait(device, lambda: _lit(device, "home_ind_compressor"),
+              "home_ind_compressor lit")
+        pill = device.find_widget(tag="home_ind_compressor")
+        assert pill is not None, "home_ind_compressor widget not found"
+        assert pill.bg_color != COLOR_INACTIVE, \
+            f"Compressor pill should be lit, got bg_color={pill.bg_color}"
 
-    def test_compressor_dot_off(self, device: DeviceClient):
-        """Compressor stopped should grey out the compressor dot."""
+    def test_compressor_pill_off(self, device: DeviceClient):
+        """Compressor stopped should dim the compressor pill."""
         device.clear_all_faults()
         device.set_demo_fields(unit_on=1, compressor_freq=0, fan_on=0,
                                fan_speed=FAN_OFF, pump_on=1)
-        _wait(device, lambda: _dot_inactive(device, "comp_dot"),
-              "comp_dot inactive")
-        dot = device.find_widget(tag="comp_dot")
-        assert dot is not None
-        assert dot.bg_color == COLOR_INACTIVE, \
-            f"Compressor dot should be inactive, got bg_color={dot.bg_color}"
+        _wait(device, lambda: _unlit(device, "home_ind_compressor"),
+              "home_ind_compressor unlit")
+        pill = device.find_widget(tag="home_ind_compressor")
+        assert pill is not None
+        assert pill.bg_color == COLOR_INACTIVE, \
+            f"Compressor pill should be unlit, got bg_color={pill.bg_color}"
+
+    def test_fan_pill_on(self, device: DeviceClient):
+        """Fan running should light the fan pill."""
+        device.clear_all_faults()
+        _running(device)
+        _wait(device, lambda: _lit(device, "home_ind_fan"), "home_ind_fan lit")
+        pill = device.find_widget(tag="home_ind_fan")
+        assert pill is not None, "home_ind_fan widget not found"
+        assert pill.bg_color != COLOR_INACTIVE, \
+            f"Fan pill should be lit, got bg_color={pill.bg_color}"
 
     def test_fan_speed_bars_medium(self, device: DeviceClient):
-        """FAN_MED — bars 1 and 2 should be green, bar 3 gray."""
+        """FAN_MED — bars 1 and 2 lit, bar 3 unlit."""
         device.clear_all_faults()
         _running(device, fan_speed=FAN_MED)
-        _wait(device, lambda: _dot_active(device, "fan_bar_1")
-              and _dot_active(device, "fan_bar_2")
-              and _dot_inactive(device, "fan_bar_3"),
-              "fan bars = medium (1,2 on / 3 off)")
-        bar1 = device.find_widget(tag="fan_bar_1")
-        bar2 = device.find_widget(tag="fan_bar_2")
-        bar3 = device.find_widget(tag="fan_bar_3")
-        assert bar1 is not None and bar2 is not None and bar3 is not None
-        assert bar1.bg_color != COLOR_INACTIVE, "Bar 1 should be active (med)"
-        assert bar2.bg_color != COLOR_INACTIVE, "Bar 2 should be active (med)"
-        assert bar3.bg_color == COLOR_INACTIVE, "Bar 3 should be inactive (med)"
+        self._wait_bars(device, 2)
+        self._assert_bars(device, 2)
 
     def test_fan_speed_bars_high(self, device: DeviceClient):
-        """FAN_HIGH — all 3 bars should be green."""
+        """FAN_HIGH — all 3 bars lit."""
         device.clear_all_faults()
         _running(device, fan_speed=FAN_HIGH)
-        _wait(device, lambda: _dot_active(device, "fan_bar_1")
-              and _dot_active(device, "fan_bar_2")
-              and _dot_active(device, "fan_bar_3"),
-              "fan bars = high (all on)")
-        bar1 = device.find_widget(tag="fan_bar_1")
-        bar2 = device.find_widget(tag="fan_bar_2")
-        bar3 = device.find_widget(tag="fan_bar_3")
-        assert bar1.bg_color != COLOR_INACTIVE, "Bar 1 should be active (high)"
-        assert bar2.bg_color != COLOR_INACTIVE, "Bar 2 should be active (high)"
-        assert bar3.bg_color != COLOR_INACTIVE, "Bar 3 should be active (high)"
+        self._wait_bars(device, 3)
+        self._assert_bars(device, 3)
 
     def test_fan_speed_bars_low(self, device: DeviceClient):
-        """FAN_LOW — only bar 1 should be green."""
+        """FAN_LOW — only bar 1 lit."""
         device.clear_all_faults()
         _running(device, fan_speed=FAN_LOW)
-        _wait(device, lambda: _dot_active(device, "fan_bar_1")
-              and _dot_inactive(device, "fan_bar_2")
-              and _dot_inactive(device, "fan_bar_3"),
-              "fan bars = low (1 on / 2,3 off)")
-        bar1 = device.find_widget(tag="fan_bar_1")
-        bar2 = device.find_widget(tag="fan_bar_2")
-        bar3 = device.find_widget(tag="fan_bar_3")
-        assert bar1.bg_color != COLOR_INACTIVE, "Bar 1 should be active (low)"
-        assert bar2.bg_color == COLOR_INACTIVE, "Bar 2 should be inactive (low)"
-        assert bar3.bg_color == COLOR_INACTIVE, "Bar 3 should be inactive (low)"
+        self._wait_bars(device, 1)
+        self._assert_bars(device, 1)
 
     def test_fan_speed_bars_off(self, device: DeviceClient):
-        """No fan speed — all 3 bars should be gray."""
+        """Fan stopped — pill and all 3 bars unlit."""
         device.clear_all_faults()
         _running(device, fan_on=0, fan_speed=FAN_OFF)
-        _wait(device, lambda: _dot_inactive(device, "fan_bar_1")
-              and _dot_inactive(device, "fan_bar_2")
-              and _dot_inactive(device, "fan_bar_3"),
-              "fan bars = off (all off)")
-        bar1 = device.find_widget(tag="fan_bar_1")
-        bar2 = device.find_widget(tag="fan_bar_2")
-        bar3 = device.find_widget(tag="fan_bar_3")
-        assert bar1.bg_color == COLOR_INACTIVE, "Bar 1 should be inactive (off)"
-        assert bar2.bg_color == COLOR_INACTIVE, "Bar 2 should be inactive (off)"
-        assert bar3.bg_color == COLOR_INACTIVE, "Bar 3 should be inactive (off)"
+        self._wait_bars(device, 0)
+        self._assert_bars(device, 0)
+        pill = device.find_widget(tag="home_ind_fan")
+        assert pill is not None
+        assert pill.bg_color == COLOR_INACTIVE, \
+            f"Fan pill should be unlit, got bg_color={pill.bg_color}"
 
-    def test_pump_dot_on(self, device: DeviceClient):
-        """Water pump running should light the pump dot."""
+    def test_pump_pill_on(self, device: DeviceClient):
+        """Water pump running should light the pump pill."""
         device.clear_all_faults()
         _running(device)
-        _wait(device, lambda: _dot_active(device, "pump_dot"),
-              "pump_dot active")
-        dot = device.find_widget(tag="pump_dot")
-        assert dot is not None, "pump_dot widget not found"
-        assert dot.bg_color != COLOR_INACTIVE, \
-            f"Pump dot should be active, got bg_color={dot.bg_color}"
+        _wait(device, lambda: _lit(device, "home_ind_pump"), "home_ind_pump lit")
+        pill = device.find_widget(tag="home_ind_pump")
+        assert pill is not None, "home_ind_pump widget not found"
+        assert pill.bg_color != COLOR_INACTIVE, \
+            f"Pump pill should be lit, got bg_color={pill.bg_color}"
 
-    def test_pump_dot_off(self, device: DeviceClient):
-        """Water pump stopped should grey out the pump dot."""
+    def test_pump_pill_off(self, device: DeviceClient):
+        """Water pump stopped should dim the pump pill."""
         device.clear_all_faults()
         _running(device, pump_on=0)
-        _wait(device, lambda: _dot_inactive(device, "pump_dot"),
-              "pump_dot inactive")
-        dot = device.find_widget(tag="pump_dot")
-        assert dot is not None
-        assert dot.bg_color == COLOR_INACTIVE, \
-            f"Pump dot should be inactive, got bg_color={dot.bg_color}"
+        _wait(device, lambda: _unlit(device, "home_ind_pump"),
+              "home_ind_pump unlit")
+        pill = device.find_widget(tag="home_ind_pump")
+        assert pill is not None
+        assert pill.bg_color == COLOR_INACTIVE, \
+            f"Pump pill should be unlit, got bg_color={pill.bg_color}"
 
-    def test_heater_dot_off_by_default(self, device: DeviceClient):
-        """Aux heater should be off in default demo state."""
+    def test_heater_pill_hidden_by_default(self, device: DeviceClient):
+        """The aux heater pill only shows while the heater runs (off in demo)."""
         device.clear_all_faults()
         _running(device)
-        _wait(device, lambda: _dot_inactive(device, "heater_dot"),
-              "heater_dot inactive")
-        dot = device.find_widget(tag="heater_dot")
-        assert dot is not None, "heater_dot widget not found"
-        assert dot.bg_color == COLOR_INACTIVE, \
-            f"Heater dot should be inactive, got bg_color={dot.bg_color}"
+        _wait(device, lambda: _present(device, "home_ind_compressor"),
+              "home_indicators present")
+        assert device.find_widget(tag="home_ind_heater") is None, \
+            "Aux heater pill should be hidden while the heater is off"
 
     @pytest.mark.skip(reason="Backup/aux heater is not mapped from any Tuya "
                              "register yet; always off. See sun-peaks TODO "
                              "(fan/aux-heater register rework).")
-    def test_heater_dot_on(self, device: DeviceClient):
-        """Turning on backup heater should light the heater dot — no mapping yet."""
+    def test_heater_pill_on(self, device: DeviceClient):
+        """Turning on backup heater should show the heater pill — no mapping yet."""
 
 
 # =========================================================================
-# Performance Strip
+# Tiles
 # =========================================================================
 
-class TestPerformanceStrip:
-    """Verify performance strip values update from demo state."""
+class TestTiles:
+    """Verify the supply/return/power tiles update from demo state."""
 
-    def test_fan_rpm_displayed(self, device: DeviceClient):
-        """Fan speed should show its RPM value when the fan is running.
-
-        fan_speed is the fan RPM (reg2003 raw ×10); the label reads
-        "<value> RPM".
-        """
+    def test_supply_and_return_displayed(self, device: DeviceClient):
+        """Supply and return tiles show the outlet/inlet water temperatures."""
         device.clear_all_faults()
-        _running(device, fan_speed=450)
-        _wait(device, lambda: _text_has(device, "perf_fan", "450"),
-              "perf_fan shows 450 RPM")
-        fan = device.find_widget(tag="perf_fan")
-        assert fan is not None, "perf_fan widget not found"
-        assert "450" in fan.text, f"Expected '450' in fan text, got '{fan.text}'"
-        assert "RPM" in fan.text, f"Expected 'RPM' in fan text, got '{fan.text}'"
-
-    def test_fan_rpm_zero_when_stopped(self, device: DeviceClient):
-        """A stopped fan shows '0 RPM', not '--'.
-
-        '--' means "no data" (disconnected or invalid); a genuine 0 RPM is
-        data, so conflating the two would lose information. This matches the
-        Status screen and the power reading, which already shows '0 W'.
-        """
-        device.clear_all_faults()
-        _running(device, fan_on=0, fan_speed=0)
-        _wait(device, lambda: _text_has(device, "perf_fan", "0 RPM"),
-              "perf_fan shows 0 RPM when stopped")
-        fan = device.find_widget(tag="perf_fan")
-        assert fan is not None
-        assert "0 RPM" in fan.text, f"Expected '0 RPM' in fan text, got '{fan.text}'"
-        assert "--" not in fan.text, \
-            f"'--' is reserved for no-data, got '{fan.text}'"
+        _running(device, outlet_water_temp=47, inlet_water_temp=39)
+        _wait(device, lambda: _text_has(device, "home_supply", "47")
+              and _text_has(device, "home_return", "39"),
+              "home_supply shows 47, home_return shows 39")
+        supply = device.find_widget(tag="home_supply")
+        ret = device.find_widget(tag="home_return")
+        assert supply is not None and "47" in supply.text, \
+            f"Expected '47' in supply tile, got '{supply.text if supply else None}'"
+        assert ret is not None and "39" in ret.text, \
+            f"Expected '39' in return tile, got '{ret.text if ret else None}'"
 
     def test_power_displayed(self, device: DeviceClient):
         """Power consumption should be displayed when compressor is running."""
@@ -388,22 +380,23 @@ class TestPerformanceStrip:
 
 
 # =========================================================================
-# Error Card
+# Fault Banner
 # =========================================================================
 
-class TestErrorCard:
-    """Verify the error card reflects fault state."""
+class TestFaultBanner:
+    """Verify the fault banner reflects fault state."""
 
-    def test_no_errors_shows_system_ok(self, device: DeviceClient):
-        """With no faults, error card should show 'No active errors'."""
+    def test_no_errors_hides_banner(self, device: DeviceClient):
+        """With no faults the fault banner is hidden entirely."""
         device.clear_all_faults()
-        _wait(device, lambda: _present(device, "error_label"),
-              "error_label present (no faults)")
-        err = device.find_widget(tag="error_label")
-        assert err is not None
+        _wait(device, lambda: not _present(device, "home_fault_banner"),
+              "home_fault_banner hidden (no faults)")
+        assert device.find_widget(tag="home_fault_banner") is None, \
+            "Fault banner should be hidden with no active faults"
+        assert device.find_widget(tag="error_label") is None
 
     def test_error_shows_description(self, device: DeviceClient):
-        """With an active fault, error card should display the error code."""
+        """With an active fault, the banner should display the error code."""
         device.clear_all_faults()
         device.inject_fault("P02", True)
         _wait(device, lambda: _text_has(device, "error_label", "P02"),

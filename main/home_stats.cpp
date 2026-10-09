@@ -4,9 +4,11 @@
 
 static constexpr uint32_t GAP_SECONDS = 3 * HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
 
+// Same rule as the cycle-history chart: a run needs a known operating mode.
 static bool is_running(const history_telemetry_sample_t& s) {
     return (s.flags & HISTORY_TELEMETRY_COMPRESSOR_VALID) &&
-           (s.flags & HISTORY_TELEMETRY_COMPRESSOR_RUNNING);
+           (s.flags & HISTORY_TELEMETRY_COMPRESSOR_RUNNING) &&
+           s.mode != HISTORY_TELEMETRY_MODE_UNKNOWN;
 }
 
 static void push_run(home_run_t* out, size_t cap, size_t* count,
@@ -52,8 +54,6 @@ size_t home_stats_runs(const history_telemetry_sample_t* samples, size_t n,
             open.seen_start = prev && !gap && !is_running(*prev);
             if (open.seen_start && open.start + 3600 >= now) sum.starts_last_hour++;
             is_open = true;
-        } else if (running && open.mode == HISTORY_TELEMETRY_MODE_UNKNOWN) {
-            open.mode = s.mode;
         }
         prev = &s;
     }

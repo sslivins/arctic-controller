@@ -32,7 +32,8 @@ Everything runs locally: no cloud account is needed, and the controller keeps wo
 
 ## Features
 
-- **Touch UI on the device** - Home dashboard (mode, tank temperature, COP, power, fan),
+- **Touch UI on the device** - Home dashboard (state, tank temperature, compressor/fan/pump
+  indicators, supply/return/power, and a 24-hour run and fault chart while idle),
   full status readout, temperature detail, compressor cycle history graph, mode and
   setpoint control, event log, error codes with descriptions, and technician
   P-parameters. Shows the local weather in the status bar. English, French, or Spanish,
@@ -125,7 +126,7 @@ the API (`/api/tls/certificate`).
 - **Home** - Current operation, tank temperature, equipment, COP and power, errors,
   and the latest cycle
 - **Status** - Every live reading from the heat pump
-- **Cycle history** - Compressor run cycles with inlet, outlet, and setpoint
+- **Cycle history** - Compressor run cycles and faults with inlet, outlet, and setpoint
   temperatures over the last 8 hours
 - **Control** - Working mode and setpoints
 - **Events** - Equipment starts/stops, mode and setpoint changes, reboots, and errors

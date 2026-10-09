@@ -96,8 +96,8 @@ class TestHistoryFaultMarkers:
 
         _open_history(dashboard_page)
 
-        # A bar along the top edge plus the code, not a band.
-        assert dashboard_page.locator(".hist-chart .hist-fault").count() >= 1
+        # A full-height red line at the fault onset, labelled with the code.
+        assert dashboard_page.locator(".hist-chart line.hist-fault").count() >= 1
         labels = dashboard_page.locator(".hist-chart .hist-fault-label").all_text_contents()
         assert any("P02" in t for t in labels)
         expect(dashboard_page.locator(".hist-legend", has_text="Fault")).to_be_visible()

@@ -68,8 +68,8 @@ DEMO_FIELD_SEEDS = {
 def _seed_demo_readings(device: DeviceClient):
     """Seed the asserted demo values before each test, and restore after.
 
-    Restoring on teardown keeps a probe value (see TestCrossScreenAgreement)
-    from leaking into modules that run later.
+    Restoring on teardown keeps any value a test changes from leaking into
+    modules that run later.
     """
     device.set_demo_fields(**DEMO_FIELD_SEEDS)
     yield
@@ -200,46 +200,3 @@ class TestSystemSetpoints:
 
         assert _has_text_containing(device, label), \
             f"Setpoint label '{label}' not found on screen"
-
-
-# =========================================================================
-# Cross-screen consistency
-# =========================================================================
-
-class TestCrossScreenAgreement:
-    """The home and Status screens must never disagree about a reading.
-
-    Both render from arctic::getState(), so a divergence means one of them has
-    reintroduced a private data source. That is exactly the bug this guards:
-    the Status screen used to hold its own hardcoded demo literals and showed
-    850 RPM while the home screen showed the seeded 400.
-    """
-
-    # Distinct from every default (400 seeded, 450 FAN_MED) so a stale label
-    # cannot accidentally satisfy the assertion. reg2003 is raw x10, so this
-    # must stay a multiple of 10.
-    PROBE_RPM = 640
-
-    def test_fan_speed_agrees_between_home_and_status(self, device: DeviceClient):
-        device.set_demo_fields(fan_on=1, fan_speed=self.PROBE_RPM)
-        expected = f"{self.PROBE_RPM} RPM"
-
-        device.click(tag="nav_home")
-        assert device.wait_for_screen("main", timeout=5.0), \
-            f"Expected 'main' screen, got '{device.screen}'"
-        device.wait_until(
-            f"home screen fan shows {expected}",
-            lambda: (lambda w: w is not None and w.text is not None
-                     and expected in w.text)(device.find_widget(tag="perf_fan")),
-            timeout=5.0,
-        )
-        home = device.find_widget(tag="perf_fan")
-        assert expected in home.text, \
-            f"Home screen fan shows '{home.text}', expected '{expected}'"
-
-        _open_system(device)
-        _wait_for_text(device, expected)
-        assert _has_text_containing(device, expected), \
-            (f"Status screen does not show '{expected}' while the home screen "
-             f"does; the two screens have diverged.")
-
