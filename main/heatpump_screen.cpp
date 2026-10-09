@@ -286,6 +286,7 @@ static struct {
 
     int16_t chart_setpoint_c = 0;
     bool chart_setpoint_valid = false;
+    bool chart_cooling = false;
     uint32_t last_query_ms = 0;
     bool queried_once = false;
 
@@ -589,46 +590,52 @@ static void chart_draw_cb(lv_event_t* e) {
         chart_draw_fault_zone(layer, x1, x2, inner.y1, inner.y2, COLOR_ERROR);
     }
 
+    // Left gutter for the axis labels: horizontal lines start after it.
+    constexpr int32_t kAxisGutter = 46;
     for (int g = 1; g < 4; g++) {
-        int32_t y = plot.y1 + (lv_area_get_height(&plot) * g) / 4;
-        draw_line(layer, inner.x1, y, inner.x2, y, COLOR_GRID, 1);
+        int32_t y = plot.y2 - (lv_area_get_height(&plot) * g) / 4;
+        draw_line(layer, inner.x1 + kAxisGutter, y, inner.x2, y, COLOR_GRID, 1);
         int32_t x = plot.x1 + (lv_area_get_width(&plot) * g) / 4;
         draw_line(layer, x, inner.y1, x, inner.y2, COLOR_GRID, 1);
     }
 
-    // Value range: the tank readings and the setpoint, with a little room.
-    int32_t lo = INT32_MAX;
-    int32_t hi = INT32_MIN;
-    for (size_t i = 0; i < CHART_BUCKETS; i++) {
-        if (!h.tank_ok[i]) continue;
-        if (h.tank[i] < lo) lo = h.tank[i];
-        if (h.tank[i] > hi) hi = h.tank[i];
+    // Fixed scale per mode, one round value per gridline: hot water/heating
+    // 20-60 °C (60-140 °F), cooling 5-25 °C (40-80 °F). Readings outside it
+    // pin to the edge; the cycle-history screen has the detail.
+    bool fahrenheit = app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT;
+    int32_t axis_lo, axis_step;  // In the display unit
+    if (state.chart_cooling) {
+        axis_lo = fahrenheit ? 40 : 5;
+        axis_step = fahrenheit ? 10 : 5;
+    } else {
+        axis_lo = fahrenheit ? 60 : 20;
+        axis_step = fahrenheit ? 20 : 10;
     }
+    auto to_deci_c = [fahrenheit](int32_t v) {
+        return fahrenheit ? (v - 32) * 50 / 9 : v * 10;
+    };
+    int32_t lo = to_deci_c(axis_lo);
+    int32_t hi = to_deci_c(axis_lo + 4 * axis_step);
+    for (int g = 0; g <= 4; g++) {
+        int32_t y = plot.y2 - (lv_area_get_height(&plot) * g) / 4;
+        // Inner labels centre on their line; the edge ones tuck inside.
+        int32_t y1 = g == 0 ? y - 20 : g == 4 ? y + 2 : y - 9;
+        char tick[12];
+        snprintf(tick, sizeof(tick), "%d" DEGREE, (int)(axis_lo + g * axis_step));
+        draw_text(layer, plot.x1 + 8, y1, plot.x1 + 80, y1 + 18, tick,
+                  COLOR_VALUE_DIM, LV_TEXT_ALIGN_LEFT, &montserrat_16_latin);
+    }
+
     bool sp_valid = state.chart_setpoint_valid;
     int32_t sp_deci = (int32_t)state.chart_setpoint_c * 10;
     if (!sp_valid && h.summary.setpoint_valid) {
         sp_valid = true;
         sp_deci = h.summary.setpoint_deci_c;
     }
-    if (sp_valid) {
-        if (sp_deci < lo) lo = sp_deci;
-        if (sp_deci > hi) hi = sp_deci;
-    }
-    if (lo > hi) {
-        lo = 400;
-        hi = 500;
-    }
-    lo -= 20;
-    hi += 30;
-    if (hi - lo < 100) {
-        int32_t mid = (lo + hi) / 2;
-        lo = mid - 50;
-        hi = mid + 50;
-    }
 
     if (sp_valid) {
         int32_t y = chart_y(sp_deci, lo, hi, plot);
-        draw_line(layer, plot.x1, y, plot.x2, y, COLOR_SETPOINT, 2, 8);
+        draw_line(layer, plot.x1 + kAxisGutter, y, plot.x2, y, COLOR_SETPOINT, 2, 8);
         char sp_text[16];
         format_temp(sp_text, sizeof(sp_text), (int16_t)(sp_deci / 10));
         draw_text(layer, plot.x2 - 120, y - 26, plot.x2, y - 4, sp_text,
@@ -1257,6 +1264,10 @@ void heatpump_screen_update(void) {
 
     state.chart_setpoint_valid = snap.setpoint_valid;
     state.chart_setpoint_c = snap.active_setpoint_c;
+    if (state.chart_cooling != (hp.working_mode == arctic::WorkingMode::COOLING)) {
+        state.chart_cooling = !state.chart_cooling;
+        if (state.chart) lv_obj_invalidate(state.chart);
+    }
 
     // Fault banner
     if (!hp.connected) {
