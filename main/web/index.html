@@ -1915,6 +1915,7 @@
       try {
         const q = state.tempHistory.end ? `?end=${state.tempHistory.end}` : "";
         state.tempHistory.data = await api(`/api/heatpump/temperature-history${q}`);
+        state.tempHistory.loadedAt = Date.now();
       } catch (error) {
         state.tempHistory.error = error.message || "Failed to load temperature history";
       } finally {
@@ -2072,9 +2073,21 @@
       svg += `</svg>`;
       return svg;
     }
-    let histGeom = null;
+    let histGeom = null, histPointer = null;
+    // Live view: while showing the newest window, quietly reload once a minute
+    // so the chart keeps sliding forward, and put the hover tooltip back.
+    async function refreshHistoryLive() {
+      const th = state.tempHistory;
+      if (th.end || th.loading || Date.now() - (th.loadedAt || 0) < 60000) return;
+      await loadHistory();
+      if (state.route !== "history" || state.tempHistory.end) return;
+      render();
+      const p = histPointer, el = p && document.elementFromPoint(p.clientX, p.clientY);
+      if (el?.closest(".hist-chart")) histHover({ target: el, clientX: p.clientX, clientY: p.clientY });
+    }
     function histHover(event) {
       const svg = event.target.closest?.(".hist-chart");
+      histPointer = svg ? { clientX: event.clientX, clientY: event.clientY } : null;
       const wrap = svg?.closest(".hist-chart-wrap");
       const hide = () => document.querySelectorAll(".hist-hover, .hist-chart-wrap .hist-tip").forEach(el => { el.style.display = "none"; });
       if (!svg || !wrap || !histGeom || !histGeom.samples.length) { hide(); return; }
@@ -3353,6 +3366,7 @@
           Object.assign(state, { status, hp, wifi, ota, errors, weather });
           const hpEdge = homeTrackTransitions();
           if (state.route === "home" && (hpEdge || homeHistoryStale())) await loadHomeHistory();
+          if (state.route === "history") await refreshHistoryLive();
           const prevNotifCount = (state.notifications || []).length;
           state.notifications = notif.notifications || [];
           if (state.route === "events") {

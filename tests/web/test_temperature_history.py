@@ -77,6 +77,36 @@ class TestTemperatureHistoryWeb:
         # Having stepped back, returning to the latest window is now possible.
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
 
+    def test_latest_window_refreshes_live(self, dashboard_page: Page, base_url: str):
+        _seed_history(base_url)
+        # Take over timers so a minute can pass instantly.
+        dashboard_page.clock.install()
+        dashboard_page.reload()
+        dashboard_page.wait_for_selector(".rail", timeout=15000)
+        _open_history(dashboard_page)
+
+        loads = []
+        dashboard_page.on(
+            "request",
+            lambda r: loads.append(r.url) if "/api/heatpump/temperature-history" in r.url else None,
+        )
+        dashboard_page.clock.run_for(30_000)
+        dashboard_page.wait_for_timeout(1500)
+        assert not loads, "refreshed before a minute had passed"
+
+        dashboard_page.clock.run_for(40_000)
+        dashboard_page.wait_for_timeout(3000)
+        assert loads and all("end=" not in url for url in loads), loads
+        expect(dashboard_page.locator(".hist-chart")).to_be_visible()
+
+        # Paged back to an older window: it stays put.
+        dashboard_page.locator('[data-action="history-prev"]').click()
+        expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
+        loads.clear()
+        dashboard_page.clock.run_for(130_000)
+        dashboard_page.wait_for_timeout(3000)
+        assert not loads, loads
+
 
 def _post(base_url: str, path: str, body: dict | None = None) -> None:
     r = requests.post(f"{base_url}{path}", json=body, timeout=30, verify=False)
