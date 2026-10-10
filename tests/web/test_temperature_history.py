@@ -2,9 +2,11 @@
 
 import re
 
+import pytest
 import requests
 import urllib3
 from playwright.sync_api import Page, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -85,27 +87,25 @@ class TestTemperatureHistoryWeb:
         dashboard_page.wait_for_selector(".rail", timeout=15000)
         _open_history(dashboard_page)
 
-        loads = []
-        dashboard_page.on(
-            "request",
-            lambda r: loads.append(r.url) if "/api/heatpump/temperature-history" in r.url else None,
-        )
-        dashboard_page.clock.run_for(30_000)
-        dashboard_page.wait_for_timeout(1500)
-        assert not loads, "refreshed before a minute had passed"
+        def is_history(request):
+            return "/api/heatpump/temperature-history" in request.url
 
-        dashboard_page.clock.run_for(40_000)
-        dashboard_page.wait_for_timeout(3000)
-        assert loads and all("end=" not in url for url in loads), loads
+        def assert_no_reload(advance_ms: int):
+            with pytest.raises(PlaywrightTimeoutError):
+                with dashboard_page.expect_request(is_history, timeout=4000):
+                    dashboard_page.clock.run_for(advance_ms)
+
+        assert_no_reload(30_000)
+
+        with dashboard_page.expect_request(is_history, timeout=10000) as reload:
+            dashboard_page.clock.run_for(40_000)
+        assert "end=" not in reload.value.url
         expect(dashboard_page.locator(".hist-chart")).to_be_visible()
 
         # Paged back to an older window: it stays put.
         dashboard_page.locator('[data-action="history-prev"]').click()
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
-        loads.clear()
-        dashboard_page.clock.run_for(130_000)
-        dashboard_page.wait_for_timeout(3000)
-        assert not loads, loads
+        assert_no_reload(130_000)
 
 
 def _post(base_url: str, path: str, body: dict | None = None) -> None:
