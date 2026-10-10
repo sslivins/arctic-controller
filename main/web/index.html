@@ -3358,6 +3358,7 @@
       }
       state.pollTimer = setInterval(async () => {
         if (!state.auth.loggedIn || state.auth.changeRequired) return;
+        if (state.route === "history") refreshHistoryLive().catch(() => {});
         try {
           const [status, hp, wifi, ota, errors, notif, weather] = await Promise.all([
             api("/api/status"), api("/api/heatpump/status"), api("/api/wifi"), api("/api/ota/status"), api("/api/heatpump/errors"), api("/api/notifications"),
@@ -3366,7 +3367,6 @@
           Object.assign(state, { status, hp, wifi, ota, errors, weather });
           const hpEdge = homeTrackTransitions();
           if (state.route === "home" && (hpEdge || homeHistoryStale())) await loadHomeHistory();
-          if (state.route === "history") await refreshHistoryLive();
           const prevNotifCount = (state.notifications || []).length;
           state.notifications = notif.notifications || [];
           if (state.route === "events") {

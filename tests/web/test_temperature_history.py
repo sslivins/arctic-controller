@@ -81,7 +81,8 @@ class TestTemperatureHistoryWeb:
 
     def test_latest_window_refreshes_live(self, dashboard_page: Page, base_url: str):
         _seed_history(base_url)
-        # Take over timers so a minute can pass instantly.
+        # Take over timers so a minute can pass instantly. fast_forward fires the
+        # 5 s poll once per jump rather than replaying every tick in a burst.
         dashboard_page.clock.install()
         dashboard_page.reload()
         dashboard_page.wait_for_selector(".rail", timeout=15000)
@@ -93,12 +94,12 @@ class TestTemperatureHistoryWeb:
         def assert_no_reload(advance_ms: int):
             with pytest.raises(PlaywrightTimeoutError):
                 with dashboard_page.expect_request(is_history, timeout=4000):
-                    dashboard_page.clock.run_for(advance_ms)
+                    dashboard_page.clock.fast_forward(advance_ms)
 
         assert_no_reload(30_000)
 
         with dashboard_page.expect_request(is_history, timeout=10000) as reload:
-            dashboard_page.clock.run_for(40_000)
+            dashboard_page.clock.fast_forward(40_000)
         assert "end=" not in reload.value.url
         expect(dashboard_page.locator(".hist-chart")).to_be_visible()
 
