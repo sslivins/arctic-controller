@@ -2147,7 +2147,7 @@
         </section>`;
       }
       return `<div class="page">
-        <div class="page-head history-head"><button class="icon-btn history-back" data-route="status" aria-label="Back to status" title="Back to status">‹</button><div class="history-title"><h1>Cycle history</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.</p></div><button class="icon-btn" data-action="history-refresh" aria-label="Refresh cycle history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>
+        <div class="page-head history-head">${(() => { const from = state.historyFrom === "home" ? "home" : "status"; const label = from === "home" ? "Back to home" : "Back to status"; return `<button class="icon-btn history-back" data-route="${from}" aria-label="${label}" title="${label}">‹</button>`; })()}<div class="history-title"><h1>Cycle history</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.</p></div><button class="icon-btn" data-action="history-refresh" aria-label="Refresh cycle history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>
         ${body}
       </div>`;
     }
@@ -2450,6 +2450,7 @@
       stopLogPolling();
       stopHaPolling();
       stopPerfPolling();
+      if (route === "history" && state.route !== "history") state.historyFrom = state.route === "home" ? "home" : "status";
       state.route = route;
       if (settingsPage) state.settingsPage = settingsPage;
       if (route === "history" && !state.tempHistory.data) state.tempHistory.loading = true;
@@ -3297,7 +3298,9 @@
       if (event.target.closest?.('form[data-form^="perf-"]')) perfSyncSaves();
     });
     async function navigateFromLocation() {
+      const prev = state.route;
       routeFromHash();
+      if (state.route === "history" && prev !== "history") state.historyFrom = prev === "home" ? "home" : "status";
       await navigate(state.route, state.settingsPage);
     }
     window.addEventListener("hashchange", navigateFromLocation);
