@@ -2037,6 +2037,11 @@ paths:
                         type: integer
                         description: Hot water mode setpoint
                         example: 55
+                  active_setpoint:
+                    type: integer
+                    nullable: true
+                    description: The setpoint the unit is working to in its current mode (°C), or null when unknown
+                    example: 45
                   readings:
                     type: object
                     description: System readings
@@ -2069,6 +2074,11 @@ paths:
                         type: integer
                         description: Calculated power consumption in watts (AC voltage × AC current)
                         example: 1150
+                      energy_today_wh:
+                        type: integer
+                        nullable: true
+                        description: Electrical energy used today (local day) in watt-hours, integrated since boot (not kept across reboots); null until known
+                        example: 5400
                       heat_out:
                         type: integer
                         nullable: true
@@ -2575,6 +2585,117 @@ paths:
 
         '400':
           $ref: '#/components/responses/BadRequest'
+  /api/heatpump/home-history:
+    get:
+      tags:
+      - HeatPump
+      summary: Get the 24-hour home chart summary
+      description: |
+        The last 24 hours as the device home screen draws them: the tank
+        temperature averaged into 150 equal buckets, compressor runs, fault
+        spans and a run summary. Computed with the same code as the device
+        chart, so the web home page and the device always agree.
+
+        Temperatures are deci-Celsius (tenths of a degree), or null when there
+        was no reading. All timestamps are Unix epoch seconds.
+      operationId: getHomeHistory
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      responses:
+        '200':
+          description: 24-hour summary
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [start, end, bucket_seconds, tank, runs, faults, fault_total, summary]
+                properties:
+                  start:
+                    type: integer
+                    description: Window start (Unix epoch seconds)
+                  end:
+                    type: integer
+                    description: Window end (Unix epoch seconds)
+                  bucket_seconds:
+                    type: integer
+                    description: Width of each tank bucket in seconds (576)
+                  tank:
+                    type: array
+                    description: Average tank temperature per bucket, oldest first
+                    items:
+                      type: integer
+                      nullable: true
+                  runs:
+                    type: array
+                    description: Compressor runs overlapping the window, oldest first
+                    items:
+                      type: object
+                      properties:
+                        start:
+                          type: integer
+                        end:
+                          type: integer
+                          nullable: true
+                          description: When the run stopped, or null if still running
+                        mode:
+                          type: string
+                          enum: [heating, cooling, hot_water]
+                  faults:
+                    type: array
+                    description: Fault spans overlapping the window, oldest first (newest 16)
+                    items:
+                      type: object
+                      properties:
+                        fault_code:
+                          type: string
+                          nullable: true
+                        fault_label:
+                          type: string
+                          nullable: true
+                        help_url:
+                          type: string
+                          nullable: true
+                        start:
+                          type: integer
+                        end:
+                          type: integer
+                          nullable: true
+                  fault_total:
+                    type: integer
+                    description: Fault spans in the window, including any beyond the 16 returned
+                  summary:
+                    type: object
+                    properties:
+                      current_start:
+                        type: integer
+                        nullable: true
+                        description: Start of the run in progress, or null
+                      last:
+                        type: object
+                        nullable: true
+                        description: The most recent finished run, or null
+                        properties:
+                          start:
+                            type: integer
+                          end:
+                            type: integer
+                          mode:
+                            type: string
+                            enum: [heating, cooling, hot_water]
+                      starts_last_hour:
+                        type: integer
+                        description: Compressor starts in the last hour
+                      setpoint:
+                        type: integer
+                        nullable: true
+                        description: Newest recorded setpoint (deci-Celsius), or null
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/heatpump/errors:
     get:
       tags:
