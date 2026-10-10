@@ -217,7 +217,7 @@
     .page-actions .btn { white-space: nowrap; }
     .history-head { align-items: flex-start; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; }
     .history-head h1 { margin: 0; }
-    .history-back { font-size: 28px; font-weight: 700; line-height: 1; }
+    .history-back .icon-svg { width: 26px; height: 26px; }
     .page-head h1 { margin: 0; font-size: clamp(26px, 4vw, 36px); letter-spacing: -0.03em; }
     .page-head p { margin: 5px 0 0; color: var(--cp-text-muted); }
     .grid { display: grid; gap: 16px; }
@@ -2147,7 +2147,7 @@
         </section>`;
       }
       return `<div class="page">
-        <div class="page-head history-head">${(() => { const from = state.historyFrom === "home" ? "home" : "status"; const label = from === "home" ? "Back to home" : "Back to status"; return `<button class="icon-btn history-back" data-route="${from}" aria-label="${label}" title="${label}">‹</button>`; })()}<div class="history-title"><h1>Cycle history</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.</p></div><button class="icon-btn" data-action="history-refresh" aria-label="Refresh cycle history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>
+        <div class="page-head history-head">${(() => { const from = state.historyFrom === "home" ? "home" : "status"; const label = from === "home" ? "Back to home" : "Back to status"; return `<button class="icon-btn history-back" data-route="${from}" aria-label="${label}" title="${label}"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M16.7 5.4 15.3 4l-8 8 8 8 1.4-1.4L10.1 12Z"/></svg></button>`; })()}<div class="history-title"><h1>Cycle history</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures over the last 8 hours.</p></div><button class="icon-btn" data-action="history-refresh" aria-label="Refresh cycle history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div>
         ${body}
       </div>`;
     }
