@@ -44,6 +44,7 @@
 #include "boot_stats.h"
 #include "fault_notice.h"
 #include "fault_history.h"
+#include "home_stats.h"
 #include "log_buffer.h"
 #include "log_persist.h"
 #include "crash_dump.h"
@@ -61,6 +62,7 @@
 #include <cJSON.h>
 #include <ctype.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <esp_ota_ops.h>
@@ -193,6 +195,7 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 #endif
 static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req);
+static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req);
 static esp_err_t notifications_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
@@ -1156,6 +1159,15 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_temperature_history_uri);
+
+    // GET /api/heatpump/home-history - 24 h summary for the web home chart
+    httpd_uri_t heatpump_home_history_uri = {
+        .uri = "/api/heatpump/home-history",
+        .method = HTTP_GET,
+        .handler = heatpump_home_history_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_home_history_uri);
 
     // GET /api/notifications - Active status-bar notifications (mirrors the device bell)
     httpd_uri_t notifications_uri = {
@@ -4229,6 +4241,17 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(setpoints, "heating", hp.heating_setpoint);
     cJSON_AddNumberToObject(setpoints, "hot_water", hp.hot_water_setpoint);
 
+    // The setpoint the unit is working to now (depends on mode and, for hot
+    // water / cooling, the current operation); null when unknown or stale.
+    {
+        const arctic::TelemetrySnapshot snap = arctic::getTelemetrySnapshot();
+        if (snap.setpoint_valid) {
+            cJSON_AddNumberToObject(root, "active_setpoint", snap.active_setpoint_c);
+        } else {
+            cJSON_AddNullToObject(root, "active_setpoint");
+        }
+    }
+
     // Setpoint limits (library-owned guardrails; the mainboard enforces none).
     // Consumers clamp/display against these instead of hardcoding their own.
     cJSON* limits = cJSON_AddObjectToObject(root, "setpoint_limits");
@@ -4256,6 +4279,11 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
     cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
     cJSON_AddNumberToObject(readings, "power_consumption", hp.realtime_power_w);
+    if (hp.energy_today_valid) {
+        cJSON_AddNumberToObject(readings, "energy_today_wh", hp.energy_today_wh);
+    } else {
+        cJSON_AddNullToObject(readings, "energy_today_wh");
+    }
     // Estimated performance (macon lib; water flow is an assumed input).
     if (hp.cop_valid) {
         cJSON_AddNumberToObject(readings, "heat_out", hp.thermal_w);
@@ -6269,6 +6297,162 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
     }
 
     emit("}", 1);
+    flush_out();
+    if (out) free(out);
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+// GET /api/heatpump/home-history
+// The last 24 hours as the device home screen draws it: the tank trend
+// averaged into fixed buckets, compressor runs, fault spans and the run
+// summary (last run, starts in the last hour, newest setpoint). Computed with
+// the same helpers as the device chart so both always agree.
+static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+
+    constexpr uint32_t kWindowSeconds = 24 * 60 * 60;
+    constexpr size_t kSampleCap = 3600;  // 24 h at 30 s is 2880
+    constexpr size_t kBuckets = 150;
+    constexpr size_t kMaxRuns = 160;
+    constexpr size_t kMaxFaults = 16;
+
+    uint32_t end = 0;
+    time_t now = 0;
+    time(&now);
+    if (time_mgr_is_synced() && now > 0) {
+        end = (uint32_t)now + 1;
+    } else {
+        history_storage_latest_telemetry_timestamp(&end);
+        if (end > 0) end += 1;
+    }
+    if (end < kWindowSeconds) end = kWindowSeconds;
+    const uint32_t start = end - kWindowSeconds;
+
+    struct Work {
+        history_telemetry_sample_t samples[kSampleCap];
+        home_run_t runs[kMaxRuns];
+        int16_t tank[kBuckets];
+        bool tank_ok[kBuckets];
+        fault_interval_t faults[kMaxFaults];
+    };
+    auto* w = static_cast<Work*>(heap_caps_calloc(1, sizeof(Work),
+                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!w) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+
+    size_t count = 0;
+    if (history_storage_query_telemetry(start, end, w->samples, kSampleCap, &count) != ESP_OK) {
+        heap_caps_free(w);
+        send_json_error(req, "500 Internal Server Error",
+                        "Failed to query telemetry history");
+        return ESP_OK;
+    }
+    home_run_summary_t summary = {};
+    const size_t run_count =
+        home_stats_runs(w->samples, count, end, w->runs, kMaxRuns, &summary);
+    home_stats_tank_series(w->samples, count, start, end, w->tank, w->tank_ok, kBuckets);
+    size_t fault_total = 0;
+    const size_t fault_count =
+        fault_history_query(start, end, w->faults, kMaxFaults, &fault_total);
+
+    set_json_content_type(req);
+
+    constexpr size_t kOutCap = 4096;
+    char* out = (char*)heap_caps_malloc(kOutCap, MALLOC_CAP_SPIRAM);
+    size_t out_len = 0;
+    auto flush_out = [&](void) {
+        if (out && out_len > 0) {
+            httpd_resp_send_chunk(req, out, out_len);
+            out_len = 0;
+        }
+    };
+    auto emit = [&](const char* s, size_t n) {
+        if (!out || n >= kOutCap) {
+            flush_out();
+            httpd_resp_send_chunk(req, s, n);
+            return;
+        }
+        if (out_len + n > kOutCap) flush_out();
+        memcpy(out + out_len, s, n);
+        out_len += n;
+    };
+    char line[256];
+    auto emitf = [&](const char* fmt, ...) {
+        va_list ap;
+        va_start(ap, fmt);
+        int n = vsnprintf(line, sizeof(line), fmt, ap);
+        va_end(ap);
+        if (n < 0) n = 0;
+        if (n > (int)sizeof(line) - 1) n = (int)sizeof(line) - 1;
+        emit(line, (size_t)n);
+    };
+    auto mode_name = [](uint8_t mode) -> const char* {
+        if (mode == HISTORY_TELEMETRY_MODE_COOLING) return "cooling";
+        if (mode == HISTORY_TELEMETRY_MODE_HOT_WATER) return "hot_water";
+        return "heating";
+    };
+
+    emitf("{\"start\":%u,\"end\":%u,\"bucket_seconds\":%u,\"tank\":[",
+          (unsigned)start, (unsigned)end, (unsigned)(kWindowSeconds / kBuckets));
+    for (size_t i = 0; i < kBuckets; i++) {
+        if (w->tank_ok[i]) emitf("%s%d", i ? "," : "", (int)w->tank[i]);
+        else emitf("%snull", i ? "," : "");
+    }
+    emit("],\"runs\":[", 10);
+    for (size_t i = 0; i < run_count; i++) {
+        const home_run_t& r = w->runs[i];
+        if (r.end) {
+            emitf("%s{\"start\":%u,\"end\":%u,\"mode\":\"%s\"}", i ? "," : "",
+                  (unsigned)r.start, (unsigned)r.end, mode_name(r.mode));
+        } else {
+            emitf("%s{\"start\":%u,\"end\":null,\"mode\":\"%s\"}", i ? "," : "",
+                  (unsigned)r.start, mode_name(r.mode));
+        }
+    }
+    emit("],\"faults\":[", 12);
+    for (size_t i = 0; i < fault_count; i++) {
+        const fault_interval_t& f = w->faults[i];
+        const arctic::MaconFaultBit* fb = arctic::macon_fault_bit_for_site(
+            static_cast<arctic::MaconFaultSiteId>(f.site));
+        char end_buf[12];
+        if (f.end) snprintf(end_buf, sizeof(end_buf), "%u", (unsigned)f.end);
+        else strcpy(end_buf, "null");
+        if (fb) {
+            // Codes, labels and help URLs are fixed ASCII tables: no escaping.
+            emitf("%s{\"fault_code\":\"%s\",\"fault_label\":\"%s\",\"help_url\":\"%s\","
+                  "\"start\":%u,\"end\":%s}",
+                  i ? "," : "", fb->code, fb->label, arctic::faultHelpUrl(fb->code),
+                  (unsigned)f.start, end_buf);
+        } else {
+            emitf("%s{\"fault_code\":null,\"fault_label\":null,\"help_url\":null,"
+                  "\"start\":%u,\"end\":%s}",
+                  i ? "," : "", (unsigned)f.start, end_buf);
+        }
+    }
+    emitf("],\"fault_total\":%u,\"summary\":{\"current_start\":",
+          (unsigned)fault_total);
+    if (summary.current.start) emitf("%u", (unsigned)summary.current.start);
+    else emit("null", 4);
+    emit(",\"last\":", 8);
+    if (summary.last.start) {
+        emitf("{\"start\":%u,\"end\":%u,\"mode\":\"%s\"}", (unsigned)summary.last.start,
+              (unsigned)summary.last.end, mode_name(summary.last.mode));
+    } else {
+        emit("null", 4);
+    }
+    emitf(",\"starts_last_hour\":%u,\"setpoint\":", (unsigned)summary.starts_last_hour);
+    if (summary.setpoint_valid) emitf("%d", (int)summary.setpoint_deci_c);
+    else emit("null", 4);
+    emit("}}", 2);
+
+    heap_caps_free(w);
     flush_out();
     if (out) free(out);
     httpd_resp_send_chunk(req, NULL, 0);

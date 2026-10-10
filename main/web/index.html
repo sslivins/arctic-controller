@@ -490,6 +490,117 @@
     .spinner-inline { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
     .btn-spinner { display: inline-block; width: 16px; height: 16px; margin-right: 8px; vertical-align: -3px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; }
     .btn.checking:disabled { opacity: 1; cursor: progress; }
+    /* Home: mirrors the device home screen. */
+    :root {
+      --home-heat-text: #c2410c; --home-cool-text: #1d4ed8; --home-defrost-text: #0e7490;
+      --home-defrost: #4fb3c9; --home-heater: #ea580c;
+    }
+    html[data-theme="dark"] {
+      --home-heat-text: #fbbf24; --home-cool-text: #7cb8ff; --home-defrost-text: #a5f3fc;
+      --home-heater: #fb923c;
+    }
+    .home-grid { display: grid; gap: 16px; grid-template-columns: minmax(300px, 4fr) minmax(0, 8fr);
+      grid-template-areas: "banner banner" "hero chart" "side side"; }
+    .home-banner { grid-area: banner; }
+    .home-hero { grid-area: hero; }
+    .home-side { grid-area: side; display: grid; gap: 16px; align-content: start; }
+    .home-chart { grid-area: chart; display: flex; flex-direction: column; }
+    .fault-banner {
+      display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+      padding: 14px 18px; border-radius: 14px; border: 1px solid var(--cp-danger);
+      background: color-mix(in srgb, var(--cp-danger) 12%, var(--cp-surface));
+      color: var(--cp-danger); font-size: 17px; font-weight: 650;
+    }
+    .fault-banner span:first-child { flex: 1; min-width: 0; }
+    .chev { color: var(--cp-text-muted); font-size: 22px; line-height: 1; flex: none; }
+    .home-hero { --hero-tone: var(--cp-text-muted); display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 6px; text-align: center; padding: 26px 20px 20px; min-height: 280px; }
+    .home-hero.s-fault, .home-hero.s-disconnected { --hero-tone: var(--cp-danger); border-color: var(--cp-danger);
+      background: color-mix(in srgb, var(--cp-danger) 10%, var(--cp-surface)); }
+    .home-hero.s-heating { --hero-tone: var(--home-heat-text); border-color: color-mix(in srgb, var(--hist-heat) 60%, var(--cp-surface));
+      background: color-mix(in srgb, var(--hist-heat) 10%, var(--cp-surface)); }
+    .home-hero.s-cooling { --hero-tone: var(--home-cool-text); border-color: var(--hist-cool);
+      background: color-mix(in srgb, var(--hist-cool) 14%, var(--cp-surface)); }
+    .home-hero.s-defrost { --hero-tone: var(--home-defrost-text); border-color: var(--home-defrost);
+      background: color-mix(in srgb, var(--home-defrost) 12%, var(--cp-surface)); }
+    .hero-state { color: var(--hero-tone); font-size: 20px; font-weight: 700; letter-spacing: .01em; }
+    .hero-state.pulse { animation: home-breathe 3s ease-in-out infinite; }
+    @keyframes home-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    @media (prefers-reduced-motion: reduce) { .hero-state.pulse { animation: none; } }
+    .hero-tank { display: flex; align-items: flex-start; justify-content: center; line-height: 1; margin-top: 4px; }
+    .hero-tank .temp-value { font-size: clamp(72px, 9vw, 108px); font-weight: 650; letter-spacing: -.05em; }
+    .hero-tank .temp-unit { font-size: 28px; font-weight: 600; color: var(--cp-text-muted); margin: 10px 0 0 4px; }
+    .hero-tank.dim .temp-value { color: var(--cp-text-muted); }
+    .hero-sub { color: var(--cp-text-muted); font-size: 16px; }
+    .hero-sub strong { color: var(--cp-text); font-weight: 650; }
+    .pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 16px; }
+    .pill { --pill: var(--cp-text-muted); display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px;
+      border-radius: 999px; border: 1px solid var(--cp-border-strong); color: var(--cp-text-muted);
+      font-size: 14px; font-weight: 600; opacity: .7; }
+    .pill.on { opacity: 1; border-color: var(--pill); color: var(--cp-text);
+      background: color-mix(in srgb, var(--pill) 10%, transparent); }
+    .pill svg { width: 17px; height: 17px; flex: none; color: var(--pill); }
+    .pill:not(.on) svg { color: var(--cp-text-muted); }
+    .fan-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 13px; }
+    .fan-bars i { width: 3px; border-radius: 1px; background: var(--cp-border-strong); }
+    .fan-bars i:nth-child(1) { height: 5px; } .fan-bars i:nth-child(2) { height: 9px; } .fan-bars i:nth-child(3) { height: 13px; }
+    .fan-bars i.lit { background: var(--pill); }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+    .tile { position: relative; text-align: left; padding: 16px; border-radius: 14px; min-height: 96px;
+      border: 1px solid var(--cp-border); background: var(--cp-surface); color: var(--cp-text); }
+    .tile:hover, .home-strip:hover, .fault-caption:hover, .fault-banner:hover { filter: brightness(1.06); }
+    .tile .chev { position: absolute; top: 10px; right: 12px; font-size: 18px; }
+    .tile-label { display: block; color: var(--cp-text-muted); font-size: 13px; font-weight: 600; }
+    .tile-value { display: block; font-size: 28px; font-weight: 650; margin-top: 6px; letter-spacing: -.02em; }
+    .tile.dim .tile-value { color: var(--cp-text-muted); }
+    .tile.warn { border-color: var(--cp-warning); }
+    .tile.warn .tile-value { color: var(--cp-warning); }
+    .home-strip { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 18px; border-radius: 14px;
+      border: 1px solid var(--cp-border); background: var(--cp-surface-soft); color: var(--cp-text); text-align: left; }
+    .strip-groups { flex: 1; display: flex; flex-wrap: wrap; gap: 8px 28px; }
+    .strip-groups > span { display: inline-flex; gap: 8px; align-items: baseline; }
+    .strip-label { color: var(--cp-text-muted); font-size: 14px; }
+    .strip-value { font-weight: 650; font-size: 16px; }
+    .strip-value.warn { color: var(--cp-warning); }
+    .home-chart .card-head { margin-bottom: 6px; }
+    .home-chart .card-head h2 { margin: 0; font-size: 18px; }
+    .home-chart .chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 4px; font-size: 13px; color: var(--cp-text-muted); }
+    .chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .chart-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+    .chart-legend i.line { height: 3px; width: 14px; border-radius: 2px; }
+    .hc { position: relative; flex: 1; height: 260px; min-height: 260px; padding: 28px 0 26px; touch-action: pan-y; user-select: none; }
+    .hc-area { position: absolute; top: 0; bottom: 0; left: 46px; right: 0; }
+    .hc-flabels { position: absolute; top: 0; left: 46px; right: 0; height: 28px; }
+    .hc-xaxis { position: absolute; bottom: 0; left: 46px; right: 0; height: 26px; }
+    .hc-plot { position: absolute; inset: 28px 0 26px; border: 1px solid var(--cp-border); border-radius: 10px;
+      background: var(--cp-bg-elevated); overflow: hidden; }
+    .hc-band, .hc-fault, .hc-vgrid, .hc-hgrid, .hc-sp, .hc-cursor { position: absolute; }
+    .hc-band { top: 0; bottom: 0; opacity: .2; }
+    .hc-fault { top: 0; bottom: 0; background:
+      repeating-linear-gradient(135deg, color-mix(in srgb, var(--cp-danger) 45%, transparent) 0 2px, transparent 2px 9px),
+      color-mix(in srgb, var(--cp-danger) 10%, transparent); }
+    .hc-vgrid { top: 0; bottom: 0; width: 0; border-left: 1px solid var(--cp-border); }
+    .hc-hgrid { left: 46px; right: 0; height: 0; border-top: 1px solid var(--cp-border); }
+    .hc-sp { left: 0; right: 0; height: 0; border-top: 2px dashed color-mix(in srgb, var(--cp-text-muted) 75%, transparent); }
+    .hc-sp-label { position: absolute; right: 6px; transform: translateY(-100%); margin-top: -3px; padding: 0 5px;
+      border-radius: 4px; background: var(--cp-bg-elevated); color: var(--cp-text-muted); font-size: 13px; font-weight: 600; z-index: 2; }
+    .hc-y { position: absolute; left: 8px; color: var(--cp-text-muted); font-size: 12px; font-weight: 600; }
+    .hc svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 1; }
+    .hc-tank { fill: none; stroke: var(--cp-text); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+    .hc-flabel { position: absolute; top: 4px; color: var(--cp-danger); font-size: 13px; font-weight: 700; white-space: nowrap; }
+    .hc-x { position: absolute; bottom: 2px; color: var(--cp-text-muted); font-size: 13px; transform: translateX(-50%); white-space: nowrap; }
+    .hc-x.first { transform: none; } .hc-x.last { transform: translateX(-100%); }
+    .hc-cursor { z-index: 2; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--cp-text-muted); display: none; }
+    .hc-dot { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%;
+      background: var(--cp-text); border: 2px solid var(--cp-surface); display: none; z-index: 2; }
+    .hc .hist-tip { top: 34px; z-index: 3; }
+    .hc-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--cp-text-muted); font-size: 14px; }
+    .fault-caption { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 12px; padding: 10px 14px;
+      border-radius: 10px; border: 1px solid color-mix(in srgb, var(--cp-danger) 50%, var(--cp-border));
+      background: color-mix(in srgb, var(--cp-danger) 7%, var(--cp-surface)); color: var(--cp-text); text-align: left; }
+    .fault-caption .fc-text { flex: 1; min-width: 0; color: var(--cp-danger); font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fault-caption .fc-time { color: var(--cp-text-muted); font-size: 14px; white-space: nowrap; }
+    .fault-caption .fc-more { padding: 2px 8px; border-radius: 999px; background: var(--cp-danger); color: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; }
     @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; }
       .rail { display: none; }
@@ -524,6 +635,8 @@
       .settings-layout { grid-template-columns: 1fr; }
       .settings-nav { position: static; display: flex; flex-wrap: wrap; overflow-x: visible; gap: 6px; padding: 10px; }
       .settings-nav .nav-link { width: auto; flex: 1 1 calc(50% - 6px); justify-content: center; white-space: normal; min-height: 48px; text-align: center; }
+      .home-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "banner" "hero" "chart" "side"; }
+      .home-hero { min-height: 0; }
     }
     @media (max-width: 620px) {
       .topbar { padding: 0 10px; }
@@ -547,6 +660,17 @@
       .page-head { align-items: flex-start; }
       .history-head { grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; }
       .history-title p { font-size: 15px; }
+      .home-grid { gap: 12px; }
+      .home-hero { padding: 20px 14px 16px; }
+      .tiles { gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .tile { padding: 12px; min-height: 80px; }
+      .tile-value { font-size: 22px; }
+      .tile .chev { display: none; }
+      .strip-groups { gap: 6px 18px; }
+      .hc { height: 220px; }
+      .hc-x.mid-q { display: none; }
+      .fault-caption { flex-wrap: wrap; }
+      .fault-caption .fc-text { flex-basis: 100%; }
     }
   </style>
 </head>
@@ -609,6 +733,7 @@
       preferences: { temp_unit: "celsius", language_code: "en", brightness: 80, device_name: "" },
       errors: { active: [], history: [] }, params: {}, events: [], eventTotal: 0,
       tempHistory: { loading: false, error: "", data: null, end: null },
+      homeHistory: { loading: false, error: "", data: null, loadedAt: 0 }, homeTrack: {}, homeHover: null,
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
       weather: {}, location: {},
@@ -796,44 +921,326 @@
     function pageHead(title, subtitle, action = "") {
       return `<div class="page-head"><div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${action ? `<div class="page-actions">${action}</div>` : ""}</div>`;
     }
-    function component(name, active, detail = "") {
-      return `<div class="component"><span class="${active ? "state-on" : "state-off"}">${active ? "● Active" : "○ Idle"}</span>
-        <strong>${esc(name)}</strong>${detail ? `<small>${esc(detail)}</small>` : ""}</div>`;
+    // ---- Home: mirrors the device home screen (heatpump_screen.cpp) ----
+    const HOME_STATE_LABEL = { disconnected: "Disconnected", fault: "Fault", standby: "Standby",
+      defrost: "Defrosting", heating: "Heating", cooling: "Cooling", idle: "Idle" };
+    const HOME_RUN_MODE = { heating: ["Heating", "var(--hist-heat)"], cooling: ["Cooling", "var(--hist-cool)"],
+      hot_water: ["Hot water", "var(--hist-dhw)"] };
+    const HOME_AT_SETPOINT_MARGIN_C = 2, HOME_STARTS_WARN = 6, HOME_DT_WARN_C = 3;
+    const HOME_HISTORY_MAX_AGE_MS = 120000;
+    function homeHeroState(hp) {
+      if (!hp.connected) return "disconnected";
+      const op = hp.operation;
+      if (op === "fault") return "fault";
+      if (op === "off") return "standby";
+      if (op === "defrost") return "defrost";
+      if (op === "heating" || op === "cooling" || op === "idle") return op;
+      if (hp.has_error) return "fault";
+      return hp.unit_on ? "idle" : "standby";
+    }
+    function homeRunning(hero) { return hero === "heating" || hero === "cooling" || hero === "defrost"; }
+    function homeSetpoint() {
+      const hp = state.hp;
+      if (hp.active_setpoint != null) return Number(hp.active_setpoint);
+      const sp = state.homeHistory.data?.summary?.setpoint;
+      return sp == null ? null : sp / 10;
+    }
+    function fmtDuration(seconds) {
+      const min = Math.round(Math.max(0, seconds) / 60);
+      return min < 100 ? `${min} min` : `${Math.round(min / 60)} h`;
+    }
+    function nowEpoch() { return Math.floor(Date.now() / 1000); }
+    function fmtPower(watts) {
+      if (watts == null) return "--";
+      const w = Number(watts);
+      return Math.abs(w) >= 1000 ? `${(w / 1000).toFixed(1)} kW` : `${Math.round(w)} W`;
+    }
+    // Client-side transition tracking for the bits the device keeps in RAM.
+    function homeTrackTransitions() {
+      const hp = state.hp, t = nowEpoch(), h = state.homeTrack;
+      const defrost = homeHeroState(hp) === "defrost";
+      if (defrost && !h.defrostSince) h.defrostSince = t;
+      if (!defrost) h.defrostSince = 0;
+      const running = homeRunning(homeHeroState(hp));
+      if (running && !h.runSince) h.runSince = t;
+      if (!running) h.runSince = 0;
+      const edge = h.compressor !== undefined &&
+        (h.compressor !== !!hp.compressor || h.hasError !== !!hp.has_error);
+      h.compressor = !!hp.compressor; h.hasError = !!hp.has_error;
+      return edge;
+    }
+    async function loadHomeHistory() {
+      const hh = state.homeHistory;
+      if (hh.loading) return;
+      hh.loading = true;
+      try {
+        hh.data = await api("/api/heatpump/home-history");
+        hh.error = "";
+      } catch (error) {
+        hh.error = error.message || "Failed to load history";
+      } finally {
+        hh.loading = false; hh.loadedAt = Date.now();
+      }
+    }
+    function homeHistoryStale() {
+      const hh = state.homeHistory;
+      return !hh.loading && (!hh.loadedAt || Date.now() - hh.loadedAt >= HOME_HISTORY_MAX_AGE_MS);
+    }
+    function homeIcon(kind) {
+      const paths = {
+        compressor: `<circle cx="12" cy="12" r="8"/><path d="M12 4v4M12 16v4M4 12h4M16 12h4"/><circle cx="12" cy="12" r="2"/>`,
+        fan: `<circle cx="12" cy="12" r="1.6"/><path d="M12 10.4c0-4 1-6.4 3.4-6.4 2.4 0 2.6 3.4-1.8 6.6M13.6 12c4 0 6.4 1 6.4 3.4 0 2.4-3.4 2.6-6.6-1.8M12 13.6c0 4-1 6.4-3.4 6.4-2.4 0-2.6-3.4 1.8-6.6M10.4 12c-4 0-6.4-1-6.4-3.4C4 6.2 7.4 6 10.6 10.4"/>`,
+        pump: `<path d="M12 3c3 4 6 7.2 6 10.5a6 6 0 0 1-12 0C6 10.2 9 7 12 3Z"/>`,
+        heater: `<path d="M8 4c-1.5 2 1.5 3 0 5s1.5 3 0 5M12 4c-1.5 2 1.5 3 0 5s1.5 3 0 5M16 4c-1.5 2 1.5 3 0 5s1.5 3 0 5M5 19h14"/>`
+      };
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
+    }
+    function homePill(kind, label, on, accent, extra = "") {
+      return `<span class="pill ${on ? "on" : ""}" data-pill="${kind}" style="--pill:${accent}" title="${esc(label)} ${on ? "on" : "off"}">
+        ${homeIcon(kind)}<span>${esc(label)}</span>${extra}</span>`;
+    }
+    function homeTile(key, label, value, { dim = false, warn = false, title = "" } = {}) {
+      return `<button class="tile ${dim ? "dim" : ""} ${warn ? "warn" : ""}" data-tile="${key}" data-route="status"${title ? ` title="${esc(title)}"` : ""}>
+        <span class="tile-label">${esc(label)}</span><span class="tile-value">${esc(value)}</span><span class="chev" aria-hidden="true">›</span></button>`;
+    }
+    function homeStripItem(key, label, value, warn = false) {
+      return `<span data-strip="${key}"><span class="strip-label">${esc(label)}</span><span class="strip-value ${warn ? "warn" : ""}">${esc(value)}</span></span>`;
+    }
+    // Fixed scale per mode, matching the device: heating/hot water 20-60 °C
+    // (60-140 °F), cooling 5-25 °C (40-80 °F). Values in the display unit.
+    function homeAxis() {
+      const f = state.preferences.temp_unit === "fahrenheit";
+      const cooling = state.hp.mode === "cooling";
+      const lo = cooling ? (f ? 40 : 5) : (f ? 60 : 20);
+      const step = cooling ? (f ? 10 : 5) : (f ? 20 : 10);
+      return { lo, hi: lo + 4 * step, step };
+    }
+    function homeChart() {
+      const hh = state.homeHistory, data = hh.data;
+      const head = `<div class="card-head">
+          <h2>Last 24 hours</h2>
+          <button class="btn" data-route="history">Cycle history ›</button></div>
+          <div class="chart-legend">
+              <span><i class="line" style="background:var(--cp-text)"></i>Tank</span>
+              <span><i style="background:color-mix(in srgb, var(--hist-heat) 35%, transparent)"></i>Heating</span>
+              <span><i style="background:color-mix(in srgb, var(--hist-cool) 35%, transparent)"></i>Cooling</span>
+              <span><i style="background:color-mix(in srgb, var(--hist-dhw) 35%, transparent)"></i>Hot water</span>
+              <span><i style="background:repeating-linear-gradient(135deg, var(--cp-danger) 0 2px, transparent 2px 5px)"></i>Fault</span>
+            </div>`;
+      if (!data) {
+        const body = hh.error ? `<div class="hc-empty">${esc(hh.error)}</div>` : `<div class="hc-empty"><div class="spinner"></div></div>`;
+        return `<section class="card home-chart">${head}<div class="hc">${body}</div></section>`;
+      }
+      const start = data.start, end = data.end, span = Math.max(1, end - start);
+      const pct = t => (Math.min(Math.max(t, start), end) - start) / span * 100;
+      const ax = homeAxis();
+      const yPct = v => (ax.hi - Math.min(Math.max(v, ax.lo), ax.hi)) / (ax.hi - ax.lo) * 100;
+      const tank = data.tank || [], bs = data.bucket_seconds || span / Math.max(1, tank.length);
+
+      const bands = (data.runs || []).map(r => {
+        const l = pct(r.start), w = pct(r.end ?? end) - l;
+        const color = (HOME_RUN_MODE[r.mode] || HOME_RUN_MODE.heating)[1];
+        return w > 0 ? `<div class="hc-band" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0.15).toFixed(3)}%;background:${color}"></div>` : "";
+      }).join("");
+      const faults = (data.faults || []).slice().sort((a, b) => a.start - b.start);
+      const zones = faults.map(f => {
+        const l = pct(f.start), w = pct(f.end ?? end) - l;
+        return `<div class="hc-fault" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0.3).toFixed(3)}%"></div>`;
+      }).join("");
+      const flabels = faults.map(f => `<span class="hc-flabel" style="left:${pct(f.start).toFixed(3)}%">⚠ ${esc(f.fault_code || "?")}</span>`).join("");
+
+      let d = "", pen = false, points = 0;
+      tank.forEach((v, i) => {
+        if (v == null) { pen = false; return; }
+        const x = ((start + (i + 0.5) * bs - start) / span * 1000).toFixed(1);
+        const y = (yPct(histDeciToDisplay(v) / 10) * 10).toFixed(1);
+        d += pen ? `L${x} ${y}` : `M${x} ${y}l0.01 0`;
+        pen = true; points++;
+      });
+
+      const ylabels = [0, 1, 2, 3, 4].map(g => {
+        const top = g / 4 * 100;
+        const shift = g === 0 ? "translateY(2px)" : g === 4 ? "translateY(calc(-100% - 2px))" : "translateY(-50%)";
+        return `<span class="hc-y" style="top:${top}%;transform:${shift}">${ax.hi - g * ax.step}°</span>`;
+      }).join("");
+      const hgrid = [1, 2, 3].map(g => `<div class="hc-hgrid" style="top:${g * 25}%"></div>`).join("");
+      const vgrid = [1, 2, 3].map(g => `<div class="hc-vgrid" style="left:${g * 25}%"></div>`).join("");
+      const sp = homeSetpoint();
+      const spLine = sp == null ? "" : (() => {
+        const top = yPct(tempNumber(sp));
+        return `<div class="hc-sp" style="top:${top.toFixed(2)}%"><span class="hc-sp-label">${temp(sp)}</span></div>`;
+      })();
+      const xl = [[0, "24 h", "first"], [25, "18 h", "mid-q"], [50, "12 h", ""], [75, "6 h", "mid-q"], [100, "now", "last"]]
+        .map(([l, t, c]) => `<span class="hc-x ${c}" style="left:${l}%">${t}</span>`).join("");
+      const empty = points ? "" : `<div class="hc-empty">No tank readings in the last 24 hours</div>`;
+
+      let caption = "";
+      const latest = faults[faults.length - 1];
+      if (latest) {
+        const dur = (latest.end ?? nowEpoch()) - latest.start;
+        const more = (data.fault_total || faults.length) - 1;
+        caption = `<button class="fault-caption" data-action="home-problems">
+          <span class="fc-text">⚠ ${esc(latest.fault_code || "?")} ${esc(latest.fault_label || "")}</span>
+          <span class="fc-time">${esc(fmtHistClock(latest.start))} · ${esc(fmtDuration(dur))}${latest.end == null ? " (active)" : ""}</span>
+          ${more > 0 ? `<span class="fc-more">+${more} more</span>` : ""}<span class="chev" aria-hidden="true">›</span></button>`;
+      }
+      return `<section class="card home-chart">${head}
+        <div class="hc" data-home-chart>
+          <div class="hc-flabels">${flabels}</div>
+          <div class="hc-plot">${ylabels}${hgrid}
+            <div class="hc-area">${bands}${zones}${vgrid}${spLine}
+              <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"><path class="hc-tank" d="${d}"/></svg>
+              <div class="hc-cursor"></div><div class="hc-dot"></div>${empty}
+            </div>
+          </div>
+          <div class="hc-xaxis">${xl}</div>
+          <div class="hist-tip"></div>
+        </div>${caption}</section>`;
+    }
+    // Hide fault labels that would collide with the one before, like the device.
+    function homeChartLayout() {
+      const box = document.querySelector(".hc-flabels")?.getBoundingClientRect();
+      let lastRight = -Infinity;
+      document.querySelectorAll(".hc-flabel").forEach(el => {
+        el.style.transform = "";
+        let r = el.getBoundingClientRect();
+        if (box && r.right > box.right) { el.style.transform = "translateX(-100%)"; r = el.getBoundingClientRect(); }
+        el.style.visibility = r.left < lastRight + 6 ? "hidden" : "";
+        if (el.style.visibility !== "hidden") lastRight = r.right;
+      });
+      if (state.homeHover != null) homeHoverAt(state.homeHover);
+    }
+    function homeHoverAt(frac) {
+      const chart = document.querySelector("[data-home-chart]"), data = state.homeHistory.data;
+      if (!chart || !data) return;
+      const area = chart.querySelector(".hc-area"), tip = chart.querySelector(".hist-tip");
+      const cursor = chart.querySelector(".hc-cursor"), dot = chart.querySelector(".hc-dot");
+      if (frac == null) { [tip, cursor, dot].forEach(el => { el.style.display = "none"; }); return; }
+      const tank = data.tank || [], n = tank.length;
+      if (!n) return;
+      const span = data.end - data.start, bs = data.bucket_seconds || span / n;
+      const i = Math.min(n - 1, Math.max(0, Math.floor(frac * n)));
+      const t = Math.round(data.start + (i + 0.5) * bs);
+      const xPct = (i + 0.5) / n * 100;
+      cursor.style.display = "block"; cursor.style.left = `${xPct}%`;
+      const v = tank[i];
+      if (v != null) {
+        const ax = homeAxis(), dv = histDeciToDisplay(v) / 10;
+        dot.style.display = "block"; dot.style.left = `${xPct}%`;
+        dot.style.top = `${(ax.hi - Math.min(Math.max(dv, ax.lo), ax.hi)) / (ax.hi - ax.lo) * 100}%`;
+      } else dot.style.display = "none";
+      const b0 = data.start + i * bs, b1 = b0 + bs;
+      const run = (data.runs || []).find(r => r.start < b1 && (r.end ?? data.end) > b0);
+      const runText = run ? (HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating)[0] : "Idle";
+      const faults = (data.faults || []).filter(f => f.start < b1 && (f.end ?? data.end) > b0);
+      tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(t, true))}</div>
+        <div>Tank <strong>${v == null ? "--" : temp(v / 10)}</strong></div>
+        <div>${run ? `<i style="background:${(HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating)[1]}"></i>` : ""}${esc(runText)}</div>` +
+        faults.map(f => `<div class="hist-tip-fault">⚠ ${esc(f.fault_code || "?")} ${esc(f.fault_label || "")}</div>`).join("");
+      tip.style.display = "block";
+      const cw = chart.clientWidth, px = area.offsetLeft + area.clientWidth * xPct / 100;
+      const left = px + 14 + tip.offsetWidth > cw ? px - 14 - tip.offsetWidth : px + 14;
+      tip.style.left = `${Math.max(0, left)}px`;
+    }
+    function homeHover(event) {
+      if (state.route !== "home") return;
+      const chart = event.target.closest?.("[data-home-chart]");
+      const area = chart?.querySelector(".hc-area");
+      if (!chart || !area || event.type === "pointerleave") {
+        if (state.homeHover != null) { state.homeHover = null; homeHoverAt(null); }
+        return;
+      }
+      const r = area.getBoundingClientRect();
+      const frac = (event.clientX - r.left) / r.width;
+      if (frac < 0 || frac > 1) { state.homeHover = null; homeHoverAt(null); return; }
+      state.homeHover = frac;
+      homeHoverAt(frac);
     }
     function homePage() {
-      const hp = state.hp;
-      const target = hp.mode === "cooling" ? hp.setpoints.cooling :
-        hp.mode === "hot_water" ? hp.setpoints.hot_water :
-        hp.mode === "hot_water_cooling" ? (hp.operation === "cooling" ? hp.setpoints.cooling : hp.setpoints.hot_water) :
-        hp.setpoints.heating;
-      const operation = hp.operation || (hp.unit_on ? "idle" : "off");
+      const hp = state.hp, r = hp.readings || {}, t = hp.temperatures || {};
+      const hero = homeHeroState(hp), running = homeRunning(hero), connected = !!hp.connected;
+      const sp = homeSetpoint(), now = nowEpoch();
+      const summary = state.homeHistory.data?.summary || {};
+
+      let detail = "";
+      if (hero === "fault") detail = state.errors.active?.[0]?.code || "";
+      else if (hero === "idle" && sp != null && t.tank != null) {
+        const ok = hp.mode === "cooling" ? t.tank <= sp + HOME_AT_SETPOINT_MARGIN_C : t.tank >= sp - HOME_AT_SETPOINT_MARGIN_C;
+        detail = ok ? "at setpoint" : "no demand";
+      }
+      let sub = "Tank";
+      if ((hero === "heating" || hero === "cooling") && sp != null) sub = `Tank · target <strong>${esc(temp(sp))}</strong>`;
+      else if (hero === "defrost") sub = `Tank · defrosting <strong>${esc(fmtDuration(now - (state.homeTrack.defrostSince || now)))}</strong>`;
+
+      const firstError = state.errors.active?.[0];
+      const banner = !connected
+        ? `<button class="fault-banner home-banner" data-route="errors"><span>⚠ Heat pump not connected</span><span class="chev" aria-hidden="true">›</span></button>`
+        : firstError
+          ? `<button class="fault-banner home-banner" data-route="errors"><span>⚠ ${esc(firstError.code)} · ${esc(firstError.name || firstError.description || "")}</span>${state.errors.active.length > 1 ? `<span class="fc-more">+${state.errors.active.length - 1} more</span>` : ""}<span class="chev" aria-hidden="true">›</span></button>`
+          : "";
+
+      const accent = running ? "var(--hero-tone)" : "var(--cp-text)";
+      const level = Math.max(0, Math.min(3, Number(hp.fan_speed) || 0));
+      const fanBars = `<span class="fan-bars" aria-hidden="true">${[0, 1, 2].map(k => `<i class="${hp.fans && k < level ? "lit" : ""}"></i>`).join("")}</span>`;
+      const pills = connected ? `<div class="pills">
+          ${homePill("compressor", "Compressor", !!hp.compressor, accent)}
+          ${homePill("fan", "Fan", !!hp.fans, accent, fanBars)}
+          ${homePill("pump", "Pump", !!hp.pump, accent)}
+          ${hp.aux_heater ? homePill("heater", "Aux heater", true, "var(--home-heater)") : ""}
+        </div>` : "";
+
+      const heroCard = `<section class="card hero home-hero s-${hero}" data-hero-state="${hero}">
+          <div class="hero-state ${running ? "pulse" : ""}" style="animation-delay:-${Date.now() % 3000}ms">${esc(HOME_STATE_LABEL[hero])}${detail ? ` · ${esc(detail)}` : ""}</div>
+          <div class="hero-tank ${connected ? "" : "dim"}"><span class="temp-value">${connected && t.tank != null ? Math.round(tempNumber(t.tank)) : "--"}</span>${connected && t.tank != null ? `<span class="temp-unit">${unit()}</span>` : ""}</div>
+          <div class="hero-sub">${sub}</div>
+          ${pills}
+        </section>`;
+
+      const dim = !running;
+      const tiles = [];
+      tiles.push(homeTile("supply", "Supply", connected ? temp(t.outlet) : "--", { dim }));
+      tiles.push(homeTile("return", "Return", connected ? temp(t.inlet) : "--", { dim }));
+      if (running) {
+        const dt = t.outlet != null && t.inlet != null ? t.outlet - t.inlet : null;
+        tiles.push(homeTile("dt", "ΔT", dt == null ? "--" : `${Math.round(tempNumber(dt, "differential"))}°`,
+          { warn: hero === "heating" && dt != null && dt < HOME_DT_WARN_C }));
+      }
+      tiles.push(homeTile("power", "Power", connected ? fmtPower(r.power_consumption) : "--", { dim }));
+      if (running) {
+        const copOk = r.cop != null && hero !== "defrost";
+        tiles.push(homeTile("cop", "COP", copOk ? Number(r.cop).toFixed(2) : "—",
+          { dim: !copOk, warn: copOk && !!r.perf_fallback, title: perfSource(r.perf_source, r.perf_fallback, r.perf_settling, r.perf_pending).caption }));
+        tiles.push(homeTile("hz", "Compressor", `${r.compressor_freq ?? 0} Hz`));
+      }
+
+      let strip;
+      if (running) {
+        let since = summary.current_start || 0;
+        const local = state.homeTrack.runSince;
+        if (local && (!since || local > since + 120)) since = local;
+        const starts = summary.starts_last_hour;
+        strip = homeStripItem("running", "Running", since && now >= since ? fmtDuration(now - since) : "--") +
+          homeStripItem("starts", "Starts", starts == null ? "--" : `${starts}/h`, starts >= HOME_STARTS_WARN) +
+          homeStripItem("discharge", "Discharge", connected ? temp(t.discharge) : "--");
+      } else {
+        let last = summary.last;
+        if (summary.current_start) last = { start: summary.current_start, end: state.homeHistory.data?.end };
+        const lastText = last && last.end > last.start ? `${fmtHistClock(last.start)} · ${fmtDuration(last.end - last.start)}` : "--";
+        const wh = r.energy_today_wh;
+        const today = wh == null ? "--" : `${Math.floor(wh / 1000)}.${Math.floor((wh % 1000) / 100)} kWh`;
+        strip = homeStripItem("last-run", "Last run", lastText) + homeStripItem("today", "Today", today);
+      }
+
       return `<div class="page">
-        ${pageHead("Home", "Live operating state and the information you need at a glance.")}
-        <section class="card hero">
-          <div><div class="eyebrow">${hp.connected ? "Connected" : "Disconnected"}</div>
-            <div class="hero-title">${hp.connected ? (operation === "off" ? "Standby" : titleCase(operation)) : "Disconnected"}</div>
-            <div class="hero-sub">${hp.defrosting ? "Defrost cycle active" : hp.unit_on ? "System is responding normally" : "Heat pump is powered off"}</div></div>
-          <div class="temp-hero"><div class="temp-value">${temp(hp.temperatures.tank)}</div><div class="temp-label">Tank · target ${temp(target)}</div></div>
-        </section>
-        <div class="grid grid-4" style="margin-top:16px">
-          <div class="card metric"><div class="metric-label">Outdoor</div><div class="metric-value">${temp(hp.temperatures.outdoor)}</div></div>
-          <div class="card metric"><div class="metric-label">Water flow</div><div class="metric-value">${temp(hp.temperatures.outlet)}</div><div class="metric-sub">Inlet ${temp(hp.temperatures.inlet)}</div></div>
-          <div class="card metric"><div class="metric-label">Power</div><div class="metric-value">${esc(hp.readings.power_consumption ?? "--")} W</div><div class="metric-sub">${esc(hp.readings.compressor_freq ?? "--")} Hz</div></div>
-          <div class="card metric"><div class="metric-label">Efficiency</div><div class="metric-value">${hp.readings.cop == null ? "--" : Number(hp.readings.cop).toFixed(2)}</div><div class="metric-sub">COP · ${perfCaption(hp.readings)}</div></div>
-        </div>
-        <div class="grid grid-2" style="margin-top:16px">
-          <section class="card"><div class="card-head"><h2>Equipment</h2><button class="btn" data-route="status">All readings</button></div>
-            <div class="component-list">
-              ${component("Compressor", hp.compressor, `${hp.readings.compressor_freq || 0} Hz`)}
-              ${component("Fan", hp.fans, `${hp.readings.fan_rpm || 0} RPM`)}
-              ${component("Water pump", hp.pump)}
-              ${component("Aux heater", hp.aux_heater)}
-            </div>
-          </section>
-          <section class="card"><div class="card-head"><h2>Problems</h2><button class="btn" data-route="errors">Error history</button></div>
-            ${state.errors.active.length ? state.errors.active.slice(0, 3).map(errorItem).join("") :
-              `<div class="empty"><span class="badge good">● No active errors</span></div>`}
-          </section>
+        ${pageHead("Home", "Live operating state at a glance.")}
+        <div class="home-grid">
+          ${banner}
+          ${heroCard}
+          <div class="home-side">
+            <div class="tiles">${tiles.join("")}</div>
+            <button class="home-strip" data-route="history"><span class="strip-groups">${strip}</span><span class="chev" aria-hidden="true">›</span></button>
+          </div>
+          ${homeChart()}
         </div>
       </div>`;
     }
@@ -1245,10 +1652,6 @@
       if (src === "external" && settling) return { text: "External sensors (waiting for the loop to settle)", caption: "Estimate · external sensors", cls: "" };
       if (src === "external") return { text: "External sensors", caption: "Estimate · external sensors", cls: "good" };
       return { text: "Heat pump sensors", caption: "Estimate · heat pump sensors", cls: "" };
-    }
-    function perfCaption(r) {
-      const s = perfSource(r.perf_source, r.perf_fallback, r.perf_settling, r.perf_pending);
-      return s.cls === "warn" ? `<span style="color:var(--cp-warning)">${esc(s.caption)}</span>` : esc(s.caption);
     }
     function perfOutput(watts) {
       if (watts == null) return { label: "Heat output", value: "--" };
@@ -1673,7 +2076,7 @@
     function histHover(event) {
       const svg = event.target.closest?.(".hist-chart");
       const wrap = svg?.closest(".hist-chart-wrap");
-      const hide = () => document.querySelectorAll(".hist-hover, .hist-tip").forEach(el => { el.style.display = "none"; });
+      const hide = () => document.querySelectorAll(".hist-hover, .hist-chart-wrap .hist-tip").forEach(el => { el.style.display = "none"; });
       if (!svg || !wrap || !histGeom || !histGeom.samples.length) { hide(); return; }
       const g = histGeom, rect = svg.getBoundingClientRect();
       const vx = (event.clientX - rect.left) / rect.width * g.W;
@@ -1763,6 +2166,7 @@
         history: historyPage, errors: errorsPage, settings: settingsPage };
       updateDocumentTitle();
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
+      if (state.route === "home") homeChartLayout();
       perfSyncSaves();
       if (state.settingsPage === "diagnostics") {
         const logs = $("#log-container"); if (logs) logs.scrollTop = logs.scrollHeight;
@@ -2055,6 +2459,7 @@
       try {
         if (route === "control" && !Object.keys(state.params).length) await loadParams();
         if (route === "history") await loadHistory();
+        if (route === "home" && homeHistoryStale()) await loadHomeHistory();
         if (route === "events" && !state.events.length) await loadEvents(true);
         if (route === "settings") {
           await ensureSettings();
@@ -2429,6 +2834,7 @@
       }
       if (action === "reload-params") { await loadParams(); render(); }
       if (action === "history-refresh") { await loadHistory(); render(); }
+      if (action === "home-problems") { state.eventFilters.category = "problems"; await navigate("events"); }
       if (action === "history-latest") { state.tempHistory.end = null; await loadHistory(); render(); }
       if (action === "history-prev") {
         const d = state.tempHistory.data;
@@ -2785,6 +3191,8 @@
       }));
     document.addEventListener("pointermove", histHover);
     document.addEventListener("pointerleave", histHover);
+    document.addEventListener("pointermove", homeHover);
+    document.addEventListener("pointerdown", homeHover);
     document.addEventListener("input", event => {
       if (event.target.id === "event-search") {
         state.eventFilters.search = event.target.value;
@@ -2908,6 +3316,8 @@
         if (state.auth.loggedIn && !state.auth.changeRequired) {
           render();
           await loadCore();
+          homeTrackTransitions();
+          if (state.route === "home") await loadHomeHistory();
           if (state.route === "control") await loadParams();
           if (state.route === "history") await loadHistory();
           if (state.route === "events") await loadEvents(true);
@@ -2938,6 +3348,8 @@
             api("/api/weather")
           ]);
           Object.assign(state, { status, hp, wifi, ota, errors, weather });
+          const hpEdge = homeTrackTransitions();
+          if (state.route === "home" && (hpEdge || homeHistoryStale())) await loadHomeHistory();
           const prevNotifCount = (state.notifications || []).length;
           state.notifications = notif.notifications || [];
           if (state.route === "events") {

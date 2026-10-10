@@ -2270,7 +2270,8 @@ static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
                        HISTORY_TELEMETRY_COMPRESSOR_VALID |
                        HISTORY_TELEMETRY_INLET_VALID |
                        HISTORY_TELEMETRY_OUTLET_VALID |
-                       HISTORY_TELEMETRY_SETPOINT_VALID;
+                       HISTORY_TELEMETRY_SETPOINT_VALID |
+                       HISTORY_TELEMETRY_TANK_VALID;
         if ((i % 240) < 160) {
             sample.flags |= HISTORY_TELEMETRY_COMPRESSOR_RUNNING;
         }
@@ -2282,16 +2283,19 @@ static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
             sample.inlet_deci_c = (int16_t)(330 + wave / 2);
             sample.outlet_deci_c = (int16_t)(390 + wave * 3 / 4);
             sample.setpoint_deci_c = 450;
+            sample.tank_deci_c = (int16_t)(400 + wave / 2);
         } else if (i < 2 * SAMPLE_COUNT / 3) {
             sample.mode = HISTORY_TELEMETRY_MODE_COOLING;
             sample.inlet_deci_c = (int16_t)(240 - wave / 3);
             sample.outlet_deci_c = (int16_t)(180 - wave / 2);
             sample.setpoint_deci_c = 180;
+            sample.tank_deci_c = (int16_t)(200 - wave / 4);
         } else {
             sample.mode = HISTORY_TELEMETRY_MODE_HOT_WATER;
             sample.inlet_deci_c = (int16_t)(360 + wave / 2);
             sample.outlet_deci_c = (int16_t)(430 + wave * 3 / 4);
             sample.setpoint_deci_c = 500;
+            sample.tank_deci_c = (int16_t)(450 + wave / 3);
         }
     }
 

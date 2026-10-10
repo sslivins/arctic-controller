@@ -35,7 +35,7 @@ pytest tests/web/ -v --headed
 | `test_login.py` | 4 | Login form, success, failure, nav hidden before login |
 | `test_password_recovery.py` | 7 | Forgot password, one-time code help disclosure (desktop + phone), cancel, bad code rejected, recovery with a one-time code |
 | `test_change_password.py` | 2 | Credentials form, change password then sign in again |
-| `test_dashboard.py` | 9 | Hero card, dots, perf strip, panels, polling |
+| `test_dashboard.py` | 14 | Home hero, pills, tiles, strip, 24 h chart + tooltip, mobile stacking, polling |
 | `test_navigation.py` | 15 | 6-page nav, logs page, events page (day groups, readable details, filters, help links), params page |
 | `test_notifications.py` | 4 | Notification tray, badge, dismissal |
 | `test_settings.py` | 8 | Settings cards, toggles, buttons, file upload, security tab |
