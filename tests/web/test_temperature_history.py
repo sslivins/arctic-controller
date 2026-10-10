@@ -2,9 +2,11 @@
 
 import re
 
+import pytest
 import requests
 import urllib3
 from playwright.sync_api import Page, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -76,6 +78,35 @@ class TestTemperatureHistoryWeb:
 
         # Having stepped back, returning to the latest window is now possible.
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
+
+    def test_latest_window_refreshes_live(self, dashboard_page: Page, base_url: str):
+        _seed_history(base_url)
+        # Take over timers so a minute can pass instantly. fast_forward fires the
+        # 5 s poll once per jump rather than replaying every tick in a burst.
+        dashboard_page.clock.install()
+        dashboard_page.reload()
+        dashboard_page.wait_for_selector(".rail", timeout=15000)
+        _open_history(dashboard_page)
+
+        def is_history(request):
+            return "/api/heatpump/temperature-history" in request.url
+
+        def assert_no_reload(advance_ms: int):
+            with pytest.raises(PlaywrightTimeoutError):
+                with dashboard_page.expect_request(is_history, timeout=4000):
+                    dashboard_page.clock.fast_forward(advance_ms)
+
+        assert_no_reload(30_000)
+
+        with dashboard_page.expect_request(is_history, timeout=10000) as reload:
+            dashboard_page.clock.fast_forward(40_000)
+        assert "end=" not in reload.value.url
+        expect(dashboard_page.locator(".hist-chart")).to_be_visible()
+
+        # Paged back to an older window: it stays put.
+        dashboard_page.locator('[data-action="history-prev"]').click()
+        expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
+        assert_no_reload(130_000)
 
 
 def _post(base_url: str, path: str, body: dict | None = None) -> None:

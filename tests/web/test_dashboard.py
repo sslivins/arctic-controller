@@ -60,6 +60,19 @@ class TestHome:
         dashboard_page.locator(".home-chart").get_by_role("button", name="Cycle history").click()
         expect(dashboard_page.get_by_role("heading", name="Cycle history")).to_be_visible()
 
+    def test_cycle_history_back_returns_home(self, dashboard_page: Page):
+        dashboard_page.locator(".home-chart").get_by_role("button", name="Cycle history").click()
+        expect(dashboard_page.get_by_role("heading", name="Cycle history")).to_be_visible()
+        dashboard_page.locator(".history-back").click()
+        expect(dashboard_page.get_by_role("heading", name="Home", exact=True)).to_be_visible()
+
+    def test_cycle_history_back_returns_status(self, dashboard_page: Page):
+        dashboard_page.locator(".rail .nav-link", has_text="Status").click()
+        dashboard_page.get_by_role("button", name="View cycle history").click()
+        expect(dashboard_page.get_by_role("heading", name="Cycle history")).to_be_visible()
+        dashboard_page.locator(".history-back").click()
+        expect(dashboard_page.get_by_role("heading", name="Status", exact=True)).to_be_visible()
+
     def test_status_survives_poll(self, dashboard_page: Page):
         dashboard_page.wait_for_timeout(5500)
         expect(dashboard_page.locator(".hero")).to_be_visible()
