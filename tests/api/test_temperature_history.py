@@ -110,8 +110,17 @@ def test_web_dashboard_has_temperature_history_view():
 
 def test_history_api_and_web_mark_faults_from_the_event_log():
     api = (MAIN / "api_server.cpp").read_text(encoding="utf-8")
-    assert "fault_history_query(" in api
+    assert "chart_spans_query(" in api
     assert '\\"faults\\"' in api
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
     assert "data.faults" in web
     assert "hist-fault-label" in web
+
+
+def test_history_api_and_web_mark_defrosts_from_the_event_log():
+    api = (MAIN / "api_server.cpp").read_text(encoding="utf-8")
+    assert '\\"defrosts\\"' in api
+    web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
+    assert "data.defrosts" in web
+    assert "hist-defrost" in web
+    assert "hc-defrost" in web
