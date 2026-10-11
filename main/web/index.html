@@ -426,6 +426,7 @@
     .event.tone-bad { --event-tone: var(--cp-danger); }
     .event.tone-warn { --event-tone: var(--cp-warning); }
     .event.tone-info { --event-tone: var(--cp-accent); }
+    .event.tone-defrost { --event-tone: var(--home-defrost-text); }
     .event-icon { color: var(--event-tone); font-size: 18px; line-height: 1.2; text-align: center; }
     .event-time { color: var(--cp-text-muted); font-size: 13px; white-space: nowrap; line-height: 1.6; }
     .event-title { font-weight: 650; color: var(--event-tone); }
@@ -574,8 +575,11 @@
     .hc-xaxis { position: absolute; bottom: 0; left: 46px; right: 0; height: 26px; }
     .hc-plot { position: absolute; inset: 28px 0 26px; border: 1px solid var(--cp-border); border-radius: 10px;
       background: var(--cp-bg-elevated); overflow: hidden; }
-    .hc-band, .hc-fault, .hc-vgrid, .hc-hgrid, .hc-sp, .hc-cursor { position: absolute; }
+    .hc-band, .hc-fault, .hc-defrost, .hc-vgrid, .hc-hgrid, .hc-sp, .hc-cursor { position: absolute; }
     .hc-band { top: 0; bottom: 0; opacity: .2; }
+    /* Defrost: an icy block over the run it interrupts, with a solid cap. */
+    .hc-defrost { top: 0; bottom: 0; min-width: 3px; border-top: 4px solid var(--home-defrost-text);
+      background: color-mix(in srgb, var(--home-defrost) 40%, transparent); }
     .hc-fault { top: 0; bottom: 0; background:
       repeating-linear-gradient(135deg, color-mix(in srgb, var(--cp-danger) 45%, transparent) 0 2px, transparent 2px 9px),
       color-mix(in srgb, var(--cp-danger) 10%, transparent); }
@@ -1025,6 +1029,7 @@
               <span><i style="background:var(--hist-heat)"></i>Heating</span>
               <span><i style="background:var(--hist-cool)"></i>Cooling</span>
               <span><i style="background:var(--hist-dhw)"></i>Hot water</span>
+              <span><i style="background:var(--home-defrost)"></i>Defrost</span>
               <span><i style="background:repeating-linear-gradient(135deg, var(--cp-danger) 0 2px, transparent 2px 5px)"></i>Fault</span>
             </div>`;
       if (!data) {
@@ -1041,6 +1046,10 @@
         const l = pct(r.start), w = pct(r.end ?? end) - l;
         const color = (HOME_RUN_MODE[r.mode] || HOME_RUN_MODE.heating)[1];
         return w > 0 ? `<div class="hc-band" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0.15).toFixed(3)}%;background:${color}"></div>` : "";
+      }).join("");
+      const defrosts = (data.defrosts || []).map(df => {
+        const l = pct(df.start), w = pct(df.end ?? end) - l;
+        return `<div class="hc-defrost" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0).toFixed(3)}%"></div>`;
       }).join("");
       const faults = (data.faults || []).slice().sort((a, b) => a.start - b.start);
       const zones = faults.map(f => {
@@ -1088,7 +1097,7 @@
         <div class="hc" data-home-chart>
           <div class="hc-flabels">${flabels}</div>
           <div class="hc-plot">${ylabels}${hgrid}
-            <div class="hc-area">${bands}${zones}${vgrid}${spLine}
+            <div class="hc-area">${bands}${defrosts}${zones}${vgrid}${spLine}
               <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"><path class="hc-tank" d="${d}"/></svg>
               <div class="hc-cursor"></div><div class="hc-dot"></div>${empty}
             </div>
@@ -1347,9 +1356,9 @@
     // Colour and icon per event type, matching the device's Events screen.
     const eventTones = {
       power_on: "good", compressor_on: "good", fan_on: "good", pump_on: "good", aux_heater_on: "good",
-      connected: "good", defrost_end: "good", error_cleared: "good", network_recovered: "good",
+      connected: "good", error_cleared: "good", network_recovered: "good",
       error_appeared: "bad", brownout_reset: "bad", application_crash: "bad", watchdog_reset: "bad",
-      defrost_start: "warn", aux_heater_off: "warn", network_unreachable: "warn",
+      network_unreachable: "warn", defrost_start: "defrost", defrost_end: "defrost",
       mode_changed: "info", setpoint_changed: "info", system_start: "info"
     };
     const eventIcons = {
@@ -1959,6 +1968,16 @@
         i = j;
       }
 
+      // Defrost (matches the device): an icy block over the run it
+      // interrupts, with a solid cap so a short one shows at this zoom.
+      for (const df of data.defrosts || []) {
+        const x1 = Math.max(plotL, mapX(df.start));
+        const x2 = Math.min(plotR, Math.max(x1 + 3, mapX(df.end ?? end)));
+        if (x2 <= x1) continue;
+        svg += `<rect class="hist-defrost" x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="var(--home-defrost)" opacity="0.4"/>`;
+        svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="4" fill="var(--home-defrost-text)"/>`;
+      }
+
       // Fault zones (matches the device): a faint hatched fill over the
       // fault's span plus a solid full-height line where it started. Red is
       // reserved for faults; heating bands are orange.
@@ -2148,6 +2167,7 @@
               <span><i class="band" style="background:var(--hist-heat)"></i>Heating</span>
               <span><i class="band" style="background:var(--hist-cool)"></i>Cooling</span>
               <span><i class="band" style="background:var(--hist-dhw)"></i>Hot Water</span>
+              <span><i class="band" style="background:var(--home-defrost)"></i>Defrost</span>
               <span><i style="background:var(--cp-danger);width:3px;height:14px"></i>Fault</span>
             </div>
           </div>

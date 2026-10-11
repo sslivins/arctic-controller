@@ -84,6 +84,7 @@ static constexpr uint32_t SUMMARY_WINDOW_S = 24 * 60 * 60;
 static constexpr size_t CHART_BUCKETS = 150;      // 4 px each across the plot
 static constexpr size_t CHART_MAX_RUNS = 160;
 static constexpr size_t CHART_MAX_FAULTS = 16;
+static constexpr size_t CHART_MAX_DEFROSTS = 16;
 static constexpr size_t CHART_SAMPLE_CAP = 3600;  // 24 h at 30 s is 2880
 static constexpr uint32_t CHART_REFRESH_MS = 2 * 60 * 1000;
 static constexpr int32_t CHART_HEIGHT = 250;
@@ -181,6 +182,8 @@ struct HomeHistory {
     fault_interval_t faults[CHART_MAX_FAULTS];
     size_t fault_count;
     size_t fault_total;  // In the window, including any beyond the cap
+    fault_interval_t defrosts[CHART_MAX_DEFROSTS];
+    size_t defrost_count;
     home_run_summary_t summary;
 };
 
@@ -585,6 +588,21 @@ static void chart_draw_cb(lv_event_t* e) {
                   LV_OPA_20);
     }
 
+    // Defrost: an icy block over the run it interrupts, with a solid cap.
+    for (size_t i = 0; i < h.defrost_count; i++) {
+        const fault_interval_t& d = h.defrosts[i];
+        int32_t x1 = chart_x(h, d.start, plot);
+        int32_t x2 = chart_x(h, d.end != 0 ? d.end : h.end, plot);
+        if (x2 - x1 < 3) x2 = x1 + 3;
+        x1 = LV_MAX(x1, inner.x1);
+        x2 = LV_MIN(x2, inner.x2);
+        if (x2 <= x1) continue;
+        fill_rect(layer, x1, inner.y1, x2, inner.y2, COLOR_DEFROST_BORDER,
+                  LV_OPA_40);
+        fill_rect(layer, x1, inner.y1, x2, inner.y1 + 4, COLOR_DEFROST_TEXT,
+                  LV_OPA_COVER);
+    }
+
     for (size_t i = 0; i < h.fault_count; i++) {
         const fault_interval_t& f = h.faults[i];
         int32_t x1 = LV_MAX(chart_x(h, f.start, plot), inner.x1);
@@ -775,8 +793,9 @@ static void home_query_task(void* arg) {
         h.loaded = true;
     }
     heap_caps_free(samples);
-    h.fault_count = fault_history_query(h.start, h.end, h.faults, CHART_MAX_FAULTS,
-                                        &h.fault_total);
+    h.fault_count = chart_spans_query(h.start, h.end, h.faults, CHART_MAX_FAULTS,
+                                      &h.fault_total, h.defrosts,
+                                      CHART_MAX_DEFROSTS, &h.defrost_count);
 
     // Worker task: lv_async_call() must hold the LVGL lock.
     bsp_display_lock(0);

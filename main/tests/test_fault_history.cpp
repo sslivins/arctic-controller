@@ -179,7 +179,43 @@ static void cap_keeps_the_newest_spans() {
     }
 }
 
+static void defrost_spans_pair_start_with_end() {
+    std::vector<event_entry_t> e = {
+        ev(T0 + 100, BOOT_A, EVENT_DEFROST_START),
+        ev(T0 + 110, BOOT_A, EVENT_ERROR_APPEARED, 4),
+        ev(T0 + 340, BOOT_A, EVENT_DEFROST_END),
+        ev(T0 + 900, BOOT_A, EVENT_DEFROST_START)};
+    fault_interval_t out[4];
+    size_t n = defrost_intervals_from_events(e.data(), e.size(), T0, T0 + 9000,
+                                             BOOT_A, out, 4);
+    CHECK_EQ_U(n, 2);
+    if (n == 2) {
+        CHECK_EQ_U(out[0].start, T0 + 100);
+        CHECK_EQ_U(out[0].end, T0 + 340);
+        CHECK_EQ_U(out[0].site, 0);
+        CHECK_EQ_U(out[1].start, T0 + 900);
+        CHECK_EQ_U(out[1].end, 0);
+    }
+    // Defrost events never become fault spans.
+    auto s = spans(e, T0, T0 + 9000, BOOT_A);
+    CHECK_EQ_U(s.size(), 1);
+}
+
+static void defrost_open_at_reboot_closes_at_that_boot() {
+    std::vector<event_entry_t> e = {
+        ev(T0 + 100, BOOT_A, EVENT_DEFROST_START),
+        ev(T0 + 200, BOOT_A, EVENT_FAN_OFF),
+        ev(T0 + 5000, BOOT_B, EVENT_SYSTEM_START)};
+    fault_interval_t out[4];
+    size_t n = defrost_intervals_from_events(e.data(), e.size(), T0, T0 + 9000,
+                                             BOOT_B, out, 4);
+    CHECK_EQ_U(n, 1);
+    if (n == 1) CHECK_EQ_U(out[0].end, T0 + 200);
+}
+
 int main() {
+    defrost_spans_pair_start_with_end();
+    defrost_open_at_reboot_closes_at_that_boot();
     pairs_appeared_with_cleared();
     active_fault_in_this_boot_is_open();
     reboot_closes_the_span_at_the_last_event_of_that_boot();

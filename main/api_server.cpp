@@ -6267,7 +6267,13 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
     // wrong and when. Field names match /api/events' error_appeared details.
     {
         fault_interval_t spans[32];
-        const size_t nspans = fault_history_query(start, end, spans, 32);
+        constexpr size_t kMaxDefrosts = 32;
+        auto* defrosts = static_cast<fault_interval_t*>(heap_caps_malloc(
+            sizeof(fault_interval_t) * kMaxDefrosts, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        size_t ndefrosts = 0;
+        const size_t nspans = chart_spans_query(start, end, spans, 32, nullptr,
+                                                defrosts, defrosts ? kMaxDefrosts : 0,
+                                                &ndefrosts);
         cJSON* faults = cJSON_CreateArray();
         for (size_t i = 0; faults && i < nspans; i++) {
             cJSON* f = cJSON_CreateObject();
@@ -6294,6 +6300,24 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
         else emit("[]", 2);
         if (fj) cJSON_free(fj);
         if (faults) cJSON_Delete(faults);
+
+        // Defrost spans (end null = still defrosting).
+        static constexpr char kDefrostsOpen[] = ",\"defrosts\":[";
+        emit(kDefrostsOpen, sizeof(kDefrostsOpen) - 1);
+        for (size_t i = 0; defrosts && i < ndefrosts; i++) {
+            char d[64];
+            int dn;
+            if (defrosts[i].end) {
+                dn = snprintf(d, sizeof(d), "%s{\"start\":%u,\"end\":%u}", i ? "," : "",
+                              (unsigned)defrosts[i].start, (unsigned)defrosts[i].end);
+            } else {
+                dn = snprintf(d, sizeof(d), "%s{\"start\":%u,\"end\":null}", i ? "," : "",
+                              (unsigned)defrosts[i].start);
+            }
+            if (dn > 0) emit(d, (size_t)dn);
+        }
+        emit("]", 1);
+        heap_caps_free(defrosts);
     }
 
     emit("}", 1);
@@ -6322,6 +6346,7 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
     constexpr size_t kBuckets = 150;
     constexpr size_t kMaxRuns = 160;
     constexpr size_t kMaxFaults = 16;
+    constexpr size_t kMaxDefrosts = 16;
 
     uint32_t end = 0;
     time_t now = 0;
@@ -6342,6 +6367,7 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
         int16_t tank[kBuckets];
         bool tank_ok[kBuckets];
         fault_interval_t faults[kMaxFaults];
+        fault_interval_t defrosts[kMaxDefrosts];
     };
     auto* w = static_cast<Work*>(heap_caps_calloc(1, sizeof(Work),
                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -6364,8 +6390,10 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
     run_count = home_stats_drop_runs_before(w->runs, run_count, start);
     home_stats_tank_series(w->samples, count, start, end, w->tank, w->tank_ok, kBuckets);
     size_t fault_total = 0;
+    size_t defrost_count = 0;
     const size_t fault_count =
-        fault_history_query(start, end, w->faults, kMaxFaults, &fault_total);
+        chart_spans_query(start, end, w->faults, kMaxFaults, &fault_total,
+                          w->defrosts, kMaxDefrosts, &defrost_count);
 
     set_json_content_type(req);
 
@@ -6441,8 +6469,18 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
                   i ? "," : "", (unsigned)f.start, end_buf);
         }
     }
-    emitf("],\"fault_total\":%u,\"summary\":{\"current_start\":",
-          (unsigned)fault_total);
+    emitf("],\"fault_total\":%u,\"defrosts\":[", (unsigned)fault_total);
+    for (size_t i = 0; i < defrost_count; i++) {
+        const fault_interval_t& d = w->defrosts[i];
+        if (d.end) {
+            emitf("%s{\"start\":%u,\"end\":%u}", i ? "," : "", (unsigned)d.start,
+                  (unsigned)d.end);
+        } else {
+            emitf("%s{\"start\":%u,\"end\":null}", i ? "," : "", (unsigned)d.start);
+        }
+    }
+    static constexpr char kSummaryOpen[] = "],\"summary\":{\"current_start\":";
+    emit(kSummaryOpen, sizeof(kSummaryOpen) - 1);
     if (summary.current.start) emitf("%u", (unsigned)summary.current.start);
     else emit("null", 4);
     emit(",\"last\":", 8);
