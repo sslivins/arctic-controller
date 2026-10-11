@@ -39,13 +39,16 @@ struct Builder {
     }
 };
 
-}  // namespace
+enum class SpanKind { Fault, Defrost };
 
-size_t fault_intervals_from_events(const event_entry_t* events, size_t n,
-                                   uint32_t window_start, uint32_t window_end,
-                                   uint32_t current_boot_id,
-                                   fault_interval_t* out, size_t cap,
-                                   size_t* total) {
+size_t pair_spans(SpanKind kind, const event_entry_t* events, size_t n,
+                  uint32_t window_start, uint32_t window_end,
+                  uint32_t current_boot_id, fault_interval_t* out, size_t cap,
+                  size_t* total) {
+    const event_type_t open_type =
+        kind == SpanKind::Fault ? EVENT_ERROR_APPEARED : EVENT_DEFROST_START;
+    const event_type_t close_type =
+        kind == SpanKind::Fault ? EVENT_ERROR_CLEARED : EVENT_DEFROST_END;
     if (total) *total = 0;
     if (!out || cap == 0) return 0;
     Builder b{window_start, window_end, out, cap};
@@ -71,14 +74,14 @@ size_t fault_intervals_from_events(const event_entry_t* events, size_t n,
         have_boot = true;
         last_ts = e.timestamp;
 
-        const uint16_t site = (uint16_t)e.payload;
-        if (e.type == EVENT_ERROR_APPEARED) {
+        const uint16_t site = kind == SpanKind::Fault ? (uint16_t)e.payload : 0;
+        if (e.type == open_type) {
             bool already = false;
             for (size_t j = 0; j < open_n; ++j) {
                 if (open[j].site == site) { already = true; break; }
             }
             if (!already && open_n < kMaxOpen) open[open_n++] = {site, e.timestamp};
-        } else if (e.type == EVENT_ERROR_CLEARED) {
+        } else if (e.type == close_type) {
             for (size_t j = 0; j < open_n; ++j) {
                 if (open[j].site != site) continue;
                 b.emit(site, open[j].start, e.timestamp);
@@ -106,9 +109,37 @@ size_t fault_intervals_from_events(const event_entry_t* events, size_t n,
     return b.count;
 }
 
+}  // namespace
+
+size_t fault_intervals_from_events(const event_entry_t* events, size_t n,
+                                   uint32_t window_start, uint32_t window_end,
+                                   uint32_t current_boot_id,
+                                   fault_interval_t* out, size_t cap,
+                                   size_t* total) {
+    return pair_spans(SpanKind::Fault, events, n, window_start, window_end,
+                      current_boot_id, out, cap, total);
+}
+
+size_t defrost_intervals_from_events(const event_entry_t* events, size_t n,
+                                     uint32_t window_start, uint32_t window_end,
+                                     uint32_t current_boot_id,
+                                     fault_interval_t* out, size_t cap) {
+    return pair_spans(SpanKind::Defrost, events, n, window_start, window_end,
+                      current_boot_id, out, cap, nullptr);
+}
+
 size_t fault_history_query(uint32_t window_start, uint32_t window_end,
                            fault_interval_t* out, size_t cap, size_t* total) {
-    if (total) *total = 0;
+    return chart_spans_query(window_start, window_end, out, cap, total, nullptr,
+                             0, nullptr);
+}
+
+size_t chart_spans_query(uint32_t window_start, uint32_t window_end,
+                         fault_interval_t* faults, size_t fault_cap,
+                         size_t* fault_total, fault_interval_t* defrosts,
+                         size_t defrost_cap, size_t* defrost_count) {
+    if (fault_total) *fault_total = 0;
+    if (defrost_count) *defrost_count = 0;
     const size_t bytes = sizeof(event_entry_t) * EVENT_LOG_MAX_ENTRIES;
 #ifdef ESP_PLATFORM
     event_entry_t* events = (event_entry_t*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
@@ -125,9 +156,14 @@ size_t fault_history_query(uint32_t window_start, uint32_t window_end,
         events[i] = events[j];
         events[j] = t;
     }
+    const size_t n = got > 0 ? (size_t)got : 0;
+    const uint32_t boot = event_log_current_boot_id();
     const size_t count = fault_intervals_from_events(
-        events, got > 0 ? (size_t)got : 0, window_start, window_end,
-        event_log_current_boot_id(), out, cap, total);
+        events, n, window_start, window_end, boot, faults, fault_cap, fault_total);
+    if (defrosts && defrost_count) {
+        *defrost_count = defrost_intervals_from_events(
+            events, n, window_start, window_end, boot, defrosts, defrost_cap);
+    }
     free(events);
     return count;
 }

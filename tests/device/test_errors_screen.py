@@ -124,16 +124,18 @@ class TestNoErrorsState:
 
     def test_no_errors_message(self, device: DeviceClient):
         """When no errors are active, the no-errors message should appear."""
-        # Clear all faults and history
+        # The home fault banner is hidden when nothing is active, so open the
+        # screen while a fault is showing, then clear it and wait for the
+        # screen to switch to its no-errors state.
+        device.clear_all_faults()
+        device.inject_fault("P02", True)
+        _open_errors(device)
         device.clear_all_faults()
         device.clear_error_history()
-
-        # Error card is always clickable (shows "System OK" when no errors)
-        _open_errors(device)
         device.wait_until(
             "no-errors message to appear",
             lambda: device.find_widget(tag="errors_no_errors") is not None,
-            timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
+            timeout=10.0, expect_within=UI_SETTLE, raise_on_timeout=False,
         )
 
         # The no-errors label should be visible

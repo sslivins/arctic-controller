@@ -37,6 +37,7 @@ static const lv_font_t* kMinReadableLabelFont = &montserrat_16_latin;
 #define COLOR_ACCENT        lv_color_hex(0x00d4ff)
 #define COLOR_SUCCESS       lv_color_hex(0x4ade80)
 #define COLOR_WARNING       lv_color_hex(0xfbbf24)
+#define COLOR_DEFROST       lv_color_hex(0xa5f3fc)
 #define COLOR_ERROR         lv_color_hex(0xef4444)
 
 // ============================================================================
@@ -168,7 +169,6 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_PUMP_ON:
         case EVENT_AUX_HEATER_ON:
         case EVENT_CONNECTED:
-        case EVENT_DEFROST_END:
         case EVENT_ERROR_CLEARED:
         case EVENT_NETWORK_RECOVERED:
             return COLOR_SUCCESS;
@@ -181,10 +181,12 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_WATCHDOG_RESET:
             return COLOR_ERROR;
         
-        case EVENT_DEFROST_START:
-        case EVENT_AUX_HEATER_OFF:
         case EVENT_NETWORK_UNREACHABLE:
             return COLOR_WARNING;
+
+        case EVENT_DEFROST_START:
+        case EVENT_DEFROST_END:
+            return COLOR_DEFROST;
         
         case EVENT_MODE_CHANGED:
         case EVENT_SETPOINT_CHANGED:

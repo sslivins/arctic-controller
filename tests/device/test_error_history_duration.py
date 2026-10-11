@@ -77,24 +77,29 @@ class TestErrorHistoryDuration:
             lambda: "P02" in _active_codes(device),
             timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
         )
+        hold_start = time.monotonic()
 
-        # 3. Hold for a known duration. This sleep is INTENTIONAL: the test
+        # 3. Open the error panel while P02 is active: the home fault banner
+        #    is hidden once nothing is active, so it can't be the way in after
+        #    the clear.
+        assert device.wait_for_widget(tag="error_label", timeout=5.0), \
+            "Home fault banner did not appear for P02"
+        device.click(tag="error_label")
+        assert device.wait_for_screen("errors", timeout=5.0), \
+            f"Expected 'errors' screen, got '{device.screen}'"
+
+        # 4. Hold for a known duration. This sleep is INTENTIONAL: the test
         #    measures how long the fault was active, so it must stay active for
         #    a real, known wall-clock interval. It is not a UI settle.
-        time.sleep(ERROR_HOLD_SECONDS)
+        time.sleep(max(0.0, ERROR_HOLD_SECONDS - (time.monotonic() - hold_start)))
 
-        # 4. Clear the fault — this creates a history entry
+        # 5. Clear the fault — this creates a history entry
         device.inject_fault("P02", False)
         device.wait_until(
             "P02 cleared",
             lambda: "P02" not in _active_codes(device),
             timeout=5.0, expect_within=UI_SETTLE, raise_on_timeout=False,
         )
-
-        # 5. Open the error panel
-        device.click(tag="error_label")
-        assert device.wait_for_screen("errors", timeout=5.0), \
-            f"Expected 'errors' screen, got '{device.screen}'"
 
         # 6. Find duration text in the widget tree
         #    The duration label is language-dependent (Duration:/Duración:/Durée :)

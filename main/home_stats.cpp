@@ -73,6 +73,15 @@ size_t home_stats_runs(const history_telemetry_sample_t* samples, size_t n,
     return count;
 }
 
+size_t home_stats_drop_runs_before(home_run_t* runs, size_t n, uint32_t start) {
+    size_t kept = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (runs[i].end != 0 && runs[i].end <= start) continue;
+        runs[kept++] = runs[i];
+    }
+    return kept;
+}
+
 void home_stats_tank_series(const history_telemetry_sample_t* samples, size_t n,
                             uint32_t start, uint32_t end, int16_t* deci_c,
                             bool* valid, size_t buckets) {

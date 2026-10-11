@@ -2576,6 +2576,22 @@ paths:
                           type: integer
                           nullable: true
                           description: When it cleared, or null if still active
+                  defrosts:
+                    type: array
+                    description: >-
+                      Defrost cycles overlapping the window, oldest first
+                      (newest 32), paired from the event log's defrost_start
+                      and defrost_end events.
+                    items:
+                      type: object
+                      properties:
+                        start:
+                          type: integer
+                          description: When defrost started (Unix epoch seconds)
+                        end:
+                          type: integer
+                          nullable: true
+                          description: When it ended, or null if still defrosting
         '401':
           description: API key required
           content:
@@ -2589,12 +2605,14 @@ paths:
     get:
       tags:
       - HeatPump
-      summary: Get the 24-hour home chart summary
+      summary: Get the 4-hour home chart summary
       description: |
-        The last 24 hours as the device home screen draws them: the tank
+        The last 4 hours as the device home screen draws them: the tank
         temperature averaged into 150 equal buckets, compressor runs, fault
-        spans and a run summary. Computed with the same code as the device
-        chart, so the web home page and the device always agree.
+        and defrost spans and a run summary. The run summary looks back 24 hours, so the
+        last run still shows when it is older than the chart. Computed with
+        the same code as the device chart, so the web home page and the
+        device always agree.
 
         Temperatures are deci-Celsius (tenths of a degree), or null when there
         was no reading. All timestamps are Unix epoch seconds.
@@ -2604,7 +2622,7 @@ paths:
       - sessionCookie: []
       responses:
         '200':
-          description: 24-hour summary
+          description: 4-hour summary
           content:
             application/json:
               schema:
@@ -2619,7 +2637,7 @@ paths:
                     description: Window end (Unix epoch seconds)
                   bucket_seconds:
                     type: integer
-                    description: Width of each tank bucket in seconds (576)
+                    description: Width of each tank bucket in seconds (96)
                   tank:
                     type: array
                     description: Average tank temperature per bucket, oldest first
@@ -2664,6 +2682,18 @@ paths:
                   fault_total:
                     type: integer
                     description: Fault spans in the window, including any beyond the 16 returned
+                  defrosts:
+                    type: array
+                    description: Defrost cycles overlapping the window, oldest first (newest 16)
+                    items:
+                      type: object
+                      properties:
+                        start:
+                          type: integer
+                        end:
+                          type: integer
+                          nullable: true
+                          description: When defrost ended, or null if still defrosting
                   summary:
                     type: object
                     properties:

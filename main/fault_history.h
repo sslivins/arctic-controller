@@ -35,8 +35,26 @@ size_t fault_intervals_from_events(const event_entry_t* oldest_first, size_t n,
                                    size_t* total = nullptr);
 
 /**
+ * Defrost spans from defrost_start / defrost_end pairs, with the same window,
+ * reboot and cap rules as fault_intervals_from_events(). site is always 0.
+ */
+size_t defrost_intervals_from_events(const event_entry_t* oldest_first, size_t n,
+                                     uint32_t window_start, uint32_t window_end,
+                                     uint32_t current_boot_id,
+                                     fault_interval_t* out, size_t cap);
+
+/**
  * fault_intervals_from_events() over the live event log.
  */
 size_t fault_history_query(uint32_t window_start, uint32_t window_end,
                            fault_interval_t* out, size_t cap,
                            size_t* total = nullptr);
+
+/**
+ * Fault and defrost spans from one read of the live event log. Returns the
+ * fault count; defrosts may be null to skip them.
+ */
+size_t chart_spans_query(uint32_t window_start, uint32_t window_end,
+                         fault_interval_t* faults, size_t fault_cap,
+                         size_t* fault_total, fault_interval_t* defrosts,
+                         size_t defrost_cap, size_t* defrost_count);

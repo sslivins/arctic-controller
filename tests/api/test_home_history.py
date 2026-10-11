@@ -24,7 +24,8 @@ def test_api_exposes_home_history_endpoint():
     # Same helpers as the device home chart, so web and device always agree.
     assert "home_stats_tank_series(" in body
     assert "home_stats_runs(" in body
-    assert "fault_history_query(" in body
+    assert "chart_spans_query(" in body
+    assert '\\"defrosts\\"' in body
     assert "history_storage_query_telemetry(" in body
 
 

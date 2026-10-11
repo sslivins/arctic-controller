@@ -37,6 +37,13 @@ size_t home_stats_runs(const history_telemetry_sample_t* samples, size_t n,
                        uint32_t now, home_run_t* out, size_t cap,
                        home_run_summary_t* summary);
 
+/**
+ * Drop runs that finished at or before `start`, keeping the order. Lets the
+ * summary look further back than the chart draws.
+ * @return Number of runs kept.
+ */
+size_t home_stats_drop_runs_before(home_run_t* runs, size_t n, uint32_t start);
+
 #define HOME_STATS_MAX_BUCKETS 240
 
 /**

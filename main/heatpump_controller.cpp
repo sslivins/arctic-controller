@@ -510,7 +510,8 @@ static void applyMaconMapping() {
     // The macon library owns the physics.
     const perf::Settings perf_cfg = ext_temp::settings();
     const perf::HeatPumpContext hp_ctx = {
-        ms.compressor_freq_valid && ms.compressor_freq > 0, ms.defrost_on, ms.mode};
+        ms.compressor_freq_valid && ms.compressor_freq > 0, ms.defrost_on,
+        arctic::live_direction(ms)};
     const perf::Selection sel = ext_temp::choose_source(hp_ctx);
     float supply_c = static_cast<float>(ms.outlet_c);
     float return_c = static_cast<float>(ms.inlet_c);

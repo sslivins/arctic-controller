@@ -51,6 +51,19 @@ static size_t runs(const std::vector<history_telemetry_sample_t>& v,
     return home_stats_runs(v.data(), v.size(), now, out, cap, sum);
 }
 
+static void drop_runs_before_keeps_overlapping_and_current() {
+    // Finished before, ending exactly at, overlapping, inside, and current.
+    home_run_t r[5] = {{100, 150, 1, true}, {160, 200, 1, true}, {180, 260, 2, true},
+                       {300, 400, 1, true}, {500, 0, 1, true}};
+    const size_t kept = home_stats_drop_runs_before(r, 5, 200);
+    CHECK_EQ_L(kept, 3);
+    CHECK_EQ_L(r[0].start, 180);
+    CHECK_EQ_L(r[0].mode, 2);
+    CHECK_EQ_L(r[1].start, 300);
+    CHECK_EQ_L(r[2].start, 500);
+    CHECK_EQ_L(r[2].end, 0);
+}
+
 static void finished_and_current_runs() {
     auto v = timeline("..HHH...HH");
     home_run_t out[8];
@@ -181,6 +194,7 @@ static void daily_energy_integrates_and_resets() {
 
 int main() {
     finished_and_current_runs();
+    drop_runs_before_keeps_overlapping_and_current();
     first_sample_running_is_not_a_start();
     gap_ends_run_and_hides_start();
     stale_open_run_is_not_current();

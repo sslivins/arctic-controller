@@ -41,8 +41,12 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 // Red is reserved for faults, drawn as hatched zones with a solid start line
 // so they never read as a mode band.
 #define COLOR_FAULT     UI_COLOR_ERROR
+// Icy teal, as on the home screen's defrost tile.
+#define COLOR_DEFROST       lv_color_hex(0x4fb3c9)
+#define COLOR_DEFROST_EDGE  lv_color_hex(0xa5f3fc)
 
 static constexpr size_t MAX_FAULTS = 16;
+static constexpr size_t MAX_DEFROSTS = 24;
 
 struct QueryResult {
     uint32_t generation;
@@ -53,6 +57,8 @@ struct QueryResult {
     history_telemetry_sample_t* samples;
     size_t fault_count;
     fault_interval_t faults[MAX_FAULTS];
+    size_t defrost_count;
+    fault_interval_t* defrosts;  // PSRAM, MAX_DEFROSTS; handed to state
 };
 
 static struct {
@@ -81,6 +87,8 @@ static struct {
     uint32_t pending_end = 0;
     size_t fault_count = 0;
     fault_interval_t faults[MAX_FAULTS] = {};
+    size_t defrost_count = 0;
+    fault_interval_t* defrosts = nullptr;  // PSRAM
 } state;
 
 static void request_window(uint32_t end);
@@ -424,6 +432,30 @@ static void draw_fault_zones(lv_layer_t* layer, const lv_area_t& plot) {
     }
 }
 
+// Defrost: an icy block over the run it interrupts, with a solid cap so a
+// short one still shows at wide zoom.
+static void draw_defrost_zones(lv_layer_t* layer, const lv_area_t& plot) {
+    for (size_t i = 0; i < state.defrost_count; i++) {
+        const auto& d = state.defrosts[i];
+        int32_t x1 = map_x(d.start, plot);
+        int32_t x2 = map_x(d.end != 0 ? d.end : state.window_end, plot);
+        if (x2 - x1 < 3) x2 = x1 + 3;
+        x1 = LV_MAX(x1, plot.x1);
+        x2 = LV_MIN(x2, plot.x2);
+        if (x2 <= x1) continue;
+        lv_draw_rect_dsc_t dsc;
+        lv_draw_rect_dsc_init(&dsc);
+        dsc.bg_color = COLOR_DEFROST;
+        dsc.bg_opa = LV_OPA_40;
+        const lv_area_t zone = {x1, plot.y1, x2, plot.y2};
+        lv_draw_rect(layer, &dsc, &zone);
+        dsc.bg_color = COLOR_DEFROST_EDGE;
+        dsc.bg_opa = LV_OPA_COVER;
+        const lv_area_t cap = {x1, plot.y1, x2, plot.y1 + 4};
+        lv_draw_rect(layer, &dsc, &cap);
+    }
+}
+
 static void draw_fault_labels(lv_layer_t* layer, const lv_area_t& plot) {
     static constexpr int32_t LABEL_W = 100;
     size_t i = 0;
@@ -524,6 +556,7 @@ static void chart_draw_cb(lv_event_t* event) {
         lv_draw_rect(layer, &band_dsc, &band);
         i = j - 1;
     }
+    draw_defrost_zones(layer, plot);
     draw_fault_zones(layer, plot);
 
     for (int grid = 0; grid <= 5; grid++) {
@@ -699,6 +732,7 @@ static void query_complete(void* data) {
     state.query_running = false;
     if (!state.shown || result->generation != state.generation) {
         heap_caps_free(result->samples);
+        heap_caps_free(result->defrosts);
         delete result;
         start_pending_query_if_needed();
         return;
@@ -710,6 +744,9 @@ static void query_complete(void* data) {
     state.cursor = -1;
     state.fault_count = result->fault_count;
     memcpy(state.faults, result->faults, sizeof(fault_interval_t) * result->fault_count);
+    heap_caps_free(state.defrosts);
+    state.defrosts = result->defrosts;
+    state.defrost_count = result->defrosts ? result->defrost_count : 0;
     heap_caps_free(state.interp_inlet);
     heap_caps_free(state.interp_outlet);
     state.interp_inlet = nullptr;
@@ -760,8 +797,13 @@ static void query_task(void* data) {
             result->start, result->end, result->samples,
             HISTORY_TELEMETRY_PAGE_CAPACITY, &result->count);
     }
-    result->fault_count = fault_history_query(result->start, result->end,
-                                              result->faults, MAX_FAULTS);
+    result->defrosts = static_cast<fault_interval_t*>(heap_caps_malloc(
+        sizeof(fault_interval_t) * MAX_DEFROSTS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    result->defrost_count = 0;
+    result->fault_count = chart_spans_query(
+        result->start, result->end, result->faults, MAX_FAULTS, nullptr,
+        result->defrosts, result->defrosts ? MAX_DEFROSTS : 0,
+        &result->defrost_count);
     // Worker task: lv_async_call() must hold the LVGL lock.
     bsp_display_lock(0);
     lv_async_call(query_complete, result);
@@ -935,6 +977,8 @@ lv_obj_t* heatpump_history_show(lv_obj_t* parent,
                     i18n_get(STR_HISTORY_LEGEND_COOLING), true);
     add_legend_item(legend_modes, COLOR_HOT_WATER,
                     i18n_get(STR_HISTORY_LEGEND_HOT_WATER), true);
+    add_legend_item(legend_modes, COLOR_DEFROST,
+                    i18n_get(STR_HISTORY_LEGEND_DEFROST), true);
     add_legend_item(legend_modes, COLOR_FAULT,
                     i18n_get(STR_HISTORY_LEGEND_FAULT), false);
 
@@ -1017,6 +1061,9 @@ void heatpump_history_hide(void) {
     state.next_button = nullptr;
     state.latest_button = nullptr;
     state.fault_count = 0;
+    state.defrost_count = 0;
+    heap_caps_free(state.defrosts);
+    state.defrosts = nullptr;
     heap_caps_free(state.samples);
     state.samples = nullptr;
     heap_caps_free(state.interp_inlet);
