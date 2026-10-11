@@ -1018,13 +1018,13 @@
     function homeChart() {
       const hh = state.homeHistory, data = hh.data;
       const head = `<div class="card-head">
-          <h2>Last 24 hours</h2>
+          <h2>Last 4 hours</h2>
           <button class="btn" data-route="history">Cycle history ›</button></div>
           <div class="chart-legend">
               <span><i class="line" style="background:var(--cp-text)"></i>Tank</span>
-              <span><i style="background:color-mix(in srgb, var(--hist-heat) 35%, transparent)"></i>Heating</span>
-              <span><i style="background:color-mix(in srgb, var(--hist-cool) 35%, transparent)"></i>Cooling</span>
-              <span><i style="background:color-mix(in srgb, var(--hist-dhw) 35%, transparent)"></i>Hot water</span>
+              <span><i style="background:var(--hist-heat)"></i>Heating</span>
+              <span><i style="background:var(--hist-cool)"></i>Cooling</span>
+              <span><i style="background:var(--hist-dhw)"></i>Hot water</span>
               <span><i style="background:repeating-linear-gradient(135deg, var(--cp-danger) 0 2px, transparent 2px 5px)"></i>Fault</span>
             </div>`;
       if (!data) {
@@ -1070,9 +1070,9 @@
         const top = yPct(tempNumber(sp));
         return `<div class="hc-sp" style="top:${top.toFixed(2)}%"><span class="hc-sp-label">${temp(sp)}</span></div>`;
       })();
-      const xl = [[0, "24 h", "first"], [25, "18 h", "mid-q"], [50, "12 h", ""], [75, "6 h", "mid-q"], [100, "now", "last"]]
+      const xl = [[0, "4 h", "first"], [25, "3 h", "mid-q"], [50, "2 h", ""], [75, "1 h", "mid-q"], [100, "now", "last"]]
         .map(([l, t, c]) => `<span class="hc-x ${c}" style="left:${l}%">${t}</span>`).join("");
-      const empty = points ? "" : `<div class="hc-empty">No tank readings in the last 24 hours</div>`;
+      const empty = points ? "" : `<div class="hc-empty">No tank readings in the last 4 hours</div>`;
 
       let caption = "";
       const latest = faults[faults.length - 1];

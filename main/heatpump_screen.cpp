@@ -78,7 +78,9 @@ static const char* TAG = "hp_screen";
 #define COLOR_IND_OFF       lv_color_hex(0x4f5871)
 #define COLOR_HEATER        lv_color_hex(0xfb923c)
 
-static constexpr uint32_t CHART_WINDOW_S = 24 * 60 * 60;
+static constexpr uint32_t CHART_WINDOW_S = 4 * 60 * 60;
+// The run summary (last run) looks further back than the chart draws.
+static constexpr uint32_t SUMMARY_WINDOW_S = 24 * 60 * 60;
 static constexpr size_t CHART_BUCKETS = 150;      // 4 px each across the plot
 static constexpr size_t CHART_MAX_RUNS = 160;
 static constexpr size_t CHART_MAX_FAULTS = 16;
@@ -165,7 +167,7 @@ static void format_error_card_text(char* buf, size_t buf_size, const lv_font_t* 
 }
 
 // ============================================================================
-// 24 h history (runs, tank trend, faults), loaded off the UI thread
+// Home history (chart runs, tank trend, faults), loaded off the UI thread
 // ============================================================================
 
 struct HomeHistory {
@@ -683,10 +685,10 @@ static void chart_draw_cb(lv_event_t* e) {
 
     int32_t ay1 = plot.y2 + 6;
     int32_t ay2 = area.y2;
-    draw_text(layer, plot.x1, ay1, plot.x1 + 120, ay2, "24 h", COLOR_VALUE_DIM,
+    draw_text(layer, plot.x1, ay1, plot.x1 + 120, ay2, "4 h", COLOR_VALUE_DIM,
               LV_TEXT_ALIGN_LEFT, &montserrat_20_latin);
     int32_t mid = (plot.x1 + plot.x2) / 2;
-    draw_text(layer, mid - 60, ay1, mid + 60, ay2, "12 h", COLOR_VALUE_DIM,
+    draw_text(layer, mid - 60, ay1, mid + 60, ay2, "2 h", COLOR_VALUE_DIM,
               LV_TEXT_ALIGN_CENTER, &montserrat_20_latin);
     draw_text(layer, plot.x2 - 120, ay1, plot.x2, ay2, i18n_get(STR_HOME_NOW),
               COLOR_VALUE_DIM, LV_TEXT_ALIGN_RIGHT, &montserrat_20_latin);
@@ -763,10 +765,11 @@ static void home_query_task(void* arg) {
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     size_t count = 0;
     if (samples != nullptr &&
-        history_storage_query_telemetry(h.start, h.end, samples,
+        history_storage_query_telemetry(h.end - SUMMARY_WINDOW_S, h.end, samples,
                                         CHART_SAMPLE_CAP, &count) == ESP_OK) {
         h.run_count = home_stats_runs(samples, count, h.end, h.runs,
                                       CHART_MAX_RUNS, &h.summary);
+        h.run_count = home_stats_drop_runs_before(h.runs, h.run_count, h.start);
         home_stats_tank_series(samples, count, h.start, h.end, h.tank,
                                h.tank_ok, CHART_BUCKETS);
         h.loaded = true;

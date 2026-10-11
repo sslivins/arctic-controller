@@ -1160,7 +1160,7 @@ bool api_server_start(void)
     };
     REGISTER_URI(heatpump_temperature_history_uri);
 
-    // GET /api/heatpump/home-history - 24 h summary for the web home chart
+    // GET /api/heatpump/home-history - 4 h summary for the web home chart
     httpd_uri_t heatpump_home_history_uri = {
         .uri = "/api/heatpump/home-history",
         .method = HTTP_GET,
@@ -6304,10 +6304,11 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
 }
 
 // GET /api/heatpump/home-history
-// The last 24 hours as the device home screen draws it: the tank trend
+// The last 4 hours as the device home screen draws it: the tank trend
 // averaged into fixed buckets, compressor runs, fault spans and the run
-// summary (last run, starts in the last hour, newest setpoint). Computed with
-// the same helpers as the device chart so both always agree.
+// summary (last run, starts in the last hour, newest setpoint). The summary
+// looks back 24 h so an older last run still shows. Computed with the same
+// helpers as the device chart so both always agree.
 static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
@@ -6315,7 +6316,8 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    constexpr uint32_t kWindowSeconds = 24 * 60 * 60;
+    constexpr uint32_t kWindowSeconds = 4 * 60 * 60;
+    constexpr uint32_t kSummarySeconds = 24 * 60 * 60;
     constexpr size_t kSampleCap = 3600;  // 24 h at 30 s is 2880
     constexpr size_t kBuckets = 150;
     constexpr size_t kMaxRuns = 160;
@@ -6330,8 +6332,9 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
         history_storage_latest_telemetry_timestamp(&end);
         if (end > 0) end += 1;
     }
-    if (end < kWindowSeconds) end = kWindowSeconds;
+    if (end < kSummarySeconds) end = kSummarySeconds;
     const uint32_t start = end - kWindowSeconds;
+    const uint32_t summary_start = end - kSummarySeconds;
 
     struct Work {
         history_telemetry_sample_t samples[kSampleCap];
@@ -6348,15 +6351,17 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
     }
 
     size_t count = 0;
-    if (history_storage_query_telemetry(start, end, w->samples, kSampleCap, &count) != ESP_OK) {
+    if (history_storage_query_telemetry(summary_start, end, w->samples, kSampleCap, &count) !=
+        ESP_OK) {
         heap_caps_free(w);
         send_json_error(req, "500 Internal Server Error",
                         "Failed to query telemetry history");
         return ESP_OK;
     }
     home_run_summary_t summary = {};
-    const size_t run_count =
+    size_t run_count =
         home_stats_runs(w->samples, count, end, w->runs, kMaxRuns, &summary);
+    run_count = home_stats_drop_runs_before(w->runs, run_count, start);
     home_stats_tank_series(w->samples, count, start, end, w->tank, w->tank_ok, kBuckets);
     size_t fault_total = 0;
     const size_t fault_count =
