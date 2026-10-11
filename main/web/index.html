@@ -3351,13 +3351,18 @@
         };
         if (state.auth.loggedIn && !state.auth.changeRequired) {
           render();
+          // navigate() loads its own data, so if the user moves on while
+          // loadCore() is in flight, don't load the new route a second time.
+          const startRoute = state.route;
           await loadCore();
           homeTrackTransitions();
-          if (state.route === "home") await loadHomeHistory();
-          if (state.route === "control") await loadParams();
-          if (state.route === "history") await loadHistory();
-          if (state.route === "events") await loadEvents(true);
-          if (state.route === "settings") await ensureSettings();
+          if (state.route === startRoute) {
+            if (state.route === "home") await loadHomeHistory();
+            if (state.route === "control") await loadParams();
+            if (state.route === "history") await loadHistory();
+            if (state.route === "events") await loadEvents(true);
+            if (state.route === "settings") await ensureSettings();
+          }
         }
       } catch (error) {
         state.auth.checked = true;
