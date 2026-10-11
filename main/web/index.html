@@ -742,7 +742,7 @@
       ha: {}, haTimer: null,
       perf: null, perfTimer: null, perfTests: {}, perfBrowses: {}, perfDiscovers: {}, perfModes: {}, perfDrafts: {},
       settingsLoaded: false, settingsPromise: null,
-      logs: [], logSeq: 0, logLevel: "V", logTimer: null, pollTimer: null,
+      logs: [], logSeq: 0, logLevel: "V", logTimer: null, pollTimer: null, polling: false,
       powerHoldTimer: null, powerHolding: false
     };
 
@@ -3359,6 +3359,10 @@
       state.pollTimer = setInterval(async () => {
         if (!state.auth.loggedIn || state.auth.changeRequired) return;
         if (state.route === "history") refreshHistoryLive().catch(() => {});
+        // On a slow link a poll can outlast the interval; skip rather than
+        // stack another batch in the request queue.
+        if (state.polling) return;
+        state.polling = true;
         try {
           const [status, hp, wifi, ota, errors, notif, weather] = await Promise.all([
             api("/api/status"), api("/api/heatpump/status"), api("/api/wifi"), api("/api/ota/status"), api("/api/heatpump/errors"), api("/api/notifications"),
@@ -3377,6 +3381,7 @@
           else if (state.route === "settings" && state.settingsPage === "firmware"
                    && ota && ota.state && ota.state !== "idle") render();
         } catch (_) {}
+        finally { state.polling = false; }
       }, 5000);
     }
     init();
