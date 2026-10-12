@@ -4,7 +4,8 @@ import re
 
 from playwright.sync_api import Page, expect
 
-HERO_STATES = ("Disconnected", "Fault", "Standby", "Defrosting", "Heating", "Cooling", "Idle")
+HERO_STATES = ("Disconnected", "Fault", "Standby", "Defrosting", "Heating", "Cooling", "Idle",
+               "Freeze protection")
 
 
 class TestHome:

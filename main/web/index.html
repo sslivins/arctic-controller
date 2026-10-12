@@ -494,10 +494,12 @@
     /* Home: mirrors the device home screen. */
     :root {
       --home-heat-text: #c2410c; --home-cool-text: #1d4ed8; --home-defrost-text: #0e7490;
+      --home-freeze-text: #0369a1;
       --home-defrost: #4fb3c9; --home-heater: #ea580c;
     }
     html[data-theme="dark"] {
       --home-heat-text: #fbbf24; --home-cool-text: #7cb8ff; --home-defrost-text: #a5f3fc;
+      --home-freeze-text: #bae6fd;
       --home-heater: #fb923c;
     }
     .home-grid { display: grid; gap: 16px; grid-template-columns: minmax(300px, 4fr) minmax(0, 8fr);
@@ -524,6 +526,7 @@
       background: color-mix(in srgb, var(--hist-cool) 14%, var(--cp-surface)); }
     .home-hero.s-defrost { --hero-tone: var(--home-defrost-text); border-color: var(--home-defrost);
       background: color-mix(in srgb, var(--home-defrost) 12%, var(--cp-surface)); }
+    .home-hero.s-freeze_protection { --hero-tone: var(--home-freeze-text); }
     .hero-state { color: var(--hero-tone); font-size: 20px; font-weight: 700; letter-spacing: .01em; }
     .hero-state.pulse { animation: home-breathe 3s ease-in-out infinite; }
     @keyframes home-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
@@ -927,12 +930,18 @@
     }
     // ---- Home: mirrors the device home screen (heatpump_screen.cpp) ----
     const HOME_STATE_LABEL = { disconnected: "Disconnected", fault: "Fault", standby: "Standby",
-      defrost: "Defrosting", heating: "Heating", cooling: "Cooling", idle: "Idle" };
+      defrost: "Defrosting", heating: "Heating", cooling: "Cooling", idle: "Idle",
+      freeze_protection: "Freeze protection" };
     const HOME_RUN_MODE = { heating: ["Heating", "var(--hist-heat)"], cooling: ["Cooling", "var(--hist-cool)"],
       hot_water: ["Hot water", "var(--hist-dhw)"] };
     const HOME_AT_SETPOINT_MARGIN_C = 2, HOME_STARTS_WARN = 6, HOME_DT_WARN_C = 3;
     const HOME_HISTORY_MAX_AGE_MS = 120000;
     function homeHeroState(hp) {
+      const s = homeBaseHeroState(hp);
+      // The unit's anti-freeze pump run decodes as idle (compressor off); name it.
+      return (s === "idle" || s === "standby") && hp.mode === "freeze_protection" ? "freeze_protection" : s;
+    }
+    function homeBaseHeroState(hp) {
       if (!hp.connected) return "disconnected";
       const op = hp.operation;
       if (op === "fault") return "fault";

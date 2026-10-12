@@ -29,6 +29,7 @@ FAN_OFF, FAN_LOW, FAN_MED, FAN_HIGH = 0, 200, 450, 700
 # Working modes
 MODE_COOLING       = 0
 MODE_HEATING = 1
+MODE_FREEZE_PROTECTION = 2
 MODE_HOT_WATER     = 5
 
 # Unlit component pill / fan bar color (COLOR_TRACK). A lit pill or bar takes
@@ -183,6 +184,26 @@ class TestHeroState:
         if STATE_SEP in label:
             assert label.split(STATE_SEP, 1)[1] in ("at setpoint", "no demand"), \
                 f"Unexpected idle detail in '{label}'"
+
+    def test_hero_shows_freeze_protection(self, device: DeviceClient):
+        """The unit's anti-freeze pump run (compressor off) is named, not 'Idle'."""
+        device.clear_all_faults()
+        device.set_demo_fields(working_mode=MODE_FREEZE_PROTECTION, unit_on=1,
+                               compressor_freq=0, fan_on=0, fan_speed=FAN_OFF,
+                               pump_on=1)
+        _wait(device, lambda: _hero_text(device, "Freeze protection"),
+              "hero_state == Freeze protection")
+        hero = self._assert_hero(device, "Freeze protection")
+        assert STATE_SEP not in (hero.text_en or hero.text), \
+            f"Freeze protection should carry no idle detail, got '{hero.text}'"
+
+    def test_freeze_protection_with_compressor_shows_operation(self, device: DeviceClient):
+        """If the compressor runs in that mode, the real operation wins."""
+        device.clear_all_faults()
+        _running(device, working_mode=MODE_FREEZE_PROTECTION)
+        _wait(device, lambda: _hero_text(device, "Heating"),
+              "hero_state == Heating (freeze protection mode)")
+        self._assert_hero(device, "Heating")
 
     def test_hero_shows_standby(self, device: DeviceClient):
         """Unit off should show Standby."""

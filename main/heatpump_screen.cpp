@@ -75,6 +75,7 @@ static const char* TAG = "hp_screen";
 #define COLOR_DEFROST_BG    lv_color_hex(0x152a36)
 #define COLOR_DEFROST_BORDER lv_color_hex(0x4fb3c9)
 #define COLOR_DEFROST_TEXT  lv_color_hex(0xa5f3fc)
+#define COLOR_FREEZE_TEXT   lv_color_hex(0xbae6fd)
 #define COLOR_IND_OFF       lv_color_hex(0x4f5871)
 #define COLOR_HEATER        lv_color_hex(0xfb923c)
 
@@ -220,6 +221,7 @@ enum class HeroState {
     DEFROST,
     HEATING,
     COOLING,
+    FREEZE_PROTECTION,
     IDLE
 };
 
@@ -371,7 +373,7 @@ static const arctic::MaconFaultBit* fault_bit(const fault_interval_t& f) {
 // Hero state
 // ============================================================================
 
-static HeroState getHeroState(const arctic::HeatPumpState& hp) {
+static HeroState getBaseHeroState(const arctic::HeatPumpState& hp) {
     if (!hp.connected) return HeroState::DISCONNECTED;
     switch (hp.operation) {
         case arctic::HeatPumpOperation::FAULT:   return HeroState::FAULT;
@@ -384,6 +386,16 @@ static HeroState getHeroState(const arctic::HeatPumpState& hp) {
     }
     if (hp.hasAnyError()) return HeroState::FAULT;
     return hp.unit_on ? HeroState::IDLE : HeroState::STANDBY;
+}
+
+// The unit's anti-freeze pump run decodes as idle (compressor off); name it.
+static HeroState getHeroState(const arctic::HeatPumpState& hp) {
+    HeroState s = getBaseHeroState(hp);
+    if ((s == HeroState::IDLE || s == HeroState::STANDBY) &&
+        hp.working_mode == arctic::WorkingMode::FREEZE_PROTECTION) {
+        return HeroState::FREEZE_PROTECTION;
+    }
+    return s;
 }
 
 static bool is_running(HeroState s) {
@@ -399,6 +411,7 @@ static const char* hero_state_text(HeroState s) {
         case HeroState::DEFROST:      return i18n_get(STR_HOME_DEFROSTING);
         case HeroState::COOLING:      return i18n_get(STR_HOME_COOLING);
         case HeroState::HEATING:      return i18n_get(STR_HOME_HEATING);
+        case HeroState::FREEZE_PROTECTION: return i18n_get(STR_HOME_FREEZE_PROTECTION);
         case HeroState::IDLE:         return i18n_get(STR_HOME_IDLE);
     }
     return "---";
@@ -411,6 +424,7 @@ static lv_color_t hero_state_color(HeroState s) {
         case HeroState::HEATING: return COLOR_HEAT_TEXT;
         case HeroState::COOLING: return COLOR_COOL_TEXT;
         case HeroState::DEFROST: return COLOR_DEFROST_TEXT;
+        case HeroState::FREEZE_PROTECTION: return COLOR_FREEZE_TEXT;
         default:                 return COLOR_TEXT_DIM;
     }
 }
@@ -1391,7 +1405,8 @@ void heatpump_screen_update(void) {
     lv_label_set_text(state.hero_sub_value, buf);
     set_visible(state.hero_sub_value, buf[0] != '\0');
 
-    bool show_chart = (hero == HeroState::IDLE || hero == HeroState::STANDBY) &&
+    bool show_chart = (hero == HeroState::IDLE || hero == HeroState::STANDBY ||
+                       hero == HeroState::FREEZE_PROTECTION) &&
                       history_has_data(history_store());
     set_visible(state.chart, show_chart);
     if (show_chart) {
