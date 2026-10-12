@@ -720,10 +720,10 @@
       ["preferences", "Preferences"], ["security", "Security"], ["home_assistant", "Home Assistant"],
       ["performance", "Heat output & COP"], ["diagnostics", "Diagnostics"], ["system", "System"]
     ];
-    // Selectable modes only; mode_2..mode_4 are displayed but never offered.
+    // Selectable modes only; freeze_protection, mode_3 and mode_4 are displayed but never offered.
     const modes = ["cooling", "heating", "hot_water", "hot_water_cooling"];
     const modeLabels = {
-      cooling: "Cooling", heating: "Heating", mode_2: "Mode 2", mode_3: "Mode 3", mode_4: "Mode 4",
+      cooling: "Cooling", heating: "Heating", freeze_protection: "Freeze protection", mode_3: "Mode 3", mode_4: "Mode 4",
       hot_water: "Hot water", hot_water_cooling: "Hot water / cooling"
     };
     const modeLabel = mode => modeLabels[mode] || titleCase(mode || "unknown");

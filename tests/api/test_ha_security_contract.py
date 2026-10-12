@@ -197,7 +197,7 @@ def test_home_assistant_command_validation_rejects_ambiguous_controls() -> None:
     assert "parseSelectableWorkingMode" in api
     types = (ROOT / "main" / "heatpump_types.h").read_text(encoding="utf-8")
     assert '{"hot_water_cooling", WorkingMode::HOT_WATER_COOLING}' in types
-    assert "mode_2" not in types.split("parseSelectableWorkingMode", 1)[1]
+    assert "freeze_protection" not in types.split("parseSelectableWorkingMode", 1)[1]
     assert "/api/v1/control/register" not in api
     assert "/api/v1/control/advanced" not in api
     capabilities = (

@@ -205,7 +205,7 @@ static const char* const strings_en[STR_COUNT] = {
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "COOLING",
     [STR_HP_MODE_HEATING] = "HEATING",
-    [STR_HP_MODE_MODE_2] = "MODE 2",
+    [STR_HP_MODE_FREEZE_PROTECTION] = "FREEZE PROTECTION",
     [STR_HP_MODE_MODE_3] = "MODE 3",
     [STR_HP_MODE_MODE_4] = "MODE 4",
     [STR_HP_MODE_HOT_WATER] = "HOT WATER",
@@ -764,7 +764,7 @@ static const char* const strings_fr[STR_COUNT] = {
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "REFROIDISSEMENT",
     [STR_HP_MODE_HEATING] = "CHAUFFAGE",
-    [STR_HP_MODE_MODE_2] = "MODE 2",
+    [STR_HP_MODE_FREEZE_PROTECTION] = "PROTECTION ANTIGEL",
     [STR_HP_MODE_MODE_3] = "MODE 3",
     [STR_HP_MODE_MODE_4] = "MODE 4",
     [STR_HP_MODE_HOT_WATER] = "EAU CHAUDE",
@@ -1324,7 +1324,7 @@ static const char* const strings_es[STR_COUNT] = {
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "ENFRIAMIENTO",
     [STR_HP_MODE_HEATING] = "CALEFACCIÓN",
-    [STR_HP_MODE_MODE_2] = "MODO 2",
+    [STR_HP_MODE_FREEZE_PROTECTION] = "PROTECCIÓN ANTIHIELO",
     [STR_HP_MODE_MODE_3] = "MODO 3",
     [STR_HP_MODE_MODE_4] = "MODO 4",
     [STR_HP_MODE_HOT_WATER] = "AGUA CALIENTE",

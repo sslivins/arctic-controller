@@ -447,8 +447,8 @@ static WorkingMode to_working_mode(const MaconState& state) {
             return WorkingMode::COOLING;
         case MaconWorkingMode::Heating:
             return WorkingMode::HEATING;
-        case MaconWorkingMode::Mode2:
-            return WorkingMode::MODE_2;
+        case MaconWorkingMode::FreezeProtection:
+            return WorkingMode::FREEZE_PROTECTION;
         case MaconWorkingMode::Mode3:
             return WorkingMode::MODE_3;
         case MaconWorkingMode::Mode4:
@@ -470,7 +470,7 @@ static MaconWorkingMode to_macon_working_mode(WorkingMode mode) {
     switch (mode) {
         case WorkingMode::COOLING:           return MaconWorkingMode::Cooling;
         case WorkingMode::HEATING:           return MaconWorkingMode::Heating;
-        case WorkingMode::MODE_2:            return MaconWorkingMode::Mode2;
+        case WorkingMode::FREEZE_PROTECTION:            return MaconWorkingMode::FreezeProtection;
         case WorkingMode::MODE_3:            return MaconWorkingMode::Mode3;
         case WorkingMode::MODE_4:            return MaconWorkingMode::Mode4;
         case WorkingMode::HOT_WATER:         return MaconWorkingMode::HotWater;
@@ -759,7 +759,7 @@ TelemetrySnapshot getTelemetrySnapshot() {
                 snapshot.active_setpoint_c = s_state.hot_water_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
             } else if (s_state.working_mode == WorkingMode::HEATING ||
-                       s_state.working_mode == WorkingMode::MODE_2) {
+                       s_state.working_mode == WorkingMode::FREEZE_PROTECTION) {
                 snapshot.active_setpoint_c = s_state.heating_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
             }
@@ -822,10 +822,10 @@ TelemetrySnapshot getTelemetrySnapshot() {
                     snapshot.setpoint_valid =
                         telemetry_fresh && s_hot_water_setpoint_valid;
                     break;
-                // Modes 1 and 2 both use the heating setpoint;
-                // modes 3/4 use P2/P3, which aren't exposed yet.
+                // Heating and freeze protection (mode 2) both use the heating
+                // setpoint; modes 3/4 use P2/P3, which aren't exposed yet.
                 case WorkingMode::HEATING:
-                case WorkingMode::MODE_2:
+                case WorkingMode::FREEZE_PROTECTION:
                     snapshot.active_setpoint_c = s_state.heating_setpoint;
                     snapshot.setpoint_valid =
                         telemetry_fresh && s_heating_setpoint_valid;

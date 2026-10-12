@@ -225,7 +225,7 @@ typedef enum {
     // Heat Pump - Mode Names
     STR_HP_MODE_COOLING,
     STR_HP_MODE_HEATING,
-    STR_HP_MODE_MODE_2,
+    STR_HP_MODE_FREEZE_PROTECTION,
     STR_HP_MODE_MODE_3,
     STR_HP_MODE_MODE_4,
     STR_HP_MODE_HOT_WATER,

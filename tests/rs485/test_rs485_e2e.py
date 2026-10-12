@@ -284,9 +284,9 @@ def test_working_mode_write_lands_on_unit(sim, device):
                    desc=f"controller reads back mode {key!r}")
 
 
-@pytest.mark.parametrize("mode", ["mode_2", "mode_3", "mode_4"])
+@pytest.mark.parametrize("mode", ["freeze_protection", "mode_3", "mode_4"])
 def test_unselectable_modes_are_refused(sim, device, mode):
-    """Modes 2-4 are reported but never selected by the controller."""
+    """Freeze protection and modes 3-4 are reported but never selected by the controller."""
     before = sim.commands()["total"]
     r = _put(device, "/api/heatpump/mode", {"mode": mode})
     assert r.status_code == 400, r.text
