@@ -202,7 +202,7 @@ static const char* mode_name_i18n(int mode) {
     switch (mode) {
         case 0: return i18n_get(STR_HP_MODE_COOLING);
         case 1: return i18n_get(STR_HP_MODE_HEATING);
-        case 2: return i18n_get(STR_HP_MODE_MODE_2);
+        case 2: return i18n_get(STR_HP_MODE_FREEZE_PROTECTION);
         case 3: return i18n_get(STR_HP_MODE_MODE_3);
         case 4: return i18n_get(STR_HP_MODE_MODE_4);
         case 5: return i18n_get(STR_HP_MODE_HOT_WATER);

@@ -42,7 +42,7 @@ BASE_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 API_KEY = os.environ.get("ARCTIC_API_KEY")
 
 VALID_MODES = ["cooling", "heating", "hot_water", "hot_water_cooling"]
-REPORTED_MODES = VALID_MODES + ["mode_2", "mode_3", "mode_4"]
+REPORTED_MODES = VALID_MODES + ["freeze_protection", "mode_3", "mode_4"]
 # Old keys still accepted on write, mapped to the current name.
 MODE_ALIASES = {"floor_heating": "heating", "auto": "hot_water_cooling"}
 
@@ -370,7 +370,7 @@ class TestDemoModeInjection:
 
     def test_inject_working_mode(self):
         """Injecting working_mode changes reported mode."""
-        modes = {0: "cooling", 1: "heating", 2: "mode_2", 3: "mode_3", 4: "mode_4",
+        modes = {0: "cooling", 1: "heating", 2: "freeze_protection", 3: "mode_3", 4: "mode_4",
                  5: "hot_water", 6: "hot_water_cooling"}
         for mode_val, mode_name in modes.items():
             _inject_demo({"working_mode": mode_val})
@@ -646,7 +646,7 @@ class TestHeatpumpMode:
         assert r.status_code == 200
         assert r.json()["mode"] == mode
 
-    @pytest.mark.parametrize("mode", ["turbo", "mode_2", "mode_3", "mode_4",
+    @pytest.mark.parametrize("mode", ["turbo", "freeze_protection", "mode_2", "mode_3", "mode_4",
                                       "fan_coil_heating"])
     def test_invalid_mode_returns_400(self, mode):
         r = _put("/api/heatpump/mode", json={"mode": mode})

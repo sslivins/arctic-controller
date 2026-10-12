@@ -193,7 +193,7 @@ require the paired integration credential in the `Authorization` header.
 
 The mode allowlist is `cooling`, `heating`, `hot_water`, and
 `hot_water_cooling` (the old `floor_heating` and `auto` names are still
-accepted as aliases). `mode_2`, `mode_3` and `mode_4` can be reported but are
+accepted as aliases). `freeze_protection` (the unit's idle anti-freeze pump run), `mode_3` and `mode_4` can be reported but are
 never selectable. Setpoint
 values must be whole degrees and inside the advertised inclusive range.
 Responses use `202 Accepted` and acknowledge command acceptance only.
@@ -212,7 +212,7 @@ must wire only advertised controls and wait for the normal pushed/reconciled
 reported state; it never mutates entity state optimistically.
 
 The climate entity uses coarse HVAC display semantics only. The Arctic mode
-select entity offers the four selectable modes; a reported `mode_2`..`mode_4`
+select entity offers the four selectable modes; a reported `freeze_protection`, `mode_3` or `mode_4`
 is display-only.
 
 ## WebSocket Contract

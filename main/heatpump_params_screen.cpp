@@ -458,7 +458,7 @@ static void update_mode_other_label(arctic::WorkingMode mode) {
     if (!state.mode_other_label) return;
     string_id_t name;
     switch (mode) {
-        case arctic::WorkingMode::MODE_2: name = STR_HP_MODE_MODE_2; break;
+        case arctic::WorkingMode::FREEZE_PROTECTION: name = STR_HP_MODE_FREEZE_PROTECTION; break;
         case arctic::WorkingMode::MODE_3: name = STR_HP_MODE_MODE_3; break;
         case arctic::WorkingMode::MODE_4: name = STR_HP_MODE_MODE_4; break;
         default:

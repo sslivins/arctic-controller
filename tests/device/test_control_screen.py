@@ -18,7 +18,7 @@ from device_client import DeviceClient
 # Working modes (reg2096 values, see heatpump_types.h)
 MODE_COOLING = 0
 MODE_HEATING = 1
-MODE_2 = 2
+MODE_FREEZE_PROTECTION = 2
 MODE_HOT_WATER = 5
 MODE_HOT_WATER_COOLING = 6
 
@@ -139,20 +139,20 @@ class TestModeButtons:
             f"Mode button '{mode_label}' not found on screen"
 
     def test_no_button_for_unselectable_modes(self, device: DeviceClient):
-        """Modes 2-4 are never offered as buttons."""
+        """Freeze protection and modes 3-4 are never offered as buttons."""
         device.set_demo_fields(working_mode=MODE_HEATING)
         _open_control(device)
         _wait_for_text(device, "HOT WATER / COOLING")
 
-        for hidden in ("MODE 2", "MODE 3", "MODE 4"):
+        for hidden in ("FREEZE PROTECTION", "MODE 3", "MODE 4"):
             assert not _has_text_containing(device, hidden), \
                 f"Unexpected mode text '{hidden}' on control screen"
 
     def test_unselectable_mode_is_reported(self, device: DeviceClient):
-        """When the unit is in mode 2 the screen says so without a button."""
-        device.set_demo_fields(working_mode=MODE_2)
+        """When the unit is in freeze protection the screen says so without a button."""
+        device.set_demo_fields(working_mode=MODE_FREEZE_PROTECTION)
         _open_control(device)
-        _wait_for_text(device, "Current mode: MODE 2")
+        _wait_for_text(device, "Current mode: FREEZE PROTECTION")
 
         device.set_demo_fields(working_mode=MODE_HEATING)
         device.wait_until(

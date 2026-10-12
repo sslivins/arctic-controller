@@ -33,6 +33,7 @@ def _set_idle(device: DeviceClient, **overrides):
 
 MODE_COOLING       = 0
 MODE_HEATING = 1
+MODE_FREEZE_PROTECTION = 2
 MODE_HOT_WATER     = 5
 
 UI_SETTLE = 1.5
@@ -55,13 +56,16 @@ LANG_TAGS = {
 HERO_STATES = {
     "English":  {"IDLE": "Idle",          "FAULT": "Fault",   "STANDBY": "Standby",
                  "DEFROST": "Defrosting", "HEATING": "Heating",
-                 "COOLING": "Cooling",    "DISCONNECTED": "Disconnected"},
+                 "COOLING": "Cooling",    "DISCONNECTED": "Disconnected",
+                 "FREEZE": "Freeze protection"},
     "Français": {"IDLE": "En attente",    "FAULT": "Défaut",  "STANDBY": "Veille",
                  "DEFROST": "Dégivrage",  "HEATING": "Chauffage",
-                 "COOLING": "Refroidissement", "DISCONNECTED": "Déconnecté"},
+                 "COOLING": "Refroidissement", "DISCONNECTED": "Déconnecté",
+                 "FREEZE": "Protection antigel"},
     "Español":  {"IDLE": "En espera",     "FAULT": "Fallo",   "STANDBY": "En reposo",
                  "DEFROST": "Descongelando", "HEATING": "Calefacción",
-                 "COOLING": "Enfriamiento", "DISCONNECTED": "Desconectado"},
+                 "COOLING": "Enfriamiento", "DISCONNECTED": "Desconectado",
+                 "FREEZE": "Protección antihielo"},
 }
 
 STATE_SEP = " · "
@@ -317,6 +321,12 @@ class TestFrenchHeroStates:
         _set_idle(device, working_mode=MODE_HEATING)
         _assert_hero_state(device, HERO_STATES["Français"]["IDLE"])
 
+    def test_freeze_protection_french(self, device: DeviceClient):
+        """Freeze protection → Protection antigel in French."""
+        device.clear_all_faults()
+        _set_idle(device, working_mode=MODE_FREEZE_PROTECTION)
+        _assert_hero_state(device, HERO_STATES["Français"]["FREEZE"])
+
     def test_fault_french(self, device: DeviceClient):
         """Fault → Défaut in French."""
         device.clear_all_faults()
@@ -397,6 +407,12 @@ class TestSpanishHeroStates:
         device.clear_all_faults()
         _set_idle(device, working_mode=MODE_HEATING)
         _assert_hero_state(device, HERO_STATES["Español"]["IDLE"])
+
+    def test_freeze_protection_spanish(self, device: DeviceClient):
+        """Freeze protection → Protección antihielo in Spanish."""
+        device.clear_all_faults()
+        _set_idle(device, working_mode=MODE_FREEZE_PROTECTION)
+        _assert_hero_state(device, HERO_STATES["Español"]["FREEZE"])
 
     def test_fault_spanish(self, device: DeviceClient):
         """Fault → Fallo in Spanish."""

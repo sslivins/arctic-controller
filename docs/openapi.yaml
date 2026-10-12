@@ -1950,9 +1950,10 @@ paths:
                     example: true
                   mode:
                     type: string
-                    enum: [cooling, heating, mode_2, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
+                    enum: [cooling, heating, freeze_protection, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
                     description: >-
-                      Current working mode. mode_2..mode_4 are heating
+                      Current working mode. freeze_protection (the unit's idle
+                      anti-freeze pump run), mode_3 and mode_4 are heating
                       variants that are reported but cannot be selected.
                     example: heating
                   defrosting:
@@ -5152,12 +5153,12 @@ components:
         from_mode:
           type: string
           description: "`mode_changed` only: the mode before the change."
-          enum: [cooling, heating, mode_2, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
+          enum: [cooling, heating, freeze_protection, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
           example: hot_water
         to_mode:
           type: string
           description: "`mode_changed` only: the mode after the change."
-          enum: [cooling, heating, mode_2, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
+          enum: [cooling, heating, freeze_protection, mode_3, mode_4, hot_water, hot_water_cooling, unknown]
           example: heating
         setpoint:
           type: string

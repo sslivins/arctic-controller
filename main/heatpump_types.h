@@ -13,12 +13,13 @@ namespace arctic {
 
 // Mirrors the unit's working-mode values (see arctic-macon MaconWorkingMode for the
 // bench mapping). Only COOLING, HEATING, HOT_WATER and HOT_WATER_COOLING can be
-// selected; MODE_2..MODE_4 are heating variants that are shown but never
+// selected; FREEZE_PROTECTION (the unit's idle anti-freeze pump run) and
+// MODE_3/MODE_4 are heating variants that are shown but never
 // written, and UNKNOWN covers anything the library can't decode.
 enum class WorkingMode : uint16_t {
     COOLING = 0,
     HEATING = 1,
-    MODE_2 = 2,
+    FREEZE_PROTECTION = 2,
     MODE_3 = 3,
     MODE_4 = 4,
     HOT_WATER = 5,
@@ -45,7 +46,7 @@ inline const char* workingModeToString(WorkingMode mode) {
     switch (mode) {
         case WorkingMode::COOLING:           return "cooling";
         case WorkingMode::HEATING:           return "heating";
-        case WorkingMode::MODE_2:            return "mode_2";
+        case WorkingMode::FREEZE_PROTECTION:            return "freeze_protection";
         case WorkingMode::MODE_3:            return "mode_3";
         case WorkingMode::MODE_4:            return "mode_4";
         case WorkingMode::HOT_WATER:         return "hot_water";
