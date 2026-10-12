@@ -4234,6 +4234,16 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(temps, "outdoor_coil", hp.outdoor_coil_temp);
     cJSON_AddNumberToObject(temps, "indoor_coil", hp.indoor_coil_temp);
     cJSON_AddNumberToObject(temps, "ipm", hp.ipm_temp);
+
+    // Direction of the tank/supply/return readings for the home arrows:
+    // "rising" | "falling" | "steady" | "unknown" (warming up or stale).
+    {
+        const arctic::TelemetrySnapshot snap = arctic::getTelemetrySnapshot();
+        cJSON* trends = cJSON_AddObjectToObject(root, "trends");
+        cJSON_AddStringToObject(trends, "tank", temp_trend_to_string(snap.tank_trend));
+        cJSON_AddStringToObject(trends, "outlet", temp_trend_to_string(snap.outlet_trend));
+        cJSON_AddStringToObject(trends, "inlet", temp_trend_to_string(snap.inlet_trend));
+    }
     
     // Setpoints
     cJSON* setpoints = cJSON_AddObjectToObject(root, "setpoints");

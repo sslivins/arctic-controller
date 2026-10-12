@@ -48,6 +48,10 @@ static bool s_inlet_valid = false;
 static bool s_outlet_valid = false;
 static bool s_tank_valid = false;
 static DailyEnergy s_daily_energy;
+// Updated in applyMaconMapping() under s_state_mutex.
+static TempTrendTracker s_tank_trend = make_tank_trend_tracker();
+static TempTrendTracker s_outlet_trend = make_water_trend_tracker();
+static TempTrendTracker s_inlet_trend = make_water_trend_tracker();
 static bool s_cooling_setpoint_valid = false;
 static bool s_heating_setpoint_valid = false;
 static bool s_hot_water_setpoint_valid = false;
@@ -549,6 +553,17 @@ static void applyMaconMapping() {
     s_state.suction_temp         = ms.suction_c;
     s_state.outdoor_coil_temp    = ms.outdoor_coil_c;
 
+    {
+        const uint32_t now = getTimeMs();
+        auto plausible = [](bool valid, int16_t c) { return valid && c >= -50 && c <= 150; };
+        s_tank_trend.update(now, ms.water_tank_c, plausible(ms.water_tank_valid, ms.water_tank_c));
+        s_outlet_trend.update(now, ms.outlet_c, plausible(ms.outlet_valid, ms.outlet_c));
+        s_inlet_trend.update(now, ms.inlet_c, plausible(ms.inlet_valid, ms.inlet_c));
+        s_state.water_tank_trend = s_tank_trend.trend();
+        s_state.outlet_water_trend = s_outlet_trend.trend();
+        s_state.inlet_water_trend = s_inlet_trend.trend();
+    }
+
     // Setpoints (whole °C), decoded by the macon library;
     // previously left unmapped so the API reported 0.
     s_state.hot_water_setpoint   = ms.hot_water_setpoint;
@@ -727,6 +742,14 @@ void liveIngestEndCycle() {
     applyIngestResult(cov, getTimeMs());
 }
 
+// Caller holds s_state_mutex and has already set the *_valid flags.
+static void applySnapshotTrends(TelemetrySnapshot& snapshot) {
+    snapshot.inlet_trend = snapshot.inlet_valid ? s_state.inlet_water_trend : TempTrend::UNKNOWN;
+    snapshot.outlet_trend =
+        snapshot.outlet_valid ? s_state.outlet_water_trend : TempTrend::UNKNOWN;
+    snapshot.tank_trend = snapshot.tank_valid ? s_state.water_tank_trend : TempTrend::UNKNOWN;
+}
+
 TelemetrySnapshot getTelemetrySnapshot() {
         TelemetrySnapshot snapshot;
         const uint32_t now = getTimeMs();
@@ -763,6 +786,7 @@ TelemetrySnapshot getTelemetrySnapshot() {
                 snapshot.active_setpoint_c = s_state.heating_setpoint;
                 snapshot.setpoint_valid = snapshot.connected;
             }
+            applySnapshotTrends(snapshot);
             xSemaphoreGive(s_state_mutex);
             return snapshot;
         }
@@ -834,6 +858,7 @@ TelemetrySnapshot getTelemetrySnapshot() {
                     break;
             }
         }
+        applySnapshotTrends(snapshot);
         xSemaphoreGive(s_state_mutex);
         return snapshot;
 }

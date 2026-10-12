@@ -534,6 +534,12 @@
     .hero-tank { display: flex; align-items: flex-start; justify-content: center; line-height: 1; margin-top: 4px; }
     .hero-tank .temp-value { font-size: clamp(72px, 9vw, 108px); font-weight: 650; letter-spacing: -.05em; }
     .hero-tank .temp-unit { font-size: 28px; font-weight: 600; color: var(--cp-text-muted); margin: 10px 0 0 4px; }
+.hero-tank .temp-side { display: flex; flex-direction: column; align-items: center; margin: 10px 0 0 4px; }
+.hero-tank .temp-side .temp-unit { margin: 0; }
+.hero-tank .trend { font-size: 26px; margin: 6px 0 0; }
+.trend { font-weight: 600; color: var(--cp-text-muted); margin-left: 6px; }
+.trend.rising { color: var(--home-heat-text); }
+.trend.falling { color: var(--home-cool-text); }
     .hero-tank.dim .temp-value { color: var(--cp-text-muted); }
     .hero-sub { color: var(--cp-text-muted); font-size: 16px; }
     .hero-sub strong { color: var(--cp-text); font-weight: 650; }
@@ -1012,9 +1018,16 @@
       return `<span class="pill ${on ? "on" : ""}" data-pill="${kind}" style="--pill:${accent}" title="${esc(label)} ${on ? "on" : "off"}">
         ${homeIcon(kind)}<span>${esc(label)}</span>${extra}</span>`;
     }
-    function homeTile(key, label, value, { dim = false, warn = false, title = "" } = {}) {
+    // Direction of a reading, from /api/heatpump/status "trends"; nothing while
+    // the device is still collecting history ("unknown").
+    const TREND_ARROW = { rising: ["↑", "Rising"], falling: ["↓", "Falling"], steady: ["→", "Steady"] };
+    function trendArrow(trend) {
+      const a = TREND_ARROW[trend];
+      return a ? `<span class="trend ${trend}" data-trend="${trend}" title="${a[1]}" aria-label="${a[1]}">${a[0]}</span>` : "";
+    }
+    function homeTile(key, label, value, { dim = false, warn = false, title = "", trend = "" } = {}) {
       return `<button class="tile ${dim ? "dim" : ""} ${warn ? "warn" : ""}" data-tile="${key}" data-route="status"${title ? ` title="${esc(title)}"` : ""}>
-        <span class="tile-label">${esc(label)}</span><span class="tile-value">${esc(value)}</span><span class="chev" aria-hidden="true">›</span></button>`;
+        <span class="tile-label">${esc(label)}</span><span class="tile-value">${esc(value)}${trendArrow(trend)}</span><span class="chev" aria-hidden="true">›</span></button>`;
     }
     function homeStripItem(key, label, value, warn = false) {
       return `<span data-strip="${key}"><span class="strip-label">${esc(label)}</span><span class="strip-value ${warn ? "warn" : ""}">${esc(value)}</span></span>`;
@@ -1175,7 +1188,7 @@
       homeHoverAt(frac);
     }
     function homePage() {
-      const hp = state.hp, r = hp.readings || {}, t = hp.temperatures || {};
+      const hp = state.hp, r = hp.readings || {}, t = hp.temperatures || {}, trends = hp.trends || {};
       const hero = homeHeroState(hp), running = homeRunning(hero), connected = !!hp.connected;
       const sp = homeSetpoint(), now = nowEpoch();
       const summary = state.homeHistory.data?.summary || {};
@@ -1209,15 +1222,15 @@
 
       const heroCard = `<section class="card hero home-hero s-${hero}" data-hero-state="${hero}">
           <div class="hero-state ${running ? "pulse" : ""}" style="animation-delay:-${Date.now() % 3000}ms">${esc(HOME_STATE_LABEL[hero])}${detail ? ` · ${esc(detail)}` : ""}</div>
-          <div class="hero-tank ${connected ? "" : "dim"}"><span class="temp-value">${connected && t.tank != null ? Math.round(tempNumber(t.tank)) : "--"}</span>${connected && t.tank != null ? `<span class="temp-unit">${unit()}</span>` : ""}</div>
+          <div class="hero-tank ${connected ? "" : "dim"}"><span class="temp-value">${connected && t.tank != null ? Math.round(tempNumber(t.tank)) : "--"}</span>${connected && t.tank != null ? `<span class="temp-side"><span class="temp-unit">${unit()}</span>${trendArrow(trends.tank)}</span>` : ""}</div>
           <div class="hero-sub">${sub}</div>
           ${pills}
         </section>`;
 
       const dim = !running;
       const tiles = [];
-      tiles.push(homeTile("supply", "Supply", connected ? temp(t.outlet) : "--", { dim }));
-      tiles.push(homeTile("return", "Return", connected ? temp(t.inlet) : "--", { dim }));
+      tiles.push(homeTile("supply", "Supply", connected ? temp(t.outlet) : "--", { dim, trend: connected ? trends.outlet : "" }));
+      tiles.push(homeTile("return", "Return", connected ? temp(t.inlet) : "--", { dim, trend: connected ? trends.inlet : "" }));
       if (running) {
         const dt = t.outlet != null && t.inlet != null ? t.outlet - t.inlet : null;
         tiles.push(homeTile("dt", "ΔT", dt == null ? "--" : `${Math.round(tempNumber(dt, "differential"))}°`,
