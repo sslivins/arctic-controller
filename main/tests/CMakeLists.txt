@@ -52,6 +52,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/perf_source.cpp
   ${MAIN_DIR}/mbtcp_frame.cpp
   ${MAIN_DIR}/bacnet_frame.cpp
+  ${MAIN_DIR}/temp_trend.cpp
 )
 
 # The macon parameter table and its guardrail are linked REAL rather than
@@ -199,3 +200,9 @@ add_test(NAME perf COMMAND test_perf)
 add_executable(test_home_stats test_home_stats.cpp)
 target_link_libraries(test_home_stats PRIVATE arctic_main_host)
 add_test(NAME home_stats COMMAND test_home_stats)
+
+# Supply/return/tank direction arrows: slope fit over whole-degree readings,
+# hysteresis and hold time. Pure logic over a caller-supplied clock.
+add_executable(test_temp_trend test_temp_trend.cpp)
+target_link_libraries(test_temp_trend PRIVATE arctic_main_host)
+add_test(NAME temp_trend COMMAND test_temp_trend)
