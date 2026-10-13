@@ -230,7 +230,13 @@ class TestHeatpumpStatus:
             assert key in temps, f"Missing temperature: {key}"
             assert isinstance(temps[key], (int, float)), f"{key} not numeric"
 
-    def test_status_setpoints_structure(self):
+    def test_status_trends_structure(self):
+        """trends gives the direction of tank/outlet/inlet for the home arrows."""
+        data = _get("/api/heatpump/status").json()
+        trends = data["trends"]
+        for key in ["tank", "outlet", "inlet"]:
+            assert trends.get(key) in ("rising", "falling", "steady", "unknown"), \
+                f"trends.{key} = {trends.get(key)!r}"
         """setpoints object must have cooling, heating, hot_water."""
         data = _get("/api/heatpump/status").json()
         sp = data["setpoints"]

@@ -390,6 +390,28 @@ class TestTiles:
         assert ret is not None and "39" in ret.text, \
             f"Expected '39' in return tile, got '{ret.text if ret else None}'"
 
+    def test_trend_arrows_match_api(self, device: DeviceClient):
+        """Tank/supply/return arrows mirror /api/heatpump/status trends.
+
+        The tracker needs 7-15 min of history, so the live trend may be
+        anything (including "unknown" = no arrow); the slope logic itself is
+        covered by the host tests in main/tests/test_temp_trend.cpp.
+        """
+        arrows = {"rising": "\u2191", "falling": "\u2193", "steady": "\u2192"}
+        tags = {"tank": "hero_tank_trend", "outlet": "home_supply_trend",
+                "inlet": "home_return_trend"}
+
+        def consistent():
+            trends = device.get_heatpump_status()["trends"]
+            for key, tag in tags.items():
+                widget = device.find_widget(tag=tag)
+                want = arrows.get(trends[key])
+                if (widget.text if widget else None) != want:
+                    return False
+            return True
+
+        _wait(device, consistent, "trend arrows match the API")
+
     def test_power_displayed(self, device: DeviceClient):
         """Power consumption should be displayed when compressor is running."""
         device.clear_all_faults()

@@ -2022,6 +2022,31 @@ paths:
                         type: integer
                         description: IPM (Intelligent Power Module) temperature
                         example: 55
+                  trends:
+                    type: object
+                    description: >
+                      Direction the tank, outlet (supply) and inlet (return)
+                      temperatures are moving, for the home-screen arrows.
+                      Readings are averaged into 15 s samples and a
+                      least-squares slope is fitted over the last 7 min
+                      (outlet/inlet) or 15 min (tank). rising/falling at
+                      0.1 °C/min (tank 0.05), back to steady below half that,
+                      changing at most once a minute. "unknown" until the
+                      window has filled, or while the reading is invalid or
+                      stale.
+                    properties:
+                      tank:
+                        type: string
+                        enum: [rising, falling, steady, unknown]
+                        example: rising
+                      outlet:
+                        type: string
+                        enum: [rising, falling, steady, unknown]
+                        example: steady
+                      inlet:
+                        type: string
+                        enum: [rising, falling, steady, unknown]
+                        example: unknown
                   setpoints:
                     type: object
                     description: Temperature setpoints in degrees Celsius

@@ -36,6 +36,26 @@ class TestHome:
         for key in ("dt", "cop", "hz"):
             assert (dashboard_page.locator(f".tile[data-tile='{key}']").count() == 1) == running
 
+    def test_trend_arrows(self, dashboard_page: Page):
+        """Tank/supply/return show the device's trend; "unknown" shows nothing."""
+        def patch(route):
+            resp = route.fetch()
+            body = resp.json()
+            body["connected"] = True
+            body["trends"] = {"tank": "rising", "outlet": "falling", "inlet": "unknown"}
+            route.fulfill(response=resp, json=body)
+
+        dashboard_page.route("**/api/heatpump/status", patch)
+        hero = dashboard_page.locator(".hero-tank .trend")
+        expect(hero).to_have_attribute("data-trend", "rising", timeout=15000)
+        expect(hero).to_have_text("↑")
+        supply = dashboard_page.locator(".tile[data-tile='supply'] .trend")
+        expect(supply).to_have_attribute("data-trend", "falling")
+        expect(supply).to_have_text("↓")
+        expect(dashboard_page.locator(".tile[data-tile='return'] .trend")).to_have_count(0)
+        assert hero.evaluate("e => getComputedStyle(e).color") != \
+            supply.evaluate("e => getComputedStyle(e).color")
+
     def test_strip(self, dashboard_page: Page):
         strip = dashboard_page.locator(".home-strip")
         expect(strip).to_be_visible()

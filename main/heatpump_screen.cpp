@@ -228,6 +228,7 @@ enum class HeroState {
 struct Tile {
     lv_obj_t* box;
     lv_obj_t* value;
+    lv_obj_t* trend = nullptr;  // direction arrow beside the value, if any
 };
 
 // A component pill under the hero: icon + name, lit while the part runs.
@@ -255,6 +256,7 @@ static struct {
     lv_obj_t* hero_state_label = nullptr;
     lv_obj_t* hero_tank_label = nullptr;
     lv_obj_t* hero_unit_label = nullptr;
+    lv_obj_t* hero_trend_label = nullptr;
     lv_obj_t* hero_sub_label = nullptr;
     lv_obj_t* hero_sub_value = nullptr;
     lv_obj_t* chart = nullptr;
@@ -880,7 +882,8 @@ static lv_obj_t* create_row(lv_obj_t* parent) {
     return row;
 }
 
-static Tile create_tile(lv_obj_t* parent, const char* caption, const char* tag) {
+static Tile create_tile(lv_obj_t* parent, const char* caption, const char* tag,
+                        const char* trend_tag = nullptr) {
     Tile tile;
     tile.box = create_card(parent, COLOR_CARD_BG, COLOR_CARD_BORDER, 12);
     lv_obj_set_size(tile.box, 225, 136);
@@ -891,8 +894,17 @@ static Tile create_tile(lv_obj_t* parent, const char* caption, const char* tag) 
     lv_obj_set_style_pad_row(tile.box, 4, LV_PART_MAIN);
     make_pressable(tile.box, tile_cb);
 
-    tile.value = create_label(tile.box, UI_FONT_TITLE, COLOR_TEXT, "--");
+    lv_obj_t* value_row = create_row(tile.box);
+    lv_obj_set_flex_align(value_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(value_row, 6, LV_PART_MAIN);
+    tile.value = create_label(value_row, UI_FONT_TITLE, COLOR_TEXT, "--");
     lv_obj_set_user_data(tile.value, (void*)tag);
+    if (trend_tag) {
+        tile.trend = create_label(value_row, &montserrat_32_latin, COLOR_VALUE_DIM, "");
+        lv_obj_set_user_data(tile.trend, (void*)trend_tag);
+        lv_obj_add_flag(tile.trend, LV_OBJ_FLAG_HIDDEN);
+    }
     create_label(tile.box, &montserrat_20_latin, COLOR_CAPTION, caption);
 
     lv_obj_t* chevron = create_label(tile.box, &montserrat_16_latin, COLOR_CHEVRON,
@@ -909,6 +921,27 @@ static void set_tile(const Tile& tile, const char* text, lv_color_t value_color,
                                 LV_PART_MAIN);
     lv_obj_set_style_border_color(tile.box, warn ? COLOR_WARNING_EDGE : COLOR_CARD_BORDER,
                                   LV_PART_MAIN);
+}
+
+// Rising warm, falling cool, steady a dim sideways arrow; nothing while the
+// tracker is still filling its window or the reading is stale.
+static void set_trend(lv_obj_t* label, TempTrend trend) {
+    if (!label) return;
+    const char* text = nullptr;
+    lv_color_t color = COLOR_VALUE_DIM;
+    switch (trend) {
+        case TempTrend::RISING:  text = "\xE2\x86\x91"; color = COLOR_HEAT_TEXT; break;
+        case TempTrend::FALLING: text = "\xE2\x86\x93"; color = COLOR_COOL_TEXT; break;
+        case TempTrend::STEADY:  text = "\xE2\x86\x92"; break;
+        default: break;
+    }
+    if (!text) {
+        lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, color, LV_PART_MAIN);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void pulse_opa_cb(void* obj, int32_t v) {
@@ -1089,10 +1122,18 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_margin_top(number_row, 26, LV_PART_MAIN);
     state.hero_tank_label = create_label(number_row, &montserrat_220_digits, COLOR_TEXT, "--");
     lv_obj_set_user_data(state.hero_tank_label, (void*)"hero_tank_temp");
-    state.hero_unit_label = create_label(number_row, &montserrat_80_unit, COLOR_TEXT_DIM,
+    // Unit with the tank's direction arrow tucked underneath it.
+    lv_obj_t* unit_col = create_row(number_row);
+    lv_obj_set_flex_flow(unit_col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(unit_col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_top(unit_col, 10, LV_PART_MAIN);
+    state.hero_unit_label = create_label(unit_col, &montserrat_80_unit, COLOR_TEXT_DIM,
                                          app_prefs_temp_unit_str());
-    lv_obj_set_style_pad_top(state.hero_unit_label, 10, LV_PART_MAIN);
     lv_obj_set_user_data(state.hero_unit_label, (void*)"hero_tank_unit");
+    state.hero_trend_label = create_label(unit_col, &montserrat_40_latin, COLOR_VALUE_DIM, "");
+    lv_obj_set_user_data(state.hero_trend_label, (void*)"hero_tank_trend");
+    lv_obj_add_flag(state.hero_trend_label, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t* sub_row = create_row(state.hero_card);
     lv_obj_set_flex_align(sub_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END,
@@ -1194,8 +1235,8 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     lv_obj_set_style_pad_row(tiles, 12, LV_PART_MAIN);
     lv_obj_clear_flag(tiles, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(tiles, LV_OBJ_FLAG_CLICKABLE);
-    state.supply = create_tile(tiles, i18n_get(STR_HOME_SUPPLY), "home_supply");
-    state.ret = create_tile(tiles, i18n_get(STR_HOME_RETURN), "home_return");
+    state.supply = create_tile(tiles, i18n_get(STR_HOME_SUPPLY), "home_supply", "home_supply_trend");
+    state.ret = create_tile(tiles, i18n_get(STR_HOME_RETURN), "home_return", "home_return_trend");
     state.dt = create_tile(tiles, "\xCE\x94T", "home_dt");
     state.power = create_tile(tiles, i18n_get(STR_HP_LABEL_POWER), "perf_power");
     state.cop = create_tile(tiles, i18n_get(STR_HP_LABEL_COP), "perf_cop");
@@ -1391,6 +1432,7 @@ void heatpump_screen_update(void) {
         lv_obj_set_style_text_color(state.hero_tank_label, COLOR_VALUE_DIM, LV_PART_MAIN);
         lv_obj_add_flag(state.hero_unit_label, LV_OBJ_FLAG_HIDDEN);
     }
+    set_trend(state.hero_trend_label, hp.connected ? snap.tank_trend : TempTrend::UNKNOWN);
 
     const char* sub = i18n_get(STR_HOME_TANK);
     buf[0] = '\0';
@@ -1441,6 +1483,8 @@ void heatpump_screen_update(void) {
             set_tile(*t, "--", COLOR_VALUE_DIM, false);
         }
     }
+    set_trend(state.supply.trend, hp.connected ? snap.outlet_trend : TempTrend::UNKNOWN);
+    set_trend(state.ret.trend, hp.connected ? snap.inlet_trend : TempTrend::UNKNOWN);
     set_visible(state.dt.box, running);
     set_visible(state.cop.box, running);
     set_visible(state.hz.box, running);

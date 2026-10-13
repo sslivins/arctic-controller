@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include "heatpump_types.h"
 #include "macon_listener.h"   // MaconObservedWindow, MaconObservedCatalog, MaconListenerStats
+#include "temp_trend.h"
 
 namespace arctic {
 
@@ -44,6 +45,12 @@ struct HeatPumpState {
     int16_t indoor_coil_temp = 0;
     int16_t outdoor_ambient_temp = 0;
     int16_t ipm_temp = 0;
+
+    // Direction of the tank/supply/return readings (see temp_trend.h). Raw
+    // tracker output; getTelemetrySnapshot() masks them when stale/invalid.
+    TempTrend water_tank_trend = TempTrend::UNKNOWN;
+    TempTrend outlet_water_trend = TempTrend::UNKNOWN;
+    TempTrend inlet_water_trend = TempTrend::UNKNOWN;
     
     // System readings (decoded by the macon library from the real Tuya window)
     uint16_t compressor_freq = 0;    // Hz
@@ -155,6 +162,10 @@ struct TelemetrySnapshot {
     int16_t tank_c = 0;
     int16_t active_setpoint_c = 0;
     TelemetryOperation operation = TelemetryOperation::UNKNOWN;
+    // UNKNOWN whenever the matching reading is invalid or stale.
+    TempTrend inlet_trend = TempTrend::UNKNOWN;
+    TempTrend outlet_trend = TempTrend::UNKNOWN;
+    TempTrend tank_trend = TempTrend::UNKNOWN;
 };
 
 // ============================================================================
