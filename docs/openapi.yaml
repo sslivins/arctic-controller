@@ -2103,7 +2103,7 @@ paths:
                       energy_today_wh:
                         type: integer
                         nullable: true
-                        description: Electrical energy used today (local day) in watt-hours, integrated since boot (not kept across reboots); null until known
+                        description: Electrical energy used today (local day) in watt-hours, integrated from the real-time power. Saved to flash every 10 minutes and before a planned restart, so it survives reboots (an unplanned reset can lose up to 10 minutes); null until known
                         example: 5400
                       heat_out:
                         type: integer
