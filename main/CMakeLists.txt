@@ -67,6 +67,7 @@ idf_component_register(
         "history_storage.cpp"
         "telemetry_history.cpp"
         "system_restart.cpp"
+        "daily_energy_store.cpp"
         "event_log_screen.cpp"
         "ui_dialog.cpp"
         "ui_overlay.cpp"

@@ -192,6 +192,51 @@ static void daily_energy_integrates_and_resets() {
     CHECK_EQ_L(e.wh(), 60);
 }
 
+static void daily_energy_restores_same_day_only() {
+    // Same day: the saved total carries on, and the first reading after the
+    // reboot only sets the reference (the downtime isn't integrated).
+    DailyEnergy e;
+    e.restore(7, 3600ull * 500);
+    CHECK_EQ_L(e.valid(), 1);
+    CHECK_EQ_L(e.wh(), 500);
+    e.add(1000, 7, 3600);
+    CHECK_EQ_L(e.wh(), 500);
+    e.add(1030, 7, 3600);
+    CHECK_EQ_L(e.wh(), 530);
+
+    // Restoring once tracking has started is ignored.
+    e.restore(7, 0);
+    CHECK_EQ_L(e.wh(), 530);
+
+    // A total from an earlier day is dropped on the first reading.
+    DailyEnergy old;
+    old.restore(6, 3600ull * 900);
+    old.add(1000, 7, 3600);
+    CHECK_EQ_L(old.wh(), 0);
+    CHECK_EQ_L(old.day(), 7);
+}
+
+static void daily_energy_save_schedule() {
+    const int64_t I = DailyEnergy::kSaveIntervalSeconds;
+    DailyEnergy e;
+    CHECK_EQ_L(e.save_due(10000), 0);            // nothing to save yet
+    e.add(10000, 1, 1000);
+    CHECK_EQ_L(e.save_due(10000), 1);            // new day: save at once
+    e.mark_saved(10000);
+    CHECK_EQ_L(e.save_due(10000 + I), 0);        // unchanged: no write
+    e.add(10030, 1, 1000);
+    CHECK_EQ_L(e.save_due(10030), 0);            // changed, interval not up
+    CHECK_EQ_L(e.save_due(10030, true), 1);      // planned restart forces it
+    CHECK_EQ_L(e.save_due(10000 + I), 1);
+    e.mark_saved(10000 + I);
+    CHECK_EQ_L(e.save_due(10000 + I, true), 0);  // forced, but nothing new
+
+    // A restored total is already saved.
+    DailyEnergy r;
+    r.restore(1, 12345);
+    CHECK_EQ_L(r.save_due(99999, true), 0);
+}
+
 int main() {
     finished_and_current_runs();
     drop_runs_before_keeps_overlapping_and_current();
@@ -203,6 +248,8 @@ int main() {
     unknown_mode_is_not_a_run();
     tank_series_averages_buckets();
     daily_energy_integrates_and_resets();
+    daily_energy_restores_same_day_only();
+    daily_energy_save_schedule();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
         return 1;

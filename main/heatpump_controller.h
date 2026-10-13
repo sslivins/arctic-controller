@@ -198,6 +198,9 @@ TelemetrySnapshot getTelemetrySnapshot();
 // Check if connected (always true in demo mode)
 bool isConnected();
 
+// Save today's energy total now, ahead of a planned restart.
+void flushDailyEnergy();
+
 // ============================================================================
 // Control Functions (write to heat pump)
 // In demo mode, these update the synthetic state. Live writes require the

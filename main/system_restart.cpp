@@ -9,6 +9,7 @@
 #include "esp_private/cache_utils.h"
 
 #include "history_storage.h"
+#include "heatpump_controller.h"
 #include "telemetry_history.h"
 #include "tuya/macon_master_iface.h"
 
@@ -21,6 +22,9 @@ static constexpr int BUS_QUIESCE_TIMEOUT_MS = 2000;
 
 void system_safe_restart(void) {
     ESP_LOGW(TAG, "Safe restart requested - quiescing RS485 bus and flash writers");
+
+    // Save today's energy total so the reboot doesn't zero it.
+    arctic::flushDailyEnergy();
 
     // Finish (or wait out) any heat-pump bus transaction, block further ones,
     // and hand the transceiver back to receive, so the reset cannot truncate

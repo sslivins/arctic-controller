@@ -338,6 +338,8 @@ def _load_dashboard(page: Page, base_url: str) -> None:
         _browser_login(page)
     else:
         page.wait_for_selector(".rail", timeout=10000)
+    # The shell renders before the first status poll; wait for real data.
+    page.wait_for_selector(".hp-status:not(.loading)", timeout=15000)
 
 
 def _report_network_outage(nodeid: str, detail: str) -> None:

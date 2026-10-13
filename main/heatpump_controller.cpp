@@ -16,6 +16,7 @@
 #include "macon_fluid.h"
 #include "ext_temp_sensors.h"
 #include "daily_energy.h"
+#include "daily_energy_store.h"
 #include "time_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -48,6 +49,7 @@ static bool s_inlet_valid = false;
 static bool s_outlet_valid = false;
 static bool s_tank_valid = false;
 static DailyEnergy s_daily_energy;
+static bool s_daily_energy_loaded = false;
 // Updated in applyMaconMapping() under s_state_mutex.
 static TempTrendTracker s_tank_trend = make_tank_trend_tracker();
 static TempTrendTracker s_outlet_trend = make_water_trend_tracker();
@@ -616,8 +618,19 @@ static void applyMaconMapping() {
         const time_t now_s = time(nullptr);
         struct tm local;
         localtime_r(&now_s, &local);
+        if (!s_daily_energy_loaded) {
+            // Needs the clock: the saved total only counts if it's from today.
+            s_daily_energy_loaded = true;
+            int32_t day = 0;
+            uint64_t ws = 0;
+            if (daily_energy_store_load(&day, &ws)) s_daily_energy.restore(day, ws);
+        }
         s_daily_energy.add(now_s, (local.tm_year + 1900) * 1000 + local.tm_yday,
                            ms.realtime_power_w);
+        if (s_daily_energy.save_due(now_s) &&
+            daily_energy_store_save(s_daily_energy.day(), s_daily_energy.watt_seconds())) {
+            s_daily_energy.mark_saved(now_s);
+        }
     } else {
         s_daily_energy.pause();
     }
@@ -914,6 +927,17 @@ bool isConnected() {
     }
     
     return connected;
+}
+
+void flushDailyEnergy() {
+    // Bounded wait: a restart must not hang on a wedged state lock.
+    if (s_state_mutex == nullptr || xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(500)) != pdTRUE) return;
+    const int64_t now_s = time(nullptr);
+    if (s_daily_energy.save_due(now_s, true) &&
+        daily_energy_store_save(s_daily_energy.day(), s_daily_energy.watt_seconds())) {
+        s_daily_energy.mark_saved(now_s);
+    }
+    xSemaphoreGive(s_state_mutex);
 }
 
 // ============================================================================
