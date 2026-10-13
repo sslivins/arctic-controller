@@ -901,12 +901,15 @@
         ${panel}</div>`;
     }
     function topbar() {
-      const connected = !!state.hp.connected;
+      const connected = !!state.hp.connected, loading = !state.coreLoaded;
+      const hpStatus = loading
+        ? `<span class="status-item hp-status loading" title="Connecting to controller" aria-label="Connecting to controller"><span class="spinner-inline" aria-hidden="true"></span><span class="status-label">Connecting…</span></span>`
+        : `<span class="status-item hp-status" title="${connected ? "Heat pump online" : "Heat pump offline"}" aria-label="${connected ? "Heat pump online" : "Heat pump offline"}"><span class="dot ${connected ? "good" : "bad"}"></span><span class="status-label">${connected ? "Online" : "Offline"}</span></span>`;
       return `<header class="topbar">
           <div class="brand"><div class="brand-mark">A</div><span>${esc(controllerTitle())}</span></div>
           <div class="top-status">
-            <span class="status-item hp-status" title="${connected ? "Heat pump online" : "Heat pump offline"}" aria-label="${connected ? "Heat pump online" : "Heat pump offline"}"><span class="dot ${connected ? "good" : "bad"}"></span><span class="status-label">${connected ? "Online" : "Offline"}</span></span>
-            <span class="status-item wifi">${esc(state.wifi.ssid || "WiFi disconnected")}</span>
+            ${hpStatus}
+            ${loading ? "" : `<span class="status-item wifi">${esc(state.wifi.ssid || "WiFi disconnected")}</span>`}
             ${weatherStatus()}
             <span class="status-item clock">${esc(fmtStatusClock(state.status.time?.local))}</span>
             ${notifBell()}
@@ -935,7 +938,7 @@
       return `<div class="page-head"><div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${action ? `<div class="page-actions">${action}</div>` : ""}</div>`;
     }
     // ---- Home: mirrors the device home screen (heatpump_screen.cpp) ----
-    const HOME_STATE_LABEL = { disconnected: "Disconnected", fault: "Fault", standby: "Standby",
+    const HOME_STATE_LABEL = { loading: "Loading…", disconnected: "Disconnected", fault: "Fault", standby: "Standby",
       defrost: "Defrosting", heating: "Heating", cooling: "Cooling", idle: "Idle",
       freeze_protection: "Freeze protection" };
     const HOME_RUN_MODE = { heating: ["Heating", "var(--hist-heat)"], cooling: ["Cooling", "var(--hist-cool)"],
@@ -948,6 +951,8 @@
       return (s === "idle" || s === "standby") && hp.mode === "freeze_protection" ? "freeze_protection" : s;
     }
     function homeBaseHeroState(hp) {
+      // Until the first status arrives "not connected" just means "not known yet".
+      if (!state.coreLoaded) return "loading";
       if (!hp.connected) return "disconnected";
       const op = hp.operation;
       if (op === "fault") return "fault";
@@ -1204,7 +1209,8 @@
       else if (hero === "defrost") sub = `Tank · defrosting <strong>${esc(fmtDuration(now - (state.homeTrack.defrostSince || now)))}</strong>`;
 
       const firstError = state.errors.active?.[0];
-      const banner = !connected
+      const banner = hero === "loading" ? ""
+        : !connected
         ? `<button class="fault-banner home-banner" data-route="errors"><span>⚠ Heat pump not connected</span><span class="chev" aria-hidden="true">›</span></button>`
         : firstError
           ? `<button class="fault-banner home-banner" data-route="errors"><span>⚠ ${esc(firstError.code)} · ${esc(firstError.name || firstError.description || "")}</span>${state.errors.active.length > 1 ? `<span class="fc-more">+${state.errors.active.length - 1} more</span>` : ""}<span class="chev" aria-hidden="true">›</span></button>`
@@ -1221,7 +1227,7 @@
         </div>` : "";
 
       const heroCard = `<section class="card hero home-hero s-${hero}" data-hero-state="${hero}">
-          <div class="hero-state ${running ? "pulse" : ""}" style="animation-delay:-${Date.now() % 3000}ms">${esc(HOME_STATE_LABEL[hero])}${detail ? ` · ${esc(detail)}` : ""}</div>
+          <div class="hero-state ${running ? "pulse" : ""}" style="animation-delay:-${Date.now() % 3000}ms">${hero === "loading" ? `<span class="spinner-inline" aria-hidden="true"></span> ` : ""}${esc(HOME_STATE_LABEL[hero])}${detail ? ` · ${esc(detail)}` : ""}</div>
           <div class="hero-tank ${connected ? "" : "dim"}"><span class="temp-value">${connected && t.tank != null ? Math.round(tempNumber(t.tank)) : "--"}</span>${connected && t.tank != null ? `<span class="temp-side"><span class="temp-unit">${unit()}</span>${trendArrow(trends.tank)}</span>` : ""}</div>
           <div class="hero-sub">${sub}</div>
           ${pills}
@@ -2238,6 +2244,7 @@
       [state.info, state.status, state.wifi, state.hp, state.preferences, state.errors, state.ota] = values;
       state.notifications = values[7].notifications || [];
       state.weather = values[8];
+      state.coreLoaded = true;
       updateDocumentTitle();
     }
     async function loadParams() { const data = await api("/api/heatpump/advanced"); state.params = data.params || {}; }

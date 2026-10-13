@@ -21,6 +21,30 @@ class TestHome:
         text = dashboard_page.locator(".temp-value").inner_text()
         assert any(char.isdigit() for char in text) or "--" in text
 
+    def test_loading_before_first_status(self, dashboard_page: Page):
+        """A refresh shows a neutral loading state, not a red "Disconnected",
+        until the first heat pump status arrives."""
+        held, released = [], []
+
+        def hold(route):
+            if released:
+                route.continue_()
+            else:
+                held.append(route)
+
+        dashboard_page.route("**/api/heatpump/status", hold)
+        dashboard_page.reload(wait_until="domcontentloaded")
+        hero = dashboard_page.locator(".hero")
+        expect(hero).to_have_attribute("data-hero-state", "loading", timeout=10000)
+        expect(dashboard_page.locator(".hp-status.loading")).to_contain_text("Connecting")
+        expect(dashboard_page.locator(".hp-status .dot.bad")).to_have_count(0)
+        expect(dashboard_page.locator(".home-banner")).to_have_count(0)
+        released.append(True)
+        for route in held:
+            route.continue_()
+        expect(hero).not_to_have_attribute("data-hero-state", "loading", timeout=15000)
+        expect(dashboard_page.locator(".hp-status.loading")).to_have_count(0)
+
     def test_component_pills(self, dashboard_page: Page):
         if dashboard_page.locator(".hero[data-hero-state='disconnected']").count():
             assert dashboard_page.locator(".pill").count() == 0
