@@ -123,6 +123,12 @@ async def test_websocket_starts_with_hello_and_coherent_snapshot():
             assert hello["device_id"] == snapshot["device_id"]
             assert hello["boot_id"] == snapshot["boot_id"]
             assert hello["revision"] == snapshot["revision"]
+            trends = snapshot["state"]["trends"]
+            assert set(trends) == {"tank", "outlet", "inlet"}
+            assert set(trends.values()) <= {"rising", "falling", "steady", "unknown"}
+            readings = snapshot["state"]["readings"]
+            assert readings["perf_source"] in {"external", "heat_pump"}
+            assert readings["flow_lpm"] > 0
         finally:
             await websocket.close()
 

@@ -5087,7 +5087,21 @@ components:
           - setpoints_c
           - readings
           - error
+          properties:
+            trends:
+              type: object
+              description: >-
+                Direction of the water temperatures, as the home screen arrows show
+                it. Added in 3.2.8; absent on older firmware.
+              properties:
+                tank: {$ref: '#/components/schemas/TempTrend'}
+                outlet: {$ref: '#/components/schemas/TempTrend'}
+                inlet: {$ref: '#/components/schemas/TempTrend'}
 
+    TempTrend:
+      type: string
+      enum: [rising, falling, steady, unknown]
+      description: '"unknown" until enough readings arrive, or while the heat pump is not connected.'
 
     LogEntry:
       type: object

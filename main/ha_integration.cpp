@@ -105,6 +105,16 @@ cJSON* createStateObject(const HeatPumpState& hp)
         temperatures, "indoor_coil", hp.indoor_coil_temp);
     cJSON_AddNumberToObject(temperatures, "ipm", hp.ipm_temp);
 
+    // Direction of the water temperatures, as the home screen arrows show it:
+    // "rising", "falling", "steady" or "unknown" (too few readings, or no link).
+    cJSON* trends = cJSON_AddObjectToObject(state, "trends");
+    const auto trend = [&hp](TempTrend t) {
+        return temp_trend_to_string(hp.connected ? t : TempTrend::UNKNOWN);
+    };
+    cJSON_AddStringToObject(trends, "tank", trend(hp.water_tank_trend));
+    cJSON_AddStringToObject(trends, "outlet", trend(hp.outlet_water_trend));
+    cJSON_AddStringToObject(trends, "inlet", trend(hp.inlet_water_trend));
+
     cJSON* setpoints = cJSON_AddObjectToObject(state, "setpoints_c");
     cJSON_AddNumberToObject(setpoints, "cooling", hp.cooling_setpoint);
     cJSON_AddNumberToObject(setpoints, "heating", hp.heating_setpoint);
