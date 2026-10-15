@@ -99,9 +99,9 @@ TANK_DESCRIPTION = {
 }
 
 FOOTER_NAV = {
-    "English":  ["Status", "Control", "Events"],
-    "Français": ["État", "Contrôle", "Événements"],
-    "Español":  ["Estado", "Control", "Eventos"],
+    "English":  ["Status", "Control", "History"],
+    "Français": ["État", "Contrôle", "Historique"],
+    "Español":  ["Estado", "Control", "Historial"],
 }
 
 DEMO_BANNER = {
@@ -501,8 +501,7 @@ def test_tabs_settings_and_overlays_refresh_after_touch_language_change(
         _assert_visible_text(device, label)
     _assert_all_text_drawable(device, "control tab")
 
-    device.click(tag="nav_events")
-    assert device.wait_for_screen("event_log", timeout=5.0)
+    assert device.open_event_log()
     for label in EVENTS_TAB_LABELS[lang_name]:
         _assert_visible_text(device, label)
     _assert_all_text_drawable(device, "events tab")
@@ -584,8 +583,7 @@ def test_search_overlay_and_notifications_are_translated_and_drawable(
     """Popups outside the tab tree: events search and the notification bell."""
     _switch_language(device, lang_name)
 
-    device.click(tag="nav_events")
-    assert device.wait_for_screen("event_log", timeout=5.0)
+    assert device.open_event_log()
     device.click(tag="event_search_open")
     assert device.wait_for_widget(tag="event_search_input", timeout=5.0)
     _assert_all_text_drawable(device, "events search overlay")
@@ -658,8 +656,7 @@ def test_component_row_and_event_chips_stay_readable(device: DeviceClient, lang_
     _switch_language(device, lang_name)
     _assert_labels_readable(device, COMPONENT_PILLS[lang_name], "home component row")
 
-    device.click(tag="nav_events")
-    assert device.wait_for_screen("event_log", timeout=5.0)
+    assert device.open_event_log()
     _assert_labels_readable(device, EVENT_CHIPS[lang_name], "events chips")
     device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0)

@@ -45,7 +45,6 @@
 #include "tuya/macon_master_iface.h"
 #include "heatpump_screen.h"
 #include "heatpump_control_screen.h"
-#include "heatpump_history_screen.h"
 #include "heatpump_errors_screen.h"
 #include "event_log_screen.h"
 #include "nav_bar.h"
@@ -75,9 +74,7 @@ void app_navigation_return_home(void)
 
     event_log_screen_dismiss_overlays();
     heatpump_control_dismiss_overlays();
-    if (heatpump_history_is_shown()) {
-        heatpump_history_hide();
-    }
+
     if (heatpump_errors_is_shown()) {
         heatpump_errors_hide();
     }

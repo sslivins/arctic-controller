@@ -671,6 +671,13 @@ class DeviceClient:
             raise DeviceError(f"Clear faults failed ({r.status_code}): {msg}")
         return r.json()
 
+    def open_event_log(self, timeout: float = 5.0) -> bool:
+        """Open History and switch it to the Events segment."""
+        self.click(tag="nav_history")
+        self.wait_for_widget(tag="history_seg_events", timeout=timeout)
+        self.click(tag="history_seg_events")
+        return self.wait_for_screen("event_log", timeout=timeout)
+
     def populate_temperature_history(self) -> dict:
         """Replace telemetry history with an eight-hour graph fixture."""
         r = self.session.post(

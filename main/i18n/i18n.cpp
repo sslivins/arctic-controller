@@ -201,6 +201,8 @@ static const char* const strings_en[STR_COUNT] = {
     [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Control",
     [STR_HP_BTN_STATUS] = "\xEF\x80\x8B Status",
     [STR_NAV_HOME] = "Home",
+    [STR_NAV_HISTORY] = "History",
+    [STR_HISTORY_SEG_CYCLES] = "Cycles",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "COOLING",
@@ -243,11 +245,9 @@ static const char* const strings_en[STR_COUNT] = {
     [STR_HP_WATER_OUTLET] = "Water Outlet",
     [STR_HP_WATER_INLET] = "Water Inlet",
     [STR_HISTORY_OPEN] = "Cycle History",
-    [STR_HISTORY_TITLE] = "Cycle History",
     [STR_HISTORY_PREVIOUS] = "\xEF\x81\x93 8 h",  /* LV_SYMBOL_LEFT */
     [STR_HISTORY_NEXT] = "8 h \xEF\x81\x94",  /* LV_SYMBOL_RIGHT */
     [STR_HISTORY_LATEST] = "Latest",
-    [STR_HISTORY_BACK] = "Back",
     [STR_HISTORY_INLET] = "Inlet",
     [STR_HISTORY_OUTLET] = "Outlet",
     [STR_HISTORY_SETPOINT] = "Setpoint",
@@ -761,6 +761,8 @@ static const char* const strings_fr[STR_COUNT] = {
     [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Contr\xc3\xb4le",
     [STR_HP_BTN_STATUS] = "\xEF\x80\x8B \xc3\x89tat",
     [STR_NAV_HOME] = "Accueil",
+    [STR_NAV_HISTORY] = "Historique",
+    [STR_HISTORY_SEG_CYCLES] = "Cycles",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "REFROIDISSEMENT",
@@ -803,11 +805,9 @@ static const char* const strings_fr[STR_COUNT] = {
     [STR_HP_WATER_OUTLET] = "Sortie d'eau",
     [STR_HP_WATER_INLET] = "Entrée d'eau",
     [STR_HISTORY_OPEN] = "Historique des cycles",
-    [STR_HISTORY_TITLE] = "Historique des cycles",
     [STR_HISTORY_PREVIOUS] = "\xEF\x81\x93 8 h",  /* LV_SYMBOL_LEFT */
     [STR_HISTORY_NEXT] = "8 h \xEF\x81\x94",  /* LV_SYMBOL_RIGHT */
     [STR_HISTORY_LATEST] = "Récent",
-    [STR_HISTORY_BACK] = "Retour",
     [STR_HISTORY_INLET] = "Entrée",
     [STR_HISTORY_OUTLET] = "Sortie",
     [STR_HISTORY_SETPOINT] = "Consigne",
@@ -1322,6 +1322,8 @@ static const char* const strings_es[STR_COUNT] = {
     [STR_HP_BTN_ADVANCED] = "\xEF\x8C\x84 Control",
     [STR_HP_BTN_STATUS] = "\xEF\x80\x8B Estado",
     [STR_NAV_HOME] = "Inicio",
+    [STR_NAV_HISTORY] = "Historial",
+    [STR_HISTORY_SEG_CYCLES] = "Ciclos",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "ENFRIAMIENTO",
@@ -1364,11 +1366,9 @@ static const char* const strings_es[STR_COUNT] = {
     [STR_HP_WATER_OUTLET] = "Salida de agua",
     [STR_HP_WATER_INLET] = "Entrada de agua",
     [STR_HISTORY_OPEN] = "Historial de ciclos",
-    [STR_HISTORY_TITLE] = "Historial de ciclos",
     [STR_HISTORY_PREVIOUS] = "\xEF\x81\x93 8 h",  /* LV_SYMBOL_LEFT */
     [STR_HISTORY_NEXT] = "8 h \xEF\x81\x94",  /* LV_SYMBOL_RIGHT */
     [STR_HISTORY_LATEST] = "Actual",
-    [STR_HISTORY_BACK] = "Atrás",
     [STR_HISTORY_INLET] = "Entrada",
     [STR_HISTORY_OUTLET] = "Salida",
     [STR_HISTORY_SETPOINT] = "Consigna",

@@ -184,7 +184,8 @@ def test_history_range_label_follows_time_format(
     text_24h = _history_range_text(device)
     assert not _12H_PATTERN.search(text_24h), \
         f"Expected 24h range label (no AM/PM), got '{text_24h}'"
-    device.click(tag="temperature_history_back")
+    device.click(tag="nav_home")
+    device.wait_for_screen("main", timeout=5.0)
 
     # 12-hour: the same label must now carry AM/PM.
     _return_to_main(device)
@@ -200,7 +201,8 @@ def test_history_range_label_follows_time_format(
     text_12h = _history_range_text(device)
     assert _12H_PATTERN.search(text_12h), \
         f"Expected 12h range label (with AM/PM), got '{text_12h}'"
-    device.click(tag="temperature_history_back")
+    device.click(tag="nav_home")
+    device.wait_for_screen("main", timeout=5.0)
 
 
 def test_main_screen_shows_24h(device: DeviceClient, time_format_restore):

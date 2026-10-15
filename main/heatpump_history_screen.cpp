@@ -76,7 +76,6 @@ static struct {
     lv_obj_t* forward_hour_button = nullptr;
     lv_obj_t* next_button = nullptr;
     lv_obj_t* latest_button = nullptr;
-    heatpump_history_close_cb_t on_close = nullptr;
     history_telemetry_sample_t* samples = nullptr;
     // Plateau-interpolated inlet/outlet (deci-C) for drawing; see
     // interpolate_series(). INT32_MIN marks "no value".
@@ -884,10 +883,6 @@ static lv_obj_t* create_button(lv_obj_t* parent, const char* text,
     return button;
 }
 
-static void close_cb(lv_event_t*) {
-    heatpump_history_hide();
-}
-
 static void previous_cb(lv_event_t*) {
     request_window(state.window_end - WINDOW_SECONDS);
 }
@@ -950,11 +945,9 @@ static void add_legend_item(lv_obj_t* parent, lv_color_t color,
     lv_obj_set_style_text_color(label, UI_COLOR_TEXT_DIM, LV_PART_MAIN);
 }
 
-lv_obj_t* heatpump_history_show(lv_obj_t* parent,
-                                heatpump_history_close_cb_t on_close) {
+lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
     if (state.shown || parent == nullptr) return nullptr;
     state.shown = true;
-    state.on_close = on_close;
     state.generation++;
 
     state.overlay = lv_obj_create(parent);
@@ -965,35 +958,12 @@ lv_obj_t* heatpump_history_show(lv_obj_t* parent,
     lv_obj_set_style_border_width(state.overlay, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(state.overlay, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(state.overlay, 18, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(state.overlay, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_bottom(state.overlay, NAV_BAR_H + 18, LV_PART_MAIN);
     lv_obj_set_flex_flow(state.overlay, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(state.overlay, 12, LV_PART_MAIN);
     lv_obj_clear_flag(state.overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_user_data(state.overlay, (void*)"temperature_history_screen");
-
-    lv_obj_t* header = lv_obj_create(state.overlay);
-    lv_obj_remove_style_all(header);
-    lv_obj_set_size(header, LV_PCT(100), 68);
-    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t* title = lv_label_create(header);
-    lv_label_set_text(title, i18n_get(STR_HISTORY_TITLE));
-    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
-    lv_obj_set_style_text_color(title, UI_COLOR_TEXT, LV_PART_MAIN);
-
-    lv_obj_t* back = lv_button_create(header);
-    lv_obj_set_size(back, 130, 60);
-    lv_obj_set_style_bg_color(back, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_radius(back, 12, LV_PART_MAIN);
-    lv_obj_set_user_data(back, (void*)"temperature_history_back");
-    lv_obj_add_event_cb(back, close_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t* back_label = lv_label_create(back);
-    lv_label_set_text(back_label, i18n_get(STR_HISTORY_BACK));
-    lv_obj_set_style_text_font(back_label, UI_FONT_SMALL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(back_label, UI_COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_center(back_label);
 
     state.range_label = lv_label_create(state.overlay);
     lv_obj_set_width(state.range_label, LV_PCT(100));
@@ -1107,10 +1077,8 @@ lv_obj_t* heatpump_history_show(lv_obj_t* parent,
 
 void heatpump_history_hide(void) {
     if (!state.shown) return;
-    heatpump_history_close_cb_t callback = state.on_close;
     state.shown = false;
     state.generation++;
-    state.on_close = nullptr;
     state.pending_query = false;
     if (state.overlay) lv_obj_delete(state.overlay);
     state.overlay = nullptr;
@@ -1134,7 +1102,6 @@ void heatpump_history_hide(void) {
     state.interp_outlet = nullptr;
     state.cursor = -1;
     state.sample_count = 0;
-    if (callback) callback();
 }
 
 bool heatpump_history_is_shown(void) {

@@ -67,13 +67,14 @@ def test_device_history_is_eight_hour_custom_draw_page():
 
     status = (MAIN / "heatpump_temps_screen.cpp").read_text(encoding="utf-8")
     assert '"temperature_history_open"' in status
-    assert "heatpump_history_show" in status
+    assert "history_tab_open(HISTORY_SEG_CYCLES)" in status
 
 
 def test_temperature_history_strings_exist_in_all_languages():
     source = (MAIN / "i18n" / "i18n.cpp").read_text(encoding="utf-8")
     for name in (
-        "STR_HISTORY_TITLE",
+        "STR_NAV_HISTORY",
+        "STR_HISTORY_SEG_CYCLES",
         "STR_HISTORY_PREVIOUS",
         "STR_HISTORY_NEXT",
         "STR_HISTORY_NO_DATA",

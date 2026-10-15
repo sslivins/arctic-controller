@@ -9,7 +9,7 @@
 #include "heatpump_control_screen.h"
 #include "event_log_screen.h"
 #include "heatpump_errors_screen.h"
-#include "heatpump_history_screen.h"
+#include "history_tab.h"
 #include <esp_log.h>
 
 static const char* TAG = "tab_shell";
@@ -25,7 +25,7 @@ static void set_panel_active(nav_tab_t tab, bool active) {
         case NAV_TAB_HOME:    heatpump_screen_set_active(active);     break;
         case NAV_TAB_STATUS:  heatpump_temps_set_active(active);      break;
         case NAV_TAB_CONTROL: heatpump_control_set_active(active);    break;
-        case NAV_TAB_EVENTS:  event_log_screen_set_active(active);    break;
+        case NAV_TAB_HISTORY: history_tab_set_active(active);         break;
         default: break;
     }
 }
@@ -53,8 +53,8 @@ static void build_panel(nav_tab_t tab) {
         case NAV_TAB_CONTROL:
             heatpump_control_create_in(s_panels[NAV_TAB_CONTROL]);
             break;
-        case NAV_TAB_EVENTS:
-            event_log_screen_create_in(s_panels[NAV_TAB_EVENTS]);
+        case NAV_TAB_HISTORY:
+            history_tab_create_in(s_panels[NAV_TAB_HISTORY]);
             break;
         default:
             break;
@@ -80,7 +80,7 @@ void tab_shell_create(lv_obj_t* root) {
     s_panels[NAV_TAB_HOME]    = make_panel();
     s_panels[NAV_TAB_STATUS]  = make_panel();
     s_panels[NAV_TAB_CONTROL] = make_panel();
-    s_panels[NAV_TAB_EVENTS]  = make_panel();
+    s_panels[NAV_TAB_HISTORY]  = make_panel();
 
     for (int i = 0; i < NAV_TAB_COUNT; i++) {
         build_panel((nav_tab_t)i);
@@ -153,9 +153,6 @@ void ui_language_changed(void) {
 
     event_log_screen_dismiss_overlays();
     heatpump_control_dismiss_overlays();
-    if (heatpump_history_is_shown()) {
-        heatpump_history_hide();
-    }
     if (heatpump_errors_is_shown()) {
         heatpump_errors_hide();
     }
@@ -163,7 +160,7 @@ void ui_language_changed(void) {
     heatpump_screen_delete();
     heatpump_temps_hide();
     heatpump_control_hide();
-    event_log_screen_hide();
+    history_tab_hide();
 
     for (int i = 0; i < NAV_TAB_COUNT; i++) {
         if (!s_panels[i]) {

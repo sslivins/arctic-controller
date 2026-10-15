@@ -23,7 +23,7 @@ typedef enum {
     NAV_TAB_HOME = 0,
     NAV_TAB_STATUS,
     NAV_TAB_CONTROL,
-    NAV_TAB_EVENTS,
+    NAV_TAB_HISTORY,
     NAV_TAB_COUNT,
 } nav_tab_t;
 

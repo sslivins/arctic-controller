@@ -27,7 +27,7 @@ static const nav_tab_def_t s_tabs[NAV_TAB_COUNT] = {
     { NAV_TAB_HOME,    STR_NAV_HOME,        "nav_home",    UI_COLOR_ACCENT },
     { NAV_TAB_STATUS,  STR_HP_BTN_STATUS,   "nav_status",  UI_COLOR_ACCENT },
     { NAV_TAB_CONTROL, STR_HP_BTN_ADVANCED, "nav_control", UI_COLOR_SUCCESS },
-    { NAV_TAB_EVENTS,  STR_EVENT_LOG,       "nav_events",  lv_color_hex(0xa78bfa) },
+    { NAV_TAB_HISTORY, STR_NAV_HISTORY,     "nav_history", lv_color_hex(0xa78bfa) },
 };
 
 // Persistent button + label handles so the active highlight can be restyled

@@ -14,7 +14,7 @@
 #include "heatpump_controller.h"
 #include "heatpump_errors.h"
 #include "heatpump_errors_screen.h"
-#include "heatpump_history_screen.h"
+#include "history_tab.h"
 #include "heatpump_types.h"
 #include "history_storage.h"
 #include "home_stats.h"
@@ -24,7 +24,6 @@
 #include "tab_shell.h"
 #include "time_manager.h"
 #include "ui_common.h"
-#include "ui_overlay.h"
 #include <bsp/m5stack_tab5.h>
 #include <cassert>
 #include <esp_heap_caps.h>
@@ -299,7 +298,6 @@ static struct {
     uint32_t last_query_ms = 0;
     bool queried_once = false;
 
-    bool history_open = false;
     lv_obj_t* saved_screen = nullptr;
     lv_timer_t* update_timer = nullptr;
 } state;
@@ -467,27 +465,13 @@ static void tile_cb(lv_event_t*) {
     tab_shell_select(NAV_TAB_STATUS);
 }
 
-static void history_closed(void) {
-    state.history_open = false;
-    if (state.active && state.update_timer) {
-        lv_timer_resume(state.update_timer);
-        heatpump_screen_update();
-    }
-}
-
 static void strip_cb(lv_event_t*) {
-    lv_obj_t* overlay = heatpump_history_show(state.panel, history_closed);
-    if (overlay == nullptr) return;
-    state.history_open = true;
-    if (state.update_timer) lv_timer_pause(state.update_timer);
-    // Bound to the overlay's lifetime, so the home content comes back however
-    // the overlay is torn down.
-    ui_overlay_cover(overlay, state.container);
+    history_tab_open(HISTORY_SEG_CYCLES);
 }
 
 static void fault_caption_cb(lv_event_t*) {
     event_log_screen_show_problems();
-    tab_shell_select(NAV_TAB_EVENTS);
+    history_tab_open(HISTORY_SEG_EVENTS);
 }
 
 static void update_timer_cb(lv_timer_t*) {
@@ -1280,11 +1264,8 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
 
 void heatpump_screen_set_active(bool active) {
     state.active = active;
-    if (!active && state.history_open && heatpump_history_is_shown()) {
-        heatpump_history_hide();
-    }
     if (state.update_timer) {
-        if (active && !state.history_open) {
+        if (active) {
             lv_timer_resume(state.update_timer);
         } else {
             lv_timer_pause(state.update_timer);
@@ -1550,9 +1531,6 @@ void heatpump_screen_delete(void) {
         return;
     }
 
-    if (state.history_open && heatpump_history_is_shown()) {
-        heatpump_history_hide();
-    }
 
     if (state.update_timer) {
         lv_timer_del(state.update_timer);
