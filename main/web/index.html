@@ -1976,7 +1976,8 @@
     }
     function historyChartSvg(data) {
       const samples = data.samples || [];
-      const W = 960, H = 360, L = 58, R = 16, T = 16, B = 34;
+      // T is the fault-label strip above the plot, so a code never sits on a line.
+      const W = 960, H = 384, L = 58, R = 16, T = 40, B = 34;
       const plotL = L, plotR = W - R, plotT = T, plotB = H - B;
       const plotW = plotR - plotL, plotH = plotB - plotT;
       const start = data.start, end = data.end, span = Math.max(1, end - start);
@@ -2034,7 +2035,7 @@
           svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="var(--cp-danger)" opacity="0.1"/>`;
           svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="url(#hist-hatch)"/>`;
         }
-        svg += `<line class="hist-fault" x1="${x1.toFixed(1)}" y1="${plotT}" x2="${x1.toFixed(1)}" y2="${plotB}" stroke="var(--cp-danger)" stroke-width="2" opacity="0.7"/>`;
+        svg += `<line class="hist-fault" x1="${x1.toFixed(1)}" y1="${plotT - 26}" x2="${x1.toFixed(1)}" y2="${plotB}" stroke="var(--cp-danger)" stroke-width="2" opacity="0.7"/>`;
       }
 
       // Horizontal gridlines + y-axis temperature labels.
@@ -2121,7 +2122,7 @@
         const label = `⚠ ${f.fault_code || "?"}`;
         if (x1 >= labelEnd) {
           const lx = Math.min(x1, plotR - 54);
-          svg += `<text x="${lx.toFixed(1)}" y="${plotT + 22}" class="hist-fault-label">${esc(label)}</text>`;
+          svg += `<text x="${lx.toFixed(1)}" y="${plotT - 12}" class="hist-fault-label">${esc(label)}</text>`;
           labelEnd = lx + 60;
         }
       }

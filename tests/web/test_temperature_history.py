@@ -146,4 +146,12 @@ class TestHistoryFaultMarkers:
         assert dashboard_page.locator(".hist-chart line.hist-fault").count() >= 1
         labels = dashboard_page.locator(".hist-chart .hist-fault-label").all_text_contents()
         assert any("P02" in t for t in labels)
+        # The code sits in the strip above the plot, clear of the lines.
+        label_bottom = dashboard_page.locator(".hist-chart .hist-fault-label").first.evaluate(
+            "e => { const b = e.getBBox(); return b.y + b.height; }"
+        )
+        plot_top = dashboard_page.locator(".hist-chart .hist-hover-line").evaluate(
+            "e => e.y1.baseVal.value"
+        )
+        assert label_bottom <= plot_top, (label_bottom, plot_top)
         expect(dashboard_page.locator(".hist-legend", has_text="Fault")).to_be_visible()

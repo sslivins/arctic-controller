@@ -48,6 +48,8 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 
 static constexpr size_t MAX_FAULTS = 16;
 static constexpr size_t MAX_DEFROSTS = 24;
+// Height of the strip above the plot that holds the fault-code labels.
+static constexpr int32_t FAULT_STRIP_H = 38;
 
 struct QueryResult {
     uint32_t generation;
@@ -269,7 +271,9 @@ static void recompute_interpolation() {
 static lv_area_t plot_area(lv_obj_t* chart) {
     lv_area_t coords;
     lv_obj_get_coords(chart, &coords);
-    return {coords.x1 + 72, coords.y1 + 20, coords.x2 - 18, coords.y2 - 48};
+    // The top margin is the fault-label strip, so codes never sit on a line.
+    return {coords.x1 + 72, coords.y1 + FAULT_STRIP_H, coords.x2 - 18,
+            coords.y2 - 48};
 }
 
 // Whole-degree reading in the user's unit, e.g. "37°C".
@@ -487,9 +491,16 @@ static void draw_fault_labels(lv_layer_t* layer, const lv_area_t& plot) {
         }
         int32_t lx = x + 6;
         if (lx + LABEL_W > plot.x2) lx = plot.x2 - LABEL_W;
-        const lv_area_t label = {lx, plot.y1 + 4, lx + LABEL_W, plot.y1 + 34};
+        const lv_area_t label = {lx, plot.y1 - FAULT_STRIP_H + 4, lx + LABEL_W,
+                                 plot.y1 - 4};
         draw_label(layer, label, text, COLOR_FAULT, LV_TEXT_ALIGN_LEFT,
                    &montserrat_24_latin);
+        // Carry the fault line up into the strip so the code flags it.
+        for (size_t k = i; k < j; k++) {
+            const int32_t fx = map_x(state.faults[k].start, plot);
+            draw_line(layer, {fx, plot.y1 - FAULT_STRIP_H + 8}, {fx, plot.y1},
+                      COLOR_FAULT, 2);
+        }
         i = j;
     }
 }
