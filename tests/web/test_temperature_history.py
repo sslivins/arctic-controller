@@ -59,6 +59,21 @@ class TestTemperatureHistoryWeb:
         # Every x-axis time label is rounded to a whole hour.
         assert all(re.fullmatch(r"\d{1,2}:00|\d{1,2} [AP]M", t) for t in clock_labels)
 
+    def test_temperature_labels_are_round_degrees(
+        self, dashboard_page: Page, base_url: str
+    ):
+        _seed_history(base_url)
+        _open_history(dashboard_page)
+
+        labels = dashboard_page.locator(".hist-chart text.hist-axis").all_text_contents()
+        temps = [t for t in labels if t.endswith("°")]
+        assert len(temps) >= 2, f"expected y-axis temperature labels, got {labels}"
+        # Whole degrees (not 4.6°, 14.4°...) at a round, even step.
+        assert all(re.fullmatch(r"-?\d+°", t) for t in temps), temps
+        values = [int(t[:-1]) for t in temps]
+        steps = {b - a for a, b in zip(values, values[1:])}
+        assert len(steps) == 1 and steps.pop() in {1, 2, 5, 10, 20, 50, 100}, values
+
     def test_history_navigation_shifts_window(
         self, dashboard_page: Page, base_url: str
     ):

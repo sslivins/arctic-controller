@@ -1947,6 +1947,21 @@
     function histDeciToDisplay(deciC) {
       return state.preferences.temp_unit === "fahrenheit" ? (deciC * 9 / 5 + 320) : deciC;
     }
+    function histDisplayToDeci(v) {
+      return state.preferences.temp_unit === "fahrenheit" ? (v - 320) * 5 / 9 : v;
+    }
+    // Gridlines on round degrees of the display unit (same rule as the
+    // device, chart_axis.cpp): the smallest step of 1, 2, 5, 10, 20, 50 or
+    // 100 degrees that covers the range in at most six intervals.
+    function histNiceAxis(lo, hi) {
+      let axis = null;
+      for (const step of [10, 20, 50, 100, 200, 500, 1000]) {
+        axis = { lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step };
+        if (axis.hi === axis.lo) axis.hi += step;
+        if ((axis.hi - axis.lo) / step <= 6) break;
+      }
+      return axis;
+    }
     async function loadHistory() {
       state.tempHistory.loading = true; state.tempHistory.error = "";
       try {
@@ -1978,6 +1993,8 @@
       if (!isFinite(lo)) { lo = 0; hi = 400; }
       if (hi - lo < 20) { const mid = (hi + lo) / 2; lo = mid - 10; hi = mid + 10; }
       const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+      const axis = histNiceAxis(histDeciToDisplay(lo), histDeciToDisplay(hi));
+      lo = histDisplayToDeci(axis.lo); hi = histDisplayToDeci(axis.hi);
       const mapY = v => plotB - (v - lo) / (hi - lo) * plotH;
 
       let svg = `<svg class="hist-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Cycle history chart">`;
@@ -2021,11 +2038,10 @@
       }
 
       // Horizontal gridlines + y-axis temperature labels.
-      for (let g = 0; g <= 5; g++) {
-        const y = plotB - g / 5 * plotH;
+      for (let val = axis.lo; val <= axis.hi; val += axis.step) {
+        const y = plotB - (val - axis.lo) / (axis.hi - axis.lo) * plotH;
         svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
-        const val = lo + g / 5 * (hi - lo);
-        svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${(histDeciToDisplay(val) / 10).toFixed(1)}°</text>`;
+        svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${val / 10}°</text>`;
       }
 
       // Vertical gridlines snapped to whole even-hour marks (matches device).

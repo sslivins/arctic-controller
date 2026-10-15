@@ -53,6 +53,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/mbtcp_frame.cpp
   ${MAIN_DIR}/bacnet_frame.cpp
   ${MAIN_DIR}/temp_trend.cpp
+  ${MAIN_DIR}/chart_axis.cpp
 )
 
 # The macon parameter table and its guardrail are linked REAL rather than
@@ -206,3 +207,7 @@ add_test(NAME home_stats COMMAND test_home_stats)
 add_executable(test_temp_trend test_temp_trend.cpp)
 target_link_libraries(test_temp_trend PRIVATE arctic_main_host)
 add_test(NAME temp_trend COMMAND test_temp_trend)
+
+add_executable(test_chart_axis test_chart_axis.cpp)
+target_link_libraries(test_chart_axis PRIVATE arctic_main_host)
+add_test(NAME chart_axis COMMAND test_chart_axis)
