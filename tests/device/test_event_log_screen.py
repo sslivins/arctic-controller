@@ -21,8 +21,7 @@ from device_client import DeviceClient
 
 def _open_event_log(device: DeviceClient):
     """Navigate from main to the event log screen."""
-    device.click(tag="nav_events")
-    assert device.wait_for_screen("event_log", timeout=5.0), \
+    assert device.open_event_log(), \
         f"Expected 'event_log' screen, got '{device.screen}'"
 
 
@@ -142,8 +141,7 @@ class TestEventLogNavigation:
             device.click(tag="nav_control")
             assert device.wait_for_screen("control", timeout=5.0)
 
-            device.click(tag="nav_events")
-            assert device.wait_for_screen("event_log", timeout=5.0)
+            assert device.open_event_log()
 
             current_uptime = device.session.get(
                 f"{device.base_url}/api/health", timeout=device.timeout

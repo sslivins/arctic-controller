@@ -8,15 +8,38 @@ def primary(page: Page, name: str):
     return page.locator(".rail .nav-link", has_text=name)
 
 
+def history_seg(page: Page, name: str):
+    return page.locator(".hist-seg-btn", has_text=name)
+
+
+def open_events(page: Page) -> None:
+    primary(page, "History").click()
+    history_seg(page, "Events").click()
+    expect(history_seg(page, "Events")).to_have_attribute("aria-selected", "true")
+
+
 class TestNavigation:
     def test_default_route(self, dashboard_page: Page):
         expect(dashboard_page.get_by_role("heading", name="Home", exact=True)).to_be_visible()
 
     def test_primary_routes(self, dashboard_page: Page):
-        for name in ("Status", "Control", "Events"):
+        for name in ("Status", "Control", "History"):
             primary(dashboard_page, name).click()
             expect(dashboard_page.get_by_role("heading", name=name, exact=True)).to_be_visible()
             assert dashboard_page.url.endswith(f"#/{name.lower()}")
+        expect(history_seg(dashboard_page, "Cycles")).to_have_attribute("aria-selected", "true")
+
+    def test_history_switches_segments_and_remembers_last(self, dashboard_page: Page):
+        open_events(dashboard_page)
+        expect(dashboard_page.locator("#event-search")).to_be_visible()
+        assert dashboard_page.url.endswith("#/events")
+        expect(primary(dashboard_page, "History")).to_have_class(re.compile(r"\bactive\b"))
+        primary(dashboard_page, "Home").click()
+        primary(dashboard_page, "History").click()
+        expect(history_seg(dashboard_page, "Events")).to_have_attribute("aria-selected", "true")
+        history_seg(dashboard_page, "Cycles").click()
+        expect(history_seg(dashboard_page, "Cycles")).to_have_attribute("aria-selected", "true")
+        assert dashboard_page.url.endswith("#/history")
 
     def test_active_route_highlight(self, dashboard_page: Page):
         primary(dashboard_page, "Status").click()
@@ -66,13 +89,13 @@ class TestNavigation:
         )
 
     def test_events_surface(self, dashboard_page: Page):
-        primary(dashboard_page, "Events").click()
+        open_events(dashboard_page)
         expect(dashboard_page.locator("#event-search")).to_be_visible()
         expect(dashboard_page.locator("#event-category")).to_be_visible()
         expect(dashboard_page.locator("#event-time")).to_be_visible()
 
     def test_event_search_keeps_focus_and_clears(self, dashboard_page: Page):
-        primary(dashboard_page, "Events").click()
+        open_events(dashboard_page)
         search = dashboard_page.locator("#event-search")
         search.fill("heat")
         expect(search).to_be_focused()
@@ -89,7 +112,7 @@ class TestNavigation:
 
     def test_open_filter_dropdown_survives_background_refresh(self, dashboard_page: Page):
         """An open category/time dropdown has focus; the 5 s poll must not rebuild it (which closed it)."""
-        primary(dashboard_page, "Events").click()
+        open_events(dashboard_page)
         expect(dashboard_page.locator("#event-list")).to_be_visible()
         for select_id in ("event-category", "event-time"):
             select = dashboard_page.locator(f"#{select_id}")
@@ -176,7 +199,7 @@ class TestEventsPage:
         body, old_day = _fake_events()
         page.route("**/api/events?*", lambda route: route.fulfill(
             status=200, content_type="application/json", body=json.dumps(body)))
-        primary(page, "Events").click()
+        open_events(page)
         expect(page.locator("#event-list .event")).to_have_count(len(body["events"]))
         return old_day
 

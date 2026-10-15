@@ -48,6 +48,7 @@
 #include "event_log_screen.h"
 #include "history_storage.h"
 #include "tab_shell.h"
+#include "history_tab.h"
 #include "status_bar.h"
 #include "display_idle.h"
 #include <esp_timer.h>
@@ -726,7 +727,8 @@ static const char* get_screen_name(void)
         case NAV_TAB_HOME:    return "main";
         case NAV_TAB_STATUS:  return "status";
         case NAV_TAB_CONTROL: return "control";
-        case NAV_TAB_EVENTS:  return "event_log";
+        case NAV_TAB_HISTORY:
+            return history_tab_segment() == HISTORY_SEG_EVENTS ? "event_log" : "history";
         default:              return "main";
     }
 }

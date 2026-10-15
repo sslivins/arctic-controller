@@ -8,9 +8,8 @@
 #include "heatpump_temps_screen.h"
 #include "nav_bar.h"
 #include "heatpump_controller.h"
-#include "heatpump_history_screen.h"
+#include "history_tab.h"
 #include "ui_common.h"
-#include "ui_overlay.h"
 #include "fonts/fonts.h"
 #include "app_preferences.h"
 #include "i18n/i18n.h"
@@ -122,19 +121,8 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* title) {
     return header;
 }
 
-static void history_closed() {
-    if (state.active && state.update_timer) {
-        lv_timer_resume(state.update_timer);
-        update_readings();
-    }
-}
-
 static void history_btn_cb(lv_event_t*) {
-    if (state.update_timer) lv_timer_pause(state.update_timer);
-    // Bound to the overlay's lifetime, so the content comes back however the
-    // overlay is torn down (Back, tab switch, display-off return-home).
-    ui_overlay_cover(heatpump_history_show(state.screen, history_closed),
-                     state.content);
+    history_tab_open(HISTORY_SEG_CYCLES);
 }
 
 static lv_obj_t* create_history_row(lv_obj_t* parent) {
@@ -408,9 +396,6 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
 
 void heatpump_temps_set_active(bool active) {
     state.active = active;
-    if (!active && heatpump_history_is_shown()) {
-        heatpump_history_hide();
-    }
     if (state.update_timer) {
         if (active) {
             lv_timer_resume(state.update_timer);

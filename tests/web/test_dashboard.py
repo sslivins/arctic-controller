@@ -101,22 +101,19 @@ class TestHome:
         expect(tip).to_be_visible()
         expect(tip).to_contain_text("Tank")
 
+    def _expect_history_cycles(self, page: Page):
+        expect(page.get_by_role("heading", name="History", exact=True)).to_be_visible()
+        expect(page.locator(".hist-seg-btn", has_text="Cycles")).to_have_attribute("aria-selected", "true")
+        expect(page.locator(".rail .nav-link.active", has_text="History")).to_be_visible()
+
     def test_cycle_history_link(self, dashboard_page: Page):
         dashboard_page.locator(".home-chart").get_by_role("button", name="Cycle history").click()
-        expect(dashboard_page.get_by_role("heading", name="Cycle history")).to_be_visible()
+        self._expect_history_cycles(dashboard_page)
 
-    def test_cycle_history_back_returns_home(self, dashboard_page: Page):
-        dashboard_page.locator(".home-chart").get_by_role("button", name="Cycle history").click()
-        expect(dashboard_page.get_by_role("heading", name="Cycle history")).to_be_visible()
-        dashboard_page.locator(".history-back").click()
-        expect(dashboard_page.get_by_role("heading", name="Home", exact=True)).to_be_visible()
-
-    def test_cycle_history_back_returns_status(self, dashboard_page: Page):
+    def test_status_cycle_history_link(self, dashboard_page: Page):
         dashboard_page.locator(".rail .nav-link", has_text="Status").click()
         dashboard_page.get_by_role("button", name="View cycle history").click()
-        expect(dashboard_page.get_by_role("heading", name="Cycle history")).to_be_visible()
-        dashboard_page.locator(".history-back").click()
-        expect(dashboard_page.get_by_role("heading", name="Status", exact=True)).to_be_visible()
+        self._expect_history_cycles(dashboard_page)
 
     def test_status_survives_poll(self, dashboard_page: Page):
         dashboard_page.wait_for_timeout(5500)
@@ -150,7 +147,7 @@ class TestResponsiveShell:
 
     def test_desktop_rail_has_primary_pages(self, dashboard_page: Page):
         labels = dashboard_page.locator(".rail .nav-link").all_inner_texts()
-        assert all(any(name in label for label in labels) for name in ("Home", "Status", "Control", "Events"))
+        assert all(any(name in label for label in labels) for name in ("Home", "Status", "Control", "History"))
 
     def test_mobile_bottom_navigation(self, dashboard_page: Page):
         dashboard_page.set_viewport_size({"width": 390, "height": 844})

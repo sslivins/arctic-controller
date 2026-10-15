@@ -34,7 +34,7 @@ class TestTemperatureHistoryWeb:
         _open_history(dashboard_page)
 
         expect(
-            dashboard_page.get_by_role("heading", name="Cycle history")
+            dashboard_page.get_by_role("heading", name="History", exact=True)
         ).to_be_visible()
 
         # Inlet, outlet, and setpoint each draw a path.

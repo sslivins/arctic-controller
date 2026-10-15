@@ -92,6 +92,13 @@ def _assert_under_budget(result: dict, label: str, budget_us: int = RENDER_BUDGE
 # =========================================================================
 
 @pytest.mark.performance
+
+def _select_events_segment(device: DeviceClient) -> None:
+    """Leave History on Events, so the timed nav_history tap builds the list."""
+    assert device.open_event_log()
+    device.click(tag="nav_home")
+    device.wait_for_screen("main", timeout=5.0)
+
 class TestNavScreenPerformance:
     """Render budget for each footer nav button → sub-screen."""
 
@@ -111,7 +118,8 @@ class TestNavScreenPerformance:
 
     def test_event_log_screen_render(self, device: DeviceClient):
         """Event log screen opens within budget (minimal events)."""
-        result = device.click(tag="nav_events")
+        _select_events_segment(device)
+        result = device.click(tag="nav_history")
         _assert_under_budget(result, "event_log")
         device.wait_for_screen("event_log", timeout=5.0)
         device.click(tag="nav_home")
@@ -164,7 +172,8 @@ class TestHeavyStatePerformance:
         )
 
         # Now open the event log — this is the hot path
-        result = device.click(tag="nav_events")
+        _select_events_segment(device)
+        result = device.click(tag="nav_history")
         us = _assert_under_budget(result, "event_log_full")
         device.wait_for_screen("event_log", timeout=5.0)
         device.click(tag="nav_home")
@@ -257,9 +266,10 @@ class TestRepeatedTransitionPerformance:
     def test_event_log_repeated_open_close(self, device: DeviceClient):
         """Open/close event log 5 times — last render still within budget."""
         times_us = []
+        _select_events_segment(device)
         for i in range(5):
-            device.wait_for_widget(tag="nav_events", timeout=5.0)
-            result = device.click(tag="nav_events")
+            device.wait_for_widget(tag="nav_history", timeout=5.0)
+            result = device.click(tag="nav_history")
             us = _render_us(result)
             times_us.append(us)
             device.wait_for_screen("event_log", timeout=5.0)

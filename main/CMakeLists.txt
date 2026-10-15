@@ -121,6 +121,7 @@ idf_component_register(
         "heatpump_errors_screen.cpp"
         "nav_bar.cpp"
         "tab_shell.cpp"
+        "history_tab.cpp"
         "lv_mem_psram.c"
         "test_endpoints.cpp"
         "tls_manager.cpp"
