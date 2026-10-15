@@ -191,4 +191,18 @@ class TestHistoryFaultMarkers:
             "e => e.y1.baseVal.value"
         )
         assert label_bottom <= plot_top, (label_bottom, plot_top)
+        # No fault line runs through a label in the strip.
+        crossings = dashboard_page.locator(".hist-chart").evaluate(
+            """svg => {
+              const labels = [...svg.querySelectorAll('.hist-fault-label')].map(e => e.getBBox());
+              const out = [];
+              for (const l of svg.querySelectorAll('line.hist-fault')) {
+                const x = l.x1.baseVal.value, top = l.y1.baseVal.value;
+                for (const b of labels)
+                  if (x >= b.x && x <= b.x + b.width && top < b.y + b.height) out.push([x, b.x, b.width]);
+              }
+              return out;
+            }"""
+        )
+        assert crossings == [], crossings
         expect(dashboard_page.locator(".hist-legend", has_text="Fault")).to_be_visible()

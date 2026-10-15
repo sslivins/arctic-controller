@@ -2001,6 +2001,10 @@
       const mapY = v => plotB - (v - lo) / (hi - lo) * plotH;
 
       let svg = `<svg class="hist-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Cycle history chart">`;
+      // Time-dependent content sits in .hist-pan groups so a mouse drag can
+      // slide it under the fixed y-axis (clipped to the plot while dragging).
+      svg += `<defs><clipPath id="hist-pan-clip"><rect x="${plotL}" y="0" width="${plotW}" height="${H}"/></clipPath></defs>`;
+      svg += `<g class="hist-pan">`;
 
       // Mode bands: contiguous running periods tinted by operating mode.
       const bandColor = { 1: "var(--hist-heat)", 2: "var(--hist-cool)", 3: "var(--hist-dhw)" };
@@ -2031,14 +2035,33 @@
       // reserved for faults; heating bands are orange.
       const faults = data.faults || [];
       svg += `<defs><pattern id="hist-hatch" patternUnits="userSpaceOnUse" width="12" height="12" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="12" stroke="var(--cp-danger)" stroke-width="2" opacity="0.4"/></pattern></defs>`;
+      // Fault codes go in the strip above the plot. Labels that would overlap
+      // are dropped (the hover tooltip still names every fault), and only a
+      // labelled fault's line reaches up into the strip, so no line crosses
+      // a neighbour's label.
+      const faultLabels = new Map();
+      let labelEnd = -Infinity;
+      for (const f of faults) {
+        const x1 = Math.max(plotL, mapX(f.start)) + 6;
+        if (x1 < labelEnd) continue;
+        // Too close to the right edge: put the label left of its line.
+        const right = x1 + 54 <= plotR;
+        const lx = right ? x1 : x1 - 12 - 54;
+        if (lx < Math.max(labelEnd, plotL)) continue;
+        faultLabels.set(f, lx);
+        labelEnd = right ? lx + 60 : plotR;
+      }
       for (const f of faults) {
         const x1 = Math.max(plotL, mapX(f.start)), x2 = Math.min(plotR, mapX(f.end ?? end));
         if (x2 - x1 >= 8) {
           svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="var(--cp-danger)" opacity="0.1"/>`;
           svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="url(#hist-hatch)"/>`;
         }
-        svg += `<line class="hist-fault" x1="${x1.toFixed(1)}" y1="${plotT - 26}" x2="${x1.toFixed(1)}" y2="${plotB}" stroke="var(--cp-danger)" stroke-width="2" opacity="0.7"/>`;
+        const y1 = faultLabels.has(f) ? plotT - 26 : plotT;
+        svg += `<line class="hist-fault" x1="${x1.toFixed(1)}" y1="${y1}" x2="${x1.toFixed(1)}" y2="${plotB}" stroke="var(--cp-danger)" stroke-width="2" opacity="0.7"/>`;
       }
+
+      svg += `</g>`;
 
       // Horizontal gridlines + y-axis temperature labels.
       for (let val = axis.lo; val <= axis.hi; val += axis.step) {
@@ -2046,6 +2069,7 @@
         svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
         svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${val / 10}°</text>`;
       }
+      svg += `<g class="hist-pan">`;
 
       // Vertical gridlines snapped to whole even-hour marks (matches device).
       const startDate = new Date(start * 1000);
@@ -2116,18 +2140,10 @@
       svg += line("out", "var(--hist-out)", false);
       svg += line("in", "var(--hist-in)", false);
 
-      // Fault codes beside each fault line. Labels that would overlap are
-      // dropped; the line and the hover tooltip still show every fault.
-      let labelEnd = -Infinity;
-      for (const f of faults) {
-        const x1 = Math.max(plotL, mapX(f.start)) + 6;
-        const label = `⚠ ${f.fault_code || "?"}`;
-        if (x1 >= labelEnd) {
-          const lx = Math.min(x1, plotR - 54);
-          svg += `<text x="${lx.toFixed(1)}" y="${plotT - 12}" class="hist-fault-label">${esc(label)}</text>`;
-          labelEnd = lx + 60;
-        }
+      for (const [f, lx] of faultLabels) {
+        svg += `<text x="${lx.toFixed(1)}" y="${plotT - 12}" class="hist-fault-label">${esc(`⚠ ${f.fault_code || "?"}`)}</text>`;
       }
+      svg += `</g>`;
 
       // Hover crosshair: a vertical line plus a dot on each series, driven by
       // histHover() from the pointer position.
@@ -2179,7 +2195,19 @@
         histDrag.svg.classList.add("dragging");
         document.querySelectorAll(".hist-hover, .hist-chart-wrap .hist-tip").forEach(el => { el.style.display = "none"; });
       }
-      histDrag.svg.style.transform = `translateX(${histDrag.dx}px)`;
+      histPanPreview(histDrag.svg, histDrag.dx);
+    }
+    function histPanPreview(svg, dx) {
+      const units = dx * histGeom.W / svg.getBoundingClientRect().width;
+      svg.querySelectorAll(".hist-pan").forEach(g => {
+        if (dx) {
+          g.setAttribute("transform", `translate(${units.toFixed(1)} 0)`);
+          g.setAttribute("clip-path", "url(#hist-pan-clip)");
+        } else {
+          g.removeAttribute("transform");
+          g.removeAttribute("clip-path");
+        }
+      });
     }
     function histDragEnd() {
       const drag = histDrag, d = state.tempHistory.data;
@@ -2188,7 +2216,7 @@
       const g = histGeom, rect = drag.svg.getBoundingClientRect();
       const plotPx = rect.width * (g.plotR - g.plotL) / g.W;
       const shift = Math.round(-drag.dx / plotPx * (g.end - g.start) / HIST_SNAP) * HIST_SNAP;
-      if (!shift) { drag.svg.style.transform = ""; drag.svg.classList.remove("dragging"); return; }
+      if (!shift) { histPanPreview(drag.svg, 0); drag.svg.classList.remove("dragging"); return; }
       histGoto(d.end + shift);
     }
     // Live view: while showing the newest window, quietly reload once a minute
