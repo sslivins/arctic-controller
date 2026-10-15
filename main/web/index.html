@@ -276,8 +276,10 @@
     .hist-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .hist-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
     .hist-legend i.band { width: 12px; height: 12px; border-radius: 3px; }
-    .hist-chart-wrap { width: 100%; position: relative; }
+    .hist-chart-wrap { width: 100%; position: relative; overflow-x: clip; }
     .hist-chart { width: 100%; height: auto; display: block; touch-action: pan-y; }
+    @media (pointer: fine) { .hist-chart { cursor: grab; } .hist-chart.dragging { cursor: grabbing; user-select: none; } }
+    .hist-hint { font-size: 13px; text-align: center; margin: 8px 0 0; }
     .hist-tip { display: none; position: absolute; top: 12px; pointer-events: none; background: var(--cp-surface, #1e293b); border: 1px solid var(--cp-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.6; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
     .hist-tip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: middle; }
     .hist-tip strong { margin-left: 6px; }
@@ -2132,12 +2134,63 @@
       svg += `<g class="hist-hover" style="display:none">
         <line class="hist-hover-line" y1="${plotT}" y2="${plotB}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
         <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/></g>`;
-      histGeom = { W, plotL, plotR, mapX, mapY, samples, series, faults: data.faults || [], end };
+      histGeom = { W, plotL, plotR, mapX, mapY, samples, series, faults: data.faults || [], start, end };
 
       svg += `</svg>`;
       return svg;
     }
-    let histGeom = null, histPointer = null;
+    let histGeom = null, histPointer = null, histDrag = null;
+    // Show the window ending at `end` (unix s), kept within the stored range;
+    // the newest window goes back to the live view.
+    async function histGoto(end) {
+      const d = state.tempHistory.data;
+      if (!d) return;
+      end = Math.max(d.earliest + d.window_seconds, Math.min(Math.round(end), d.latest_end));
+      state.tempHistory.end = end >= d.latest_end ? null : end;
+      await loadHistory(); render();
+    }
+    // Unix time under a client x, or null outside the plot.
+    function histTimeAt(svg, clientX) {
+      const g = histGeom, rect = svg.getBoundingClientRect();
+      const vx = (clientX - rect.left) / rect.width * g.W;
+      if (vx < g.plotL || vx > g.plotR) return null;
+      return g.start + (vx - g.plotL) / (g.plotR - g.plotL) * (g.end - g.start);
+    }
+    const HIST_SNAP = 15 * 60;
+    function histDoubleClick(event) {
+      const svg = event.target.closest?.(".hist-chart"), d = state.tempHistory.data;
+      if (!svg || !histGeom || !d) return;
+      const t = histTimeAt(svg, event.clientX);
+      if (t === null) return;
+      histGoto(Math.round((t + d.window_seconds / 2) / HIST_SNAP) * HIST_SNAP);
+    }
+    // Mouse drag pans the window (touch keeps its drag for the readout).
+    function histDragStart(event) {
+      const svg = event.target.closest?.(".hist-chart");
+      if (!svg || event.pointerType !== "mouse" || event.button !== 0 || !histGeom) return;
+      histDrag = { svg, x0: event.clientX, dx: 0, moved: false };
+    }
+    function histDragMove(event) {
+      if (!histDrag) return;
+      histDrag.dx = event.clientX - histDrag.x0;
+      if (!histDrag.moved && Math.abs(histDrag.dx) < 5) return;
+      if (!histDrag.moved) {
+        histDrag.moved = true;
+        histDrag.svg.classList.add("dragging");
+        document.querySelectorAll(".hist-hover, .hist-chart-wrap .hist-tip").forEach(el => { el.style.display = "none"; });
+      }
+      histDrag.svg.style.transform = `translateX(${histDrag.dx}px)`;
+    }
+    function histDragEnd() {
+      const drag = histDrag, d = state.tempHistory.data;
+      histDrag = null;
+      if (!drag || !drag.moved || !d || !histGeom) return;
+      const g = histGeom, rect = drag.svg.getBoundingClientRect();
+      const plotPx = rect.width * (g.plotR - g.plotL) / g.W;
+      const shift = Math.round(-drag.dx / plotPx * (g.end - g.start) / HIST_SNAP) * HIST_SNAP;
+      if (!shift) { drag.svg.style.transform = ""; drag.svg.classList.remove("dragging"); return; }
+      histGoto(d.end + shift);
+    }
     // Live view: while showing the newest window, quietly reload once a minute
     // so the chart keeps sliding forward, and put the hover tooltip back.
     async function refreshHistoryLive() {
@@ -2150,6 +2203,7 @@
       if (el?.closest(".hist-chart")) histHover({ target: el, clientX: p.clientX, clientY: p.clientY });
     }
     function histHover(event) {
+      if (histDrag?.moved) return;
       const svg = event.target.closest?.(".hist-chart");
       histPointer = svg ? { clientX: event.clientX, clientY: event.clientY } : null;
       const wrap = svg?.closest(".hist-chart-wrap");
@@ -2218,10 +2272,13 @@
           </div>
           <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>
           <div class="hist-nav">
-            <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ Earlier</button>
+            <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ 8 h</button>
+            <button class="btn" data-action="history-back-hour" ${atOldest ? "disabled" : ""}>‹ 1 h</button>
             <button class="btn" data-action="history-latest" ${atLatest ? "disabled" : ""}>Latest</button>
-            <button class="btn" data-action="history-next" ${atLatest ? "disabled" : ""}>Later ›</button>
+            <button class="btn" data-action="history-forward-hour" ${atLatest ? "disabled" : ""}>1 h ›</button>
+            <button class="btn" data-action="history-next" ${atLatest ? "disabled" : ""}>8 h ›</button>
           </div>
+          <p class="hist-muted hist-hint">Double-click the chart to centre it on that moment, or drag it sideways.</p>
         </section>`;
       }
       return `<div class="page">
@@ -2916,18 +2973,10 @@
       if (action === "history-refresh") { await loadHistory(); render(); }
       if (action === "home-problems") { state.eventFilters.category = "problems"; await navigate("events"); }
       if (action === "history-latest") { state.tempHistory.end = null; await loadHistory(); render(); }
-      if (action === "history-prev") {
-        const d = state.tempHistory.data;
-        if (d) { state.tempHistory.end = d.start; await loadHistory(); render(); }
-      }
-      if (action === "history-next") {
-        const d = state.tempHistory.data;
-        if (d) {
-          const next = d.end + d.window_seconds;
-          state.tempHistory.end = next >= d.latest_end ? null : next;
-          await loadHistory(); render();
-        }
-      }
+      if (action === "history-prev") { const d = state.tempHistory.data; if (d) await histGoto(d.end - d.window_seconds); }
+      if (action === "history-next") { const d = state.tempHistory.data; if (d) await histGoto(d.end + d.window_seconds); }
+      if (action === "history-back-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end - 3600); }
+      if (action === "history-forward-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end + 3600); }
       if (action === "load-more-events") { await loadEvents(false); render(); }
       if (action === "clear-events" && await askConfirm({ title: "Clear all events?", message: "This permanently removes the operational event log.", confirmLabel: "Clear events", danger: true })) {
         await mutate("/api/events", { method: "DELETE" }, "Events cleared"); await loadEvents(true); render();
@@ -3271,6 +3320,11 @@
       }));
     document.addEventListener("pointermove", histHover);
     document.addEventListener("pointerleave", histHover);
+    document.addEventListener("dblclick", histDoubleClick);
+    document.addEventListener("pointerdown", histDragStart);
+    document.addEventListener("pointermove", histDragMove);
+    document.addEventListener("pointerup", histDragEnd);
+    document.addEventListener("pointercancel", histDragEnd);
     document.addEventListener("pointermove", homeHover);
     document.addEventListener("pointerdown", homeHover);
     document.addEventListener("input", event => {

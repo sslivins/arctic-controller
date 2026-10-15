@@ -37,6 +37,21 @@ def test_temperature_history_page_and_navigation(device: DeviceClient):
         is not None and bool(w.disabled),
         timeout=5.0,
     )
+    # One-hour steps: back enables "1 h ›", forward returns to latest.
+    device.click(tag="temperature_history_back_hour")
+    device.wait_until(
+        "1 h forward enabled after stepping back an hour",
+        lambda: (w := device.find_widget(tag="temperature_history_forward_hour"))
+        is not None and not w.disabled,
+        timeout=5.0,
+    )
+    device.click(tag="temperature_history_forward_hour")
+    device.wait_until(
+        "1 h forward disabled back at latest window",
+        lambda: (w := device.find_widget(tag="temperature_history_forward_hour"))
+        is not None and bool(w.disabled),
+        timeout=5.0,
+    )
     device.click(tag="temperature_history_back")
     device.wait_for_widget(tag="temperature_history_open")
 
