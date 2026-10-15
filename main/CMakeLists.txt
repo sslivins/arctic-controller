@@ -76,6 +76,7 @@ idf_component_register(
         "fault_history.cpp"
         "home_stats.cpp"
         "temp_trend.cpp"
+        "chart_axis.cpp"
         "device_diagnostics.cpp"
         "wifi_supervisor.cpp"
         "log_buffer.cpp"

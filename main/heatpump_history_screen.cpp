@@ -1,6 +1,7 @@
 #include "heatpump_history_screen.h"
 
 #include "app_preferences.h"
+#include "chart_axis.h"
 #include "chart_fault_zone.h"
 #include "fault_history.h"
 #include "fonts/fonts.h"
@@ -98,6 +99,14 @@ static int32_t display_deci_c(int32_t deci_c) {
         return (deci_c * 9) / 5 + 320;
     }
     return deci_c;
+}
+
+static int32_t deci_c_from_display(int32_t value) {
+    if (app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT) {
+        const int32_t num = (value - 320) * 5;
+        return (num >= 0 ? num + 4 : num - 4) / 9;
+    }
+    return value;
 }
 
 static lv_color_t mode_color(uint8_t mode) {
@@ -350,7 +359,7 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
 
     char when[12];
     format_clock(when, sizeof(when), s.timestamp);
-    char outlet[12], inlet[12], setpoint[12];
+    char outlet[16], inlet[16], setpoint[16];
     format_reading(outlet, sizeof(outlet), s, HISTORY_TELEMETRY_OUTLET_VALID,
                    s.outlet_deci_c);
     format_reading(inlet, sizeof(inlet), s, HISTORY_TELEMETRY_INLET_VALID,
@@ -524,10 +533,14 @@ static void chart_draw_cb(lv_event_t* event) {
         }
         int32_t padding = (max_value - min_value) / 10;
         if (padding < 20) padding = 20;
-        min_value = ((min_value - padding) / 50) * 50;
-        if (min_value > 0 && min_value % 50) min_value -= 50;
-        max_value = ((max_value + padding + 49) / 50) * 50;
+        min_value -= padding;
+        max_value += padding;
     }
+    // Gridlines on round degrees of the display unit.
+    const ChartAxis axis =
+        chart_axis_nice(display_deci_c(min_value), display_deci_c(max_value));
+    min_value = deci_c_from_display(axis.lo);
+    max_value = deci_c_from_display(axis.hi);
 
     for (size_t i = 0; i < state.sample_count; i++) {
         const auto& first = state.samples[i];
@@ -559,16 +572,13 @@ static void chart_draw_cb(lv_event_t* event) {
     draw_defrost_zones(layer, plot);
     draw_fault_zones(layer, plot);
 
-    for (int grid = 0; grid <= 5; grid++) {
+    for (int32_t value = axis.lo; value <= axis.hi; value += axis.step) {
         int32_t y = plot.y2 -
-            (int32_t)((int64_t)grid * lv_area_get_height(&plot) / 5);
+            (int32_t)((int64_t)(value - axis.lo) * lv_area_get_height(&plot) /
+                      (axis.hi - axis.lo));
         draw_line(layer, {plot.x1, y}, {plot.x2, y}, COLOR_GRID, 1);
-        int32_t value = min_value +
-            (int32_t)((int64_t)grid * (max_value - min_value) / 5);
-        value = display_deci_c(value);
         char label[16];
-        snprintf(label, sizeof(label), "%ld.%ld°",
-                 (long)(value / 10), (long)labs(value % 10));
+        snprintf(label, sizeof(label), "%ld°", (long)(value / 10));
         lv_area_t label_area = {coords.x1, y - 12, plot.x1 - 8, y + 12};
         draw_label(layer, label_area, label, UI_COLOR_TEXT_DIM,
                    LV_TEXT_ALIGN_RIGHT);
