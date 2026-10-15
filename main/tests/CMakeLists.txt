@@ -211,3 +211,7 @@ add_test(NAME temp_trend COMMAND test_temp_trend)
 add_executable(test_chart_axis test_chart_axis.cpp)
 target_link_libraries(test_chart_axis PRIVATE arctic_main_host)
 add_test(NAME chart_axis COMMAND test_chart_axis)
+
+add_executable(test_history_window test_history_window.cpp)
+target_link_libraries(test_history_window PRIVATE arctic_main_host)
+add_test(NAME history_window COMMAND test_history_window)

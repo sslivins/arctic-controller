@@ -3,6 +3,7 @@
 #include "app_preferences.h"
 #include "chart_axis.h"
 #include "chart_fault_zone.h"
+#include "history_window.h"
 #include "fault_history.h"
 #include "fonts/fonts.h"
 #include "macon_faults.h"
@@ -48,6 +49,8 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 
 static constexpr size_t MAX_FAULTS = 16;
 static constexpr size_t MAX_DEFROSTS = 24;
+// Height of the strip above the plot that holds the fault-code labels.
+static constexpr int32_t FAULT_STRIP_H = 38;
 
 struct QueryResult {
     uint32_t generation;
@@ -69,6 +72,8 @@ static struct {
     lv_obj_t* range_label = nullptr;
     lv_obj_t* status_label = nullptr;
     lv_obj_t* previous_button = nullptr;
+    lv_obj_t* back_hour_button = nullptr;
+    lv_obj_t* forward_hour_button = nullptr;
     lv_obj_t* next_button = nullptr;
     lv_obj_t* latest_button = nullptr;
     heatpump_history_close_cb_t on_close = nullptr;
@@ -269,7 +274,9 @@ static void recompute_interpolation() {
 static lv_area_t plot_area(lv_obj_t* chart) {
     lv_area_t coords;
     lv_obj_get_coords(chart, &coords);
-    return {coords.x1 + 72, coords.y1 + 20, coords.x2 - 18, coords.y2 - 48};
+    // The top margin is the fault-label strip, so codes never sit on a line.
+    return {coords.x1 + 72, coords.y1 + FAULT_STRIP_H, coords.x2 - 18,
+            coords.y2 - 48};
 }
 
 // Whole-degree reading in the user's unit, e.g. "37°C".
@@ -487,9 +494,16 @@ static void draw_fault_labels(lv_layer_t* layer, const lv_area_t& plot) {
         }
         int32_t lx = x + 6;
         if (lx + LABEL_W > plot.x2) lx = plot.x2 - LABEL_W;
-        const lv_area_t label = {lx, plot.y1 + 4, lx + LABEL_W, plot.y1 + 34};
+        const lv_area_t label = {lx, plot.y1 - FAULT_STRIP_H + 4, lx + LABEL_W,
+                                 plot.y1 - 4};
         draw_label(layer, label, text, COLOR_FAULT, LV_TEXT_ALIGN_LEFT,
                    &montserrat_24_latin);
+        // Carry the fault line up into the strip so the code flags it.
+        for (size_t k = i; k < j; k++) {
+            const int32_t fx = map_x(state.faults[k].start, plot);
+            draw_line(layer, {fx, plot.y1 - FAULT_STRIP_H + 8}, {fx, plot.y1},
+                      COLOR_FAULT, 2);
+        }
         i = j;
     }
 }
@@ -718,14 +732,18 @@ static void update_navigation() {
             : 0;
     if (state.window_start <= earliest) {
         lv_obj_add_state(state.previous_button, LV_STATE_DISABLED);
+        lv_obj_add_state(state.back_hour_button, LV_STATE_DISABLED);
     } else {
         lv_obj_remove_state(state.previous_button, LV_STATE_DISABLED);
+        lv_obj_remove_state(state.back_hour_button, LV_STATE_DISABLED);
     }
     if (state.window_end >= state.latest_end) {
         lv_obj_add_state(state.next_button, LV_STATE_DISABLED);
+        lv_obj_add_state(state.forward_hour_button, LV_STATE_DISABLED);
         lv_obj_add_state(state.latest_button, LV_STATE_DISABLED);
     } else {
         lv_obj_remove_state(state.next_button, LV_STATE_DISABLED);
+        lv_obj_remove_state(state.forward_hour_button, LV_STATE_DISABLED);
         lv_obj_remove_state(state.latest_button, LV_STATE_DISABLED);
     }
 }
@@ -874,6 +892,30 @@ static void previous_cb(lv_event_t*) {
     request_window(state.window_end - WINDOW_SECONDS);
 }
 
+static void step_window(int32_t delta) {
+    request_window(history_window_shift(state.window_end, delta,
+                                        WINDOW_SECONDS, state.latest_end));
+}
+
+static void back_hour_cb(lv_event_t*) { step_window(-3600); }
+static void forward_hour_cb(lv_event_t*) { step_window(3600); }
+
+// Double-tap: re-centre the window on the tapped moment, e.g. to see a run
+// that straddled two windows in one piece.
+static void chart_double_click_cb(lv_event_t*) {
+    lv_indev_t* indev = lv_indev_active();
+    if (indev == nullptr) return;
+    lv_point_t point;
+    lv_indev_get_point(indev, &point);
+    const lv_area_t plot = plot_area(state.chart);
+    if (point.x < plot.x1 || point.x > plot.x2) return;
+    const uint32_t t = state.window_start +
+        (uint32_t)((uint64_t)(point.x - plot.x1) * WINDOW_SECONDS /
+                   (uint32_t)lv_area_get_width(&plot));
+    request_window(history_window_center(t, WINDOW_SECONDS, 15 * 60,
+                                         state.latest_end));
+}
+
 static void next_cb(lv_event_t*) {
     uint32_t end = state.window_end + WINDOW_SECONDS;
     if (end > state.latest_end) end = state.latest_end;
@@ -1005,6 +1047,8 @@ lv_obj_t* heatpump_history_show(lv_obj_t* parent,
     lv_obj_set_user_data(state.chart, (void*)"temperature_history_chart");
     lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_PRESSED, nullptr);
     lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_PRESSING, nullptr);
+    lv_obj_add_event_cb(state.chart, chart_double_click_cb,
+                        LV_EVENT_DOUBLE_CLICKED, nullptr);
     lv_obj_add_event_cb(state.chart, chart_draw_cb, LV_EVENT_DRAW_MAIN_END,
                         nullptr);
 
@@ -1028,9 +1072,15 @@ lv_obj_t* heatpump_history_show(lv_obj_t* parent,
     state.previous_button = create_button(
         actions, i18n_get(STR_HISTORY_PREVIOUS),
         "temperature_history_previous", previous_cb);
+    state.back_hour_button = create_button(
+        actions, LV_SYMBOL_LEFT " 1 h", "temperature_history_back_hour",
+        back_hour_cb);
     state.latest_button = create_button(
         actions, i18n_get(STR_HISTORY_LATEST),
         "temperature_history_latest", latest_cb);
+    state.forward_hour_button = create_button(
+        actions, "1 h " LV_SYMBOL_RIGHT, "temperature_history_forward_hour",
+        forward_hour_cb);
     state.next_button = create_button(
         actions, i18n_get(STR_HISTORY_NEXT),
         "temperature_history_next", next_cb);
@@ -1068,6 +1118,8 @@ void heatpump_history_hide(void) {
     state.range_label = nullptr;
     state.status_label = nullptr;
     state.previous_button = nullptr;
+    state.back_hour_button = nullptr;
+    state.forward_hour_button = nullptr;
     state.next_button = nullptr;
     state.latest_button = nullptr;
     state.fault_count = 0;

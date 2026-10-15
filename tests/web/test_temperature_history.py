@@ -94,6 +94,43 @@ class TestTemperatureHistoryWeb:
         # Having stepped back, returning to the latest window is now possible.
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
 
+    def test_hour_step_and_double_click_recentre(
+        self, dashboard_page: Page, base_url: str
+    ):
+        _seed_history(base_url)
+        _open_history(dashboard_page)
+
+        def next_request_end(action):
+            with dashboard_page.expect_request(
+                lambda r: "/api/heatpump/temperature-history" in r.url, timeout=10000
+            ) as req:
+                action()
+            m = re.search(r"end=(\d+)", req.value.url)
+            return int(m.group(1)) if m else None
+
+        latest_end = dashboard_page.evaluate("state.tempHistory.data.latest_end")
+        back = next_request_end(
+            lambda: dashboard_page.locator('[data-action="history-back-hour"]').click()
+        )
+        assert back == latest_end - 3600
+        dashboard_page.wait_for_function(
+            f"state.tempHistory.data && state.tempHistory.data.end === {back}"
+        )
+
+        # Double-clicking a moment centres the 8 h window on it (15 min snap).
+        chart = dashboard_page.locator(".hist-chart")
+        box = chart.bounding_box()
+        t = dashboard_page.evaluate(
+            "([x]) => histTimeAt(document.querySelector('.hist-chart'), x)",
+            [box["x"] + box["width"] * 0.3],
+        )
+        centred = next_request_end(
+            lambda: chart.dblclick(position={"x": box["width"] * 0.3, "y": box["height"] / 2})
+        )
+        assert centred is not None
+        assert abs(centred - (t + 4 * 3600)) <= 450
+        assert centred % 900 == 0
+
     def test_latest_window_refreshes_live(self, dashboard_page: Page, base_url: str):
         _seed_history(base_url)
         # Take over timers so a minute can pass instantly. fast_forward fires the
@@ -146,4 +183,26 @@ class TestHistoryFaultMarkers:
         assert dashboard_page.locator(".hist-chart line.hist-fault").count() >= 1
         labels = dashboard_page.locator(".hist-chart .hist-fault-label").all_text_contents()
         assert any("P02" in t for t in labels)
+        # The code sits in the strip above the plot, clear of the lines.
+        label_bottom = dashboard_page.locator(".hist-chart .hist-fault-label").first.evaluate(
+            "e => { const b = e.getBBox(); return b.y + b.height; }"
+        )
+        plot_top = dashboard_page.locator(".hist-chart .hist-hover-line").evaluate(
+            "e => e.y1.baseVal.value"
+        )
+        assert label_bottom <= plot_top, (label_bottom, plot_top)
+        # No fault line runs through a label in the strip.
+        crossings = dashboard_page.locator(".hist-chart").evaluate(
+            """svg => {
+              const labels = [...svg.querySelectorAll('.hist-fault-label')].map(e => e.getBBox());
+              const out = [];
+              for (const l of svg.querySelectorAll('line.hist-fault')) {
+                const x = l.x1.baseVal.value, top = l.y1.baseVal.value;
+                for (const b of labels)
+                  if (x >= b.x && x <= b.x + b.width && top < b.y + b.height) out.push([x, b.x, b.width]);
+              }
+              return out;
+            }"""
+        )
+        assert crossings == [], crossings
         expect(dashboard_page.locator(".hist-legend", has_text="Fault")).to_be_visible()
