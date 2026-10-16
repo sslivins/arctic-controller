@@ -24,6 +24,7 @@
 #include <time.h>
 
 static constexpr uint32_t WINDOW_SECONDS = 8 * 60 * 60;
+static constexpr int32_t LATEST_BUTTON_H = 52;
 static constexpr uint32_t RETENTION_SECONDS =
     HISTORY_TELEMETRY_RETENTION_DAYS * 24 * 60 * 60;
 static constexpr uint32_t CONTIGUOUS_SECONDS =
@@ -739,11 +740,11 @@ static void update_navigation() {
     if (state.window_end >= state.latest_end) {
         lv_obj_add_state(state.next_button, LV_STATE_DISABLED);
         lv_obj_add_state(state.forward_hour_button, LV_STATE_DISABLED);
-        lv_obj_add_state(state.latest_button, LV_STATE_DISABLED);
+        lv_obj_add_flag(state.latest_button, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_remove_state(state.next_button, LV_STATE_DISABLED);
         lv_obj_remove_state(state.forward_hour_button, LV_STATE_DISABLED);
-        lv_obj_remove_state(state.latest_button, LV_STATE_DISABLED);
+        lv_obj_remove_flag(state.latest_button, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -965,14 +966,40 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
     lv_obj_clear_flag(state.overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_user_data(state.overlay, (void*)"temperature_history_screen");
 
-    state.range_label = lv_label_create(state.overlay);
-    lv_obj_set_width(state.range_label, LV_PCT(100));
+    // Header: range text, plus a "Latest" jump that only shows when the
+    // window is behind the newest data. Fixed height so the chart doesn't
+    // move when it appears.
+    lv_obj_t* header = lv_obj_create(state.overlay);
+    lv_obj_remove_style_all(header);
+    lv_obj_set_size(header, LV_PCT(100), LATEST_BUTTON_H);
+    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(header, 12, LV_PART_MAIN);
+    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
+
+    state.range_label = lv_label_create(header);
+    lv_obj_set_flex_grow(state.range_label, 1);
     lv_obj_set_style_text_font(state.range_label, UI_FONT_SMALL, LV_PART_MAIN);
     lv_obj_set_style_text_color(state.range_label, UI_COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_set_style_text_align(state.range_label, LV_TEXT_ALIGN_CENTER,
                                 LV_PART_MAIN);
     lv_obj_set_user_data(state.range_label,
                          (void*)"temperature_history_range");
+
+    char latest_text[48];
+    snprintf(latest_text, sizeof(latest_text), "%s  " LV_SYMBOL_NEXT,
+             i18n_get(STR_HISTORY_LATEST));
+    state.latest_button = create_button(header, latest_text,
+                                        "temperature_history_latest", latest_cb);
+    lv_obj_set_flex_grow(state.latest_button, 0);
+    lv_obj_set_size(state.latest_button, LV_SIZE_CONTENT, LATEST_BUTTON_H);
+    lv_obj_set_style_pad_hor(state.latest_button, 22, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.latest_button, UI_COLOR_ACCENT,
+                              LV_PART_MAIN);
+    lv_obj_set_style_text_color(lv_obj_get_child(state.latest_button, 0),
+                                lv_color_hex(0x062033), LV_PART_MAIN);
+    lv_obj_add_flag(state.latest_button, LV_OBJ_FLAG_HIDDEN);
 
     // Row 1: plotted lines. Row 2: mode bands.
     auto make_legend_row = [](lv_obj_t* parent) {
@@ -1045,9 +1072,6 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
     state.back_hour_button = create_button(
         actions, LV_SYMBOL_LEFT " 1 h", "temperature_history_back_hour",
         back_hour_cb);
-    state.latest_button = create_button(
-        actions, i18n_get(STR_HISTORY_LATEST),
-        "temperature_history_latest", latest_cb);
     state.forward_hour_button = create_button(
         actions, "1 h " LV_SYMBOL_RIGHT, "temperature_history_forward_hour",
         forward_hour_cb);

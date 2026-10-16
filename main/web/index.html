@@ -272,7 +272,11 @@
     .btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .hist-muted { color: var(--cp-text-muted); margin: 8px 0; }
     .hist-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+    .hist-range-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .hist-range { font-weight: 600; }
+    .hist-latest { min-height: 32px; padding: 4px 6px 4px 10px; font-size: 13px; display: inline-flex; align-items: center; gap: 2px; }
+    .hist-latest svg { width: 18px; height: 18px; fill: currentColor; }
+    .hist-latest[hidden] { display: none; }
     .hist-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--cp-text-muted); }
     .hist-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .hist-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
@@ -288,7 +292,8 @@
     .hist-fault-label { fill: var(--cp-danger); font-size: 13px; font-weight: 600; }
     .hist-tip-time { color: var(--cp-text-muted); font-size: 12px; }
     .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
-    .hist-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .hist-nav { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; }
+    .hist-nav-group { display: flex; gap: 8px; }
     .field { display: grid; gap: 6px; margin-bottom: 14px; }
 .field[hidden] { display: none; }
     .field label { color: var(--cp-text-muted); font-size: 13px; font-weight: 600; }
@@ -671,6 +676,8 @@
       .component-list { grid-template-columns: repeat(2, 1fr); }
       .mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .event-toolbar { grid-template-columns: 1fr; }
+      .hist-toolbar > .hist-range-row { width: 100%; flex-wrap: nowrap; justify-content: space-between; }
+      .hist-range { display: grid; }
       .event { gap: 10px; padding: 12px; }
       .ap-row { grid-template-columns: 1fr; }
       .page-head { align-items: flex-start; }
@@ -1988,7 +1995,11 @@
     function historyChartSvg(data) {
       const samples = data.samples || [];
       // T is the fault-label strip above the plot, so a code never sits on a line.
-      const W = 960, H = 384, L = 58, R = 16, T = 40, B = 34;
+      // Drawn at the wrap's real pixel width (histFitChart) so text keeps its
+      // CSS size; a fixed 960-wide viewBox shrank labels to ~4 px on phones.
+      const W = Math.max(280, Math.round(state.histChartW || 960)), narrow = W < 600;
+      const H = narrow ? 260 : Math.round(Math.min(384, Math.max(260, W * 0.4)));
+      const L = narrow ? 42 : 58, R = narrow ? 10 : 16, T = 40, B = 34;
       const plotL = L, plotR = W - R, plotT = T, plotB = H - B;
       const plotW = plotR - plotL, plotH = plotB - plotT;
       const start = data.start, end = data.end, span = Math.max(1, end - start);
@@ -2165,6 +2176,20 @@
       return svg;
     }
     let histGeom = null, histPointer = null, histDrag = null;
+    // Redraw the chart if its wrap's width no longer matches the drawn width.
+    function histFitChart() {
+      const wrap = $(".hist-chart-wrap"), old = wrap?.querySelector(".hist-chart"), data = state.tempHistory.data;
+      if (!old || !data) return;
+      const w = Math.round(wrap.clientWidth);
+      if (!w || (histGeom && histGeom.W === Math.max(280, w))) return;
+      state.histChartW = w;
+      old.outerHTML = historyChartSvg(data);
+    }
+    let histResizeFrame = 0;
+    window.addEventListener("resize", () => {
+      if (state.route !== "history" || histResizeFrame) return;
+      histResizeFrame = requestAnimationFrame(() => { histResizeFrame = 0; histFitChart(); });
+    });
     // Show the window ending at `end` (unix s), kept within the stored range;
     // the newest window goes back to the live view.
     async function histGoto(end) {
@@ -2292,10 +2317,10 @@
       } else {
         const atLatest = data.end >= data.latest_end;
         const atOldest = data.start <= data.earliest;
-        const rangeText = `${fmtHistClock(data.start, true)} — ${fmtHistClock(data.end, true)}`;
         body = `<section class="card">
           <div class="hist-toolbar">
-            <div class="hist-range">${esc(rangeText)}</div>
+            <div class="hist-range-row"><span class="hist-range"><span>${esc(fmtHistClock(data.start, true))} —</span> <span>${esc(fmtHistClock(data.end, true))}</span></span>
+              <button class="btn primary hist-latest" data-action="history-latest" ${atLatest ? "hidden disabled" : ""}>Latest<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.6 7.4 10.2 12l-4.6 4.6L7 18l6-6-6-6-1.4 1.4ZM16 6h2v12h-2V6Z"/></svg></button></div>
             <div class="hist-legend">
               <span><i style="background:var(--hist-in)"></i>Inlet</span>
               <span><i style="background:var(--hist-out)"></i>Outlet</span>
@@ -2309,11 +2334,14 @@
           </div>
           <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>
           <div class="hist-nav">
-            <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ 8 h</button>
-            <button class="btn" data-action="history-back-hour" ${atOldest ? "disabled" : ""}>‹ 1 h</button>
-            <button class="btn" data-action="history-latest" ${atLatest ? "disabled" : ""}>Latest</button>
-            <button class="btn" data-action="history-forward-hour" ${atLatest ? "disabled" : ""}>1 h ›</button>
-            <button class="btn" data-action="history-next" ${atLatest ? "disabled" : ""}>8 h ›</button>
+            <div class="hist-nav-group">
+              <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ 8 h</button>
+              <button class="btn" data-action="history-back-hour" ${atOldest ? "disabled" : ""}>‹ 1 h</button>
+            </div>
+            <div class="hist-nav-group">
+              <button class="btn" data-action="history-forward-hour" ${atLatest ? "disabled" : ""}>1 h ›</button>
+              <button class="btn" data-action="history-next" ${atLatest ? "disabled" : ""}>8 h ›</button>
+            </div>
           </div>
           <p class="hist-muted hist-hint">Double-click the chart to centre it on that moment, or drag it sideways.</p>
         </section>`;
@@ -2340,6 +2368,7 @@
       updateDocumentTitle();
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
       if (state.route === "home") homeChartLayout();
+      if (state.route === "history") histFitChart();
       perfSyncSaves();
       if (state.settingsPage === "diagnostics") {
         const logs = $("#log-container"); if (logs) logs.scrollTop = logs.scrollHeight;
