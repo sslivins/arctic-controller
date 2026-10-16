@@ -1069,8 +1069,11 @@ void persistEnergyLedger(bool force) {
 
     const bool committed = have_closed && energy::store_commit_day(closed, &life);
     const bool saved = save && energy::store_save_today(accum);
-    if ((have_closed || saved) && xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-        if (have_closed) s_closed_pending = false;
+    if (have_closed && !committed) {
+        ESP_LOGW(TAG, "Energy: committing %lu failed, retrying", (unsigned long)closed.date);
+    }
+    if ((committed || saved) && xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+        if (committed) s_closed_pending = false;
         if (committed) {
             s_lifetime = life;
             s_lifetime_valid = true;
@@ -1088,6 +1091,15 @@ bool getEnergyToday(energy::DayRecord* out) {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     const bool ok = s_ledger.valid();
     if (ok) *out = s_ledger.today();
+    xSemaphoreGive(s_state_mutex);
+    return ok;
+}
+
+bool getEnergyPendingDay(energy::DayRecord* out) {
+    if (s_state_mutex == nullptr) return false;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const bool ok = s_closed_pending;
+    if (ok) *out = s_closed_day;
     xSemaphoreGive(s_state_mutex);
     return ok;
 }

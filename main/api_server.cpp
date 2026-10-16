@@ -6503,6 +6503,8 @@ static esp_err_t energy_daily_get_handler(httpd_req_t* req)
 
     energy::DayRecord today = {};
     const bool have_today = arctic::getEnergyToday(&today);
+    energy::DayRecord pending = {};
+    const bool have_pending = arctic::getEnergyPendingDay(&pending);
     uint32_t today_date = energy_today_date();
     if (today_date == 0 && have_today) today_date = today.date;
     if (today_date == 0) {
@@ -6567,7 +6569,16 @@ static esp_err_t energy_daily_get_handler(httpd_req_t* req)
         if (have_today && days[i].date == today.date) continue;
         emit_day(days[i], true);
     }
+    const bool stored_last = n > 0;
+    const uint32_t last_stored = stored_last ? days[n - 1].date : 0;
     heap_caps_free(days);
+    // A day closed moments ago that isn't in flash yet comes after every
+    // stored day.
+    if (have_pending && pending.date >= from && pending.date <= to &&
+        (!have_today || pending.date != today.date) &&
+        (!stored_last || pending.date > last_stored)) {
+        emit_day(pending, true);
+    }
     // The open day: normally today, but a day the unit couldn't close yet
     // (disconnected over midnight) is reported as it stands, still not final.
     if (have_today && today.date >= from && today.date <= to) emit_day(today, false);
@@ -6588,7 +6599,13 @@ static esp_err_t energy_totals_get_handler(httpd_req_t* req)
         return ESP_OK;
     }
     energy::Lifetime life = {};
-    const bool have_life = arctic::getEnergyLifetime(&life);
+    bool have_life = arctic::getEnergyLifetime(&life);
+    const bool have_id = have_life;
+    energy::DayRecord pending = {};
+    if (arctic::getEnergyPendingDay(&pending) && (!have_life || pending.date > life.through_date)) {
+        energy::fold(&life, pending);
+        have_life = true;
+    }
     energy::DayRecord today = {};
     const bool have_today = arctic::getEnergyToday(&today);
     // A day already folded into the lifetime totals isn't added twice.
@@ -6604,7 +6621,7 @@ static esp_err_t energy_totals_get_handler(httpd_req_t* req)
     if (add_today) elec += energy::total_elec_wh(today);
 
     cJSON* root = cJSON_CreateObject();
-    if (have_life) {
+    if (have_id) {
         char id[9];
         snprintf(id, sizeof(id), "%08lx", (unsigned long)life.reset_id);
         cJSON_AddStringToObject(root, "reset_id", id);

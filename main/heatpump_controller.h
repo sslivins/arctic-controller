@@ -213,6 +213,10 @@ bool getEnergyToday(energy::DayRecord* out);
 // until the first day has closed.
 bool getEnergyLifetime(energy::Lifetime* out);
 
+// A day that has closed but isn't in flash yet (persisted within ~30 s).
+// Readers add it so totals don't dip while it waits.
+bool getEnergyPendingDay(energy::DayRecord* out);
+
 // Time-weighted average power since the previous call, for the telemetry
 // recorder. False when there was no valid power reading.
 bool takeAveragePower(uint16_t* watts);

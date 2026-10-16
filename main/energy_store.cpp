@@ -122,7 +122,7 @@ bool store_save_today(const DayAccum& accum) {
     return true;
 }
 
-static void fold(Lifetime* life, const DayRecord& d) {
+void fold(Lifetime* life, const DayRecord& d) {
     if (life->days == 0) life->since_date = d.date;
     life->through_date = d.date;
     life->days++;

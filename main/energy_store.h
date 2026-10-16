@@ -39,6 +39,9 @@ struct Lifetime {
 };
 static_assert(sizeof(Lifetime) == 56, "Lifetime is persisted; keep its layout");
 
+// Add a closed day to the lifetime totals (in memory only).
+void fold(Lifetime* life, const DayRecord& d);
+
 bool store_load_today(DayAccum* out);
 bool store_save_today(const DayAccum& accum);
 
