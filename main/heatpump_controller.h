@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "heatpump_types.h"
+#include "energy_store.h"
 #include "macon_listener.h"   // MaconObservedWindow, MaconObservedCatalog, MaconListenerStats
 #include "temp_trend.h"
 
@@ -74,8 +75,7 @@ struct HeatPumpState {
     uint16_t primary_eev_opening = 0;   // steps
     bool     primary_eev_valid = false;
     uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
-    // Electrical energy used today (local day), integrated from
-    // realtime_power_w since boot; not persisted across reboots.
+    // Electrical energy used today (local day), from the energy ledger.
     uint32_t energy_today_wh = 0;
     bool     energy_today_valid = false;
 
@@ -198,8 +198,28 @@ TelemetrySnapshot getTelemetrySnapshot();
 // Check if connected (always true in demo mode)
 bool isConnected();
 
-// Save today's energy total now, ahead of a planned restart.
-void flushDailyEnergy();
+// Load the energy ledger once the clock is set, then commit closed days and
+// checkpoint the open one when due (or now, with `force`). Does NVS writes, so
+// it runs on the telemetry recorder task rather than the bus poll task.
+void persistEnergyLedger(bool force = false);
+
+// Save the open day's energy checkpoint now, ahead of a planned restart.
+void flushEnergyLedger();
+
+// Today's energy so far (see energy_ledger.h). False until the clock is set.
+bool getEnergyToday(energy::DayRecord* out);
+
+// Energy totals over every closed day since install or factory reset. False
+// until the first day has closed.
+bool getEnergyLifetime(energy::Lifetime* out);
+
+// A day that has closed but isn't in flash yet (persisted within ~30 s).
+// Readers add it so totals don't dip while it waits.
+bool getEnergyPendingDay(energy::DayRecord* out);
+
+// Time-weighted average power since the previous call, for the telemetry
+// recorder. False when there was no valid power reading.
+bool takeAveragePower(uint16_t* watts);
 
 // ============================================================================
 // Control Functions (write to heat pump)

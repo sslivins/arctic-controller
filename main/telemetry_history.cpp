@@ -37,6 +37,7 @@ static void recorder_task(void*) {
                          pdMS_TO_TICKS(HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC * 1000));
         if (s_stop_requested.load()) break;
         if (!time_mgr_is_synced()) continue;
+        arctic::persistEnergyLedger();
 
         time_t now;
         time(&now);
@@ -65,6 +66,11 @@ static void recorder_task(void*) {
         if (snapshot.tank_valid) {
             sample.flags |= HISTORY_TELEMETRY_TANK_VALID;
             sample.tank_deci_c = (int16_t)(snapshot.tank_c * 10);
+        }
+        uint16_t avg_w = 0;
+        if (arctic::takeAveragePower(&avg_w) && snapshot.connected) {
+            sample.average_power_w = avg_w;
+            sample.flags |= HISTORY_TELEMETRY_POWER_VALID;
         }
 
         esp_err_t err = history_storage_append_telemetry(&sample);

@@ -30,6 +30,8 @@ enum {
     HISTORY_TELEMETRY_SETPOINT_VALID = 1 << 5,
     // Set only by firmware 3.2.0+; older samples carry no tank reading.
     HISTORY_TELEMETRY_TANK_VALID = 1 << 6,
+    // Set only by firmware with the energy ledger; older samples carry no power.
+    HISTORY_TELEMETRY_POWER_VALID = 1 << 7,
 };
 
 typedef struct {
@@ -41,7 +43,9 @@ typedef struct {
     uint8_t mode;
     uint8_t flags;
     int16_t tank_deci_c;
-    uint16_t reserved;
+    // Electrical power averaged over the sample interval (W). Meaningful only
+    // with HISTORY_TELEMETRY_POWER_VALID.
+    uint16_t average_power_w;
 } history_telemetry_sample_t;
 
 esp_err_t history_storage_init(void);
