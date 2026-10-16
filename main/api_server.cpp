@@ -6526,13 +6526,11 @@ static esp_err_t energy_daily_get_handler(httpd_req_t* req)
         }
     }
     if (from == 0) from = energy_date_add(to, -30);
-    if (from > to) {
-        send_json_error(req, "400 Bad Request", "from is after to");
-        return ESP_OK;
-    }
-    if (energy_date_add(from, kMaxDays - 1) < to) {
-        send_json_error(req, "400 Bad Request", "Range is limited to 400 days");
-        return ESP_OK;
+    // Well-formed but awkward ranges are answered rather than rejected: a range
+    // over the limit keeps its last kMaxDays days, and one that runs backwards
+    // is empty. The reply echoes the range it actually covers.
+    if (from <= to && energy_date_add(from, kMaxDays - 1) < to) {
+        from = energy_date_add(to, -(kMaxDays - 1));
     }
 
     auto* days = static_cast<energy::DayRecord*>(heap_caps_malloc(

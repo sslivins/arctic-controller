@@ -37,6 +37,7 @@ static void recorder_task(void*) {
                          pdMS_TO_TICKS(HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC * 1000));
         if (s_stop_requested.load()) break;
         if (!time_mgr_is_synced()) continue;
+        arctic::persistEnergyLedger();
 
         time_t now;
         time(&now);

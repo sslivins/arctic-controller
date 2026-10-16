@@ -198,6 +198,11 @@ TelemetrySnapshot getTelemetrySnapshot();
 // Check if connected (always true in demo mode)
 bool isConnected();
 
+// Load the energy ledger once the clock is set, then commit closed days and
+// checkpoint the open one when due (or now, with `force`). Does NVS writes, so
+// it runs on the telemetry recorder task rather than the bus poll task.
+void persistEnergyLedger(bool force = false);
+
 // Save the open day's energy checkpoint now, ahead of a planned restart.
 void flushEnergyLedger();
 

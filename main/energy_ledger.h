@@ -246,8 +246,10 @@ public:
         return force || !has_saved_ || saved_.date != cur_.date ||
                now_s - last_save_s_ >= kSaveIntervalSeconds;
     }
-    void mark_saved(int64_t now_s) {
-        saved_ = cur_;
+    void mark_saved(int64_t now_s) { mark_saved(now_s, cur_); }
+    // `what` is the accum() copy that was written, which may trail cur_.
+    void mark_saved(int64_t now_s, const DayAccum& what) {
+        saved_ = what;
         has_saved_ = true;
         last_save_s_ = now_s;
     }
@@ -255,6 +257,12 @@ public:
     bool valid() const { return open_; }
     const DayAccum& accum() const { return cur_; }
     DayRecord today() const { return to_record(cur_); }
+    // total_elec_wh(today()) without building a record on the caller's stack.
+    uint32_t today_elec_wh() const {
+        uint32_t t = ws_to_wh(cur_.elec_unattributed_ws);
+        for (int b = 0; b < kBuckets; b++) t += ws_to_wh(cur_.elec_ws[b]);
+        return t;
+    }
 
 private:
     void open_day(const Day& day) {

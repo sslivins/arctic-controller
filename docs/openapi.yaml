@@ -2789,13 +2789,19 @@ paths:
         required: false
         schema:
           type: string
+          pattern: '^(2\d{3}|[3-9]\d{3})-?(0[1-9]|1[0-2])-?(0[1-9]|[12]\d|3[01])$'
           example: '2026-10-01'
-        description: First day (YYYY-MM-DD or YYYYMMDD). Defaults to 30 days before `to` (31 days in all).
+        description: |
+          First day (YYYY-MM-DD or YYYYMMDD). Defaults to 30 days before `to`
+          (31 days in all). A range longer than 400 days keeps its last 400
+          days, and a `from` after `to` gives no days; `from`/`to` in the reply
+          show the range actually covered.
       - name: to
         in: query
         required: false
         schema:
           type: string
+          pattern: '^(2\d{3}|[3-9]\d{3})-?(0[1-9]|1[0-2])-?(0[1-9]|[12]\d|3[01])$'
           example: '2026-10-16'
         description: Last day (YYYY-MM-DD or YYYYMMDD). Defaults to today.
       responses:
@@ -2818,7 +2824,7 @@ paths:
                     items:
                       $ref: '#/components/schemas/EnergyDay'
         '400':
-          description: Bad date, `from` after `to`, or a range over 400 days
+          description: Date not in YYYY-MM-DD or YYYYMMDD form
           content:
             application/json:
               schema:

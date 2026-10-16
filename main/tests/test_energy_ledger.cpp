@@ -126,6 +126,7 @@ static void gaps_and_disconnects_are_not_booked() {
     l.add(t - 500, DAY1, standby(3600));
     l.add(t - 470, DAY1, standby(3600));
     CHECK_EQ_L(total_elec_wh(l.today()), 350);
+    CHECK_EQ_L(l.today_elec_wh(), 350);
 }
 
 static void splits_at_midnight() {
@@ -219,6 +220,17 @@ static void save_schedule() {
     // A new day saves at once.
     l.add(DAY2.start_s + 5, DAY2, standby());
     CHECK_EQ_L(l.save_due(DAY2.start_s + 5), 1);
+
+    // A save written from an older copy still leaves the newer state due, even
+    // when forced and nothing changes afterwards.
+    EnergyLedger m;
+    m.add(MIDNIGHT + 10, DAY1, running(BUCKET_HEATING, 1000, 3000));
+    const DayAccum written = m.accum();
+    m.add(MIDNIGHT + 20, DAY1, running(BUCKET_HEATING, 1000, 3000));
+    m.mark_saved(MIDNIGHT + 20, written);
+    CHECK_EQ_L(m.save_due(MIDNIGHT + 20, true), 1);
+    m.mark_saved(MIDNIGHT + 20, m.accum());
+    CHECK_EQ_L(m.save_due(MIDNIGHT + 20, true), 0);
 }
 
 static void thermal_only_counts_the_expected_direction() {

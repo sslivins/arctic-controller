@@ -76,22 +76,29 @@ static uint32_t find_month_at_or_before(nvs_handle_t nvs, uint32_t yyyymm, Month
 }
 
 bool store_load_today(DayAccum* out) {
+    TodayBlob* bp = static_cast<TodayBlob*>(malloc(sizeof(TodayBlob)));
+    if (!bp) return false;
+    const TodayBlob& b = *bp;
     nvs_handle_t nvs;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return false;
-    TodayBlob b;
-    size_t len = sizeof(b);
-    const bool ok = nvs_get_blob(nvs, NVS_KEY_TODAY, &b, &len) == ESP_OK &&
-                    len == sizeof(b) && b.magic == kTodayMagic && b.version == kVersion &&
-                    b.accum_size == sizeof(DayAccum) && b.crc32 == blob_crc(b);
-    nvs_close(nvs);
-    if (!ok) return false;
-    *out = b.accum;
-    return true;
+    bool ok = false;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(b);
+        ok = nvs_get_blob(nvs, NVS_KEY_TODAY, bp, &len) == ESP_OK && len == sizeof(b) &&
+             b.magic == kTodayMagic && b.version == kVersion &&
+             b.accum_size == sizeof(DayAccum) && b.crc32 == blob_crc(b);
+        nvs_close(nvs);
+    }
+    if (ok) *out = b.accum;
+    free(bp);
+    return ok;
 }
 
 bool store_save_today(const DayAccum& accum) {
     static uint32_t s_generation = 0;
-    TodayBlob b;
+    // On the heap: callers run on 4 KB task stacks, and NVS writes are deep.
+    TodayBlob* bp = static_cast<TodayBlob*>(malloc(sizeof(TodayBlob)));
+    if (!bp) return false;
+    TodayBlob& b = *bp;
     memset(&b, 0, sizeof(b));
     b.magic = kTodayMagic;
     b.version = kVersion;
@@ -107,6 +114,7 @@ bool store_save_today(const DayAccum& accum) {
         if (err == ESP_OK) err = nvs_commit(nvs);
         nvs_close(nvs);
     }
+    free(bp);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to save today's energy: %s", esp_err_to_name(err));
         return false;
