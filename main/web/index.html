@@ -86,6 +86,8 @@
       --hist-heat: #f97316;
       --hist-cool: #3b82f6;
       --hist-dhw: #f59e0b;
+      --hist-power: #7c3aed;
+      --energy-other: #94a3b8;
     }
     html[data-theme="dark"] {
       --cp-bg: #1a1a2e;
@@ -115,6 +117,8 @@
       --hist-heat: #f97316;
       --hist-cool: #3b82f6;
       --hist-dhw: #fbbf24;
+      --hist-power: #a78bfa;
+      --energy-other: #64748b;
     }
     * { box-sizing: border-box; }
 
@@ -294,6 +298,46 @@
     .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
     .hist-nav { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; }
     .hist-nav-group { display: flex; gap: 8px; }
+    .hist-tip i.band, .hist-legend i.dot { width: 10px; height: 10px; border-radius: 2px; }
+    .hist-legend i.dot { border-radius: 50%; }
+    .hist-toggle { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--cp-border-strong); background: transparent; color: var(--cp-text-muted); border-radius: 999px; padding: 2px 10px 2px 6px; font: inherit; font-size: 13px; cursor: pointer; }
+    .hist-toggle .box { width: 14px; height: 14px; border-radius: 4px; border: 2px solid var(--hist-power); display: inline-grid; place-items: center; font-size: 10px; line-height: 1; color: var(--cp-surface); }
+    .hist-toggle.on { color: var(--cp-text); }
+    .hist-toggle.on .box { background: var(--hist-power); }
+    .hist-energy { font-size: 13px; text-align: center; margin: 10px 0 0; }
+    .en-chart-wrap { width: 100%; position: relative; overflow-x: clip; margin-top: 6px; }
+    .en-chart { width: 100%; height: auto; display: block; touch-action: pan-y; }
+    .en-chart .en-hit { cursor: pointer; }
+    .en-ranges { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--cp-border); border-radius: 10px; background: var(--cp-bg-elevated); }
+    .en-ranges button { border: 0; background: transparent; color: var(--cp-text-muted); padding: 5px 12px; border-radius: 7px; font-weight: 600; cursor: pointer; }
+    .en-ranges button:hover { color: var(--cp-text); }
+    .en-ranges button.active { background: var(--cp-accent-soft); color: var(--cp-accent); }
+    .en-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .en-stat { padding: 10px 12px; border: 1px solid var(--cp-border); border-radius: 10px; background: var(--cp-surface-soft); min-width: 0; }
+    .en-stat span { display: block; color: var(--cp-text-muted); font-size: 13px; }
+    .en-stat strong { display: block; font-size: 20px; margin-top: 2px; white-space: nowrap; }
+    .en-stat small { display: block; color: var(--cp-text-muted); font-size: 12px; }
+    .en-legend { margin-bottom: 4px; }
+    .en-detail { margin-top: 16px; }
+    .en-detail .card-head { flex-wrap: wrap; gap: 10px; }
+    .en-detail h2 { display: flex; align-items: center; gap: 10px; margin: 0; white-space: nowrap; }
+    .en-detail h3 { margin: 18px 0 8px; font-size: 16px; }
+    .en-swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 8px; flex: none; }
+    .en-table-wrap { overflow-x: auto; }
+    .en-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .en-table th { text-align: left; color: var(--cp-text-muted); font-weight: 600; font-size: 13px; padding: 6px 8px; border-bottom: 1px solid var(--cp-border); white-space: nowrap; }
+    .en-table td { padding: 8px; border-bottom: 1px solid var(--cp-border); white-space: nowrap; }
+    .en-table th:not(:first-child), .en-table td:not(:first-child) { text-align: right; }
+    .en-facts { margin: 12px 0 4px; }
+    .en-note { font-size: 13px; }
+    .en-runs { display: grid; gap: 6px; }
+    .en-run { display: grid; grid-template-columns: auto auto 1fr auto auto; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--cp-border); border-radius: 10px; background: var(--cp-surface-soft); }
+    .en-run .en-swatch { margin: 0; }
+    .en-run-time { font-weight: 600; white-space: nowrap; }
+    .en-run-meta { color: var(--cp-text-muted); font-size: 13px; }
+    .en-run strong { white-space: nowrap; }
+    .en-run-view { min-height: 32px; padding: 4px 10px; font-size: 13px; }
+    .en-runs-loading { display: grid; place-items: center; min-height: 80px; }
     .field { display: grid; gap: 6px; margin-bottom: 14px; }
 .field[hidden] { display: none; }
     .field label { color: var(--cp-text-muted); font-size: 13px; font-weight: 600; }
@@ -678,6 +722,18 @@
       .event-toolbar { grid-template-columns: 1fr; }
       .hist-toolbar > .hist-range-row { width: 100%; flex-wrap: nowrap; justify-content: space-between; }
       .hist-range { display: grid; }
+      .en-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .en-stat strong { font-size: 18px; }
+      .en-ranges { width: 100%; }
+      .en-ranges button { flex: 1; padding: 6px 4px; }
+      .en-range-text { display: inline; }
+      .en-run { grid-template-columns: auto 1fr auto; row-gap: 2px; }
+      .en-run-meta { grid-column: 2; grid-row: 2; }
+      .en-run strong { grid-column: 3; grid-row: 1; }
+      .en-run-view { grid-column: 3; grid-row: 2; }
+      .en-table { font-size: 13px; }
+      .en-table th, .en-table td { padding: 6px 5px; }
+      .en-table th:nth-child(5), .en-table td:nth-child(5) { display: none; }
       .event { gap: 10px; padding: 12px; }
       .ap-row { grid-template-columns: 1fr; }
       .page-head { align-items: flex-start; }
@@ -754,6 +810,8 @@
       preferences: { temp_unit: "celsius", language_code: "en", brightness: 80, device_name: "" },
       errors: { active: [], history: [] }, params: {}, events: [], eventTotal: 0,
       tempHistory: { loading: false, error: "", data: null, end: null },
+      histShowPower: localStorage.getItem("arcticHistPower") !== "0",
+      energy: { range: 30, to: null, today: null, since: null, data: null, loading: false, error: "", selected: null, runs: {} },
       homeHistory: { loading: false, error: "", data: null, loadedAt: 0 }, homeTrack: {}, homeHover: null,
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
@@ -882,10 +940,10 @@
       return `<button class="nav-link ${active ? "active" : ""}" data-route="${target}">
         <span class="nav-icon">${icon}</span><span>${label}</span></button>`;
     }
-    const historyRoutes = ["history", "events"];
+    const historyRoutes = ["history", "energy", "events"];
     function historySegs(active) {
       const seg = (route, label) => `<button class="hist-seg-btn ${active === route ? "active" : ""}" role="tab" aria-selected="${active === route}" data-route="${route}">${label}</button>`;
-      return `<div class="hist-seg" role="tablist" aria-label="History">${seg("history", "Cycles")}${seg("events", "Events")}</div>`;
+      return `<div class="hist-seg" role="tablist" aria-label="History">${seg("history", "Cycles")}${seg("energy", "Energy")}${seg("events", "Events")}</div>`;
     }
     function routeFromHash() {
       const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -1998,10 +2056,15 @@
       // Drawn at the wrap's real pixel width (histFitChart) so text keeps its
       // CSS size; a fixed 960-wide viewBox shrank labels to ~4 px on phones.
       const W = Math.max(280, Math.round(state.histChartW || 960)), narrow = W < 600;
-      const H = narrow ? 260 : Math.round(Math.min(384, Math.max(260, W * 0.4)));
+      const H0 = narrow ? 260 : Math.round(Math.min(384, Math.max(260, W * 0.4)));
       const L = narrow ? 42 : 58, R = narrow ? 10 : 16, T = 40, B = 34;
-      const plotL = L, plotR = W - R, plotT = T, plotB = H - B;
+      const plotL = L, plotR = W - R, plotT = T, plotB = H0 - B;
       const plotW = plotR - plotL, plotH = plotB - plotT;
+      // Optional power panel under the temperatures, on the same time axis.
+      const showPower = state.histShowPower && samples.some(s => s.p != null);
+      const powT = plotB + 30, powB = showPower ? powT + (narrow ? 84 : 104) : plotB;
+      const bottom = showPower ? powB : plotB, fullH = bottom - plotT;
+      const H = bottom + B;
       const start = data.start, end = data.end, span = Math.max(1, end - start);
       const mapX = t => plotL + (Math.min(Math.max(t, start), end) - start) / span * plotW;
 
@@ -2036,7 +2099,7 @@
         let j = i + 1;
         while (j < samples.length && samples[j].run && samples[j].mode === s.mode) j++;
         const x1 = mapX(s.t), x2 = mapX(samples[j - 1].t + interval);
-        svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${Math.max(1, x2 - x1).toFixed(1)}" height="${plotH}" fill="${bandColor[s.mode]}" opacity="0.13"/>`;
+        svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${Math.max(1, x2 - x1).toFixed(1)}" height="${fullH}" fill="${bandColor[s.mode]}" opacity="0.13"/>`;
         i = j;
       }
 
@@ -2046,7 +2109,7 @@
         const x1 = Math.max(plotL, mapX(df.start));
         const x2 = Math.min(plotR, Math.max(x1 + 3, mapX(df.end ?? end)));
         if (x2 <= x1) continue;
-        svg += `<rect class="hist-defrost" x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="var(--home-defrost)" opacity="0.4"/>`;
+        svg += `<rect class="hist-defrost" x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${fullH}" fill="var(--home-defrost)" opacity="0.4"/>`;
         svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="4" fill="var(--home-defrost-text)"/>`;
       }
 
@@ -2074,11 +2137,11 @@
       for (const f of faults) {
         const x1 = Math.max(plotL, mapX(f.start)), x2 = Math.min(plotR, mapX(f.end ?? end));
         if (x2 - x1 >= 8) {
-          svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="var(--cp-danger)" opacity="0.1"/>`;
-          svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${plotH}" fill="url(#hist-hatch)"/>`;
+          svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${fullH}" fill="var(--cp-danger)" opacity="0.1"/>`;
+          svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${fullH}" fill="url(#hist-hatch)"/>`;
         }
         const y1 = faultLabels.has(f) ? plotT - 26 : plotT;
-        svg += `<line class="hist-fault" x1="${x1.toFixed(1)}" y1="${y1}" x2="${x1.toFixed(1)}" y2="${plotB}" stroke="var(--cp-danger)" stroke-width="2" opacity="0.7"/>`;
+        svg += `<line class="hist-fault" x1="${x1.toFixed(1)}" y1="${y1}" x2="${x1.toFixed(1)}" y2="${bottom}" stroke="var(--cp-danger)" stroke-width="2" opacity="0.7"/>`;
       }
 
       svg += `</g>`;
@@ -2088,6 +2151,22 @@
         const y = plotB - (val - axis.lo) / (axis.hi - axis.lo) * plotH;
         svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
         svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${val / 10}°</text>`;
+      }
+      // Power panel gridlines: whole kW (or halves) in at most three steps.
+      let mapP = null;
+      if (showPower) {
+        const maxKw = Math.max(0.5, ...samples.map(s => (s.p || 0) / 1000));
+        let pAxis = null;
+        for (const step of [0.5, 1, 2, 5, 10]) {
+          pAxis = { hi: Math.ceil(maxKw / step) * step, step };
+          if (pAxis.hi / step <= 3) break;
+        }
+        mapP = w => powB - Math.min(w / 1000, pAxis.hi) / pAxis.hi * (powB - powT);
+        for (let v = 0; v <= pAxis.hi + 1e-9; v += pAxis.step) {
+          const y = mapP(v * 1000);
+          svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
+          svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${v ? `${+v.toFixed(1)} kW` : "0"}</text>`;
+        }
       }
       svg += `<g class="hist-pan">`;
 
@@ -2100,8 +2179,8 @@
       for (let ts = Math.floor(tick.getTime() / 1000); ts <= end; ts += 2 * 3600) {
         if (ts < start) continue;
         const x = mapX(ts);
-        svg += `<line x1="${x.toFixed(1)}" y1="${plotT}" x2="${x.toFixed(1)}" y2="${plotB}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
-        svg += `<text x="${x.toFixed(1)}" y="${plotB + 20}" text-anchor="middle" class="hist-axis">${fmtHistClock(ts, false)}</text>`;
+        svg += `<line x1="${x.toFixed(1)}" y1="${plotT}" x2="${x.toFixed(1)}" y2="${bottom}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
+        svg += `<text x="${x.toFixed(1)}" y="${bottom + 20}" text-anchor="middle" class="hist-axis">${fmtHistClock(ts, false)}</text>`;
       }
 
       // Series paths (setpoint is a step line, temps are interpolated).
@@ -2160,6 +2239,25 @@
       svg += line("out", "var(--hist-out)", false);
       svg += line("in", "var(--hist-in)", false);
 
+      // Power: each 30 s reading held until the next sample, as a filled step.
+      if (showPower) {
+        let area = "", edge = "", run = null;
+        const flush = () => {
+          if (!run) return;
+          area += `M${run[0][0].toFixed(1)} ${powB}` + run.map(([x1, x2, y]) => `V${y.toFixed(1)}H${x2.toFixed(1)}`).join("") + `V${powB}Z`;
+          edge += `M${run[0][0].toFixed(1)} ${run[0][2].toFixed(1)}` + run.map(([x1, x2, y]) => `V${y.toFixed(1)}H${x2.toFixed(1)}`).join("");
+          run = null;
+        };
+        samples.forEach((s, k) => {
+          if (s.p == null || (run && s.t - samples[k - 1].t > interval * 2.5)) flush();
+          if (s.p == null) return;
+          (run ||= []).push([mapX(s.t), mapX(s.t + interval), mapP(s.p)]);
+        });
+        flush();
+        svg += `<path class="hist-power-area" d="${area}" fill="var(--hist-power)" opacity="0.25"/>`;
+        svg += `<path d="${edge}" fill="none" stroke="var(--hist-power)" stroke-width="1.5" stroke-linejoin="round"/>`;
+      }
+
       for (const [f, lx] of faultLabels) {
         svg += `<text x="${lx.toFixed(1)}" y="${plotT - 12}" class="hist-fault-label">${esc(`⚠ ${f.fault_code || "?"}`)}</text>`;
       }
@@ -2168,9 +2266,10 @@
       // Hover crosshair: a vertical line plus a dot on each series, driven by
       // histHover() from the pointer position.
       svg += `<g class="hist-hover" style="display:none">
-        <line class="hist-hover-line" y1="${plotT}" y2="${plotB}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
-        <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/></g>`;
-      histGeom = { W, plotL, plotR, mapX, mapY, samples, series, faults: data.faults || [], start, end };
+        <line class="hist-hover-line" y1="${plotT}" y2="${bottom}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
+        <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/>${showPower ? `<circle data-key="p" r="4" fill="var(--hist-power)"/>` : ""}</g>`;
+      series.p = samples.map(s => s.p ?? null);
+      histGeom = { W, plotL, plotR, mapX, mapY, mapP, samples, series, faults: data.faults || [], start, end, showPower, interval };
 
       svg += `</svg>`;
       return svg;
@@ -2187,8 +2286,11 @@
     }
     let histResizeFrame = 0;
     window.addEventListener("resize", () => {
-      if (state.route !== "history" || histResizeFrame) return;
-      histResizeFrame = requestAnimationFrame(() => { histResizeFrame = 0; histFitChart(); });
+      if ((state.route !== "history" && state.route !== "energy") || histResizeFrame) return;
+      histResizeFrame = requestAnimationFrame(() => {
+        histResizeFrame = 0;
+        if (state.route === "history") histFitChart(); else energyFitChart();
+      });
     });
     // Show the window ending at `end` (unix s), kept within the stored range;
     // the newest window goes back to the live view.
@@ -2289,7 +2391,8 @@
       hover.querySelectorAll("circle").forEach(c => {
         const v = g.series[c.dataset.key][best];
         if (v === null || v === undefined) { c.style.display = "none"; return; }
-        c.style.display = ""; c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", g.mapY(v).toFixed(1));
+        const y = c.dataset.key === "p" ? g.mapP(v) : g.mapY(v);
+        c.style.display = ""; c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1));
       });
       const fmt = v => (v === null || v === undefined) ? "--" : temp(v / 10);
       const tip = wrap.querySelector(".hist-tip");
@@ -2297,12 +2400,19 @@
         <div><i style="background:var(--hist-out)"></i>Outlet <strong>${fmt(s.out)}</strong></div>
         <div><i style="background:var(--hist-in)"></i>Inlet <strong>${fmt(s.in)}</strong></div>
         <div><i style="background:var(--hist-set)"></i>Setpoint <strong>${fmt(s.set)}</strong></div>` +
+        (g.showPower && s.p != null ? `<div><i style="background:var(--hist-power)"></i>Power <strong>${fmtPower(s.p)}</strong></div>` : "") +
         g.faults.filter(f => f.start <= s.t && s.t <= (f.end ?? g.end))
           .map(f => `<div class="hist-tip-fault">⚠ ${esc(f.fault_code || "?")} ${esc(f.fault_label || "")}</div>`).join("");
       tip.style.display = "block";
       const px = x / g.W * rect.width;
       const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
       tip.style.left = `${Math.max(0, left)}px`;
+    }
+    function histWindowEnergy(data) {
+      const samples = data.samples || [], interval = data.sample_interval_sec || 30;
+      if (!state.histShowPower || !samples.some(s => s.p != null)) return "";
+      const wh = samples.reduce((sum, s) => sum + (s.p || 0) * interval / 3600, 0);
+      return `<p class="hist-muted hist-energy"><strong>${fmtKwh(wh)}</strong> of electricity used in this window</p>`;
     }
     function historyPage() {
       const th = state.tempHistory, data = th.data;
@@ -2330,9 +2440,11 @@
               <span><i class="band" style="background:var(--hist-dhw)"></i>Hot Water</span>
               <span><i class="band" style="background:var(--home-defrost)"></i>Defrost</span>
               <span><i style="background:var(--cp-danger);width:3px;height:14px"></i>Fault</span>
+              <button class="hist-toggle ${state.histShowPower ? "on" : ""}" data-action="history-power" aria-pressed="${state.histShowPower}"><span class="box" aria-hidden="true">${state.histShowPower ? "✓" : ""}</span>Power</button>
             </div>
           </div>
           <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>
+          ${histWindowEnergy(data)}
           <div class="hist-nav">
             <div class="hist-nav-group">
               <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ 8 h</button>
@@ -2352,6 +2464,382 @@
         ${body}
       </div>`;
     }
+
+    // ---- Energy: electricity used each day by mode, with an estimated COP ----
+    const ENERGY_RANGES = [[14, "14 d"], [30, "30 d"], [90, "90 d"], [365, "1 y"]];
+    const ENERGY_MODES = [["heating", "Heating", "var(--hist-heat)"], ["cooling", "Cooling", "var(--hist-cool)"],
+      ["hot_water", "Hot water", "var(--hist-dhw)"]];
+    const ENERGY_RUN_MODE = { 1: "heating", 2: "cooling", 3: "hot_water" };
+    // With less metered running than this a day's COP is mostly start-up noise.
+    const ENERGY_COP_MIN_WH = 200;
+    const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    // Energy days are the controller's local calendar dates ("YYYY-MM-DD");
+    // the arithmetic runs in UTC so DST never shifts a day.
+    const dayAdd = (date, n) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+    const dayDiff = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
+    function localToday() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    }
+    function fmtDay(date, long = false) {
+      const d = new Date(`${date}T00:00:00Z`);
+      const md = `${MONTH_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}`;
+      return long ? `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()]}, ${md}` : md;
+    }
+    function fmtKwh(wh) {
+      if (wh == null) return "--";
+      const k = wh / 1000;
+      return `${k >= 100 ? Math.round(k).toLocaleString("en-US") : k.toFixed(1)} kWh`;
+    }
+    // Local midnight (unix s) that starts an energy day.
+    function energyMidnight(day) {
+      return Date.parse(`${day.date}T00:00:00Z`) / 1000 - (day.utc_offset_min || 0) * 60;
+    }
+    function energyCop(heatWh, coveredWh) { return coveredWh >= ENERGY_COP_MIN_WH ? heatWh / coveredWh : null; }
+    function energySums(days) {
+      let total = 0, heat = 0, covered = 0, other = 0;
+      for (const d of days) {
+        const e = d.electrical_wh || {}, th = d.thermal_wh || {}, cov = d.covered_electrical_wh || {};
+        total += e.total || 0;
+        other += (e.standby || 0) + (e.unattributed || 0);
+        for (const [m] of ENERGY_MODES) { heat += th[m] || 0; covered += cov[m] || 0; }
+      }
+      return { total, heat, covered, other, cop: energyCop(heat, covered) };
+    }
+    async function loadEnergy() {
+      const en = state.energy;
+      en.loading = true; en.error = "";
+      try {
+        // The live view asks from a date and lets the controller fill in its
+        // own today, so a browser in another time zone can't skip a day.
+        const q = en.to ? `from=${dayAdd(en.to, 1 - en.range)}&to=${en.to}` : `from=${dayAdd(localToday(), 1 - en.range)}`;
+        const [data, totals] = await Promise.all([api(`/api/energy/daily?${q}`),
+          en.since ? null : api("/api/energy/totals").catch(() => null)]);
+        if (totals) en.since = totals.since;
+        en.data = data; en.loadedAt = Date.now();
+        if (!en.to) en.today = data.to;
+      } catch (error) {
+        en.error = error.message || "Failed to load energy";
+      } finally {
+        en.loading = false;
+      }
+    }
+    async function refreshEnergyLive() {
+      const en = state.energy;
+      if (en.to || en.loading || Date.now() - (en.loadedAt || 0) < 120000) return;
+      await loadEnergy();
+      if (state.route === "energy" && !state.energy.to) render();
+    }
+    async function energyGoto(to) {
+      const en = state.energy;
+      en.to = en.today && to >= en.today ? null : to;
+      await loadEnergy(); render();
+    }
+    // Compressor runs for one day, rebuilt from the 30 s cycle history (kept
+    // about 14 days): three 8 h pages cover the day.
+    async function loadEnergyRuns(date) {
+      const en = state.energy, day = en.data?.days?.find(d => d.date === date);
+      if (!day || en.runs[date]?.loading) return;
+      const entry = en.runs[date] = { loading: true, error: "", runs: [], samples: 0, loadedAt: Date.now() };
+      try {
+        const midnight = energyMidnight(day), next = midnight + 86400;
+        const pages = await Promise.all([8, 16, 24].map(h => api(`/api/heatpump/temperature-history?end=${midnight + h * 3600}`)));
+        const byTime = new Map();
+        let interval = 30;
+        for (const page of pages) {
+          interval = page.sample_interval_sec || interval;
+          for (const s of page.samples || []) if (s.t >= midnight && s.t < next) byTime.set(s.t, s);
+        }
+        const samples = [...byTime.values()].sort((a, b) => a.t - b.t);
+        entry.samples = samples.length;
+        let cur = null;
+        const close = () => {
+          if (!cur) return;
+          const mode = Object.entries(cur.modes).sort((a, b) => b[1] - a[1])[0]?.[0];
+          entry.runs.push({ start: cur.start, end: cur.last + interval, wh: cur.metered ? cur.wh : null, mode: ENERGY_RUN_MODE[mode] });
+          cur = null;
+        };
+        for (const s of samples) {
+          if (!s.run) { close(); continue; }
+          if (cur && s.t - cur.last > interval * 2.5) close();
+          if (!cur) cur = { start: s.t, last: s.t, wh: 0, metered: false, modes: {} };
+          cur.last = s.t;
+          if (s.p != null) { cur.wh += s.p * interval / 3600; cur.metered = true; }
+          cur.modes[s.mode] = (cur.modes[s.mode] || 0) + 1;
+        }
+        close();
+      } catch (error) {
+        entry.error = error.message || "Failed to load runs";
+      } finally {
+        entry.loading = false;
+      }
+    }
+    // kWh gridlines: the smallest of 0.5, 1, 2, 5, 10 ... that covers the
+    // tallest day in at most five intervals.
+    function energyNiceAxis(maxKwh) {
+      let axis = null;
+      for (const step of [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]) {
+        axis = { hi: Math.max(step, Math.ceil(maxKwh / step) * step), step };
+        if (axis.hi / step <= 5) break;
+      }
+      return axis;
+    }
+    let enGeom = null;
+    function energyChartSvg(data) {
+      const en = state.energy;
+      const W = Math.max(280, Math.round(en.chartW || 960)), narrow = W < 600;
+      const L = narrow ? 40 : 52, R = narrow ? 8 : 16, T = 24, B = 26;
+      const barH = narrow ? 180 : 230, gap = 26, copH = narrow ? 56 : 64;
+      const plotL = L, plotR = W - R, plotW = plotR - plotL;
+      const barT = T, barB = barT + barH, copT = barB + gap, copB = copT + copH, H = copB + B;
+      const byDate = new Map((data.days || []).map(d => [d.date, d]));
+      const n = Math.max(1, dayDiff(data.from, data.to) + 1);
+      const slots = Array.from({ length: n }, (_, i) => {
+        const date = dayAdd(data.from, i), day = byDate.get(date) || null;
+        return { date, day, sums: day ? energySums([day]) : null };
+      });
+      const slotW = plotW / n;
+      const barW = Math.max(1, Math.min(32, slotW * (n > 60 ? 0.78 : 0.62)));
+      const cx = i => plotL + (i + 0.5) * slotW;
+      const axis = energyNiceAxis(Math.max(0, ...slots.map(s => (s.sums?.total || 0) / 1000)));
+      const mapY = kwh => barB - kwh / axis.hi * barH;
+
+      let svg = `<svg class="en-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Daily energy chart">`;
+      svg += `<text x="${plotL - 8}" y="${barT - 10}" text-anchor="end" class="hist-axis">kWh</text>`;
+      for (let v = 0; v <= axis.hi + 1e-9; v += axis.step) {
+        const y = mapY(v);
+        svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
+        svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${+v.toFixed(1)}</text>`;
+      }
+      const selected = slots.findIndex(s => s.date === en.selected);
+      if (selected >= 0) svg += `<rect class="en-selected" x="${(plotL + selected * slotW).toFixed(1)}" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="var(--cp-accent)" opacity="0.14" rx="3"/>`;
+      svg += `<rect class="en-hover" x="0" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="var(--cp-text-muted)" opacity="0.1" rx="3" pointer-events="none" style="display:none"/>`;
+
+      // Bars stacked by mode, with standby and unattributed energy on top.
+      slots.forEach((s, i) => {
+        if (!s.day) return;
+        const e = s.day.electrical_wh || {};
+        const parts = [...ENERGY_MODES.map(([m, , color]) => [e[m] || 0, color]), [s.sums.other, "var(--energy-other)"]];
+        let acc = 0;
+        const x = (cx(i) - barW / 2).toFixed(1);
+        for (const [wh, color] of parts) {
+          if (wh <= 0) continue;
+          const y1 = mapY((acc + wh) / 1000), y0 = mapY(acc / 1000);
+          svg += `<rect class="en-bar" x="${x}" y="${y1.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, y0 - y1).toFixed(1)}" fill="${color}"/>`;
+          acc += wh;
+        }
+        if (s.day.final === false && acc > 0) {
+          svg += `<rect x="${x}" y="${mapY(acc / 1000).toFixed(1)}" width="${barW.toFixed(1)}" height="${(barB - mapY(acc / 1000)).toFixed(1)}" fill="none" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="3 2"/>`;
+        }
+      });
+
+      // Estimated COP strip under the bars, on its own axis.
+      const cops = slots.map(s => s.sums?.cop ?? null);
+      const known = cops.filter(c => c !== null);
+      svg += `<text x="${plotL - 8}" y="${(copT + copH / 2 + 4).toFixed(1)}" text-anchor="end" class="hist-axis">COP</text>`;
+      if (known.length) {
+        let lo = Math.floor(Math.min(...known)), hi = Math.ceil(Math.max(...known));
+        if (hi - lo < 1) hi = lo + 1;
+        const mapC = c => copB - (c - lo) / (hi - lo) * copH;
+        const step = hi - lo <= 4 ? 1 : Math.ceil((hi - lo) / 4);
+        for (let v = lo; v <= hi; v += step) {
+          const y = mapC(v);
+          svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.5"/>`;
+          // Only the ends are labelled; the middle of the axis carries the title.
+          if (v === lo || v + step > hi) svg += `<text x="${plotL - 8}" y="${(y + (v === lo ? 0 : 8)).toFixed(1)}" text-anchor="end" class="hist-axis">${v}</text>`;
+        }
+        let d = "", pen = false;
+        cops.forEach((c, i) => {
+          if (c === null) { pen = false; return; }
+          d += `${pen ? "L" : "M"}${cx(i).toFixed(1)} ${mapC(c).toFixed(1)}`; pen = true;
+        });
+        svg += `<path d="${d}" fill="none" stroke="var(--hist-set)" stroke-width="1.5" opacity="0.55"/>`;
+        const r = n > 90 ? 2 : 3;
+        cops.forEach((c, i) => {
+          if (c !== null) svg += `<circle class="en-cop" cx="${cx(i).toFixed(1)}" cy="${mapC(c).toFixed(1)}" r="${r}" fill="var(--hist-set)"/>`;
+        });
+      } else {
+        svg += `<line x1="${plotL}" y1="${copB}" x2="${plotR}" y2="${copB}" stroke="var(--cp-border)" stroke-width="1" opacity="0.5"/>`;
+        svg += `<text x="${(plotL + plotR) / 2}" y="${(copT + copB) / 2 + 4}" text-anchor="middle" class="hist-axis">No COP estimate in this range</text>`;
+      }
+
+      // Date labels, spaced out and anchored on the newest day; the year view
+      // labels month starts instead.
+      const minGap = narrow ? 52 : 64;
+      // A label near the right edge is end-anchored so it isn't clipped.
+      const dateLabel = (i, text) => {
+        const edge = cx(i) + 24 > W;
+        return `<text x="${(edge ? W - 2 : cx(i)).toFixed(1)}" y="${copB + 18}" text-anchor="${edge ? "end" : "middle"}" class="hist-axis">${text}</text>`;
+      };
+      if (n > 90) {
+        let lastX = -Infinity;
+        slots.forEach((s, i) => {
+          if (!s.date.endsWith("-01") || cx(i) - lastX < minGap * 0.7) return;
+          lastX = cx(i);
+          svg += dateLabel(i, MONTH_SHORT[+s.date.slice(5, 7) - 1]);
+        });
+      } else {
+        const every = Math.max(1, Math.ceil(minGap / slotW));
+        for (let i = n - 1; i >= 0; i -= every) svg += dateLabel(i, fmtDay(slots[i].date));
+      }
+
+      // One full-height target per day with data, so a tap anywhere in the
+      // column (not just on a thin bar) opens that day.
+      slots.forEach((s, i) => {
+        if (s.day) svg += `<rect class="en-hit" data-action="energy-day" data-date="${s.date}" x="${(plotL + i * slotW).toFixed(1)}" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="transparent"/>`;
+      });
+      enGeom = { W, plotL, plotR, slotW, slots };
+      svg += `</svg>`;
+      return svg;
+    }
+    function energyFitChart() {
+      const wrap = $(".en-chart-wrap"), old = wrap?.querySelector(".en-chart"), data = state.energy.data;
+      if (!old || !data) return;
+      const w = Math.round(wrap.clientWidth);
+      if (!w || (enGeom && enGeom.W === Math.max(280, w))) return;
+      state.energy.chartW = w;
+      old.outerHTML = energyChartSvg(data);
+    }
+    function energyTipHtml(day) {
+      const s = energySums([day]), e = day.electrical_wh || {};
+      const row = (color, label, value) => `<div><i class="band" style="background:${color}"></i>${label} <strong>${value}</strong></div>`;
+      return `<div class="hist-tip-time">${esc(fmtDay(day.date, true))}${day.final === false ? " · so far" : ""}</div>
+        <div>Total <strong>${fmtKwh(s.total)}</strong></div>` +
+        ENERGY_MODES.filter(([m]) => e[m] > 0).map(([m, label, color]) => row(color, label, fmtKwh(e[m]))).join("") +
+        (s.other > 0 ? row("var(--energy-other)", "Standby / other", fmtKwh(s.other)) : "") +
+        (s.cop !== null ? `<div>Est. COP <strong>${s.cop.toFixed(1)}</strong></div>` : "") +
+        (day.outdoor_c ? `<div>Outdoor avg <strong>${temp(day.outdoor_c.avg)}</strong></div>` : "");
+    }
+    function energyHover(event) {
+      const svg = event.target.closest?.(".en-chart"), wrap = svg?.closest(".en-chart-wrap");
+      const hide = () => document.querySelectorAll(".en-chart-wrap .hist-tip, .en-hover").forEach(el => { el.style.display = "none"; });
+      if (!svg || !wrap || !enGeom) { hide(); return; }
+      const g = enGeom, rect = svg.getBoundingClientRect();
+      const vx = (event.clientX - rect.left) / rect.width * g.W;
+      const i = Math.floor((vx - g.plotL) / g.slotW);
+      const slot = vx >= g.plotL && vx <= g.plotR ? g.slots[i] : null;
+      if (!slot?.day) { hide(); return; }
+      const hover = svg.querySelector(".en-hover");
+      hover.setAttribute("x", (g.plotL + i * g.slotW).toFixed(1));
+      hover.style.display = "";
+      const tip = wrap.querySelector(".hist-tip");
+      tip.innerHTML = energyTipHtml(slot.day);
+      tip.style.display = "block";
+      const px = (g.plotL + (i + 0.5) * g.slotW) / g.W * rect.width;
+      const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
+      tip.style.left = `${Math.max(0, left)}px`;
+    }
+    function energyStat(label, value, sub = "") {
+      return `<div class="en-stat"><span>${esc(label)}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</div>`;
+    }
+    function energyDetail(day) {
+      const en = state.energy, s = energySums([day]);
+      const e = day.electrical_wh || {}, th = day.thermal_wh || {}, cov = day.covered_electrical_wh || {}, run = day.run_seconds || {};
+      const midnight = energyMidnight(day);
+      const viewEnd = t => Math.round(t / HIST_SNAP) * HIST_SNAP;
+      const out = day.outdoor_c;
+      const rows = ENERGY_MODES.filter(([m]) => (e[m] || 0) > 0 || (run[m] || 0) > 0).map(([m, label, color]) => {
+        const cop = energyCop(th[m] || 0, cov[m] || 0);
+        return `<tr><td><i class="en-swatch" style="background:${color}"></i>${label}</td><td>${fmtKwh(e[m] || 0)}</td>
+          <td>${th[m] ? fmtKwh(th[m]) : "--"}</td><td>${cop !== null ? cop.toFixed(1) : "--"}</td><td>${run[m] ? fmtDuration(run[m]) : "--"}</td></tr>`;
+      }).join("");
+      const other = s.other > 0 ? `<tr><td><i class="en-swatch" style="background:var(--energy-other)"></i>Standby / other</td><td>${fmtKwh(s.other)}</td><td>--</td><td>--</td><td>--</td></tr>` : "";
+      const df = day.defrost || {};
+      const facts = [`${day.starts || 0} start${day.starts === 1 ? "" : "s"}`];
+      if (df.count) {
+        const taken = df.thermal_wh < 0 ? ` · ${fmtKwh(-df.thermal_wh)} heat taken back` : "";
+        facts.push(`${df.count} defrost${df.count === 1 ? "" : "s"} (${fmtDuration(df.seconds || 0)}${taken})`);
+      }
+      const st = day.settings;
+      const notes = [];
+      if (st) notes.push(`Heat is estimated from a flow of ${st.flow_lpm} L/min with ${st.glycol_pct}% glycol${st.mixed ? " (changed during the day)" : ""}.`);
+      notes.push("COP covers metered running with a valid heat estimate and leaves out defrost.");
+      if ((e.unattributed || 0) > 0) notes.push("Other includes energy recorded before it was split by mode.");
+
+      const r = en.runs[day.date];
+      let runs;
+      if (!r || r.loading) runs = `<div class="en-runs-loading"><div class="spinner"></div></div>`;
+      else if (r.error) runs = `<p class="hist-muted en-runs-msg">${esc(r.error)}</p>`;
+      else if (!r.samples) runs = `<p class="hist-muted en-runs-msg">Run detail is kept for about 14 days, so it isn't available for this day.</p>`;
+      else if (!r.runs.length) runs = `<p class="hist-muted en-runs-msg">No compressor runs${day.final === false ? " yet today" : " this day"}.</p>`;
+      else runs = `<div class="en-runs">${r.runs.map(run => {
+        const mode = ENERGY_MODES.find(([m]) => m === run.mode);
+        return `<div class="en-run"><i class="en-swatch" style="background:${mode ? mode[2] : "var(--energy-other)"}"></i>
+          <span class="en-run-time">${esc(fmtHistClock(run.start))} – ${esc(fmtHistClock(run.end))}</span>
+          <span class="en-run-meta">${fmtDuration(run.end - run.start)}${mode ? ` · ${mode[1]}` : ""}</span>
+          <strong>${run.wh == null ? "--" : fmtKwh(run.wh)}</strong>
+          <button class="btn en-run-view" data-action="energy-view" data-t="${viewEnd((run.start + run.end) / 2 + 4 * 3600)}">View ›</button></div>`;
+      }).join("")}</div>`;
+
+      return `<section class="card en-detail" data-energy-day="${day.date}">
+        <div class="card-head"><h2>${esc(fmtDay(day.date, true))}${day.final === false ? ` <span class="badge">so far</span>` : ""}</h2>
+          <div class="btn-row"><button class="btn" data-action="energy-view" data-t="${midnight + 8 * 3600}">View from midnight ›</button>
+          <button class="icon-btn" data-action="energy-close" aria-label="Close day" title="Close">×</button></div></div>
+        <div class="en-stats">
+          ${energyStat("Electricity", fmtKwh(s.total))}
+          ${energyStat("Heat (est.)", s.heat ? fmtKwh(s.heat) : "--")}
+          ${energyStat("Est. COP", s.cop !== null ? s.cop.toFixed(1) : "--")}
+          ${energyStat("Outdoor", out ? temp(out.avg) : "--", out ? `${temp(out.min)} – ${temp(out.max)}` : "")}
+        </div>
+        <div class="en-table-wrap"><table class="en-table"><thead><tr><th>Mode</th><th>Electricity</th><th>Heat (est.)</th><th>COP</th><th>Run time</th></tr></thead>
+          <tbody>${rows}${other || ""}${rows || other ? "" : `<tr><td colspan="5" class="hist-muted">No energy recorded.</td></tr>`}</tbody></table></div>
+        <p class="en-facts">${facts.join(" · ")}</p>
+        <p class="hist-muted en-note">${notes.join(" ")}</p>
+        <h3>Compressor runs</h3>
+        ${runs}
+      </section>`;
+    }
+    function energyPage() {
+      const en = state.energy, data = en.data;
+      let body;
+      if (en.loading && !data) {
+        body = `<section class="card"><div class="login" style="min-height:320px"><div class="spinner"></div></div></section>`;
+      } else if (en.error && !data) {
+        body = `<section class="card"><p class="hist-muted">${esc(en.error)}</p></section>`;
+      } else if (!data) {
+        body = `<section class="card"><p class="hist-muted">No energy recorded yet.</p></section>`;
+      } else {
+        const days = data.days || [];
+        const sums = energySums(days);
+        const outs = days.filter(d => d.outdoor_c).map(d => d.outdoor_c.avg);
+        const atLatest = !en.to;
+        const atOldest = !!en.since && data.from <= en.since;
+        const fromYear = data.from.slice(0, 4) !== data.to.slice(0, 4) ? `, ${data.from.slice(0, 4)}` : "";
+        const rangeLabel = (ENERGY_RANGES.find(([v]) => v === en.range) || [, `${en.range} d`])[1];
+        const day = en.selected && days.find(d => d.date === en.selected);
+        body = `<section class="card">
+          <div class="hist-toolbar">
+            <div class="hist-range-row"><span class="hist-range en-range-text">${esc(fmtDay(data.from))}${fromYear} — ${esc(fmtDay(data.to))}</span>
+              <button class="btn primary hist-latest" data-action="energy-latest" ${atLatest ? "hidden disabled" : ""}>Latest<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.6 7.4 10.2 12l-4.6 4.6L7 18l6-6-6-6-1.4 1.4ZM16 6h2v12h-2V6Z"/></svg></button></div>
+            <div class="en-ranges" role="group" aria-label="Range">${ENERGY_RANGES.map(([v, label]) =>
+              `<button class="${en.range === v ? "active" : ""}" data-action="energy-range" data-range="${v}" aria-pressed="${en.range === v}">${label}</button>`).join("")}</div>
+          </div>
+          <div class="en-stats">
+            ${energyStat("Electricity", fmtKwh(sums.total))}
+            ${energyStat("Heat (est.)", sums.heat ? fmtKwh(sums.heat) : "--")}
+            ${energyStat("Est. COP", sums.cop !== null ? sums.cop.toFixed(1) : "--")}
+            ${energyStat("Avg outdoor", outs.length ? temp(outs.reduce((a, b) => a + b, 0) / outs.length) : "--")}
+          </div>
+          <div class="hist-legend en-legend">
+            ${ENERGY_MODES.map(([, label, color]) => `<span><i class="band" style="background:${color}"></i>${label}</span>`).join("")}
+            <span><i class="band" style="background:var(--energy-other)"></i>Standby / other</span>
+            <span><i class="dot" style="background:var(--hist-set)"></i>COP (est.)</span>
+          </div>
+          <div class="en-chart-wrap">${energyChartSvg(data)}<div class="hist-tip"></div></div>
+          <div class="hist-nav">
+            <button class="btn" data-action="energy-prev" ${atOldest ? "disabled" : ""}>‹ ${rangeLabel}</button>
+            <button class="btn" data-action="energy-next" ${atLatest ? "disabled" : ""}>${rangeLabel} ›</button>
+          </div>
+          <p class="hist-muted hist-hint">Select a day for its breakdown and compressor runs.</p>
+        </section>
+        ${day ? energyDetail(day) : ""}`;
+      }
+      return `<div class="page">
+        <div class="page-head"><div><h1>History</h1><p>Electricity used each day by operating mode, with an estimated COP.</p></div><div class="page-actions"><button class="icon-btn" data-action="energy-refresh" aria-label="Refresh energy history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div></div>
+        ${historySegs("energy")}
+        ${body}
+      </div>`;
+    }
     function render() {
       if (!state.auth.checked) {
         $("#app").innerHTML = `<div class="login"><div class="spinner"></div></div>`;
@@ -2364,11 +2852,12 @@
         $("#app").innerHTML = credentialChangePage(); return;
       }
       const pages = { home: homePage, status: statusPage, control: controlPage, events: eventsPage,
-        history: historyPage, errors: errorsPage, settings: settingsPage };
+        history: historyPage, energy: energyPage, errors: errorsPage, settings: settingsPage };
       updateDocumentTitle();
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
       if (state.route === "home") homeChartLayout();
       if (state.route === "history") histFitChart();
+      if (state.route === "energy") energyFitChart();
       perfSyncSaves();
       if (state.settingsPage === "diagnostics") {
         const logs = $("#log-container"); if (logs) logs.scrollTop = logs.scrollHeight;
@@ -2659,12 +3148,14 @@
       state.route = route;
       if (settingsPage) state.settingsPage = settingsPage;
       if (route === "history" && !state.tempHistory.data) state.tempHistory.loading = true;
+      if (route === "energy" && !state.energy.data) state.energy.loading = true;
       const targetHash = route === "settings" ? `#/settings/${state.settingsPage}` : `#/${route}`;
       if (location.hash !== targetHash) history.pushState(null, "", targetHash);
       render();
       try {
         if (route === "control" && !Object.keys(state.params).length) await loadParams();
         if (route === "history") await loadHistory();
+        if (route === "energy") await loadEnergy();
         if (route === "home" && homeHistoryStale()) await loadHomeHistory();
         if (route === "events" && !state.events.length) await loadEvents(true);
         if (route === "settings") {
@@ -3049,6 +3540,31 @@
       if (action === "history-next") { const d = state.tempHistory.data; if (d) await histGoto(d.end + d.window_seconds); }
       if (action === "history-back-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end - 3600); }
       if (action === "history-forward-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end + 3600); }
+      if (action === "history-power") {
+        state.histShowPower = !state.histShowPower;
+        localStorage.setItem("arcticHistPower", state.histShowPower ? "1" : "0");
+        render();
+      }
+      if (action === "energy-refresh") { state.energy.runs = {}; await loadEnergy(); render(); if (state.energy.selected) { await loadEnergyRuns(state.energy.selected); render(); } }
+      if (action === "energy-latest") await energyGoto(null);
+      if (action === "energy-range") { state.energy.range = Number(el.dataset.range); await loadEnergy(); render(); }
+      if (action === "energy-prev") { const d = state.energy.data; if (d) await energyGoto(dayAdd(d.from, -1)); }
+      if (action === "energy-next") { const d = state.energy.data; if (d) await energyGoto(dayAdd(d.to, state.energy.range)); }
+      if (action === "energy-close") { state.energy.selected = null; render(); }
+      if (action === "energy-day") {
+        const en = state.energy, date = el.dataset.date;
+        en.selected = en.selected === date ? null : date;
+        render();
+        if (!en.selected) return;
+        $(".en-detail")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        // Today's runs keep growing; older days are fixed once loaded.
+        const cached = en.runs[date], today = en.data?.days?.find(d => d.date === date)?.final === false;
+        if (!cached || cached.error || (today && Date.now() - cached.loadedAt > 60000)) {
+          await loadEnergyRuns(date);
+          if (state.route === "energy" && en.selected === date) render();
+        }
+      }
+      if (action === "energy-view") { state.tempHistory.end = Number(el.dataset.t); await navigate("history"); }
       if (action === "load-more-events") { await loadEvents(false); render(); }
       if (action === "clear-events" && await askConfirm({ title: "Clear all events?", message: "This permanently removes the operational event log.", confirmLabel: "Clear events", danger: true })) {
         await mutate("/api/events", { method: "DELETE" }, "Events cleared"); await loadEvents(true); render();
@@ -3392,6 +3908,7 @@
       }));
     document.addEventListener("pointermove", histHover);
     document.addEventListener("pointerleave", histHover);
+    document.addEventListener("pointermove", energyHover);
     document.addEventListener("dblclick", histDoubleClick);
     document.addEventListener("pointerdown", histDragStart);
     document.addEventListener("pointermove", histDragMove);
@@ -3530,6 +4047,7 @@
             if (state.route === "home") await loadHomeHistory();
             if (state.route === "control") await loadParams();
             if (state.route === "history") await loadHistory();
+            if (state.route === "energy") await loadEnergy();
             if (state.route === "events") await loadEvents(true);
             if (state.route === "settings") await ensureSettings();
           }
@@ -3554,6 +4072,7 @@
       state.pollTimer = setInterval(async () => {
         if (!state.auth.loggedIn || state.auth.changeRequired) return;
         if (state.route === "history") refreshHistoryLive().catch(() => {});
+        if (state.route === "energy") refreshEnergyLive().catch(() => {});
         // On a slow link a poll can outlast the interval; skip rather than
         // stack another batch in the request queue.
         if (state.polling) return;
