@@ -728,7 +728,11 @@ static const char* get_screen_name(void)
         case NAV_TAB_STATUS:  return "status";
         case NAV_TAB_CONTROL: return "control";
         case NAV_TAB_HISTORY:
-            return history_tab_segment() == HISTORY_SEG_EVENTS ? "event_log" : "history";
+            switch (history_tab_segment()) {
+                case HISTORY_SEG_EVENTS: return "event_log";
+                case HISTORY_SEG_ENERGY: return "energy";
+                default:                 return "history";
+            }
         default:              return "main";
     }
 }

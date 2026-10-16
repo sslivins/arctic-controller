@@ -13,6 +13,7 @@ extern "C" {
 
 typedef enum {
     HISTORY_SEG_CYCLES = 0,
+    HISTORY_SEG_ENERGY,
     HISTORY_SEG_EVENTS,
     HISTORY_SEG_COUNT,
 } history_seg_t;
