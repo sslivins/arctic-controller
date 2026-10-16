@@ -6598,42 +6598,23 @@ static esp_err_t energy_totals_get_handler(httpd_req_t* req)
         send_json_error(req, "401 Unauthorized", "API key required");
         return ESP_OK;
     }
-    energy::Lifetime life = {};
-    bool have_life = arctic::getEnergyLifetime(&life);
-    const bool have_id = have_life;
-    energy::DayRecord pending = {};
-    if (arctic::getEnergyPendingDay(&pending) && (!have_life || pending.date > life.through_date)) {
-        energy::fold(&life, pending);
-        have_life = true;
-    }
-    energy::DayRecord today = {};
-    const bool have_today = arctic::getEnergyToday(&today);
-    // A day already folded into the lifetime totals isn't added twice.
-    const bool add_today = have_today && (!have_life || today.date > life.through_date);
-
-    uint32_t elec = have_life ? life.elec_wh : 0;
-    uint32_t thermal[energy::kModes] = {}, covered[energy::kModes] = {};
-    for (int m = 0; m < energy::kModes; m++) {
-        thermal[m] = (have_life ? life.thermal_wh[m] : 0) + (add_today ? today.thermal_wh[m] : 0);
-        covered[m] =
-            (have_life ? life.covered_elec_wh[m] : 0) + (add_today ? today.covered_elec_wh[m] : 0);
-    }
-    if (add_today) elec += energy::total_elec_wh(today);
+    arctic::EnergyTotals t = {};
+    arctic::getEnergyTotals(&t);
 
     cJSON* root = cJSON_CreateObject();
-    if (have_id) {
+    if (t.have_reset_id) {
         char id[9];
-        snprintf(id, sizeof(id), "%08lx", (unsigned long)life.reset_id);
+        snprintf(id, sizeof(id), "%08lx", (unsigned long)t.reset_id);
         cJSON_AddStringToObject(root, "reset_id", id);
     } else {
         cJSON_AddNullToObject(root, "reset_id");
     }
-    add_energy_date(root, "since", have_life ? life.since_date : (have_today ? today.date : 0));
-    add_energy_date(root, "through", have_life ? life.through_date : 0);
-    cJSON_AddBoolToObject(root, "includes_today", add_today);
-    cJSON_AddNumberToObject(root, "electrical_wh", elec);
-    cJSON_AddItemToObject(root, "thermal_wh", energy_modes_json(thermal));
-    cJSON_AddItemToObject(root, "covered_electrical_wh", energy_modes_json(covered));
+    add_energy_date(root, "since", t.since_date);
+    add_energy_date(root, "through", t.through_date);
+    cJSON_AddBoolToObject(root, "includes_today", t.includes_today);
+    cJSON_AddNumberToObject(root, "electrical_wh", t.elec_wh);
+    cJSON_AddItemToObject(root, "thermal_wh", energy_modes_json(t.thermal_wh));
+    cJSON_AddItemToObject(root, "covered_electrical_wh", energy_modes_json(t.covered_elec_wh));
     set_json_content_type(req);
     char* js = cJSON_PrintUnformatted(root);
     httpd_resp_sendstr(req, js ? js : "{}");

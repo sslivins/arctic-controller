@@ -217,6 +217,21 @@ bool getEnergyLifetime(energy::Lifetime* out);
 // Readers add it so totals don't dip while it waits.
 bool getEnergyPendingDay(energy::DayRecord* out);
 
+// Running totals since install or factory reset: closed days, the day
+// waiting to be saved and today so far, read together so they never dip.
+struct EnergyTotals {
+    bool     have_reset_id;  // false until the first day is in flash
+    uint32_t reset_id;
+    uint32_t since_date;     // YYYYMMDD, 0 when nothing recorded yet
+    uint32_t through_date;   // last closed day counted, 0 if none
+    bool     includes_today;
+    uint32_t elec_wh;
+    uint32_t thermal_wh[energy::kModes];
+    uint32_t covered_elec_wh[energy::kModes];
+};
+// False until the ledger has loaded.
+bool getEnergyTotals(EnergyTotals* out);
+
 // Time-weighted average power since the previous call, for the telemetry
 // recorder. False when there was no valid power reading.
 bool takeAveragePower(uint16_t* watts);

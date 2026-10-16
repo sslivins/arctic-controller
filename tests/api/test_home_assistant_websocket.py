@@ -134,6 +134,35 @@ async def test_websocket_starts_with_hello_and_coherent_snapshot():
 
 
 @pytest.mark.asyncio
+async def test_snapshot_energy_totals_match_rest_totals():
+    api_key = os.environ.get("ARCTIC_API_KEY")
+    if not api_key:
+        pytest.skip("ARCTIC_API_KEY not set")
+    token = _test_token()
+    async with aiohttp.ClientSession() as session:
+        websocket = await _connect(session, token)
+        try:
+            _, snapshot = await _initial_messages(websocket)
+        finally:
+            await websocket.close()
+    totals = requests.get(
+        f"{BASE_URL}/api/energy/totals", headers={"X-API-Key": api_key}, timeout=10
+    )
+    totals.raise_for_status()
+    totals = totals.json()
+
+    # The ledger has loaded on a running bench, so the totals are present, and
+    # they match the REST totals read a moment later (allowing for live accrual).
+    energy = snapshot["state"]["energy"]
+    assert energy is not None
+    assert set(energy["thermal_wh"]) == {"heating", "cooling", "hot_water"}
+    assert energy["reset_id"] == totals["reset_id"]
+    assert 0 <= totals["electrical_wh"] - energy["electrical_wh"] <= 50
+    for mode, wh in energy["thermal_wh"].items():
+        assert 0 <= totals["thermal_wh"][mode] - wh <= 200
+
+
+@pytest.mark.asyncio
 async def test_telemetry_only_change_pushes_newer_snapshot():
     token = _test_token()
     async with aiohttp.ClientSession() as session:
