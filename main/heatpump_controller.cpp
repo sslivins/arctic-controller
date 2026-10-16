@@ -15,8 +15,9 @@
 #include "macon_faults.h"
 #include "macon_fluid.h"
 #include "ext_temp_sensors.h"
-#include "daily_energy.h"
 #include "daily_energy_store.h"
+#include "energy_ledger.h"
+#include "energy_store.h"
 #include "time_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -48,8 +49,13 @@ static uint32_t s_telemetry_window_ms = 0;
 static bool s_inlet_valid = false;
 static bool s_outlet_valid = false;
 static bool s_tank_valid = false;
-static DailyEnergy s_daily_energy;
-static bool s_daily_energy_loaded = false;
+// Energy ledger, under s_state_mutex.
+static energy::EnergyLedger s_ledger;
+static bool s_ledger_loaded = false;
+static energy::Lifetime s_lifetime = {};
+static bool s_lifetime_valid = false;
+static energy::Day s_ledger_day = {};
+static energy::PowerAverager s_power_avg;
 // Updated in applyMaconMapping() under s_state_mutex.
 static TempTrendTracker s_tank_trend = make_tank_trend_tracker();
 static TempTrendTracker s_outlet_trend = make_water_trend_tracker();
@@ -497,6 +503,70 @@ static HeatPumpOperation to_operation(const MaconState& state) {
     }
 }
 
+// The local calendar day `now_s` falls in. Midnight is found with mktime so a
+// DST change day still starts at its own midnight.
+static energy::Day localDay(time_t now_s) {
+    struct tm local;
+    localtime_r(&now_s, &local);
+    const uint32_t date = (uint32_t)(local.tm_year + 1900) * 10000 +
+                          (uint32_t)(local.tm_mon + 1) * 100 + (uint32_t)local.tm_mday;
+    if (date != s_ledger_day.date) {
+        energy::Day d;
+        d.date = date;
+        struct tm mid = local;
+        mid.tm_hour = mid.tm_min = mid.tm_sec = 0;
+        mid.tm_isdst = -1;
+        d.start_s = mktime(&mid);
+        struct tm utc;
+        gmtime_r(&now_s, &utc);
+        utc.tm_isdst = local.tm_isdst;
+        d.utc_offset_min = (int16_t)((now_s - mktime(&utc)) / 60);
+        s_ledger_day = d;
+    }
+    return s_ledger_day;
+}
+
+// Book a reading into the energy ledger and keep it persisted. Caller holds
+// s_state_mutex.
+static void updateEnergyLedger(const energy::Input& in) {
+    if (!time_mgr_is_synced()) {
+        s_ledger.pause();
+        return;
+    }
+    const time_t now_s = time(nullptr);
+    const energy::Day day = localDay(now_s);
+    uint64_t migrate_ws = 0;
+    if (!s_ledger_loaded) {
+        // Needs the clock: a checkpoint from an earlier day is closed by the
+        // first reading, and the old today-only total only counts for today.
+        s_ledger_loaded = true;
+        energy::DayAccum saved;
+        int32_t old_day = 0;
+        uint64_t old_ws = 0;
+        struct tm local;
+        localtime_r(&now_s, &local);
+        if (energy::store_load_today(&saved)) {
+            s_ledger.restore(saved);
+        } else if (daily_energy_store_load(&old_day, &old_ws) &&
+                   old_day == (local.tm_year + 1900) * 1000 + local.tm_yday) {
+            migrate_ws = old_ws;
+        }
+        s_lifetime_valid = energy::store_load_lifetime(day.date, &s_lifetime);
+    }
+    if (s_ledger.add(now_s, day, in)) {
+        energy::DayRecord closed;
+        if (s_ledger.take_finished(&closed) && energy::store_commit_day(closed, &s_lifetime)) {
+            s_lifetime_valid = true;
+        }
+    }
+    if (migrate_ws) s_ledger.add_unattributed(migrate_ws);
+    if (s_ledger.save_due(now_s) && energy::store_save_today(s_ledger.accum())) {
+        s_ledger.mark_saved(now_s);
+    }
+    s_state.energy_today_wh = energy::total_elec_wh(s_ledger.today());
+    s_state.energy_today_valid = s_ledger.valid();
+}
+
 static void applyMaconMapping() {
     // The arctic-macon library owns the register->field mapping. Copy the opaque
     // image under its own lock, release it, then decode the copy — so the image
@@ -540,6 +610,45 @@ static void applyMaconMapping() {
         perf = arctic::estimate_performance(ms, perf_in);
     } else if (!sel.settling) {
         perf = arctic::estimate_performance_with_temps(ms, supply_c, return_c, perf_in);
+    }
+
+    // What the energy ledger books this reading as (see energy_ledger.h).
+    energy::Input energy_in;
+    {
+        const bool running = ms.compressor_freq_valid && ms.compressor_freq > 0;
+        energy_in.running = running;
+        energy_in.defrost = ms.defrost_on;
+        energy_in.power_valid = ms.realtime_power_valid;
+        energy_in.power_w = ms.realtime_power_w;
+        if (running || ms.defrost_on) {
+            // Defrost serves the heating it interrupts, even though the
+            // reversing valve reads "cooling" while it runs.
+            const WorkingMode wm = to_working_mode(ms);
+            const bool hot_water =
+                wm == WorkingMode::HOT_WATER || wm == WorkingMode::HOT_WATER_COOLING;
+            if (!ms.defrost_on && arctic::live_direction(ms) == MaconMode::Cooling) {
+                energy_in.bucket = energy::BUCKET_COOLING;
+            } else {
+                energy_in.bucket = hot_water ? energy::BUCKET_HOT_WATER : energy::BUCKET_HEATING;
+            }
+        }
+        energy_in.thermal_valid = perf.valid;
+        energy_in.thermal_w = perf.thermal_w;
+        energy_in.source = external && sel.settling ? energy::SOURCE_SETTLING
+                           : external               ? energy::SOURCE_EXTERNAL
+                           : sel.fallback           ? energy::SOURCE_FALLBACK
+                                                    : energy::SOURCE_UNIT;
+        if (ms.defrost_on && ms.pump_on && ms.inlet_valid && ms.outlet_valid &&
+            perf_in.water_flow_lpm > 0) {
+            const float kg_s = perf_in.water_flow_lpm * perf_in.fluid_density_kg_per_l / 60.0f;
+            energy_in.defrost_thermal_valid = true;
+            energy_in.defrost_thermal_w = static_cast<int32_t>(
+                kg_s * perf_in.fluid_cp_j_per_kgK * static_cast<float>(ms.outlet_c - ms.inlet_c));
+        }
+        energy_in.outdoor_valid = ms.outdoor_ambient_valid;
+        energy_in.outdoor_c = ms.outdoor_ambient_c;
+        energy_in.flow_lpm_x10 = perf_cfg.flow_lpm_x10;
+        energy_in.glycol_pct = perf_cfg.glycol_pct;
     }
 
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -614,29 +723,11 @@ static void applyMaconMapping() {
     // Preferred over the old V*I/10 estimate, which is now 10x low because the
     // library normalises ac_current to whole amps.
     s_state.realtime_power_w    = ms.realtime_power_w;
-    if (time_mgr_is_synced()) {
-        const time_t now_s = time(nullptr);
-        struct tm local;
-        localtime_r(&now_s, &local);
-        if (!s_daily_energy_loaded) {
-            // Needs the clock: the saved total only counts if it's from today.
-            s_daily_energy_loaded = true;
-            int32_t day = 0;
-            uint64_t ws = 0;
-            if (daily_energy_store_load(&day, &ws)) s_daily_energy.restore(day, ws);
-        }
-        s_daily_energy.add(now_s, (local.tm_year + 1900) * 1000 + local.tm_yday,
-                           ms.realtime_power_w);
-        if (s_daily_energy.save_due(now_s) &&
-            daily_energy_store_save(s_daily_energy.day(), s_daily_energy.watt_seconds())) {
-            s_daily_energy.mark_saved(now_s);
-        }
-    } else {
-        s_daily_energy.pause();
-    }
-    s_state.energy_today_wh    = s_daily_energy.wh();
-    s_state.energy_today_valid = s_daily_energy.valid();
-
+    s_power_avg.add(getTimeMs(), ms.realtime_power_valid, ms.realtime_power_w);
+    energy_in.connected =
+        s_demo_mode ? s_state.connected
+                    : elapsed_within(getTimeMs(), s_telemetry_window_ms, TELEMETRY_FRESHNESS_MS);
+    updateEnergyLedger(energy_in);
     s_state.thermal_w = perf.valid ? perf.thermal_w : 0;
     s_state.cop_x100  = perf.valid ? perf.cop_x100 : 0;
     s_state.cop_valid = perf.valid;
@@ -929,15 +1020,40 @@ bool isConnected() {
     return connected;
 }
 
-void flushDailyEnergy() {
+void flushEnergyLedger() {
     // Bounded wait: a restart must not hang on a wedged state lock.
     if (s_state_mutex == nullptr || xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(500)) != pdTRUE) return;
     const int64_t now_s = time(nullptr);
-    if (s_daily_energy.save_due(now_s, true) &&
-        daily_energy_store_save(s_daily_energy.day(), s_daily_energy.watt_seconds())) {
-        s_daily_energy.mark_saved(now_s);
+    if (s_ledger.save_due(now_s, true) && energy::store_save_today(s_ledger.accum())) {
+        s_ledger.mark_saved(now_s);
     }
     xSemaphoreGive(s_state_mutex);
+}
+
+bool getEnergyToday(energy::DayRecord* out) {
+    if (s_state_mutex == nullptr) return false;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const bool ok = s_ledger.valid();
+    if (ok) *out = s_ledger.today();
+    xSemaphoreGive(s_state_mutex);
+    return ok;
+}
+
+bool getEnergyLifetime(energy::Lifetime* out) {
+    if (s_state_mutex == nullptr) return false;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const bool ok = s_lifetime_valid;
+    if (ok) *out = s_lifetime;
+    xSemaphoreGive(s_state_mutex);
+    return ok;
+}
+
+bool takeAveragePower(uint16_t* watts) {
+    if (s_state_mutex == nullptr) return false;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const bool ok = s_power_avg.take(getTimeMs(), watts);
+    xSemaphoreGive(s_state_mutex);
+    return ok;
 }
 
 // ============================================================================

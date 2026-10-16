@@ -54,6 +54,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/bacnet_frame.cpp
   ${MAIN_DIR}/temp_trend.cpp
   ${MAIN_DIR}/chart_axis.cpp
+  ${MAIN_DIR}/energy_store.cpp
 )
 
 # The macon parameter table and its guardrail are linked REAL rather than
@@ -197,7 +198,7 @@ target_link_libraries(test_perf PRIVATE arctic_main_host)
 add_test(NAME perf COMMAND test_perf)
 
 # Home screen stats: compressor runs, starts per hour and the tank trend from
-# telemetry samples, plus the in-RAM today's-energy integrator. Pure logic.
+# telemetry samples. Pure logic.
 add_executable(test_home_stats test_home_stats.cpp)
 target_link_libraries(test_home_stats PRIVATE arctic_main_host)
 add_test(NAME home_stats COMMAND test_home_stats)
@@ -215,3 +216,14 @@ add_test(NAME chart_axis COMMAND test_chart_axis)
 add_executable(test_history_window test_history_window.cpp)
 target_link_libraries(test_history_window PRIVATE arctic_main_host)
 add_test(NAME history_window COMMAND test_history_window)
+
+# Energy ledger: per-mode electrical/heat integration, day boundaries, clock
+# jumps and checkpoints (pure), plus the NVS day/month store and lifetime
+# totals over the NVS fake.
+add_executable(test_energy_ledger test_energy_ledger.cpp)
+target_link_libraries(test_energy_ledger PRIVATE arctic_main_host)
+add_test(NAME energy_ledger COMMAND test_energy_ledger)
+
+add_executable(test_energy_store test_energy_store.cpp)
+target_link_libraries(test_energy_store PRIVATE arctic_main_host)
+add_test(NAME energy_store COMMAND test_energy_store)

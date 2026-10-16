@@ -68,8 +68,9 @@ typedef struct {
 } telemetry_sector_header_t;
 
 // On-flash sample layout (format version 1). The public sample adds the tank
-// reading, which lives in what used to be the record's reserved word so
-// existing journals stay readable.
+// reading and the average power, which live in what used to be the record's
+// reserved words so existing journals stay readable. Unused words are left
+// erased (0xFFFF), so a value only counts alongside its flag.
 typedef struct {
     uint32_t timestamp;
     uint32_t sequence;
@@ -85,7 +86,7 @@ typedef struct {
     uint32_t sequence;
     telemetry_flash_sample_t sample;
     int16_t tank_deci_c;
-    uint16_t reserved;
+    uint16_t average_power_w;
     uint32_t crc32;
 } telemetry_record_t;
 
@@ -586,6 +587,11 @@ static void pack_telemetry_record(telemetry_record_t* record,
     if (sample->flags & HISTORY_TELEMETRY_TANK_VALID) {
         record->tank_deci_c = sample->tank_deci_c;
     }
+    if ((sample->flags & HISTORY_TELEMETRY_POWER_VALID) && sample->average_power_w != 0xFFFF) {
+        record->average_power_w = sample->average_power_w;
+    } else {
+        record->sample.flags &= (uint8_t)~HISTORY_TELEMETRY_POWER_VALID;
+    }
     record->crc32 = telemetry_record_crc(record);
 }
 
@@ -601,6 +607,11 @@ static history_telemetry_sample_t unpack_telemetry_record(
     sample.flags = record.sample.flags;
     if (sample.flags & HISTORY_TELEMETRY_TANK_VALID) {
         sample.tank_deci_c = record.tank_deci_c;
+    }
+    if ((sample.flags & HISTORY_TELEMETRY_POWER_VALID) && record.average_power_w != 0xFFFF) {
+        sample.average_power_w = record.average_power_w;
+    } else {
+        sample.flags &= (uint8_t)~HISTORY_TELEMETRY_POWER_VALID;
     }
     return sample;
 }

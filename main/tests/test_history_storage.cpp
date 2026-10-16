@@ -418,6 +418,39 @@ void telemetry_tank_reading_round_trips() {
     CHECK(out[1].inlet_deci_c == 201);
 }
 
+// The average power lives in the record's last spare word. Records written
+// before it existed have neither the flag nor a value (erased 0xFFFF), and
+// must read back as "no power reading".
+void telemetry_power_round_trips() {
+    fresh_device();
+    history_telemetry_sample_t with_p = make_sample(1000, 1, 200);
+    with_p.flags |= HISTORY_TELEMETRY_POWER_VALID;
+    with_p.average_power_w = 3456;
+    CHECK_ERR(history_storage_append_telemetry(&with_p), ESP_OK);
+    history_telemetry_sample_t without_p = make_sample(1030, 2, 201);
+    without_p.average_power_w = 999;
+    CHECK_ERR(history_storage_append_telemetry(&without_p), ESP_OK);
+    // The erased marker is never stored as a reading.
+    history_telemetry_sample_t marker = make_sample(1060, 3, 202);
+    marker.flags |= HISTORY_TELEMETRY_POWER_VALID;
+    marker.average_power_w = 0xFFFF;
+    CHECK_ERR(history_storage_append_telemetry(&marker), ESP_OK);
+
+    boot();
+    std::vector<history_telemetry_sample_t> out(8);
+    size_t count = 0;
+    CHECK_ERR(history_storage_query_telemetry(0, 0xffffffff, out.data(), out.size(),
+                                              &count),
+              ESP_OK);
+    CHECK(count == 3);
+    CHECK((out[0].flags & HISTORY_TELEMETRY_POWER_VALID) != 0);
+    CHECK(out[0].average_power_w == 3456);
+    CHECK((out[1].flags & HISTORY_TELEMETRY_POWER_VALID) == 0);
+    CHECK(out[1].average_power_w == 0);
+    CHECK((out[2].flags & HISTORY_TELEMETRY_POWER_VALID) == 0);
+    CHECK(out[2].average_power_w == 0);
+}
+
 void write_five_telemetry_samples() {
     fresh_device();
     for (uint32_t i = 0; i < 5; ++i) {
@@ -637,6 +670,7 @@ int main() {
 
     SCENARIO("telemetry round trips", telemetry_round_trips);
 SCENARIO("telemetry tank reading round trips", telemetry_tank_reading_round_trips);
+    SCENARIO("the average power reading round-trips", telemetry_power_round_trips);
     SCENARIO("telemetry survives a reboot", write_five_telemetry_samples,
              expect_five_telemetry_samples_after_reboot);
     SCENARIO("telemetry query filters by time window",

@@ -195,6 +195,8 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req);
 #endif
 static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req);
+static esp_err_t energy_daily_get_handler(httpd_req_t* req);
+static esp_err_t energy_totals_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req);
 static esp_err_t notifications_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
@@ -1168,6 +1170,24 @@ bool api_server_start(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_home_history_uri);
+
+    // GET /api/energy/daily - Per-day energy ledger (electrical, heat, defrost)
+    httpd_uri_t energy_daily_uri = {
+        .uri = "/api/energy/daily",
+        .method = HTTP_GET,
+        .handler = energy_daily_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(energy_daily_uri);
+
+    // GET /api/energy/totals - Lifetime energy totals for Home Assistant
+    httpd_uri_t energy_totals_uri = {
+        .uri = "/api/energy/totals",
+        .method = HTTP_GET,
+        .handler = energy_totals_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(energy_totals_uri);
 
     // GET /api/notifications - Active status-bar notifications (mirrors the device bell)
     httpd_uri_t notifications_uri = {
@@ -6259,12 +6279,17 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
         bool running = (s.flags & HISTORY_TELEMETRY_COMPRESSOR_VALID) &&
                        (s.flags & HISTORY_TELEMETRY_COMPRESSOR_RUNNING);
         bool conn = (s.flags & HISTORY_TELEMETRY_CONNECTED) != 0;
+        char p_buf[8];
+        if (s.flags & HISTORY_TELEMETRY_POWER_VALID)
+            snprintf(p_buf, sizeof(p_buf), "%u", (unsigned)s.average_power_w);
+        else
+            strcpy(p_buf, "null");
         n = snprintf(line, sizeof(line),
                  "%s{\"t\":%u,\"in\":%s,\"out\":%s,\"set\":%s,\"tank\":%s,"
-                 "\"mode\":%u,\"run\":%s,\"conn\":%s}",
+                 "\"mode\":%u,\"run\":%s,\"conn\":%s,\"p\":%s}",
                  i == 0 ? "" : ",", (unsigned)s.timestamp, in_buf, out_buf,
                  set_buf, tank_buf, (unsigned)s.mode, running ? "true" : "false",
-                 conn ? "true" : "false");
+                 conn ? "true" : "false", p_buf);
         if (n < 0) n = 0;
         if (n > (int)sizeof(line) - 1) n = (int)sizeof(line) - 1;
         emit(line, (size_t)n);
@@ -6334,6 +6359,271 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
     flush_out();
     if (out) free(out);
     httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+// ---------------------------------------------------------------------------
+// Energy ledger (see energy_ledger.h)
+// ---------------------------------------------------------------------------
+
+// YYYY-MM-DD or YYYYMMDD -> YYYYMMDD. Rejects anything else.
+static bool parse_energy_date(const char* s, uint32_t* out)
+{
+    char digits[9];
+    size_t n = 0;
+    for (const char* p = s; *p; p++) {
+        if (*p == '-') continue;
+        if (*p < '0' || *p > '9' || n >= 8) return false;
+        digits[n++] = *p;
+    }
+    if (n != 8) return false;
+    digits[8] = '\0';
+    const uint32_t v = (uint32_t)strtoul(digits, nullptr, 10);
+    const uint32_t m = v / 100 % 100, d = v % 100;
+    if (v / 10000 < 2000 || m < 1 || m > 12 || d < 1 || d > 31) return false;
+    *out = v;
+    return true;
+}
+
+// YYYYMMDD shifted by `days` (may be negative), via the C library calendar.
+static uint32_t energy_date_add(uint32_t date, int days)
+{
+    struct tm t = {};
+    t.tm_year = (int)(date / 10000) - 1900;
+    t.tm_mon = (int)(date / 100 % 100) - 1;
+    t.tm_mday = (int)(date % 100) + days;
+    t.tm_hour = 12;
+    t.tm_isdst = -1;
+    mktime(&t);
+    return (uint32_t)(t.tm_year + 1900) * 10000 + (uint32_t)(t.tm_mon + 1) * 100 +
+           (uint32_t)t.tm_mday;
+}
+
+static uint32_t energy_today_date()
+{
+    if (!time_mgr_is_synced()) return 0;
+    time_t now = time(nullptr);
+    struct tm local;
+    localtime_r(&now, &local);
+    return (uint32_t)(local.tm_year + 1900) * 10000 + (uint32_t)(local.tm_mon + 1) * 100 +
+           (uint32_t)local.tm_mday;
+}
+
+static void format_energy_date(uint32_t date, char (&out)[16])
+{
+    snprintf(out, sizeof(out), "%04u-%02u-%02u", (unsigned)(date / 10000 % 10000),
+             (unsigned)(date / 100 % 100), (unsigned)(date % 100));
+}
+
+static void add_energy_date(cJSON* o, const char* key, uint32_t date)
+{
+    if (date == 0) {
+        cJSON_AddNullToObject(o, key);
+        return;
+    }
+    char s[16];
+    format_energy_date(date, s);
+    cJSON_AddStringToObject(o, key, s);
+}
+
+static cJSON* energy_modes_json(const uint32_t (&v)[energy::kModes])
+{
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "heating", v[energy::BUCKET_HEATING]);
+    cJSON_AddNumberToObject(o, "cooling", v[energy::BUCKET_COOLING]);
+    cJSON_AddNumberToObject(o, "hot_water", v[energy::BUCKET_HOT_WATER]);
+    return o;
+}
+
+static cJSON* energy_day_json(const energy::DayRecord& r, bool final)
+{
+    cJSON* o = cJSON_CreateObject();
+    add_energy_date(o, "date", r.date);
+    cJSON_AddBoolToObject(o, "final", final);
+    cJSON_AddNumberToObject(o, "utc_offset_min", r.utc_offset_min);
+
+    cJSON* e = cJSON_AddObjectToObject(o, "electrical_wh");
+    cJSON_AddNumberToObject(e, "heating", r.elec_wh[energy::BUCKET_HEATING]);
+    cJSON_AddNumberToObject(e, "cooling", r.elec_wh[energy::BUCKET_COOLING]);
+    cJSON_AddNumberToObject(e, "hot_water", r.elec_wh[energy::BUCKET_HOT_WATER]);
+    cJSON_AddNumberToObject(e, "standby", r.elec_wh[energy::BUCKET_STANDBY]);
+    cJSON_AddNumberToObject(e, "unattributed", r.elec_unattributed_wh);
+    cJSON_AddNumberToObject(e, "total", energy::total_elec_wh(r));
+    cJSON_AddItemToObject(o, "thermal_wh", energy_modes_json(r.thermal_wh));
+    cJSON_AddItemToObject(o, "covered_electrical_wh", energy_modes_json(r.covered_elec_wh));
+    cJSON_AddItemToObject(o, "run_seconds", energy_modes_json(r.run_s));
+    cJSON_AddNumberToObject(o, "starts", r.starts);
+
+    cJSON* d = cJSON_AddObjectToObject(o, "defrost");
+    cJSON_AddNumberToObject(d, "count", r.defrosts);
+    cJSON_AddNumberToObject(d, "seconds", r.defrost_s);
+    cJSON_AddNumberToObject(d, "thermal_wh", r.defrost_thermal_wh);
+
+    cJSON* c = cJSON_AddObjectToObject(o, "coverage_seconds");
+    cJSON_AddNumberToObject(c, "power", r.power_s);
+    cJSON_AddNumberToObject(c, "thermal", r.thermal_s);
+
+    cJSON* s = cJSON_AddObjectToObject(o, "source_seconds");
+    cJSON_AddNumberToObject(s, "unit", r.source_s[energy::SOURCE_UNIT]);
+    cJSON_AddNumberToObject(s, "external", r.source_s[energy::SOURCE_EXTERNAL]);
+    cJSON_AddNumberToObject(s, "fallback", r.source_s[energy::SOURCE_FALLBACK]);
+    cJSON_AddNumberToObject(s, "settling", r.source_s[energy::SOURCE_SETTLING]);
+
+    if (r.flags & energy::DAY_OUTDOOR_SET) {
+        cJSON* t = cJSON_AddObjectToObject(o, "outdoor_c");
+        cJSON_AddNumberToObject(t, "min", r.outdoor_min_deci / 10.0);
+        cJSON_AddNumberToObject(t, "avg", r.outdoor_avg_deci / 10.0);
+        cJSON_AddNumberToObject(t, "max", r.outdoor_max_deci / 10.0);
+    } else {
+        cJSON_AddNullToObject(o, "outdoor_c");
+    }
+    if (r.flags & energy::DAY_SETTINGS_SET) {
+        cJSON* st = cJSON_AddObjectToObject(o, "settings");
+        cJSON_AddNumberToObject(st, "flow_lpm", r.flow_lpm_x10 / 10.0);
+        cJSON_AddNumberToObject(st, "glycol_pct", r.glycol_pct);
+        cJSON_AddBoolToObject(st, "mixed", (r.flags & energy::DAY_MIXED_SETTINGS) != 0);
+    } else {
+        cJSON_AddNullToObject(o, "settings");
+    }
+    return o;
+}
+
+// GET /api/energy/daily[?from=YYYY-MM-DD&to=YYYY-MM-DD]
+// One entry per local day that has data, oldest first: electrical energy per
+// mode, estimated heat with the electricity of the same covered intervals,
+// defrost, run time and coverage. Defaults to the last 31 days; at most
+// kMaxDays per request. Today's open day is included with final=false.
+static esp_err_t energy_daily_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    constexpr int kMaxDays = 400;
+
+    energy::DayRecord today = {};
+    const bool have_today = arctic::getEnergyToday(&today);
+    uint32_t today_date = energy_today_date();
+    if (today_date == 0 && have_today) today_date = today.date;
+    if (today_date == 0) {
+        send_json_error(req, "503 Service Unavailable", "Clock not set");
+        return ESP_OK;
+    }
+
+    uint32_t to = today_date, from = 0;
+    char query[96];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char param[16];
+        if (httpd_query_key_value(query, "to", param, sizeof(param)) == ESP_OK &&
+            !parse_energy_date(param, &to)) {
+            send_json_error(req, "400 Bad Request", "to must be YYYY-MM-DD");
+            return ESP_OK;
+        }
+        if (httpd_query_key_value(query, "from", param, sizeof(param)) == ESP_OK &&
+            !parse_energy_date(param, &from)) {
+            send_json_error(req, "400 Bad Request", "from must be YYYY-MM-DD");
+            return ESP_OK;
+        }
+    }
+    if (from == 0) from = energy_date_add(to, -30);
+    if (from > to) {
+        send_json_error(req, "400 Bad Request", "from is after to");
+        return ESP_OK;
+    }
+    if (energy_date_add(from, kMaxDays - 1) < to) {
+        send_json_error(req, "400 Bad Request", "Range is limited to 400 days");
+        return ESP_OK;
+    }
+
+    auto* days = static_cast<energy::DayRecord*>(heap_caps_malloc(
+        sizeof(energy::DayRecord) * kMaxDays, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!days) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    size_t n = energy::store_read_days(from, to, days, kMaxDays);
+
+    set_json_content_type(req);
+    char head[160];
+    char from_s[16], to_s[16];
+    format_energy_date(from, from_s);
+    format_energy_date(to, to_s);
+    int hn = snprintf(head, sizeof(head), "{\"from\":\"%s\",\"to\":\"%s\",\"days\":[", from_s,
+                      to_s);
+    httpd_resp_send_chunk(req, head, hn);
+
+    bool first = true;
+    auto emit_day = [&](const energy::DayRecord& r, bool final) {
+        cJSON* o = energy_day_json(r, final);
+        char* js = o ? cJSON_PrintUnformatted(o) : nullptr;
+        if (js) {
+            if (!first) httpd_resp_send_chunk(req, ",", 1);
+            httpd_resp_send_chunk(req, js, strlen(js));
+            first = false;
+            cJSON_free(js);
+        }
+        if (o) cJSON_Delete(o);
+    };
+    for (size_t i = 0; i < n; i++) {
+        // A closed day can't also be the open one; skip a stale duplicate.
+        if (have_today && days[i].date == today.date) continue;
+        emit_day(days[i], true);
+    }
+    heap_caps_free(days);
+    // The open day: normally today, but a day the unit couldn't close yet
+    // (disconnected over midnight) is reported as it stands, still not final.
+    if (have_today && today.date >= from && today.date <= to) emit_day(today, false);
+
+    httpd_resp_send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+// GET /api/energy/totals
+// Running totals since install or factory reset: every closed day plus today
+// so far. They only ever grow while reset_id stays the same, so they suit
+// Home Assistant's total_increasing energy sensors.
+static esp_err_t energy_totals_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    energy::Lifetime life = {};
+    const bool have_life = arctic::getEnergyLifetime(&life);
+    energy::DayRecord today = {};
+    const bool have_today = arctic::getEnergyToday(&today);
+    // A day already folded into the lifetime totals isn't added twice.
+    const bool add_today = have_today && (!have_life || today.date > life.through_date);
+
+    uint32_t elec = have_life ? life.elec_wh : 0;
+    uint32_t thermal[energy::kModes] = {}, covered[energy::kModes] = {};
+    for (int m = 0; m < energy::kModes; m++) {
+        thermal[m] = (have_life ? life.thermal_wh[m] : 0) + (add_today ? today.thermal_wh[m] : 0);
+        covered[m] =
+            (have_life ? life.covered_elec_wh[m] : 0) + (add_today ? today.covered_elec_wh[m] : 0);
+    }
+    if (add_today) elec += energy::total_elec_wh(today);
+
+    cJSON* root = cJSON_CreateObject();
+    if (have_life) {
+        char id[9];
+        snprintf(id, sizeof(id), "%08lx", (unsigned long)life.reset_id);
+        cJSON_AddStringToObject(root, "reset_id", id);
+    } else {
+        cJSON_AddNullToObject(root, "reset_id");
+    }
+    add_energy_date(root, "since", have_life ? life.since_date : (have_today ? today.date : 0));
+    add_energy_date(root, "through", have_life ? life.through_date : 0);
+    cJSON_AddBoolToObject(root, "includes_today", add_today);
+    cJSON_AddNumberToObject(root, "electrical_wh", elec);
+    cJSON_AddItemToObject(root, "thermal_wh", energy_modes_json(thermal));
+    cJSON_AddItemToObject(root, "covered_electrical_wh", energy_modes_json(covered));
+    set_json_content_type(req);
+    char* js = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, js ? js : "{}");
+    if (js) cJSON_free(js);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 

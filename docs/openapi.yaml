@@ -2575,6 +2575,13 @@ paths:
                         conn:
                           type: boolean
                           description: Whether the heat pump was connected
+                        p:
+                          type: integer
+                          nullable: true
+                          description: >-
+                            Average electrical power over the sample interval
+                            (watts), or null when unknown or disconnected.
+                            Samples from older firmware are null.
                   faults:
                     type: array
                     description: >-
@@ -2746,6 +2753,135 @@ paths:
                         type: integer
                         nullable: true
                         description: Newest recorded setpoint (deci-Celsius), or null
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/energy/daily:
+    get:
+      tags:
+      - HeatPump
+      summary: Get daily energy totals
+      description: |
+        Per-day electrical and thermal energy, split by what the unit was
+        doing. Days are local calendar days (the device time zone at the time
+        they were recorded). Stored days are `final`; the current open day is
+        appended with `final: false` and keeps changing until midnight.
+
+        Electrical energy is integrated from the unit's power reading, booked
+        to the state the unit was in during each interval. Intervals with no
+        reading for more than 2 minutes, or while disconnected, are not booked.
+        `unattributed` holds energy that can't be split by mode (for example
+        today's total carried over from older firmware).
+
+        For COP, divide `thermal_wh` by `covered_electrical_wh` of the same
+        mode. Only intervals with both a power and a heat-out reading are
+        covered; defrost intervals are excluded. Days are kept for 13 months.
+      operationId: getEnergyDaily
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          example: '2026-10-01'
+        description: First day (YYYY-MM-DD or YYYYMMDD). Defaults to 30 days before `to` (31 days in all).
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          example: '2026-10-16'
+        description: Last day (YYYY-MM-DD or YYYYMMDD). Defaults to today.
+      responses:
+        '200':
+          description: Days in ascending date order; days with no data are omitted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, days]
+                properties:
+                  from:
+                    type: string
+                    format: date
+                  to:
+                    type: string
+                    format: date
+                  days:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EnergyDay'
+        '400':
+          description: Bad date, `from` after `to`, or a range over 400 days
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Clock not set yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/energy/totals:
+    get:
+      tags:
+      - HeatPump
+      summary: Get lifetime energy totals
+      description: |
+        Cumulative energy since recording started, including the current open
+        day. Totals only grow; `reset_id` changes if the store is wiped (for
+        example after a factory reset), so clients tracking a meter can tell a
+        reset from a rollover.
+      operationId: getEnergyTotals
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Lifetime totals
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reset_id, since, through, includes_today, electrical_wh, thermal_wh, covered_electrical_wh]
+                properties:
+                  reset_id:
+                    type: string
+                    nullable: true
+                    description: 8 hex characters, or null before the first day is stored
+                  since:
+                    type: string
+                    format: date
+                    nullable: true
+                    description: First recorded day
+                  through:
+                    type: string
+                    format: date
+                    nullable: true
+                    description: Last stored (closed) day, or null if none yet
+                  includes_today:
+                    type: boolean
+                    description: Whether the open day is included in the totals
+                  electrical_wh:
+                    type: integer
+                    description: All electrical energy (Wh)
+                  thermal_wh:
+                    $ref: '#/components/schemas/EnergyModes'
+                  covered_electrical_wh:
+                    $ref: '#/components/schemas/EnergyModes'
         '401':
           description: API key required
           content:
@@ -4717,6 +4853,119 @@ components:
         error:
           type: string
           description: Error message
+
+    EnergyModes:
+      type: object
+      description: Energy per operating mode (Wh)
+      required: [heating, cooling, hot_water]
+      properties:
+        heating:
+          type: integer
+        cooling:
+          type: integer
+        hot_water:
+          type: integer
+
+    EnergyDay:
+      type: object
+      required: [date, final, utc_offset_min, electrical_wh, thermal_wh, covered_electrical_wh,
+        run_seconds, starts, defrost, coverage_seconds, source_seconds, outdoor_c, settings]
+      properties:
+        date:
+          type: string
+          format: date
+          description: Local calendar day
+        final:
+          type: boolean
+          description: False for the current open day, which is still changing
+        utc_offset_min:
+          type: integer
+          description: Local UTC offset in minutes when the day was recorded
+        electrical_wh:
+          type: object
+          description: Electrical energy by what the unit was doing (Wh)
+          properties:
+            heating:
+              type: integer
+            cooling:
+              type: integer
+            hot_water:
+              type: integer
+            standby:
+              type: integer
+              description: Compressor off (pump, fan, controls)
+            unattributed:
+              type: integer
+              description: Energy that can't be split by mode
+            total:
+              type: integer
+        thermal_wh:
+          $ref: '#/components/schemas/EnergyModes'
+        covered_electrical_wh:
+          $ref: '#/components/schemas/EnergyModes'
+        run_seconds:
+          $ref: '#/components/schemas/EnergyModes'
+        starts:
+          type: integer
+          description: Compressor starts
+        defrost:
+          type: object
+          properties:
+            count:
+              type: integer
+            seconds:
+              type: integer
+            thermal_wh:
+              type: integer
+              description: Estimated heat moved during defrost (Wh, signed)
+        coverage_seconds:
+          type: object
+          description: Seconds with a valid reading
+          properties:
+            power:
+              type: integer
+              description: Connected time with a power reading (any state)
+            thermal:
+              type: integer
+              description: Mode time covered by both power and heat-out readings
+        source_seconds:
+          type: object
+          description: Where the heat-out reading came from while running
+          properties:
+            unit:
+              type: integer
+            external:
+              type: integer
+              description: External BACnet / Modbus-TCP sensors
+            fallback:
+              type: integer
+              description: Unit readings while external sensors were unavailable
+            settling:
+              type: integer
+              description: Settling window after a start, defrost or direction change
+        outdoor_c:
+          type: object
+          nullable: true
+          description: Outdoor temperature (°C, 0.1 resolution), or null with no readings
+          properties:
+            min:
+              type: number
+            avg:
+              type: number
+            max:
+              type: number
+        settings:
+          type: object
+          nullable: true
+          description: Heat-out settings used for the day, or null if unknown
+          properties:
+            flow_lpm:
+              type: number
+            glycol_pct:
+              type: integer
+            mixed:
+              type: boolean
+              description: True if the settings changed during the day
 
     HomeAssistantCapabilities:
       type: object
