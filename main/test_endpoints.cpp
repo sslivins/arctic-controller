@@ -2273,9 +2273,12 @@ static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
                        HISTORY_TELEMETRY_INLET_VALID |
                        HISTORY_TELEMETRY_OUTLET_VALID |
                        HISTORY_TELEMETRY_SETPOINT_VALID |
-                       HISTORY_TELEMETRY_TANK_VALID;
+                       HISTORY_TELEMETRY_TANK_VALID |
+                       HISTORY_TELEMETRY_POWER_VALID;
+        sample.average_power_w = 15;
         if ((i % 240) < 160) {
             sample.flags |= HISTORY_TELEMETRY_COMPRESSOR_RUNNING;
+            sample.average_power_w = (uint16_t)(1200 + (i % 160) * 5);
         }
 
         int16_t wave = (int16_t)(i % 160);
