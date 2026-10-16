@@ -621,6 +621,29 @@ typedef enum {
     STR_HOME_NOW,
     STR_HOME_MORE_FAULTS,
 
+    // Energy (History tab segment) and the cycle-history power view
+    STR_ENERGY_DAYS_FMT,
+    STR_ENERGY_COP_FMT,
+    STR_ENERGY_OTHER,
+    STR_ENERGY_ELECTRICITY,
+    STR_ENERGY_HEAT,
+    STR_ENERGY_COP,
+    STR_ENERGY_OUTDOOR,
+    STR_ENERGY_RUNS_FMT,
+    STR_ENERGY_NO_RUNS,
+    STR_ENERGY_NO_RUN_DETAIL,
+    STR_ENERGY_SETTINGS_FMT,
+    STR_ENERGY_STARTS_FMT,
+    STR_ENERGY_DEFROSTS_FMT,
+    STR_ENERGY_NO_DATA,
+    STR_ENERGY_SO_FAR,
+    STR_ENERGY_LOADING,
+    STR_ENERGY_DAY_UNIT,
+    STR_ENERGY_LOAD_ERROR,
+    STR_HISTORY_VIEW_TEMPS,
+    STR_HISTORY_VIEW_POWER,
+    STR_HISTORY_POWER_WINDOW_FMT,
+
     // ========================================================================
     // Must be last - used for array sizing
     // ========================================================================

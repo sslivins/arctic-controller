@@ -9,6 +9,7 @@
 #include "ui_common.h"
 #include "event_log_screen.h"
 #include "heatpump_history_screen.h"
+#include "energy_screen.h"
 #include "i18n/i18n.h"
 #include <esp_log.h>
 
@@ -24,6 +25,7 @@ static const struct {
     const char* tag;
 } s_seg_defs[HISTORY_SEG_COUNT] = {
     { STR_HISTORY_SEG_CYCLES, "history_seg_cycles" },
+    { STR_HP_ENERGY,          "history_seg_energy" },
     { STR_EVENT_LOG,          "history_seg_events" },
 };
 
@@ -60,11 +62,16 @@ static void apply_segment(void) {
         }
     }
     const bool cycles = s_active && s_seg == HISTORY_SEG_CYCLES;
+    const bool energy = s_active && s_seg == HISTORY_SEG_ENERGY;
     const bool events = s_active && s_seg == HISTORY_SEG_EVENTS;
     if (!cycles && heatpump_history_is_shown()) heatpump_history_hide();
+    if (!energy && energy_screen_is_shown()) energy_screen_hide();
     event_log_screen_set_active(events);
     if (cycles && !heatpump_history_is_shown()) {
         heatpump_history_create_in(s_hosts[HISTORY_SEG_CYCLES]);
+    }
+    if (energy && !energy_screen_is_shown()) {
+        energy_screen_create_in(s_hosts[HISTORY_SEG_ENERGY]);
     }
 }
 
@@ -131,6 +138,7 @@ void history_tab_set_active(bool active) {
 void history_tab_hide(void) {
     s_active = false;
     if (heatpump_history_is_shown()) heatpump_history_hide();
+    if (energy_screen_is_shown()) energy_screen_hide();
     event_log_screen_hide();
     for (int i = 0; i < HISTORY_SEG_COUNT; i++) {
         s_btns[i] = nullptr;

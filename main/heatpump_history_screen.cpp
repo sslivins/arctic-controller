@@ -47,6 +47,7 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 // Icy teal, as on the home screen's defrost tile.
 #define COLOR_DEFROST       lv_color_hex(0x4fb3c9)
 #define COLOR_DEFROST_EDGE  lv_color_hex(0xa5f3fc)
+#define COLOR_POWER     lv_color_hex(0x60a5fa)
 
 static constexpr size_t MAX_FAULTS = 16;
 static constexpr size_t MAX_DEFROSTS = 24;
@@ -95,6 +96,17 @@ static struct {
     fault_interval_t faults[MAX_FAULTS] = {};
     size_t defrost_count = 0;
     fault_interval_t* defrosts = nullptr;  // PSRAM
+    // Power view: electrical draw instead of temperatures. Kept across
+    // hide/show so the chart reopens the way the user left it.
+    bool power_view = false;
+    lv_obj_t* view_temps_button = nullptr;
+    lv_obj_t* view_power_button = nullptr;
+    lv_obj_t* legend_lines = nullptr;
+    lv_obj_t* legend_power = nullptr;
+    lv_obj_t* power_label = nullptr;
+    uint32_t window_wh = 0;
+    // Moment to centre the next opened window on (0 = latest).
+    uint32_t pending_center = 0;
 } state;
 
 static void request_window(uint32_t end);
@@ -302,12 +314,12 @@ static void chart_press_cb(lv_event_t* event) {
     int32_t best = -1;
     int32_t best_dx = INT32_MAX;
     if (point.x >= plot.x1 && point.x <= plot.x2) {
+        const uint8_t wanted = state.power_view
+            ? HISTORY_TELEMETRY_POWER_VALID
+            : (HISTORY_TELEMETRY_INLET_VALID | HISTORY_TELEMETRY_OUTLET_VALID);
         for (size_t i = 0; i < state.sample_count; i++) {
             const auto& s = state.samples[i];
-            if (!(s.flags & (HISTORY_TELEMETRY_INLET_VALID |
-                             HISTORY_TELEMETRY_OUTLET_VALID))) {
-                continue;
-            }
+            if (!(s.flags & wanted)) continue;
             const int32_t dx = abs(map_x(s.timestamp, plot) - point.x);
             if (dx < best_dx) { best_dx = dx; best = (int32_t)i; }
         }
@@ -508,12 +520,247 @@ static void draw_fault_labels(lv_layer_t* layer, const lv_area_t& plot) {
     }
 }
 
+static void draw_mode_bands(lv_layer_t* layer, const lv_area_t& plot) {
+    for (size_t i = 0; i < state.sample_count; i++) {
+        const auto& first = state.samples[i];
+        if (!running_sample(first)) continue;
+        uint32_t band_start = first.timestamp;
+        uint32_t band_end = first.timestamp + HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+        size_t j = i + 1;
+        while (j < state.sample_count) {
+            const auto& next = state.samples[j];
+            const auto& previous = state.samples[j - 1];
+            if (!running_sample(next) || next.mode != first.mode ||
+                next.timestamp - previous.timestamp > CONTIGUOUS_SECONDS) {
+                break;
+            }
+            band_end = next.timestamp + HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+            j++;
+        }
+        lv_area_t band = {
+            map_x(band_start, plot), plot.y1,
+            map_x(band_end, plot), plot.y2,
+        };
+        lv_draw_rect_dsc_t band_dsc;
+        lv_draw_rect_dsc_init(&band_dsc);
+        band_dsc.bg_color = mode_color(first.mode);
+        band_dsc.bg_opa = LV_OPA_20;
+        lv_draw_rect(layer, &band_dsc, &band);
+        i = j - 1;
+    }
+}
+
+// X-axis gridlines/labels are anchored to whole-hour boundaries in local
+// time (rounded up to the next even-hour multiple) rather than to the
+// ragged window edges, so the axis always reads in clean hours
+// (e.g. 08:00, 10:00, 12:00) regardless of the current minute. The data
+// window itself still ends at "now" so the last 8 hours stay visible.
+static void draw_time_axis(lv_layer_t* layer, const lv_area_t& coords,
+                           const lv_area_t& plot) {
+    static constexpr int TICK_STEP_HOURS = 2;
+    time_t tick_time;
+    {
+        time_t start = state.window_start;
+        struct tm t0 = {};
+        localtime_r(&start, &t0);
+        if (t0.tm_min != 0 || t0.tm_sec != 0) {
+            t0.tm_hour += 1;
+        }
+        t0.tm_min = 0;
+        t0.tm_sec = 0;
+        // Snap up to the next multiple of TICK_STEP_HOURS for even spacing.
+        t0.tm_hour +=
+            (TICK_STEP_HOURS - (t0.tm_hour % TICK_STEP_HOURS)) % TICK_STEP_HOURS;
+        t0.tm_isdst = -1;
+        tick_time = mktime(&t0);
+    }
+    for (; tick_time > 0 && (uint32_t)tick_time <= state.window_end;
+         tick_time += TICK_STEP_HOURS * 3600) {
+        if ((uint32_t)tick_time < state.window_start) continue;
+        int32_t x = map_x((uint32_t)tick_time, plot);
+        draw_line(layer, {x, plot.y1}, {x, plot.y2}, COLOR_GRID, 1);
+        struct tm local = {};
+        localtime_r(&tick_time, &local);
+        char label[12];
+        if (time_mgr_get_24h_format()) {
+            strftime(label, sizeof(label), "%H:%M", &local);
+        } else {
+            // Ticks are snapped to whole hours above, so the minutes carry no
+            // information in 12-hour form -- "8 AM" rather than "08:00 AM".
+            // That also keeps the label narrower than the 24-hour "08:00", so
+            // adding the suffix cannot make axis labels collide.
+            int hour12 = local.tm_hour % 12;
+            if (hour12 == 0) hour12 = 12;
+            snprintf(label, sizeof(label), "%d %s", hour12,
+                     local.tm_hour < 12 ? "AM" : "PM");
+        }
+        lv_area_t label_area = {x - 40, plot.y2 + 10, x + 40, coords.y2};
+        draw_label(layer, label_area, label, UI_COLOR_TEXT_DIM,
+                   LV_TEXT_ALIGN_CENTER);
+    }
+}
+
+// Tenths of a unit as "12.5" (or "12" when whole).
+static void format_tenths(char* buf, size_t len, uint32_t tenths, bool keep_decimal) {
+    if (!keep_decimal && tenths % 10 == 0) {
+        snprintf(buf, len, "%lu", (unsigned long)(tenths / 10));
+    } else {
+        snprintf(buf, len, "%lu.%lu", (unsigned long)(tenths / 10),
+                 (unsigned long)(tenths % 10));
+    }
+}
+
+static const char* sample_mode_name(const history_telemetry_sample_t& s) {
+    if (!running_sample(s)) return i18n_get(STR_ENERGY_OTHER);
+    switch (s.mode) {
+        case HISTORY_TELEMETRY_MODE_HEATING: return i18n_get(STR_HISTORY_LEGEND_HEATING);
+        case HISTORY_TELEMETRY_MODE_COOLING: return i18n_get(STR_HISTORY_LEGEND_COOLING);
+        default: return i18n_get(STR_HISTORY_LEGEND_HOT_WATER);
+    }
+}
+
+static void draw_power_cursor(lv_layer_t* layer, const lv_area_t& plot,
+                              int32_t max_w) {
+    if (state.cursor < 0 || (size_t)state.cursor >= state.sample_count) return;
+    const auto& s = state.samples[state.cursor];
+    if (!(s.flags & HISTORY_TELEMETRY_POWER_VALID)) return;
+    const int32_t x = map_x(s.timestamp, plot);
+
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = UI_COLOR_TEXT_DIM;
+    line.width = 2;
+    line.dash_width = 6;
+    line.dash_gap = 5;
+    line.p1.x = x; line.p1.y = plot.y1;
+    line.p2.x = x; line.p2.y = plot.y2;
+    lv_draw_line(layer, &line);
+    draw_dot(layer, x, map_y(s.average_power_w, 0, max_w, plot), COLOR_POWER);
+
+    char when[12];
+    format_clock(when, sizeof(when), s.timestamp);
+    char kw[16], power[24];
+    format_tenths(kw, sizeof(kw), ((uint32_t)s.average_power_w + 50) / 100, true);
+    snprintf(power, sizeof(power), "%s kW", kw);
+
+    static constexpr int32_t BOX_W = 250, TIME_H = 30, ROW_H = 30, PAD = 10;
+    const int32_t BOX_H = 6 + TIME_H + 2 * ROW_H + 8;
+    int32_t bx = x + 16;
+    if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
+    if (bx < plot.x1) bx = plot.x1;
+    const lv_area_t box = {bx, plot.y1 + 4, bx + BOX_W, plot.y1 + 4 + BOX_H};
+    lv_draw_rect_dsc_t bg;
+    lv_draw_rect_dsc_init(&bg);
+    bg.bg_color = COLOR_BG;
+    bg.bg_opa = LV_OPA_90;
+    bg.radius = 10;
+    bg.border_color = COLOR_GRID;
+    bg.border_width = 1;
+    lv_draw_rect(layer, &bg, &box);
+
+    lv_area_t row = {box.x1 + PAD, box.y1 + 6, box.x2 - PAD, box.y1 + 6 + TIME_H};
+    draw_label(layer, row, when, UI_COLOR_TEXT_DIM, LV_TEXT_ALIGN_LEFT,
+               &montserrat_24_latin);
+    row.y1 += TIME_H;
+    row.y2 = row.y1 + ROW_H;
+    draw_label(layer, row, power, COLOR_POWER, LV_TEXT_ALIGN_LEFT,
+               &montserrat_24_latin);
+    row.y1 += ROW_H;
+    row.y2 += ROW_H;
+    draw_label(layer, row, sample_mode_name(s),
+               running_sample(s) ? mode_color(s.mode) : UI_COLOR_TEXT_DIM,
+               LV_TEXT_ALIGN_LEFT, &montserrat_24_latin);
+}
+
+// Electrical draw: an area per pixel column (the tallest sample in it) under
+// a line, broken wherever samples are missing.
+static void draw_power_chart(lv_layer_t* layer, const lv_area_t& coords,
+                             const lv_area_t& plot) {
+    uint32_t peak = 0;
+    for (size_t i = 0; i < state.sample_count; i++) {
+        const auto& s = state.samples[i];
+        if ((s.flags & HISTORY_TELEMETRY_POWER_VALID) && s.average_power_w > peak) {
+            peak = s.average_power_w;
+        }
+    }
+    // Tenths of a kW, so the round steps read 0.5 / 1 / 2 / 5 kW. A little
+    // headroom keeps the peak off the top edge.
+    const ChartAxis axis =
+        chart_axis_nice(0, LV_MAX((int32_t)((peak + peak / 20 + 99) / 100), 10), 5);
+    const int32_t max_w = axis.hi * 100;
+
+    draw_mode_bands(layer, plot);
+    draw_defrost_zones(layer, plot);
+    draw_fault_zones(layer, plot);
+    for (int32_t value = axis.lo; value <= axis.hi; value += axis.step) {
+        const int32_t y = map_y(value * 100, 0, max_w, plot);
+        draw_line(layer, {plot.x1, y}, {plot.x2, y}, COLOR_GRID, 1);
+        char num[12], label[20];
+        format_tenths(num, sizeof(num), (uint32_t)value, false);
+        snprintf(label, sizeof(label), "%s kW", num);
+        lv_area_t label_area = {coords.x1, y - 12, plot.x1 - 8, y + 12};
+        draw_label(layer, label_area, label, UI_COLOR_TEXT_DIM,
+                   LV_TEXT_ALIGN_RIGHT);
+    }
+    draw_time_axis(layer, coords, plot);
+
+    lv_draw_rect_dsc_t fill;
+    lv_draw_rect_dsc_init(&fill);
+    fill.bg_color = COLOR_POWER;
+    fill.bg_opa = LV_OPA_30;
+    bool have_column = false;
+    int32_t col_x = 0, col_top = 0;
+    bool have_previous = false;
+    uint32_t prev_t = 0;
+    lv_point_t prev_p = {0, 0};
+    for (size_t i = 0; i < state.sample_count; i++) {
+        const auto& s = state.samples[i];
+        if (!(s.flags & HISTORY_TELEMETRY_POWER_VALID)) {
+            have_previous = false;
+            continue;
+        }
+        const lv_point_t p = {map_x(s.timestamp, plot),
+                              map_y(s.average_power_w, 0, max_w, plot)};
+        const bool contiguous =
+            have_previous && s.timestamp - prev_t <= CONTIGUOUS_SECONDS;
+        if (have_column && p.x != col_x) {
+            // Fill to the next column only when the samples join up.
+            const int32_t right = contiguous ? p.x - 1 : col_x;
+            const lv_area_t area = {col_x, col_top, LV_MAX(right, col_x), plot.y2};
+            lv_draw_rect(layer, &fill, &area);
+            have_column = false;
+        }
+        if (!have_column) {
+            have_column = true;
+            col_x = p.x;
+            col_top = p.y;
+        } else if (p.y < col_top) {
+            col_top = p.y;
+        }
+        if (contiguous) draw_line(layer, prev_p, p, COLOR_POWER, 3);
+        have_previous = true;
+        prev_t = s.timestamp;
+        prev_p = p;
+    }
+    if (have_column) {
+        const lv_area_t area = {col_x, col_top, col_x, plot.y2};
+        lv_draw_rect(layer, &fill, &area);
+    }
+
+    draw_fault_labels(layer, plot);
+    draw_power_cursor(layer, plot, max_w);
+}
+
 static void chart_draw_cb(lv_event_t* event) {
     lv_obj_t* chart = (lv_obj_t*)lv_event_get_target(event);
     lv_layer_t* layer = lv_event_get_layer(event);
     lv_area_t coords;
     lv_obj_get_coords(chart, &coords);
     const lv_area_t plot = plot_area(chart);
+    if (state.power_view) {
+        draw_power_chart(layer, coords, plot);
+        return;
+    }
 
     int32_t min_value = INT32_MAX;
     int32_t max_value = INT32_MIN;
@@ -556,33 +803,7 @@ static void chart_draw_cb(lv_event_t* event) {
     min_value = deci_c_from_display(axis.lo);
     max_value = deci_c_from_display(axis.hi);
 
-    for (size_t i = 0; i < state.sample_count; i++) {
-        const auto& first = state.samples[i];
-        if (!running_sample(first)) continue;
-        uint32_t band_start = first.timestamp;
-        uint32_t band_end = first.timestamp + HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
-        size_t j = i + 1;
-        while (j < state.sample_count) {
-            const auto& next = state.samples[j];
-            const auto& previous = state.samples[j - 1];
-            if (!running_sample(next) || next.mode != first.mode ||
-                next.timestamp - previous.timestamp > CONTIGUOUS_SECONDS) {
-                break;
-            }
-            band_end = next.timestamp + HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
-            j++;
-        }
-        lv_area_t band = {
-            map_x(band_start, plot), plot.y1,
-            map_x(band_end, plot), plot.y2,
-        };
-        lv_draw_rect_dsc_t band_dsc;
-        lv_draw_rect_dsc_init(&band_dsc);
-        band_dsc.bg_color = mode_color(first.mode);
-        band_dsc.bg_opa = LV_OPA_20;
-        lv_draw_rect(layer, &band_dsc, &band);
-        i = j - 1;
-    }
+    draw_mode_bands(layer, plot);
     draw_defrost_zones(layer, plot);
     draw_fault_zones(layer, plot);
 
@@ -597,52 +818,7 @@ static void chart_draw_cb(lv_event_t* event) {
         draw_label(layer, label_area, label, UI_COLOR_TEXT_DIM,
                    LV_TEXT_ALIGN_RIGHT);
     }
-    // X-axis gridlines/labels are anchored to whole-hour boundaries in local
-    // time (rounded up to the next even-hour multiple) rather than to the
-    // ragged window edges, so the axis always reads in clean hours
-    // (e.g. 08:00, 10:00, 12:00) regardless of the current minute. The data
-    // window itself still ends at "now" so the last 8 hours stay visible.
-    static constexpr int TICK_STEP_HOURS = 2;
-    time_t tick_time;
-    {
-        time_t start = state.window_start;
-        struct tm t0 = {};
-        localtime_r(&start, &t0);
-        if (t0.tm_min != 0 || t0.tm_sec != 0) {
-            t0.tm_hour += 1;
-        }
-        t0.tm_min = 0;
-        t0.tm_sec = 0;
-        // Snap up to the next multiple of TICK_STEP_HOURS for even spacing.
-        t0.tm_hour +=
-            (TICK_STEP_HOURS - (t0.tm_hour % TICK_STEP_HOURS)) % TICK_STEP_HOURS;
-        t0.tm_isdst = -1;
-        tick_time = mktime(&t0);
-    }
-    for (; tick_time > 0 && (uint32_t)tick_time <= state.window_end;
-         tick_time += TICK_STEP_HOURS * 3600) {
-        if ((uint32_t)tick_time < state.window_start) continue;
-        int32_t x = map_x((uint32_t)tick_time, plot);
-        draw_line(layer, {x, plot.y1}, {x, plot.y2}, COLOR_GRID, 1);
-        struct tm local = {};
-        localtime_r(&tick_time, &local);
-        char label[12];
-        if (time_mgr_get_24h_format()) {
-            strftime(label, sizeof(label), "%H:%M", &local);
-        } else {
-            // Ticks are snapped to whole hours above, so the minutes carry no
-            // information in 12-hour form -- "8 AM" rather than "08:00 AM".
-            // That also keeps the label narrower than the 24-hour "08:00", so
-            // adding the suffix cannot make axis labels collide.
-            int hour12 = local.tm_hour % 12;
-            if (hour12 == 0) hour12 = 12;
-            snprintf(label, sizeof(label), "%d %s", hour12,
-                     local.tm_hour < 12 ? "AM" : "PM");
-        }
-        lv_area_t label_area = {x - 40, plot.y2 + 10, x + 40, coords.y2};
-        draw_label(layer, label_area, label, UI_COLOR_TEXT_DIM,
-                   LV_TEXT_ALIGN_CENTER);
-    }
+    draw_time_axis(layer, coords, plot);
 
     struct Series {
         uint8_t valid_flag;
@@ -748,6 +924,18 @@ static void update_navigation() {
     }
 }
 
+static void update_power_label() {
+    if (state.power_label == nullptr) return;
+    char kwh[16];
+    format_tenths(kwh, sizeof(kwh), (state.window_wh + 50) / 100, true);
+    char amount[48];
+    snprintf(amount, sizeof(amount), i18n_get(STR_HISTORY_POWER_WINDOW_FMT), kwh);
+    char text[80];
+    snprintf(text, sizeof(text), "%s \xc2\xb7 %s", i18n_get(STR_HISTORY_VIEW_POWER),
+             amount);
+    lv_label_set_text(state.power_label, text);
+}
+
 static void start_pending_query_if_needed() {
     if (!state.shown || !state.pending_query || state.query_running) return;
     uint32_t end = state.pending_end;
@@ -792,6 +980,18 @@ static void query_complete(void* data) {
             state.interp_outlet = nullptr;
         }
         recompute_interpolation();
+    }
+    {
+        uint64_t joules = 0;
+        for (size_t i = 0; i < state.sample_count; i++) {
+            const auto& s = state.samples[i];
+            if (s.flags & HISTORY_TELEMETRY_POWER_VALID) {
+                joules += (uint64_t)s.average_power_w *
+                          HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+            }
+        }
+        state.window_wh = (uint32_t)((joules + 1800) / 3600);
+        update_power_label();
     }
     if (result->error != ESP_OK) {
         lv_label_set_text(state.status_label,
@@ -922,10 +1122,43 @@ static void latest_cb(lv_event_t*) {
     request_window(state.latest_end);
 }
 
+static void apply_view() {
+    if (state.view_temps_button == nullptr) return;
+    lv_obj_t* buttons[2] = {state.view_temps_button, state.view_power_button};
+    for (int i = 0; i < 2; i++) {
+        const bool on = (i == 1) == state.power_view;
+        lv_obj_set_style_bg_color(buttons[i],
+                                  on ? UI_COLOR_ACCENT : lv_color_hex(0x3d4f6f),
+                                  LV_PART_MAIN);
+        lv_obj_set_style_text_color(lv_obj_get_child(buttons[i], 0),
+                                    on ? lv_color_hex(0x062033) : UI_COLOR_TEXT,
+                                    LV_PART_MAIN);
+    }
+    if (state.power_view) {
+        lv_obj_add_flag(state.legend_lines, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(state.legend_power, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(state.legend_lines, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(state.legend_power, LV_OBJ_FLAG_HIDDEN);
+    }
+    state.cursor = -1;
+    lv_obj_invalidate(state.chart);
+}
+
+static void view_temps_cb(lv_event_t*) {
+    state.power_view = false;
+    apply_view();
+}
+
+static void view_power_cb(lv_event_t*) {
+    state.power_view = true;
+    apply_view();
+}
+
 // Lines get a thin bar swatch, mode bands a filled block, so the two legend
 // rows read like a chart key.
-static void add_legend_item(lv_obj_t* parent, lv_color_t color,
-                            const char* text, bool band) {
+static lv_obj_t* add_legend_item(lv_obj_t* parent, lv_color_t color,
+                                 const char* text, bool band) {
     lv_obj_t* item = lv_obj_create(parent);
     lv_obj_remove_style_all(item);
     lv_obj_set_size(item, LV_SIZE_CONTENT, 34);
@@ -944,6 +1177,7 @@ static void add_legend_item(lv_obj_t* parent, lv_color_t color,
     lv_label_set_text(label, text);
     lv_obj_set_style_text_font(label, &montserrat_24_latin, LV_PART_MAIN);
     lv_obj_set_style_text_color(label, UI_COLOR_TEXT_DIM, LV_PART_MAIN);
+    return label;
 }
 
 lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
@@ -1001,6 +1235,22 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
                                 lv_color_hex(0x062033), LV_PART_MAIN);
     lv_obj_add_flag(state.latest_button, LV_OBJ_FLAG_HIDDEN);
 
+    // Temperatures | Power switch.
+    lv_obj_t* views = lv_obj_create(state.overlay);
+    lv_obj_remove_style_all(views);
+    lv_obj_set_size(views, LV_PCT(100), 52);
+    lv_obj_set_flex_flow(views, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(views, 12, LV_PART_MAIN);
+    lv_obj_clear_flag(views, LV_OBJ_FLAG_SCROLLABLE);
+    state.view_temps_button = create_button(
+        views, i18n_get(STR_HISTORY_VIEW_TEMPS), "history_view_temps",
+        view_temps_cb);
+    state.view_power_button = create_button(
+        views, i18n_get(STR_HISTORY_VIEW_POWER), "history_view_power",
+        view_power_cb);
+    lv_obj_set_height(state.view_temps_button, 52);
+    lv_obj_set_height(state.view_power_button, 52);
+
     // Row 1: plotted lines. Row 2: mode bands.
     auto make_legend_row = [](lv_obj_t* parent) {
         lv_obj_t* row = lv_obj_create(parent);
@@ -1014,10 +1264,15 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
         return row;
     };
     lv_obj_t* legend_lines = make_legend_row(state.overlay);
+    state.legend_lines = legend_lines;
     add_legend_item(legend_lines, COLOR_INLET, i18n_get(STR_HISTORY_INLET), false);
     add_legend_item(legend_lines, COLOR_OUTLET, i18n_get(STR_HISTORY_OUTLET), false);
     add_legend_item(legend_lines, COLOR_SETPOINT,
                     i18n_get(STR_HISTORY_SETPOINT), false);
+    state.legend_power = make_legend_row(state.overlay);
+    state.power_label = add_legend_item(state.legend_power, COLOR_POWER,
+                                        i18n_get(STR_HISTORY_VIEW_POWER), false);
+    lv_obj_set_user_data(state.power_label, (void*)"history_power_total");
     lv_obj_t* legend_modes = make_legend_row(state.overlay);
     lv_obj_set_style_margin_top(legend_modes, -8, LV_PART_MAIN);
     add_legend_item(legend_modes, COLOR_HEATING,
@@ -1095,7 +1350,14 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
         latest = WINDOW_SECONDS;
     }
     state.latest_end = latest;
-    request_window(latest);
+    apply_view();
+    if (state.pending_center != 0) {
+        const uint32_t t = state.pending_center;
+        state.pending_center = 0;
+        request_window(history_window_center(t, WINDOW_SECONDS, 15 * 60, latest));
+    } else {
+        request_window(latest);
+    }
     return state.overlay;
 }
 
@@ -1114,6 +1376,11 @@ void heatpump_history_hide(void) {
     state.forward_hour_button = nullptr;
     state.next_button = nullptr;
     state.latest_button = nullptr;
+    state.view_temps_button = nullptr;
+    state.view_power_button = nullptr;
+    state.legend_lines = nullptr;
+    state.legend_power = nullptr;
+    state.power_label = nullptr;
     state.fault_count = 0;
     state.defrost_count = 0;
     heap_caps_free(state.defrosts);
@@ -1130,4 +1397,13 @@ void heatpump_history_hide(void) {
 
 bool heatpump_history_is_shown(void) {
     return state.shown;
+}
+
+void heatpump_history_open_centered(uint32_t timestamp) {
+    if (state.shown) {
+        request_window(history_window_center(timestamp, WINDOW_SECONDS, 15 * 60,
+                                             state.latest_end));
+    } else {
+        state.pending_center = timestamp;
+    }
 }

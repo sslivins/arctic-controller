@@ -123,6 +123,7 @@ idf_component_register(
         "nav_bar.cpp"
         "tab_shell.cpp"
         "history_tab.cpp"
+        "energy_screen.cpp"
         "lv_mem_psram.c"
         "test_endpoints.cpp"
         "tls_manager.cpp"

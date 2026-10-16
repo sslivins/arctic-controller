@@ -134,7 +134,7 @@ def _return_to_main(device: DeviceClient):
 
     # Status / Control / Events are persistent panels in the tab shell — return
     # to the Home tab via the nav bar (there is no per-panel close button).
-    if current in ("status", "control", "event_log", "history"):
+    if current in ("status", "control", "event_log", "history", "energy"):
         try:
             device.click(tag="nav_home")
         except Exception:

@@ -469,6 +469,10 @@ static void strip_cb(lv_event_t*) {
     history_tab_open(HISTORY_SEG_CYCLES);
 }
 
+static void strip_energy_cb(lv_event_t*) {
+    history_tab_open(HISTORY_SEG_ENERGY);
+}
+
 static void fault_caption_cb(lv_event_t*) {
     event_log_screen_show_problems();
     history_tab_open(HISTORY_SEG_EVENTS);
@@ -1253,6 +1257,11 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
                                             COLOR_TEXT, "--");
         lv_obj_set_user_data(state.strip_value[i], (void*)kStripTags[i]);
     }
+    // Clickable only while it shows today's energy (see the strip update).
+    lv_obj_add_event_cb(state.strip_group[1], strip_energy_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_style_radius(state.strip_group[1], 8, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.strip_group[1], COLOR_PRESSED, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(state.strip_group[1], LV_OPA_COVER, LV_STATE_PRESSED);
     create_label(state.strip, &montserrat_24_latin, COLOR_TEXT_DIM, LV_SYMBOL_RIGHT);
 
     state.created = true;
@@ -1492,6 +1501,7 @@ void heatpump_screen_update(void) {
             many = summary.starts_last_hour >= STARTS_WARN_PER_HOUR;
         }
         set_strip(1, i18n_get(STR_HOME_STARTS), starts, many ? COLOR_WARNING : COLOR_TEXT);
+        lv_obj_remove_flag(state.strip_group[1], LV_OBJ_FLAG_CLICKABLE);
 
         char discharge[16] = "--";
         if (hp.connected) format_temp(discharge, sizeof(discharge), hp.discharge_temp);
@@ -1522,6 +1532,8 @@ void heatpump_screen_update(void) {
                      (unsigned long)((hp.energy_today_wh % 1000) / 100));
         }
         set_strip(1, i18n_get(STR_EVENT_TODAY), energy, COLOR_TEXT);
+        // Today's energy opens the Energy view; the rest of the strip, Cycles.
+        lv_obj_add_flag(state.strip_group[1], LV_OBJ_FLAG_CLICKABLE);
         set_strip(2, nullptr, nullptr, COLOR_TEXT);
     }
 }
