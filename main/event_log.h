@@ -46,6 +46,8 @@ typedef enum {
     EVENT_WATCHDOG_RESET,       // Previous boot was reset by a watchdog
     EVENT_NETWORK_UNREACHABLE,  // Gateway unreachable while WiFi still associated (network-stack wedge)
     EVENT_NETWORK_RECOVERED,    // Network auto-recovery ran (payload: 0=self/keepalive, 1=WiFi bounce, 2=reboot)
+    EVENT_WEB_SERVER_DOWN,      // Web/API servers found down while online (payload: event_web_server_cause_t)
+    EVENT_WEB_SERVER_RECOVERED, // Web/API server recovery ran (payload: event_web_server_recovery_t)
     EVENT_TYPE_COUNT
 } event_type_t;
 
@@ -70,6 +72,21 @@ typedef enum {
     EVENT_NETWORK_RECOVERED_WIFI_BOUNCE = 1, // a WiFi link bounce restored it
     EVENT_NETWORK_RECOVERED_REBOOT = 2,      // gave up and rebooted
 } event_network_recovery_t;
+
+// Why the web/API servers were down, as the EVENT_WEB_SERVER_DOWN payload.
+typedef enum {
+    EVENT_WEB_SERVER_CAUSE_UNKNOWN = 0,      // stopped for an unknown reason
+    EVENT_WEB_SERVER_CAUSE_NO_MEMORY = 1,    // a server task could not get memory
+    EVENT_WEB_SERVER_CAUSE_NO_IDENTITY = 2,  // no TLS certificate for HTTPS
+    EVENT_WEB_SERVER_CAUSE_START_FAILED = 3, // any other startup failure
+    EVENT_WEB_SERVER_CAUSE_TEST = 4,         // injected by a test
+} event_web_server_cause_t;
+
+// How the web/API servers came back, as the EVENT_WEB_SERVER_RECOVERED payload.
+typedef enum {
+    EVENT_WEB_SERVER_RECOVERED_RESTARTED = 0, // restarted in place
+    EVENT_WEB_SERVER_RECOVERED_REBOOT = 1,    // gave up and rebooted
+} event_web_server_recovery_t;
 
 // ============================================================================
 // Event Entry
@@ -202,6 +219,18 @@ const char* event_watchdog_key(uint32_t payload);
  *        ("self", "wifi_bounce", "reboot"), or NULL if unknown.
  */
 const char* event_network_recovery_key(uint32_t payload);
+
+/**
+ * @brief Stable API key for an EVENT_WEB_SERVER_DOWN payload
+ *        ("unknown", "no_memory", "no_identity", "start_failed", "test").
+ */
+const char* event_web_server_cause_key(uint32_t payload);
+
+/**
+ * @brief Stable API key for an EVENT_WEB_SERVER_RECOVERED payload
+ *        ("restarted", "reboot"), or NULL if unknown.
+ */
+const char* event_web_server_recovery_key(uint32_t payload);
 
 #ifdef __cplusplus
 }

@@ -43,6 +43,7 @@
  */
 #include "wifi_supervisor.h"
 #include "wifi_manager.h"
+#include "api_server.h"
 #include "system_restart.h"
 #include "log_persist.h"
 #include "event_log.h"
@@ -51,6 +52,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+#include <esp_attr.h>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
@@ -89,6 +91,135 @@ static const int MAX_BOUNCES     = 2;
 static const uint32_t RECOVER_SELF   = EVENT_NETWORK_RECOVERED_SELF;
 static const uint32_t RECOVER_BOUNCE = EVENT_NETWORK_RECOVERED_WIFI_BOUNCE;
 static const uint32_t RECOVER_REBOOT = EVENT_NETWORK_RECOVERED_REBOOT;
+
+// Web/API server safety net. The servers are started once and kept running
+// across WiFi drops, but if they are ever found down while we hold an IP the
+// device is pingable yet unmanageable (the field failure that needed a power
+// cycle). Restart them in place every check; if that keeps failing, reboot.
+//   - API_BOOT_GRACE_MS: never judge before this uptime unless the servers
+//     have already been healthy once (the boot-time start may be in flight).
+//   - API_DOWN_REBOOT_MS: continuously down this long -> reboot.
+//   - API_MAX_REBOOTS: consecutive safety-net reboots allowed before we stop
+//     rebooting (and just keep retrying in place) so a fault that survives a
+//     reboot cannot boot-loop the controller. Only back-to-back safety-net
+//     reboots count: any other reset (power-on, OTA, crash, user restart) or
+//     API_HEALTHY_RESET_MS of healthy running starts the count again.
+static const int64_t  API_BOOT_GRACE_MS      = 120000;
+static const int      API_RESTART_TIMEOUT_MS = 20000;
+static const int      API_DOWN_REBOOT_MS     = 90000;
+static const int64_t  API_HEALTHY_RESET_MS   = 600000;
+static const uint32_t API_MAX_REBOOTS        = 2;
+static const uint32_t API_REBOOT_MAGIC       = 0x41504952;  // "APIR"
+
+// Survive software resets (not power loss) so the reboot cap spans reboots.
+RTC_NOINIT_ATTR static uint32_t s_api_reboot_magic;
+RTC_NOINIT_ATTR static uint32_t s_api_reboot_count;
+RTC_NOINIT_ATTR static uint32_t s_api_reboot_ours;  // magic if we caused the last reset
+
+static uint32_t web_server_cause(api_start_error_t err) {
+    switch (err) {
+        case API_START_ERR_NO_MEMORY:   return EVENT_WEB_SERVER_CAUSE_NO_MEMORY;
+        case API_START_ERR_NO_IDENTITY: return EVENT_WEB_SERVER_CAUSE_NO_IDENTITY;
+        case API_START_ERR_FAILED:      return EVENT_WEB_SERVER_CAUSE_START_FAILED;
+        case API_START_ERR_INJECTED:    return EVENT_WEB_SERVER_CAUSE_TEST;
+        default:                        return EVENT_WEB_SERVER_CAUSE_UNKNOWN;
+    }
+}
+
+struct ApiWatch {
+    int64_t down_since_us = 0;
+    int64_t healthy_since_us = 0;
+    bool    ever_healthy = false;
+    bool    down_logged = false;
+    bool    budget_note_logged = false;
+    int     attempts = 0;
+};
+
+// One safety-net step; called each check while associated with an IP.
+static void supervise_api_server(ApiWatch& w) {
+    if (api_server_is_shut_down()) {
+        return;  // OTA flashing: a reboot follows
+    }
+    const int64_t now = esp_timer_get_time();
+
+    if (api_server_is_healthy()) {
+        if (w.down_since_us != 0) {
+            // Came back without our restart (e.g. a GOT_IP start finished).
+            event_log_record(EVENT_WEB_SERVER_RECOVERED,
+                             EVENT_WEB_SERVER_RECOVERED_RESTARTED);
+            ESP_LOGW(TAG, "web/API servers healthy again");
+            w.down_since_us = 0;
+        }
+        w.ever_healthy = true;
+        if (w.healthy_since_us == 0) w.healthy_since_us = now;
+        if (s_api_reboot_count != 0 &&
+            (now - w.healthy_since_us) / 1000 >= API_HEALTHY_RESET_MS) {
+            s_api_reboot_count = 0;
+        }
+        return;
+    }
+
+    w.healthy_since_us = 0;
+    if (!w.ever_healthy && now / 1000 < API_BOOT_GRACE_MS) {
+        return;
+    }
+    if (w.down_since_us == 0) {
+        w.down_since_us = now;
+        w.down_logged = false;
+        w.budget_note_logged = false;
+        w.attempts = 0;
+    }
+
+    const api_start_error_t prior = api_server_last_start_error();
+    w.attempts++;
+    ESP_LOGE(TAG, "web/API servers down while online - restart attempt %d "
+             "(internal free=%u largest=%u)", w.attempts,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    const bool ok = wifi_mgr_api_ensure_running(API_RESTART_TIMEOUT_MS);
+
+    if (!w.down_logged) {
+        const api_start_error_t cause = ok ? prior : api_server_last_start_error();
+        event_log_record(EVENT_WEB_SERVER_DOWN, web_server_cause(cause));
+        log_persist_flush_now(LOG_PERSIST_REASON_MANUAL);
+        w.down_logged = true;
+    }
+
+    if (ok) {
+        ESP_LOGW(TAG, "web/API servers restarted after %d attempt(s)", w.attempts);
+        event_log_record(EVENT_WEB_SERVER_RECOVERED,
+                         EVENT_WEB_SERVER_RECOVERED_RESTARTED);
+        w.down_since_us = 0;
+        w.ever_healthy = true;
+        return;
+    }
+
+    const int down_ms = (int)((esp_timer_get_time() - w.down_since_us) / 1000);
+    if (down_ms < API_DOWN_REBOOT_MS) {
+        return;
+    }
+    if (s_api_reboot_magic != API_REBOOT_MAGIC) {
+        s_api_reboot_magic = API_REBOOT_MAGIC;
+        s_api_reboot_count = 0;
+    }
+    if (s_api_reboot_count >= API_MAX_REBOOTS) {
+        if (!w.budget_note_logged) {
+            ESP_LOGE(TAG, "web/API servers still down after %d reboots - not "
+                     "rebooting again, retrying in place", (int)API_MAX_REBOOTS);
+            w.budget_note_logged = true;
+        }
+        return;
+    }
+    s_api_reboot_count++;
+    s_api_reboot_ours = API_REBOOT_MAGIC;
+    ESP_LOGE(TAG, "web/API servers down %ds after %d restart attempts - rebooting "
+             "(%u/%u)", down_ms / 1000, w.attempts, (unsigned)s_api_reboot_count,
+             (unsigned)API_MAX_REBOOTS);
+    event_log_record(EVENT_WEB_SERVER_RECOVERED, EVENT_WEB_SERVER_RECOVERED_REBOOT);
+    log_persist_flush_now(LOG_PERSIST_REASON_MANUAL);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    system_safe_restart();
+}
 
 static SemaphoreHandle_t s_ping_done = nullptr;
 
@@ -174,6 +305,17 @@ static void wifi_supervisor_task(void* param) {
     bool    unreachable_logged   = false;  // recorded EVENT_NETWORK_UNREACHABLE yet
     int     bounces              = 0;      // WiFi bounces performed this outage
     bool    ever_reachable       = false;  // gate: only supervise once first seen up
+    ApiWatch api_watch;
+
+    // The reboot cap lives in RTC no-init RAM: garbage after power loss, and
+    // only meaningful if the reset we are booting from was our own.
+    if (s_api_reboot_magic != API_REBOOT_MAGIC ||
+        s_api_reboot_ours != API_REBOOT_MAGIC ||
+        esp_reset_reason() != ESP_RST_SW) {
+        s_api_reboot_magic = API_REBOOT_MAGIC;
+        s_api_reboot_count = 0;
+    }
+    s_api_reboot_ours = 0;
 
     // Let the initial boot-time connection flow run before supervising.
     vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
@@ -247,6 +389,9 @@ static void wifi_supervisor_task(void* param) {
             vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
             continue;
         }
+
+        // ---- Web/API server safety net ----
+        supervise_api_server(api_watch);
 
         const bool reachable = probe_gateway_reachable();
 

@@ -49,7 +49,7 @@ static constexpr uint32_t REFRESH_MS = 60 * 1000;
 #define COLOR_HEATING   lv_color_hex(0xf97316)
 #define COLOR_COOLING   lv_color_hex(0x3b82f6)
 #define COLOR_HOT_WATER lv_color_hex(0xfbbf24)
-#define COLOR_STANDBY   lv_color_hex(0x737373)
+#define COLOR_STANDBY   lv_color_hex(0x94a3b8)
 #define COLOR_COP       lv_color_hex(0x4ade80)
 #define COLOR_ON_ACCENT lv_color_hex(0x062033)
 
@@ -523,13 +523,21 @@ static void refresh_timer_cb(lv_timer_t*) {
 // Main view: chart
 // ---------------------------------------------------------------------------
 
-static constexpr int32_t COP_STRIP_H = 34;
+static constexpr int32_t COP_STRIP_H = 64;
+static constexpr int32_t COP_GAP = 14;
 static constexpr int32_t AXIS_GUTTER = 64;
 static constexpr int32_t LABEL_H = 36;
 
+// The bars; the estimated-COP strip sits under them, above the date labels,
+// as on the web page.
 static lv_area_t chart_plot(const lv_area_t& coords) {
-    return {coords.x1 + AXIS_GUTTER, coords.y1 + 12 + COP_STRIP_H,
-            coords.x2 - 14, coords.y2 - LABEL_H};
+    // The top margin holds the "kWh" unit above the top tick label.
+    return {coords.x1 + AXIS_GUTTER, coords.y1 + 36, coords.x2 - 14,
+            coords.y2 - LABEL_H - COP_STRIP_H - COP_GAP};
+}
+
+static lv_area_t cop_strip(const lv_area_t& plot) {
+    return {plot.x1, plot.y2 + COP_GAP, plot.x2, plot.y2 + COP_GAP + COP_STRIP_H};
 }
 
 static int32_t slot_x(const lv_area_t& plot, int i) {
@@ -556,6 +564,66 @@ static void draw_hline(lv_layer_t* layer, int32_t x1, int32_t x2, int32_t y) {
     dsc.p1.x = x1; dsc.p1.y = y;
     dsc.p2.x = x2; dsc.p2.y = y;
     lv_draw_line(layer, &dsc);
+}
+
+// Each day's estimated COP as a dot on its own axis, joined across
+// consecutive days.
+static void draw_cop_strip(lv_layer_t* layer, const lv_area_t& coords, const lv_area_t& plot,
+                           const MainData& d) {
+    const lv_area_t strip = cop_strip(plot);
+    int32_t cops[WINDOW_DAYS];
+    int32_t lo = INT32_MAX, hi = INT32_MIN;
+    for (int i = 0; i < WINDOW_DAYS; i++) {
+        const auto& r = d.days[i];
+        cops[i] = r.date != 0 ? cop_x10(thermal_wh(r), covered_wh(r)) : -1;
+        if (cops[i] < 0) continue;
+        lo = LV_MIN(lo, cops[i] / 10);
+        hi = LV_MAX(hi, (cops[i] + 9) / 10);
+    }
+    const int32_t mid = (strip.y1 + strip.y2) / 2;
+    draw_text(layer, {coords.x1 + 4, mid - 10, plot.x1 - 8, mid + 10}, "COP", COLOR_COP);
+    if (lo > hi) {
+        draw_hline(layer, plot.x1, plot.x2, strip.y2);
+        draw_text(layer, {plot.x1, mid - 10, plot.x2, mid + 10},
+                  i18n_get(STR_ENERGY_NO_COP), UI_COLOR_TEXT_DIM);
+        return;
+    }
+    if (hi - lo < 1) hi = lo + 1;
+    auto y_of = [&](int32_t x10) {
+        return strip.y2 - (int32_t)((int64_t)(x10 - lo * 10) * COP_STRIP_H / ((hi - lo) * 10));
+    };
+    for (const int32_t v : {lo, hi}) {
+        const int32_t y = y_of(v * 10);
+        draw_hline(layer, plot.x1, plot.x2, y);
+        char label[8];
+        snprintf(label, sizeof(label), "%ld", (long)v);
+        // The ends sit inside the strip so they don't run into the title.
+        const int32_t ty = v == lo ? y - 18 : y;
+        draw_text(layer, {plot.x1 - 40, ty, plot.x1 - 8, ty + 18}, label, UI_COLOR_TEXT_DIM);
+    }
+
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = COLOR_COP;
+    line.width = 2;
+    line.opa = LV_OPA_60;
+    auto cx = [&](int i) { return (slot_x(plot, i) + slot_x(plot, i + 1)) / 2; };
+    for (int i = 1; i < WINDOW_DAYS; i++) {
+        if (cops[i] < 0 || cops[i - 1] < 0) continue;
+        line.p1.x = cx(i - 1); line.p1.y = y_of(cops[i - 1]);
+        line.p2.x = cx(i);     line.p2.y = y_of(cops[i]);
+        lv_draw_line(layer, &line);
+    }
+    lv_draw_rect_dsc_t dot;
+    lv_draw_rect_dsc_init(&dot);
+    dot.bg_color = COLOR_COP;
+    dot.radius = LV_RADIUS_CIRCLE;
+    for (int i = 0; i < WINDOW_DAYS; i++) {
+        if (cops[i] < 0) continue;
+        const int32_t x = cx(i), y = y_of(cops[i]);
+        const lv_area_t a = {x - 5, y - 5, x + 5, y + 5};
+        lv_draw_rect(layer, &dot, &a);
+    }
 }
 
 static void chart_draw_cb(lv_event_t* event) {
@@ -592,9 +660,8 @@ static void chart_draw_cb(lv_event_t* event) {
         draw_text(layer, {coords.x1 + 4, y - 10, plot.x1 - 8, y + 10}, label,
                   UI_COLOR_TEXT_DIM);
     }
-    draw_text(layer, {coords.x1 + 4, plot.y1 - COP_STRIP_H, plot.x1 - 8, plot.y1 - 8},
-              "COP", COLOR_COP);
-    draw_text(layer, {coords.x1 + 4, plot.y2 + 8, plot.x1 - 8, coords.y2 - 4}, "kWh",
+    const int32_t label_y = cop_strip(plot).y2 + 8;
+    draw_text(layer, {coords.x1 + 4, coords.y1 + 4, plot.x1 - 8, coords.y1 + 24}, "kWh",
               UI_COLOR_TEXT_DIM);
 
     for (int i = 0; i < WINDOW_DAYS; i++) {
@@ -607,16 +674,17 @@ static void chart_draw_cb(lv_event_t* event) {
 
         char label[8];
         snprintf(label, sizeof(label), "%u", (unsigned)(date % 100));
-        draw_text(layer, {x1, plot.y2 + 8, x2, coords.y2 - 4}, label,
+        draw_text(layer, {x1, label_y, x2, coords.y2 - 4}, label,
                   today ? UI_COLOR_ACCENT : UI_COLOR_TEXT_DIM);
         if (r.date == 0) continue;
 
+        // Modes from the bottom, standby and unattributed on top, as on the web.
         struct Part { uint32_t wh; lv_color_t color; };
         const Part parts[] = {
-            {r.elec_wh[energy::BUCKET_STANDBY] + r.elec_unattributed_wh, COLOR_STANDBY},
             {r.elec_wh[energy::BUCKET_HEATING], COLOR_HEATING},
             {r.elec_wh[energy::BUCKET_COOLING], COLOR_COOLING},
             {r.elec_wh[energy::BUCKET_HOT_WATER], COLOR_HOT_WATER},
+            {r.elec_wh[energy::BUCKET_STANDBY] + r.elec_unattributed_wh, COLOR_STANDBY},
         };
         uint32_t base = 0;
         for (const auto& p : parts) {
@@ -641,18 +709,11 @@ static void chart_draw_cb(lv_event_t* event) {
             sel.border_color = UI_COLOR_ACCENT;
             sel.border_width = 2;
             sel.radius = 6;
-            const lv_area_t a = {x1 + 2, plot.y1, x2 - 2, plot.y2};
+            const lv_area_t a = {x1 + 2, plot.y1, x2 - 2, cop_strip(plot).y2 + 4};
             lv_draw_rect(layer, &sel, &a);
         }
-
-        const int32_t cop = cop_x10(thermal_wh(r), covered_wh(r));
-        if (cop >= 0) {
-            char text[12];
-            format_cop(text, sizeof(text), cop);
-            draw_text(layer, {x1 - 4, plot.y1 - COP_STRIP_H, x2 + 4, plot.y1 - 8},
-                      text, COLOR_COP);
-        }
     }
+    draw_cop_strip(layer, coords, plot, d);
 }
 
 static void chart_click_cb(lv_event_t*) {

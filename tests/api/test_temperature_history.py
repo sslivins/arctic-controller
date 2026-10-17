@@ -66,8 +66,9 @@ def test_device_history_is_eight_hour_custom_draw_page():
     assert "NAV_BAR_H + 18" in source
 
     status = (MAIN / "heatpump_temps_screen.cpp").read_text(encoding="utf-8")
-    assert '"temperature_history_open"' in status
-    assert "history_tab_open(HISTORY_SEG_CYCLES)" in status
+    # History is reached from the nav bar; the Status page no longer carries
+    # a duplicate "Cycle History" button.
+    assert '"temperature_history_open"' not in status
 
 
 def test_temperature_history_strings_exist_in_all_languages():

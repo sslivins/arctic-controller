@@ -127,6 +127,8 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_WATCHDOG_RESET:   return STR_EVENT_WATCHDOG_RESET;
         case EVENT_NETWORK_UNREACHABLE: return STR_EVENT_NETWORK_UNREACHABLE;
         case EVENT_NETWORK_RECOVERED:   return STR_EVENT_NETWORK_RECOVERED;
+        case EVENT_WEB_SERVER_DOWN:     return STR_EVENT_WEB_SERVER_DOWN;
+        case EVENT_WEB_SERVER_RECOVERED:return STR_EVENT_WEB_SERVER_RECOVERED;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -157,6 +159,8 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_WATCHDOG_RESET:   return LV_SYMBOL_WARNING;
         case EVENT_NETWORK_UNREACHABLE: return LV_SYMBOL_WIFI;
         case EVENT_NETWORK_RECOVERED:   return LV_SYMBOL_WIFI;
+        case EVENT_WEB_SERVER_DOWN:     return LV_SYMBOL_WARNING;
+        case EVENT_WEB_SERVER_RECOVERED:return LV_SYMBOL_OK;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -171,6 +175,7 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_CONNECTED:
         case EVENT_ERROR_CLEARED:
         case EVENT_NETWORK_RECOVERED:
+        case EVENT_WEB_SERVER_RECOVERED:
             return COLOR_SUCCESS;
         
         case EVENT_ERROR_APPEARED:
@@ -182,6 +187,7 @@ static lv_color_t event_type_color(event_type_t type) {
             return COLOR_ERROR;
         
         case EVENT_NETWORK_UNREACHABLE:
+        case EVENT_WEB_SERVER_DOWN:
             return COLOR_WARNING;
 
         case EVENT_DEFROST_START:
@@ -271,6 +277,25 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
                 default:
                     buf[0] = '\0';
                     break;
+            }
+            break;
+        case EVENT_WEB_SERVER_DOWN: {
+            string_id_t id = STR_EVENT_WEB_SERVER_UNKNOWN;
+            switch (p) {
+                case EVENT_WEB_SERVER_CAUSE_NO_MEMORY:    id = STR_EVENT_WEB_SERVER_NO_MEMORY; break;
+                case EVENT_WEB_SERVER_CAUSE_NO_IDENTITY:  id = STR_EVENT_WEB_SERVER_NO_IDENTITY; break;
+                case EVENT_WEB_SERVER_CAUSE_START_FAILED: id = STR_EVENT_WEB_SERVER_START_FAILED; break;
+                case EVENT_WEB_SERVER_CAUSE_TEST:         id = STR_EVENT_WEB_SERVER_TEST; break;
+                default: break;
+            }
+            snprintf(buf, buf_size, "%s", i18n_get(id));
+            break;
+        }
+        case EVENT_WEB_SERVER_RECOVERED:
+            if (p == EVENT_WEB_SERVER_RECOVERED_REBOOT) {
+                snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_NETWORK_RECOVERED_REBOOT));
+            } else {
+                snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_WEB_SERVER_RESTARTED));
             }
             break;
         default:

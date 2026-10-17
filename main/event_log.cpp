@@ -70,6 +70,8 @@ static const char* s_event_names[] = {
     "watchdog_reset",
     "network_unreachable",
     "network_recovered",
+    "web_server_down",
+    "web_server_recovered",
 };
 
 static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
@@ -306,6 +308,8 @@ event_category_t event_type_category(event_type_t type) {
         case EVENT_WATCHDOG_RESET:
         case EVENT_NETWORK_UNREACHABLE:
         case EVENT_NETWORK_RECOVERED:
+        case EVENT_WEB_SERVER_DOWN:
+        case EVENT_WEB_SERVER_RECOVERED:
             return EVENT_CATEGORY_PROBLEMS;
 
         case EVENT_COMPRESSOR_ON:
@@ -365,5 +369,23 @@ const char* event_network_recovery_key(uint32_t payload) {
         case EVENT_NETWORK_RECOVERED_WIFI_BOUNCE: return "wifi_bounce";
         case EVENT_NETWORK_RECOVERED_REBOOT:      return "reboot";
         default:                                  return NULL;
+    }
+}
+
+const char* event_web_server_cause_key(uint32_t payload) {
+    switch (payload) {
+        case EVENT_WEB_SERVER_CAUSE_NO_MEMORY:    return "no_memory";
+        case EVENT_WEB_SERVER_CAUSE_NO_IDENTITY:  return "no_identity";
+        case EVENT_WEB_SERVER_CAUSE_START_FAILED: return "start_failed";
+        case EVENT_WEB_SERVER_CAUSE_TEST:         return "test";
+        default:                                  return "unknown";
+    }
+}
+
+const char* event_web_server_recovery_key(uint32_t payload) {
+    switch (payload) {
+        case EVENT_WEB_SERVER_RECOVERED_RESTARTED: return "restarted";
+        case EVENT_WEB_SERVER_RECOVERED_REBOOT:    return "reboot";
+        default:                                   return NULL;
     }
 }

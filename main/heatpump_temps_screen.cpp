@@ -8,7 +8,6 @@
 #include "heatpump_temps_screen.h"
 #include "nav_bar.h"
 #include "heatpump_controller.h"
-#include "history_tab.h"
 #include "ui_common.h"
 #include "fonts/fonts.h"
 #include "app_preferences.h"
@@ -119,35 +118,6 @@ static lv_obj_t* create_section_header(lv_obj_t* parent, const char* title) {
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID, 0, 0);
 
     return header;
-}
-
-static void history_btn_cb(lv_event_t*) {
-    history_tab_open(HISTORY_SEG_CYCLES);
-}
-
-static lv_obj_t* create_history_row(lv_obj_t* parent) {
-    lv_obj_t* button = lv_button_create(parent);
-    lv_obj_set_size(button, LV_PCT(100), 78);
-    lv_obj_set_style_bg_color(button, COLOR_CARD_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(button, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(button, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_radius(button, 12, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(button, 24, LV_PART_MAIN);
-    lv_obj_set_user_data(button, (void*)"temperature_history_open");
-    lv_obj_add_event_cb(button, history_btn_cb, LV_EVENT_CLICKED, nullptr);
-
-    lv_obj_t* label = lv_label_create(button);
-    lv_label_set_text(label, i18n_get(STR_HISTORY_OPEN));
-    lv_obj_set_style_text_font(label, UI_FONT_SMALL, LV_PART_MAIN);
-    lv_obj_set_style_text_color(label, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_align(label, LV_ALIGN_LEFT_MID, 0, 0);
-
-    lv_obj_t* arrow = lv_label_create(button);
-    lv_label_set_text(arrow, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_font(arrow, UI_FONT_ICON, LV_PART_MAIN);
-    lv_obj_set_style_text_color(arrow, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_align(arrow, LV_ALIGN_RIGHT_MID, 0, 0);
-    return button;
 }
 
 static lv_obj_t* create_reading_row(lv_obj_t* parent, const char* label, lv_obj_t** value_label_out) {
@@ -353,7 +323,6 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
     
     // ===== Temperatures section =====
     create_section_header(content, i18n_get(STR_HP_TEMPERATURES));
-    create_history_row(content);
 
     // Temperature rows - Water temperatures first
     create_temp_row(content, i18n_get(STR_HP_WATER_TANK), &state.tank_temp);

@@ -114,7 +114,7 @@ class TestEnergyPage:
         assert page.locator(".en-chart .en-bar").count() >= 30
         assert page.locator(".en-chart .en-cop").count() == 30
         expect(page.locator(".en-stat", has_text="Electricity")).to_contain_text("kWh")
-        expect(page.locator(".en-stat", has_text="Est. COP")).to_contain_text("2.")
+        expect(page.locator(".en-stat", has_text="COP (est.)")).to_contain_text("2.")
         assert page_errors == []
 
     def test_live_range_lets_the_controller_pick_today(self, mocked_energy: Page):

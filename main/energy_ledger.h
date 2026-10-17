@@ -67,7 +67,22 @@ struct Day {
     uint32_t date = 0;        // YYYYMMDD
     int64_t start_s = 0;      // epoch of local midnight
     int16_t utc_offset_min = 0;
+    int64_t end_s = 0;        // epoch of the next local midnight; 0 = start_s + 24 h
 };
+
+inline int64_t day_end(const Day& d) { return d.end_s ? d.end_s : d.start_s + 86400; }
+
+// Days since 1970-01-01 for a YYYYMMDD date (proleptic Gregorian).
+inline int64_t days_from_date(uint32_t date) {
+    int64_t y = date / 10000;
+    const int64_t m = date / 100 % 100, d = date % 100;
+    y -= m <= 2;
+    const int64_t era = (y >= 0 ? y : y - 399) / 400;
+    const int64_t yoe = y - era * 400;
+    const int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
 
 enum : uint8_t {
     DAY_MIXED_SETTINGS = 1 << 0,  // flow / glycol changed during the day
@@ -183,6 +198,13 @@ public:
 
     // Feed one reading. Returns true when it closed the previous day; that
     // day's record is then available from take_finished() until the next add().
+    //
+    // A day is the span of real time from its local midnight to the next one,
+    // fixed when it opens. A timezone change doesn't move the clock, so it
+    // neither closes the open day early nor leaves a gap: a shift east keeps
+    // booking to the open day until its own midnight, and a shift west (local
+    // date now behind the open day) lets the open day run on to the next local
+    // midnight rather than reopening a closed date.
     bool add(int64_t now_s, const Day& day, const Input& in) {
         has_finished_ = false;
         if (!open_) {
@@ -190,23 +212,28 @@ public:
             set_reference(now_s, in);
             return false;
         }
-        if (day.date < cur_.date) {
-            // The clock went back past midnight: never reopen a closed day.
-            // Drop the reference so nothing is booked until it's caught up.
+        if (!span_exact_ && day.date == cur_.date) set_span(day);
+        if (now_s < start_s_) {
+            // The clock went back past the open day's midnight: never reopen
+            // a closed day. Drop the reference so nothing is booked until it's
+            // caught up.
             has_prev_ = false;
             return false;
         }
+        if (now_s >= end_s_ && day.date <= cur_.date) end_s_ = day_end(day);
+        const bool day_over = now_s >= end_s_;
         if (!has_prev_ || now_s < prev_s_) {
             set_reference(now_s, in);
-            if (day.date != cur_.date) close_and_open(day);
+            if (day_over) close_and_open(day);
             return has_finished_;
         }
         const int64_t dt = now_s - prev_s_;
         const bool in_step = dt <= kMaxStepSeconds;
-        if (day.date != cur_.date) {
-            if (in_step && prev_s_ < day.start_s) book(prev_s_, day.start_s, prev_);
+        if (day_over) {
+            const int64_t boundary = end_s_;
+            if (in_step && prev_s_ < boundary) book(prev_s_, boundary, prev_);
             close_and_open(day);
-            if (in_step) book(prev_s_ > day.start_s ? prev_s_ : day.start_s, now_s, prev_);
+            if (in_step) book(prev_s_ > boundary ? prev_s_ : boundary, now_s, prev_);
         } else if (in_step) {
             book(prev_s_, now_s, prev_);
         }
@@ -230,6 +257,11 @@ public:
         has_prev_ = false;
         saved_ = a;
         has_saved_ = true;
+        // The checkpoint doesn't keep the span: estimate it from the date and
+        // offset until a reading on the same date gives the exact one.
+        start_s_ = days_from_date(a.date) * 86400 - (int64_t)a.utc_offset_min * 60;
+        end_s_ = start_s_ + 86400;
+        span_exact_ = false;
     }
 
     // Electrical energy the firmware integrated before the ledger existed.
@@ -270,6 +302,13 @@ private:
         cur_.date = day.date;
         cur_.utc_offset_min = day.utc_offset_min;
         open_ = true;
+        set_span(day);
+    }
+
+    void set_span(const Day& day) {
+        start_s_ = day.start_s;
+        end_s_ = day_end(day);
+        span_exact_ = true;
     }
 
     void close_and_open(const Day& day) {
@@ -337,6 +376,9 @@ private:
 
     DayAccum cur_{};
     bool open_ = false;
+    int64_t start_s_ = 0;  // the open day's span of real time
+    int64_t end_s_ = 0;
+    bool span_exact_ = false;
     Input prev_{};
     int64_t prev_s_ = 0;
     bool has_prev_ = false;
