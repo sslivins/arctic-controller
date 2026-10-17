@@ -168,6 +168,78 @@ static void clock_going_back_never_reopens_a_day() {
     CHECK_EQ_L(l.today().elec_wh[BUCKET_STANDBY], 130);
 }
 
+static void timezone_change_keeps_the_open_day() {
+    // East: the local date jumps ahead mid-day (PST -> JST, 13:00 -> 06:00
+    // the next day). The open day keeps booking until its own midnight, and
+    // the switch back doesn't drop anything either.
+    const int64_t noon = MIDNIGHT + 13 * 3600;
+    const Day DAY2_JST{20270116, MIDNIGHT + 7 * 3600, 540};
+    EnergyLedger l;
+    feed(l, DAY1, noon, 100, standby(3600));
+    DayRecord fin{};
+    CHECK_EQ_L(l.add(noon + 101, DAY2_JST, standby(3600)), 0);
+    feed(l, DAY2_JST, noon + 102, 98, standby(3600));
+    CHECK_EQ_L(l.today().date, 20270115);
+    feed(l, DAY1, noon + 201, 99, standby(3600));
+    CHECK_EQ_L(l.today().date, 20270115);
+    CHECK_EQ_L(l.today().elec_wh[BUCKET_STANDBY], 300);
+    // Still on JST at the open day's midnight: it closes there and the next
+    // day is keyed by the local date in force.
+    l.add(DAY2.start_s - 30, DAY2_JST, standby(3600));
+    CHECK_EQ_L(l.add(DAY2.start_s + 30, DAY2_JST, standby(3600)), 1);
+    CHECK_EQ_L(l.take_finished(&fin), 1);
+    CHECK_EQ_L(fin.date, 20270115);
+    CHECK_EQ_L(l.today().date, 20270116);
+    CHECK_EQ_L(l.today().elec_wh[BUCKET_STANDBY], 30);
+
+    // West: the local date falls behind the open day (UTC -> PST just after
+    // UTC midnight). The open day runs on to the next local midnight instead
+    // of a closed date being reopened or the time going unbooked.
+    const Day UTC_D2{20270116, MIDNIGHT + 16 * 3600, 0};  // 2027-01-16 00:00 UTC
+    EnergyLedger w;
+    const int64_t t0 = UTC_D2.start_s + 3600;            // 17:00 PST on the 15th
+    feed(w, UTC_D2, t0, 100, standby(3600));
+    CHECK_EQ_L(w.add(t0 + 101, DAY1, standby(3600)), 0);
+    feed(w, DAY1, t0 + 102, 98, standby(3600));
+    CHECK_EQ_L(w.today().date, 20270116);
+    CHECK_EQ_L(w.today().elec_wh[BUCKET_STANDBY], 200);
+    // Past the UTC day's end, still the 16th locally: no close.
+    const int64_t utc_end = UTC_D2.start_s + 86400;      // 16:00 PST on the 16th
+    feed(w, DAY2, utc_end - 50, 100, standby(3600));
+    CHECK_EQ_L(w.today().date, 20270116);
+    // Closes at local midnight.
+    w.add(DAY3.start_s - 30, DAY2, standby(3600));
+    CHECK_EQ_L(w.add(DAY3.start_s + 30, DAY3, standby(3600)), 1);
+    CHECK_EQ_L(w.take_finished(&fin), 1);
+    CHECK_EQ_L(fin.date, 20270116);
+    CHECK_EQ_L(w.today().date, 20270117);
+}
+
+static void restored_day_span() {
+    // The span is estimated from the checkpoint's date and offset: DAY1 is
+    // 2027-01-15 at UTC-8, i.e. MIDNIGHT.
+    CHECK_EQ_L(days_from_date(19700101), 0);
+    CHECK_EQ_L(days_from_date(20270115) * 86400 + 480 * 60, MIDNIGHT);
+    EnergyLedger first;
+    feed(first, DAY1, MIDNIGHT + 100, 100, standby(3600));
+    const DayAccum saved = first.accum();
+
+    // Restored, then a reading already on another (east) date before the
+    // estimated end: kept open.
+    EnergyLedger r;
+    r.restore(saved);
+    const Day DAY2_JST{20270116, MIDNIGHT + 7 * 3600, 540};
+    CHECK_EQ_L(r.add(MIDNIGHT + 20 * 3600, DAY2_JST, standby(3600)), 0);
+    r.add(MIDNIGHT + 20 * 3600 + 10, DAY2_JST, standby(3600));
+    CHECK_EQ_L(r.today().date, 20270115);
+    CHECK_EQ_L(r.today().elec_wh[BUCKET_STANDBY], 110);
+    // Before the estimated start: the clock went back.
+    EnergyLedger b;
+    b.restore(saved);
+    CHECK_EQ_L(b.add(MIDNIGHT - 10, DAY1, standby(3600)), 0);
+    CHECK_EQ_L(b.today().date, 20270115);
+}
+
 static void restore_continues_or_closes() {
     EnergyLedger first;
     feed(first, DAY1, MIDNIGHT + 100, 100, standby(3600));
@@ -344,6 +416,8 @@ int main() {
     gaps_and_disconnects_are_not_booked();
     splits_at_midnight();
     clock_going_back_never_reopens_a_day();
+    timezone_change_keeps_the_open_day();
+    restored_day_span();
     restore_continues_or_closes();
     save_schedule();
     thermal_only_counts_the_expected_direction();

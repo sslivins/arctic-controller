@@ -3,17 +3,19 @@
 from device_client import DeviceClient
 
 
-def _open_status(device: DeviceClient) -> None:
-    device.click(tag="nav_status")
-    device.wait_for_widget(tag="temperature_history_open")
+def _open_cycles(device: DeviceClient) -> None:
+    """Open the History tab on its Cycles segment (the tab remembers the last
+    segment, so select it explicitly)."""
+    device.click(tag="nav_history")
+    device.wait_for_widget(tag="history_seg_cycles")
+    device.click(tag="history_seg_cycles")
 
 
 def test_temperature_history_page_and_navigation(device: DeviceClient):
     fixture = device.populate_temperature_history()
     assert fixture["samples"] == 960
 
-    _open_status(device)
-    device.click(tag="temperature_history_open")
+    _open_cycles(device)
     device.wait_for_widget(tag="temperature_history_screen")
     assert device.wait_for_screen("history", timeout=5.0)
     device.wait_for_widget(tag="temperature_history_previous")
@@ -97,8 +99,7 @@ def test_history_tab_switches_segments_and_remembers_last(device: DeviceClient):
 def test_history_tab_rebuilds_chart_after_display_off(device: DeviceClient):
     """Display-off returns home from the History tab; reopening History must
     rebuild the chart rather than show an empty Cycles segment."""
-    _open_status(device)
-    device.click(tag="temperature_history_open")
+    _open_cycles(device)
     device.wait_for_widget(tag="temperature_history_screen")
 
     off = device.set_display_idle("off")

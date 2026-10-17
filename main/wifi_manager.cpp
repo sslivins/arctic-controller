@@ -15,6 +15,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
+#include <freertos/idf_additions.h>
+#include <esp_heap_caps.h>
 #include <bsp/m5stack_tab5.h>
 #include <esp_hosted.h>
 
@@ -59,7 +61,10 @@ static struct {
 
 } wifi_state = {};
 
-static TaskHandle_t api_start_task_handle = NULL;
+static TaskHandle_t s_api_svc_task = NULL;
+static std::atomic<uint32_t> s_api_req_gen{0};
+static std::atomic<uint32_t> s_api_done_gen{0};
+static std::atomic<bool> s_api_last_ok{false};
 
 // Forward declarations
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
@@ -67,18 +72,80 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 static void ip_event_handler(void* arg, esp_event_base_t event_base,
                              int32_t event_id, void* event_data);
 static void notify_state_change(wifi_mgr_state_t new_state);
-static void api_start_task(void* arg);
 
-static void api_start_task(void* arg)
+// Single owner of server (re)starts: GOT_IP and the supervisor's safety net
+// both just post a request here, so two starts can never run concurrently.
+//
+// The task lives for the whole boot and is created at init, while the heap is
+// unfragmented. Its stack is in PSRAM: a start only builds configs, creates
+// the httpd tasks and registers routes (no NVS or flash access, measured peak
+// ~6 KB), so it must not take a large INTERNAL block -- that is exactly what
+// the httpd stacks it is about to create need.
+static void api_service_task(void* arg)
 {
     (void)arg;
-    const bool mdns_started = api_server_init_mdns();
-    const bool api_started = mdns_started && api_server_start();
-    if (!api_started) {
-        ESP_LOGE(TAG, "API server startup failed");
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const uint32_t gen = s_api_req_gen.load();
+        bool ok = false;
+        if (wifi_state.current_ip[0] != '\0' && !api_server_is_shut_down()) {
+            // mDNS is best effort: a failure must never keep the API down.
+            if (!api_server_init_mdns()) {
+                ESP_LOGW(TAG, "mDNS unavailable; starting API server anyway");
+            }
+            ok = api_server_ensure_running();
+            if (!ok) {
+                ESP_LOGE(TAG, "API server startup failed");
+            }
+        }
+        s_api_last_ok.store(ok);
+        s_api_done_gen.store(gen);
     }
-    api_start_task_handle = NULL;
-    vTaskDelete(NULL);
+}
+
+void wifi_mgr_request_api_start(void)
+{
+    if (s_api_svc_task == NULL) {
+        return;
+    }
+    s_api_req_gen.fetch_add(1);
+    xTaskNotifyGive(s_api_svc_task);
+}
+
+bool wifi_mgr_api_ensure_running(uint32_t timeout_ms)
+{
+    if (s_api_svc_task == NULL) {
+        return false;
+    }
+    const uint32_t gen = s_api_req_gen.fetch_add(1) + 1;
+    xTaskNotifyGive(s_api_svc_task);
+    const TickType_t step = pdMS_TO_TICKS(100);
+    for (uint32_t waited = 0; waited < timeout_ms; waited += 100) {
+        if ((int32_t)(s_api_done_gen.load() - gen) >= 0) {
+            return s_api_last_ok.load();
+        }
+        vTaskDelay(step);
+    }
+    return false;
+}
+
+static void start_api_service_task(void)
+{
+    if (s_api_svc_task != NULL) {
+        return;
+    }
+    if (xTaskCreatePinnedToCoreWithCaps(
+            api_service_task, "api_svc", 12288, NULL, 5, &s_api_svc_task,
+            tskNO_AFFINITY, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS) {
+        return;
+    }
+    s_api_svc_task = NULL;
+    ESP_LOGE(TAG, "PSRAM API service task failed; falling back to internal RAM");
+    if (xTaskCreate(api_service_task, "api_svc", 8192, NULL, 5,
+                    &s_api_svc_task) != pdPASS) {
+        s_api_svc_task = NULL;
+        ESP_LOGE(TAG, "Failed to create API service task");
+    }
 }
 
 // ============================================================================
@@ -216,6 +283,7 @@ bool wifi_mgr_init(void)
 
     wifi_state.initialized = true;
     wifi_state.state = WIFI_MGR_STATE_DISCONNECTED;
+    start_api_service_task();
     
     ESP_LOGI(TAG, "WiFi manager initialized successfully");
     return true;
@@ -432,8 +500,13 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             s_last_disconnect_reason.store(event->reason);
             wifi_state.current_ip[0] = '\0';
             
-            // Stop REST API server on disconnect
-            api_server_stop();
+            // Deliberately do NOT stop the servers here. Their listening
+            // sockets are bound to INADDR_ANY and survive the link going down
+            // and coming back (even on a new address); lwIP aborts only the
+            // established connections when the netif goes down. Stopping them
+            // used to free their stacks, and on reconnect the 16 KB internal
+            // blocks were often gone -> start failed -> device unreachable
+            // until power-cycled.
             
             xEventGroupSetBits(wifi_state.event_group, WIFI_FAIL_BIT);
             notify_state_change(WIFI_MGR_STATE_DISCONNECTED);
@@ -506,16 +579,8 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
         
         // Route registration is intentionally kept off the system event task:
         // WebSocket-enabled URI descriptors make the startup frame too large
-        // for that shared infrastructure stack.
-        if (!api_server_is_running() && api_start_task_handle == NULL) {
-            const BaseType_t created = xTaskCreate(
-                api_start_task, "api_start", 16384, NULL, 5,
-                &api_start_task_handle);
-            if (created != pdPASS) {
-                api_start_task_handle = NULL;
-                ESP_LOGE(TAG, "Failed to create API startup task");
-            }
-        }
+        // for that shared infrastructure stack. No-op if already healthy.
+        wifi_mgr_request_api_start();
         
         xEventGroupSetBits(wifi_state.event_group, WIFI_CONNECTED_BIT);
         notify_state_change(WIFI_MGR_STATE_CONNECTED);

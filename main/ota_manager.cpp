@@ -647,7 +647,7 @@ static void ota_task(void* pvParameter)
     // servers and mDNS, then let any queued RX drain briefly.
     ESP_LOGI(TAG, "Quiescing network before flashing (stopping servers + mDNS)...");
     macon_master::begin_shutdown();  // every path below ends in a reboot
-    api_server_stop();
+    api_server_shutdown();
     mdns_free();
     vTaskDelay(pdMS_TO_TICKS(500));
 

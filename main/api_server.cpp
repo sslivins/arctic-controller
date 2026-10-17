@@ -90,7 +90,39 @@ static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — when TLS certs
 static httpd_handle_t server_integration = NULL;  // HA HTTPS/WSS (port 8443)
 #ifdef CONFIG_TEST_ENDPOINTS
 static httpd_handle_t websocket_test_server = NULL;  // WS feasibility (port 81)
+static int s_test_fail_starts = 0;
 #endif
+
+// Server lifecycle. Every start/stop goes through one recursive lock (the
+// start path rolls back via api_server_stop()), so the GOT_IP start, the WiFi
+// supervisor's recovery and OTA can never interleave. s_started is set only
+// after every route is registered, so "running" never means "half started".
+static volatile bool s_started = false;
+static volatile bool s_shut_down = false;
+static volatile api_start_error_t s_last_start_error = API_START_ERR_NONE;
+static bool s_mdns_ready = false;
+static bool s_mdns_ha_added = false;
+
+static SemaphoreHandle_t lifecycle_mutex(void)
+{
+    static StaticSemaphore_t buf;
+    static SemaphoreHandle_t m = xSemaphoreCreateRecursiveMutexStatic(&buf);
+    return m;
+}
+
+namespace {
+struct LifecycleLock {
+    LifecycleLock() { xSemaphoreTakeRecursive(lifecycle_mutex(), portMAX_DELAY); }
+    ~LifecycleLock() { xSemaphoreGiveRecursive(lifecycle_mutex()); }
+};
+}  // namespace
+
+static api_start_error_t start_error_from(esp_err_t err)
+{
+    return err == ESP_ERR_HTTPD_TASK || err == ESP_ERR_NO_MEM
+        ? API_START_ERR_NO_MEMORY
+        : API_START_ERR_FAILED;
+}
 
 // Embedded web files (from EMBED_FILES) - gzip compressed
 extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
@@ -371,6 +403,9 @@ static void clear_session_cookie(httpd_req_t* req)
 
 bool api_server_init_mdns(void)
 {
+    if (s_mdns_ready) {
+        return true;
+    }
     ESP_LOGI(TAG, "Initializing mDNS...");
     
     esp_err_t err = mdns_init();
@@ -435,6 +470,7 @@ bool api_server_init_mdns(void)
     }
     
     ESP_LOGI(TAG, "mDNS initialized: %s.local", hostname);
+    s_mdns_ready = true;
     return true;
 }
 
@@ -447,13 +483,51 @@ const char* api_server_get_hostname(void)
 // HTTP Server
 // ============================================================================
 
+static bool api_server_start_locked(void);
+
 bool api_server_start(void)
 {
-    if (server != NULL) {
+    LifecycleLock lock;
+    if (s_shut_down) {
+        ESP_LOGW(TAG, "Server start refused: shut down for reboot");
+        return false;
+    }
+    if (s_started) {
         ESP_LOGW(TAG, "Server already running");
         return true;
     }
-    
+    if (server != NULL || server_ssl != NULL || server_integration != NULL) {
+        ESP_LOGW(TAG, "Tearing down a partially started server before restart");
+        api_server_stop();
+    }
+#ifdef CONFIG_TEST_ENDPOINTS
+    if (s_test_fail_starts > 0) {
+        s_test_fail_starts--;
+        s_last_start_error = API_START_ERR_INJECTED;
+        ESP_LOGE(TAG, "Server start failed (test injection, %d more queued)",
+                 s_test_fail_starts);
+        return false;
+    }
+#endif
+    s_last_start_error = API_START_ERR_FAILED;
+    if (!api_server_start_locked()) {
+        if (server != NULL || server_ssl != NULL) {
+            api_server_stop();
+        }
+        return false;
+    }
+    if (server_integration == NULL && tls_mgr_has_identity()) {
+        // Degraded: keep the cause the 8443 start recorded.
+        ESP_LOGW(TAG, "Started without the Home Assistant server (8443)");
+    } else {
+        s_last_start_error = API_START_ERR_NONE;
+    }
+    s_started = true;
+    return true;
+}
+
+static bool api_server_start_locked(void)
+{
     // Common httpd config values
     if (!arctic::ha::init()) {
         ESP_LOGE(TAG, "Failed to initialize Home Assistant state foundation");
@@ -535,6 +609,8 @@ bool api_server_start(void)
         ret = httpd_start(&server, &http_config);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
+            s_last_start_error = start_error_from(ret);
+            server = NULL;
             return false;
         }
     }
@@ -615,11 +691,13 @@ bool api_server_start(void)
                 (unsigned)heap_caps_get_largest_free_block(
                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                 stack_size);
+            s_last_start_error = start_error_from(ret);
             api_server_stop();
             return false;
         }
     } else {
         ESP_LOGE(TAG, "No TLS identity available for mandatory HTTPS");
+        s_last_start_error = API_START_ERR_NO_IDENTITY;
         api_server_stop();
         return false;
     }
@@ -678,6 +756,7 @@ bool api_server_start(void)
                 (unsigned)heap_caps_get_largest_free_block(
                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                 integration_config.httpd.stack_size);
+            s_last_start_error = start_error_from(ret);
         } else {
             ESP_LOGI(TAG, "Integration HTTPS server started on port 8443");
         }
@@ -1465,6 +1544,8 @@ bool api_server_start(void)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start isolated WebSocket test server: %s",
                  esp_err_to_name(ret));
+        s_last_start_error = start_error_from(ret);
+        websocket_test_server = NULL;
         api_server_stop();
         return false;
     }
@@ -1674,19 +1755,24 @@ bool api_server_start(void)
     if (server_integration != NULL) {
         ESP_LOGI(TAG, "Home Assistant REST foundation enabled");
 
-        mdns_txt_item_t integration_txt[] = {
-            {"device", "arctic-controller"},
-            {"id", arctic::ha::deviceId()},
-            {"version", "1"},
-            {"tls", "1"},
-            {"push", "1"},
-        };
-        ret = mdns_service_add(
-            "Arctic Home Assistant", "_arctic", "_tcp", 8443,
-            integration_txt, sizeof(integration_txt) / sizeof(integration_txt[0]));
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "HA mDNS service add failed: %s",
-                     esp_err_to_name(ret));
+        if (s_mdns_ready && !s_mdns_ha_added) {
+            mdns_txt_item_t integration_txt[] = {
+                {"device", "arctic-controller"},
+                {"id", arctic::ha::deviceId()},
+                {"version", "1"},
+                {"tls", "1"},
+                {"push", "1"},
+            };
+            ret = mdns_service_add(
+                "Arctic Home Assistant", "_arctic", "_tcp", 8443,
+                integration_txt,
+                sizeof(integration_txt) / sizeof(integration_txt[0]));
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "HA mDNS service add failed: %s",
+                         esp_err_to_name(ret));
+            } else {
+                s_mdns_ha_added = true;
+            }
         }
     } else {
         ESP_LOGE(TAG, "Home Assistant REST disabled: no identity server");
@@ -1776,6 +1862,8 @@ bool api_server_start(void)
 
 void api_server_stop(void)
 {
+    LifecycleLock lock;
+    s_started = false;
 #ifdef CONFIG_TEST_ENDPOINTS
     if (websocket_test_server != NULL) {
         ESP_LOGI(TAG, "Stopping WebSocket feasibility server...");
@@ -1804,7 +1892,61 @@ void api_server_stop(void)
 
 bool api_server_is_running(void)
 {
-    return server != NULL;
+    return s_started && server != NULL && server_ssl != NULL;
+}
+
+bool api_server_is_healthy(void)
+{
+    if (!api_server_is_running()) {
+        return false;
+    }
+    return server_integration != NULL || !tls_mgr_has_identity();
+}
+
+void api_server_shutdown(void)
+{
+    LifecycleLock lock;
+    s_shut_down = true;
+    api_server_stop();
+    // The caller frees mDNS next; forget it so nothing reuses stale state.
+    s_mdns_ready = false;
+    s_mdns_ha_added = false;
+}
+
+bool api_server_is_shut_down(void)
+{
+    return s_shut_down;
+}
+
+bool api_server_ensure_running(void)
+{
+    LifecycleLock lock;
+    if (s_shut_down) {
+        return false;
+    }
+    if (api_server_is_healthy()) {
+        return true;
+    }
+    if (s_started) {
+        ESP_LOGW(TAG, "Server degraded (8443 missing) - restarting all servers");
+        api_server_stop();
+    }
+    return api_server_start() && api_server_is_healthy();
+}
+
+api_start_error_t api_server_last_start_error(void)
+{
+    return s_last_start_error;
+}
+
+void api_server_test_fail_starts(int count)
+{
+#ifdef CONFIG_TEST_ENDPOINTS
+    LifecycleLock lock;
+    s_test_fail_starts = count < 0 ? 0 : count;
+#else
+    (void)count;
+#endif
 }
 
 // ============================================================================
@@ -6842,6 +6984,15 @@ static void add_event_details(cJSON* evt, const event_entry_t& e)
             break;
         case EVENT_NETWORK_RECOVERED: {
             const char* key = event_network_recovery_key(p);
+            if (key) cJSON_AddStringToObject(evt, "recovery", key);
+            else cJSON_AddNullToObject(evt, "recovery");
+            break;
+        }
+        case EVENT_WEB_SERVER_DOWN:
+            cJSON_AddStringToObject(evt, "cause", event_web_server_cause_key(p));
+            break;
+        case EVENT_WEB_SERVER_RECOVERED: {
+            const char* key = event_web_server_recovery_key(p);
             if (key) cJSON_AddStringToObject(evt, "recovery", key);
             else cJSON_AddNullToObject(evt, "recovery");
             break;

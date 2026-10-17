@@ -5443,6 +5443,8 @@ components:
           - watchdog_reset
           - network_unreachable
           - network_recovered
+          - web_server_down
+          - web_server_recovered
           example: power_on
         category:
           type: string
@@ -5469,6 +5471,8 @@ components:
             - `error_appeared` / `error_cleared`: opaque fault site id
             - `watchdog_reset`: `(rom_reset_code << 8) | reason`, where `reason` is the ESP-IDF reset reason and `rom_reset_code` the chip's raw reset code (0 on events recorded before it was kept)
             - `network_recovered`: 0=came back on its own, 1=WiFi reconnect, 2=controller reboot
+            - `web_server_down`: 0=unknown, 1=out of memory, 2=no TLS certificate, 3=other startup failure, 4=injected by a test
+            - `web_server_recovered`: 0=servers restarted in place, 1=controller reboot
             - All other events: 0
           example: 0
         from_mode:
@@ -5521,9 +5525,17 @@ components:
         recovery:
           type: string
           nullable: true
-          description: "`network_recovered` only: how the network connection came back."
-          enum: [self, wifi_bounce, reboot]
+          description: |
+            `network_recovered` / `web_server_recovered` only: how the network
+            connection or the web/API servers came back (`restarted` is used by
+            `web_server_recovered` only).
+          enum: [self, wifi_bounce, reboot, restarted]
           example: wifi_bounce
+        cause:
+          type: string
+          description: "`web_server_down` only: why the web/API servers were down."
+          enum: [unknown, no_memory, no_identity, start_failed, test]
+          example: no_memory
 
     AdvancedParam:
       type: object
