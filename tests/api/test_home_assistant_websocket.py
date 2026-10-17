@@ -133,6 +133,64 @@ async def test_websocket_starts_with_hello_and_coherent_snapshot():
             await websocket.close()
 
 
+async def _snapshot_with_energy(token: str, timeout_s: float = 120) -> dict:
+    """The first snapshot that carries energy totals.
+
+    The controller loads its energy history on the telemetry recorder's first
+    tick after the clock syncs, so straight after a reboot the snapshot sends
+    null for a while. Pushed snapshots are watched, reconnecting for a fresh
+    one when the state is quiet.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    async with aiohttp.ClientSession() as session:
+        while True:
+            websocket = await _connect_with_retry(session, token)
+            try:
+                _, snapshot = await _initial_messages(websocket)
+                while snapshot["state"].get("energy") is None:
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        raise AssertionError(
+                            f"no energy totals in the snapshot within {timeout_s:.0f}s"
+                        )
+                    try:
+                        message = await websocket.receive_json(
+                            timeout=min(10, remaining)
+                        )
+                    except asyncio.TimeoutError:
+                        break
+                    if message.get("type") == "snapshot":
+                        snapshot = message["snapshot"]
+                else:
+                    return snapshot
+            finally:
+                await websocket.close()
+
+
+@pytest.mark.asyncio
+async def test_snapshot_energy_totals_match_rest_totals():
+    api_key = os.environ.get("ARCTIC_API_KEY")
+    if not api_key:
+        pytest.skip("ARCTIC_API_KEY not set")
+    snapshot = await _snapshot_with_energy(_test_token())
+    totals = requests.get(
+        f"{BASE_URL}/api/energy/totals", headers={"X-API-Key": api_key}, timeout=10
+    )
+    totals.raise_for_status()
+    totals = totals.json()
+
+    # Once loaded, the totals match the REST totals read a moment later
+    # (allowing for live accrual).
+    energy = snapshot["state"]["energy"]
+    assert energy is not None
+    assert set(energy["thermal_wh"]) == {"heating", "cooling", "hot_water"}
+    assert energy["reset_id"] == totals["reset_id"]
+    assert 0 <= totals["electrical_wh"] - energy["electrical_wh"] <= 50
+    for mode, wh in energy["thermal_wh"].items():
+        assert 0 <= totals["thermal_wh"][mode] - wh <= 200
+
+
 @pytest.mark.asyncio
 async def test_telemetry_only_change_pushes_newer_snapshot():
     token = _test_token()

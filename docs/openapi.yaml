@@ -5352,6 +5352,33 @@ components:
                 tank: {$ref: '#/components/schemas/TempTrend'}
                 outlet: {$ref: '#/components/schemas/TempTrend'}
                 inlet: {$ref: '#/components/schemas/TempTrend'}
+            energy:
+              type: object
+              nullable: true
+              description: >-
+                Running energy totals since install or factory reset, the same
+                figures as GET /api/energy/totals, for Home Assistant's
+                total_increasing energy sensors. Null until the energy ledger has
+                loaded after boot (never zeros, which would read as a meter reset).
+                Values only grow while reset_id stays the same; reset_id is null
+                until the first day has been saved. Added in 3.4.0; absent on
+                older firmware.
+              required: [reset_id, electrical_wh, thermal_wh]
+              properties:
+                reset_id:
+                  type: string
+                  nullable: true
+                  pattern: '^[0-9a-f]{8}$'
+                electrical_wh:
+                  type: integer
+                  minimum: 0
+                thermal_wh:
+                  type: object
+                  required: [heating, cooling, hot_water]
+                  properties:
+                    heating: {type: integer, minimum: 0}
+                    cooling: {type: integer, minimum: 0}
+                    hot_water: {type: integer, minimum: 0}
 
     TempTrend:
       type: string

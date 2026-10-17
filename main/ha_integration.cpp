@@ -67,6 +67,33 @@ void addSetpointLimits(cJSON* parent)
     }
 }
 
+// Running energy totals for Home Assistant's total_increasing sensors.
+// Null until the ledger has loaded after boot, never zeros, because a drop
+// to 0 would read as a meter reset. reset_id changes only when the store
+// starts over (factory reset). Kept out of line so its locals aren't added
+// to createStateObject's frame on the HA push task.
+__attribute__((noinline)) void addEnergyTotals(cJSON* state)
+{
+    arctic::EnergyTotals totals = {};
+    if (arctic::getEnergyTotals(&totals)) {
+        cJSON* totals_obj = cJSON_AddObjectToObject(state, "energy");
+        if (totals.have_reset_id) {
+            char id[9];
+            snprintf(id, sizeof(id), "%08lx", (unsigned long)totals.reset_id);
+            cJSON_AddStringToObject(totals_obj, "reset_id", id);
+        } else {
+            cJSON_AddNullToObject(totals_obj, "reset_id");
+        }
+        cJSON_AddNumberToObject(totals_obj, "electrical_wh", totals.elec_wh);
+        cJSON* thermal = cJSON_AddObjectToObject(totals_obj, "thermal_wh");
+        cJSON_AddNumberToObject(thermal, "heating", totals.thermal_wh[energy::BUCKET_HEATING]);
+        cJSON_AddNumberToObject(thermal, "cooling", totals.thermal_wh[energy::BUCKET_COOLING]);
+        cJSON_AddNumberToObject(thermal, "hot_water", totals.thermal_wh[energy::BUCKET_HOT_WATER]);
+    } else {
+        cJSON_AddNullToObject(state, "energy");
+    }
+}
+
 cJSON* createStateObject(const HeatPumpState& hp)
 {
     cJSON* state = cJSON_CreateObject();
@@ -169,6 +196,8 @@ cJSON* createStateObject(const HeatPumpState& hp)
     cJSON_AddNumberToObject(readings, "flow_lpm", hp.flow_lpm_x10 / 10.0);
     cJSON_AddStringToObject(readings, "perf_source", hp.perf_external ? "external" : "heat_pump");
     cJSON_AddBoolToObject(readings, "perf_fallback", hp.perf_fallback);
+
+    addEnergyTotals(state);
 
     cJSON* error = cJSON_AddObjectToObject(state, "error");
     cJSON_AddBoolToObject(error, "active", hp.hasAnyError());

@@ -1104,6 +1104,53 @@ bool getEnergyPendingDay(energy::DayRecord* out) {
     return ok;
 }
 
+bool getEnergyTotals(EnergyTotals* out) {
+    if (s_state_mutex == nullptr) return false;
+    *out = {};
+    // Summed in place under the lock: this runs on the HA push task, whose
+    // stack has no room for copies of the 112-byte records.
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (!s_ledger_loaded) {
+        xSemaphoreGive(s_state_mutex);
+        return false;
+    }
+    const auto add_day = [out](uint32_t date, uint32_t elec, const uint32_t* thermal,
+                               const uint32_t* covered) {
+        if (out->since_date == 0) out->since_date = date;
+        out->elec_wh += elec;
+        for (int m = 0; m < energy::kModes; m++) {
+            out->thermal_wh[m] += thermal[m];
+            out->covered_elec_wh[m] += covered[m];
+        }
+    };
+    if (s_lifetime_valid) {
+        const energy::Lifetime& life = s_lifetime;
+        out->have_reset_id = true;
+        out->reset_id = life.reset_id;
+        out->since_date = life.since_date;
+        out->through_date = life.through_date;
+        add_day(life.since_date, life.elec_wh, life.thermal_wh, life.covered_elec_wh);
+    }
+    if (s_closed_pending && s_closed_day.date > out->through_date) {
+        const energy::DayRecord& d = s_closed_day;
+        add_day(d.date, energy::total_elec_wh(d), d.thermal_wh, d.covered_elec_wh);
+        out->through_date = d.date;
+    }
+    // A day already folded into the totals isn't added twice.
+    if (s_ledger.valid() && s_ledger.accum().date > out->through_date) {
+        const energy::DayAccum& a = s_ledger.accum();
+        out->includes_today = true;
+        if (out->since_date == 0) out->since_date = a.date;
+        out->elec_wh += s_ledger.today_elec_wh();
+        for (int m = 0; m < energy::kModes; m++) {
+            out->thermal_wh[m] += energy::ws_to_wh(a.thermal_ws[m]);
+            out->covered_elec_wh[m] += energy::ws_to_wh(a.covered_elec_ws[m]);
+        }
+    }
+    xSemaphoreGive(s_state_mutex);
+    return true;
+}
+
 bool getEnergyLifetime(energy::Lifetime* out) {
     if (s_state_mutex == nullptr) return false;
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
