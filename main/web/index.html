@@ -1454,14 +1454,15 @@
       error_appeared: "Problem appeared", error_cleared: "Problem cleared",
       connected: "Heat pump connected", disconnected: "Heat pump disconnected",
       brownout_reset: "Brownout reset", application_crash: "Application crash", watchdog_reset: "Watchdog reset",
-      network_unreachable: "Network unreachable", network_recovered: "Network recovered"
+      network_unreachable: "Network unreachable", network_recovered: "Network recovered",
+      web_server_down: "Web server down", web_server_recovered: "Web server recovered"
     };
     // Colour and icon per event type, matching the device's Events screen.
     const eventTones = {
       power_on: "good", compressor_on: "good", fan_on: "good", pump_on: "good", aux_heater_on: "good",
-      connected: "good", error_cleared: "good", network_recovered: "good",
+      connected: "good", error_cleared: "good", network_recovered: "good", web_server_recovered: "good",
       error_appeared: "bad", brownout_reset: "bad", application_crash: "bad", watchdog_reset: "bad",
-      network_unreachable: "warn", defrost_start: "defrost", defrost_end: "defrost",
+      network_unreachable: "warn", web_server_down: "warn", defrost_start: "defrost", defrost_end: "defrost",
       mode_changed: "info", setpoint_changed: "info", system_start: "info"
     };
     const eventIcons = {
@@ -1470,12 +1471,18 @@
       pump_on: "≈", pump_off: "≈", aux_heater_on: "+", aux_heater_off: "+",
       defrost_start: "❄\uFE0E", defrost_end: "❄\uFE0E", error_appeared: "⚠\uFE0E", error_cleared: "✓",
       connected: "⇆", disconnected: "⇆", brownout_reset: "⚠\uFE0E", application_crash: "⚠\uFE0E",
-      watchdog_reset: "⚠\uFE0E", network_unreachable: "⚠\uFE0E", network_recovered: "✓"
+      watchdog_reset: "⚠\uFE0E", network_unreachable: "⚠\uFE0E", network_recovered: "✓",
+      web_server_down: "⚠\uFE0E", web_server_recovered: "✓"
     };
     const setpointNames = { cooling: "Cooling", heating: "Heating", hot_water: "Hot water" };
     const watchdogNames = { interrupt: "Interrupt watchdog", task: "Task watchdog", other: "System watchdog", startup: "Stalled at startup (likely power loss)" };
     const recoveryNames = {
-      self: "Came back on its own", wifi_bounce: "Restored by reconnecting WiFi", reboot: "Restarting the controller"
+      self: "Came back on its own", wifi_bounce: "Restored by reconnecting WiFi", reboot: "Restarting the controller",
+      restarted: "Restarted the web server"
+    };
+    const webServerCauseNames = {
+      no_memory: "Out of memory", no_identity: "No TLS certificate", start_failed: "Startup failed",
+      test: "Simulated by a test", unknown: "Stopped unexpectedly"
     };
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     function eventName(event) {
@@ -1491,7 +1498,8 @@
         case "error_appeared": case "error_cleared":
           return event.fault_code ? `(${event.fault_code}) ${event.fault_label || ""}`.trim() : "";
         case "watchdog_reset": return watchdogNames[event.watchdog] || "";
-        case "network_recovered": return recoveryNames[event.recovery] || "";
+        case "network_recovered": case "web_server_recovered": return recoveryNames[event.recovery] || "";
+        case "web_server_down": return webServerCauseNames[event.cause] || "";
         default: return "";
       }
     }
@@ -2707,7 +2715,7 @@
         <div>Total <strong>${fmtKwh(s.total)}</strong></div>` +
         ENERGY_MODES.filter(([m]) => e[m] > 0).map(([m, label, color]) => row(color, label, fmtKwh(e[m]))).join("") +
         (s.other > 0 ? row("var(--energy-other)", "Standby / other", fmtKwh(s.other)) : "") +
-        (s.cop !== null ? `<div>Est. COP <strong>${s.cop.toFixed(1)}</strong></div>` : "") +
+        (s.cop !== null ? `<div>COP (est.) <strong>${s.cop.toFixed(1)}</strong></div>` : "") +
         (day.outdoor_c ? `<div>Outdoor avg <strong>${temp(day.outdoor_c.avg)}</strong></div>` : "");
     }
     function energyHover(event) {
@@ -2778,7 +2786,7 @@
         <div class="en-stats">
           ${energyStat("Electricity", fmtKwh(s.total))}
           ${energyStat("Heat (est.)", s.heat ? fmtKwh(s.heat) : "--")}
-          ${energyStat("Est. COP", s.cop !== null ? s.cop.toFixed(1) : "--")}
+          ${energyStat("COP (est.)", s.cop !== null ? s.cop.toFixed(1) : "--")}
           ${energyStat("Outdoor", out ? temp(out.avg) : "--", out ? `${temp(out.min)} – ${temp(out.max)}` : "")}
         </div>
         <div class="en-table-wrap"><table class="en-table"><thead><tr><th>Mode</th><th>Electricity</th><th>Heat (est.)</th><th>COP</th><th>Run time</th></tr></thead>
@@ -2817,7 +2825,7 @@
           <div class="en-stats">
             ${energyStat("Electricity", fmtKwh(sums.total))}
             ${energyStat("Heat (est.)", sums.heat ? fmtKwh(sums.heat) : "--")}
-            ${energyStat("Est. COP", sums.cop !== null ? sums.cop.toFixed(1) : "--")}
+            ${energyStat("COP (est.)", sums.cop !== null ? sums.cop.toFixed(1) : "--")}
             ${energyStat("Avg outdoor", outs.length ? temp(outs.reduce((a, b) => a + b, 0) / outs.length) : "--")}
           </div>
           <div class="hist-legend en-legend">

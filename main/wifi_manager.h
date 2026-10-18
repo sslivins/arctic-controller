@@ -180,6 +180,21 @@ bool wifi_mgr_get_mac_addr(uint8_t* mac);
  */
 bool wifi_mgr_get_coprocessor_version(uint32_t* major, uint32_t* minor, uint32_t* patch);
 
+/**
+ * @brief Ask the API service task to (re)start the web/API servers if they
+ *        are not healthy. Non-blocking; safe from event handlers.
+ */
+void wifi_mgr_request_api_start(void);
+
+/**
+ * @brief Run the same (re)start synchronously, waiting up to @p timeout_ms.
+ *
+ * Used by the WiFi supervisor's safety net. All starts are executed by the
+ * single API service task, so callers never race each other.
+ * @return true if the servers are healthy afterwards
+ */
+bool wifi_mgr_api_ensure_running(uint32_t timeout_ms);
+
 #ifdef __cplusplus
 }
 #endif

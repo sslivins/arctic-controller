@@ -513,23 +513,30 @@ static HeatPumpOperation to_operation(const MaconState& state) {
 }
 
 // The local calendar day `now_s` falls in. Midnight is found with mktime so a
-// DST change day still starts at its own midnight.
+// DST change day still starts and ends at its own midnights. Cached until the
+// date or the UTC offset (timezone change) moves.
 __attribute__((noinline)) static energy::Day localDay(time_t now_s) {
     struct tm local;
     localtime_r(&now_s, &local);
     const uint32_t date = (uint32_t)(local.tm_year + 1900) * 10000 +
                           (uint32_t)(local.tm_mon + 1) * 100 + (uint32_t)local.tm_mday;
-    if (date != s_ledger_day.date) {
+    struct tm utc;
+    gmtime_r(&now_s, &utc);
+    utc.tm_isdst = local.tm_isdst;
+    const int16_t offset_min = (int16_t)((now_s - mktime(&utc)) / 60);
+    if (date != s_ledger_day.date || offset_min != s_ledger_day.utc_offset_min) {
         energy::Day d;
         d.date = date;
         struct tm mid = local;
         mid.tm_hour = mid.tm_min = mid.tm_sec = 0;
         mid.tm_isdst = -1;
         d.start_s = mktime(&mid);
-        struct tm utc;
-        gmtime_r(&now_s, &utc);
-        utc.tm_isdst = local.tm_isdst;
-        d.utc_offset_min = (int16_t)((now_s - mktime(&utc)) / 60);
+        struct tm next = local;
+        next.tm_mday += 1;
+        next.tm_hour = next.tm_min = next.tm_sec = 0;
+        next.tm_isdst = -1;
+        d.end_s = mktime(&next);
+        d.utc_offset_min = offset_min;
         s_ledger_day = d;
     }
     return s_ledger_day;

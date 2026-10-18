@@ -148,9 +148,9 @@ def test_toggle_to_12h_format(device: DeviceClient, time_format_restore):
 
 def _open_temperature_history(device: DeviceClient):
     """From the main screen, open the 8-hour temperature history graph."""
-    device.click(tag="nav_status")
-    device.wait_for_widget(tag="temperature_history_open", timeout=5.0)
-    device.click(tag="temperature_history_open")
+    device.click(tag="nav_history")
+    device.wait_for_widget(tag="history_seg_cycles", timeout=5.0)
+    device.click(tag="history_seg_cycles")
     device.wait_for_widget(tag="temperature_history_screen", timeout=5.0)
 
 

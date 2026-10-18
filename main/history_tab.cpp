@@ -17,8 +17,9 @@ static const char* TAG = "history_tab";
 
 #define SEG_BAR_H        76
 #define SEG_ACCENT       lv_color_hex(0xa78bfa)
-#define SEG_COLOR_IDLE   lv_color_hex(0x1b1e26)
-#define SEG_COLOR_ACTIVE lv_color_hex(0x292d38)
+#define SEG_COLOR_IDLE   lv_color_hex(0x2c3140)
+#define SEG_BORDER_IDLE  lv_color_hex(0x4a5166)
+#define SEG_TEXT_ACTIVE  lv_color_hex(0x14121c)
 
 static const struct {
     string_id_t str_id;
@@ -41,10 +42,11 @@ static void style_buttons(void) {
     for (int i = 0; i < HISTORY_SEG_COUNT; i++) {
         if (!s_btns[i]) continue;
         const bool on = i == (int)s_seg;
-        lv_obj_set_style_bg_color(s_btns[i], on ? SEG_COLOR_ACTIVE : SEG_COLOR_IDLE,
-                                  LV_PART_MAIN);
-        lv_obj_set_style_border_width(s_btns[i], on ? 2 : 0, LV_PART_MAIN);
-        lv_obj_set_style_text_color(s_labels[i], on ? SEG_ACCENT : UI_COLOR_TEXT_DIM,
+        // Selected: solid accent. Idle: a raised outlined chip, so all three
+        // read as buttons against the dark page.
+        lv_obj_set_style_bg_color(s_btns[i], on ? SEG_ACCENT : SEG_COLOR_IDLE, LV_PART_MAIN);
+        lv_obj_set_style_border_width(s_btns[i], on ? 0 : 2, LV_PART_MAIN);
+        lv_obj_set_style_text_color(s_labels[i], on ? SEG_TEXT_ACTIVE : UI_COLOR_TEXT,
                                     LV_PART_MAIN);
     }
 }
@@ -103,8 +105,8 @@ void history_tab_create_in(lv_obj_t* parent) {
         lv_obj_set_height(btn, SEG_BAR_H - 14);
         lv_obj_set_style_radius(btn, 12, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
-        lv_obj_set_style_border_color(btn, SEG_ACCENT, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x343946), LV_STATE_PRESSED);
+        lv_obj_set_style_border_color(btn, SEG_BORDER_IDLE, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x3a4053), LV_STATE_PRESSED);
         lv_obj_set_user_data(btn, (void*)s_seg_defs[i].tag);
         lv_obj_add_event_cb(btn, seg_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
         lv_obj_t* lbl = lv_label_create(btn);

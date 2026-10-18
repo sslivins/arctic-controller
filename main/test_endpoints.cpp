@@ -55,6 +55,8 @@
 #include "png_encoder.h"
 #include "geocoding.h"
 #include "weather.h"
+#include "api_server.h"
+#include "wifi_manager.h"
 #include <time.h>
 
 static const char* TAG = "test_api";
@@ -2663,6 +2665,101 @@ static esp_err_t stack_watermarks_get_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/wifi-bounce — drop and re-join WiFi (servers must survive)
+// POST /api/test/api-server-kill — stop the web/API servers behind the
+//   supervisor's back. Body (optional): {"fail_starts": N} makes the next N
+//   start attempts fail, to exercise the in-place restart and the reboot path.
+// Both reply first and act from a short-lived task: the connection being
+// served would otherwise be torn down mid-response (and httpd_stop() cannot
+// run on the server's own task).
+// ============================================================================
+
+static void wifi_bounce_task(void*)
+{
+    vTaskDelay(pdMS_TO_TICKS(300));
+    ESP_LOGW(TAG, "test: bouncing WiFi");
+    char ssid[33] = {0};
+    char password[65] = {0};
+    const bool have = wifi_mgr_load_credentials(ssid, sizeof(ssid),
+                                                password, sizeof(password));
+    wifi_mgr_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    if (have) {
+        wifi_mgr_connect(ssid, password, nullptr);
+    }
+    memset(password, 0, sizeof(password));
+    vTaskDelete(NULL);
+}
+
+static void api_kill_task(void* arg)
+{
+    vTaskDelay(pdMS_TO_TICKS(300));
+    const int fail_starts = (int)(intptr_t)arg;
+    ESP_LOGW(TAG, "test: stopping web/API servers (fail next %d starts)", fail_starts);
+    api_server_test_fail_starts(fail_starts);
+    api_server_stop();
+    vTaskDelete(NULL);
+}
+
+static esp_err_t send_accepted(httpd_req_t* req)
+{
+    httpd_resp_set_status(req, "202 Accepted");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Connection", "close");
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+static esp_err_t wifi_bounce_post_handler(httpd_req_t* req)
+{
+    if (!wifi_mgr_has_saved_credentials()) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"error\":\"no saved WiFi credentials\"}");
+        return ESP_OK;
+    }
+    if (xTaskCreate(wifi_bounce_task, "t_wbounce", 4096, NULL, 5, NULL) != pdPASS) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":\"task create failed\"}");
+        return ESP_OK;
+    }
+    return send_accepted(req);
+}
+
+static esp_err_t api_server_kill_post_handler(httpd_req_t* req)
+{
+    int fail_starts = 0;
+    if (req->content_len > 0) {
+        char buf[64] = {0};
+        if (req->content_len >= sizeof(buf)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
+            return ESP_FAIL;
+        }
+        const int received = httpd_req_recv(req, buf, req->content_len);
+        if (received <= 0) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read body");
+            return ESP_FAIL;
+        }
+        cJSON* body = cJSON_Parse(buf);
+        if (!body) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+            return ESP_FAIL;
+        }
+        const cJSON* n = cJSON_GetObjectItem(body, "fail_starts");
+        if (cJSON_IsNumber(n) && n->valueint > 0) {
+            fail_starts = n->valueint > 1000 ? 1000 : n->valueint;
+        }
+        cJSON_Delete(body);
+    }
+    if (xTaskCreate(api_kill_task, "t_apikill", 4096,
+                    (void*)(intptr_t)fail_starts, 5, NULL) != pdPASS) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":\"task create failed\"}");
+        return ESP_OK;
+    }
+    return send_accepted(req);
+}
+
+// ============================================================================
 // Registration
 // ============================================================================
 
@@ -2886,6 +2983,22 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &wifi_mock_reset_options_uri);
+
+    httpd_uri_t wifi_bounce_uri = {
+        .uri = "/api/test/wifi-bounce",
+        .method = HTTP_POST,
+        .handler = wifi_bounce_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &wifi_bounce_uri);
+
+    httpd_uri_t api_server_kill_uri = {
+        .uri = "/api/test/api-server-kill",
+        .method = HTTP_POST,
+        .handler = api_server_kill_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &api_server_kill_uri);
 
     httpd_uri_t type_text_uri = {
         .uri = "/api/test/type-text",

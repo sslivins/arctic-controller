@@ -147,6 +147,8 @@ void event_names_are_the_documented_api_strings() {
     CHECK(std::strcmp(event_type_name(EVENT_ERROR_APPEARED), "error_appeared") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_NETWORK_RECOVERED), "network_recovered") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_WATCHDOG_RESET), "watchdog_reset") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_WEB_SERVER_DOWN), "web_server_down") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_WEB_SERVER_RECOVERED), "web_server_recovered") == 0);
 }
 
 void event_payloads_decode_to_the_documented_api_keys() {
@@ -176,6 +178,16 @@ void event_payloads_decode_to_the_documented_api_keys() {
     CHECK(std::strcmp(event_network_recovery_key(EVENT_NETWORK_RECOVERED_WIFI_BOUNCE), "wifi_bounce") == 0);
     CHECK(std::strcmp(event_network_recovery_key(EVENT_NETWORK_RECOVERED_REBOOT), "reboot") == 0);
     CHECK(event_network_recovery_key(9) == nullptr);
+
+    CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_UNKNOWN), "unknown") == 0);
+    CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_NO_MEMORY), "no_memory") == 0);
+    CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_NO_IDENTITY), "no_identity") == 0);
+    CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_START_FAILED), "start_failed") == 0);
+    CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_TEST), "test") == 0);
+    CHECK(std::strcmp(event_web_server_cause_key(99), "unknown") == 0);
+    CHECK(std::strcmp(event_web_server_recovery_key(EVENT_WEB_SERVER_RECOVERED_RESTARTED), "restarted") == 0);
+    CHECK(std::strcmp(event_web_server_recovery_key(EVENT_WEB_SERVER_RECOVERED_REBOOT), "reboot") == 0);
+    CHECK(event_web_server_recovery_key(9) == nullptr);
 }
 
 void every_event_type_maps_to_a_valid_category() {
@@ -190,7 +202,8 @@ void categories_match_the_intended_grouping() {
     const event_type_t problems[] = {
         EVENT_ERROR_APPEARED, EVENT_ERROR_CLEARED,     EVENT_DISCONNECTED,
         EVENT_BROWNOUT_RESET, EVENT_APPLICATION_CRASH, EVENT_WATCHDOG_RESET,
-        EVENT_NETWORK_UNREACHABLE, EVENT_NETWORK_RECOVERED};
+        EVENT_NETWORK_UNREACHABLE, EVENT_NETWORK_RECOVERED,
+        EVENT_WEB_SERVER_DOWN, EVENT_WEB_SERVER_RECOVERED};
     for (event_type_t t : problems) {
         CHECK(event_type_category(t) == EVENT_CATEGORY_PROBLEMS);
     }
