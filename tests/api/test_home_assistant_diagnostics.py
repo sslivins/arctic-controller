@@ -16,6 +16,7 @@ from urllib3.util.retry import Retry
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BASE_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
+API_KEY = os.environ.get("ARCTIC_API_KEY")
 _base_parts = urlsplit(BASE_URL)
 HA_URL = os.environ.get(
     "ARCTIC_HA_URL",
@@ -135,6 +136,10 @@ def test_diagnostics_report_controller_health():
     assert wifi["last_disconnect_reason"] is None or _is_count(
         wifi["last_disconnect_reason"]
     )
+    drops = wifi["drops"]
+    for key in ("total", "short", "long"):
+        assert _is_count(drops[key]), key
+    assert drops["short"] + drops["long"] == drops["total"]
 
     assert isinstance(diag["time"]["synced"], bool)
     assert isinstance(diag["ota"]["busy"], bool)
@@ -163,6 +168,45 @@ def test_diagnostics_uptime_is_monotonic_within_a_boot():
     second = _diagnostics(token)
     assert first["boot_id"] == second["boot_id"]
     assert second["diagnostics"]["uptime_ms"] >= first["diagnostics"]["uptime_ms"]
+
+
+def _problem_events_from_log() -> list:
+    headers = {"X-API-Key": API_KEY} if API_KEY else {}
+    problems = []
+    offset = 0
+    while len(problems) < 16:
+        log = _session.get(
+            f"{BASE_URL}/api/events?limit=128&offset={offset}",
+            headers=headers,
+            timeout=10,
+        )
+        log.raise_for_status()
+        page = log.json()["events"]
+        problems += [
+            e for e in page
+            if e["category"] == "problems"
+            and e["type"] not in ("error_appeared", "error_cleared")
+        ]
+        if len(page) < 128:
+            break
+        offset += 128
+    return problems[:16]
+
+
+def test_diagnostics_events_are_the_newest_controller_problems():
+    """diagnostics.events must be the newest problem events from the event log
+    (minus heat-pump faults), in the same form as GET /api/events."""
+    token = _issue_test_token()
+    # An event recorded between the two requests shifts the window; retry.
+    for _attempt in range(3):
+        events = _diagnostics(token)["diagnostics"]["events"]
+        expected = _problem_events_from_log()
+        if events == expected:
+            break
+    assert events == expected
+    assert len(events) <= 16
+    for event in events:
+        assert _is_count(event["boot_id"]) and _is_count(event["uptime_ms"])
 
 
 def test_state_snapshot_excludes_diagnostics():

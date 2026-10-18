@@ -5231,6 +5231,22 @@ components:
                   type: integer
                   nullable: true
                   description: wifi_err_reason_t of the last disconnect.
+                drops:
+                  type: object
+                  description: Unplanned WiFi outages this boot.
+                  required: [total, short, long]
+                  properties:
+                    total:
+                      type: integer
+                      minimum: 0
+                    short:
+                      type: integer
+                      minimum: 0
+                      description: Back within a minute.
+                    long:
+                      type: integer
+                      minimum: 0
+                      description: A minute or more, including one in progress.
             time:
               type: object
               required: [synced]
@@ -5286,6 +5302,16 @@ components:
                 resyncs:
                   type: integer
                   minimum: 0
+            events:
+              type: array
+              maxItems: 16
+              description: |
+                Newest controller problem events from the event log, newest
+                first (WiFi/network outages, crashes and resets, web server
+                recoveries). Heat-pump faults are excluded; the state snapshot
+                carries them. Identify an event by boot_id, uptime_ms and type.
+              items:
+                $ref: '#/components/schemas/EventEntry'
 
     HomeAssistantPowerCommand:
       type: object

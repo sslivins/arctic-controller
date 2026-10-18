@@ -14,10 +14,13 @@
 #include <sdkconfig.h>
 
 #include "boot_stats.h"
+#include "event_json.h"
+#include "event_log.h"
 #include "heatpump_controller.h"
 #include "ota_manager.h"
 #include "time_manager.h"
 #include "macon_master_iface.h"
+#include "wifi_drops.h"
 #include "wifi_manager.h"
 
 namespace {
@@ -89,6 +92,45 @@ void add_wifi(cJSON* root)
         cJSON_AddNumberToObject(wifi, "last_disconnect_reason", reason);
     } else {
         cJSON_AddNullToObject(wifi, "last_disconnect_reason");
+    }
+
+    const WifiDropStats d = wifi_drops_stats();
+    cJSON* drops = cJSON_AddObjectToObject(wifi, "drops");
+    if (drops == nullptr) return;
+    cJSON_AddNumberToObject(drops, "total", d.drops);
+    cJSON_AddNumberToObject(drops, "short", d.short_drops);
+    cJSON_AddNumberToObject(drops, "long", d.long_drops);
+}
+
+// Controller problems Home Assistant can't see in the state snapshot: WiFi and
+// network outages, crashes, server recoveries. Heat-pump faults are left out
+// because the snapshot already carries them.
+bool is_controller_problem(event_type_t type)
+{
+    return event_type_category(type) == EVENT_CATEGORY_PROBLEMS &&
+           type != EVENT_ERROR_APPEARED && type != EVENT_ERROR_CLEARED;
+}
+
+void add_events(cJSON* root)
+{
+    constexpr int kMaxEvents = 16;
+    constexpr int kChunk = 32;
+    cJSON* arr = cJSON_AddArrayToObject(root, "events");
+    if (arr == nullptr) return;
+    event_entry_t chunk[kChunk];
+    int found = 0;
+    // Newest first; walk the whole log in chunks so a burst of equipment
+    // events can't hide an older outage.
+    for (int offset = 0; found < kMaxEvents; offset += kChunk) {
+        const int n = event_log_get(chunk, kChunk, offset);
+        for (int i = 0; i < n && found < kMaxEvents; ++i) {
+            if (!is_controller_problem(chunk[i].type)) continue;
+            cJSON* evt = event_json_create(chunk[i]);
+            if (evt == nullptr) return;
+            cJSON_AddItemToArray(arr, evt);
+            ++found;
+        }
+        if (n < kChunk) break;
     }
 }
 
@@ -172,5 +214,6 @@ cJSON* device_diagnostics_create(void)
     }
 
     add_rs485(root);
+    add_events(root);
     return root;
 }

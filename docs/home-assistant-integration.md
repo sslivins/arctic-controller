@@ -163,7 +163,9 @@ The response carries `protocol_version`, `device_id`, `boot_id` and a
 - `memory`: internal-RAM `internal_free_bytes`, `internal_min_free_bytes` and
   `internal_largest_free_block_bytes`.
 - `wifi`: `connected`, `ssid`, `rssi_dbm`, and per-boot `disconnect_count`
-  and `last_disconnect_reason` (a `wifi_err_reason_t`, or null).
+  and `last_disconnect_reason` (a `wifi_err_reason_t`, or null). `drops`
+  counts this boot's unplanned outages: `total`, `short` (back within a
+  minute) and `long` (a minute or more, including one in progress).
 - `time.synced`, and `ota.busy` / `ota.pending_verify`.
 - `rs485`: `role` (`master`, `listener`, `blocked` by another bus master,
   `demo`, or `inactive`) and `last_ok_uptime_ms`. The active master adds
@@ -171,6 +173,15 @@ The response carries `protocol_version`, `device_id`, `boot_id` and a
   `checksum_errors`, `consecutive_failures`, `writes_ok` and `writes_failed`.
   The passive listener adds `frames_ok`, `checksum_errors` and `resyncs`
   instead. All RS485 counters are per boot.
+- `events`: up to 16 of the newest controller problem events from the event
+  log, newest first, in the same form as `GET /api/events` (`type`,
+  `category`, `timestamp`, numeric `boot_id`, `uptime_ms`, `payload` and the
+  decoded detail fields). This covers WiFi and network outages, crashes,
+  watchdog and brownout resets, and web server recoveries. Heat-pump faults
+  are left out because the state snapshot already carries them. The log
+  persists across reboots, so a client that was cut off by an outage or
+  restart sees what happened once it can reach the controller again. Clients
+  identify an event by `boot_id`, `uptime_ms` and `type`.
 
 Clients must treat every field as optional, because a rolled-back firmware
 may not have it.

@@ -64,6 +64,7 @@ idf_component_register(
         "heatpump_errors.cpp"
         "fault_help_links.cpp"
         "event_log.cpp"
+        "event_json.cpp"
         "history_storage.cpp"
         "telemetry_history.cpp"
         "system_restart.cpp"
