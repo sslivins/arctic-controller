@@ -73,6 +73,9 @@ static const char* s_event_names[] = {
     "network_recovered",
     "web_server_down",
     "web_server_recovered",
+    "wifi_lost",
+    "wifi_restored",
+    "wifi_unstable",
 };
 
 static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
@@ -311,6 +314,9 @@ event_category_t event_type_category(event_type_t type) {
         case EVENT_NETWORK_RECOVERED:
         case EVENT_WEB_SERVER_DOWN:
         case EVENT_WEB_SERVER_RECOVERED:
+        case EVENT_WIFI_LOST:
+        case EVENT_WIFI_RESTORED:
+        case EVENT_WIFI_UNSTABLE:
             return EVENT_CATEGORY_PROBLEMS;
 
         case EVENT_COMPRESSOR_ON:
@@ -388,5 +394,25 @@ const char* event_web_server_recovery_key(uint32_t payload) {
         case EVENT_WEB_SERVER_RECOVERED_RESTARTED: return "restarted";
         case EVENT_WEB_SERVER_RECOVERED_REBOOT:    return "reboot";
         default:                                   return NULL;
+    }
+}
+
+// wifi_err_reason_t values, as numbers so the host build needs no WiFi headers.
+const char* event_wifi_reason_key(uint32_t payload) {
+    switch (payload) {
+        case 200:                                   // BEACON_TIMEOUT
+            return "signal_lost";
+        case 201: case 210: case 211: case 212:     // NO_AP_FOUND*
+            return "network_not_found";
+        case 2: case 14: case 15: case 16: case 23: // AUTH_EXPIRE, MIC, 4-way, group key, 802.1X
+        case 202: case 204:                         // AUTH_FAIL, HANDSHAKE_TIMEOUT
+            return "auth_failed";
+        case 3: case 4: case 5: case 6: case 7: case 8:
+        case 12: case 34: case 39: case 46: case 47:
+            return "ap_disconnected";
+        case 206:                                   // AP_TSF_RESET
+            return "ap_restarted";
+        default:
+            return "other";
     }
 }

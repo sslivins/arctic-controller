@@ -149,6 +149,9 @@ void event_names_are_the_documented_api_strings() {
     CHECK(std::strcmp(event_type_name(EVENT_WATCHDOG_RESET), "watchdog_reset") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_WEB_SERVER_DOWN), "web_server_down") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_WEB_SERVER_RECOVERED), "web_server_recovered") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_WIFI_LOST), "wifi_lost") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_WIFI_RESTORED), "wifi_restored") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_WIFI_UNSTABLE), "wifi_unstable") == 0);
 }
 
 void event_payloads_decode_to_the_documented_api_keys() {
@@ -188,6 +191,13 @@ void event_payloads_decode_to_the_documented_api_keys() {
     CHECK(std::strcmp(event_web_server_recovery_key(EVENT_WEB_SERVER_RECOVERED_RESTARTED), "restarted") == 0);
     CHECK(std::strcmp(event_web_server_recovery_key(EVENT_WEB_SERVER_RECOVERED_REBOOT), "reboot") == 0);
     CHECK(event_web_server_recovery_key(9) == nullptr);
+
+    CHECK(std::strcmp(event_wifi_reason_key(200), "signal_lost") == 0);
+    CHECK(std::strcmp(event_wifi_reason_key(201), "network_not_found") == 0);
+    CHECK(std::strcmp(event_wifi_reason_key(15), "auth_failed") == 0);
+    CHECK(std::strcmp(event_wifi_reason_key(4), "ap_disconnected") == 0);
+    CHECK(std::strcmp(event_wifi_reason_key(206), "ap_restarted") == 0);
+    CHECK(std::strcmp(event_wifi_reason_key(0), "other") == 0);
 }
 
 void every_event_type_maps_to_a_valid_category() {
@@ -203,7 +213,8 @@ void categories_match_the_intended_grouping() {
         EVENT_ERROR_APPEARED, EVENT_ERROR_CLEARED,     EVENT_DISCONNECTED,
         EVENT_BROWNOUT_RESET, EVENT_APPLICATION_CRASH, EVENT_WATCHDOG_RESET,
         EVENT_NETWORK_UNREACHABLE, EVENT_NETWORK_RECOVERED,
-        EVENT_WEB_SERVER_DOWN, EVENT_WEB_SERVER_RECOVERED};
+        EVENT_WEB_SERVER_DOWN, EVENT_WEB_SERVER_RECOVERED,
+        EVENT_WIFI_LOST, EVENT_WIFI_RESTORED, EVENT_WIFI_UNSTABLE};
     for (event_type_t t : problems) {
         CHECK(event_type_category(t) == EVENT_CATEGORY_PROBLEMS);
     }

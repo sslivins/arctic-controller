@@ -80,6 +80,7 @@ idf_component_register(
         "chart_axis.cpp"
         "device_diagnostics.cpp"
         "wifi_supervisor.cpp"
+        "wifi_drops.cpp"
         "log_buffer.cpp"
         "log_persist.cpp"
         "crash_dump.cpp"

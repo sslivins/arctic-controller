@@ -132,6 +132,9 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_NETWORK_RECOVERED:   return STR_EVENT_NETWORK_RECOVERED;
         case EVENT_WEB_SERVER_DOWN:     return STR_EVENT_WEB_SERVER_DOWN;
         case EVENT_WEB_SERVER_RECOVERED:return STR_EVENT_WEB_SERVER_RECOVERED;
+        case EVENT_WIFI_LOST:           return STR_EVENT_WIFI_LOST;
+        case EVENT_WIFI_RESTORED:       return STR_EVENT_WIFI_RESTORED;
+        case EVENT_WIFI_UNSTABLE:       return STR_EVENT_WIFI_UNSTABLE;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -164,6 +167,9 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_NETWORK_RECOVERED:   return LV_SYMBOL_WIFI;
         case EVENT_WEB_SERVER_DOWN:     return LV_SYMBOL_WARNING;
         case EVENT_WEB_SERVER_RECOVERED:return LV_SYMBOL_OK;
+        case EVENT_WIFI_LOST:           return LV_SYMBOL_WIFI;
+        case EVENT_WIFI_RESTORED:       return LV_SYMBOL_WIFI;
+        case EVENT_WIFI_UNSTABLE:       return LV_SYMBOL_WIFI;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -179,6 +185,7 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_ERROR_CLEARED:
         case EVENT_NETWORK_RECOVERED:
         case EVENT_WEB_SERVER_RECOVERED:
+        case EVENT_WIFI_RESTORED:
             return COLOR_SUCCESS;
         
         case EVENT_ERROR_APPEARED:
@@ -191,6 +198,8 @@ static lv_color_t event_type_color(event_type_t type) {
         
         case EVENT_NETWORK_UNREACHABLE:
         case EVENT_WEB_SERVER_DOWN:
+        case EVENT_WIFI_LOST:
+        case EVENT_WIFI_UNSTABLE:
             return COLOR_WARNING;
 
         case EVENT_DEFROST_START:
@@ -300,6 +309,36 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
             } else {
                 snprintf(buf, buf_size, "%s", i18n_get(STR_EVENT_WEB_SERVER_RESTARTED));
             }
+            break;
+        case EVENT_WIFI_LOST: {
+            const char* key = event_wifi_reason_key(p);
+            string_id_t id = STR_EVENT_WIFI_OTHER_FMT;
+            if (strcmp(key, "signal_lost") == 0) id = STR_EVENT_WIFI_SIGNAL_LOST;
+            else if (strcmp(key, "network_not_found") == 0) id = STR_EVENT_WIFI_NOT_FOUND;
+            else if (strcmp(key, "auth_failed") == 0) id = STR_EVENT_WIFI_AUTH_FAILED;
+            else if (strcmp(key, "ap_disconnected") == 0) id = STR_EVENT_WIFI_AP_DISCONNECTED;
+            else if (strcmp(key, "ap_restarted") == 0) id = STR_EVENT_WIFI_AP_RESTARTED;
+            if (id == STR_EVENT_WIFI_OTHER_FMT) {
+                snprintf(buf, buf_size, i18n_get(id), (unsigned)p);
+            } else {
+                snprintf(buf, buf_size, "%s", i18n_get(id));
+            }
+            break;
+        }
+        case EVENT_WIFI_RESTORED: {
+            char dur[24];
+            if (p >= 3600) {
+                snprintf(dur, sizeof(dur), "%u h %02u min", (unsigned)(p / 3600),
+                         (unsigned)(p % 3600 / 60));
+            } else {
+                snprintf(dur, sizeof(dur), "%u min %02u s", (unsigned)(p / 60),
+                         (unsigned)(p % 60));
+            }
+            snprintf(buf, buf_size, i18n_get(STR_EVENT_WIFI_DOWN_FOR_FMT), dur);
+            break;
+        }
+        case EVENT_WIFI_UNSTABLE:
+            snprintf(buf, buf_size, i18n_get(STR_EVENT_WIFI_DROPS_FMT), (unsigned)p);
             break;
         default:
             buf[0] = '\0';

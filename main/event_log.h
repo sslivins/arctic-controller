@@ -48,6 +48,9 @@ typedef enum {
     EVENT_NETWORK_RECOVERED,    // Network auto-recovery ran (payload: 0=self/keepalive, 1=WiFi bounce, 2=reboot)
     EVENT_WEB_SERVER_DOWN,      // Web/API servers found down while online (payload: event_web_server_cause_t)
     EVENT_WEB_SERVER_RECOVERED, // Web/API server recovery ran (payload: event_web_server_recovery_t)
+    EVENT_WIFI_LOST,            // WiFi down for a minute (payload: wifi_err_reason_t of the disconnect)
+    EVENT_WIFI_RESTORED,        // WiFi back after an EVENT_WIFI_LOST (payload: seconds down)
+    EVENT_WIFI_UNSTABLE,        // Repeated short WiFi drops (payload: drops in the last hour)
     EVENT_TYPE_COUNT
 } event_type_t;
 
@@ -231,6 +234,13 @@ const char* event_web_server_cause_key(uint32_t payload);
  *        ("restarted", "reboot"), or NULL if unknown.
  */
 const char* event_web_server_recovery_key(uint32_t payload);
+
+/**
+ * @brief Stable API key for the disconnect reason in an EVENT_WIFI_LOST
+ *        payload ("signal_lost", "network_not_found", "auth_failed",
+ *        "ap_disconnected", "ap_restarted" or "other").
+ */
+const char* event_wifi_reason_key(uint32_t payload);
 
 #ifdef __cplusplus
 }

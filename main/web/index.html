@@ -1455,14 +1455,15 @@
       connected: "Heat pump connected", disconnected: "Heat pump disconnected",
       brownout_reset: "Brownout reset", application_crash: "Application crash", watchdog_reset: "Watchdog reset",
       network_unreachable: "Network unreachable", network_recovered: "Network recovered",
-      web_server_down: "Web server down", web_server_recovered: "Web server recovered"
+      web_server_down: "Web server down", web_server_recovered: "Web server recovered",
+      wifi_lost: "WiFi lost", wifi_restored: "WiFi restored", wifi_unstable: "WiFi unstable"
     };
     // Colour and icon per event type, matching the device's Events screen.
     const eventTones = {
       power_on: "good", compressor_on: "good", fan_on: "good", pump_on: "good", aux_heater_on: "good",
-      connected: "good", error_cleared: "good", network_recovered: "good", web_server_recovered: "good",
+      connected: "good", error_cleared: "good", network_recovered: "good", web_server_recovered: "good", wifi_restored: "good",
       error_appeared: "bad", brownout_reset: "bad", application_crash: "bad", watchdog_reset: "bad",
-      network_unreachable: "warn", web_server_down: "warn", defrost_start: "defrost", defrost_end: "defrost",
+      network_unreachable: "warn", web_server_down: "warn", wifi_lost: "warn", wifi_unstable: "warn", defrost_start: "defrost", defrost_end: "defrost",
       mode_changed: "info", setpoint_changed: "info", system_start: "info"
     };
     const eventIcons = {
@@ -1472,7 +1473,8 @@
       defrost_start: "❄\uFE0E", defrost_end: "❄\uFE0E", error_appeared: "⚠\uFE0E", error_cleared: "✓",
       connected: "⇆", disconnected: "⇆", brownout_reset: "⚠\uFE0E", application_crash: "⚠\uFE0E",
       watchdog_reset: "⚠\uFE0E", network_unreachable: "⚠\uFE0E", network_recovered: "✓",
-      web_server_down: "⚠\uFE0E", web_server_recovered: "✓"
+      web_server_down: "⚠\uFE0E", web_server_recovered: "✓",
+      wifi_lost: "⚠\uFE0E", wifi_restored: "✓", wifi_unstable: "⚠\uFE0E"
     };
     const setpointNames = { cooling: "Cooling", heating: "Heating", hot_water: "Hot water" };
     const watchdogNames = { interrupt: "Interrupt watchdog", task: "Task watchdog", other: "System watchdog", startup: "Stalled at startup (likely power loss)" };
@@ -1484,6 +1486,15 @@
       no_memory: "Out of memory", no_identity: "No TLS certificate", start_failed: "Startup failed",
       test: "Simulated by a test", unknown: "Stopped unexpectedly"
     };
+    const wifiReasonNames = {
+      signal_lost: "Lost the access point's signal", network_not_found: "Network not found",
+      auth_failed: "WiFi authentication failed", ap_disconnected: "The access point dropped the connection",
+      ap_restarted: "The access point restarted"
+    };
+    function fmtDownFor(s) {
+      return s >= 3600 ? `${Math.floor(s / 3600)} h ${String(Math.floor(s % 3600 / 60)).padStart(2, "0")} min`
+        : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+    }
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     function eventName(event) {
       return eventNames[event.type] || titleCase(event.type);
@@ -1500,6 +1511,9 @@
         case "watchdog_reset": return watchdogNames[event.watchdog] || "";
         case "network_recovered": case "web_server_recovered": return recoveryNames[event.recovery] || "";
         case "web_server_down": return webServerCauseNames[event.cause] || "";
+        case "wifi_lost": return wifiReasonNames[event.reason_key] || (event.reason != null ? `Disconnected (reason ${event.reason})` : "");
+        case "wifi_restored": return event.down_s != null ? `Down for ${fmtDownFor(event.down_s)}` : "";
+        case "wifi_unstable": return event.drops != null ? `${event.drops} short drops in an hour` : "";
         default: return "";
       }
     }

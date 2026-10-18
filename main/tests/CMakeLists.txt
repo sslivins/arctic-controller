@@ -227,3 +227,9 @@ add_test(NAME energy_ledger COMMAND test_energy_ledger)
 add_executable(test_energy_store test_energy_store.cpp)
 target_link_libraries(test_energy_store PRIVATE arctic_main_host)
 add_test(NAME energy_store COMMAND test_energy_store)
+
+# WiFi drop policy: which outages become wifi_lost/restored/unstable events.
+# Header-only pure logic over a caller-supplied clock.
+add_executable(test_wifi_drop_tracker test_wifi_drop_tracker.cpp)
+target_link_libraries(test_wifi_drop_tracker PRIVATE arctic_main_host)
+add_test(NAME wifi_drop_tracker COMMAND test_wifi_drop_tracker)

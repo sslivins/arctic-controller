@@ -6,6 +6,7 @@
 #include <atomic>
 #include "time_manager.h"
 #include "api_server.h"
+#include "wifi_drops.h"
 #include <string.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -297,6 +298,7 @@ void wifi_mgr_deinit(void)
     
     ESP_LOGI(TAG, "Deinitializing WiFi manager...");
     
+    wifi_drops_note_local_disconnect();
     esp_wifi_disconnect();
     esp_wifi_stop();
     esp_wifi_deinit();
@@ -395,6 +397,11 @@ bool wifi_mgr_connect(const char* ssid, const char* password, wifi_mgr_state_cb_
     // Clear event bits
     xEventGroupClearBits(wifi_state.event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
     
+    // Switching networks while connected drops the current link on purpose.
+    if (wifi_state.state == WIFI_MGR_STATE_CONNECTED) {
+        wifi_drops_note_local_disconnect();
+    }
+
     // Apply config and connect
     esp_err_t ret = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (ret != ESP_OK) {
@@ -423,6 +430,7 @@ void wifi_mgr_disconnect(void)
     }
     
     ESP_LOGI(TAG, "Disconnecting...");
+    wifi_drops_note_local_disconnect();
     esp_wifi_disconnect();
     wifi_state.connected_ssid[0] = '\0';
     wifi_state.current_ip[0] = '\0';
@@ -498,6 +506,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             ESP_LOGW(TAG, "Disconnected from AP, reason: %d", event->reason);
             s_disconnect_count.fetch_add(1);
             s_last_disconnect_reason.store(event->reason);
+            wifi_drops_note_down(event->reason);
             wifi_state.current_ip[0] = '\0';
             
             // Deliberately do NOT stop the servers here. Their listening
@@ -573,6 +582,7 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
         snprintf(wifi_state.current_ip, sizeof(wifi_state.current_ip),
                  IPSTR, IP2STR(&event->ip_info.ip));
         ESP_LOGI(TAG, "Got IP: %s", wifi_state.current_ip);
+        wifi_drops_note_up();
         
         // Start NTP time synchronization
         time_mgr_start_sync();
