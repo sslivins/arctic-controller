@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <esp_attr.h>
 
 static const char* TAG = "evt_screen";
 static const lv_font_t* kMinReadableLabelFont = &montserrat_16_latin;
@@ -87,7 +88,6 @@ static struct {
     lv_obj_t* search_textarea = nullptr;
     lv_obj_t* filter_overlay = nullptr;
     lv_obj_t* time_btn[EVENT_TIME_COUNT] = {};
-    event_entry_t filtered_events[EVENT_LOG_MAX_ENTRIES] = {};
     int filtered_count = 0;
     uint8_t category_mask = 0;
     uint8_t pending_category_mask = 0;
@@ -96,6 +96,9 @@ static struct {
     char search_query[64] = {};
     bool pending_refresh = false;
 } state;
+
+// Kept out of `state`: its non-zero initialisers put that in internal .data.
+EXT_RAM_BSS_ATTR static event_entry_t s_filtered_events[EVENT_LOG_MAX_ENTRIES];
 
 // ============================================================================
 // Helpers
@@ -622,7 +625,7 @@ static void append_next_batch() {
     int32_t scroll_y = lv_obj_get_scroll_y(state.content);
     lv_obj_add_flag(state.content, LV_OBJ_FLAG_HIDDEN);
     for (int i = 0; i < got; i++) {
-        create_event_row(state.content, &state.filtered_events[state.displayed + i]);
+        create_event_row(state.content, &s_filtered_events[state.displayed + i]);
     }
     state.displayed += got;
     update_footer(count - state.displayed);
@@ -673,7 +676,7 @@ static void rebuild_event_list() {
         int got = event_log_get(batch, FILTER_BATCH_SIZE, offset);
         for (int i = 0; i < got; i++) {
             if (event_matches_filters(&batch[i], now)) {
-                state.filtered_events[state.filtered_count++] = batch[i];
+                s_filtered_events[state.filtered_count++] = batch[i];
             }
         }
     }
@@ -745,7 +748,7 @@ static void rebuild_event_list() {
     int first_batch = count < EVENT_BATCH_SIZE ? count : EVENT_BATCH_SIZE;
 
     for (int i = 0; i < first_batch; i++) {
-        create_event_row(state.content, &state.filtered_events[i]);
+        create_event_row(state.content, &s_filtered_events[i]);
     }
     state.displayed = first_batch;
 

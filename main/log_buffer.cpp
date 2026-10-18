@@ -15,12 +15,13 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <esp_attr.h>
 
 // ============================================================================
 // Ring Buffer State
 // ============================================================================
 
-static log_entry_t s_buffer[LOG_BUFFER_MAX_ENTRIES];
+EXT_RAM_BSS_ATTR static log_entry_t s_buffer[LOG_BUFFER_MAX_ENTRIES];
 static int s_head = 0;           // Next write position
 static int s_count = 0;          // Number of valid entries
 static uint32_t s_next_seq = 1;  // Next sequence number to assign

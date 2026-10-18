@@ -12,6 +12,7 @@
 #include <mbedtls/x509.h>
 #include <string.h>
 #include <stdlib.h>
+#include <esp_attr.h>
 
 static const char* TAG = "tls_mgr";
 
@@ -23,7 +24,7 @@ static const char* NVS_KEY_IDENTITY_CERT = "id_cert";
 static const char* NVS_KEY_IDENTITY_KEY = "id_key";
 
 // Runtime state
-static struct {
+EXT_RAM_BSS_ATTR static struct {
     bool initialised;
     bool has_certs;
     bool https_active;
@@ -37,7 +38,7 @@ static struct {
     uint8_t identity_key[TLS_MAX_KEY_LEN];
     size_t identity_key_len;
     uint8_t identity_fingerprint[32];
-} state = {};
+} state;
 
 static bool calculate_identity_fingerprint(void)
 {

@@ -25,6 +25,7 @@
 #include <freertos/idf_additions.h>
 #include <esp_heap_caps.h>
 #include <bsp/m5stack_tab5.h>
+#include <esp_attr.h>
 
 static const char* TAG = "time_screen";
 
@@ -121,7 +122,7 @@ static time_screen_state_t s_state = {};
 // ============================================================================
 
 #define MAX_GEO_RESULTS 6
-static geo_result_t s_geo_results[MAX_GEO_RESULTS];
+EXT_RAM_BSS_ATTR static geo_result_t s_geo_results[MAX_GEO_RESULTS];
 static int          s_geo_count = 0;      // >=0: result count, <0: error
 static char         s_geo_query[128];
 static volatile bool s_geo_busy = false;
@@ -549,7 +550,7 @@ static void create_timezone_card(lv_obj_t* parent)
     lv_obj_set_user_data(s_state.tz_auto_value_label, (void*)"tz_auto_value");
 
     // ---- Manual timezone roller (shown when auto is off) ----
-    static char tz_options[2048] = {0};
+    EXT_RAM_BSS_ATTR static char tz_options[2048];
     tz_options[0] = '\0';
     for (size_t i = 0; i < NUM_TIMEZONES; i++) {
         if (i > 0) strcat(tz_options, "\n");

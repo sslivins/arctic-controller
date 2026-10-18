@@ -58,11 +58,12 @@
 #include "api_server.h"
 #include "wifi_manager.h"
 #include <time.h>
+#include <esp_attr.h>
 
 static const char* TAG = "test_api";
 
 static constexpr size_t WS_FEASIBILITY_MAX_PAYLOAD = 8192;
-static uint8_t s_ws_feasibility_payload[WS_FEASIBILITY_MAX_PAYLOAD];
+EXT_RAM_BSS_ATTR static uint8_t s_ws_feasibility_payload[WS_FEASIBILITY_MAX_PAYLOAD];
 
 static void set_json_content_type(httpd_req_t* req);
 static void send_json_error(
@@ -2490,7 +2491,9 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     // Take snapshot under LVGL lock
     bsp_display_lock(0);
     screen = lv_screen_active();
+    const int64_t render_t0 = esp_timer_get_time();
     lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
+    const int64_t render_us = esp_timer_get_time() - render_t0;
     bsp_display_unlock();
 
     if (snap_res != LV_RESULT_OK) {
@@ -2548,6 +2551,10 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     httpd_resp_set_type(req, "image/png");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=\"screenshot.png\"");
+    // Software render time of the whole screen, for performance comparisons.
+    char render_hdr[24];
+    snprintf(render_hdr, sizeof(render_hdr), "%lld", (long long)render_us);
+    httpd_resp_set_hdr(req, "X-Render-Time-Us", render_hdr);
 
     // Send in chunks to avoid stack issues with large buffers
     const size_t chunk_size = 8192;

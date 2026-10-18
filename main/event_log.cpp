@@ -13,11 +13,12 @@
 #include <freertos/semphr.h>
 #include <string.h>
 #include <time.h>
+#include <esp_attr.h>
 
 static const char* TAG = "event_log";
 
-static event_entry_t s_buffer[EVENT_LOG_MAX_ENTRIES];
-static uint32_t s_event_ids[EVENT_LOG_MAX_ENTRIES];
+EXT_RAM_BSS_ATTR static event_entry_t s_buffer[EVENT_LOG_MAX_ENTRIES];
+EXT_RAM_BSS_ATTR static uint32_t s_event_ids[EVENT_LOG_MAX_ENTRIES];
 static int s_head = 0;
 static int s_count = 0;
 static uint32_t s_next_event_id = 1;
