@@ -17,6 +17,7 @@
 #include <esp_log.h>
 #include <stdio.h>
 #include <string.h>
+#include <esp_attr.h>
 
 static const char* TAG = "hp_errors_scr";
 
@@ -40,7 +41,7 @@ static constexpr int ERROR_LOAD_INTERVAL_MS = 50;
 // ============================================================================
 // State
 // ============================================================================
-static struct {
+EXT_RAM_BSS_ATTR static struct {
     bool shown = false;
     lv_obj_t* screen = nullptr;
     heatpump_errors_close_cb_t on_close = nullptr;

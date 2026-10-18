@@ -287,6 +287,11 @@ CONFIG_MBEDTLS_HARDWARE_ECDSA_VERIFY=n
 # unaffected. Still required after the LVGL-IRAM fix below.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=512
 
+# Let large static buffers marked EXT_RAM_BSS_ATTR (log/event ring buffers,
+# TLS identity, screen snapshots) live in PSRAM instead of internal RAM. Only
+# zero-initialised data that is never touched from an ISR or DMA belongs there.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
 
 
 # Save an ELF core dump to the coredump partition on a panic or task-watchdog

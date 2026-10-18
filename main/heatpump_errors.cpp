@@ -20,6 +20,7 @@
 #include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include <esp_attr.h>
 
 static const char* TAG = "hp_errors";
 
@@ -83,7 +84,7 @@ static ErrorSeverity toErrorSeverity(FaultSeverity s) {
 // ============================================================================
 // Error History
 // ============================================================================
-static ErrorHistoryEntry s_history[ERROR_HISTORY_SIZE];
+EXT_RAM_BSS_ATTR static ErrorHistoryEntry s_history[ERROR_HISTORY_SIZE];
 static int s_history_head = 0;  // Next write position
 static int s_history_count = 0;
 
@@ -94,7 +95,7 @@ static int s_history_count = 0;
 static uint8_t s_prev_regs[5] = {0};
 
 struct FirstSeen { MaconFaultSiteId site; time_t when; };
-static FirstSeen s_first_seen[64];
+EXT_RAM_BSS_ATTR static FirstSeen s_first_seen[64];
 static size_t    s_first_seen_count = 0;
 
 static time_t getFirstSeen(MaconFaultSiteId site) {

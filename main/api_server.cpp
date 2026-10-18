@@ -74,6 +74,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
+#include <esp_attr.h>
 
 static const char* TAG = "api_server";
 
@@ -144,7 +145,7 @@ struct HaCommandRecord {
     char operation[HA_COMMAND_OPERATION_MAX + 1];
     char payload[HA_COMMAND_PAYLOAD_MAX + 1];
 };
-static HaCommandRecord s_ha_command_cache[HA_COMMAND_CACHE_SIZE] = {};
+EXT_RAM_BSS_ATTR static HaCommandRecord s_ha_command_cache[HA_COMMAND_CACHE_SIZE];
 static size_t s_ha_command_next = 0;
 static SemaphoreHandle_t s_ha_command_mutex = nullptr;
 
@@ -4534,7 +4535,7 @@ static esp_err_t heatpump_windows_handler(httpd_req_t* req)
 
     set_json_content_type(req);
 
-    static arctic::MaconObservedWindow wins[64];
+    EXT_RAM_BSS_ATTR static arctic::MaconObservedWindow wins[64];
     uint16_t n = arctic::getObservedWindows(wins, sizeof(wins) / sizeof(wins[0]));
 
     cJSON* root = cJSON_CreateObject();
