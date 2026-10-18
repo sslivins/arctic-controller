@@ -48,6 +48,7 @@
 #include "log_persist.h"
 #include "event_log.h"
 #include "net_diag.h"
+#include "wifi_drops.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -321,6 +322,7 @@ static void wifi_supervisor_task(void* param) {
     vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
 
     for (;;) {
+        wifi_drops_poll();
         wifi_mgr_state_t state = wifi_mgr_get_state();
         const bool have_creds = wifi_mgr_has_saved_credentials();
 

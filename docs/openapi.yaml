@@ -268,6 +268,32 @@ paths:
                       ip:
                         type: string
                         example: 192.168.1.100
+                      drops:
+                        type: object
+                        description: |
+                          WiFi outages since boot, not counting disconnects the
+                          controller made itself. Outages of 60 s or more are
+                          also logged as `wifi_lost` / `wifi_restored` events.
+                        properties:
+                          total:
+                            type: integer
+                            example: 2
+                          short:
+                            type: integer
+                            description: Outages that ended in under 60 s.
+                            example: 1
+                          long:
+                            type: integer
+                            description: Outages that reached 60 s, including one in progress.
+                            example: 1
+                          last_reason:
+                            type: integer
+                            description: ESP-IDF disconnect reason of the last outage, 0 if none.
+                            example: 200
+                          down_s:
+                            type: integer
+                            description: Length of the outage in progress in seconds, 0 if connected.
+                            example: 0
                   time:
                     type: object
                     properties:
@@ -5445,6 +5471,9 @@ components:
           - network_recovered
           - web_server_down
           - web_server_recovered
+          - wifi_lost
+          - wifi_restored
+          - wifi_unstable
           example: power_on
         category:
           type: string
@@ -5473,6 +5502,9 @@ components:
             - `network_recovered`: 0=came back on its own, 1=WiFi reconnect, 2=controller reboot
             - `web_server_down`: 0=unknown, 1=out of memory, 2=no TLS certificate, 3=other startup failure, 4=injected by a test
             - `web_server_recovered`: 0=servers restarted in place, 1=controller reboot
+            - `wifi_lost`: ESP-IDF disconnect reason (`wifi_err_reason_t`)
+            - `wifi_restored`: outage length in seconds
+            - `wifi_unstable`: number of short drops in the hour
             - All other events: 0
           example: 0
         from_mode:
@@ -5536,6 +5568,27 @@ components:
           description: "`web_server_down` only: why the web/API servers were down."
           enum: [unknown, no_memory, no_identity, start_failed, test]
           example: no_memory
+        reason:
+          type: integer
+          description: |
+            `wifi_lost` only: ESP-IDF disconnect reason. Logged once the WiFi
+            link has been down for 60 s; shorter drops are only counted.
+          example: 200
+        reason_key:
+          type: string
+          description: "`wifi_lost` only: the disconnect reason grouped for display."
+          enum: [signal_lost, network_not_found, auth_failed, ap_disconnected, ap_restarted, other]
+          example: signal_lost
+        down_s:
+          type: integer
+          description: "`wifi_restored` only: how long the WiFi link was down, in seconds."
+          example: 252
+        drops:
+          type: integer
+          description: |
+            `wifi_unstable` only: short (under 60 s) WiFi drops within an hour.
+            Logged at 3 or more, then at most once an hour while it continues.
+          example: 3
 
     AdvancedParam:
       type: object

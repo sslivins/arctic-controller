@@ -10,6 +10,7 @@
 #include "device_name.h"
 #include "i18n/i18n.h"
 #include "wifi_manager.h"
+#include "wifi_drops.h"
 #include "time_manager.h"
 #include "location_manager.h"
 #include "geocoding.h"
@@ -2369,6 +2370,15 @@ static esp_err_t status_get_handler(httpd_req_t* req)
             cJSON_AddStringToObject(wifi, "ip", ip);
         }
         cJSON_AddNumberToObject(wifi, "rssi", wifi_mgr_get_rssi());
+    }
+    {
+        const WifiDropStats ds = wifi_drops_stats();
+        cJSON* drops = cJSON_AddObjectToObject(wifi, "drops");
+        cJSON_AddNumberToObject(drops, "total", ds.drops);
+        cJSON_AddNumberToObject(drops, "short", ds.short_drops);
+        cJSON_AddNumberToObject(drops, "long", ds.long_drops);
+        cJSON_AddNumberToObject(drops, "last_reason", ds.last_reason);
+        cJSON_AddNumberToObject(drops, "down_s", ds.down_s);
     }
     
     // Time status
@@ -6998,6 +7008,16 @@ static void add_event_details(cJSON* evt, const event_entry_t& e)
             else cJSON_AddNullToObject(evt, "recovery");
             break;
         }
+        case EVENT_WIFI_LOST:
+            cJSON_AddNumberToObject(evt, "reason", p);
+            cJSON_AddStringToObject(evt, "reason_key", event_wifi_reason_key(p));
+            break;
+        case EVENT_WIFI_RESTORED:
+            cJSON_AddNumberToObject(evt, "down_s", p);
+            break;
+        case EVENT_WIFI_UNSTABLE:
+            cJSON_AddNumberToObject(evt, "drops", p);
+            break;
         default:
             break;
     }

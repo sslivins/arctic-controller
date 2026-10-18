@@ -57,6 +57,8 @@
 #include "weather.h"
 #include "api_server.h"
 #include "wifi_manager.h"
+#include "wifi_drops.h"
+#include <esp_wifi.h>
 #include <time.h>
 #include <esp_attr.h>
 
@@ -2681,17 +2683,44 @@ static esp_err_t stack_watermarks_get_handler(httpd_req_t* req)
 // run on the server's own task).
 // ============================================================================
 
-static void wifi_bounce_task(void*)
+struct WifiBounceArgs {
+    bool unplanned;
+    uint16_t reason;
+    uint32_t down_ms;
+};
+
+static void wifi_bounce_task(void* arg)
 {
+    WifiBounceArgs a = {false, 0, 1500};
+    if (arg) {
+        a = *(WifiBounceArgs*)arg;
+        free(arg);
+    }
     vTaskDelay(pdMS_TO_TICKS(300));
-    ESP_LOGW(TAG, "test: bouncing WiFi");
+    ESP_LOGW(TAG, "test: bouncing WiFi (%s, %lu ms)", a.unplanned ? "unplanned" : "planned",
+             (unsigned long)a.down_ms);
     char ssid[33] = {0};
     char password[65] = {0};
     const bool have = wifi_mgr_load_credentials(ssid, sizeof(ssid),
                                                 password, sizeof(password));
-    wifi_mgr_disconnect();
-    vTaskDelay(pdMS_TO_TICKS(1500));
-    if (have) {
+    if (a.unplanned) {
+        // Counts as a real drop: skip wifi_mgr_disconnect()'s local marker.
+        wifi_drops_test_unplanned_next(a.reason);
+        esp_wifi_disconnect();
+        // Act like an unreachable AP: abort the supervisor's reconnects until
+        // the outage has lasted down_ms.
+        const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(a.down_ms);
+        while ((int32_t)(until - xTaskGetTickCount()) > 0) {
+            if (wifi_mgr_get_state() != WIFI_MGR_STATE_DISCONNECTED) {
+                esp_wifi_disconnect();
+            }
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+    } else {
+        wifi_mgr_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(a.down_ms));
+    }
+    if (have && wifi_mgr_get_state() != WIFI_MGR_STATE_CONNECTED) {
         wifi_mgr_connect(ssid, password, nullptr);
     }
     memset(password, 0, sizeof(password));
@@ -2724,7 +2753,36 @@ static esp_err_t wifi_bounce_post_handler(httpd_req_t* req)
         httpd_resp_sendstr(req, "{\"error\":\"no saved WiFi credentials\"}");
         return ESP_OK;
     }
-    if (xTaskCreate(wifi_bounce_task, "t_wbounce", 4096, NULL, 5, NULL) != pdPASS) {
+    WifiBounceArgs* args = nullptr;
+    if (req->content_len > 0) {
+        char buf[96] = {0};
+        if (req->content_len >= sizeof(buf)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
+            return ESP_FAIL;
+        }
+        if (httpd_req_recv(req, buf, req->content_len) <= 0) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read body");
+            return ESP_FAIL;
+        }
+        cJSON* body = cJSON_Parse(buf);
+        if (!body) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+            return ESP_FAIL;
+        }
+        args = (WifiBounceArgs*)malloc(sizeof(WifiBounceArgs));
+        if (args) {
+            args->unplanned = cJSON_IsTrue(cJSON_GetObjectItem(body, "unplanned"));
+            const cJSON* r = cJSON_GetObjectItem(body, "reason");
+            args->reason = cJSON_IsNumber(r) ? (uint16_t)r->valueint : 0;
+            const cJSON* d = cJSON_GetObjectItem(body, "down_s");
+            int down_s = cJSON_IsNumber(d) ? d->valueint : 0;
+            if (down_s > 600) down_s = 600;
+            args->down_ms = down_s > 0 ? (uint32_t)down_s * 1000 : 1500;
+        }
+        cJSON_Delete(body);
+    }
+    if (xTaskCreate(wifi_bounce_task, "t_wbounce", 4096, args, 5, NULL) != pdPASS) {
+        free(args);
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\":\"task create failed\"}");
         return ESP_OK;
