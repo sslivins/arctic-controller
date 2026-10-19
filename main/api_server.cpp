@@ -11,6 +11,7 @@
 #include "i18n/i18n.h"
 #include "wifi_manager.h"
 #include "wifi_drops.h"
+#include "wifi_roam.h"
 #include "time_manager.h"
 #include "location_manager.h"
 #include "geocoding.h"
@@ -86,6 +87,18 @@ static const char* TAG = "api_server";
 // "arctic.local".
 static const char* HOSTNAME_BASE = "arctic";
 static char hostname[32] = "arctic";  // Actual hostname (may have suffix)
+
+// Which access point we're on: networks with several APs share one SSID.
+static void add_wifi_bss(cJSON* obj)
+{
+    wifi_mgr_bss_t bss;
+    if (!wifi_mgr_get_current_bss(&bss)) return;
+    char b[18];
+    snprintf(b, sizeof(b), "%02X:%02X:%02X:%02X:%02X:%02X", bss.bssid[0], bss.bssid[1],
+             bss.bssid[2], bss.bssid[3], bss.bssid[4], bss.bssid[5]);
+    cJSON_AddStringToObject(obj, "bssid", b);
+    cJSON_AddNumberToObject(obj, "channel", bss.channel);
+}
 
 // HTTP/HTTPS server handle (only one is active per boot)
 static httpd_handle_t server = NULL;      // HTTP (port 80) — always running
@@ -2371,7 +2384,9 @@ static esp_err_t status_get_handler(httpd_req_t* req)
             cJSON_AddStringToObject(wifi, "ip", ip);
         }
         cJSON_AddNumberToObject(wifi, "rssi", wifi_mgr_get_rssi());
+        add_wifi_bss(wifi);
     }
+    cJSON_AddNumberToObject(wifi, "roams", wifi_roam_count());
     {
         const WifiDropStats ds = wifi_drops_stats();
         cJSON* drops = cJSON_AddObjectToObject(wifi, "drops");
@@ -2780,7 +2795,9 @@ static esp_err_t wifi_get_handler(httpd_req_t* req)
             cJSON_AddStringToObject(root, "ip", ip);
         }
         cJSON_AddNumberToObject(root, "rssi", wifi_mgr_get_rssi());
+        add_wifi_bss(root);
         cJSON_AddStringToObject(root, "hostname", hostname);
+        cJSON_AddStringToObject(root, "dhcp_hostname", wifi_mgr_get_hostname());
         
         char url[64];
         snprintf(url, sizeof(url), "%s://%s.local",
@@ -7209,6 +7226,7 @@ static esp_err_t preferences_patch_handler(httpd_req_t* req)
         }
         name_changed = strcmp(normalized, app_prefs_get_device_name()) != 0;
         app_prefs_set_device_name(normalized);
+        wifi_mgr_refresh_hostname();
     }
     if (temp_unit) {
         app_prefs_set_temp_unit(

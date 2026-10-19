@@ -268,6 +268,20 @@ paths:
                       ip:
                         type: string
                         example: 192.168.1.100
+                      bssid:
+                        type: string
+                        description: Access point the controller is on (only when connected).
+                        example: "74:83:C2:12:34:56"
+                      channel:
+                        type: integer
+                        description: That access point's WiFi channel (only when connected).
+                        example: 6
+                      roams:
+                        type: integer
+                        description: |
+                          Moves to a stronger access point since boot (logged as
+                          `wifi_roamed` events).
+                        example: 0
                       drops:
                         type: object
                         description: |
@@ -704,10 +718,29 @@ paths:
                     type: integer
                     description: Signal strength in dBm (only when connected). Typical range -30 (excellent) to -90 (weak).
                     example: -45
+                  bssid:
+                    type: string
+                    description: |
+                      MAC of the access point the controller is on (only when
+                      connected). Networks with several access points share one
+                      SSID; this tells them apart.
+                    example: "74:83:C2:12:34:56"
+                  channel:
+                    type: integer
+                    description: WiFi channel of that access point (only when connected)
+                    example: 6
                   hostname:
                     type: string
                     description: mDNS hostname (only when connected)
                     example: arctic
+                  dhcp_hostname:
+                    type: string
+                    description: |
+                      Name the controller gives the router over DHCP (only when
+                      connected): its friendly name reduced to letters, digits
+                      and hyphens, or `Macon-Heat-Pump-Controller-XXXX` (last 4
+                      MAC hex digits) when it has none.
+                    example: Sun-Peaks-HP1
                   local_url:
                     type: string
                     description: Full mDNS URL (only when connected)
@@ -5223,6 +5256,17 @@ components:
                 rssi_dbm:
                   type: integer
                   nullable: true
+                bssid:
+                  type: string
+                  nullable: true
+                  description: Access point the controller is on.
+                channel:
+                  type: integer
+                  nullable: true
+                roams:
+                  type: integer
+                  minimum: 0
+                  description: Moves to a stronger access point this boot.
                 disconnect_count:
                   type: integer
                   minimum: 0
@@ -5500,6 +5544,7 @@ components:
           - wifi_lost
           - wifi_restored
           - wifi_unstable
+          - wifi_roamed
           example: power_on
         category:
           type: string
@@ -5531,6 +5576,7 @@ components:
             - `wifi_lost`: ESP-IDF disconnect reason (`wifi_err_reason_t`)
             - `wifi_restored`: outage length in seconds
             - `wifi_unstable`: number of short drops in the hour
+            - `wifi_roamed`: `(channel << 16) | (-to_rssi << 8) | -from_rssi`
             - All other events: 0
           example: 0
         from_mode:
@@ -5615,6 +5661,21 @@ components:
             `wifi_unstable` only: short (under 60 s) WiFi drops within an hour.
             Logged at 3 or more, then at most once an hour while it continues.
           example: 3
+        from_rssi_dbm:
+          type: integer
+          description: |
+            `wifi_roamed` only: signal from the access point the controller
+            left. It moves only when the signal stays at -70 dBm or weaker for
+            a minute and another access point of the network is 10 dB stronger.
+          example: -78
+        to_rssi_dbm:
+          type: integer
+          description: "`wifi_roamed` only: signal from the new access point."
+          example: -52
+        channel:
+          type: integer
+          description: "`wifi_roamed` only: the new access point's WiFi channel."
+          example: 6
 
     AdvancedParam:
       type: object

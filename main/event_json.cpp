@@ -74,6 +74,11 @@ void add_event_details(cJSON* evt, const event_entry_t& e)
         case EVENT_WIFI_UNSTABLE:
             cJSON_AddNumberToObject(evt, "drops", p);
             break;
+        case EVENT_WIFI_ROAMED:
+            cJSON_AddNumberToObject(evt, "from_rssi_dbm", -(int)(p & 0xFF));
+            cJSON_AddNumberToObject(evt, "to_rssi_dbm", -(int)((p >> 8) & 0xFF));
+            cJSON_AddNumberToObject(evt, "channel", (p >> 16) & 0xFF);
+            break;
         default:
             break;
     }

@@ -28,6 +28,9 @@ CONFIG_LWIP_MAX_SOCKETS=24
 # lru_purge (see api_server.cpp max_open_sockets) starved this pool and took
 # every server (443/8443/web) unresponsive at once (mbedtls -0x7780 storm).
 CONFIG_LWIP_MAX_ACTIVE_TCP=24
+# Send DHCP option 60 ("Arctic Controller", set in wifi_manager.cpp) so
+# routers can identify the device instead of showing a generic ESP32.
+# CONFIG_LWIP_DHCP_DISABLE_VENDOR_CLASS_ID is not set
 
 # TCP window / send buffer. IDF's stock 5760 is 4x MSS, which caps throughput
 # at window/RTT regardless of link speed: measured against the CI controller at

@@ -76,6 +76,7 @@ static const char* s_event_names[] = {
     "wifi_lost",
     "wifi_restored",
     "wifi_unstable",
+    "wifi_roamed",
 };
 
 static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
@@ -339,6 +340,7 @@ event_category_t event_type_category(event_type_t type) {
 
         case EVENT_SYSTEM_START:
         case EVENT_CONNECTED:
+        case EVENT_WIFI_ROAMED:
         default:
             return EVENT_CATEGORY_SYSTEM;
     }

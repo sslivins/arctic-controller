@@ -7,6 +7,8 @@
 #include "time_manager.h"
 #include "api_server.h"
 #include "wifi_drops.h"
+#include "dhcp_hostname.h"
+#include "app_preferences.h"
 #include <string.h>
 #include <esp_wifi.h>
 #include <esp_event.h>
@@ -20,6 +22,7 @@
 #include <esp_heap_caps.h>
 #include <bsp/m5stack_tab5.h>
 #include <esp_hosted.h>
+#include <lwip_default_hooks.h>
 
 static const char* TAG = "wifi_mgr";
 
@@ -61,6 +64,17 @@ static struct {
     uint32_t coproc_ver_patch;
 
 } wifi_state = {};
+
+static char s_hostname[DHCP_HOSTNAME_MAX + 1] = "arctic";
+static uint8_t s_sta_mac[6] = {0};
+
+// Roam scans (wifi_mgr_scan_bss) share the radio's single scan with the
+// settings screen but keep their results out of it.
+#define MAX_ROAM_BSS 8
+static std::atomic<bool> s_roam_scan{false};
+static const char* s_roam_ssid = nullptr;
+static wifi_mgr_bss_t s_roam_bss[MAX_ROAM_BSS];
+static int s_roam_bss_count = 0;
 
 static TaskHandle_t s_api_svc_task = NULL;
 static std::atomic<uint32_t> s_api_req_gen{0};
@@ -282,6 +296,20 @@ bool wifi_mgr_init(void)
                  esp_err_to_name(c6_ver_err));
     }
 
+    // Identify ourselves to the DHCP server. Without this lwIP sends
+    // "espressif", which is what router UIs (UniFi etc.) show for the client.
+    // Both must be set before DHCP starts.
+    esp_wifi_get_mac(WIFI_IF_STA, s_sta_mac);
+    wifi_mgr_refresh_hostname();
+    // esp_netif_dhcpc_option() can't do this: it needs the per-netif DHCP
+    // state, which only exists once DHCP has started, and SET is rejected
+    // after that. The vendor class is a single global lwIP buffer, so set it
+    // directly before the first connect.
+    static const char VENDOR_CLASS[] = "Arctic Controller";
+    if (dhcp_set_vendor_class_identifier(sizeof(VENDOR_CLASS) - 1, VENDOR_CLASS) != 0) {
+        ESP_LOGW(TAG, "DHCP vendor class not set");
+    }
+
     wifi_state.initialized = true;
     wifi_state.state = WIFI_MGR_STATE_DISCONNECTED;
     start_api_service_task();
@@ -362,7 +390,9 @@ uint16_t wifi_mgr_get_scan_results(wifi_mgr_ap_info_t* out, uint16_t max_out)
     return count;
 }
 
-bool wifi_mgr_connect(const char* ssid, const char* password, wifi_mgr_state_cb_t state_callback)
+static bool connect_internal(const char* ssid, const char* password,
+                             wifi_mgr_state_cb_t state_callback,
+                             const uint8_t* bssid, uint8_t channel)
 {
     if (!wifi_state.initialized) {
         ESP_LOGE(TAG, "WiFi not initialized");
@@ -374,7 +404,13 @@ bool wifi_mgr_connect(const char* ssid, const char* password, wifi_mgr_state_cb_
         return false;
     }
     
-    ESP_LOGI(TAG, "Connecting to '%s'...", ssid);
+    if (bssid) {
+        ESP_LOGI(TAG, "Connecting to '%s' via %02x:%02x:%02x:%02x:%02x:%02x (ch %u)...",
+                 ssid, bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5],
+                 (unsigned)channel);
+    } else {
+        ESP_LOGI(TAG, "Connecting to '%s'...", ssid);
+    }
     
     // Preserve any previously-registered state callback when the caller passes
     // NULL (e.g. the WiFi health supervisor reconnecting in the background) so
@@ -393,6 +429,16 @@ bool wifi_mgr_connect(const char* ssid, const char* password, wifi_mgr_state_cb_
     wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;  // Accept any auth mode
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
+    // Look at every channel and join the strongest access point of the
+    // network. The default fast scan takes the first match it finds, which
+    // with several APs sharing the SSID can be a distant one.
+    wifi_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    wifi_config.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    if (bssid) {
+        wifi_config.sta.bssid_set = true;
+        memcpy(wifi_config.sta.bssid, bssid, 6);
+        wifi_config.sta.channel = channel;
+    }
     
     // Clear event bits
     xEventGroupClearBits(wifi_state.event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
@@ -421,6 +467,128 @@ bool wifi_mgr_connect(const char* ssid, const char* password, wifi_mgr_state_cb_
     notify_state_change(WIFI_MGR_STATE_CONNECTING);
     
     return true;
+}
+
+bool wifi_mgr_connect(const char* ssid, const char* password, wifi_mgr_state_cb_t state_callback)
+{
+    return connect_internal(ssid, password, state_callback, nullptr, 0);
+}
+
+bool wifi_mgr_connect_bss(const char* ssid, const char* password,
+                          const uint8_t bssid[6], uint8_t channel)
+{
+    if (bssid == NULL) {
+        return false;
+    }
+    return connect_internal(ssid, password, nullptr, bssid, channel);
+}
+
+bool wifi_mgr_get_current_bss(wifi_mgr_bss_t* out)
+{
+    if (out == NULL || wifi_state.state != WIFI_MGR_STATE_CONNECTED) {
+        return false;
+    }
+    wifi_ap_record_t ap;
+    if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        return false;
+    }
+    memcpy(out->bssid, ap.bssid, 6);
+    out->rssi = ap.rssi;
+    out->channel = ap.primary;
+    return true;
+}
+
+int wifi_mgr_scan_bss(const char* ssid, wifi_mgr_bss_t* out, int max_out,
+                      uint32_t timeout_ms)
+{
+    if (!wifi_state.initialized || ssid == NULL || out == NULL || max_out <= 0) {
+        return -1;
+    }
+    bool expected = false;
+    if (!s_roam_scan.compare_exchange_strong(expected, true)) {
+        return -1;
+    }
+    s_roam_ssid = ssid;
+    s_roam_bss_count = 0;
+    xEventGroupClearBits(wifi_state.event_group, WIFI_SCAN_DONE_BIT);
+
+    wifi_scan_config_t cfg = {};
+    cfg.ssid = (uint8_t*)ssid;
+    cfg.channel = 0;
+    cfg.show_hidden = false;
+    cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    // Short dwell: we stay associated and every off-channel slot delays our
+    // own traffic a little.
+    cfg.scan_time.active.min = 60;
+    cfg.scan_time.active.max = 120;
+    esp_err_t ret = esp_wifi_scan_start(&cfg, false);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "roam scan not started: %s", esp_err_to_name(ret));
+        s_roam_scan.store(false);
+        return -1;
+    }
+    EventBits_t bits = xEventGroupWaitBits(wifi_state.event_group, WIFI_SCAN_DONE_BIT,
+                                           pdTRUE, pdTRUE, pdMS_TO_TICKS(timeout_ms));
+    if (!(bits & WIFI_SCAN_DONE_BIT)) {
+        esp_wifi_scan_stop();
+        s_roam_scan.store(false);
+        ESP_LOGW(TAG, "roam scan timed out");
+        return -1;
+    }
+    const int n = s_roam_bss_count < max_out ? s_roam_bss_count : max_out;
+    memcpy(out, s_roam_bss, n * sizeof(wifi_mgr_bss_t));
+    return n;
+}
+
+const char* wifi_mgr_get_hostname(void)
+{
+    return s_hostname;
+}
+
+void wifi_mgr_refresh_hostname(void)
+{
+    if (wifi_state.sta_netif == NULL) {
+        return;
+    }
+    char name[sizeof(s_hostname)];
+    dhcp_hostname_build(app_prefs_get_device_name(), s_sta_mac, name, sizeof(name));
+    if (strcmp(name, s_hostname) == 0 && wifi_state.initialized) {
+        return;
+    }
+    // A rename reaches the router at the next DHCP renewal or reconnect; we
+    // don't drop the link just to announce it sooner.
+    esp_err_t ret = esp_netif_set_hostname(wifi_state.sta_netif, name);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "DHCP hostname not set: %s", esp_err_to_name(ret));
+        return;
+    }
+    memcpy(s_hostname, name, sizeof(s_hostname));
+    ESP_LOGI(TAG, "DHCP hostname '%s'", s_hostname);
+}
+
+static void collect_roam_scan(void)
+{
+    uint16_t n = 0;
+    esp_wifi_scan_get_ap_num(&n);
+    wifi_ap_record_t* recs = n ? (wifi_ap_record_t*)malloc(sizeof(wifi_ap_record_t) * n) : NULL;
+    int kept = 0;
+    if (recs) {
+        esp_wifi_scan_get_ap_records(&n, recs);
+        for (int i = 0; i < n && kept < MAX_ROAM_BSS; i++) {
+            if (s_roam_ssid && strcmp((const char*)recs[i].ssid, s_roam_ssid) != 0) {
+                continue;
+            }
+            memcpy(s_roam_bss[kept].bssid, recs[i].bssid, 6);
+            s_roam_bss[kept].rssi = recs[i].rssi;
+            s_roam_bss[kept].channel = recs[i].primary;
+            kept++;
+        }
+        free(recs);
+    } else {
+        // Records must be freed even when we can't read them.
+        esp_wifi_clear_ap_list();
+    }
+    s_roam_bss_count = kept;
 }
 
 void wifi_mgr_disconnect(void)
@@ -528,6 +696,13 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             
         case WIFI_EVENT_SCAN_DONE: {
             ESP_LOGI(TAG, "Scan complete");
+
+            if (s_roam_scan.load()) {
+                collect_roam_scan();
+                s_roam_scan.store(false);
+                xEventGroupSetBits(wifi_state.event_group, WIFI_SCAN_DONE_BIT);
+                break;
+            }
             
             // Get scan results
             uint16_t ap_count = 0;
