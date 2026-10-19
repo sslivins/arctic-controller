@@ -58,6 +58,7 @@
 #include "api_server.h"
 #include "wifi_manager.h"
 #include "wifi_drops.h"
+#include "wifi_roam.h"
 #include <esp_wifi.h>
 #include <time.h>
 #include <esp_attr.h>
@@ -2790,6 +2791,48 @@ static esp_err_t wifi_bounce_post_handler(httpd_req_t* req)
     return send_accepted(req);
 }
 
+// POST /api/test/wifi-roam {"any":bool,"bogus":bool,"dry":bool}: run a roam
+// check now (see wifi_roam_test_run). Replies first; the outcome is logged
+// ("test roam ...") and visible in /api/wifi bssid and the event log.
+static void wifi_roam_task(void* arg)
+{
+    const uint32_t f = (uint32_t)(uintptr_t)arg;
+    vTaskDelay(pdMS_TO_TICKS(300));
+    wifi_roam_test_run(f & 1, f & 2, f & 4);
+    vTaskDelete(NULL);
+}
+
+static esp_err_t wifi_roam_post_handler(httpd_req_t* req)
+{
+    uint32_t flags = 0;
+    if (req->content_len > 0) {
+        char buf[96] = {0};
+        if (req->content_len >= sizeof(buf)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
+            return ESP_FAIL;
+        }
+        if (httpd_req_recv(req, buf, req->content_len) <= 0) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Failed to read body");
+            return ESP_FAIL;
+        }
+        cJSON* body = cJSON_Parse(buf);
+        if (!body) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+            return ESP_FAIL;
+        }
+        if (cJSON_IsTrue(cJSON_GetObjectItem(body, "any"))) flags |= 1;
+        if (cJSON_IsTrue(cJSON_GetObjectItem(body, "bogus"))) flags |= 2;
+        if (cJSON_IsTrue(cJSON_GetObjectItem(body, "dry"))) flags |= 4;
+        cJSON_Delete(body);
+    }
+    if (xTaskCreate(wifi_roam_task, "t_wroam", 4096, (void*)(uintptr_t)flags, 5, NULL) != pdPASS) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":\"task create failed\"}");
+        return ESP_OK;
+    }
+    return send_accepted(req);
+}
+
 static esp_err_t api_server_kill_post_handler(httpd_req_t* req)
 {
     int fail_starts = 0;
@@ -3056,6 +3099,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &wifi_bounce_uri);
+
+    httpd_uri_t wifi_roam_uri = {
+        .uri = "/api/test/wifi-roam",
+        .method = HTTP_POST,
+        .handler = wifi_roam_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &wifi_roam_uri);
 
     httpd_uri_t api_server_kill_uri = {
         .uri = "/api/test/api-server-kill",

@@ -120,6 +120,48 @@ bool wifi_mgr_get_ip_info(uint32_t* ip_out, uint32_t* netmask_out);
 int8_t wifi_mgr_get_rssi(void);
 
 /**
+ * @brief One access point (BSS) of the configured network.
+ */
+typedef struct {
+    uint8_t bssid[6];
+    int8_t rssi;
+    uint8_t channel;
+} wifi_mgr_bss_t;
+
+/**
+ * @brief The access point the station is associated with.
+ * @return false when not connected or the C6 can't report it.
+ */
+bool wifi_mgr_get_current_bss(wifi_mgr_bss_t* out);
+
+/**
+ * @brief Connect to one specific access point of `ssid` (used to roam).
+ *        Later reconnects through wifi_mgr_connect() are not pinned.
+ */
+bool wifi_mgr_connect_bss(const char* ssid, const char* password,
+                          const uint8_t bssid[6], uint8_t channel);
+
+/**
+ * @brief Blocking all-channel scan for the access points of `ssid`, kept
+ *        out of the user-facing scan results.
+ * @return number of entries written to `out`, or -1 if the scan failed.
+ */
+int wifi_mgr_scan_bss(const char* ssid, wifi_mgr_bss_t* out, int max_out,
+                      uint32_t timeout_ms);
+
+/**
+ * @brief DHCP hostname: the controller's friendly name made hostname-safe,
+ *        or "Macon-Heat-Pump-Controller-XXXX" (see dhcp_hostname.h).
+ */
+const char* wifi_mgr_get_hostname(void);
+
+/**
+ * @brief Re-derive the DHCP hostname after the friendly name changes. The
+ *        router sees it at the next DHCP renewal or reconnect.
+ */
+void wifi_mgr_refresh_hostname(void);
+
+/**
  * @brief Number of STA disconnect events this boot (includes failed
  *        reconnect attempts).
  */

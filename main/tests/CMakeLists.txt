@@ -233,3 +233,13 @@ add_test(NAME energy_store COMMAND test_energy_store)
 add_executable(test_wifi_drop_tracker test_wifi_drop_tracker.cpp)
 target_link_libraries(test_wifi_drop_tracker PRIVATE arctic_main_host)
 add_test(NAME wifi_drop_tracker COMMAND test_wifi_drop_tracker)
+
+# WiFi roam policy: when to look for a stronger access point and which to pick.
+add_executable(test_wifi_roam_policy test_wifi_roam_policy.cpp)
+target_link_libraries(test_wifi_roam_policy PRIVATE arctic_main_host)
+add_test(NAME wifi_roam_policy COMMAND test_wifi_roam_policy)
+
+# DHCP hostname from the friendly name.
+add_executable(test_dhcp_hostname test_dhcp_hostname.cpp)
+target_link_libraries(test_dhcp_hostname PRIVATE arctic_main_host)
+add_test(NAME dhcp_hostname COMMAND test_dhcp_hostname)

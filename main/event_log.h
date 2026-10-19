@@ -51,6 +51,7 @@ typedef enum {
     EVENT_WIFI_LOST,            // WiFi down for a minute (payload: wifi_err_reason_t of the disconnect)
     EVENT_WIFI_RESTORED,        // WiFi back after an EVENT_WIFI_LOST (payload: seconds down)
     EVENT_WIFI_UNSTABLE,        // Repeated short WiFi drops (payload: drops in the last hour)
+    EVENT_WIFI_ROAMED,          // Moved to a stronger access point (payload: wifi_roam_pack)
     EVENT_TYPE_COUNT
 } event_type_t;
 

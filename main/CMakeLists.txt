@@ -82,6 +82,7 @@ idf_component_register(
         "device_diagnostics.cpp"
         "wifi_supervisor.cpp"
         "wifi_drops.cpp"
+        "wifi_roam.cpp"
         "log_buffer.cpp"
         "log_persist.cpp"
         "crash_dump.cpp"

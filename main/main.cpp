@@ -54,6 +54,7 @@
 #include "boot_stats.h"
 #include "fault_notice.h"
 #include "wifi_supervisor.h"
+#include "wifi_roam.h"
 #include "telemetry_history.h"
 #include "ui_common.h"
 #include "log_buffer.h"
@@ -777,8 +778,12 @@ static void on_wifi_state_changed(wifi_mgr_state_t state, const char* ssid)
                 wifi_screen_update_connection(false, NULL, NULL);
             }
             
-            // Track disconnect for instability detection
+            // Track disconnect for instability detection (a roam's deliberate
+            // disconnect isn't instability)
             uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);  // Current time in ms
+            if (wifi_roam_in_progress()) {
+                break;
+            }
             wifi_disconnect_times[wifi_disconnect_index] = now;
             wifi_disconnect_index = (wifi_disconnect_index + 1) % WIFI_UNSTABLE_THRESHOLD;
             

@@ -49,6 +49,7 @@
 #include "event_log.h"
 #include "net_diag.h"
 #include "wifi_drops.h"
+#include "wifi_roam.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -427,6 +428,8 @@ static void wifi_supervisor_task(void* param) {
             unreachable_since_us = 0;
             unreachable_logged = false;
             bounces = 0;
+            // Only from a healthy link, so roaming never overlaps recovery.
+            wifi_roam_poll();
             vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
             continue;
         }

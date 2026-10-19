@@ -135,6 +135,7 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_WIFI_LOST:           return STR_EVENT_WIFI_LOST;
         case EVENT_WIFI_RESTORED:       return STR_EVENT_WIFI_RESTORED;
         case EVENT_WIFI_UNSTABLE:       return STR_EVENT_WIFI_UNSTABLE;
+        case EVENT_WIFI_ROAMED:         return STR_EVENT_WIFI_ROAMED;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -170,6 +171,7 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_WIFI_LOST:           return LV_SYMBOL_WIFI;
         case EVENT_WIFI_RESTORED:       return LV_SYMBOL_WIFI;
         case EVENT_WIFI_UNSTABLE:       return LV_SYMBOL_WIFI;
+        case EVENT_WIFI_ROAMED:         return LV_SYMBOL_WIFI;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -339,6 +341,10 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
         }
         case EVENT_WIFI_UNSTABLE:
             snprintf(buf, buf_size, i18n_get(STR_EVENT_WIFI_DROPS_FMT), (unsigned)p);
+            break;
+        case EVENT_WIFI_ROAMED:
+            snprintf(buf, buf_size, i18n_get(STR_EVENT_WIFI_ROAMED_FMT),
+                     -(int)(p & 0xFF), -(int)((p >> 8) & 0xFF), (unsigned)((p >> 16) & 0xFF));
             break;
         default:
             buf[0] = '\0';

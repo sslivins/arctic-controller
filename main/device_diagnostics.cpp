@@ -22,6 +22,7 @@
 #include "macon_master_iface.h"
 #include "wifi_drops.h"
 #include "wifi_manager.h"
+#include "wifi_roam.h"
 
 namespace {
 
@@ -85,6 +86,18 @@ void add_wifi(cJSON* root)
     } else {
         cJSON_AddNullToObject(wifi, "rssi_dbm");
     }
+    wifi_mgr_bss_t bss;
+    if (connected && wifi_mgr_get_current_bss(&bss)) {
+        char b[18];
+        snprintf(b, sizeof(b), "%02X:%02X:%02X:%02X:%02X:%02X", bss.bssid[0],
+                 bss.bssid[1], bss.bssid[2], bss.bssid[3], bss.bssid[4], bss.bssid[5]);
+        cJSON_AddStringToObject(wifi, "bssid", b);
+        cJSON_AddNumberToObject(wifi, "channel", bss.channel);
+    } else {
+        cJSON_AddNullToObject(wifi, "bssid");
+        cJSON_AddNullToObject(wifi, "channel");
+    }
+    cJSON_AddNumberToObject(wifi, "roams", wifi_roam_count());
     cJSON_AddNumberToObject(wifi, "disconnect_count",
                             wifi_mgr_get_disconnect_count());
     const uint16_t reason = wifi_mgr_get_last_disconnect_reason();

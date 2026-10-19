@@ -478,6 +478,7 @@ static void name_save_cb(lv_event_t* e)
     }
 
     app_prefs_set_device_name(normalized);
+    wifi_mgr_refresh_hostname();
     heatpump_screen_update_device_name();
     if (state.device_name_value_label) {
         lv_label_set_text(state.device_name_value_label,
