@@ -8,6 +8,7 @@
 #include "api_server.h"
 #include "wifi_drops.h"
 #include "dhcp_hostname.h"
+#include "wifi_supervisor.h"
 #include "app_preferences.h"
 #include <string.h>
 #include <esp_wifi.h>
@@ -687,6 +688,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             
             xEventGroupSetBits(wifi_state.event_group, WIFI_FAIL_BIT);
             notify_state_change(WIFI_MGR_STATE_DISCONNECTED);
+            wifi_supervisor_notify_disconnect();
             break;
         }
         

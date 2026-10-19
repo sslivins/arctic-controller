@@ -72,6 +72,7 @@ static const char* TAG = "wifi_super";
 // operation and gentle during an outage (the local touchscreen keeps working
 // without WiFi), escalating to a reboot only as a genuine last resort.
 static const int CHECK_INTERVAL_MS  = 15000;    // poll cadence
+static const int FAST_RECONNECT_MS  = 2000;     // one quick retry after an unplanned drop
 static const int GRACE_MS           = 60000;    // tolerate assoc loss before acting
 static const int RECONNECT_EVERY_MS = 30000;    // in-place reconnect cadence
 static const int REBOOT_AFTER_MS    = 900000;   // 15 min continuously down -> reboot
@@ -223,6 +224,18 @@ static void supervise_api_server(ApiWatch& w) {
     system_safe_restart();
 }
 
+static TaskHandle_t s_task = nullptr;
+
+// Sleeps until the next check, or until the link drops.
+static void wait_for_next_check(int ms) {
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(ms > 0 ? ms : 1));
+}
+
+void wifi_supervisor_notify_disconnect(void) {
+    TaskHandle_t t = s_task;
+    if (t != nullptr) xTaskNotifyGive(t);
+}
+
 static SemaphoreHandle_t s_ping_done = nullptr;
 
 static void ping_on_end(esp_ping_handle_t hdl, void* args) {
@@ -298,8 +311,9 @@ static bool probe_gateway_reachable(void) {
 
 static void wifi_supervisor_task(void* param) {
     (void)param;
-    int disconnected_ms = 0;
-    int since_attempt_ms = RECONNECT_EVERY_MS;  // allow a first attempt after grace
+    int64_t down_since_us = 0;    // association lost at, 0 while associated
+    int64_t last_attempt_us = 0;  // our last reconnect this outage, 0 if none
+    bool    fast_tried = false;   // the quick retry has been used this outage
 
     // Reachability-supervision state. unreachable_since_us anchors the outage to
     // the monotonic clock (so time spent disconnected mid-bounce still counts).
@@ -329,8 +343,9 @@ static void wifi_supervisor_task(void* param) {
 
         if (!have_creds) {
             // Nothing to supervise. Stay fully passive and reset all state.
-            disconnected_ms = 0;
-            since_attempt_ms = RECONNECT_EVERY_MS;
+            down_since_us = 0;
+            last_attempt_us = 0;
+            fast_tried = false;
             unreachable_since_us = 0;
             unreachable_logged = false;
             bounces = 0;
@@ -345,43 +360,58 @@ static void wifi_supervisor_task(void* param) {
             // clear the reachability outage clock here: if we are here because a
             // recovery bounce dropped the link, the outage is ongoing and must
             // keep counting toward escalation.
-            disconnected_ms += CHECK_INTERVAL_MS;
-            since_attempt_ms += CHECK_INTERVAL_MS;
+            const int64_t now = esp_timer_get_time();
+            if (down_since_us == 0) down_since_us = now;
+            const int down_ms = (int)((now - down_since_us) / 1000);
 
             // While an association attempt is already in flight (including the
             // app's own boot-time or user-initiated connect, or a recovery
             // bounce's reconnect), do NOT issue a competing reconnect. Only
-            // re-issue once the link is genuinely idle (DISCONNECTED / ERROR)
-            // past the grace + backoff windows.
-            bool connecting = (state == WIFI_MGR_STATE_CONNECTING);
-            if (!connecting && disconnected_ms >= GRACE_MS &&
-                since_attempt_ms >= RECONNECT_EVERY_MS) {
+            // re-issue once the link is genuinely idle (DISCONNECTED / ERROR).
+            // A drop we did not cause (AP kick or restart, signal loss) gets one
+            // quick retry; after that, and for everything else, wait out the
+            // grace period and then retry on the usual cadence. Our own
+            // disconnects (roams, bounces, network changes) reconnect themselves.
+            const bool connecting = (state == WIFI_MGR_STATE_CONNECTING);
+            const bool fast_due = !fast_tried && wifi_drops_stats().down &&
+                                  !wifi_roam_in_progress();
+            const bool slow_due = down_ms >= GRACE_MS &&
+                (last_attempt_us == 0 ||
+                 (now - last_attempt_us) / 1000 >= RECONNECT_EVERY_MS);
+            if (!connecting && ((fast_due && down_ms >= FAST_RECONNECT_MS) || slow_due)) {
                 char ssid[33] = {0};
                 char password[65] = {0};
                 if (wifi_mgr_load_credentials(ssid, sizeof(ssid),
                                               password, sizeof(password))) {
                     ESP_LOGW(TAG, "WiFi down %ds - reconnecting to '%s'",
-                             disconnected_ms / 1000, ssid);
+                             down_ms / 1000, ssid);
                     wifi_mgr_connect(ssid, password, nullptr);
                 }
-                since_attempt_ms = 0;
+                memset(password, 0, sizeof(password));
+                last_attempt_us = now;
+                fast_tried = true;
             }
 
-            if (disconnected_ms >= REBOOT_AFTER_MS) {
+            if (down_ms >= REBOOT_AFTER_MS) {
                 ESP_LOGE(TAG, "WiFi down %ds and unrecoverable in place - restarting "
-                         "to reinitialize the network stack", disconnected_ms / 1000);
+                         "to reinitialize the network stack", down_ms / 1000);
                 log_persist_flush_now(LOG_PERSIST_REASON_MANUAL);
                 vTaskDelay(pdMS_TO_TICKS(500));  // flush logs
                 system_safe_restart();
             }
 
-            vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
+            int wait_ms = CHECK_INTERVAL_MS;
+            if (!fast_tried && fast_due && !connecting) {
+                wait_ms = FAST_RECONNECT_MS - down_ms;
+            }
+            wait_for_next_check(wait_ms);
             continue;
         }
 
         // ---- Associated: reset association bookkeeping ----
-        disconnected_ms = 0;
-        since_attempt_ms = RECONNECT_EVERY_MS;
+        down_since_us = 0;
+        last_attempt_us = 0;
+        fast_tried = false;
 
         // ---- Reachability (network-stack wedge) supervision ----
         char ip[16] = {0};
@@ -389,7 +419,7 @@ static void wifi_supervisor_task(void* param) {
                              ip[0] != '\0' && strcmp(ip, "0.0.0.0") != 0;
         if (!have_ip) {
             // Associated but no IP yet (DHCP in progress) - not a wedge.
-            vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
+            wait_for_next_check(CHECK_INTERVAL_MS);
             continue;
         }
 
@@ -430,7 +460,7 @@ static void wifi_supervisor_task(void* param) {
             bounces = 0;
             // Only from a healthy link, so roaming never overlaps recovery.
             wifi_roam_poll();
-            vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
+            wait_for_next_check(CHECK_INTERVAL_MS);
             continue;
         }
 
@@ -438,7 +468,7 @@ static void wifi_supervisor_task(void* param) {
         if (!ever_reachable) {
             // Never came up since boot: servers/certs/DHCP may still be settling.
             // Recovery would be premature, so just wait.
-            vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
+            wait_for_next_check(CHECK_INTERVAL_MS);
             continue;
         }
 
@@ -489,14 +519,14 @@ static void wifi_supervisor_task(void* param) {
             system_safe_restart();
         }
 
-        vTaskDelay(pdMS_TO_TICKS(CHECK_INTERVAL_MS));
+        wait_for_next_check(CHECK_INTERVAL_MS);
     }
 }
 
 void wifi_supervisor_start(void) {
     // 5 KB stack: the recovery path calls wifi_mgr_connect()/disconnect() and
     // event_log_record() inline; the ICMP ping runs in its own esp_ping task.
-    if (xTaskCreate(wifi_supervisor_task, "wifi_super", 5120, nullptr, 4, nullptr) != pdPASS) {
+    if (xTaskCreate(wifi_supervisor_task, "wifi_super", 5120, nullptr, 4, &s_task) != pdPASS) {
         // Silent failure disables WiFi wedge recovery entirely, which only
         // shows up much later as an unexplained unreachable device.
         ESP_LOGE(TAG, "Failed to create WiFi supervisor task (largest free internal block=%u)",

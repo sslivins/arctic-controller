@@ -22,7 +22,7 @@ static int64_t now_ms() { return esp_timer_get_time() / 1000; }
 void wifi_drops_note_down(uint16_t reason)
 {
     portENTER_CRITICAL(&s_mux);
-    bool local = s_local_pending || reason == WIFI_REASON_ASSOC_LEAVE;
+    bool local = s_local_pending;
     if (s_test_reason != 0) {
         reason = s_test_reason;
         local = false;
