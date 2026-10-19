@@ -60,6 +60,8 @@ from pathlib import Path
 INFRA_SKIP_PATTERNS = [
     r"device (?:is )?(?:not |un)reachable",
     r"simulator (?:is )?(?:not |un)reachable",
+    r"unifi controller (?:is )?(?:not |un)reachable",
+    r"unifi_api_key not set",
     r"device not in demo mode",
     r"device is not running in demo mode",
     r"demo mode not enabled",
