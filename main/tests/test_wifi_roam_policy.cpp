@@ -41,42 +41,52 @@ static int64_t first_scan(P& p, int64_t from, int64_t until, int rssi) {
     return -1;
 }
 
-// Runs a fresh connection through its settle period and the one-off check
-// after connecting (recorded as a scan that found nothing better). Returns
-// the time of that check.
+// Runs a fresh connection through its settle period, including the one-off
+// check after connecting if it fires (recorded as a scan that found nothing
+// better). Returns the time of the first sample past the settle period.
 static int64_t past_connect_check(P& p, int rssi) {
-    const int64_t t = first_scan(p, 0, 3600000, rssi);
-    p.pick(t, A, rssi, nullptr, 0);
-    return t;
+    for (int64_t t = 0;; t += TICK) {
+        const bool scan = p.sample(t, true, rssi);
+        if (t >= P::SETTLE_MS) {
+            if (scan) p.pick(t, A, rssi, nullptr, 0);
+            return t;
+        }
+    }
 }
 
-static void strong_signal_checks_once_after_connecting() {
+static void strong_signal_never_scans() {
     P p;
-    const int64_t t = first_scan(p, 0, 3600000, -55);
+    CHECK(first_scan(p, 0, 3600000, -55) == -1);
+    P q;
+    CHECK(first_scan(q, 0, 3600000, P::GOOD_RSSI + 1) == -1);
+}
+
+static void mediocre_signal_checks_once_after_connecting() {
+    P p;
+    const int64_t t = first_scan(p, 0, 3600000, P::GOOD_RSSI);
     CHECK(t >= P::SETTLE_MS);
     CHECK(t < P::SETTLE_MS + TICK);
-    p.pick(t, A, -55, nullptr, 0);
-    CHECK(first_scan(p, t + TICK, 7200000, -55) == -1);
+    p.pick(t, A, P::GOOD_RSSI, nullptr, 0);
+    CHECK(first_scan(p, t + TICK, 7200000, P::GOOD_RSSI) == -1);
     CHECK(first_scan(p, 7200000, 14400000, P::WEAK_RSSI + 1) == -1);
 }
 
 static void each_new_connection_gets_a_check() {
     P p;
-    int64_t t = past_connect_check(p, -55);
-    CHECK(first_scan(p, t + TICK, t + 600000, -55) == -1);
+    int64_t t = past_connect_check(p, -65);
+    CHECK(first_scan(p, t + TICK, t + 600000, -65) == -1);
     t += 600000;
     CHECK(!p.sample(t, false, 0));
     t += TICK;
     const int64_t back = t;
-    const int64_t scan = first_scan(p, t, t + 600000, -55);
+    const int64_t scan = first_scan(p, t, t + 600000, -65);
     CHECK(scan >= back + P::SETTLE_MS);
     CHECK(scan < back + P::SETTLE_MS + TICK);
 }
 
-static void unknown_rssi_only_gets_the_connect_check() {
+static void unknown_rssi_never_scans() {
     P p;
-    const int64_t t = past_connect_check(p, 0);
-    CHECK(first_scan(p, t + TICK, 7200000, 0) == -1);
+    CHECK(first_scan(p, 0, 7200000, 0) == -1);
 }
 
 static void weak_signal_scans_after_settle() {
@@ -103,7 +113,7 @@ static void weak_needs_a_continuous_minute() {
 
 static void weak_soon_after_connect_check_waits_for_rescan() {
     P p;
-    const int64_t t1 = past_connect_check(p, -50);
+    const int64_t t1 = past_connect_check(p, -65);
     const int64_t t2 = first_scan(p, t1 + TICK, t1 + 7200000, -80);
     CHECK(t2 >= t1 + P::RESCAN_MS);
     CHECK(t2 < t1 + P::RESCAN_MS + TICK);
@@ -179,9 +189,10 @@ static void event_payload_round_trips() {
 }
 
 int main() {
-    strong_signal_checks_once_after_connecting();
+    strong_signal_never_scans();
+    mediocre_signal_checks_once_after_connecting();
     each_new_connection_gets_a_check();
-    unknown_rssi_only_gets_the_connect_check();
+    unknown_rssi_never_scans();
     weak_signal_scans_after_settle();
     weak_needs_a_continuous_minute();
     weak_soon_after_connect_check_waits_for_rescan();

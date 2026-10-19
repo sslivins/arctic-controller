@@ -6,8 +6,9 @@
  * The ESP32-C6's stock ESP-Hosted firmware has no 802.11k/v roaming, so the
  * controller roams itself. Two things trigger a scan of the network's access
  * points: a link that stays weak for a minute, and a one-off check two minutes
- * after each new connection (the C6 doesn't reliably join the strongest AP,
- * so a fresh connection can sit on a mediocre one that never counts as weak).
+ * after each new connection that isn't already good (the C6 doesn't reliably
+ * join the strongest AP, so a fresh connection can sit on a mediocre one that
+ * never counts as weak).
  * We move only to an access point that is clearly stronger. Each roam costs a
  * few seconds of reconnect, so the policy is deliberately conservative and
  * rate-limited.
@@ -26,6 +27,7 @@ struct WifiRoamCandidate {
 class WifiRoamPolicy {
 public:
     static constexpr int WEAK_RSSI = -70;          // dBm at or below = weak
+    static constexpr int GOOD_RSSI = -60;          // above this, a fresh connection is left alone
     static constexpr int64_t WEAK_FOR_MS = 60000;  // weak this long before scanning
     static constexpr int64_t SETTLE_MS = 120000;   // after (re)connecting
     static constexpr int64_t RESCAN_MS = 900000;   // between scans / after a roam
@@ -47,8 +49,10 @@ public:
             return false;
         }
         if (!connect_checked_) {
+            // A good link isn't worth a reconnect, however much better
+            // another AP is.
             connect_checked_ = true;
-            return true;
+            if (rssi != 0 && rssi <= GOOD_RSSI) return true;
         }
         if (rssi == 0 || rssi > WEAK_RSSI) {
             weak_since_ = -1;
