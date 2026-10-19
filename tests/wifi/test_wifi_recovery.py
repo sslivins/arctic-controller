@@ -47,6 +47,25 @@ def test_ap_kick_recovers_fast_and_is_counted(device, unifi, device_mac):
     assert after["uptime_ms"] > before["uptime_ms"], "controller rebooted instead of reconnecting"
 
 
+def test_back_to_back_kicks_both_recover_fast(device, unifi, device_mac):
+    """A second kick right after reconnecting is a new outage with its own quick
+    retry. The supervisor used to sleep through the reconnect and treat the
+    second drop as the first one continuing, leaving it to the 60 s grace."""
+    before = status(device)
+    for i in range(2):
+        drops0 = status(device)["wifi"]["drops"]["total"]
+        t0 = time.monotonic()
+        unifi.kick(device_mac)
+        wait_until(
+            lambda: _connected_with(device, lambda d: d.get("total", 0) > drops0),
+            timeout=KICK_RECOVERY_S, desc=f"controller back on Wi-Fi after kick {i + 1}",
+        )
+        print(f"\nkick {i + 1}: recovered in {time.monotonic() - t0:.1f}s")
+    after = status(device)
+    assert after["wifi"]["drops"]["total"] == before["wifi"]["drops"]["total"] + 2, after["wifi"]
+    assert after["uptime_ms"] > before["uptime_ms"], "controller rebooted instead of reconnecting"
+
+
 def test_long_outage_recovers_without_reboot(device, unifi, device_mac):
     before = status(device)
     drops0 = before["wifi"]["drops"]

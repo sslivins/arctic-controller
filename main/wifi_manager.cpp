@@ -760,6 +760,7 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
                  IPSTR, IP2STR(&event->ip_info.ip));
         ESP_LOGI(TAG, "Got IP: %s", wifi_state.current_ip);
         wifi_drops_note_up();
+        wifi_supervisor_notify_connected();
         
         // Start NTP time synchronization
         time_mgr_start_sync();
