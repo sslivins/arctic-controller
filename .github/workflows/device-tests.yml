@@ -1228,6 +1228,21 @@ jobs:
             -H "Content-Type: application/json" -d '{"session_id":"","force":true}' \
             "${ARCTIC_URL}/api/test/unlock" >/dev/null 2>&1 || true
 
+      - name: Run Wi-Fi recovery tests (UniFi kick / block)
+        id: wifi_tests
+        if: always() && steps.ui_tests.outcome != 'skipped'
+        # Runs after every other suite: it knocks the bench controller off
+        # Wi-Fi through the UniFi controller (one kick, one 75 s block) and
+        # checks it reconnects on its own, counts the drops and logs
+        # wifi_lost / wifi_restored, without rebooting. Always unblocks.
+        continue-on-error: true
+        run: python -m pytest tests/wifi/ -v -rs --tb=short --junitxml=wifi-test-results.xml -p no:cacheprovider
+        env:
+          UNIFI_URL: https://192.168.1.1
+          UNIFI_API_KEY: ${{ secrets.UNIFI_API_KEY }}
+          UNIFI_DEVICE_MAC: dc:1e:d5:95:01:b0
+          PYTHONDONTWRITEBYTECODE: '1'
+
       - name: Reset device to baseline TLS/auth state
         if: always()
         run: |
@@ -1539,6 +1554,16 @@ jobs:
           reporter: java-junit
           use-actions-summary: 'false'
 
+      - name: Publish Wi-Fi recovery test results
+        uses: dorny/test-reporter@v2
+        if: always() && steps.wifi_tests.outcome != 'skipped'
+        continue-on-error: true
+        with:
+          name: Wi-Fi Recovery Test Results
+          path: wifi-test-results.xml
+          reporter: java-junit
+          use-actions-summary: 'false'
+
       - name: Publish Home Assistant test results
         uses: dorny/test-reporter@v2
         if: always() && steps.ha_tests.outcome != 'skipped'
@@ -1561,7 +1586,8 @@ jobs:
           always() && (steps.ui_tests.outcome == 'failure'
           || steps.api_tests.outcome == 'failure'
           || steps.web_tests.outcome == 'failure'
-          || steps.rs485_tests.outcome == 'failure')
+          || steps.rs485_tests.outcome == 'failure'
+          || steps.wifi_tests.outcome == 'failure')
         with:
           name: failure-screenshots
           path: |
@@ -1601,6 +1627,7 @@ jobs:
             api=api-test-results.xml \
             web=web-test-results.xml \
             rs485=rs485-test-results.xml \
+            wifi=wifi-test-results.xml \
             --floors tests/executed_floor.json \
             --enforce-infra-skips \
             --report executed-floor-report.json
@@ -1617,6 +1644,7 @@ jobs:
             api-test-results.xml
             web-test-results.xml
             rs485-test-results.xml
+            wifi-test-results.xml
             ha-test-results.xml
             executed-floor-report.json
           if-no-files-found: warn
@@ -1811,7 +1839,7 @@ jobs:
         run: |
           # With continue-on-error on test steps, we need to explicitly fail the job
           FAILED=false
-          for step_outcome in "${{ steps.upgrade_compare.outcome }}" "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}" "${{ steps.rs485_tests.outcome }}" "${{ steps.ha_tests.outcome }}"; do
+          for step_outcome in "${{ steps.upgrade_compare.outcome }}" "${{ steps.ui_tests.outcome }}" "${{ steps.api_tests.outcome }}" "${{ steps.web_tests.outcome }}" "${{ steps.rs485_tests.outcome }}" "${{ steps.wifi_tests.outcome }}" "${{ steps.ha_tests.outcome }}"; do
             if [ "$step_outcome" = "failure" ]; then
               FAILED=true
             fi
