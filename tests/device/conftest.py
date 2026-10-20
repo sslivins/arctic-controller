@@ -227,6 +227,19 @@ def device() -> DeviceClient:
     except Exception as e:
         pytest.exit(f"Failed to enable demo mode: {e}", returncode=1)
 
+    # Date-dependent screens (energy days, "today", history windows) show
+    # "Waiting for the clock to synchronize" until NTP lands, which can take
+    # minutes after the pre-session OTA reboot. Wait here so those tests don't
+    # race it; a clock that never syncs is an environment fault, not a test one.
+    def _clock_synced() -> bool:
+        r = client.session.get(f"{client.base_url}/api/time", timeout=client.timeout)
+        r.raise_for_status()
+        return bool(r.json().get("ntp_synced"))
+
+    if not client.wait_until("device clock synchronized", _clock_synced,
+                             timeout=240.0, poll=2.0, raise_on_timeout=False):
+        pytest.exit("Device clock never synchronized (NTP) — aborting session", returncode=1)
+
     # Suppress the firmware's automatic (boot + periodic) GitHub update check for
     # the whole session. Otherwise the background check's callback can clear a
     # test-mocked firmware notification mid-test, flaking the status-bar and

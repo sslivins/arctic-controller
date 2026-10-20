@@ -31,6 +31,10 @@ CONFIG_LWIP_MAX_ACTIVE_TCP=24
 # Send DHCP option 60 ("Arctic Controller", set in wifi_manager.cpp) so
 # routers can identify the device instead of showing a generic ESP32.
 # CONFIG_LWIP_DHCP_DISABLE_VENDOR_CLASS_ID is not set
+# time_manager.cpp sets three NTP servers, but lwIP keeps only the first
+# SNTP_MAX_SERVERS (default 1). With one, an unanswered request just backs off
+# (15/30/60 s...) and a boot sync took 150 s; with three it moves on after 15 s.
+CONFIG_LWIP_SNTP_MAX_SERVERS=3
 
 # TCP window / send buffer. IDF's stock 5760 is 4x MSS, which caps throughput
 # at window/RTT regardless of link speed: measured against the CI controller at
