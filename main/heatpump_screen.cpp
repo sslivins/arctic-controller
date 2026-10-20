@@ -592,7 +592,7 @@ static void chart_draw_cb(lv_event_t* e) {
                   LV_OPA_20);
     }
 
-    // Defrost: an icy block over the run it interrupts, with a solid cap.
+    // Defrost: an icy block over the run it interrupts.
     for (size_t i = 0; i < h.defrost_count; i++) {
         const fault_interval_t& d = h.defrosts[i];
         int32_t x1 = chart_x(h, d.start, plot);
@@ -603,8 +603,6 @@ static void chart_draw_cb(lv_event_t* e) {
         if (x2 <= x1) continue;
         fill_rect(layer, x1, inner.y1, x2, inner.y2, COLOR_DEFROST_BORDER,
                   LV_OPA_40);
-        fill_rect(layer, x1, inner.y1, x2, inner.y1 + 4, COLOR_DEFROST_TEXT,
-                  LV_OPA_COVER);
     }
 
     for (size_t i = 0; i < h.fault_count; i++) {

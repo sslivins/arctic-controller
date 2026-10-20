@@ -281,6 +281,9 @@
     .hist-latest { min-height: 32px; padding: 4px 6px 4px 10px; font-size: 13px; display: inline-flex; align-items: center; gap: 2px; }
     .hist-latest svg { width: 18px; height: 18px; fill: currentColor; }
     .hist-latest[hidden] { display: none; }
+    .hist-range-actions { display: flex; align-items: center; gap: 10px; }
+    .hist-zoom button { padding: 5px 10px; white-space: nowrap; }
+    .hist-tip-state { font-weight: 600; }
     .hist-legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--cp-text-muted); }
     .hist-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .hist-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
@@ -639,7 +642,7 @@
     .hc-band, .hc-fault, .hc-defrost, .hc-vgrid, .hc-hgrid, .hc-sp, .hc-cursor { position: absolute; }
     .hc-band { top: 0; bottom: 0; opacity: .2; }
     /* Defrost: an icy block over the run it interrupts, with a solid cap. */
-    .hc-defrost { top: 0; bottom: 0; min-width: 3px; border-top: 4px solid var(--home-defrost-text);
+    .hc-defrost { top: 0; bottom: 0; min-width: 3px;
       background: color-mix(in srgb, var(--home-defrost) 40%, transparent); }
     .hc-fault { top: 0; bottom: 0; background:
       repeating-linear-gradient(135deg, color-mix(in srgb, var(--cp-danger) 45%, transparent) 0 2px, transparent 2px 9px),
@@ -720,12 +723,15 @@
       .component-list { grid-template-columns: repeat(2, 1fr); }
       .mode-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .event-toolbar { grid-template-columns: 1fr; }
-      .hist-toolbar > .hist-range-row { width: 100%; flex-wrap: nowrap; justify-content: space-between; }
+      .hist-toolbar > .hist-range-row { width: 100%; justify-content: space-between; }
+      .hist-range-actions { width: 100%; }
       .hist-range { display: grid; }
       .en-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
       .en-stat strong { font-size: 18px; }
       .en-ranges { width: 100%; }
       .en-ranges button { flex: 1; padding: 6px 4px; }
+      .en-ranges.hist-zoom { width: auto; flex: 1; }
+      .hist-zoom button { padding: 6px 8px; min-height: 36px; }
       .en-range-text { display: inline; }
       .en-run { grid-template-columns: auto 1fr auto; row-gap: 2px; }
       .en-run-meta { grid-column: 2; grid-row: 2; }
@@ -811,6 +817,8 @@
       errors: { active: [], history: [] }, params: {}, events: [], eventTotal: 0,
       tempHistory: { loading: false, error: "", data: null, end: null },
       histShowPower: localStorage.getItem("arcticHistPower") !== "0",
+      histWindow: [28800, 14400, 7200, 3600].includes(Number(localStorage.getItem("arcticHistWindow")))
+        ? Number(localStorage.getItem("arcticHistWindow")) : 28800,
       energy: { range: 30, to: null, today: null, since: null, data: null, loading: false, error: "", selected: null, runs: {} },
       homeHistory: { loading: false, error: "", data: null, loadedAt: 0 }, homeTrack: {}, homeHover: null,
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
@@ -1242,11 +1250,14 @@
       } else dot.style.display = "none";
       const b0 = data.start + i * bs, b1 = b0 + bs;
       const run = (data.runs || []).find(r => r.start < b1 && (r.end ?? data.end) > b0);
-      const runText = run ? (HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating)[0] : "Idle";
+      // A defrost isn't part of a run span, so check it first or it reads "Idle".
+      const defrost = (data.defrosts || []).some(df => df.start < b1 && (df.end ?? data.end) > b0);
+      const [runText, runColor] = defrost ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
+        : run ? HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating : ["Idle", ""];
       const faults = (data.faults || []).filter(f => f.start < b1 && (f.end ?? data.end) > b0);
       tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(t, true))}</div>
         <div>Tank <strong>${v == null ? "--" : temp(v / 10)}</strong></div>
-        <div>${run ? `<i style="background:${(HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating)[1]}"></i>` : ""}${esc(runText)}</div>` +
+        <div>${runColor ? `<i style="background:${runColor}"></i>` : ""}${esc(runText)}</div>` +
         faults.map(f => `<div class="hist-tip-fault">⚠ ${esc(f.fault_code || "?")} ${esc(f.fault_label || "")}</div>`).join("");
       tip.style.display = "block";
       const cw = chart.clientWidth, px = area.offsetLeft + area.clientWidth * xPct / 100;
@@ -2065,8 +2076,8 @@
     async function loadHistory() {
       state.tempHistory.loading = true; state.tempHistory.error = "";
       try {
-        const q = state.tempHistory.end ? `?end=${state.tempHistory.end}` : "";
-        state.tempHistory.data = await api(`/api/heatpump/temperature-history${q}`);
+        const end = state.tempHistory.end ? `&end=${state.tempHistory.end}` : "";
+        state.tempHistory.data = await api(`/api/heatpump/temperature-history?window=${state.histWindow}${end}`);
         state.tempHistory.loadedAt = Date.now();
       } catch (error) {
         state.tempHistory.error = error.message || "Failed to load temperature history";
@@ -2128,13 +2139,12 @@
       }
 
       // Defrost (matches the device): an icy block over the run it
-      // interrupts, with a solid cap so a short one shows at this zoom.
+      // interrupts, at least 3 px wide so a short one shows at this zoom.
       for (const df of data.defrosts || []) {
         const x1 = Math.max(plotL, mapX(df.start));
         const x2 = Math.min(plotR, Math.max(x1 + 3, mapX(df.end ?? end)));
         if (x2 <= x1) continue;
         svg += `<rect class="hist-defrost" x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${fullH}" fill="var(--home-defrost)" opacity="0.4"/>`;
-        svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="4" fill="var(--home-defrost-text)"/>`;
       }
 
       // Fault zones (matches the device): a faint hatched fill over the
@@ -2194,13 +2204,11 @@
       }
       svg += `<g class="hist-pan">`;
 
-      // Vertical gridlines snapped to whole even-hour marks (matches device).
-      const startDate = new Date(start * 1000);
-      const tick = new Date(startDate);
-      tick.setMinutes(0, 0, 0);
-      if (startDate.getMinutes() !== 0 || startDate.getSeconds() !== 0) tick.setHours(tick.getHours() + 1);
-      while (tick.getHours() % 2 !== 0) tick.setHours(tick.getHours() + 1);
-      for (let ts = Math.floor(tick.getTime() / 1000); ts <= end; ts += 2 * 3600) {
+      // Vertical gridlines on round local times, 4-5 per window (matches the
+      // device): every 2 h at 8 h down to every 15 min at 1 h.
+      const tickStep = histTick(end - start), startDate = new Date(start * 1000);
+      const sinceMidnight = startDate.getHours() * 3600 + startDate.getMinutes() * 60 + startDate.getSeconds();
+      for (let ts = start + (tickStep - sinceMidnight % tickStep) % tickStep; ts <= end; ts += tickStep) {
         if (ts < start) continue;
         const x = mapX(ts);
         svg += `<line x1="${x.toFixed(1)}" y1="${plotT}" x2="${x.toFixed(1)}" y2="${bottom}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
@@ -2293,7 +2301,7 @@
         <line class="hist-hover-line" y1="${plotT}" y2="${bottom}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
         <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/>${showPower ? `<circle data-key="p" r="4" fill="var(--hist-power)"/>` : ""}</g>`;
       series.p = samples.map(s => s.p ?? null);
-      histGeom = { W, plotL, plotR, mapX, mapY, mapP, samples, series, faults: data.faults || [], start, end, showPower, interval };
+      histGeom = { W, plotL, plotR, mapX, mapY, mapP, samples, series, faults: data.faults || [], defrosts: data.defrosts || [], start, end, showPower, interval };
 
       svg += `</svg>`;
       return svg;
@@ -2333,12 +2341,21 @@
       return g.start + (vx - g.plotL) / (g.plotR - g.plotL) * (g.end - g.start);
     }
     const HIST_SNAP = 15 * 60;
+    // Zoom presets (same as the device), widest first, plus the step, gridline
+    // and "centre here" snap each one uses (history_window.h).
+    const HIST_WINDOWS = [28800, 14400, 7200, 3600];
+    const histStep = w => Math.max(HIST_SNAP, w / 8);
+    const histTick = w => w / 4;
+    const histSnap = w => Math.min(HIST_SNAP, w / 12);
+    const fmtHistSpan = s => s % 3600 ? `${s / 60} min` : `${s / 3600} h`;
+    const HIST_RUN_STATE = { 1: ["Heating", "var(--hist-heat)"], 2: ["Cooling", "var(--hist-cool)"], 3: ["Hot water", "var(--hist-dhw)"] };
     function histDoubleClick(event) {
       const svg = event.target.closest?.(".hist-chart"), d = state.tempHistory.data;
       if (!svg || !histGeom || !d) return;
       const t = histTimeAt(svg, event.clientX);
       if (t === null) return;
-      histGoto(Math.round((t + d.window_seconds / 2) / HIST_SNAP) * HIST_SNAP);
+      const snap = histSnap(d.window_seconds);
+      histGoto(Math.round((t + d.window_seconds / 2) / snap) * snap);
     }
     // Mouse drag pans the window (touch keeps its drag for the readout).
     function histDragStart(event) {
@@ -2375,7 +2392,8 @@
       if (!drag || !drag.moved || !d || !histGeom) return;
       const g = histGeom, rect = drag.svg.getBoundingClientRect();
       const plotPx = rect.width * (g.plotR - g.plotL) / g.W;
-      const shift = Math.round(-drag.dx / plotPx * (g.end - g.start) / HIST_SNAP) * HIST_SNAP;
+      const snap = histSnap(g.end - g.start);
+      const shift = Math.round(-drag.dx / plotPx * (g.end - g.start) / snap) * snap;
       if (!shift) { histPanPreview(drag.svg, 0); drag.svg.classList.remove("dragging"); return; }
       histGoto(d.end + shift);
     }
@@ -2419,8 +2437,13 @@
         c.style.display = ""; c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1));
       });
       const fmt = v => (v === null || v === undefined) ? "--" : temp(v / 10);
+      // A defrost pauses the run, so check it first or it reads "Idle".
+      const defrost = g.defrosts.some(df => df.start <= s.t && s.t <= (df.end ?? g.end));
+      const [runText, runColor] = defrost ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
+        : (s.run && HIST_RUN_STATE[s.mode]) || ["Idle", ""];
       const tip = wrap.querySelector(".hist-tip");
       tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(s.t, true))}</div>
+        <div class="hist-tip-state">${runColor ? `<i class="band" style="background:${runColor}"></i>` : ""}${esc(runText)}</div>
         <div><i style="background:var(--hist-out)"></i>Outlet <strong>${fmt(s.out)}</strong></div>
         <div><i style="background:var(--hist-in)"></i>Inlet <strong>${fmt(s.in)}</strong></div>
         <div><i style="background:var(--hist-set)"></i>Setpoint <strong>${fmt(s.set)}</strong></div>` +
@@ -2451,10 +2474,15 @@
       } else {
         const atLatest = data.end >= data.latest_end;
         const atOldest = data.start <= data.earliest;
+        const win = data.window_seconds, step = fmtHistSpan(histStep(win)), page = fmtHistSpan(win);
         body = `<section class="card">
           <div class="hist-toolbar">
             <div class="hist-range-row"><span class="hist-range"><span>${esc(fmtHistClock(data.start, true))} —</span> <span>${esc(fmtHistClock(data.end, true))}</span></span>
-              <button class="btn primary hist-latest" data-action="history-latest" ${atLatest ? "hidden disabled" : ""}>Latest<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.6 7.4 10.2 12l-4.6 4.6L7 18l6-6-6-6-1.4 1.4ZM16 6h2v12h-2V6Z"/></svg></button></div>
+              <div class="hist-range-actions">
+                <div class="en-ranges hist-zoom" role="group" aria-label="Window">${HIST_WINDOWS.map(w =>
+                  `<button class="${win === w ? "active" : ""}" data-action="history-window" data-window="${w}" aria-pressed="${win === w}">${fmtHistSpan(w)}</button>`).join("")}</div>
+                <button class="btn primary hist-latest" data-action="history-latest" ${atLatest ? "hidden disabled" : ""}>Latest<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.6 7.4 10.2 12l-4.6 4.6L7 18l6-6-6-6-1.4 1.4ZM16 6h2v12h-2V6Z"/></svg></button>
+              </div></div>
             <div class="hist-legend">
               <span><i style="background:var(--hist-in)"></i>Inlet</span>
               <span><i style="background:var(--hist-out)"></i>Outlet</span>
@@ -2471,19 +2499,19 @@
           ${histWindowEnergy(data)}
           <div class="hist-nav">
             <div class="hist-nav-group">
-              <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ 8 h</button>
-              <button class="btn" data-action="history-back-hour" ${atOldest ? "disabled" : ""}>‹ 1 h</button>
+              <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ ${page}</button>
+              <button class="btn" data-action="history-back-hour" ${atOldest ? "disabled" : ""}>‹ ${step}</button>
             </div>
             <div class="hist-nav-group">
-              <button class="btn" data-action="history-forward-hour" ${atLatest ? "disabled" : ""}>1 h ›</button>
-              <button class="btn" data-action="history-next" ${atLatest ? "disabled" : ""}>8 h ›</button>
+              <button class="btn" data-action="history-forward-hour" ${atLatest ? "disabled" : ""}>${step} ›</button>
+              <button class="btn" data-action="history-next" ${atLatest ? "disabled" : ""}>${page} ›</button>
             </div>
           </div>
           <p class="hist-muted hist-hint">Double-click the chart to centre it on that moment, or drag it sideways.</p>
         </section>`;
       }
       return `<div class="page">
-        <div class="page-head"><div><h1>History</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures, 8 hours at a time.</p></div><div class="page-actions"><button class="icon-btn" data-action="history-refresh" aria-label="Refresh cycle history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div></div>
+        <div class="page-head"><div><h1>History</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures, 1 to 8 hours at a time.</p></div><div class="page-actions"><button class="icon-btn" data-action="history-refresh" aria-label="Refresh cycle history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div></div>
         ${historySegs("history")}
         ${body}
       </div>`;
@@ -3558,8 +3586,17 @@
       if (action === "history-latest") { state.tempHistory.end = null; await loadHistory(); render(); }
       if (action === "history-prev") { const d = state.tempHistory.data; if (d) await histGoto(d.end - d.window_seconds); }
       if (action === "history-next") { const d = state.tempHistory.data; if (d) await histGoto(d.end + d.window_seconds); }
-      if (action === "history-back-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end - 3600); }
-      if (action === "history-forward-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end + 3600); }
+      if (action === "history-back-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end - histStep(d.window_seconds)); }
+      if (action === "history-forward-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end + histStep(d.window_seconds)); }
+      if (action === "history-window") {
+        const w = Number(el.dataset.window);
+        if (HIST_WINDOWS.includes(w) && w !== state.histWindow) {
+          // Keep the window's end, so zooming from the live view stays live.
+          state.histWindow = w;
+          localStorage.setItem("arcticHistWindow", String(w));
+          await loadHistory(); render();
+        }
+      }
       if (action === "history-power") {
         state.histShowPower = !state.histShowPower;
         localStorage.setItem("arcticHistPower", state.histShowPower ? "1" : "0");

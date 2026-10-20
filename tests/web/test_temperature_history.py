@@ -131,6 +131,113 @@ class TestTemperatureHistoryWeb:
         assert abs(centred - (t + 4 * 3600)) <= 450
         assert centred % 900 == 0
 
+    def test_zoom_presets_narrow_the_window(
+        self, dashboard_page: Page, base_url: str
+    ):
+        _seed_history(base_url)
+        _open_history(dashboard_page)
+        page = dashboard_page
+        zoom = page.locator(".hist-zoom button")
+        expect(zoom).to_have_text(["8 h", "4 h", "2 h", "1 h"])
+        expect(page.locator('.hist-zoom [data-window="28800"]')).to_have_attribute(
+            "aria-pressed", "true"
+        )
+
+        try:
+            with page.expect_request(
+                lambda r: "/api/heatpump/temperature-history" in r.url, timeout=10000
+            ) as req:
+                page.locator('.hist-zoom [data-window="3600"]').click()
+            assert "window=3600" in req.value.url
+            # Zooming from the live view stays live.
+            assert "end=" not in req.value.url
+            page.wait_for_function(
+                "state.tempHistory.data && state.tempHistory.data.window_seconds === 3600"
+            )
+            data = page.evaluate("state.tempHistory.data")
+            assert data["end"] - data["start"] == 3600
+            expect(page.locator('.hist-zoom [data-window="3600"]')).to_have_attribute(
+                "aria-pressed", "true"
+            )
+            # Paging moves a whole hour, fine steps 15 min.
+            expect(page.locator('[data-action="history-prev"]')).to_have_text("‹ 1 h")
+            expect(page.locator('[data-action="history-back-hour"]')).to_have_text("‹ 15 min")
+            # Gridlines every 15 minutes, on the quarter hour.
+            labels = page.locator(".hist-chart text.hist-axis").all_text_contents()
+            clock = [t for t in labels if t and (":" in t or t.endswith("M"))]
+            assert len(clock) >= 4, labels
+            assert all(
+                re.fullmatch(r"\d{1,2}:(00|15|30|45)( [AP]M)?|\d{1,2} [AP]M", t)
+                for t in clock
+            ), clock
+
+            with page.expect_request(
+                lambda r: "/api/heatpump/temperature-history" in r.url, timeout=10000
+            ) as req:
+                page.locator('[data-action="history-back-hour"]').click()
+            m = re.search(r"end=(\d+)", req.value.url)
+            assert m and int(m.group(1)) == data["latest_end"] - 900
+
+            # The choice is remembered.
+            page.reload()
+            page.wait_for_selector(".rail", timeout=15000)
+            _open_history(page)
+            expect(page.locator('.hist-zoom [data-window="3600"]')).to_have_attribute(
+                "aria-pressed", "true"
+            )
+        finally:
+            page.evaluate("localStorage.removeItem('arcticHistWindow')")
+
+    def test_zoom_presets_fit_on_mobile(self, dashboard_page: Page, base_url: str):
+        _seed_history(base_url)
+        _open_history(dashboard_page)
+        dashboard_page.set_viewport_size({"width": 390, "height": 844})
+        expect(dashboard_page.locator(".hist-zoom button").first).to_be_visible()
+        boxes = [b.bounding_box() for b in dashboard_page.locator(".hist-zoom button").all()]
+        # One row, one line each ("8 h", not "8" over "h").
+        assert len({round(b["y"]) for b in boxes}) == 1, boxes
+        assert all(b["height"] < 48 for b in boxes), boxes
+        width = dashboard_page.evaluate("() => document.documentElement.scrollWidth")
+        assert width <= 390, width
+
+    def test_tooltip_names_the_operating_state(self, dashboard_page: Page, base_url: str):
+        """The history tooltip says what the unit was doing, like the home
+        chart's: a defrost (outside every run) reads Defrosting, not Idle."""
+        _seed_history(base_url)
+
+        def patch(route):
+            resp = route.fetch()
+            body = resp.json()
+            end = body["end"]
+            for s in body["samples"]:
+                age = end - s["t"]
+                s["run"] = 1800 <= age < 3600 or 600 <= age < 1200
+                s["mode"] = 1 if s["run"] else 0
+                if 600 <= age < 1200:
+                    s["mode"] = 3
+            body["defrosts"] = [{"start": end - 1800, "end": end - 1200}]
+            route.fulfill(response=resp, json=body)
+
+        dashboard_page.route("**/api/heatpump/temperature-history*", patch)
+        _open_history(dashboard_page)
+        tip = dashboard_page.locator(".hist-chart-wrap .hist-tip")
+        end = dashboard_page.evaluate("state.tempHistory.data.end")
+
+        def hover_at(t):
+            x = dashboard_page.evaluate(
+                """t => { const svg = document.querySelector('.hist-chart'),
+                    r = svg.getBoundingClientRect();
+                  return r.left + histGeom.mapX(t) / histGeom.W * r.width; }""",
+                t,
+            )
+            box = dashboard_page.locator(".hist-chart").bounding_box()
+            dashboard_page.mouse.move(x, box["y"] + box["height"] / 2)
+
+        for age, text in ((2700, "Heating"), (1500, "Defrosting"), (900, "Hot water"),
+                          (300, "Idle")):
+            hover_at(end - age)
+            expect(tip.locator(".hist-tip-state")).to_have_text(text)
+
     def test_latest_window_refreshes_live(self, dashboard_page: Page, base_url: str):
         _seed_history(base_url)
         # Take over timers so a minute can pass instantly. fast_forward fires the

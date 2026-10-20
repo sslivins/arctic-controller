@@ -101,6 +101,39 @@ class TestHome:
         expect(tip).to_be_visible()
         expect(tip).to_contain_text("Tank")
 
+    def test_chart_tooltip_names_a_defrost(self, dashboard_page: Page):
+        """A defrost splits the run it interrupts, so it sits outside every run
+        span; the tooltip must still call it a defrost, not "Idle"."""
+        span = {}
+
+        def patch(route):
+            resp = route.fetch()
+            body = resp.json()
+            end = body["end"]
+            span.update(start=body["start"], end=end)
+            body["runs"] = [{"start": end - 3600, "end": end - 1800, "mode": "heating"},
+                            {"start": end - 1200, "end": end - 600, "mode": "heating"}]
+            body["defrosts"] = [{"start": end - 1800, "end": end - 1200}]
+            route.fulfill(response=resp, json=body)
+
+        dashboard_page.route("**/api/heatpump/home-history", patch)
+        dashboard_page.reload(wait_until="domcontentloaded")
+        area = dashboard_page.locator("[data-home-chart] .hc-area")
+        expect(area).to_be_visible(timeout=15000)
+        expect(dashboard_page.locator(".hc-defrost")).to_have_count(1)
+        tip = dashboard_page.locator("[data-home-chart] .hist-tip")
+        box = area.bounding_box()
+
+        def hover_at(t):
+            frac = (t - span["start"]) / (span["end"] - span["start"])
+            dashboard_page.mouse.move(box["x"] + box["width"] * frac, box["y"] + box["height"] / 2)
+
+        hover_at(span["end"] - 1500)
+        expect(tip).to_contain_text("Defrosting")
+        expect(tip).not_to_contain_text("Idle")
+        hover_at(span["end"] - 2700)
+        expect(tip).to_contain_text("Heating")
+
     def _expect_history_cycles(self, page: Page):
         expect(page.get_by_role("heading", name="History", exact=True)).to_be_visible()
         expect(page.locator(".hist-seg-btn", has_text="Cycles")).to_have_attribute("aria-selected", "true")

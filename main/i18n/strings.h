@@ -266,8 +266,6 @@ typedef enum {
     STR_HP_WATER_TANK,
     STR_HP_WATER_OUTLET,
     STR_HP_WATER_INLET,
-    STR_HISTORY_PREVIOUS,
-    STR_HISTORY_NEXT,
     STR_HISTORY_LATEST,
     STR_HISTORY_INLET,
     STR_HISTORY_OUTLET,
@@ -644,7 +642,6 @@ typedef enum {
     // Energy (History tab segment) and the cycle-history power view
     STR_ENERGY_DAYS_FMT,
     STR_ENERGY_COP_FMT,
-    STR_ENERGY_OTHER,
     STR_ENERGY_ELECTRICITY,
     STR_ENERGY_HEAT,
     STR_ENERGY_COP,
