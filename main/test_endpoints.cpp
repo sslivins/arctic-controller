@@ -2686,13 +2686,14 @@ static esp_err_t stack_watermarks_get_handler(httpd_req_t* req)
 
 struct WifiBounceArgs {
     bool unplanned;
+    bool supervisor;  // unplanned only: drop once and leave the reconnect to the supervisor
     uint16_t reason;
     uint32_t down_ms;
 };
 
 static void wifi_bounce_task(void* arg)
 {
-    WifiBounceArgs a = {false, 0, 1500};
+    WifiBounceArgs a = {false, false, 0, 1500};
     if (arg) {
         a = *(WifiBounceArgs*)arg;
         free(arg);
@@ -2704,6 +2705,14 @@ static void wifi_bounce_task(void* arg)
     char password[65] = {0};
     const bool have = wifi_mgr_load_credentials(ssid, sizeof(ssid),
                                                 password, sizeof(password));
+    if (a.unplanned && a.supervisor) {
+        // Same as an AP kick: one unplanned drop, nothing else.
+        wifi_drops_test_unplanned_next(a.reason);
+        esp_wifi_disconnect();
+        memset(password, 0, sizeof(password));
+        vTaskDelete(NULL);
+        return;
+    }
     if (a.unplanned) {
         // Counts as a real drop: skip wifi_mgr_disconnect()'s local marker.
         wifi_drops_test_unplanned_next(a.reason);
@@ -2773,6 +2782,7 @@ static esp_err_t wifi_bounce_post_handler(httpd_req_t* req)
         args = (WifiBounceArgs*)malloc(sizeof(WifiBounceArgs));
         if (args) {
             args->unplanned = cJSON_IsTrue(cJSON_GetObjectItem(body, "unplanned"));
+            args->supervisor = cJSON_IsTrue(cJSON_GetObjectItem(body, "supervisor"));
             const cJSON* r = cJSON_GetObjectItem(body, "reason");
             args->reason = cJSON_IsNumber(r) ? (uint16_t)r->valueint : 0;
             const cJSON* d = cJSON_GetObjectItem(body, "down_s");
