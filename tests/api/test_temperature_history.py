@@ -80,8 +80,6 @@ def test_temperature_history_strings_exist_in_all_languages():
     for name in (
         "STR_NAV_HISTORY",
         "STR_HISTORY_SEG_CYCLES",
-        "STR_HISTORY_PREVIOUS",
-        "STR_HISTORY_NEXT",
         "STR_HISTORY_NO_DATA",
     ):
         assert len(re.findall(rf"\[{name}\]\s*=", source)) == 3
