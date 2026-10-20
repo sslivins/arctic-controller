@@ -26,12 +26,39 @@ def _connected_with(dev, pred):
     return st if wifi.get("state") == "connected" and pred(wifi.get("drops") or {}) else None
 
 
+def _kick(dev, unifi, mac, drops0: int, attempts: int = 3) -> float:
+    """Kick the controller and return when the kick was sent (monotonic s).
+
+    UniFi sometimes refuses (HTTP 400) or silently ignores a kick sent a few
+    seconds after the client reassociated, so resend until the controller is
+    actually knocked off: unreachable, not connected, or drop count up."""
+    def dropped():
+        try:
+            wifi = status(dev).get("wifi") or {}
+        except Exception:
+            return True
+        return wifi.get("state") != "connected" or \
+            (wifi.get("drops") or {}).get("total", 0) > drops0
+
+    for i in range(attempts):
+        t0 = time.monotonic()
+        try:
+            unifi.kick(mac)
+        except Exception as e:
+            print(f"\nkick attempt {i + 1} rejected: {e}")
+        deadline = t0 + 8.0
+        while time.monotonic() < deadline:
+            if dropped():
+                return t0
+            time.sleep(0.3)
+    raise AssertionError(f"UniFi kick had no effect after {attempts} attempts")
+
+
 def test_ap_kick_recovers_fast_and_is_counted(device, unifi, device_mac):
     before = status(device)
     drops0 = before["wifi"]["drops"]
 
-    t0 = time.monotonic()
-    unifi.kick(device_mac)
+    t0 = _kick(device, unifi, device_mac, drops0["total"])
     after = wait_until(
         lambda: _connected_with(device, lambda d: d.get("total", 0) > drops0["total"]),
         timeout=KICK_RECOVERY_S, desc="controller back on Wi-Fi with the kick counted",
@@ -44,6 +71,36 @@ def test_ap_kick_recovers_fast_and_is_counted(device, unifi, device_mac):
     assert drops["short"] == drops0["short"] + 1, drops
     assert drops["long"] == drops0["long"], drops
     assert drops["last_reason"] != 0, drops
+    assert after["uptime_ms"] > before["uptime_ms"], "controller rebooted instead of reconnecting"
+
+
+def _drop_now(dev) -> float:
+    """Unplanned drop from the controller's side, reconnect left to the supervisor.
+    UniFi won't kick a client again until it lists it as reassociated (~55 s),
+    so kicks can't land back to back, or inside the supervisor's 15 s sleep."""
+    t0 = time.monotonic()
+    r = dev.session.post(f"{dev.base_url}/api/test/wifi-bounce",
+                         json={"unplanned": True, "supervisor": True, "reason": 8},
+                         timeout=dev.timeout)
+    r.raise_for_status()
+    return t0
+
+
+def test_back_to_back_drops_both_recover_fast(device, unifi, device_mac):
+    """A drop right after reconnecting is a new outage with its own quick retry.
+    The supervisor used to sleep through the reconnect and treat the second drop
+    as the first one continuing, leaving it to the 60 s grace."""
+    before = status(device)
+    for i in range(2):
+        drops0 = status(device)["wifi"]["drops"]["total"]
+        t0 = _drop_now(device)
+        wait_until(
+            lambda: _connected_with(device, lambda d: d.get("total", 0) > drops0),
+            timeout=KICK_RECOVERY_S, desc=f"controller back on Wi-Fi after drop {i + 1}",
+        )
+        print(f"\ndrop {i + 1}: recovered in {time.monotonic() - t0:.1f}s")
+    after = status(device)
+    assert after["wifi"]["drops"]["total"] == before["wifi"]["drops"]["total"] + 2, after["wifi"]
     assert after["uptime_ms"] > before["uptime_ms"], "controller rebooted instead of reconnecting"
 
 

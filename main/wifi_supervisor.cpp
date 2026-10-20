@@ -61,7 +61,7 @@
 #include <esp_timer.h>
 #include <esp_netif.h>
 #include <string.h>
-
+#include <atomic>
 #include "ping/ping_sock.h"
 #include "lwip/ip_addr.h"
 
@@ -236,6 +236,17 @@ void wifi_supervisor_notify_disconnect(void) {
     if (t != nullptr) xTaskNotifyGive(t);
 }
 
+// Set when the link comes up, cleared by the supervisor. Without it a drop
+// shortly after a reconnect the supervisor slept through looks like the same
+// outage: no quick retry, and the grace period counted from the earlier drop.
+static std::atomic<bool> s_link_up_seen{false};
+
+void wifi_supervisor_notify_connected(void) {
+    s_link_up_seen.store(true);
+    TaskHandle_t t = s_task;
+    if (t != nullptr) xTaskNotifyGive(t);
+}
+
 static SemaphoreHandle_t s_ping_done = nullptr;
 
 static void ping_on_end(esp_ping_handle_t hdl, void* args) {
@@ -361,6 +372,11 @@ static void wifi_supervisor_task(void* param) {
             // recovery bounce dropped the link, the outage is ongoing and must
             // keep counting toward escalation.
             const int64_t now = esp_timer_get_time();
+            if (s_link_up_seen.exchange(false)) {
+                down_since_us = 0;
+                last_attempt_us = 0;
+                fast_tried = false;
+            }
             if (down_since_us == 0) down_since_us = now;
             const int down_ms = (int)((now - down_since_us) / 1000);
 
@@ -409,6 +425,7 @@ static void wifi_supervisor_task(void* param) {
         }
 
         // ---- Associated: reset association bookkeeping ----
+        s_link_up_seen.store(false);
         down_since_us = 0;
         last_attempt_us = 0;
         fast_tried = false;

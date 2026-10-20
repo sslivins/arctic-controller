@@ -33,6 +33,13 @@ void wifi_supervisor_start(void);
  */
 void wifi_supervisor_notify_disconnect(void);
 
+/**
+ * @brief Tell the supervisor the link came back (got an IP). A drop after
+ *        this is a new outage with its own quick reconnect, even if the
+ *        supervisor slept through the reconnect. Safe from the event handler.
+ */
+void wifi_supervisor_notify_connected(void);
+
 #ifdef __cplusplus
 }
 #endif
