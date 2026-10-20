@@ -678,13 +678,13 @@ static void chart_draw_cb(lv_event_t* event) {
                   today ? UI_COLOR_ACCENT : UI_COLOR_TEXT_DIM);
         if (r.date == 0) continue;
 
-        // Modes from the bottom, standby and unattributed on top, as on the web.
+        // Modes stacked from the bottom, as on the web. Idle draw is below the
+        // unit's 100 W metering step, so there is no standby segment.
         struct Part { uint32_t wh; lv_color_t color; };
         const Part parts[] = {
             {r.elec_wh[energy::BUCKET_HEATING], COLOR_HEATING},
             {r.elec_wh[energy::BUCKET_COOLING], COLOR_COOLING},
             {r.elec_wh[energy::BUCKET_HOT_WATER], COLOR_HOT_WATER},
-            {r.elec_wh[energy::BUCKET_STANDBY] + r.elec_unattributed_wh, COLOR_STANDBY},
         };
         uint32_t base = 0;
         for (const auto& p : parts) {
@@ -768,10 +768,7 @@ static void fill_day_stats(const energy::DayRecord& r) {
     char value[32], sub[64], num[16];
     format_kwh(value, sizeof(value), energy::total_elec_wh(r));
     lv_label_set_text(s.stat_value[0], value);
-    format_kwh_number(num, sizeof(num),
-                      r.elec_wh[energy::BUCKET_STANDBY] + r.elec_unattributed_wh);
-    snprintf(sub, sizeof(sub), "%s %s kWh", i18n_get(STR_ENERGY_OTHER), num);
-    lv_label_set_text(s.stat_sub[0], sub);
+    lv_label_set_text(s.stat_sub[0], " ");
 
     const uint32_t thermal = thermal_wh(r);
     format_kwh(value, sizeof(value), thermal);
@@ -1119,7 +1116,6 @@ static void build_main_view() {
     add_legend_item(legend, COLOR_HEATING, i18n_get(STR_HISTORY_LEGEND_HEATING));
     add_legend_item(legend, COLOR_COOLING, i18n_get(STR_HISTORY_LEGEND_COOLING));
     add_legend_item(legend, COLOR_HOT_WATER, i18n_get(STR_HISTORY_LEGEND_HOT_WATER));
-    add_legend_item(legend, COLOR_STANDBY, i18n_get(STR_ENERGY_OTHER));
 
     s.chart = make_panel(s.main_view);
     lv_obj_set_width(s.chart, LV_PCT(100));

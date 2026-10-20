@@ -2521,14 +2521,13 @@
     }
     function energyCop(heatWh, coveredWh) { return coveredWh >= ENERGY_COP_MIN_WH ? heatWh / coveredWh : null; }
     function energySums(days) {
-      let total = 0, heat = 0, covered = 0, other = 0;
+      let total = 0, heat = 0, covered = 0;
       for (const d of days) {
         const e = d.electrical_wh || {}, th = d.thermal_wh || {}, cov = d.covered_electrical_wh || {};
         total += e.total || 0;
-        other += (e.standby || 0) + (e.unattributed || 0);
         for (const [m] of ENERGY_MODES) { heat += th[m] || 0; covered += cov[m] || 0; }
       }
-      return { total, heat, covered, other, cop: energyCop(heat, covered) };
+      return { total, heat, covered, cop: energyCop(heat, covered) };
     }
     async function loadEnergy() {
       const en = state.energy;
@@ -2639,11 +2638,12 @@
       if (selected >= 0) svg += `<rect class="en-selected" x="${(plotL + selected * slotW).toFixed(1)}" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="var(--cp-accent)" opacity="0.14" rx="3"/>`;
       svg += `<rect class="en-hover" x="0" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="var(--cp-text-muted)" opacity="0.1" rx="3" pointer-events="none" style="display:none"/>`;
 
-      // Bars stacked by mode, with standby and unattributed energy on top.
+      // Bars stacked by mode. The unit meters power in 100 W steps, so idle draw
+      // reads as 0 and there is no standby segment.
       slots.forEach((s, i) => {
         if (!s.day) return;
         const e = s.day.electrical_wh || {};
-        const parts = [...ENERGY_MODES.map(([m, , color]) => [e[m] || 0, color]), [s.sums.other, "var(--energy-other)"]];
+        const parts = ENERGY_MODES.map(([m, , color]) => [e[m] || 0, color]);
         let acc = 0;
         const x = (cx(i) - barW / 2).toFixed(1);
         for (const [wh, color] of parts) {
@@ -2730,7 +2730,6 @@
       return `<div class="hist-tip-time">${esc(fmtDay(day.date, true))}${day.final === false ? " · so far" : ""}</div>
         <div>Total <strong>${fmtKwh(s.total)}</strong></div>` +
         ENERGY_MODES.filter(([m]) => e[m] > 0).map(([m, label, color]) => row(color, label, fmtKwh(e[m]))).join("") +
-        (s.other > 0 ? row("var(--energy-other)", "Standby / other", fmtKwh(s.other)) : "") +
         (s.cop !== null ? `<div>COP (est.) <strong>${s.cop.toFixed(1)}</strong></div>` : "") +
         (day.outdoor_c ? `<div>Outdoor avg <strong>${temp(day.outdoor_c.avg)}</strong></div>` : "");
     }
@@ -2767,7 +2766,6 @@
         return `<tr><td><i class="en-swatch" style="background:${color}"></i>${label}</td><td>${fmtKwh(e[m] || 0)}</td>
           <td>${th[m] ? fmtKwh(th[m]) : "--"}</td><td>${cop !== null ? cop.toFixed(1) : "--"}</td><td>${run[m] ? fmtDuration(run[m]) : "--"}</td></tr>`;
       }).join("");
-      const other = s.other > 0 ? `<tr><td><i class="en-swatch" style="background:var(--energy-other)"></i>Standby / other</td><td>${fmtKwh(s.other)}</td><td>--</td><td>--</td><td>--</td></tr>` : "";
       const df = day.defrost || {};
       const facts = [`${day.starts || 0} start${day.starts === 1 ? "" : "s"}`];
       if (df.count) {
@@ -2778,7 +2776,6 @@
       const notes = [];
       if (st) notes.push(`Heat is estimated from a flow of ${st.flow_lpm} L/min with ${st.glycol_pct}% glycol${st.mixed ? " (changed during the day)" : ""}.`);
       notes.push("COP covers metered running with a valid heat estimate and leaves out defrost.");
-      if ((e.unattributed || 0) > 0) notes.push("Other includes energy recorded before it was split by mode.");
 
       const r = en.runs[day.date];
       let runs;
@@ -2806,7 +2803,7 @@
           ${energyStat("Outdoor", out ? temp(out.avg) : "--", out ? `${temp(out.min)} – ${temp(out.max)}` : "")}
         </div>
         <div class="en-table-wrap"><table class="en-table"><thead><tr><th>Mode</th><th>Electricity</th><th>Heat (est.)</th><th>COP</th><th>Run time</th></tr></thead>
-          <tbody>${rows}${other || ""}${rows || other ? "" : `<tr><td colspan="5" class="hist-muted">No energy recorded.</td></tr>`}</tbody></table></div>
+          <tbody>${rows || `<tr><td colspan="5" class="hist-muted">No energy recorded.</td></tr>`}</tbody></table></div>
         <p class="en-facts">${facts.join(" · ")}</p>
         <p class="hist-muted en-note">${notes.join(" ")}</p>
         <h3>Compressor runs</h3>
@@ -2846,7 +2843,6 @@
           </div>
           <div class="hist-legend en-legend">
             ${ENERGY_MODES.map(([, label, color]) => `<span><i class="band" style="background:${color}"></i>${label}</span>`).join("")}
-            <span><i class="band" style="background:var(--energy-other)"></i>Standby / other</span>
             <span><i class="dot" style="background:var(--hist-set)"></i>COP (est.)</span>
           </div>
           <div class="en-chart-wrap">${energyChartSvg(data)}<div class="hist-tip"></div></div>
