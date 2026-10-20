@@ -2545,10 +2545,11 @@ paths:
       - HeatPump
       summary: Get temperature history timeline
       description: |
-        Returns up to an eight-hour window of telemetry samples (inlet, outlet,
-        and setpoint temperatures plus operating mode and compressor state),
-        mirroring the on-device history graph. Samples are captured every 30
-        seconds and retained for 14 days.
+        Returns a window of telemetry samples (inlet, outlet, and setpoint
+        temperatures plus operating mode and compressor state), mirroring the
+        on-device history graph: 8 hours by default, or 4, 2 or 1 hour via
+        `window`. Samples are captured every 30 seconds and retained for 14
+        days.
 
         Temperatures are raw deci-Celsius integers (tenths of a degree), or null
         when the reading was invalid at capture time; clients convert to the
@@ -2568,6 +2569,16 @@ paths:
         description: |
           Unix epoch seconds for the end of the window. Defaults to the latest
           aligned sample. Clamped to [window_seconds, latest_end].
+      - name: window
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum: [3600, 7200, 14400, 28800]
+          default: 28800
+        description: |
+          Window length in seconds: one of the history chart's zoom presets
+          (1, 2, 4 or 8 hours). Any other value is rejected with 400.
       responses:
         '200':
           description: Telemetry timeline

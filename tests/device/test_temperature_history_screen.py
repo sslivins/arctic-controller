@@ -73,6 +73,56 @@ def test_temperature_history_page_and_navigation(device: DeviceClient):
     assert device.wait_for_screen("main", timeout=5.0)
 
 
+def test_history_zoom_presets(device: DeviceClient):
+    device.populate_temperature_history()
+    _open_cycles(device)
+    device.wait_for_widget(tag="temperature_history_screen")
+    for tag in ("history_zoom_8h", "history_zoom_4h", "history_zoom_2h",
+                "history_zoom_1h"):
+        device.wait_for_widget(tag=tag)
+
+    def step_labels() -> set[str]:
+        return {w.text.split(" ", 1)[1] for w in device.widgets
+                if w.text and w.text[0] in "\uf053\uf054" and " " in w.text}
+
+    def highlighted(tag: str) -> bool:
+        on = device.find_widget(tag=tag)
+        off = device.find_widget(tag="history_zoom_4h")
+        return on is not None and off is not None and on.bg_color != off.bg_color
+
+    try:
+        assert highlighted("history_zoom_8h")
+        assert step_labels() >= {"8 h", "1 h"}, step_labels()
+        device.click(tag="history_zoom_1h")
+        device.wait_until(
+            "1 h zoom highlighted with 15 min steps",
+            lambda: highlighted("history_zoom_1h") and step_labels() >= {"1 h", "15 min"},
+            timeout=5.0,
+        )
+        # Zooming keeps the live window, and the fine steps still page.
+        w = device.find_widget(tag="temperature_history_next")
+        assert w is not None and w.disabled
+        device.click(tag="temperature_history_back_hour")
+        device.wait_until(
+            "15 min forward enabled after stepping back",
+            lambda: (w := device.find_widget(tag="temperature_history_forward_hour"))
+            is not None and not w.disabled,
+            timeout=5.0,
+        )
+        # The zoom survives leaving and reopening the page.
+        device.click(tag="nav_home")
+        assert device.wait_for_screen("main", timeout=5.0)
+        _open_cycles(device)
+        device.wait_for_widget(tag="history_zoom_1h")
+        device.wait_until("1 h zoom kept", lambda: highlighted("history_zoom_1h"),
+                          timeout=5.0)
+    finally:
+        if device.has_widget(tag="history_zoom_8h"):
+            device.click(tag="history_zoom_8h")
+        device.click(tag="nav_home")
+        device.wait_for_screen("main", timeout=5.0)
+
+
 def test_history_tab_switches_segments_and_remembers_last(device: DeviceClient):
     device.populate_temperature_history()
     device.click(tag="nav_history")

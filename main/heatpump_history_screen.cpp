@@ -23,7 +23,6 @@
 #include <string.h>
 #include <time.h>
 
-static constexpr uint32_t WINDOW_SECONDS = 8 * 60 * 60;
 static constexpr int32_t LATEST_BUTTON_H = 52;
 static constexpr uint32_t RETENTION_SECONDS =
     HISTORY_TELEMETRY_RETENTION_DAYS * 24 * 60 * 60;
@@ -46,7 +45,6 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 #define COLOR_FAULT     UI_COLOR_ERROR
 // Icy teal, as on the home screen's defrost tile.
 #define COLOR_DEFROST       lv_color_hex(0x4fb3c9)
-#define COLOR_DEFROST_EDGE  lv_color_hex(0xa5f3fc)
 #define COLOR_POWER     lv_color_hex(0x60a5fa)
 
 static constexpr size_t MAX_FAULTS = 16;
@@ -107,6 +105,10 @@ static struct {
     uint32_t window_wh = 0;
     // Moment to centre the next opened window on (0 = latest).
     uint32_t pending_center = 0;
+    // Zoom preset; kept across hide/show like the view.
+    uint32_t window_seconds = HISTORY_WINDOW_DEFAULT_SECONDS;
+    lv_obj_t* zoom_buttons[sizeof(HISTORY_WINDOW_PRESETS) /
+                           sizeof(HISTORY_WINDOW_PRESETS[0])] = {};
 } state;
 
 static void request_window(uint32_t end);
@@ -146,7 +148,7 @@ static int32_t map_x(uint32_t timestamp, const lv_area_t& plot) {
     if (timestamp >= state.window_end) return plot.x2;
     return plot.x1 + (int32_t)(((uint64_t)(timestamp - state.window_start) *
                                 (uint32_t)lv_area_get_width(&plot)) /
-                               WINDOW_SECONDS);
+                               (state.window_end - state.window_start));
 }
 
 static int32_t map_y(int32_t value, int32_t min_value, int32_t max_value,
@@ -346,6 +348,47 @@ static void draw_dot(lv_layer_t* layer, int32_t x, int32_t y, lv_color_t color) 
     lv_draw_rect(layer, &dsc, &area);
 }
 
+// What the unit was doing at a sample, as the home screen names it. Defrost
+// is checked first: it pauses the run, so its samples aren't "running".
+static const char* sample_state_name(const history_telemetry_sample_t& s,
+                                     lv_color_t* color) {
+    for (size_t i = 0; i < state.defrost_count; i++) {
+        const auto& d = state.defrosts[i];
+        const uint32_t end = d.end != 0 ? d.end : state.window_end;
+        if (d.start <= s.timestamp && s.timestamp <= end) {
+            *color = COLOR_DEFROST;
+            return i18n_get(STR_HOME_DEFROSTING);
+        }
+    }
+    if (!running_sample(s)) {
+        *color = UI_COLOR_TEXT_DIM;
+        return i18n_get(STR_HOME_IDLE);
+    }
+    *color = mode_color(s.mode);
+    switch (s.mode) {
+        case HISTORY_TELEMETRY_MODE_HEATING: return i18n_get(STR_HISTORY_LEGEND_HEATING);
+        case HISTORY_TELEMETRY_MODE_COOLING: return i18n_get(STR_HISTORY_LEGEND_COOLING);
+        default: return i18n_get(STR_HISTORY_LEGEND_HOT_WATER);
+    }
+}
+
+// The operating-state row of a cursor popup: a band swatch and the name.
+static void draw_state_row(lv_layer_t* layer, const lv_area_t& row,
+                           const history_telemetry_sample_t& s) {
+    lv_color_t color;
+    const char* name = sample_state_name(s, &color);
+    lv_draw_rect_dsc_t sw;
+    lv_draw_rect_dsc_init(&sw);
+    sw.bg_color = color;
+    sw.radius = 3;
+    const int32_t cy = (row.y1 + row.y2) / 2;
+    const lv_area_t swatch = {row.x1, cy - 8, row.x1 + 16, cy + 8};
+    lv_draw_rect(layer, &sw, &swatch);
+    const lv_area_t name_area = {row.x1 + 24, row.y1, row.x2, row.y2};
+    draw_label(layer, name_area, name, color, LV_TEXT_ALIGN_LEFT,
+               &montserrat_24_latin);
+}
+
 static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
                         int32_t min_value, int32_t max_value) {
     if (state.cursor < 0 || (size_t)state.cursor >= state.sample_count) return;
@@ -399,7 +442,7 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
     }
 
     static constexpr int32_t BOX_W = 250, TIME_H = 30, ROW_H = 30, PAD = 10;
-    const int32_t BOX_H = 6 + TIME_H + (3 + fault_row_count) * ROW_H + 8;
+    const int32_t BOX_H = 6 + TIME_H + (4 + fault_row_count) * ROW_H + 8;
     int32_t bx = x + 16;
     if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
     if (bx < plot.x1) bx = plot.x1;
@@ -418,6 +461,9 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
     draw_label(layer, time_row, when, UI_COLOR_TEXT_DIM, LV_TEXT_ALIGN_LEFT,
                &montserrat_24_latin);
     lv_area_t row = {time_row.x1, time_row.y2 - ROW_H, time_row.x2, time_row.y2};
+    row.y1 += ROW_H;
+    row.y2 += ROW_H;
+    draw_state_row(layer, row, s);
     struct Row { lv_color_t color; const char* name; const char* value; };
     const Row rows[] = {
         {COLOR_OUTLET, i18n_get(STR_HISTORY_OUTLET), outlet},
@@ -460,7 +506,7 @@ static void draw_fault_zones(lv_layer_t* layer, const lv_area_t& plot) {
     }
 }
 
-// Defrost: an icy block over the run it interrupts, with a solid cap so a
+// Defrost: an icy block over the run it interrupts, at least 3 px wide so a
 // short one still shows at wide zoom.
 static void draw_defrost_zones(lv_layer_t* layer, const lv_area_t& plot) {
     for (size_t i = 0; i < state.defrost_count; i++) {
@@ -477,10 +523,6 @@ static void draw_defrost_zones(lv_layer_t* layer, const lv_area_t& plot) {
         dsc.bg_opa = LV_OPA_40;
         const lv_area_t zone = {x1, plot.y1, x2, plot.y2};
         lv_draw_rect(layer, &dsc, &zone);
-        dsc.bg_color = COLOR_DEFROST_EDGE;
-        dsc.bg_opa = LV_OPA_COVER;
-        const lv_area_t cap = {x1, plot.y1, x2, plot.y1 + 4};
-        lv_draw_rect(layer, &dsc, &cap);
     }
 }
 
@@ -550,32 +592,26 @@ static void draw_mode_bands(lv_layer_t* layer, const lv_area_t& plot) {
     }
 }
 
-// X-axis gridlines/labels are anchored to whole-hour boundaries in local
-// time (rounded up to the next even-hour multiple) rather than to the
-// ragged window edges, so the axis always reads in clean hours
-// (e.g. 08:00, 10:00, 12:00) regardless of the current minute. The data
-// window itself still ends at "now" so the last 8 hours stay visible.
+// X-axis gridlines/labels are anchored to round local-time boundaries
+// (multiples of the zoom's tick step: 2 h at 8 h down to 15 min at 1 h)
+// rather than to the ragged window edges, so the axis always reads in clean
+// times (e.g. 08:00, 10:00, 12:00) regardless of the current minute. The data
+// window itself still ends at "now".
 static void draw_time_axis(lv_layer_t* layer, const lv_area_t& coords,
                            const lv_area_t& plot) {
-    static constexpr int TICK_STEP_HOURS = 2;
+    const uint32_t tick_step = history_window_tick(state.window_seconds);
     time_t tick_time;
     {
         time_t start = state.window_start;
         struct tm t0 = {};
         localtime_r(&start, &t0);
-        if (t0.tm_min != 0 || t0.tm_sec != 0) {
-            t0.tm_hour += 1;
-        }
-        t0.tm_min = 0;
-        t0.tm_sec = 0;
-        // Snap up to the next multiple of TICK_STEP_HOURS for even spacing.
-        t0.tm_hour +=
-            (TICK_STEP_HOURS - (t0.tm_hour % TICK_STEP_HOURS)) % TICK_STEP_HOURS;
-        t0.tm_isdst = -1;
-        tick_time = mktime(&t0);
+        // Round up to the next multiple of the step since local midnight.
+        const uint32_t since_midnight =
+            (uint32_t)(t0.tm_hour * 3600 + t0.tm_min * 60 + t0.tm_sec);
+        tick_time = start + (tick_step - since_midnight % tick_step) % tick_step;
     }
     for (; tick_time > 0 && (uint32_t)tick_time <= state.window_end;
-         tick_time += TICK_STEP_HOURS * 3600) {
+         tick_time += tick_step) {
         if ((uint32_t)tick_time < state.window_start) continue;
         int32_t x = map_x((uint32_t)tick_time, plot);
         draw_line(layer, {x, plot.y1}, {x, plot.y2}, COLOR_GRID, 1);
@@ -585,16 +621,19 @@ static void draw_time_axis(lv_layer_t* layer, const lv_area_t& coords,
         if (time_mgr_get_24h_format()) {
             strftime(label, sizeof(label), "%H:%M", &local);
         } else {
-            // Ticks are snapped to whole hours above, so the minutes carry no
-            // information in 12-hour form -- "8 AM" rather than "08:00 AM".
-            // That also keeps the label narrower than the 24-hour "08:00", so
-            // adding the suffix cannot make axis labels collide.
+            // On the hour the minutes carry no information in 12-hour form --
+            // "8 AM" rather than "8:00 AM".
             int hour12 = local.tm_hour % 12;
             if (hour12 == 0) hour12 = 12;
-            snprintf(label, sizeof(label), "%d %s", hour12,
-                     local.tm_hour < 12 ? "AM" : "PM");
+            const char* suffix = local.tm_hour < 12 ? "AM" : "PM";
+            if (local.tm_min == 0) {
+                snprintf(label, sizeof(label), "%d %s", hour12, suffix);
+            } else {
+                snprintf(label, sizeof(label), "%d:%02d %s", hour12,
+                         local.tm_min, suffix);
+            }
         }
-        lv_area_t label_area = {x - 40, plot.y2 + 10, x + 40, coords.y2};
+        lv_area_t label_area = {x - 60, plot.y2 + 10, x + 60, coords.y2};
         draw_label(layer, label_area, label, UI_COLOR_TEXT_DIM,
                    LV_TEXT_ALIGN_CENTER);
     }
@@ -607,15 +646,6 @@ static void format_tenths(char* buf, size_t len, uint32_t tenths, bool keep_deci
     } else {
         snprintf(buf, len, "%lu.%lu", (unsigned long)(tenths / 10),
                  (unsigned long)(tenths % 10));
-    }
-}
-
-static const char* sample_mode_name(const history_telemetry_sample_t& s) {
-    if (!running_sample(s)) return i18n_get(STR_ENERGY_OTHER);
-    switch (s.mode) {
-        case HISTORY_TELEMETRY_MODE_HEATING: return i18n_get(STR_HISTORY_LEGEND_HEATING);
-        case HISTORY_TELEMETRY_MODE_COOLING: return i18n_get(STR_HISTORY_LEGEND_COOLING);
-        default: return i18n_get(STR_HISTORY_LEGEND_HOT_WATER);
     }
 }
 
@@ -667,9 +697,7 @@ static void draw_power_cursor(lv_layer_t* layer, const lv_area_t& plot,
                &montserrat_24_latin);
     row.y1 += ROW_H;
     row.y2 += ROW_H;
-    draw_label(layer, row, sample_mode_name(s),
-               running_sample(s) ? mode_color(s.mode) : UI_COLOR_TEXT_DIM,
-               LV_TEXT_ALIGN_LEFT, &montserrat_24_latin);
+    draw_state_row(layer, row, s);
 }
 
 // Electrical draw: an area per pixel column (the tallest sample in it) under
@@ -1041,7 +1069,7 @@ static void query_task(void* data) {
 
 static void request_window(uint32_t end) {
     state.window_end = end;
-    state.window_start = end - WINDOW_SECONDS;
+    state.window_start = end - state.window_seconds;
     update_range_label();
     update_navigation();
     lv_label_set_text(state.status_label, i18n_get(STR_HISTORY_LOADING));
@@ -1085,16 +1113,82 @@ static lv_obj_t* create_button(lv_obj_t* parent, const char* text,
 }
 
 static void previous_cb(lv_event_t*) {
-    request_window(state.window_end - WINDOW_SECONDS);
+    request_window(history_window_shift(state.window_end,
+                                        -(int32_t)state.window_seconds,
+                                        state.window_seconds, state.latest_end));
 }
 
 static void step_window(int32_t delta) {
     request_window(history_window_shift(state.window_end, delta,
-                                        WINDOW_SECONDS, state.latest_end));
+                                        state.window_seconds, state.latest_end));
 }
 
-static void back_hour_cb(lv_event_t*) { step_window(-3600); }
-static void forward_hour_cb(lv_event_t*) { step_window(3600); }
+static void back_hour_cb(lv_event_t*) {
+    step_window(-(int32_t)history_window_step(state.window_seconds));
+}
+static void forward_hour_cb(lv_event_t*) {
+    step_window((int32_t)history_window_step(state.window_seconds));
+}
+
+// "1 h" or "15 min".
+static void format_duration(char* buf, size_t len, uint32_t seconds) {
+    if (seconds % 3600 == 0) {
+        snprintf(buf, len, "%lu h", (unsigned long)(seconds / 3600));
+    } else {
+        snprintf(buf, len, "%lu min", (unsigned long)(seconds / 60));
+    }
+}
+
+// Highlight the active zoom preset and label the fine steps to match it.
+static void apply_zoom() {
+    for (size_t i = 0; i < sizeof(HISTORY_WINDOW_PRESETS) /
+                               sizeof(HISTORY_WINDOW_PRESETS[0]); i++) {
+        lv_obj_t* button = state.zoom_buttons[i];
+        if (button == nullptr) continue;
+        const bool on = HISTORY_WINDOW_PRESETS[i] == state.window_seconds;
+        lv_obj_set_style_bg_color(button,
+                                  on ? UI_COLOR_ACCENT : lv_color_hex(0x3d4f6f),
+                                  LV_PART_MAIN);
+        lv_obj_set_style_text_color(lv_obj_get_child(button, 0),
+                                    on ? lv_color_hex(0x062033) : UI_COLOR_TEXT,
+                                    LV_PART_MAIN);
+    }
+    char step[16], text[32];
+    format_duration(step, sizeof(step), state.window_seconds);
+    if (state.previous_button) {
+        snprintf(text, sizeof(text), LV_SYMBOL_LEFT " %s", step);
+        lv_label_set_text(lv_obj_get_child(state.previous_button, 0), text);
+    }
+    if (state.next_button) {
+        snprintf(text, sizeof(text), "%s " LV_SYMBOL_RIGHT, step);
+        lv_label_set_text(lv_obj_get_child(state.next_button, 0), text);
+    }
+    format_duration(step, sizeof(step), history_window_step(state.window_seconds));
+    if (state.back_hour_button) {
+        snprintf(text, sizeof(text), LV_SYMBOL_LEFT " %s", step);
+        lv_label_set_text(lv_obj_get_child(state.back_hour_button, 0), text);
+    }
+    if (state.forward_hour_button) {
+        snprintf(text, sizeof(text), "%s " LV_SYMBOL_RIGHT, step);
+        lv_label_set_text(lv_obj_get_child(state.forward_hour_button, 0), text);
+    }
+}
+
+// Zoom keeps the window's end, so the newest data stays in view from the
+// live window and an older window zooms around its right edge.
+static void zoom_cb(lv_event_t* event) {
+    const auto* target = static_cast<lv_obj_t*>(lv_event_get_target(event));
+    uint32_t window = 0;
+    for (size_t i = 0; i < sizeof(HISTORY_WINDOW_PRESETS) /
+                               sizeof(HISTORY_WINDOW_PRESETS[0]); i++) {
+        if (state.zoom_buttons[i] == target) window = HISTORY_WINDOW_PRESETS[i];
+    }
+    if (window == 0 || window == state.window_seconds) return;
+    state.window_seconds = window;
+    apply_zoom();
+    request_window(history_window_shift(state.window_end, 0, window,
+                                        state.latest_end));
+}
 
 // Double-tap: re-centre the window on the tapped moment, e.g. to see a run
 // that straddled two windows in one piece.
@@ -1106,14 +1200,15 @@ static void chart_double_click_cb(lv_event_t*) {
     const lv_area_t plot = plot_area(state.chart);
     if (point.x < plot.x1 || point.x > plot.x2) return;
     const uint32_t t = state.window_start +
-        (uint32_t)((uint64_t)(point.x - plot.x1) * WINDOW_SECONDS /
+        (uint32_t)((uint64_t)(point.x - plot.x1) * state.window_seconds /
                    (uint32_t)lv_area_get_width(&plot));
-    request_window(history_window_center(t, WINDOW_SECONDS, 15 * 60,
+    request_window(history_window_center(t, state.window_seconds,
+                                         history_window_snap(state.window_seconds),
                                          state.latest_end));
 }
 
 static void next_cb(lv_event_t*) {
-    uint32_t end = state.window_end + WINDOW_SECONDS;
+    uint32_t end = state.window_end + state.window_seconds;
     if (end > state.latest_end) end = state.latest_end;
     request_window(end);
 }
@@ -1251,6 +1346,26 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
     lv_obj_set_height(state.view_temps_button, 52);
     lv_obj_set_height(state.view_power_button, 52);
 
+    // Zoom presets, widest first.
+    static const char* const kZoomTags[] = {"history_zoom_8h", "history_zoom_4h",
+                                            "history_zoom_2h", "history_zoom_1h"};
+    static_assert(sizeof(kZoomTags) / sizeof(kZoomTags[0]) ==
+                      sizeof(HISTORY_WINDOW_PRESETS) /
+                          sizeof(HISTORY_WINDOW_PRESETS[0]),
+                  "one tag per zoom preset");
+    lv_obj_t* zoom = lv_obj_create(state.overlay);
+    lv_obj_remove_style_all(zoom);
+    lv_obj_set_size(zoom, LV_PCT(100), 52);
+    lv_obj_set_flex_flow(zoom, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(zoom, 12, LV_PART_MAIN);
+    lv_obj_clear_flag(zoom, LV_OBJ_FLAG_SCROLLABLE);
+    for (size_t i = 0; i < sizeof(kZoomTags) / sizeof(kZoomTags[0]); i++) {
+        char text[16];
+        format_duration(text, sizeof(text), HISTORY_WINDOW_PRESETS[i]);
+        state.zoom_buttons[i] = create_button(zoom, text, kZoomTags[i], zoom_cb);
+        lv_obj_set_height(state.zoom_buttons[i], 52);
+    }
+
     // Row 1: plotted lines. Row 2: mode bands.
     auto make_legend_row = [](lv_obj_t* parent) {
         lv_obj_t* row = lv_obj_create(parent);
@@ -1322,7 +1437,7 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(actions, 12, LV_PART_MAIN);
     state.previous_button = create_button(
-        actions, i18n_get(STR_HISTORY_PREVIOUS),
+        actions, LV_SYMBOL_LEFT " 8 h",
         "temperature_history_previous", previous_cb);
     state.back_hour_button = create_button(
         actions, LV_SYMBOL_LEFT " 1 h", "temperature_history_back_hour",
@@ -1331,7 +1446,7 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
         actions, "1 h " LV_SYMBOL_RIGHT, "temperature_history_forward_hour",
         forward_hour_cb);
     state.next_button = create_button(
-        actions, i18n_get(STR_HISTORY_NEXT),
+        actions, "8 h " LV_SYMBOL_RIGHT,
         "temperature_history_next", next_cb);
 
     time_t now;
@@ -1347,14 +1462,17 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
         if (latest > 0) latest += HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
     }
     if (latest == 0) {
-        latest = WINDOW_SECONDS;
+        latest = state.window_seconds;
     }
     state.latest_end = latest;
     apply_view();
+    apply_zoom();
     if (state.pending_center != 0) {
         const uint32_t t = state.pending_center;
         state.pending_center = 0;
-        request_window(history_window_center(t, WINDOW_SECONDS, 15 * 60, latest));
+        request_window(history_window_center(
+            t, state.window_seconds, history_window_snap(state.window_seconds),
+            latest));
     } else {
         request_window(latest);
     }
@@ -1378,6 +1496,7 @@ void heatpump_history_hide(void) {
     state.latest_button = nullptr;
     state.view_temps_button = nullptr;
     state.view_power_button = nullptr;
+    for (auto& button : state.zoom_buttons) button = nullptr;
     state.legend_lines = nullptr;
     state.legend_power = nullptr;
     state.power_label = nullptr;
@@ -1401,8 +1520,9 @@ bool heatpump_history_is_shown(void) {
 
 void heatpump_history_open_centered(uint32_t timestamp) {
     if (state.shown) {
-        request_window(history_window_center(timestamp, WINDOW_SECONDS, 15 * 60,
-                                             state.latest_end));
+        request_window(history_window_center(
+            timestamp, state.window_seconds,
+            history_window_snap(state.window_seconds), state.latest_end));
     } else {
         state.pending_center = timestamp;
     }

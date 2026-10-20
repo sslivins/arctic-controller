@@ -55,14 +55,18 @@ def test_recorder_uses_validity_flags_and_thirty_second_cadence():
         assert flag in source
 
 
-def test_device_history_is_eight_hour_custom_draw_page():
+def test_device_history_is_zoomable_custom_draw_page():
     source = (MAIN / "heatpump_history_screen.cpp").read_text(encoding="utf-8")
-    assert "WINDOW_SECONDS = 8 * 60 * 60" in source
+    window = (MAIN / "history_window.h").read_text(encoding="utf-8")
+    # 8 h (the default), 4 h, 2 h and 1 h zoom presets, shared with the API.
+    assert "HISTORY_WINDOW_PRESETS[] = {8 * 3600, 4 * 3600," in window
+    assert "HISTORY_WINDOW_DEFAULT_SECONDS = HISTORY_WINDOW_PRESETS[0]" in window
+    assert "state.window_seconds" in source
+    assert '"history_zoom_1h"' in source
     assert "LV_EVENT_DRAW_MAIN_END" in source
     assert "lv_draw_rect" in source
     assert "lv_draw_line" in source
     assert "lv_canvas" not in source
-    assert source.count("WINDOW_SECONDS") >= 5
     assert "NAV_BAR_H + 18" in source
 
     status = (MAIN / "heatpump_temps_screen.cpp").read_text(encoding="utf-8")
@@ -105,8 +109,9 @@ def test_web_dashboard_has_temperature_history_view():
     assert "function historyChartSvg" in web
     # Fetches from the streaming endpoint above.
     assert "/api/heatpump/temperature-history" in web
-    # Same 8-hour window / whole-hour axis rounding as the device chart.
-    assert "getHours() % 2 !== 0" in web
+    # Same zoom presets / round-time axis as the device chart.
+    assert "HIST_WINDOWS" in web
+    assert "window=${state.histWindow}" in web
 
 
 

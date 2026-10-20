@@ -38,6 +38,7 @@
 #include "ext_temp_sensors.h"  // heat output & COP settings, external sensors
 #include "heatpump_errors.h"
 #include "history_storage.h"
+#include "history_window.h"
 #include "system_restart.h"
 #include "status_bar.h"        // status_bar_get_notifications() for /api/notifications
 #include "event_log.h"
@@ -6306,9 +6307,10 @@ static esp_err_t heatpump_demo_patch_handler(httpd_req_t* req)
 // Temperature history API
 // ============================================================================
 
-// GET /api/heatpump/temperature-history[?end=<unix_seconds>]
-// Returns up to an 8-hour window of telemetry samples ending at `end`
-// (default: now), mirroring the on-device history screen. Temperatures are raw
+// GET /api/heatpump/temperature-history[?end=<unix_seconds>][&window=<seconds>]
+// Returns a window of telemetry samples ending at `end` (default: now),
+// mirroring the on-device history screen. `window` is one of the screen's
+// zoom presets (1, 2, 4 or 8 hours; default 8). Temperatures are raw
 // deci-Celsius (or null when the reading is invalid); the client converts to
 // the user's preferred unit. The JSON is assembled into a bounded buffer and
 // flushed in batches, so we never build a multi-hundred-KB buffer in RAM for
@@ -6320,9 +6322,25 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    constexpr uint32_t kWindowSeconds = 8 * 60 * 60;
     constexpr uint32_t kRetentionSeconds =
         (uint32_t)HISTORY_TELEMETRY_RETENTION_DAYS * 24 * 60 * 60;
+
+    char query[64];
+    const bool have_query =
+        httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK;
+    uint32_t window_seconds = HISTORY_WINDOW_DEFAULT_SECONDS;
+    if (have_query) {
+        char param[16];
+        if (httpd_query_key_value(query, "window", param, sizeof(param)) == ESP_OK) {
+            const long requested = atol(param);
+            if (!history_window_is_preset((uint32_t)(requested > 0 ? requested : 0))) {
+                send_json_error(req, "400 Bad Request",
+                                "window must be 3600, 7200, 14400 or 28800");
+                return ESP_OK;
+            }
+            window_seconds = (uint32_t)requested;
+        }
+    }
 
     // Latest sample-aligned timestamp ("now" snapped to the sample grid), so
     // the web window lines up with the on-device chart.
@@ -6337,12 +6355,11 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
         history_storage_latest_telemetry_timestamp(&latest_end);
         if (latest_end > 0) latest_end += HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
     }
-    if (latest_end == 0) latest_end = kWindowSeconds;
+    if (latest_end == 0) latest_end = window_seconds;
 
-    // Resolve the requested window end, clamped to [kWindowSeconds, latest_end].
+    // Resolve the requested window end, clamped to [window_seconds, latest_end].
     uint32_t end = latest_end;
-    char query[64];
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+    if (have_query) {
         char param[16];
         if (httpd_query_key_value(query, "end", param, sizeof(param)) == ESP_OK) {
             long requested = atol(param);
@@ -6350,8 +6367,8 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
         }
     }
     if (end > latest_end) end = latest_end;
-    if (end < kWindowSeconds) end = kWindowSeconds;
-    uint32_t start = end - kWindowSeconds;
+    if (end < window_seconds) end = window_seconds;
+    uint32_t start = end - window_seconds;
     uint32_t earliest =
         latest_end > kRetentionSeconds ? latest_end - kRetentionSeconds : 0;
 
@@ -6421,7 +6438,7 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
              "\"window_seconds\":%u,\"sample_interval_sec\":%u,"
              "\"retention_days\":%u,\"samples\":[",
              (unsigned)start, (unsigned)end, (unsigned)latest_end,
-             (unsigned)earliest, (unsigned)kWindowSeconds,
+             (unsigned)earliest, (unsigned)window_seconds,
              (unsigned)HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC,
              (unsigned)HISTORY_TELEMETRY_RETENTION_DAYS);
     if (n < 0) n = 0;

@@ -38,6 +38,31 @@ int main() {
     // Near zero, the window can't start before zero.
     CHECK_EQ(history_window_center(60, W, 900, LATEST), W);
 
+    // Zoom presets: widest first and the default; anything else is rejected.
+    CHECK_EQ(HISTORY_WINDOW_DEFAULT_SECONDS, W);
+    CHECK_EQ(history_window_is_preset(3600), 1);
+    CHECK_EQ(history_window_is_preset(7200), 1);
+    CHECK_EQ(history_window_is_preset(14400), 1);
+    CHECK_EQ(history_window_is_preset(28800), 1);
+    CHECK_EQ(history_window_is_preset(0), 0);
+    CHECK_EQ(history_window_is_preset(1800), 0);
+    CHECK_EQ(history_window_is_preset(86400), 0);
+    // Fine steps: 1 h / 30 min / 15 min / 15 min.
+    CHECK_EQ(history_window_step(28800), 3600);
+    CHECK_EQ(history_window_step(14400), 1800);
+    CHECK_EQ(history_window_step(7200), 900);
+    CHECK_EQ(history_window_step(3600), 900);
+    // Gridlines: 2 h / 1 h / 30 min / 15 min.
+    CHECK_EQ(history_window_tick(28800), 7200);
+    CHECK_EQ(history_window_tick(14400), 3600);
+    CHECK_EQ(history_window_tick(7200), 1800);
+    CHECK_EQ(history_window_tick(3600), 900);
+    // Re-centre snap: 15 / 15 / 10 / 5 min.
+    CHECK_EQ(history_window_snap(28800), 900);
+    CHECK_EQ(history_window_snap(14400), 900);
+    CHECK_EQ(history_window_snap(7200), 600);
+    CHECK_EQ(history_window_snap(3600), 300);
+
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return EXIT_FAILURE;
