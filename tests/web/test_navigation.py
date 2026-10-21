@@ -183,6 +183,7 @@ def _fake_events():
         ev("compressor_on", "equipment", now - 3, cur),
         ev("watchdog_reset", "problems", yesterday_noon, prev, watchdog="task"),
         ev("network_recovered", "problems", yesterday_noon - 60, prev, recovery="wifi_bounce"),
+        ev("firmware_updated", "system", yesterday_noon - 120, prev, from_version="3.4.4", to_version="3.4.5"),
         ev("system_start", "system", old, prev),
         ev("pump_on", "equipment", 0, prev),
     ]
@@ -218,6 +219,7 @@ class TestEventsPage:
         assert "Hot water → Heating" in details
         assert "Task watchdog" in details
         assert "Restored by reconnecting WiFi" in details
+        assert "3.4.4 → 3.4.5" in details
         assert any(d in details for d in ("Hot water: 50°C → 45°C", "Hot water: 122°F → 113°F")), details
 
     def test_no_boot_numbers_and_no_empty_details(self, dashboard_page: Page):

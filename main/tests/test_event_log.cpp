@@ -36,6 +36,7 @@
 #include "esp_timer.h"
 #include "event_log.h"
 #include "history_storage.h"
+#include "nvs_fake.h"
 #include "time_fake.h"
 
 #include <sys/time.h>
@@ -234,7 +235,7 @@ void categories_match_the_intended_grouping() {
         CHECK(event_type_category(t) == EVENT_CATEGORY_CHANGES);
     }
 
-    const event_type_t system[] = {EVENT_SYSTEM_START, EVENT_CONNECTED};
+    const event_type_t system[] = {EVENT_SYSTEM_START, EVENT_CONNECTED, EVENT_FIRMWARE_UPDATED};
     for (event_type_t t : system) {
         CHECK(event_type_category(t) == EVENT_CATEGORY_SYSTEM);
     }
@@ -510,6 +511,84 @@ void normal_resets_are_not_recorded() {
         event_log_record_reset_reason(r, 0);
         CHECK_EQ_INT(event_log_count(), 0);
     }
+}
+
+// ------------------------------------------------------------------------
+// Firmware version changes
+//
+// Without this an OTA is just an unexplained software restart in the log.
+// ------------------------------------------------------------------------
+std::string fw_version(uint16_t packed) {
+    char buf[16];
+    event_firmware_version_format(packed, buf, sizeof(buf));
+    return buf;
+}
+
+void firmware_versions_pack_and_format() {
+    CHECK(fw_version(event_firmware_version_pack("3.4.5")) == "3.4.5");
+    CHECK(fw_version(event_firmware_version_pack("v2.11.29")) == "2.11.29");
+    CHECK(fw_version(event_firmware_version_pack("15.31.127-dirty")) == "15.31.127");
+    // Anything that does not parse or fit is "unknown", never a wrong version.
+    CHECK_EQ_INT(event_firmware_version_pack("16.0.0"), 0);
+    CHECK_EQ_INT(event_firmware_version_pack("3.32.0"), 0);
+    CHECK_EQ_INT(event_firmware_version_pack("3.4.128"), 0);
+    CHECK_EQ_INT(event_firmware_version_pack("3.4"), 0);
+    CHECK_EQ_INT(event_firmware_version_pack("dev"), 0);
+    CHECK_EQ_INT(event_firmware_version_pack(""), 0);
+    CHECK_EQ_INT(event_firmware_version_pack(nullptr), 0);
+    CHECK(fw_version(0) == "?");
+    // Newer versions pack larger, so a rollback reads as to < from.
+    CHECK(event_firmware_version_pack("3.4.10") > event_firmware_version_pack("3.4.9"));
+    CHECK(event_firmware_version_pack("3.5.0") > event_firmware_version_pack("3.4.127"));
+}
+
+void a_firmware_change_is_recorded_once() {
+    nvs_fake::reset();
+    fresh_boot(1);
+
+    // First boot with tracking and no hint: remember the version, log nothing.
+    event_log_clear();
+    CHECK(!event_log_record_firmware_change("3.4.4", nullptr));
+    CHECK_EQ_INT(event_log_count(), 0);
+    std::string saved;
+    CHECK(nvs_fake::peek_str("event_log", "fw_version", &saved) && saved == "3.4.4");
+
+    // Same version again (an ordinary restart): nothing.
+    CHECK(!event_log_record_firmware_change("3.4.4", "3.4.0"));
+    CHECK_EQ_INT(event_log_count(), 0);
+
+    // Update. The saved version wins over the hint.
+    CHECK(event_log_record_firmware_change("3.4.5", "3.4.0"));
+    CHECK_EQ_INT(event_log_count(), 1);
+    event_entry_t e = newest();
+    CHECK(e.type == EVENT_FIRMWARE_UPDATED);
+    CHECK(fw_version(event_firmware_from(e.payload)) == "3.4.4");
+    CHECK(fw_version(event_firmware_to(e.payload)) == "3.4.5");
+    CHECK(!event_log_record_firmware_change("3.4.5", nullptr));
+    CHECK_EQ_INT(event_log_count(), 1);
+
+    // Rollback.
+    CHECK(event_log_record_firmware_change("3.4.4", nullptr));
+    e = newest();
+    CHECK(fw_version(event_firmware_from(e.payload)) == "3.4.5");
+    CHECK(fw_version(event_firmware_to(e.payload)) == "3.4.4");
+}
+
+void the_first_ota_with_tracking_uses_the_hint() {
+    nvs_fake::reset();
+    fresh_boot(1);
+    event_log_clear();
+    // No saved version yet, but the other OTA slot says what ran before.
+    CHECK(event_log_record_firmware_change("3.4.6", "3.4.5"));
+    event_entry_t e = newest();
+    CHECK(e.type == EVENT_FIRMWARE_UPDATED);
+    CHECK(fw_version(event_firmware_from(e.payload)) == "3.4.5");
+    CHECK(fw_version(event_firmware_to(e.payload)) == "3.4.6");
+    // A version string the payload can't hold still logs, as unknown.
+    CHECK(event_log_record_firmware_change("dev-build", nullptr));
+    e = newest();
+    CHECK(fw_version(event_firmware_from(e.payload)) == "3.4.6");
+    CHECK(fw_version(event_firmware_to(e.payload)) == "?");
 }
 
 // ------------------------------------------------------------------------
@@ -979,6 +1058,10 @@ int main() {
     SCENARIO("abnormal resets are recorded with the right type",
              abnormal_resets_are_recorded_with_the_right_type);
     SCENARIO("normal resets are not recorded", normal_resets_are_not_recorded);
+    SCENARIO("firmware versions pack and format", firmware_versions_pack_and_format);
+    SCENARIO("a firmware change is recorded once", a_firmware_change_is_recorded_once);
+    SCENARIO("the first OTA with tracking uses the hint",
+             the_first_ota_with_tracking_uses_the_hint);
 
     // Timestamps and backfill
     SCENARIO("events before the clock is set have no timestamp",
