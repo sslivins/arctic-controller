@@ -517,6 +517,20 @@
     }
     .login-card { width: min(420px, 100%); }
     .login-card h1 { margin-top: 0; }
+    .login-card.shake { animation: login-shake .45s ease-in-out; }
+    .login-card input[aria-invalid="true"] { border-color: var(--cp-danger); }
+    .login-card .btn.attention { border-color: var(--cp-accent); color: var(--cp-accent); font-weight: 650; }
+    @keyframes login-shake {
+      0%, 100% { transform: translateX(0); }
+      15%, 55% { transform: translateX(-10px); }
+      35%, 75% { transform: translateX(10px); }
+      90% { transform: translateX(-4px); }
+    }
+    @keyframes login-flash { 0% { background: var(--cp-danger); } 100% { background: var(--cp-surface-soft); } }
+    @media (prefers-reduced-motion: reduce) {
+      .login-card.shake { animation: none; }
+      .login-card.shake .notice.bad { animation: login-flash .6s ease-out; }
+    }
     .mobile-nav { display: none; }
     .spinner { width: 18px; height: 18px; border: 2px solid var(--cp-border); border-top-color: var(--cp-accent); border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -808,7 +822,7 @@
     const modeLabel = mode => modeLabels[mode] || titleCase(mode || "unknown");
 
     const state = {
-      auth: { checked: false, required: true, loggedIn: false, changeRequired: false, loginError: "", recovering: false, recoveryError: "" },
+      auth: { checked: false, required: true, loggedIn: false, changeRequired: false, loginError: "", loginFailures: 0, loginUsername: "", loginCooldownUntil: 0, loginShake: false, recovering: false, recoveryError: "" },
       route: "home", settingsPage: "wifi", historyLast: "history", busy: false,
       info: {}, status: { time: {} }, wifi: {}, hp: {
         temperatures: {}, setpoints: {}, setpoint_limits: {}, readings: {}
@@ -854,12 +868,17 @@
               const wasLoggedIn = state.auth.loggedIn;
               state.auth.loggedIn = false;
               if (wasLoggedIn) render();
-              throw new Error("Authentication required");
+              const err = new Error("Authentication required");
+              err.status = 401;
+              throw err;
             }
             const type = response.headers.get("content-type") || "";
             const data = type.includes("json") ? await response.json() : await response.text();
             if (!response.ok) {
               const err = new Error(data.error || data.message || `HTTP ${response.status}`);
+              err.status = response.status;
+              const retryAfter = parseInt(response.headers.get("retry-after") || "", 10);
+              if (retryAfter > 0) err.retryAfter = retryAfter;
               if (data && data.field) err.field = data.field;
               throw err;
             }
@@ -1994,14 +2013,54 @@
       }
       return settingsShell((pages[state.settingsPage] || wifiSettings)());
     }
+    // Failures after which the sign-in error starts pointing at password recovery.
+    const LOGIN_RECOVERY_HINT_AFTER = 3;
+    let loginCooldownTimer = null;
+    function loginCooldownSeconds() {
+      return Math.max(0, Math.ceil((state.auth.loginCooldownUntil - Date.now()) / 1000));
+    }
+    function loginCooldownMessage(seconds) {
+      return `Too many failed sign-in attempts. Try again in ${seconds}\u00A0s.`;
+    }
     function loginPage() {
-      return `<div class="login"><form class="card login-card" data-form="login"><div class="brand" style="margin-bottom:20px"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
+      const auth = state.auth, failed = auth.loginFailures > 0;
+      const cooldown = loginCooldownSeconds();
+      const message = cooldown > 0 ? loginCooldownMessage(cooldown) : auth.loginError;
+      const hint = auth.loginFailures >= LOGIN_RECOVERY_HINT_AFTER && cooldown === 0
+        ? `<br><span class="login-hint">Forgotten it? Use <strong>Forgot password?</strong> below to reset it with a code from the controller screen.</span>` : "";
+      return `<div class="login"><form class="card login-card${auth.loginShake ? " shake" : ""}" data-form="login"><div class="brand" style="margin-bottom:20px"><div class="brand-mark">A</div><span>Arctic Controller</span></div>
         <h1>Sign in</h1><p class="metric-sub">Enter the controller credentials.</p>
-        ${state.auth.loginError ? `<div class="notice bad" style="margin:0 0 16px">${esc(state.auth.loginError)}</div>` : ""}
-        <div class="field"><label>Username</label><input name="username" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username" required></div>
-        <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
-        <button class="btn primary" type="submit">Sign in</button>
-        <p style="margin:16px 0 0;text-align:center"><button class="btn" type="button" data-action="forgot-password">Forgot password?</button></p></form></div>`;
+        <div class="login-error" role="alert" aria-live="assertive">${message ? `<div class="notice bad" style="margin:0 0 16px"><span class="login-message">${esc(message)}</span>${hint}</div>` : ""}</div>
+        <div class="field"><label>Username</label><input name="username" value="${esc(auth.loginUsername)}" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="username" required></div>
+        <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password"${failed ? ` aria-invalid="true"` : ""} required></div>
+        <button class="btn primary" type="submit"${cooldown > 0 ? " disabled" : ""}>Sign in</button>
+        <p style="margin:16px 0 0;text-align:center"><button class="btn${auth.loginFailures >= LOGIN_RECOVERY_HINT_AFTER ? " attention" : ""}" type="button" data-action="forgot-password">Forgot password?</button></p></form></div>`;
+    }
+    // Runs after the login page is drawn: focuses the right field and drives
+    // the cooldown countdown in place, so typing isn't wiped by a re-render.
+    function afterLoginRender() {
+      const card = $(".login-card");
+      if (!card) return;
+      state.auth.loginShake = false;
+      const field = state.auth.loginUsername ? card.querySelector('input[name="password"]') : card.querySelector('input[name="username"]');
+      if (state.auth.loginFailures > 0 && field) field.focus();
+      if (loginCooldownTimer) { clearInterval(loginCooldownTimer); loginCooldownTimer = null; }
+      if (loginCooldownSeconds() === 0) return;
+      loginCooldownTimer = setInterval(() => {
+        const current = $(".login-card");
+        const seconds = loginCooldownSeconds();
+        if (!current) { clearInterval(loginCooldownTimer); loginCooldownTimer = null; return; }
+        const text = current.querySelector(".login-message");
+        if (seconds > 0) {
+          if (text) text.textContent = loginCooldownMessage(seconds);
+          return;
+        }
+        clearInterval(loginCooldownTimer); loginCooldownTimer = null;
+        state.auth.loginCooldownUntil = 0;
+        if (text) text.textContent = "You can try signing in again.";
+        const submit = current.querySelector('button[type="submit"]');
+        if (submit) submit.disabled = false;
+      }, 250);
     }
     function credentialChangePage() {
       // Two callers: first-time setup (the controller still holds the factory
@@ -2895,7 +2954,7 @@
         return;
       }
       if (state.auth.required && !state.auth.loggedIn && !state.auth.recovering) {
-        $("#app").innerHTML = loginPage(); return;
+        $("#app").innerHTML = loginPage(); afterLoginRender(); return;
       }
       if (state.auth.changeRequired || state.auth.recovering) {
         $("#app").innerHTML = credentialChangePage(); return;
@@ -3256,8 +3315,12 @@
       const type = form.dataset.form, data = new FormData(form);
       if (type === "login") {
         state.auth.loginError = "";
+        state.auth.loginUsername = String(data.get("username") || "");
         try {
           await api("/login", jsonOptions("POST", { username: data.get("username"), password: data.get("password") }));
+          state.auth.loginFailures = 0;
+          state.auth.loginUsername = "";
+          state.auth.loginCooldownUntil = 0;
           const auth = await api("/api/auth/status");
           state.auth.loggedIn = !!auth.session_valid;
           state.auth.changeRequired = !!auth.credentials_change_required;
@@ -3265,8 +3328,20 @@
           render();
         } catch (error) {
           state.auth.loggedIn = false;
-          state.auth.loginError = /authentication required|401|unauthorized/i.test(error.message)
-            ? "Incorrect username or password." : error.message;
+          if (error.status === 401 || /authentication required|unauthorized/i.test(error.message)) {
+            // Count attempts so a repeat failure visibly changes the message.
+            state.auth.loginFailures++;
+            state.auth.loginError = state.auth.loginFailures > 1
+              ? `Incorrect username or password (attempt ${state.auth.loginFailures}).`
+              : "Incorrect username or password.";
+          } else if (error.status === 429) {
+            state.auth.loginFailures = Math.max(state.auth.loginFailures, 1);
+            state.auth.loginCooldownUntil = Date.now() + (error.retryAfter || 5) * 1000;
+            state.auth.loginError = error.message;
+          } else {
+            state.auth.loginError = error.message;
+          }
+          state.auth.loginShake = true;
           render();
         }
       }
@@ -4089,6 +4164,7 @@
       try {
         const auth = await fetch("/api/auth/status").then(r => r.json());
         state.auth = {
+          ...state.auth,
           checked: true,
           required: true,
           loggedIn: !!auth.session_valid,
