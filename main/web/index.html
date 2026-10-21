@@ -1468,7 +1468,7 @@
       network_unreachable: "Network unreachable", network_recovered: "Network recovered",
       web_server_down: "Web server down", web_server_recovered: "Web server recovered",
       wifi_lost: "WiFi lost", wifi_restored: "WiFi restored", wifi_unstable: "WiFi unstable",
-      wifi_roamed: "WiFi access point changed"
+      wifi_roamed: "WiFi access point changed", firmware_updated: "Firmware updated"
     };
     // Colour and icon per event type, matching the device's Events screen.
     const eventTones = {
@@ -1476,7 +1476,7 @@
       connected: "good", error_cleared: "good", network_recovered: "good", web_server_recovered: "good", wifi_restored: "good",
       error_appeared: "bad", brownout_reset: "bad", application_crash: "bad", watchdog_reset: "bad",
       network_unreachable: "warn", web_server_down: "warn", wifi_lost: "warn", wifi_unstable: "warn", defrost_start: "defrost", defrost_end: "defrost",
-      mode_changed: "info", setpoint_changed: "info", system_start: "info", wifi_roamed: "info"
+      mode_changed: "info", setpoint_changed: "info", system_start: "info", wifi_roamed: "info", firmware_updated: "info"
     };
     const eventIcons = {
       system_start: "↻", power_on: "⏻", power_off: "⏻", mode_changed: "⇄", setpoint_changed: "✎",
@@ -1486,7 +1486,7 @@
       connected: "⇆", disconnected: "⇆", brownout_reset: "⚠\uFE0E", application_crash: "⚠\uFE0E",
       watchdog_reset: "⚠\uFE0E", network_unreachable: "⚠\uFE0E", network_recovered: "✓",
       web_server_down: "⚠\uFE0E", web_server_recovered: "✓",
-      wifi_lost: "⚠\uFE0E", wifi_restored: "✓", wifi_unstable: "⚠\uFE0E", wifi_roamed: "⇆"
+      wifi_lost: "⚠\uFE0E", wifi_restored: "✓", wifi_unstable: "⚠\uFE0E", wifi_roamed: "⇆", firmware_updated: "⬇\uFE0E"
     };
     const setpointNames = { cooling: "Cooling", heating: "Heating", hot_water: "Hot water" };
     const watchdogNames = { interrupt: "Interrupt watchdog", task: "Task watchdog", other: "System watchdog", startup: "Stalled at startup (likely power loss)" };
@@ -1527,6 +1527,7 @@
         case "wifi_restored": return event.down_s != null ? `Down for ${fmtDownFor(event.down_s)}` : "";
         case "wifi_unstable": return event.drops != null ? `${event.drops} short drops in an hour` : "";
         case "wifi_roamed": return event.to_rssi_dbm != null ? `${event.from_rssi_dbm} → ${event.to_rssi_dbm} dBm, channel ${event.channel}` : "";
+        case "firmware_updated": return event.to_version ? `${event.from_version || "?"} → ${event.to_version}` : "";
         default: return "";
       }
     }

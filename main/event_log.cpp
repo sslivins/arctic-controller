@@ -14,8 +14,14 @@
 #include <string.h>
 #include <time.h>
 #include <esp_attr.h>
+#include <nvs.h>
+#include <stdio.h>
 
 static const char* TAG = "event_log";
+
+// Version that ran last boot, for EVENT_FIRMWARE_UPDATED.
+#define FW_NVS_NAMESPACE "event_log"
+#define FW_NVS_KEY       "fw_version"
 
 EXT_RAM_BSS_ATTR static event_entry_t s_buffer[EVENT_LOG_MAX_ENTRIES];
 EXT_RAM_BSS_ATTR static uint32_t s_event_ids[EVENT_LOG_MAX_ENTRIES];
@@ -77,6 +83,7 @@ static const char* s_event_names[] = {
     "wifi_restored",
     "wifi_unstable",
     "wifi_roamed",
+    "firmware_updated",
 };
 
 static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
@@ -199,6 +206,64 @@ void event_log_record_reset_reason(esp_reset_reason_t reason, uint32_t raw_reaso
         default:
             break;
     }
+}
+
+bool event_log_record_firmware_change(const char* running_version, const char* previous_hint) {
+    if (running_version == nullptr || running_version[0] == '\0') return false;
+
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        ESP_LOGW(TAG, "Cannot open NVS to track the firmware version");
+        return false;
+    }
+    char saved[40] = "";
+    size_t len = sizeof(saved);
+    esp_err_t err = nvs_get_str(nvs, FW_NVS_KEY, saved, &len);
+    const char* previous = nullptr;
+    if (err == ESP_OK) {
+        previous = saved;
+    } else if (err == ESP_ERR_NVS_NOT_FOUND && previous_hint != nullptr && previous_hint[0] != '\0') {
+        previous = previous_hint;
+    }
+
+    bool recorded = false;
+    if (previous != nullptr && strcmp(previous, running_version) != 0) {
+        ESP_LOGI(TAG, "Firmware changed: %s -> %s", previous, running_version);
+        event_log_record(EVENT_FIRMWARE_UPDATED,
+                         ((uint32_t)event_firmware_version_pack(previous) << 16) |
+                             event_firmware_version_pack(running_version));
+        recorded = true;
+    }
+    if (err != ESP_OK || strcmp(saved, running_version) != 0) {
+        err = nvs_set_str(nvs, FW_NVS_KEY, running_version);
+        if (err == ESP_OK) err = nvs_commit(nvs);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to save firmware version: %s", esp_err_to_name(err));
+        }
+    }
+    nvs_close(nvs);
+    return recorded;
+}
+
+uint16_t event_firmware_version_pack(const char* version) {
+    if (version == nullptr) return 0;
+    if (*version == 'v' || *version == 'V') ++version;
+    if (*version < '0' || *version > '9') return 0;
+    unsigned major = 0, minor = 0, patch = 0;
+    if (sscanf(version, "%u.%u.%u", &major, &minor, &patch) != 3) return 0;
+    if (major > 15 || minor > 31 || patch > 127) return 0;
+    return (uint16_t)((major << 12) | (minor << 7) | patch);
+}
+
+bool event_firmware_version_format(uint16_t packed, char* buf, size_t size) {
+    if (buf == nullptr || size == 0) return false;
+    if (packed == 0) {
+        snprintf(buf, size, "?");
+        return false;
+    }
+    snprintf(buf, size, "%u.%u.%u", (unsigned)(packed >> 12), (unsigned)((packed >> 7) & 0x1F),
+             (unsigned)(packed & 0x7F));
+    return true;
 }
 
 int event_log_count(void) {
@@ -341,6 +406,7 @@ event_category_t event_type_category(event_type_t type) {
         case EVENT_SYSTEM_START:
         case EVENT_CONNECTED:
         case EVENT_WIFI_ROAMED:
+        case EVENT_FIRMWARE_UPDATED:
         default:
             return EVENT_CATEGORY_SYSTEM;
     }

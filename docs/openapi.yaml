@@ -5556,6 +5556,7 @@ components:
           - wifi_restored
           - wifi_unstable
           - wifi_roamed
+          - firmware_updated
           example: power_on
         category:
           type: string
@@ -5588,6 +5589,7 @@ components:
             - `wifi_restored`: outage length in seconds
             - `wifi_unstable`: number of short drops in the hour
             - `wifi_roamed`: `(channel << 16) | (-to_rssi << 8) | -from_rssi`
+            - `firmware_updated`: `(from << 16) | to`, each version packed as `(major << 12) | (minor << 7) | patch`, 0 if unknown
             - All other events: 0
           example: 0
         from_mode:
@@ -5687,6 +5689,19 @@ components:
           type: integer
           description: "`wifi_roamed` only: the new access point's WiFi channel."
           example: 6
+        from_version:
+          type: string
+          nullable: true
+          description: |
+            `firmware_updated` only: the firmware version that ran before, or
+            null if unknown. Logged on the first boot of a different version,
+            so a rollback shows as an update to an older version.
+          example: 3.4.4
+        to_version:
+          type: string
+          nullable: true
+          description: "`firmware_updated` only: the firmware version now running."
+          example: 3.4.5
 
     AdvancedParam:
       type: object

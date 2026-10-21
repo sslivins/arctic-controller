@@ -136,6 +136,7 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_WIFI_RESTORED:       return STR_EVENT_WIFI_RESTORED;
         case EVENT_WIFI_UNSTABLE:       return STR_EVENT_WIFI_UNSTABLE;
         case EVENT_WIFI_ROAMED:         return STR_EVENT_WIFI_ROAMED;
+        case EVENT_FIRMWARE_UPDATED:    return STR_EVENT_FIRMWARE_UPDATED;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -172,6 +173,7 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_WIFI_RESTORED:       return LV_SYMBOL_WIFI;
         case EVENT_WIFI_UNSTABLE:       return LV_SYMBOL_WIFI;
         case EVENT_WIFI_ROAMED:         return LV_SYMBOL_WIFI;
+        case EVENT_FIRMWARE_UPDATED:    return LV_SYMBOL_DOWNLOAD;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -211,6 +213,7 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_MODE_CHANGED:
         case EVENT_SETPOINT_CHANGED:
         case EVENT_SYSTEM_START:
+        case EVENT_FIRMWARE_UPDATED:
             return COLOR_ACCENT;
         
         default:
@@ -346,6 +349,13 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
             snprintf(buf, buf_size, i18n_get(STR_EVENT_WIFI_ROAMED_FMT),
                      -(int)(p & 0xFF), -(int)((p >> 8) & 0xFF), (unsigned)((p >> 16) & 0xFF));
             break;
+        case EVENT_FIRMWARE_UPDATED: {
+            char from[16], to[16];
+            event_firmware_version_format(event_firmware_from(p), from, sizeof(from));
+            event_firmware_version_format(event_firmware_to(p), to, sizeof(to));
+            snprintf(buf, buf_size, "%s → %s", from, to);
+            break;
+        }
         default:
             buf[0] = '\0';
             break;

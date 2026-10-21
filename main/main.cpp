@@ -22,8 +22,8 @@
 #include "weather.h"
 #include "ota_manager.h"
 #include "ota_commit.h"
-#if CONFIG_ARCTIC_POISON_FIRMWARE
 #include "esp_ota_ops.h"
+#if CONFIG_ARCTIC_POISON_FIRMWARE
 #include "esp_rom_sys.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -350,6 +350,22 @@ extern "C" void app_main(void)
     // NVS, which was initialized above.
     boot_stats_init(reset_reason, raw_reset_reason);
     event_log_record_reset_reason(reset_reason, raw_reset_reason);
+
+    // Note a firmware update (or rollback) in the event log. The first boot of
+    // a freshly OTA'd image is still pending verification, so the other slot
+    // holds the version it replaced; use that when NVS has none saved yet.
+    {
+        esp_app_desc_t prev_desc = {};
+        const char* prev_hint = nullptr;
+        if (ota_mgr_is_pending_verify()) {
+            const esp_partition_t* other = esp_ota_get_next_update_partition(nullptr);
+            if (other && esp_ota_get_partition_description(other, &prev_desc) == ESP_OK) {
+                prev_desc.version[sizeof(prev_desc.version) - 1] = '\0';
+                prev_hint = prev_desc.version;
+            }
+        }
+        event_log_record_firmware_change(esp_app_get_description()->version, prev_hint);
+    }
 
     // Heat pump problems the user has not acknowledged yet (NVS), so the bell
     // shows them again after a reboot or firmware update.

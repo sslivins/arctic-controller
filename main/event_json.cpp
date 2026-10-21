@@ -79,6 +79,18 @@ void add_event_details(cJSON* evt, const event_entry_t& e)
             cJSON_AddNumberToObject(evt, "to_rssi_dbm", -(int)((p >> 8) & 0xFF));
             cJSON_AddNumberToObject(evt, "channel", (p >> 16) & 0xFF);
             break;
+        case EVENT_FIRMWARE_UPDATED: {
+            char v[16];
+            if (event_firmware_version_format(event_firmware_from(p), v, sizeof(v)))
+                cJSON_AddStringToObject(evt, "from_version", v);
+            else
+                cJSON_AddNullToObject(evt, "from_version");
+            if (event_firmware_version_format(event_firmware_to(p), v, sizeof(v)))
+                cJSON_AddStringToObject(evt, "to_version", v);
+            else
+                cJSON_AddNullToObject(evt, "to_version");
+            break;
+        }
         default:
             break;
     }

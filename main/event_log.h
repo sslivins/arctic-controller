@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <esp_system.h>
 #include <sys/time.h>
 
@@ -52,6 +53,7 @@ typedef enum {
     EVENT_WIFI_RESTORED,        // WiFi back after an EVENT_WIFI_LOST (payload: seconds down)
     EVENT_WIFI_UNSTABLE,        // Repeated short WiFi drops (payload: drops in the last hour)
     EVENT_WIFI_ROAMED,          // Moved to a stronger access point (payload: wifi_roam_pack)
+    EVENT_FIRMWARE_UPDATED,     // Firmware version changed since the last boot (payload: from << 16 | to, see event_firmware_version_pack)
     EVENT_TYPE_COUNT
 } event_type_t;
 
@@ -135,6 +137,19 @@ void event_log_record(event_type_t type, uint32_t payload);
  * @param raw_reason Value from esp_rom_get_reset_reason(0); 0 if unknown.
  */
 void event_log_record_reset_reason(esp_reset_reason_t reason, uint32_t raw_reason);
+
+/**
+ * @brief Record EVENT_FIRMWARE_UPDATED if the running firmware version differs
+ *        from the one that ran last boot (kept in NVS), then remember the
+ *        running version. Call once at boot, after NVS and the event log are up.
+ *        A rollback shows as an update to an older version.
+ * @param running_version  Version of the running image, e.g. "3.4.5".
+ * @param previous_hint    Version to assume ran before when NVS has none yet
+ *                         (e.g. the other OTA slot on the first boot after an
+ *                         OTA); NULL to record nothing in that case.
+ * @return true if an event was recorded.
+ */
+bool event_log_record_firmware_change(const char* running_version, const char* previous_hint);
 
 /**
  * @brief Get count of events currently in the buffer.
@@ -242,6 +257,25 @@ const char* event_web_server_recovery_key(uint32_t payload);
  *        "ap_disconnected", "ap_restarted" or "other").
  */
 const char* event_wifi_reason_key(uint32_t payload);
+
+/**
+ * @brief Pack a "major.minor.patch" version (optional leading 'v', any suffix
+ *        ignored) into 16 bits: major 4 bits, minor 5, patch 7. Returns 0
+ *        ("unknown") if it does not parse or a part does not fit.
+ */
+uint16_t event_firmware_version_pack(const char* version);
+
+/**
+ * @brief Write a packed version as "3.4.5", or "?" if it is 0 (unknown).
+ * @return false if the version is unknown.
+ */
+bool event_firmware_version_format(uint16_t packed, char* buf, size_t size);
+
+/** "Before" version of an EVENT_FIRMWARE_UPDATED payload. */
+static inline uint16_t event_firmware_from(uint32_t payload) { return (uint16_t)(payload >> 16); }
+
+/** "After" version of an EVENT_FIRMWARE_UPDATED payload. */
+static inline uint16_t event_firmware_to(uint32_t payload) { return (uint16_t)(payload & 0xFFFF); }
 
 #ifdef __cplusplus
 }
