@@ -88,6 +88,16 @@
       --hist-dhw: #f59e0b;
       --hist-power: #7c3aed;
       --energy-other: #94a3b8;
+      /* Run-mode bands: fill plus a solid strip along the bottom. A thin flat
+         tint over the dark navy background reads as muddy brown/olive, so dark
+         mode fades the fill from strong at the bottom to faint at the top. */
+      --band-heat: #f97316;
+      --band-cool: #3b82f6;
+      --band-dhw: #f59e0b;
+      --band-a0: 16%;
+      --band-a1: 16%;
+      --band-a2: 16%;
+      --power-fill-a: 0.25;
     }
     html[data-theme="dark"] {
       --cp-bg: #1a1a2e;
@@ -119,6 +129,13 @@
       --hist-dhw: #fbbf24;
       --hist-power: #a78bfa;
       --energy-other: #64748b;
+      --band-heat: #fb923c;
+      --band-cool: #60a5fa;
+      --band-dhw: #facc15;
+      --band-a0: 60%;
+      --band-a1: 10%;
+      --band-a2: 6%;
+      --power-fill-a: 0.55;
     }
     * { box-sizing: border-box; }
 
@@ -288,6 +305,10 @@
     .hist-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .hist-legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
     .hist-legend i.band { width: 12px; height: 12px; border-radius: 3px; }
+    /* Legend swatch drawn like a run band: tint + solid bottom strip. */
+    i.band-swatch { background: linear-gradient(to top, color-mix(in srgb, var(--band) 70%, transparent),
+      color-mix(in srgb, var(--band) 20%, transparent)) !important;
+      border-bottom: 3px solid var(--band); border-radius: 2px !important; box-sizing: border-box; }
     .hist-chart-wrap { width: 100%; position: relative; overflow-x: clip; }
     .hist-chart { width: 100%; height: auto; display: block; touch-action: pan-y; }
     @media (pointer: fine) { .hist-chart { cursor: grab; } .hist-chart.dragging { cursor: grabbing; user-select: none; } }
@@ -654,7 +675,10 @@
     .hc-plot { position: absolute; inset: 28px 0 26px; border: 1px solid var(--cp-border); border-radius: 10px;
       background: var(--cp-bg-elevated); overflow: hidden; }
     .hc-band, .hc-fault, .hc-defrost, .hc-vgrid, .hc-hgrid, .hc-sp, .hc-cursor { position: absolute; }
-    .hc-band { top: 0; bottom: 0; opacity: .2; }
+    .hc-band { top: 0; bottom: 0; border-bottom: 3px solid var(--band); background: linear-gradient(to top,
+      color-mix(in srgb, var(--band) var(--band-a0), transparent),
+      color-mix(in srgb, var(--band) var(--band-a1), transparent) 70%,
+      color-mix(in srgb, var(--band) var(--band-a2), transparent)); }
     /* Defrost: an icy block over the run it interrupts, with a solid cap. */
     .hc-defrost { top: 0; bottom: 0; min-width: 3px;
       background: color-mix(in srgb, var(--home-defrost) 40%, transparent); }
@@ -1045,6 +1069,7 @@
       freeze_protection: "Freeze protection" };
     const HOME_RUN_MODE = { heating: ["Heating", "var(--hist-heat)"], cooling: ["Cooling", "var(--hist-cool)"],
       hot_water: ["Hot water", "var(--hist-dhw)"] };
+    const HOME_RUN_BAND = { heating: "var(--band-heat)", cooling: "var(--band-cool)", hot_water: "var(--band-dhw)" };
     const HOME_AT_SETPOINT_MARGIN_C = 2, HOME_STARTS_WARN = 6, HOME_DT_WARN_C = 3;
     const HOME_HISTORY_MAX_AGE_MS = 120000;
     function homeHeroState(hp) {
@@ -1155,9 +1180,9 @@
           <button class="btn" data-route="history">Cycle history ›</button></div>
           <div class="chart-legend">
               <span><i class="line" style="background:var(--cp-text)"></i>Tank</span>
-              <span><i style="background:var(--hist-heat)"></i>Heating</span>
-              <span><i style="background:var(--hist-cool)"></i>Cooling</span>
-              <span><i style="background:var(--hist-dhw)"></i>Hot water</span>
+              <span><i class="band-swatch" style="--band:var(--band-heat)"></i>Heating</span>
+              <span><i class="band-swatch" style="--band:var(--band-cool)"></i>Cooling</span>
+              <span><i class="band-swatch" style="--band:var(--band-dhw)"></i>Hot water</span>
               <span><i style="background:var(--home-defrost)"></i>Defrost</span>
               <span><i style="background:repeating-linear-gradient(135deg, var(--cp-danger) 0 2px, transparent 2px 5px)"></i>Fault</span>
             </div>`;
@@ -1173,8 +1198,8 @@
 
       const bands = (data.runs || []).map(r => {
         const l = pct(r.start), w = pct(r.end ?? end) - l;
-        const color = (HOME_RUN_MODE[r.mode] || HOME_RUN_MODE.heating)[1];
-        return w > 0 ? `<div class="hc-band" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0.15).toFixed(3)}%;background:${color}"></div>` : "";
+        const band = HOME_RUN_BAND[r.mode] || HOME_RUN_BAND.heating;
+        return w > 0 ? `<div class="hc-band" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0.15).toFixed(3)}%;--band:${band}"></div>` : "";
       }).join("");
       const defrosts = (data.defrosts || []).map(df => {
         const l = pct(df.start), w = pct(df.end ?? end) - l;
@@ -2185,7 +2210,11 @@
       svg += `<g class="hist-pan">`;
 
       // Mode bands: contiguous running periods tinted by operating mode.
-      const bandColor = { 1: "var(--hist-heat)", 2: "var(--hist-cool)", 3: "var(--hist-dhw)" };
+      const bandColor = { 1: "var(--band-heat)", 2: "var(--band-cool)", 3: "var(--band-dhw)" };
+      svg += `<defs>${Object.entries(bandColor).map(([m, c]) => `<linearGradient id="hist-band-${m}" x1="0" y1="1" x2="0" y2="0">` +
+        `<stop offset="0" style="stop-color:${c};stop-opacity:var(--band-a0)"/>` +
+        `<stop offset="0.7" style="stop-color:${c};stop-opacity:var(--band-a1)"/>` +
+        `<stop offset="1" style="stop-color:${c};stop-opacity:var(--band-a2)"/></linearGradient>`).join("")}</defs>`;
       const interval = data.sample_interval_sec || 30;
       let i = 0;
       while (i < samples.length) {
@@ -2194,7 +2223,9 @@
         let j = i + 1;
         while (j < samples.length && samples[j].run && samples[j].mode === s.mode) j++;
         const x1 = mapX(s.t), x2 = mapX(samples[j - 1].t + interval);
-        svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${Math.max(1, x2 - x1).toFixed(1)}" height="${fullH}" fill="${bandColor[s.mode]}" opacity="0.13"/>`;
+        const bw = Math.max(1, x2 - x1).toFixed(1);
+        svg += `<rect class="hist-band" x="${x1.toFixed(1)}" y="${plotT}" width="${bw}" height="${fullH}" fill="url(#hist-band-${s.mode})"/>`;
+        svg += `<rect x="${x1.toFixed(1)}" y="${(plotT + fullH - 3).toFixed(1)}" width="${bw}" height="3" fill="${bandColor[s.mode]}"/>`;
         i = j;
       }
 
@@ -2346,7 +2377,7 @@
           (run ||= []).push([mapX(s.t), mapX(s.t + interval), mapP(s.p)]);
         });
         flush();
-        svg += `<path class="hist-power-area" d="${area}" fill="var(--hist-power)" opacity="0.25"/>`;
+        svg += `<path class="hist-power-area" d="${area}" fill="var(--hist-power)" style="opacity:var(--power-fill-a)"/>`;
         svg += `<path d="${edge}" fill="none" stroke="var(--hist-power)" stroke-width="1.5" stroke-linejoin="round"/>`;
       }
 
@@ -2547,9 +2578,9 @@
               <span><i style="background:var(--hist-in)"></i>Inlet</span>
               <span><i style="background:var(--hist-out)"></i>Outlet</span>
               <span><i style="background:var(--hist-set)"></i>Setpoint</span>
-              <span><i class="band" style="background:var(--hist-heat)"></i>Heating</span>
-              <span><i class="band" style="background:var(--hist-cool)"></i>Cooling</span>
-              <span><i class="band" style="background:var(--hist-dhw)"></i>Hot Water</span>
+              <span><i class="band band-swatch" style="--band:var(--band-heat)"></i>Heating</span>
+              <span><i class="band band-swatch" style="--band:var(--band-cool)"></i>Cooling</span>
+              <span><i class="band band-swatch" style="--band:var(--band-dhw)"></i>Hot Water</span>
               <span><i class="band" style="background:var(--home-defrost)"></i>Defrost</span>
               <span><i style="background:var(--cp-danger);width:3px;height:14px"></i>Fault</span>
               <button class="hist-toggle ${state.histShowPower ? "on" : ""}" data-action="history-power" aria-pressed="${state.histShowPower}"><span class="box" aria-hidden="true">${state.histShowPower ? "✓" : ""}</span>Power</button>
@@ -2571,7 +2602,7 @@
         </section>`;
       }
       return `<div class="page">
-        <div class="page-head"><div><h1>History</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures, 1 to 8 hours at a time.</p></div><div class="page-actions"><button class="icon-btn" data-action="history-refresh" aria-label="Refresh cycle history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div></div>
+        <div class="page-head"><div><h1>History</h1><p>Compressor run cycles with inlet, outlet, and setpoint temperatures, 1 to 8 hours at a time.</p></div></div>
         ${historySegs("history")}
         ${body}
       </div>`;
@@ -2943,7 +2974,7 @@
         ${day ? energyDetail(day) : ""}`;
       }
       return `<div class="page">
-        <div class="page-head"><div><h1>History</h1><p>Electricity used each day by operating mode, with an estimated COP.</p></div><div class="page-actions"><button class="icon-btn" data-action="energy-refresh" aria-label="Refresh energy history" title="Refresh"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Refresh</title><path d="M17.7 6.3C16.2 4.9 14.2 4 12 4c-4.1 0-7.5 3.1-7.9 7H2l3 3.2L8 11H6.1c.5-2.8 2.9-5 5.9-5 1.7 0 3.2.7 4.2 1.8L13 11h9V2l-4.3 4.3ZM6.3 17.7C7.8 19.1 9.8 20 12 20c4.1 0 7.5-3.1 7.9-7H22l-3-3.2L16 13h1.9c-.5 2.8-2.9 5-5.9 5-1.7 0-3.2-.7-4.2-1.8L11 13H2v9l4.3-4.3Z"/></svg></button></div></div>
+        <div class="page-head"><div><h1>History</h1><p>Electricity used each day by operating mode, with an estimated COP.</p></div></div>
         ${historySegs("energy")}
         ${body}
       </div>`;
@@ -3657,7 +3688,6 @@
         state.hp.mode = data.mode || el.dataset.value; render();
       }
       if (action === "reload-params") { await loadParams(); render(); }
-      if (action === "history-refresh") { await loadHistory(); render(); }
       if (action === "home-problems") { state.eventFilters.category = "problems"; await navigate("events"); }
       if (action === "history-latest") { state.tempHistory.end = null; await loadHistory(); render(); }
       if (action === "history-prev") { const d = state.tempHistory.data; if (d) await histGoto(d.end - d.window_seconds); }
@@ -3678,7 +3708,6 @@
         localStorage.setItem("arcticHistPower", state.histShowPower ? "1" : "0");
         render();
       }
-      if (action === "energy-refresh") { state.energy.runs = {}; await loadEnergy(); render(); if (state.energy.selected) { await loadEnergyRuns(state.energy.selected); render(); } }
       if (action === "energy-latest") await energyGoto(null);
       if (action === "energy-range") { state.energy.range = Number(el.dataset.range); await loadEnergy(); render(); }
       if (action === "energy-prev") { const d = state.energy.data; if (d) await energyGoto(dayAdd(d.from, -1)); }
