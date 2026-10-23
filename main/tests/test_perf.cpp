@@ -631,26 +631,38 @@ static void test_selector_falls_back_and_recovers_pairwise() {
     feed(sel, 0, 120000, 35.0f, 30.0f, both, kIdleHeat, &s);
     CHECK(s.source == PerfSource::External);
 
-    // Return sensor errors once: both fall back at once.
+    // A single missed poll is tolerated, and the next good one carries on
+    // without restarting the clean minute.
     sel.on_reading(Slot::Supply, 130000, 35.0f);
     sel.on_error(Slot::Return, 130000);
     s = sel.evaluate(130000, both, kIdleHeat);
+    CHECK(s.source == PerfSource::External);
+    CHECK(!s.fallback);
+    feed(sel, 140000, 140000, 35.0f, 30.0f, both, kIdleHeat, &s);
+    CHECK(s.source == PerfSource::External);
+
+    // Return sensor errors twice in a row: both fall back at once.
+    sel.on_reading(Slot::Supply, 150000, 35.0f);
+    sel.on_error(Slot::Return, 150000);
+    sel.on_reading(Slot::Supply, 160000, 35.0f);
+    sel.on_error(Slot::Return, 160000);
+    s = sel.evaluate(160000, both, kIdleHeat);
     CHECK(s.source == PerfSource::HeatPump);
     CHECK(s.fallback);
     CHECK(!s.pending);
 
     // Good again, but must stay good for a minute first.
-    feed(sel, 140000, 190000, 35.0f, 30.0f, both, kIdleHeat, &s);
+    feed(sel, 170000, 220000, 35.0f, 30.0f, both, kIdleHeat, &s);
     CHECK(s.source == PerfSource::HeatPump);
     CHECK(!s.fallback);
     CHECK(s.pending);
-    feed(sel, 200000, 200000, 35.0f, 30.0f, both, kIdleHeat, &s);
+    feed(sel, 230000, 230000, 35.0f, 30.0f, both, kIdleHeat, &s);
     CHECK(s.source == PerfSource::External);
 
     // Silence (worker stalled, no errors reported) also falls back once stale.
-    s = sel.evaluate(200000 + kStaleMs, both, kIdleHeat);
+    s = sel.evaluate(230000 + kStaleMs, both, kIdleHeat);
     CHECK(s.source == PerfSource::External);
-    s = sel.evaluate(200000 + kStaleMs + 1, both, kIdleHeat);
+    s = sel.evaluate(230000 + kStaleMs + 1, both, kIdleHeat);
     CHECK(s.source == PerfSource::HeatPump);
     CHECK(s.fallback);
 }

@@ -664,21 +664,33 @@ def _wait_readings(device: DeviceClient, timeout: float = POLL_TIMEOUT) -> dict:
 SWITCH_TIMEOUT = 300.0
 
 
+def _wait_status(device: DeviceClient, desc: str, match, timeout: float) -> dict:
+    # Return the status that matched rather than re-reading it: a later read
+    # can land after the next 15 s poll, which a network blip may have failed.
+    seen = {}
+
+    def check():
+        st = _get_config(device)["status"]
+        if match(st):
+            seen["st"] = st
+            return True
+        return False
+
+    device.wait_until(desc, check, timeout=timeout, poll=2.0)
+    return seen["st"]
+
+
 def _wait_source(device: DeviceClient, source: str, desc: str) -> dict:
-    device.wait_until(desc, lambda: _get_config(device)["status"]["source"] == source,
-                      timeout=SWITCH_TIMEOUT, poll=2.0)
-    return _get_config(device)["status"]
+    return _wait_status(device, desc, lambda st: st["source"] == source, SWITCH_TIMEOUT)
 
 
 def _wait_fallback(device: DeviceClient) -> dict:
     # Wait on the fallback flag itself: before the sensors' first minute of
     # good readings the source is already "heat_pump" (pending), so waiting on
-    # the source alone can read a status from before the error was seen.
-    device.wait_until("estimate to fall back to the heat pump",
-                      lambda: (lambda st: st["source"] == "heat_pump" and st["fallback"])(
-                          _get_config(device)["status"]),
-                      timeout=30.0, poll=1.0)
-    return _get_config(device)["status"]
+    # the source alone can read a status from before the error was seen. One
+    # failed poll is tolerated, so this takes the next 15 s poll to fail too.
+    return _wait_status(device, "estimate to fall back to the heat pump",
+                        lambda st: st["source"] == "heat_pump" and st["fallback"], 45.0)
 
 
 class TestPolling:

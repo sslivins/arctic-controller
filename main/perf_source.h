@@ -26,6 +26,7 @@ constexpr uint32_t kWindowMs = 120000;
 constexpr size_t kWindowCapacity = 32;
 constexpr size_t kMinSamples = 3;
 constexpr uint32_t kStaleMs = 60000;
+constexpr uint8_t kErrorsToFail = 2;  // consecutive failed polls before falling back
 constexpr uint32_t kRecoverMs = 60000;
 constexpr uint32_t kSettleMs = 180000;
 
@@ -83,12 +84,13 @@ public:
 
 private:
     bool healthy(int slot, uint32_t now_ms) const;
+    bool errored(int slot) const;
     bool failing(int slot, uint32_t now_ms) const;
     void track_transitions(uint32_t now_ms, const HeatPumpContext& hp);
 
     MedianWindow windows_[kSlotCount];
     bool have_ok_[kSlotCount] = {};
-    bool errored_[kSlotCount] = {};
+    uint8_t errors_[kSlotCount] = {};  // consecutive failed polls
     uint32_t last_ok_ms_[kSlotCount] = {};
     bool good_run_[kSlotCount] = {};
     uint32_t good_since_ms_[kSlotCount] = {};
