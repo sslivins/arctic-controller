@@ -62,8 +62,11 @@ class ArcticSimClient:
         return self.get_status()["tuya_stats"]
 
     def reboot(self) -> None:
+        # Bypass the retrying session: the sim often goes down before it
+        # answers, and a retried POST would reboot the freshly booted sim a
+        # second time, wiping the lease and state the caller sets next.
         try:
-            self._req("POST", "/api/reboot")
+            requests.post(f"{self.base_url}/api/reboot", timeout=self.timeout)
         except requests.RequestException:
             pass  # the connection may drop as it goes down
 
