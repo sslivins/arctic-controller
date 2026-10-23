@@ -4848,7 +4848,10 @@ components:
               enum: [heat_pump, external]
             fallback:
               type: boolean
-              description: An external sensor is failing, so the heat pump's own sensors are used
+              description: >-
+                An external sensor is failing (two failed polls in a row, no reading for a
+                minute, or an error before its first reading), so the heat pump's own
+                sensors are used
             pending:
               type: boolean
               description: External sensors read fine but aren't trusted yet; the heat pump's own sensors are used meanwhile

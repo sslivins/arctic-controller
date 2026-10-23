@@ -44,17 +44,25 @@ void SourceSelector::on_reading(Slot slot, uint32_t now_ms, float celsius) {
         good_since_ms_[i] = now_ms;
     }
     have_ok_[i] = true;
-    errored_[i] = false;
+    errors_[i] = 0;
     last_ok_ms_[i] = now_ms;
 }
 
 void SourceSelector::on_error(Slot slot, uint32_t /*now_ms*/) {
-    good_run_[static_cast<int>(slot)] = false;
-    errored_[static_cast<int>(slot)] = true;
+    int i = static_cast<int>(slot);
+    if (errors_[i] < UINT8_MAX) errors_[i]++;
+    if (errored(i)) good_run_[i] = false;
+}
+
+// One missed poll from a sensor that has been reading is tolerated (a dropped
+// packet over Wi-Fi shouldn't knock the estimate off the external sensors for
+// a minute); a second in a row, or any error before the first reading, counts.
+bool SourceSelector::errored(int slot) const {
+    return errors_[slot] >= kErrorsToFail || (errors_[slot] > 0 && !have_ok_[slot]);
 }
 
 bool SourceSelector::failing(int slot, uint32_t now_ms) const {
-    return errored_[slot] || (have_ok_[slot] && now_ms - last_ok_ms_[slot] > kStaleMs);
+    return errored(slot) || (have_ok_[slot] && now_ms - last_ok_ms_[slot] > kStaleMs);
 }
 
 bool SourceSelector::healthy(int slot, uint32_t now_ms) const {
