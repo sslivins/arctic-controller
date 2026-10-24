@@ -1187,7 +1187,6 @@ jobs:
         id: web_tests
         continue-on-error: true
         run: python -m pytest tests/web/ -v -rs --tb=short --junitxml=web-test-results.xml
-        env:
 
       - name: Run RS-485 end-to-end tests (arctic-simulator)
         id: rs485_tests
