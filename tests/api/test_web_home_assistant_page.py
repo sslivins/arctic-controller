@@ -24,7 +24,7 @@ def _index_html() -> str:
 def test_web_ui_has_home_assistant_settings_page() -> None:
     html = _index_html()
     # Nav entry and render function wired into the settings pages map.
-    assert '["home_assistant", "Home Assistant"]' in html
+    assert '["home_assistant", "Home Assistant",' in html
     assert "function homeAssistantSettings(" in html
     assert "home_assistant: homeAssistantSettings" in html
 

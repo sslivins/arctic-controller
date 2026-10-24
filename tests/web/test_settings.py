@@ -167,7 +167,12 @@ class TestSettingsWorkspace:
         open_settings(dashboard_page, "System")
         reset = dashboard_page.get_by_role("button", name="Erase and reset")
         expect(reset).to_be_hidden()
-        open_fold(dashboard_page, "Factory reset")
+        # Click and re-render in one task, before the async "toggle" event fires.
+        dashboard_page.evaluate("""() => {
+          [...document.querySelectorAll("details.fold > summary")]
+            .find(s => s.textContent.includes("Factory reset")).click();
+          render();
+        }""")
         expect(reset).to_be_visible()
         dashboard_page.evaluate("render()")
         expect(reset).to_be_visible()

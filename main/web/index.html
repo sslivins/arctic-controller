@@ -3108,6 +3108,8 @@
       </div>`;
     }
     function render() {
+      // "toggle" is dispatched async, so a render right after a click would otherwise lose the open fold.
+      document.querySelectorAll("details[data-fold]").forEach(d => { state.folds[d.dataset.fold] = d.open; });
       if (!state.auth.checked) {
         $("#app").innerHTML = `<div class="login"><div class="spinner"></div></div>`;
         return;
