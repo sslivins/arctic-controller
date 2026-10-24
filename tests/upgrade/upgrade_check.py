@@ -440,7 +440,9 @@ def main() -> int:
     sub.add_parser("restore").add_argument("--defaults", required=True)
     args = ap.parse_args()
 
-    url = os.environ.get("ARCTIC_URL", "").replace("http://", "https://", 1)
+    # As given: the release may serve HTTPS (identity certificate, releases
+    # from before HTTP mode) and the build under test HTTP.
+    url = os.environ.get("ARCTIC_URL", "")
     key = os.environ.get("ARCTIC_API_KEY", "")
     if not url or not key:
         print("ARCTIC_URL and ARCTIC_API_KEY are required", file=sys.stderr)

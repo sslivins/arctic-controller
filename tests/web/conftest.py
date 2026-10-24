@@ -206,7 +206,7 @@ def _wait_for_web_ready(base_url: str, timeout: float = 45.0) -> None:
     test independently time out on ``page.goto`` — turning one dead device into
     a multi-minute (or multi-hour, across retries) suite crawl. Gate once at
     session start and fail fast with a clear message instead. ``/api/health`` is
-    unauthenticated (the CI "Require HTTPS readiness" step polls the same route).
+    unauthenticated (the CI "Require HTTP-mode readiness" step polls the same route).
     """
     import requests
     import time

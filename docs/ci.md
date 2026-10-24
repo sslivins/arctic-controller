@@ -81,6 +81,32 @@ repository, rather than being allowed to pass unvalidated.
 enabling a merge queue later cannot deadlock on a context that only pull
 requests produce.
 
+## HTTP, then HTTPS, on the bench
+
+A controller with no administrator TLS certificate serves the web UI and API
+over plain HTTP with port 443 closed; installing one restarts it into HTTPS
+mode, where port 80 serves only `/api/health` and a "use HTTPS" 404. The bench
+walks that path once per run instead of running every suite on both schemes:
+
+1. The latest release, the OTA and everything up to the core dump check run in
+   HTTP mode, as a field unit comes up after updating. `Require HTTP-mode
+   readiness` also fails the run if port 443 answers.
+2. `HTTP to HTTPS` (`.github/scripts/http_to_https.py`) checks the dashboard
+   and API over HTTP, uploads a throwaway self-signed certificate over HTTP,
+   then checks that HTTP serves only `/api/health` (404, not a redirect, for
+   everything else) and that HTTPS presents the uploaded certificate and
+   serves the API.
+3. The suites run over HTTPS. `tests/device/test_https.py` deletes the
+   certificate, checks HTTP mode and a fresh upload, and reinstalls the
+   step 2 certificate from `ARCTIC_ADMIN_CERT_FILE`/`ARCTIC_ADMIN_KEY_FILE`.
+4. `Reset device to baseline TLS/auth state` deletes the certificate, so the
+   bench rests in HTTP mode.
+
+The scheme the bench serves therefore depends on the firmware and on where a
+run stopped. Workflows that reach it outside that sequence (the OTA rollback
+and resilience workflows, the release baseline, core dump collection) resolve
+it with `.github/scripts/device_url.sh`, which prefers HTTPS when 443 answers.
+
 ## Changing the policy
 
 `tests/test_ci_policy.py` extracts the gate scripts from the workflow YAML and

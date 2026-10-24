@@ -261,3 +261,41 @@ def test_secret_bearing_automation_is_https_only() -> None:
     assert "privkey<<KEY_EOF" not in renewal
     assert 'for URL in "$ARCTIC_URL" "$ARCTIC_URL_HTTPS"' not in device_tests
     assert "http_to_https_redirect_handler" not in api
+
+
+def test_device_tests_cover_http_then_https() -> None:
+    """The bench checks HTTP mode, the certificate upload and HTTPS mode once,
+    before the suites, rather than running every suite on both schemes."""
+    workflow = (
+        ROOT / ".github" / "workflows" / "device-tests.yml"
+    ).read_text(encoding="utf-8")
+    transition = (
+        ROOT / ".github" / "scripts" / "http_to_https.py"
+    ).read_text(encoding="utf-8")
+
+    readiness = workflow.index("- name: Require HTTP-mode readiness")
+    upgrade = workflow.index("- name: Upgrade migration check")
+    step = workflow.index("python .github/scripts/http_to_https.py")
+    suites = workflow.index("- name: Run device UI tests")
+    reset = workflow.index("- name: Reset device to baseline TLS/auth state")
+    assert readiness < upgrade < step < suites < reset
+    # Port 443 must be closed in HTTP mode.
+    assert "require_https_closed" in workflow[readiness:upgrade]
+    # The transition must be able to fail the job.
+    assert "continue-on-error:" not in workflow[workflow.index("- name: HTTP to HTTPS"):step]
+
+    # A throwaway certificate, so no real private key travels over HTTP.
+    assert "generate_cert(" in transition
+    assert "TLS_PRIVKEY_PEM" not in transition
+    assert "TLS_PRIVKEY_PEM" not in workflow
+    for check in (
+        "port 443 is closed",
+        "the dashboard is served over HTTP",
+        "the controller restarts into HTTPS",
+        "is a 404, not a redirect",
+        "the API is not served over HTTP",
+        "port 443 presents the uploaded certificate",
+        "the authenticated API answers over HTTPS",
+    ):
+        assert check in transition
+    assert "ARCTIC_ADMIN_CERT_FILE" in transition

@@ -16,9 +16,10 @@ The controller runs in one of two modes, chosen at boot:
 Uploading a certificate restarts the controller into HTTPS mode; deleting it
 restarts it into HTTP mode. This module walks that lifecycle and leaves the
 controller in the mode it found it in. If it starts in HTTPS mode, the
-administrator certificate can only be put back when TLS_FULLCHAIN_PEM and
-TLS_PRIVKEY_PEM are set, so without them the lifecycle tests are skipped
-rather than discarding a certificate they cannot restore.
+administrator certificate can only be put back when ARCTIC_ADMIN_CERT_FILE
+and ARCTIC_ADMIN_KEY_FILE name its PEM files (CI's HTTP to HTTPS step writes
+them), so without them the lifecycle tests are skipped rather than discarding
+a certificate they cannot restore.
 
 The test generates a self-signed EC certificate at runtime -- no external
 cert files or DNS records are needed. Requests use verify=False, so the
@@ -28,6 +29,7 @@ hostname mismatch does not matter.
 import datetime
 import os
 import time
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
@@ -40,8 +42,15 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 ARCTIC_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 API_KEY = os.environ.get("ARCTIC_API_KEY", "")
-ADMIN_CERT = os.environ.get("TLS_FULLCHAIN_PEM", "")
-ADMIN_KEY = os.environ.get("TLS_PRIVKEY_PEM", "")
+
+
+def _read_pem(env: str) -> str:
+    path = os.environ.get(env, "")
+    return Path(path).read_text() if path and Path(path).is_file() else ""
+
+
+ADMIN_CERT = _read_pem("ARCTIC_ADMIN_CERT_FILE")
+ADMIN_KEY = _read_pem("ARCTIC_ADMIN_KEY_FILE")
 
 HOST = urlsplit(ARCTIC_URL).netloc
 HTTP_URL = f"http://{HOST}"
@@ -182,7 +191,7 @@ def http_mode(device: DeviceClient, auth_enabled):
     started_in = _mode()
     if started_in == "https":
         if not (ADMIN_CERT and ADMIN_KEY):
-            # TLS_FULLCHAIN_PEM / TLS_PRIVKEY_PEM are needed to put it back.
+            # ARCTIC_ADMIN_CERT_FILE / ARCTIC_ADMIN_KEY_FILE are needed to put it back.
             pytest.skip("Cannot restore the administrator certificate afterwards")
         assert _delete(HTTPS_URL).status_code == 200
         assert _wait_for_mode("http"), "Controller did not restart into HTTP mode"
