@@ -99,6 +99,9 @@ class Device:
         self.s = requests.Session()
         self.s.verify = False
         self.s.headers["X-API-Key"] = key
+        # No keep-alive: a pooled connection from before a restart would be
+        # reused afterwards and reset by the rebooted controller.
+        self.s.headers["Connection"] = "close"
 
     def req(self, method: str, url: str, **kw) -> requests.Response:
         kw.setdefault("timeout", 15)
@@ -170,6 +173,7 @@ def wait_for_restart(d: Device, base: str, uptime_before: int) -> None:
             if r.status_code == 200:
                 uptime = int(r.json().get("uptime_ms", 0))
                 if uptime < uptime_before:
+                    d.s.close()
                     print(f"  ok: the controller restarted ({base} answered at uptime "
                           f"{uptime} ms, was {uptime_before} ms)")
                     return
