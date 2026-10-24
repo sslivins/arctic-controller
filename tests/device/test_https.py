@@ -113,6 +113,17 @@ def _wait_for_mode(mode: str, timeout: float = RESTART_TIMEOUT) -> bool:
     return False
 
 
+def _follow(device: DeviceClient, mode: str) -> None:
+    """Point the shared device client at ``mode`` after a restart into it.
+
+    The suite's autouse fixtures talk to the controller through ``device``
+    before every test, so it must use whichever port is serving. A restart
+    also clears the in-memory test lock.
+    """
+    device.base_url = HTTPS_URL if mode == "https" else HTTP_URL
+    device.lock(ttl_seconds=900)
+
+
 def _upload(base: str, cert_pem: str, key_pem: str) -> requests.Response:
     return requests.post(
         f"{base}/api/tls/certificate", headers=_headers(),
@@ -195,6 +206,7 @@ def http_mode(device: DeviceClient, auth_enabled):
             pytest.skip("Cannot restore the administrator certificate afterwards")
         assert _delete(HTTPS_URL).status_code == 200
         assert _wait_for_mode("http"), "Controller did not restart into HTTP mode"
+        _follow(device, "http")
 
     yield
 
@@ -210,8 +222,7 @@ def http_mode(device: DeviceClient, auth_enabled):
         if not restored:
             print(f"WARNING: could not restore {started_in.upper()} mode after "
                   "the HTTPS tests; later suites may fail.")
-        # A restart clears the in-memory test lock.
-        device.lock(ttl_seconds=900)
+        _follow(device, started_in)
     except Exception as e:
         print(f"WARNING: HTTPS teardown error: {e}")
 
@@ -276,7 +287,7 @@ class TestHttpMode:
 class TestHttpsLifecycle:
     """Upload -> restart into HTTPS mode -> delete -> restart into HTTP mode."""
 
-    def test_upload_restarts_into_https_mode(self, http_mode, self_signed_cert):
+    def test_upload_restarts_into_https_mode(self, device, http_mode, self_signed_cert):
         cert_pem, key_pem = self_signed_cert
         r = _upload(HTTP_URL, cert_pem, key_pem)
         assert r.status_code == 200, r.text[:300]
@@ -285,6 +296,7 @@ class TestHttpsLifecycle:
         assert data["restarting"] is True
         assert data["scheme"] == "https"
         assert _wait_for_mode("https"), "Controller did not restart into HTTPS mode"
+        _follow(device, "https")
 
     def test_api_works_over_https(self, http_mode):
         if not _https_open():
@@ -317,7 +329,7 @@ class TestHttpsLifecycle:
         r = requests.get(f"{HTTP_URL}/api/health", allow_redirects=False, timeout=10)
         assert r.status_code == 200
 
-    def test_delete_restarts_into_http_mode(self, http_mode):
+    def test_delete_restarts_into_http_mode(self, device, http_mode):
         if not _https_open():
             pytest.skip("HTTPS not active -- previous test failed")
         r = _delete(HTTPS_URL)
@@ -326,5 +338,6 @@ class TestHttpsLifecycle:
         assert data["restarting"] is True
         assert data["scheme"] == "http"
         assert _wait_for_mode("http"), "Controller did not restart into HTTP mode"
+        _follow(device, "http")
         r = requests.get(f"{HTTP_URL}/", timeout=10)
         assert r.status_code == 200

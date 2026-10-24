@@ -3795,6 +3795,7 @@
       }
       toast(ok ? success : "Couldn't copy. Select the text and copy it manually.", ok ? "good" : "bad");
     }
+    async function startInstallWatch() {
       const startVersion = state.ota.current_version || state.info.version || "";
       state.otaInstall = {
         active: true, phase: "starting", startVersion,
