@@ -91,7 +91,7 @@ walks that path once per run instead of running every suite on both schemes:
 1. The latest release, the OTA and everything up to the core dump check run in
    HTTP mode, as a field unit comes up after updating. `Require HTTP-mode
    readiness` also fails the run if port 443 answers.
-2. `HTTP to HTTPS` (`.github/scripts/http_to_https.py`) checks the dashboard
+2. `HTTP to HTTPS` (`.github/scripts/tls_mode.py to-https`) checks the dashboard
    and API over HTTP, uploads a throwaway self-signed certificate over HTTP,
    then checks that HTTP serves only `/api/health` (404, not a redirect, for
    everything else) and that HTTPS presents the uploaded certificate and
@@ -99,8 +99,12 @@ walks that path once per run instead of running every suite on both schemes:
 3. The suites run over HTTPS. `tests/device/test_https.py` deletes the
    certificate, checks HTTP mode and a fresh upload, and reinstalls the
    step 2 certificate from `ARCTIC_ADMIN_CERT_FILE`/`ARCTIC_ADMIN_KEY_FILE`.
-4. `Reset device to baseline TLS/auth state` deletes the certificate, so the
-   bench rests in HTTP mode.
+4. `HTTPS to HTTP` (`tls_mode.py to-http`) deletes the certificate over
+   HTTPS and checks that the controller restarts into HTTP-only mode: 443
+   closed, and the dashboard, API and test API served over HTTP. It fails the
+   job if the controller is not in HTTPS mode by then.
+5. `Reset device to baseline TLS/auth state` is the safety net: it deletes any
+   certificate still installed, so the bench rests in HTTP mode.
 
 The scheme the bench serves therefore depends on the firmware and on where a
 run stopped. Workflows that reach it outside that sequence (the OTA rollback

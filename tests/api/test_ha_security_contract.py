@@ -270,19 +270,24 @@ def test_device_tests_cover_http_then_https() -> None:
         ROOT / ".github" / "workflows" / "device-tests.yml"
     ).read_text(encoding="utf-8")
     transition = (
-        ROOT / ".github" / "scripts" / "http_to_https.py"
+        ROOT / ".github" / "scripts" / "tls_mode.py"
     ).read_text(encoding="utf-8")
 
     readiness = workflow.index("- name: Require HTTP-mode readiness")
     upgrade = workflow.index("- name: Upgrade migration check")
-    step = workflow.index("python .github/scripts/http_to_https.py")
+    step = workflow.index("python .github/scripts/tls_mode.py to-https")
     suites = workflow.index("- name: Run device UI tests")
+    wifi = workflow.index("- name: Run Wi-Fi recovery tests")
+    revert = workflow.index("python .github/scripts/tls_mode.py to-http\n")
     reset = workflow.index("- name: Reset device to baseline TLS/auth state")
-    assert readiness < upgrade < step < suites < reset
+    assert readiness < upgrade < step < suites < wifi < revert < reset
     # Port 443 must be closed in HTTP mode.
     assert "require_https_closed" in workflow[readiness:upgrade]
     # The transition must be able to fail the job.
     assert "continue-on-error:" not in workflow[workflow.index("- name: HTTP to HTTPS"):step]
+    revert_step = workflow[workflow.index("- name: HTTPS to HTTP"):revert]
+    assert "continue-on-error:" not in revert_step
+    assert "if: always() && steps.tls_transition.outcome == 'success'" in revert_step
 
     # A throwaway certificate, so no real private key travels over HTTP.
     assert "generate_cert(" in transition
@@ -296,6 +301,8 @@ def test_device_tests_cover_http_then_https() -> None:
         "the API is not served over HTTP",
         "port 443 presents the uploaded certificate",
         "the authenticated API answers over HTTPS",
+        "the controller restarts into HTTP",
+        "the controller restarted",
     ):
         assert check in transition
     assert "ARCTIC_ADMIN_CERT_FILE" in transition

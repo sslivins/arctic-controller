@@ -17,7 +17,7 @@ Uploading a certificate restarts the controller into HTTPS mode; deleting it
 restarts it into HTTP mode. This module walks that lifecycle and leaves the
 controller in the mode it found it in. If it starts in HTTPS mode, the
 administrator certificate can only be put back when ARCTIC_ADMIN_CERT_FILE
-and ARCTIC_ADMIN_KEY_FILE name its PEM files (CI's HTTP to HTTPS step writes
+and ARCTIC_ADMIN_KEY_FILE name its PEM files (CI's "HTTP to HTTPS" step writes
 them), so without them the lifecycle tests are skipped rather than discarding
 a certificate they cannot restore.
 

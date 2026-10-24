@@ -1162,7 +1162,7 @@ jobs:
         # Allowed to fail the job: the suites need HTTPS, so if this fails they
         # are skipped and the job fails here with the reason.
         id: tls_transition
-        run: python .github/scripts/http_to_https.py --cert-dir "$RUNNER_TEMP/ci-admin-cert"
+        run: python .github/scripts/tls_mode.py to-https --cert-dir "$RUNNER_TEMP/ci-admin-cert"
 
       - name: Run device UI tests
         id: ui_tests
@@ -1274,6 +1274,18 @@ jobs:
           UNIFI_API_KEY: ${{ secrets.UNIFI_API_KEY }}
           UNIFI_DEVICE_MAC: dc:1e:d5:95:01:b0
           PYTHONDONTWRITEBYTECODE: '1'
+
+      - name: HTTPS to HTTP — remove the administrator certificate
+        # The reverse of "HTTP to HTTPS": delete the certificate over HTTPS and
+        # check that the controller restarts back into HTTP-only mode, with
+        # 443 closed and the dashboard, API and test API served over HTTP.
+        # This is what a user who disables HTTPS gets. Runs whenever the
+        # forward switch succeeded, however the suites ended; it fails the job
+        # if the controller is not in HTTPS mode by then (test_https.py puts
+        # the certificate back after its own round trip).
+        id: tls_revert
+        if: always() && steps.tls_transition.outcome == 'success'
+        run: python .github/scripts/tls_mode.py to-http
 
       - name: Reset device to baseline TLS/auth state
         if: always()
