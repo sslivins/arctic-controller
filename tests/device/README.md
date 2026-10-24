@@ -176,7 +176,7 @@ The `conftest.py` session fixture handles this automatically.
 | [`test_temperature_unit.py`](test_temperature_unit.py) | 2 | °C/°F toggle and preferences |
 | [`test_error_history_duration.py`](test_error_history_duration.py) | 1 | Error history duration format ("3s") |
 | [`test_screenshot_api.py`](test_screenshot_api.py) | 9 | Production screenshot endpoint: PNG validity, dimensions, auth |
-| [`test_https.py`](test_https.py) | 10 | HTTPS lifecycle: self-signed cert upload, reboot, HTTPS verification, cleanup |
+| [`test_https.py`](test_https.py) | 14 | HTTP/HTTPS modes: HTTP-mode dashboard, cert upload restarting into HTTPS mode, the port-80 notice, delete restarting back to HTTP mode |
 | [`../api/test_api_schema.py`](../api/test_api_schema.py) | 8+ | API contract validation via Schemathesis + targeted smoke tests |
 | [`../api/test_heatpump_api.py`](../api/test_heatpump_api.py) | 65 | Heat pump status, demo injection, component state, power/mode/setpoint control, params, errors |
 | [`../api/test_logs_api.py`](../api/test_logs_api.py) | 17 | Log buffer retrieval, filtering (since/level/limit), incremental polling, clear |

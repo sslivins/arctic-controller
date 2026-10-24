@@ -377,9 +377,10 @@ identity model is certificate/public-key fingerprint pinning:
   integration certificate and private key on first boot.
 - The identity is stored in NVS and served only by the dedicated integration
   HTTPS/WSS server on port 8443.
-- It is independent of the optional manually uploaded Web UI certificate on
-  port 443; changing or deleting that certificate does not disrupt Home
-  Assistant.
+- It is independent of the optional administrator-installed Web UI certificate
+  on port 443, and is never served to browsers; installing, changing or
+  deleting that certificate restarts the controller but does not change the
+  pinned identity.
 - Home Assistant records the fingerprint during the physically authorized
   pairing flow.
 - Subsequent connections reject a changed fingerprint.
@@ -546,10 +547,13 @@ after reboot.
 The legacy web/API surface now fails closed: web login and API-key
 authentication are mandatory, operational and administrative APIs remain
 blocked while the factory password exists, and the factory credential can only
-be replaced after a one-time code is opened on the physical controller. Port
-443 is available from first boot using the persistent device identity, and
-secret-bearing requests never fall back to plaintext HTTP. Port 80 exposes only
-the health check, plus test instrumentation in explicitly built test firmware.
+be replaced after a one-time code is opened on the physical controller. The
+web UI and legacy API are served over plain HTTP on port 80 until an
+administrator installs a certificate; from then on they are served only on
+port 443 with that certificate, and port 80 exposes only the health check plus
+a notice (never a redirect, so secret-bearing requests are not normalised over
+plaintext). The self-signed device identity is reserved for the integration
+server on 8443.
 TLS renewal uses validated HTTPS and keeps the wildcard private key local to
 the runner step rather than passing it through workflow outputs.
 

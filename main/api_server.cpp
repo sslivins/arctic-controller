@@ -101,9 +101,17 @@ static void add_wifi_bss(cJSON* obj)
     cJSON_AddNumberToObject(obj, "channel", bss.channel);
 }
 
-// HTTP/HTTPS server handle (only one is active per boot)
+// Web/API server mode, chosen at each start from whether an administrator
+// certificate is installed:
+//   HTTP mode  (no administrator cert): port 80 serves the full web UI and API;
+//              port 443 is not started.
+//   HTTPS mode (administrator cert):    port 443 serves the full web UI and
+//              API; port 80 only serves /api/health plus a "use HTTPS" 404.
+// The integration server on 8443 always uses the persistent device identity
+// (pinned by Home Assistant) and is independent of this choice.
 static httpd_handle_t server = NULL;      // HTTP (port 80) — always running
-static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — when TLS certs present
+static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — administrator cert only
+static bool s_https_mode = false;
 static httpd_handle_t server_integration = NULL;  // HA HTTPS/WSS (port 8443)
 #ifdef CONFIG_TEST_ENDPOINTS
 static httpd_handle_t websocket_test_server = NULL;  // WS feasibility (port 81)
@@ -551,24 +559,31 @@ static bool api_server_start_locked(void)
         return false;
     }
 
-    // URI-handler table size for the port-80 and port-443 servers. This must
-    // exceed the total number of handlers registered on a single server. The
-    // worst case is the CONFIG_TEST_ENDPOINTS build, where the production
-    // handlers on port 443 are joined by the /api/test/* instrumentation
-    // handlers (see test_endpoints_register); together they reached 142 when
-    // the energy routes landed. Each slot costs only a pointer, so keep ample
-    // headroom: an overflow makes httpd_register_uri_handler return "no slots
-    // left" and the affected route then answers 404. (Production builds
-    // register far fewer handlers, so they are unaffected either way.)
+    // URI-handler table size for the server that carries the web UI and API
+    // (port 443 in HTTPS mode, port 80 in HTTP mode). This must exceed the
+    // total number of handlers registered on a single server. The worst case
+    // is the CONFIG_TEST_ENDPOINTS build, where the production handlers are
+    // joined by the /api/test/* instrumentation handlers (see
+    // test_endpoints_register); together they reached 142 when the energy
+    // routes landed. Each slot costs only a pointer, so keep ample headroom:
+    // an overflow makes httpd_register_uri_handler return "no slots left" and
+    // the affected route then answers 404. (Production builds register far
+    // fewer handlers, so they are unaffected either way.)
     const int uri_handlers = 180;
     const int stack_size   = 16384;  // Default task stack
     const int max_headers  = 16;
     const int recv_timeout = 10;     // seconds
 
-    // Port 80 serves exactly one route (/api/health) plus the "HTTPS required"
-    // 404 notice -- in test builds too, since test endpoints are registered on
-    // the HTTPS server only. It therefore needs neither the full handler table
-    // nor a 16 KB stack.
+    // Only an administrator-installed certificate turns HTTPS on. The
+    // persistent device identity is self-signed, so serving the web UI with it
+    // made every browser show a certificate warning; it is now used only by
+    // the Home Assistant server on 8443, which pins it.
+    s_https_mode = tls_mgr_has_certs();
+
+    // In HTTPS mode port 80 serves exactly one route (/api/health) plus the
+    // "HTTPS required" 404 notice -- in test builds too, since test endpoints
+    // are registered on the HTTPS server. It therefore needs neither the full
+    // handler table nor more than two sockets.
     //
     // The handler table is trimmed, but the stack deliberately is NOT:
     // esp_http_server gives every server task the name "httpd" (httpd_config_t
@@ -583,7 +598,12 @@ static bool api_server_start_locked(void)
     // httpd task stacks must live in internal RAM: handlers write NVS, and a
     // PSRAM stack trips esp_task_stack_is_sane_cache_disabled() while the
     // flash cache is disabled.
-    const int http_uri_handlers = 8;
+    const int http_uri_handlers = s_https_mode ? 8 : uri_handlers;
+    // Port 80 carries the whole web UI in HTTP mode, where browsers open up to
+    // ~6 parallel connections; it gets the same 7 sockets as port 443 (see the
+    // note there). Only one of 80/443 is full-size at a time, so the LWIP
+    // socket budget is unchanged.
+    const int http_open_sockets = s_https_mode ? 2 : 7;
     
     esp_err_t ret;
 
@@ -596,9 +616,9 @@ static bool api_server_start_locked(void)
     }
     
     // ---- Always start HTTP on port 80 ----
-    // This ensures CI, local development, and OTA always work regardless of TLS state.
     {
-        ESP_LOGI(TAG, "Starting HTTP server on port 80...");
+        ESP_LOGI(TAG, "Starting HTTP server on port 80 (%s)...",
+                 s_https_mode ? "health only" : "web UI and API");
         
         httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
         http_config.lru_purge_enable   = true;
@@ -607,9 +627,7 @@ static bool api_server_start_locked(void)
         http_config.stack_size         = stack_size;
         http_config.max_resp_headers   = max_headers;
         http_config.recv_wait_timeout  = recv_timeout;
-        // Port 80 only serves essential health/OTA bootstrap routes when
-        // mandatory HTTPS is active, so two concurrent clients are sufficient.
-        http_config.max_open_sockets   = 2;
+        http_config.max_open_sockets   = http_open_sockets;
         // TCP keepalive reaps dead ESTABLISHED sockets left behind when a
         // client vanishes mid-request (e.g. slow TLS clients that abandon a
         // handshake, or the test suite's connection storm). Without this the
@@ -632,17 +650,14 @@ static bool api_server_start_locked(void)
         }
     }
     
-    // ---- Always start HTTPS using either the administrator certificate or
-    // the persistent device identity generated on first boot. ----
-    if (tls_mgr_has_certs() || tls_mgr_has_identity()) {
+    // ---- HTTPS on port 443, only with an administrator certificate ----
+    // Once an administrator has installed a certificate HTTPS is mandatory:
+    // if it cannot start, the whole start fails rather than falling back to
+    // plaintext HTTP.
+    if (s_https_mode) {
         size_t cert_len = 0, key_len = 0;
-        const bool administrator_cert = tls_mgr_has_certs();
-        const uint8_t* cert = administrator_cert
-            ? tls_mgr_get_cert(&cert_len)
-            : tls_mgr_get_identity_cert(&cert_len);
-        const uint8_t* key = administrator_cert
-            ? tls_mgr_get_key(&key_len)
-            : tls_mgr_get_identity_key(&key_len);
+        const uint8_t* cert = tls_mgr_get_cert(&cert_len);
+        const uint8_t* key = tls_mgr_get_key(&key_len);
         
         ESP_LOGI(TAG, "Starting HTTPS server on port 443...");
         
@@ -688,11 +703,9 @@ static bool api_server_start_locked(void)
         ret = httpd_ssl_start(&server_ssl, &ssl_config);
         if (ret == ESP_OK) {
             tls_mgr_set_https_active(true);
-            ESP_LOGI(
-                TAG, "HTTPS server started on port 443 using %s",
-                administrator_cert
-                    ? "administrator certificate"
-                    : "persistent device identity");
+            ESP_LOGI(TAG,
+                     "HTTPS server started on port 443 using the administrator "
+                     "certificate");
         } else {
             ESP_LOGE(
                 TAG, "Failed to start mandatory HTTPS server: %s",
@@ -712,11 +725,6 @@ static bool api_server_start_locked(void)
             api_server_stop();
             return false;
         }
-    } else {
-        ESP_LOGE(TAG, "No TLS identity available for mandatory HTTPS");
-        s_last_start_error = API_START_ERR_NO_IDENTITY;
-        api_server_stop();
-        return false;
     }
 
     if (tls_mgr_has_identity()) {
@@ -782,8 +790,7 @@ static bool api_server_start_locked(void)
     }
     
     // Helper macro - abort if URI registration fails (catches max_uri_handlers issues)
-    // When HTTPS is active, registers on HTTPS only.
-    // When no HTTPS, registers on HTTP.
+    // Registers on HTTPS in HTTPS mode, otherwise on HTTP.
     #define REGISTER_URI(uri_struct) do { \
         httpd_handle_t _target = server_ssl ? server_ssl : server; \
         esp_err_t err = httpd_register_uri_handler(_target, &(uri_struct)); \
@@ -1512,27 +1519,14 @@ static bool api_server_start_locked(void)
     REGISTER_URI(ha_manage_revoke_uri);
 
 #ifdef CONFIG_TEST_ENDPOINTS
-    // Test endpoints are registered on the HTTPS server only.
-    //
-    // They used to also be registered on the port-80 server ("no TLS on test
-    // runner"), but that is stale: device-tests.yml provisions credentials and
-    // then rewrites ARCTIC_URL to https:// before any suite runs, so every
-    // /api/test/* request already goes over TLS. The only plain-HTTP calls CI
-    // makes are liveness probes against /api/heatpump/status, a production
-    // route.
-    //
-    // Registering ~53 test handlers on port 80 was expensive: it forced that
-    // server to carry the full 140-slot handler table and a 16 KB task stack,
-    // consuming the contiguous internal SRAM that the HTTPS servers need for
-    // their own stacks. Under ESP-IDF 6.1 that was the difference between the
-    // servers starting and failing with ESP_ERR_HTTPD_TASK.
-    if (server_ssl != NULL) {
-        test_endpoints_register(server_ssl);
-        ESP_LOGI(TAG, "Test instrumentation endpoints enabled");
-    } else {
-        ESP_LOGE(TAG,
-                 "No HTTPS server: test instrumentation endpoints NOT "
-                 "registered");
+    // Test endpoints go on the server that carries the web UI and API: port
+    // 443 in HTTPS mode, port 80 in HTTP mode. In HTTPS mode they are never
+    // added to port 80, which keeps that server's handler table small.
+    {
+        httpd_handle_t api_server_handle = server_ssl ? server_ssl : server;
+        test_endpoints_register(api_server_handle);
+        ESP_LOGI(TAG, "Test instrumentation endpoints enabled (%s)",
+                 server_ssl ? "HTTPS" : "HTTP");
     }
 
     httpd_config_t websocket_config = HTTPD_DEFAULT_CONFIG();
@@ -1798,13 +1792,13 @@ static bool api_server_start_locked(void)
     #undef REGISTER_URI
     #undef REGISTER_URI_ESSENTIAL
 
-    // With mandatory HTTPS active, port 80 only serves the essential bootstrap
-    // routes; any other path (e.g. a browser opening http://<device>) would
-    // otherwise hit the bare "Nothing matches the given URI" 404. Register a
-    // 404 handler on the HTTP server that returns a clean "use HTTPS" notice
-    // instead. It does NOT redirect: mandatory HTTPS means port 80 must stay a
-    // dead end so secret-bearing requests are never normalised onto plaintext
-    // HTTP (see tests/api/test_ha_security_contract.py).
+    // In HTTPS mode port 80 only serves the essential bootstrap routes; any
+    // other path (e.g. a browser opening http://<device>) would otherwise hit
+    // the bare "Nothing matches the given URI" 404. Register a 404 handler on
+    // the HTTP server that returns a clean "use HTTPS" notice instead. It does
+    // NOT redirect: once an administrator has installed a certificate, port 80
+    // must stay a dead end so secret-bearing requests are never normalised
+    // onto plaintext HTTP (see tests/api/test_ha_security_contract.py).
     if (server != NULL && server_ssl != NULL) {
         esp_err_t rerr = httpd_register_err_handler(
             server, HTTPD_404_NOT_FOUND, http_https_required_handler);
@@ -1814,30 +1808,34 @@ static bool api_server_start_locked(void)
         }
     }
 
-    // The HTTPS API server previously had no 404 handler, so a routing miss
-    // fell back to the esp_http_server default 404 whose empty-ish body was
-    // indistinguishable from a truncated response. Register an explicit JSON
-    // 404 handler so every miss is diagnosable (logs + echoes method/URI).
-    if (server_ssl != NULL) {
+    // The server carrying the web UI and API (443 in HTTPS mode, 80 in HTTP
+    // mode).
+    httpd_handle_t api_handle = server_ssl ? server_ssl : server;
+
+    // Without an explicit handler a routing miss falls back to the
+    // esp_http_server default 404 whose empty-ish body was indistinguishable
+    // from a truncated response. Register an explicit JSON 404 handler so every
+    // miss is diagnosable (logs + echoes method/URI).
+    if (api_handle != NULL) {
         esp_err_t rerr = httpd_register_err_handler(
-            server_ssl, HTTPD_404_NOT_FOUND, https_api_not_found_handler);
+            api_handle, HTTPD_404_NOT_FOUND, https_api_not_found_handler);
         if (rerr != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to register HTTPS 404 handler: %s",
+            ESP_LOGW(TAG, "Failed to register API 404 handler: %s",
                      esp_err_to_name(rerr));
         }
     }
 
-    // Keep wrong-method requests from tearing down the TLS connection. See
-    // https_api_method_not_allowed_handler for why this is load-bearing
-    // (issue #234). Registered on both TLS servers; port 80 is left alone
-    // because a plaintext close costs no handshake and mandatory HTTPS keeps
-    // that port a deliberate dead end.
-    if (server_ssl != NULL) {
+    // Keep wrong-method requests from tearing down the connection. See
+    // https_api_method_not_allowed_handler for why this is load-bearing on TLS
+    // (issue #234); on the HTTP API server it keeps the JSON error contract
+    // identical in both modes. Port 80 in HTTPS mode is left alone because it
+    // is a deliberate dead end.
+    if (api_handle != NULL) {
         esp_err_t rerr = httpd_register_err_handler(
-            server_ssl, HTTPD_405_METHOD_NOT_ALLOWED,
+            api_handle, HTTPD_405_METHOD_NOT_ALLOWED,
             https_api_method_not_allowed_handler);
         if (rerr != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to register HTTPS 405 handler: %s",
+            ESP_LOGW(TAG, "Failed to register API 405 handler: %s",
                      esp_err_to_name(rerr));
         }
     }
@@ -1909,7 +1907,7 @@ void api_server_stop(void)
 
 bool api_server_is_running(void)
 {
-    return s_started && server != NULL && server_ssl != NULL;
+    return s_started && server != NULL && (server_ssl != NULL || !s_https_mode);
 }
 
 bool api_server_is_healthy(void)
@@ -1993,17 +1991,18 @@ static void send_json_error(httpd_req_t* req, const char* status, const char* me
 // Web Interface Handlers
 // ============================================================================
 
-// 404 handler for the plain-HTTP server (port 80). Because mandatory HTTPS is
-// active, all normal routes are registered on the HTTPS server only, so any
-// non-essential HTTP request lands here. Return a clean 404 with a short
-// plain-text notice pointing at the device's HTTPS URL instead of the default
-// esp_http_server "Nothing matches the given URI" body.
+// 404 handler for the plain-HTTP server (port 80) in HTTPS mode, i.e. once an
+// administrator certificate is installed. All normal routes are then
+// registered on the HTTPS server only, so any non-essential HTTP request lands
+// here. Return a clean 404 with a short plain-text notice pointing at the
+// device's HTTPS URL instead of the default esp_http_server "Nothing matches
+// the given URI" body.
 //
-// This intentionally does NOT redirect (no Location header / 3xx): under
-// mandatory HTTPS, port 80 must stay a dead end so clients are never
-// encouraged to send secret-bearing requests (X-API-Key / bearer tokens) over
-// plaintext HTTP. The message uses the device's own advertised hostname rather
-// than reflecting the client-supplied Host header.
+// This intentionally does NOT redirect (no Location header / 3xx): in HTTPS
+// mode port 80 must stay a dead end so clients are never encouraged to send
+// secret-bearing requests (X-API-Key / bearer tokens) over plaintext HTTP. The
+// message uses the device's own advertised hostname rather than reflecting the
+// client-supplied Host header.
 static esp_err_t http_https_required_handler(httpd_req_t* req,
                                              httpd_err_code_t err)
 {
@@ -2020,8 +2019,9 @@ static esp_err_t http_https_required_handler(httpd_req_t* req,
     return ESP_OK;
 }
 
-// 404 handler for the HTTPS API server (port 443). Without this the port-443
-// server falls back to esp_http_server's built-in 404, whose body ("Nothing
+// 404 handler for the server carrying the web UI and API (port 443 in HTTPS
+// mode, port 80 in HTTP mode). Without this it falls back to esp_http_server's
+// built-in 404, whose body ("Nothing
 // matches the given URI") is unhelpful and — crucially — indistinguishable
 // from a truncated/reset response (both surface to the test client as an
 // empty-bodied 404). Emitting an explicit JSON body that echoes the requested
@@ -2033,7 +2033,7 @@ static esp_err_t https_api_not_found_handler(httpd_req_t* req,
     (void)err;
 
     // The request URI is still available on the request struct here.
-    ESP_LOGW(TAG, "HTTPS 404: no handler for %s %s",
+    ESP_LOGW(TAG, "API 404: no handler for %s %s",
              http_method_str((enum http_method)req->method), req->uri);
 
     char body[256];
@@ -2047,8 +2047,8 @@ static esp_err_t https_api_not_found_handler(httpd_req_t* req,
     return ESP_OK;
 }
 
-// 405 handler for the TLS servers. This exists for connection lifetime, not
-// for the response body.
+// 405 handler for the TLS servers and the HTTP-mode API server. This exists
+// for connection lifetime, not for the response body.
 //
 // With no handler registered for an error code, esp_http_server's default path
 // sends the response and then deliberately closes the connection --
@@ -2077,7 +2077,7 @@ static esp_err_t https_api_method_not_allowed_handler(httpd_req_t* req,
 {
     (void)err;
 
-    ESP_LOGW(TAG, "HTTPS 405: method %d not allowed for %s",
+    ESP_LOGW(TAG, "API 405: method %d not allowed for %s",
              req->method, req->uri);
 
     char body[256];
@@ -7915,6 +7915,30 @@ static esp_err_t tls_status_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+// The web server's mode (HTTP vs HTTPS) is fixed when it starts, so a
+// certificate change restarts the controller to take effect. The response
+// names the scheme the controller will come back on so the caller (the web UI)
+// can move to it. The restart is delayed like /api/ota/reboot so the response
+// reaches the client first.
+static void send_tls_change_response_and_restart(httpd_req_t* req,
+                                                 const char* message,
+                                                 const char* scheme)
+{
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddBoolToObject(resp, "restarting", true);
+    cJSON_AddStringToObject(resp, "scheme", scheme);
+    cJSON_AddStringToObject(resp, "message", message);
+
+    char* json_str = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(resp);
+
+    vTaskDelay(pdMS_TO_TICKS(500));
+    system_safe_restart();
+}
+
 static esp_err_t tls_cert_post_handler(httpd_req_t* req)
 {
     // Always require authentication for cert provisioning
@@ -7930,11 +7954,10 @@ static esp_err_t tls_cert_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    // If HTTPS is already active, cert changes are only accepted over HTTPS.
-    // Since the server runs in either HTTP or HTTPS mode (never both), if
-    // HTTPS is NOT active the request arrived over HTTP — block it.
+    // An upload while a stored administrator certificate has not taken effect
+    // (it only does at server start) arrived over plain HTTP; refuse it so a
+    // replacement is only ever sent over the HTTPS it is replacing.
     if (tls_mgr_has_certs() && !tls_mgr_is_https_active()) {
-        // Edge case: certs in NVS but server is HTTP (shouldn't normally happen)
         send_json_error(req, "403 Forbidden",
                         "Certs exist but HTTPS is not active. Reboot first.");
         return ESP_OK;
@@ -8026,6 +8049,15 @@ static esp_err_t tls_cert_post_handler(httpd_req_t* req)
                         "cert is not a valid PEM certificate");
         return ESP_OK;
     }
+    // Storing restarts the controller into HTTPS, which cannot start with a
+    // key that does not belong to the certificate -- leaving no web server to
+    // fix it from. Catch that now too.
+    if (!tls_mgr_key_matches_cert(cert_pem, cert_len, key_pem, key_len)) {
+        cJSON_Delete(root);
+        send_json_error(req, "400 Bad Request",
+                        "key is not a valid private key for this certificate");
+        return ESP_OK;
+    }
 
     bool ok = tls_mgr_store_certs(cert_pem, cert_len, key_pem, key_len);
     cJSON_Delete(root);
@@ -8036,19 +8068,12 @@ static esp_err_t tls_cert_post_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "TLS certificates stored (%d + %d bytes). Reboot to activate HTTPS.",
+    ESP_LOGI(TAG, "TLS certificates stored (%d + %d bytes). Restarting to serve HTTPS.",
              (int)cert_len, (int)key_len);
 
-    cJSON* resp = cJSON_CreateObject();
-    cJSON_AddBoolToObject(resp, "success", true);
-    cJSON_AddStringToObject(resp, "message",
-                            "Certificates stored. Reboot to activate HTTPS.");
-
-    char* json_str = cJSON_PrintUnformatted(resp);
-    httpd_resp_sendstr(req, json_str);
-    free(json_str);
-    cJSON_Delete(resp);
-
+    send_tls_change_response_and_restart(
+        req, "Certificate installed. The controller is restarting and will "
+             "be available over HTTPS.", "https");
     return ESP_OK;
 }
 
@@ -8073,17 +8098,10 @@ static esp_err_t tls_cert_delete_handler(httpd_req_t* req)
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "TLS certificates cleared. Reboot to revert to HTTP.");
+    ESP_LOGI(TAG, "TLS certificates cleared. Restarting to serve HTTP.");
 
-    cJSON* resp = cJSON_CreateObject();
-    cJSON_AddBoolToObject(resp, "success", true);
-    cJSON_AddStringToObject(resp, "message",
-                            "Certificates cleared. Reboot to revert to HTTP.");
-
-    char* json_str = cJSON_PrintUnformatted(resp);
-    httpd_resp_sendstr(req, json_str);
-    free(json_str);
-    cJSON_Delete(resp);
-
+    send_tls_change_response_and_restart(
+        req, "Certificate deleted. The controller is restarting and will be "
+             "available over HTTP.", "http");
     return ESP_OK;
 }

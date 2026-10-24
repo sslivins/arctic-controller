@@ -30,7 +30,11 @@ def test_socket_budget_covers_all_three_http_servers() -> None:
 
     assert "CONFIG_LWIP_MAX_SOCKETS=24" in defaults
     assert "CONFIG_LWIP_MAX_SOCKETS=24" in sdkconfig
-    assert "http_config.max_open_sockets   = 2;" in api
+    # Port 80 is the full web server in HTTP mode and a health-only stub in
+    # HTTPS mode; only one of 80/443 is ever full-size.
+    assert "s_https_mode ? 2 : 7" in api
+    assert "http_config.max_open_sockets   = http_open_sockets;" in api
+    assert "ssl_config.httpd.max_open_sockets   = 7;" in api
     assert "integration_config.httpd.max_open_sockets = 5;" in api
     assert "websocket_config.max_open_sockets = 2;" in api
 
@@ -99,9 +103,42 @@ def test_factory_credential_replacement_requires_physical_tls_flow() -> None:
     assert 'strcmp(state.username, "arctic")' not in auth
     assert "strcmp(state.username, AUTH_FACTORY_USERNAME)" not in auth
     assert "setup_pairing_authorize(code)" in api
-    assert "persistent device identity" in api
     assert "Failed to start mandatory HTTPS server" in api
     assert "setup_pairing_authorize" in pairing
+
+
+def test_https_mode_follows_administrator_certificate() -> None:
+    """Port 443 runs only with an administrator certificate, never the identity.
+
+    The self-signed identity is reserved for the Home Assistant server on 8443
+    (which pins it); serving the web UI with it made every browser warn. With
+    an administrator certificate installed, plaintext must not fall back to the
+    full UI, and certificate changes must restart into the new mode.
+    """
+    api = (ROOT / "main" / "api_server.cpp").read_text(encoding="utf-8")
+    start = api[
+        api.index("static bool api_server_start_locked"):
+        api.index("integration_config.port_secure = 8443;")
+    ]
+    https = start[start.index("if (s_https_mode) {"):start.index("if (tls_mgr_has_identity())")]
+
+    assert "s_https_mode = tls_mgr_has_certs();" in start
+    assert "tls_mgr_get_cert(&cert_len)" in https
+    assert "tls_mgr_get_identity_cert" not in https
+    assert "tls_mgr_get_identity_cert(&cert_len)" in api[
+        api.index("integration_config.port_secure = 8443;") - 600:
+        api.index("integration_config.port_secure = 8443;")
+    ]
+    assert "server_ssl != NULL || !s_https_mode" in api
+    assert "tls_mgr_key_matches_cert" in api
+    post = api[api.index("static esp_err_t tls_cert_post_handler(httpd_req_t* req)\n{"):]
+    post = post[:post.index("\n}\n")]
+    delete = api[api.index("static esp_err_t tls_cert_delete_handler(httpd_req_t* req)\n{"):]
+    delete = delete[:delete.index("\n}")]
+    assert 'send_tls_change_response_and_restart(' in post
+    assert '"https"' in post
+    assert 'send_tls_change_response_and_restart(' in delete
+    assert '"http"' in delete
 
 
 def test_credential_change_without_a_session_requires_a_one_time_code() -> None:

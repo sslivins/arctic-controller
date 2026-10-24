@@ -65,8 +65,23 @@ jobs:
             echo "Certificate renewed successfully."
           fi
 
-      - name: Sync API key from device
+      # The controller only serves HTTPS once an administrator certificate is
+      # installed. The private key is never sent over plain HTTP, so a
+      # controller in HTTP mode is left alone; the GitHub secrets are still
+      # refreshed below.
+      - name: Check the device is in HTTPS mode
+        id: device
         if: steps.certbot.outputs.renewed == 'true'
+        run: |
+          if curl -sS --fail --connect-timeout 3 --max-time 10 "$ARCTIC_URL/api/health" > /dev/null; then
+            echo "https=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "https=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$ARCTIC_URL is not serving HTTPS; skipping the device deploy"
+          fi
+
+      - name: Sync API key from device
+        if: steps.device.outputs.https == 'true'
         run: |
           DEVICE_KEY=""
 
@@ -100,7 +115,7 @@ jobs:
           ARCTIC_PASSWORD: ${{ secrets.ARCTIC_PASSWORD }}
 
       - name: Enable both auth methods on device
-        if: steps.certbot.outputs.renewed == 'true'
+        if: steps.device.outputs.https == 'true'
         run: |
           curl -sSf --max-time 10 \
             -H "X-API-Key: ${ARCTIC_API_KEY}" \
@@ -109,19 +124,10 @@ jobs:
             "$ARCTIC_URL/api/auth/config" \
             || echo "Warning: Could not configure auth (may already be set)"
 
-      - name: Clear existing certs on device
-        if: steps.certbot.outputs.renewed == 'true'
-        run: |
-          # Delete any existing certs to avoid the deadlock where certs exist
-          # in NVS but HTTPS failed to start (blocks HTTP cert uploads).
-          for URL in "$ARCTIC_URL"; do
-            curl -sS --fail --max-time 10 -X DELETE \
-              -H "X-API-Key: ${ARCTIC_API_KEY}" \
-              "$URL/api/tls/certificate" 2>/dev/null && break || true
-          done
-
+      # Replacing the certificate over HTTPS is allowed directly; the
+      # controller restarts on its own to start serving the new one.
       - name: Upload certificate to device
-        if: steps.certbot.outputs.renewed == 'true'
+        if: steps.device.outputs.https == 'true'
         run: |
           CERT_DIR="/etc/letsencrypt/live/mennlabs-wildcard"
           FULLCHAIN=$(sudo cat "$CERT_DIR/fullchain.pem")
@@ -150,26 +156,18 @@ jobs:
           echo "::error::Certificate upload failed over HTTPS"
           exit 1
 
-      - name: Reboot device to activate new cert
-        if: steps.certbot.outputs.renewed == 'true'
+      - name: Wait for the device to restart with the new cert
+        if: steps.device.outputs.https == 'true'
         run: |
-          curl -sSf --max-time 10 \
-            -H "X-API-Key: ${ARCTIC_API_KEY}" \
-            -X POST \
-            "$ARCTIC_URL/api/ota/reboot" \
-            || true
-
-          echo "Reboot triggered. Waiting for device to come back..."
           sleep 10
-
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             if curl -sS --fail --connect-timeout 2 "$ARCTIC_URL/api/health" > /dev/null 2>&1; then
-              echo "Device is back online after $((i + 10))s."
+              echo "Device is back online after about $((i * 2 + 10))s."
               exit 0
             fi
-            sleep 1
+            sleep 2
           done
-          echo "::warning::Device did not respond within 40s after reboot"
+          echo "::warning::Device did not respond within 130s after the restart"
 
       - name: Update GitHub secrets with new certs
         if: steps.certbot.outputs.renewed == 'true'

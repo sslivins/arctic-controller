@@ -49,8 +49,9 @@ Everything runs locally: no cloud account is needed, and the controller keeps wo
 - **OTA updates** - Install new releases straight from GitHub (the controller checks for
   them) or upload a `.bin`. Dual A/B partitions with automatic rollback if the new
   firmware fails to come up.
-- **Security** - HTTPS only, login-protected web UI, per-device API key, and separate
-  revocable credentials for Home Assistant.
+- **Security** - Login-protected web UI (HTTPS once you install your own certificate),
+  per-device API key, and separate revocable credentials for Home Assistant over a
+  pinned TLS connection.
 - **Reliability** - Persistent event log and crash/brownout tracking, and a safe-restart
   path that finishes any in-flight heat-pump transaction and releases the RS-485 bus
   before every reboot.
@@ -116,11 +117,23 @@ The bus behaviour is selected at build time via a Kconfig `choice`
 
 ## Web Interface
 
-Open `https://arctic-xxxx.local` (or the controller's IP address) in a browser. The
-controller only serves the UI and API over HTTPS; plain `http://` returns a notice
-telling you to switch. It uses a self-signed certificate by default, so your browser
-will ask you to accept it the first time. You can install your own certificate through
-the API (`/api/tls/certificate`).
+Open `http://arctic-xxxx.local` (or the controller's IP address) in a browser.
+
+### HTTPS
+
+Out of the box the dashboard is served over plain HTTP on port 80. A self-signed
+certificate would only trade that for a browser warning on every visit, so the
+controller doesn't serve one to browsers.
+
+To switch to HTTPS, install a certificate issued for the name you use to reach the
+controller (for example one from your own CA, or a Let's Encrypt certificate for a DNS
+name that points at it) under **Settings → Security → TLS certificate**, or with
+`POST /api/tls/certificate`. The controller restarts and then serves the dashboard and
+API only on `https://` (port 443); `http://` answers with a notice telling you to switch,
+apart from `/api/health`. Deleting the certificate restarts it back into HTTP mode.
+
+Home Assistant is unaffected either way: it always uses the dedicated, pinned TLS port
+8443.
 
 ### Pages
 - **Home** - Current operation, tank temperature, equipment, COP and power, errors,
@@ -161,6 +174,9 @@ The design and threat model are in
 - **API key** - A per-device key for scripts and other tools, sent as an `X-API-Key`
   header. View or regenerate it in the web UI under Settings → Security.
 - **Home Assistant credentials** - Issued at pairing and revocable from the device.
+- **Plain HTTP** - Without a certificate, logins and the API key cross your LAN
+  unencrypted. Install a certificate (see [HTTPS](#https)) if that matters on your
+  network.
 
 ## REST API
 
@@ -181,20 +197,20 @@ a logged-in web session.
 ### Examples
 ```bash
 KEY=your-api-key
-HOST=https://arctic-xxxx.local
+HOST=http://arctic-xxxx.local
 
 # Heat pump status
-curl -k -H "X-API-Key: $KEY" $HOST/api/heatpump/status
+curl -H "X-API-Key: $KEY" $HOST/api/heatpump/status
 
 # Set the hot-water setpoint to 50 °C
-curl -k -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+curl -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
      -d '{"hot_water":50}' $HOST/api/heatpump/setpoints
 
 # Grab a screenshot of the device display
-curl -k -H "X-API-Key: $KEY" -o screen.jpg "$HOST/api/screenshot?format=jpeg"
+curl -H "X-API-Key: $KEY" -o screen.jpg "$HOST/api/screenshot?format=jpeg"
 ```
 
-`-k` skips certificate verification for the default self-signed certificate.
+With a certificate installed, use `https://` and the name it was issued for.
 
 ## OTA Updates
 
