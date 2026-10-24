@@ -40,7 +40,9 @@ def _fake_day(day: dt.date) -> dict:
         "defrost": {"count": 2, "seconds": 480, "thermal_wh": -300},
         "coverage_seconds": {"power": 86000, "thermal": 50000},
         "source_seconds": {"unit": 0, "external": 50000, "fallback": 0, "settling": 600},
-        "outdoor_c": {"min": -4.0, "avg": 1.0, "max": 5.0},
+        "outdoor_c": {"min": -4.0, "avg": 1.0, "max": 5.0,
+                      # Even days mimic records from before the running average.
+                      "run_avg": -2.0 if n % 2 else None},
         "settings": {"flow_lpm": 40, "glycol_pct": 30, "mixed": False},
     }
 
@@ -174,6 +176,24 @@ class TestEnergyPage:
 
         page.locator('[data-action="energy-close"]').click()
         expect(page.locator(".en-detail")).to_have_count(0)
+        assert page_errors == []
+
+    def test_outdoor_while_running_with_day_average_fallback(self, mocked_energy: Page, page_errors):
+        page = mocked_energy
+        _open_energy(page)
+        expect(page.locator(".en-stat", has_text="Avg outdoor while running")).to_contain_text("Day avg")
+
+        days = [TODAY - dt.timedelta(days=i) for i in (3, 4)]
+        ran, old = sorted(days, key=lambda d: d.toordinal() % 2, reverse=True)
+        page.locator(f'.en-hit[data-date="{ran.isoformat()}"]').click()
+        stat = page.locator(f'.en-detail[data-energy-day="{ran.isoformat()}"] .en-stat', has_text="Outdoor")
+        expect(stat).to_contain_text("Outdoor while running")
+        expect(stat).to_contain_text("Day avg")
+
+        page.locator(f'.en-hit[data-date="{old.isoformat()}"]').click()
+        stat = page.locator(f'.en-detail[data-energy-day="{old.isoformat()}"] .en-stat', has_text="Outdoor")
+        expect(stat).not_to_contain_text("while running")
+        expect(stat).not_to_contain_text("Day avg")
         assert page_errors == []
 
     def test_energy_page_loads_against_the_device(self, dashboard_page: Page, page_errors):

@@ -114,6 +114,7 @@ static struct {
     lv_obj_t* day_title = nullptr;
     lv_obj_t* stat_value[4] = {};
     lv_obj_t* stat_sub[4] = {};
+    lv_obj_t* outdoor_name = nullptr;
     lv_obj_t* facts_label = nullptr;
     lv_obj_t* runs_title = nullptr;
     lv_obj_t* runs_list = nullptr;
@@ -765,7 +766,7 @@ static void fill_day_stats(const energy::DayRecord& r) {
     }
     lv_label_set_text(s.day_title, title);
 
-    char value[32], sub[64], num[16];
+    char value[32], sub[96], num[16];
     format_kwh(value, sizeof(value), energy::total_elec_wh(r));
     lv_label_set_text(s.stat_value[0], value);
     lv_label_set_text(s.stat_sub[0], " ");
@@ -785,12 +786,25 @@ static void fill_day_stats(const energy::DayRecord& r) {
     lv_label_set_text(s.stat_value[2], value);
     lv_label_set_text(s.stat_sub[2], " ");
 
+    // The running average is what COP depends on; days booked before it
+    // existed (or without a run) show the whole-day average instead.
+    const bool run_avg = (r.flags & energy::DAY_RUN_OUTDOOR_SET) != 0;
+    lv_label_set_text(s.outdoor_name,
+                      i18n_get(run_avg ? STR_ENERGY_OUTDOOR_RUNNING : STR_ENERGY_OUTDOOR));
     if (r.flags & energy::DAY_OUTDOOR_SET) {
-        format_temp(value, sizeof(value), r.outdoor_avg_deci, true);
         char lo[16], hi[16];
         format_temp(lo, sizeof(lo), r.outdoor_min_deci, false);
         format_temp(hi, sizeof(hi), r.outdoor_max_deci, false);
-        snprintf(sub, sizeof(sub), "%s \xe2\x80\x93 %s", lo, hi);
+        if (run_avg) {
+            char day_avg[16], day_txt[32];
+            format_temp(value, sizeof(value), r.outdoor_run_avg_deci, true);
+            format_temp(day_avg, sizeof(day_avg), r.outdoor_avg_deci, false);
+            snprintf(day_txt, sizeof(day_txt), i18n_get(STR_ENERGY_DAY_AVG_FMT), day_avg);
+            snprintf(sub, sizeof(sub), "%s \xc2\xb7 %s \xe2\x80\x93 %s", day_txt, lo, hi);
+        } else {
+            format_temp(value, sizeof(value), r.outdoor_avg_deci, true);
+            snprintf(sub, sizeof(sub), "%s \xe2\x80\x93 %s", lo, hi);
+        }
     } else {
         snprintf(value, sizeof(value), "--");
         snprintf(sub, sizeof(sub), " ");
@@ -1177,7 +1191,8 @@ static void build_day_view() {
             lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
             lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_START,
                                   LV_FLEX_ALIGN_START);
-            make_label(cell, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, i18n_get(names[i]));
+            lv_obj_t* name = make_label(cell, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, i18n_get(names[i]));
+            if (i == 3) s.outdoor_name = name;
             s.stat_value[i] = make_label(cell, &montserrat_32_latin,
                                          i == 2 ? COLOR_COP : UI_COLOR_TEXT, "--");
             lv_obj_set_user_data(s.stat_value[i], (void*)tags[i]);
@@ -1261,6 +1276,7 @@ void energy_screen_hide(void) {
     s.next_day_button = s.next_window_button = nullptr;
     for (int i = 0; i < 3; i++) s.tile_value[i] = s.tile_cop[i] = s.tile_title[i] = nullptr;
     for (int i = 0; i < 4; i++) s.stat_value[i] = s.stat_sub[i] = nullptr;
+    s.outdoor_name = nullptr;
     s.day_title = s.facts_label = s.runs_title = s.runs_list = nullptr;
     s.runs_status = s.settings_label = nullptr;
     heap_caps_free(s.data);

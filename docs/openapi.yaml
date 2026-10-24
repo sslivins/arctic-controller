@@ -5031,8 +5031,16 @@ components:
               type: number
             avg:
               type: number
+              description: Time-weighted average over the whole day
             max:
               type: number
+            run_avg:
+              type: number
+              nullable: true
+              description: >-
+                Time-weighted average while the compressor ran, leaving out
+                defrost and the two minutes after it (the sensor reads warm
+                then). Null if the unit didn't run or the day predates it.
         settings:
           type: object
           nullable: true

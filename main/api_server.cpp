@@ -6662,6 +6662,11 @@ static cJSON* energy_day_json(const energy::DayRecord& r, bool final)
         cJSON_AddNumberToObject(t, "min", r.outdoor_min_deci / 10.0);
         cJSON_AddNumberToObject(t, "avg", r.outdoor_avg_deci / 10.0);
         cJSON_AddNumberToObject(t, "max", r.outdoor_max_deci / 10.0);
+        if (r.flags & energy::DAY_RUN_OUTDOOR_SET) {
+            cJSON_AddNumberToObject(t, "run_avg", r.outdoor_run_avg_deci / 10.0);
+        } else {
+            cJSON_AddNullToObject(t, "run_avg");
+        }
     } else {
         cJSON_AddNullToObject(o, "outdoor_c");
     }

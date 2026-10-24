@@ -382,6 +382,41 @@ static void outdoor_and_settings() {
     CHECK_EQ_L(none.today().outdoor_avg_deci, 0);
 }
 
+static void outdoor_while_running() {
+    EnergyLedger l;
+    int64_t t = MIDNIGHT + 100;
+    Input idle = standby();
+    idle.outdoor_valid = true;
+    idle.outdoor_c = 20;  // idle readings count for the day, not the running average
+    t = feed(l, DAY1, t, 3600, idle, 30);
+    Input run = running(BUCKET_HEATING, 1000, 3000);
+    run.outdoor_valid = true;
+    run.outdoor_c = 0;
+    t = feed(l, DAY1, t, 3600, run, 30);
+    Input df = run;
+    df.defrost = true;
+    df.outdoor_c = 30;
+    t = feed(l, DAY1, t, 300, df, 30);
+    Input after = run;
+    after.outdoor_c = 30;  // still warm from the defrost: left out
+    t = feed(l, DAY1, t, EnergyLedger::kPostDefrostSeconds, after, 30);
+    Input cool = running(BUCKET_COOLING, 1000, -3000);  // cooling counts too
+    cool.outdoor_valid = true;
+    cool.outdoor_c = -2;
+    t = feed(l, DAY1, t, 3480, cool, 30);
+    (void)t;
+    const DayRecord r = l.today();
+    CHECK_EQ_L(r.flags & DAY_RUN_OUTDOOR_SET, DAY_RUN_OUTDOOR_SET);
+    CHECK_EQ_L(r.outdoor_run_avg_deci, (0 * 3600 - 20 * 3480) / (3600 + 3480));
+    CHECK_EQ_L(r.outdoor_max_deci, 300);
+
+    // Never ran (or a day booked before this existed): no running average.
+    EnergyLedger never;
+    feed(never, DAY1, MIDNIGHT + 100, 600, idle, 30);
+    CHECK_EQ_L(never.today().flags & DAY_RUN_OUTDOOR_SET, 0);
+    CHECK_EQ_L(never.today().flags & DAY_OUTDOOR_SET, DAY_OUTDOOR_SET);
+}
+
 static void power_averager() {
     PowerAverager p;
     uint16_t w = 0;
@@ -423,6 +458,7 @@ int main() {
     thermal_only_counts_the_expected_direction();
     defrost_is_counted();
     outdoor_and_settings();
+    outdoor_while_running();
     power_averager();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
