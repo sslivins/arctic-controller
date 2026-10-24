@@ -2850,7 +2850,8 @@
         <div>Total <strong>${fmtKwh(s.total)}</strong></div>` +
         ENERGY_MODES.filter(([m]) => e[m] > 0).map(([m, label, color]) => row(color, label, fmtKwh(e[m]))).join("") +
         (s.cop !== null ? `<div>COP (est.) <strong>${s.cop.toFixed(1)}</strong></div>` : "") +
-        (day.outdoor_c ? `<div>Outdoor avg <strong>${temp(day.outdoor_c.avg)}</strong></div>` : "");
+        (day.outdoor_c ? (day.outdoor_c.run_avg != null ? `<div>Outdoor while running <strong>${temp(day.outdoor_c.run_avg)}</strong></div>` : "") +
+          `<div>Outdoor day avg <strong>${temp(day.outdoor_c.avg)}</strong></div>` : "");
     }
     function energyHover(event) {
       const svg = event.target.closest?.(".en-chart"), wrap = svg?.closest(".en-chart-wrap");
@@ -2919,7 +2920,9 @@
           ${energyStat("Electricity", fmtKwh(s.total))}
           ${energyStat("Heat (est.)", s.heat ? fmtKwh(s.heat) : "--")}
           ${energyStat("COP (est.)", s.cop !== null ? s.cop.toFixed(1) : "--")}
-          ${energyStat("Outdoor", out ? temp(out.avg) : "--", out ? `${temp(out.min)} – ${temp(out.max)}` : "")}
+          ${out && out.run_avg != null
+            ? energyStat("Outdoor while running", temp(out.run_avg), `Day avg ${temp(out.avg)} · ${temp(out.min)} – ${temp(out.max)}`)
+            : energyStat("Outdoor", out ? temp(out.avg) : "--", out ? `${temp(out.min)} – ${temp(out.max)}` : "")}
         </div>
         <div class="en-table-wrap"><table class="en-table"><thead><tr><th>Mode</th><th>Electricity</th><th>Heat (est.)</th><th>COP</th><th>Run time</th></tr></thead>
           <tbody>${rows || `<tr><td colspan="5" class="hist-muted">No energy recorded.</td></tr>`}</tbody></table></div>
@@ -2942,6 +2945,18 @@
         const days = data.days || [];
         const sums = energySums(days);
         const outs = days.filter(d => d.outdoor_c).map(d => d.outdoor_c.avg);
+        // Running average weighted by each day's run time; ranges recorded
+        // before it existed fall back to the mean of the daily averages.
+        let runW = 0, runSum = 0;
+        for (const d of days) {
+          const ra = d.outdoor_c?.run_avg;
+          if (ra == null) continue;
+          const w = Object.values(d.run_seconds || {}).reduce((a, b) => a + b, 0) || 1;
+          runW += w; runSum += ra * w;
+        }
+        const outStat = runW
+          ? energyStat("Avg outdoor while running", temp(runSum / runW), outs.length ? `Day avg ${temp(outs.reduce((a, b) => a + b, 0) / outs.length)}` : "")
+          : energyStat("Avg outdoor", outs.length ? temp(outs.reduce((a, b) => a + b, 0) / outs.length) : "--");
         const atLatest = !en.to;
         const atOldest = !!en.since && data.from <= en.since;
         const fromYear = data.from.slice(0, 4) !== data.to.slice(0, 4) ? `, ${data.from.slice(0, 4)}` : "";
@@ -2958,7 +2973,7 @@
             ${energyStat("Electricity", fmtKwh(sums.total))}
             ${energyStat("Heat (est.)", sums.heat ? fmtKwh(sums.heat) : "--")}
             ${energyStat("COP (est.)", sums.cop !== null ? sums.cop.toFixed(1) : "--")}
-            ${energyStat("Avg outdoor", outs.length ? temp(outs.reduce((a, b) => a + b, 0) / outs.length) : "--")}
+            ${outStat}
           </div>
           <div class="hist-legend en-legend">
             ${ENERGY_MODES.map(([, label, color]) => `<span><i class="band" style="background:${color}"></i>${label}</span>`).join("")}

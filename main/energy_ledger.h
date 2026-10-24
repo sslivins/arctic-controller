@@ -88,6 +88,7 @@ enum : uint8_t {
     DAY_MIXED_SETTINGS = 1 << 0,  // flow / glycol changed during the day
     DAY_SETTINGS_SET = 1 << 1,
     DAY_OUTDOOR_SET = 1 << 2,
+    DAY_RUN_OUTDOOR_SET = 1 << 3,  // outdoor_run_avg_deci is set
 };
 
 // One finished (or in-progress) day as stored and reported. Fixed layout:
@@ -114,7 +115,7 @@ struct DayRecord {
     int16_t outdoor_min_deci;
     int16_t outdoor_max_deci;
     int16_t outdoor_avg_deci;
-    int16_t reserved2;
+    int16_t outdoor_run_avg_deci;   // while the compressor ran, outside defrost
 };
 static_assert(sizeof(DayRecord) == 112, "DayRecord is persisted; keep its layout");
 
@@ -147,10 +148,10 @@ struct DayAccum {
     uint32_t run_s[kModes];
     int16_t outdoor_min_deci;
     int16_t outdoor_max_deci;
-    int32_t reserved3;
+    int32_t run_outdoor_sum_deci_s;
     int64_t outdoor_sum_deci_s;
     uint32_t outdoor_s;
-    uint32_t reserved2;
+    uint32_t run_outdoor_s;
 };
 // No padding: the checkpoint is CRC'd and compared byte for byte.
 static_assert(sizeof(DayAccum) == 176, "DayAccum is persisted; keep its layout");
@@ -188,6 +189,12 @@ inline DayRecord to_record(const DayAccum& a) {
         const int64_t avg = a.outdoor_sum_deci_s / (int64_t)a.outdoor_s;
         r.outdoor_avg_deci = (int16_t)avg;
     }
+    if (a.run_outdoor_s > 0) {
+        r.outdoor_run_avg_deci = (int16_t)(a.run_outdoor_sum_deci_s / (int32_t)a.run_outdoor_s);
+        r.flags |= DAY_RUN_OUTDOOR_SET;
+    } else {
+        r.flags &= (uint8_t)~DAY_RUN_OUTDOOR_SET;
+    }
     return r;
 }
 
@@ -195,6 +202,9 @@ class EnergyLedger {
 public:
     static constexpr int64_t kMaxStepSeconds = 120;
     static constexpr int64_t kSaveIntervalSeconds = 600;
+    // Running time this long after a defrost is left out of the running
+    // outdoor average (field data: the reading settles within ~1 min).
+    static constexpr int64_t kPostDefrostSeconds = 120;
 
     // Feed one reading. Returns true when it closed the previous day; that
     // day's record is then available from take_finished() until the next add().
@@ -241,6 +251,7 @@ public:
             if (in.running && !prev_.running && cur_.starts < UINT16_MAX) cur_.starts++;
             if (in.defrost && !prev_.defrost && cur_.defrosts < UINT16_MAX) cur_.defrosts++;
         }
+        if (prev_.defrost && !in.defrost) defrost_end_s_ = now_s;
         set_reference(now_s, in);
         return has_finished_;
     }
@@ -361,6 +372,18 @@ private:
             if (deci > cur_.outdoor_max_deci) cur_.outdoor_max_deci = deci;
             cur_.outdoor_sum_deci_s += (int64_t)deci * dt;
             cur_.outdoor_s += dt;
+            if (p.running && mode && !p.defrost) {
+                // Skip the tail of a defrost: the stopped fan leaves the
+                // sensor reading warm for about a minute after it ends.
+                const int64_t from = a > defrost_end_s_ + kPostDefrostSeconds
+                                         ? a
+                                         : defrost_end_s_ + kPostDefrostSeconds;
+                if (b > from) {
+                    const uint32_t run_dt = (uint32_t)(b - from);
+                    cur_.run_outdoor_sum_deci_s += (int32_t)deci * (int32_t)run_dt;
+                    cur_.run_outdoor_s += run_dt;
+                }
+            }
         }
     }
 
@@ -382,6 +405,7 @@ private:
     Input prev_{};
     int64_t prev_s_ = 0;
     bool has_prev_ = false;
+    int64_t defrost_end_s_ = INT64_MIN / 2;
     DayRecord finished_{};
     bool has_finished_ = false;
     DayAccum saved_{};
