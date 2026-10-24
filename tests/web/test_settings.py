@@ -91,12 +91,86 @@ def route_perf_config(page: Page, current=None, saved_payloads=None):
 
 
 
+def open_fold(page: Page, summary: str):
+    page.locator("details.fold > summary", has_text=summary).click()
+
+
 class TestSettingsWorkspace:
     def test_all_sections_present(self, dashboard_page: Page):
         dashboard_page.locator('button[aria-label="Settings"]').click()
-        labels = dashboard_page.locator(".settings-nav .nav-link").all_inner_texts()
-        assert labels == ["WiFi", "Firmware", "Time & Location", "Display", "Preferences",
-                          "Security", "Home Assistant", "Heat output & COP", "Diagnostics", "System"]
+        expect(dashboard_page.locator(".settings-nav .sl-gh")).to_have_text(
+            ["Heat pump", "Connection", "Controller", "Security", "System"])
+        labels = dashboard_page.locator(".settings-nav .sl-t").all_inner_texts()
+        assert labels == ["Heat output & COP", "WiFi", "Home Assistant", "Preferences",
+                          "Time & Location", "Display", "Security", "Firmware", "Diagnostics", "System"]
+
+    def test_rows_show_current_values(self, dashboard_page: Page):
+        dashboard_page.locator('button[aria-label="Settings"]').click()
+        info = dashboard_page.evaluate("""async () => {
+          const get = url => fetch(url).then(r => r.json());
+          return { prefs: await get("/api/preferences"), ota: await get("/api/ota/status") };
+        }""")
+        row = lambda key: dashboard_page.locator(f'.settings-nav [data-settings="{key}"] .sl-v')
+        expect(row("display")).to_have_text(f"{info['prefs']['brightness']}%")
+        expect(row("firmware")).to_contain_text(re.compile(r"\S"))
+        expect(row("home_assistant")).to_have_text(re.compile(r"^(Paired|Not paired)$"))
+
+    def test_wide_screen_keeps_list_beside_section(self, dashboard_page: Page):
+        open_settings(dashboard_page, "Display")
+        expect(dashboard_page.locator(".settings-nav")).to_be_visible()
+        expect(dashboard_page.locator(".sl-back")).to_be_hidden()
+        dashboard_page.goto(dashboard_page.url.split("#")[0] + "#/settings")
+        expect(dashboard_page).to_have_url(re.compile(r"#/settings/wifi$"))
+
+    def test_phone_drills_into_a_section_and_back(self, dashboard_page: Page):
+        dashboard_page.set_viewport_size({"width": 390, "height": 844})
+        dashboard_page.locator('button[aria-label="Settings"]').click()
+        expect(dashboard_page).to_have_url(re.compile(r"#/settings$"))
+        nav = dashboard_page.locator(".settings-nav")
+        expect(nav).to_be_visible()
+        expect(dashboard_page.locator(".settings-main")).to_be_hidden()
+
+        nav.locator('[data-settings="display"]').click()
+        expect(dashboard_page).to_have_url(re.compile(r"#/settings/display$"))
+        expect(dashboard_page.locator('input[name="brightness"]')).to_be_visible()
+        expect(nav).to_be_hidden()
+
+        dashboard_page.locator(".sl-back").click()
+        expect(dashboard_page).to_have_url(re.compile(r"#/settings$"))
+        expect(nav).to_be_visible()
+
+        nav.locator('[data-settings="system"]').click()
+        expect(dashboard_page.get_by_role("button", name="Restart controller")).to_be_visible()
+        dashboard_page.go_back()
+        expect(nav).to_be_visible()
+        expect(dashboard_page.get_by_role("button", name="Restart controller")).to_be_hidden()
+
+    def test_save_enabled_only_after_a_change(self, dashboard_page: Page):
+        """Nothing is saved: Save is only checked for enabled/disabled."""
+        open_settings(dashboard_page, "Display")
+        save = dashboard_page.locator('form[data-form="brightness"] button[type="submit"]')
+        slider = dashboard_page.locator('input[name="brightness"]')
+        original = slider.input_value()
+        expect(save).to_be_disabled()
+        slider.fill("37" if original != "37" else "38")
+        expect(save).to_be_enabled()
+        slider.fill(original)
+        expect(save).to_be_disabled()
+
+        open_settings(dashboard_page, "Security")
+        creds = dashboard_page.locator('form[data-form="credentials"]')
+        expect(creds.locator('button[type="submit"]')).to_be_disabled()
+        creds.locator('input[name="password"]').fill("something-new")
+        expect(creds.locator('button[type="submit"]')).to_be_enabled()
+
+    def test_fold_stays_open_across_rerender(self, dashboard_page: Page):
+        open_settings(dashboard_page, "System")
+        reset = dashboard_page.get_by_role("button", name="Erase and reset")
+        expect(reset).to_be_hidden()
+        open_fold(dashboard_page, "Factory reset")
+        expect(reset).to_be_visible()
+        dashboard_page.evaluate("render()")
+        expect(reset).to_be_visible()
 
     def test_wifi_controls(self, dashboard_page: Page):
         open_settings(dashboard_page, "WiFi")
@@ -144,6 +218,7 @@ class TestSettingsWorkspace:
 
     def test_security_and_tls(self, dashboard_page: Page):
         open_settings(dashboard_page, "Security")
+        open_fold(dashboard_page, "Install a certificate")
         tls_form = dashboard_page.locator('form[data-form="tls"]')
         expect(
             dashboard_page.locator(
@@ -604,6 +679,7 @@ class TestSettingsWorkspace:
     def test_system_and_factory_reset(self, dashboard_page: Page):
         open_settings(dashboard_page, "System")
         expect(dashboard_page.get_by_role("button", name="Restart controller")).to_be_visible()
+        open_fold(dashboard_page, "Factory reset")
         expect(dashboard_page.get_by_role("button", name="Erase and reset")).to_be_visible()
 
     def test_factory_reset_uses_themed_dialog_and_needs_typed_phrase(self, dashboard_page: Page):
@@ -612,6 +688,7 @@ class TestSettingsWorkspace:
         native_dialogs = []
         dashboard_page.on("dialog", lambda d: (native_dialogs.append(d.message), d.dismiss()))
         open_settings(dashboard_page, "System")
+        open_fold(dashboard_page, "Factory reset")
 
         dashboard_page.get_by_role("button", name="Erase and reset").click()
         dialog = dashboard_page.get_by_role("alertdialog")

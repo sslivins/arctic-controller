@@ -5,6 +5,7 @@ from playwright.sync_api import Page, expect
 def open_security(page: Page):
     page.locator('button[aria-label="Settings"]').click()
     page.locator(".settings-nav .nav-link", has_text="Security").click()
+    page.locator("details.fold > summary", has_text="Install a certificate").click()
     page.locator('form[data-form="tls"]').wait_for()
 
 

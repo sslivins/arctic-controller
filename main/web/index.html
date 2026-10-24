@@ -508,9 +508,46 @@
     .event-title { font-weight: 650; color: var(--event-tone); }
     .event-detail { color: var(--cp-text-muted); font-size: 13px; margin-top: 3px; }
     .event-help { margin-top: 8px; }
-    .settings-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 20px; }
-    .settings-nav { align-self: start; position: sticky; top: 88px; }
-    .settings-nav .nav-link { font-weight: 600; }
+    /* Settings: a grouped list of sections. Wide screens show it beside the open
+       section; phones show the list, and tapping a row drills into that section. */
+    .settings-layout { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 24px; align-items: start; }
+    .settings-side { position: sticky; top: 88px; }
+    .sl-gh {
+      margin: 18px 6px 6px; color: var(--cp-text-muted); font-size: 12px; font-weight: 650;
+      letter-spacing: .06em; text-transform: uppercase;
+    }
+    .sl-gh:first-child { margin-top: 0; }
+    .sl-grp { background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 14px; overflow: hidden; }
+    .settings-nav .sl-row {
+      display: flex; align-items: center; gap: 12px; width: 100%; margin: 0; padding: 10px 12px;
+      border: 0; border-top: 1px solid var(--cp-border); border-radius: 0; background: transparent;
+      color: var(--cp-text); font: inherit; text-align: left; cursor: pointer;
+    }
+    .settings-nav .sl-row:first-child { border-top: 0; }
+    .settings-nav .sl-row:hover { background: var(--cp-surface-soft); color: var(--cp-text); }
+    .settings-nav .sl-row.active { background: var(--cp-accent-soft); }
+    .settings-nav .sl-row.active .sl-t { color: var(--cp-accent); }
+    .sl-ic { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; color: #fff; flex: none; }
+    .sl-ic svg { width: 17px; height: 17px; }
+    .sl-t { flex: 1 0 auto; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sl-v { flex: 0 1 auto; min-width: 0; color: var(--cp-text-muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sl-v.hl { color: var(--cp-accent); font-weight: 650; }
+    .sl-ch { color: var(--cp-text-muted); font-size: 20px; line-height: 1; }
+    .sl-back {
+      display: none; align-items: center; gap: 6px; margin: 0 0 14px; padding: 4px 0; border: 0; background: none;
+      color: var(--cp-accent); font: inherit; font-size: 17px; font-weight: 600; cursor: pointer;
+    }
+    .sl-back span:first-child { font-size: 24px; line-height: 1; }
+    .settings-empty { color: var(--cp-text-muted); text-align: center; padding: 48px 16px; }
+    .fold { margin-top: 20px; border-top: 1px solid var(--cp-border); }
+    .fold > summary {
+      display: flex; justify-content: space-between; align-items: center; padding: 14px 0 8px;
+      list-style: none; cursor: pointer; user-select: none; color: var(--cp-text-muted); font-weight: 650;
+    }
+    .fold > summary::-webkit-details-marker { display: none; }
+    .fold > summary::after { content: "\203A"; font-size: 22px; line-height: 1; transition: transform .15s; }
+    .fold[open] > summary::after { transform: rotate(90deg); }
+    .fold.danger > summary { color: var(--cp-danger); }
     .kv { display: grid; grid-template-columns: minmax(130px, 1fr) auto; gap: 10px; padding: 10px 0; border-top: 1px solid var(--cp-border); }
     .kv:first-child { border-top: 0; }
     .kv span:first-child { color: var(--cp-text-muted); }
@@ -738,9 +775,17 @@
       .notif-panel { position: fixed; top: 58px; left: 12px; right: 12px; width: auto; max-width: none; }
       .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .settings-layout { grid-template-columns: 1fr; }
-      .settings-nav { position: static; display: flex; flex-wrap: wrap; overflow-x: visible; gap: 6px; padding: 10px; }
-      .settings-nav .nav-link { width: auto; flex: 1 1 calc(50% - 6px); justify-content: center; white-space: normal; min-height: 48px; text-align: center; }
+      .settings-layout { grid-template-columns: minmax(0, 1fr); }
+      .settings-side { position: static; }
+      .settings-page.has-page .settings-side, .settings-page.has-page .page-head { display: none; }
+      .settings-page.is-list .settings-main { display: none; }
+      .sl-back { display: inline-flex; }
+      .settings-nav .sl-row { min-height: 54px; padding: 12px 14px; font-size: 17px; }
+      .settings-nav .sl-row.active { background: transparent; }
+      .settings-nav .sl-row.active .sl-t { color: var(--cp-text); }
+      .sl-ic { width: 30px; height: 30px; }
+      .sl-ic svg { width: 18px; height: 18px; }
+      .sl-v { font-size: 15px; }
       .home-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "banner" "hero" "chart" "side"; }
       .home-hero { min-height: 0; }
     }
@@ -832,11 +877,28 @@
       ["home", "⌂", "Home"], ["status", "▥", "Status"], ["control", "◉", "Control"],
       ["history", "◷", "History"]
     ];
-    const settingsNav = [
-      ["wifi", "WiFi"], ["firmware", "Firmware"], ["time", "Time & Location"], ["display", "Display"],
-      ["preferences", "Preferences"], ["security", "Security"], ["home_assistant", "Home Assistant"],
-      ["performance", "Heat output & COP"], ["diagnostics", "Diagnostics"], ["system", "System"]
+    const slIcon = body => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+    // [key, label, icon colour, icon]
+    const settingsGroups = [
+      ["Heat pump", [
+        ["performance", "Heat output & COP", "#f97316", slIcon('<path d="M3 12h4l3-8 4 16 3-8h4"/>')]]],
+      ["Connection", [
+        ["wifi", "WiFi", "#3b82f6", slIcon('<path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r=".8" fill="currentColor"/>')],
+        ["home_assistant", "Home Assistant", "#06b6d4", slIcon('<path d="M3 11l9-7 9 7v9H3z"/><path d="M9 20v-6h6v6"/>')]]],
+      ["Controller", [
+        ["preferences", "Preferences", "#14b8a6", slIcon('<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>')],
+        ["time", "Time & Location", "#22c55e", slIcon('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>')],
+        ["display", "Display", "#8b5cf6", slIcon('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/>')]]],
+      ["Security", [
+        ["security", "Security", "#64748b", slIcon('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>')]]],
+      ["System", [
+        ["firmware", "Firmware", "#ef4444", slIcon('<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>')],
+        ["diagnostics", "Diagnostics", "#0ea5e9", slIcon('<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>')],
+        ["system", "System", "#6b7280", slIcon('<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>')]]]
     ];
+    const settingsKeys = settingsGroups.flatMap(([, rows]) => rows.map(([key]) => key));
+    // Wide screens show the list beside a section, so there is always one open.
+    const settingsWide = () => matchMedia("(min-width: 901px)").matches;
     // Selectable modes only; freeze_protection, mode_3 and mode_4 are displayed but never offered.
     const modes = ["cooling", "heating", "hot_water", "hot_water_cooling"];
     const modeLabels = {
@@ -847,7 +909,7 @@
 
     const state = {
       auth: { checked: false, required: true, loggedIn: false, changeRequired: false, loginError: "", loginFailures: 0, loginUsername: "", loginCooldownUntil: 0, loginShake: false, recovering: false, recoveryError: "" },
-      route: "home", settingsPage: "wifi", historyLast: "history", busy: false,
+      route: "home", settingsPage: "", folds: {}, historyLast: "history", busy: false,
       info: {}, status: { time: {} }, wifi: {}, hp: {
         temperatures: {}, setpoints: {}, setpoint_limits: {}, readings: {}
       },
@@ -999,7 +1061,13 @@
     function routeFromHash() {
       const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
       state.route = parts[0] || "home";
-      if (state.route === "settings") state.settingsPage = parts[1] || "wifi";
+      if (state.route === "settings") {
+        state.settingsPage = settingsKeys.includes(parts[1]) ? parts[1] : "";
+        if (!state.settingsPage && settingsWide()) {
+          state.settingsPage = "wifi";
+          history.replaceState(null, "", "#/settings/wifi");
+        }
+      }
       if (![...nav.map(n => n[0]), "settings", "errors", ...historyRoutes].includes(state.route)) state.route = "home";
     }
     const NOTIF_META = {
@@ -1674,12 +1742,53 @@
         <section class="card"><div class="card-head"><h2>History</h2><button class="btn danger" data-action="clear-error-history">Clear history</button></div>
           ${state.errors.history.length ? state.errors.history.map(errorItem).join("") : `<div class="empty">No recorded errors.</div>`}</section></div></div>`;
     }
-    function settingsShell(content) {
-      return `<div class="page">${pageHead("Settings", "Controller configuration, service tools, and diagnostics.")}
-        <div class="settings-layout"><nav class="settings-nav card">${settingsNav.map(([key,label]) =>
-          `<button class="nav-link ${state.settingsPage===key?"active":""}" data-settings="${key}">${label}</button>`).join("")}</nav>
-          <div>${content}</div></div></div>`;
+    function settingsValue(key) {
+      const p = state.preferences || {};
+      switch (key) {
+        case "performance": return { text: state.hp?.perf_source === "external" ? "External" : "Heat pump" };
+        case "wifi": return { text: state.wifi?.connected ? (state.wifi.ssid || "Connected") : "Not connected" };
+        case "home_assistant": return { text: state.ha ? (state.ha.paired ? "Paired" : "Not paired") : "" };
+        case "preferences": return { text: p.device_name || [p.temp_unit ? (p.temp_unit === "fahrenheit" ? "°F" : "°C") : "", p.language || ""].filter(Boolean).join(" · ") };
+        case "time": {
+          if (state.location?.valid) return { text: state.location.name || "" };
+          const tz = timezones.find(([, value]) => value === state.timeConfig?.timezone);
+          return { text: tz ? tz[0] : "" };
+        }
+        case "display": return { text: p.brightness != null ? `${p.brightness}%` : "" };
+        case "security": return { text: state.tls?.https_active ? "HTTPS" : (state.tls ? "HTTP only" : "") };
+        case "firmware": {
+          const update = state.release?.update_available
+            ? state.release.latest_version
+            : (state.notifications || []).some(n => n.key === "firmware_update") ? "" : null;
+          if (update !== null) return { text: update ? `Update ${update}` : "Update available", hl: true };
+          return { text: state.ota?.current_version || state.info?.version || "" };
+        }
+        default: return { text: "" };
+      }
     }
+    function settingsLabel(key) {
+      for (const [, rows] of settingsGroups) for (const row of rows) if (row[0] === key) return row[1];
+      return "";
+    }
+    function settingsList() {
+      return `<nav class="settings-nav" aria-label="Settings sections">${settingsGroups.map(([title, rows]) =>
+        `<div class="sl-gh">${esc(title)}</div><div class="sl-grp">${rows.map(([key, label, color, icon]) => {
+          const value = settingsValue(key);
+          const active = state.settingsPage === key;
+          return `<button type="button" class="sl-row nav-link ${active ? "active" : ""}" data-settings="${key}" ${active ? 'aria-current="page"' : ""}>
+            <span class="sl-ic" style="background:${color}">${icon}</span><span class="sl-t">${esc(label)}</span>
+            <span class="sl-v ${value.hl ? "hl" : ""}">${esc(value.text)}</span><span class="sl-ch" aria-hidden="true">&#x203A;</span></button>`;
+        }).join("")}</div>`).join("")}</nav>`;
+    }
+    function settingsShell(content) {
+      const page = state.settingsPage;
+      return `<div class="page settings-page ${page ? "has-page" : "is-list"}">${pageHead("Settings", "Controller configuration, service tools, and diagnostics.")}
+        <div class="settings-layout"><div class="settings-side">${settingsList()}</div>
+          <div class="settings-main">${page
+            ? `<button type="button" class="sl-back" data-settings=""><span aria-hidden="true">&#x2039;</span><span>Settings</span></button>${content}`
+            : `<section class="card settings-empty">Choose a section.</section>`}</div></div></div>`;
+    }
+    const foldOpen = key => state.folds[key] ? "open" : "";
     function wifiSettings() {
       return `<section class="card"><div class="card-head"><div><h2>WiFi</h2><div class="metric-sub">${state.wifi.connected ? `Connected to ${esc(state.wifi.ssid)}` : "Not connected"}</div></div>
         <button class="btn" data-action="scan-wifi">Scan</button></div>
@@ -1722,8 +1831,9 @@
                ${(installDone || installFailed) ? `<button class="btn" data-action="ota-dismiss">Dismiss</button>` : ""}`}
           ${!installing && state.ota.state === "ready_to_reboot" ? `<button class="btn primary" data-action="reboot">Reboot now</button>` : ""}</div>
         ${!otaActive && !inst && !state.checkingUpdate && state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(state.release.latest_version)} is available.` : "The controller is up to date."}</div>` : ""}
-        <h3 style="margin-top:28px">Upload firmware</h3><form data-form="firmware"><div class="field"><label>ESP-IDF application image (.bin)</label>
-          <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit">Upload and install</button></form>
+        <details class="fold" data-fold="fw-upload" ${foldOpen("fw-upload")}><summary>Install from a file</summary>
+          <form data-form="firmware" data-gate><div class="field"><label>ESP-IDF application image (.bin)</label>
+          <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit">Upload and install</button></form></details>
       </section>`;
     }
     function timeSettings() {
@@ -1732,7 +1842,7 @@
       // a save silently get overwritten.
       const tzAuto = !!(state.location && state.location.tz_auto);
       return `<section class="card"><div class="card-head"><h2>Time</h2><span class="badge ${state.timeConfig.synced ? "good" : "warn"}">${state.timeConfig.synced ? "Synced" : "Not synced"}</span></div>
-        <form data-form="time"><div class="field"><label>Timezone</label><select name="timezone" ${tzAuto ? "disabled" : ""}>${timezones.map(([name,value]) =>
+        <form data-form="time" data-gate><div class="field"><label>Timezone</label><select name="timezone" ${tzAuto ? "disabled" : ""}>${timezones.map(([name,value]) =>
           `<option value="${esc(value)}" ${state.timeConfig.timezone===value?"selected":""}>${esc(name)}</option>`).join("")}</select>
           ${tzAuto ? `<p class="metric-sub">The timezone follows the location below. Turn off automatic timezone to choose one manually.</p>` : ""}</div>
           <div class="field"><label>Clock format</label><select name="format"><option value="24" ${state.timeConfig.format_24h?"selected":""}>24 hour</option>
@@ -1762,12 +1872,12 @@
       </section>`;
     }
     function displaySettings() {
-      return `<section class="card"><h2>Display</h2><form data-form="brightness"><div class="field"><label>Saved brightness · <span id="brightness-value">${state.preferences.brightness}%</span></label>
+      return `<section class="card"><h2>Display</h2><form data-form="brightness" data-gate><div class="field"><label>Saved brightness · <span id="brightness-value">${state.preferences.brightness}%</span></label>
         <input name="brightness" type="range" min="5" max="100" value="${state.preferences.brightness}"></div><button class="btn primary" type="submit">Apply brightness</button></form>
         <p class="metric-sub">After five minutes without touch input, the screen dims to 10%. The first touch wakes it and restores this saved level.</p></section>`;
     }
     function preferenceSettings() {
-      return `<section class="card"><h2>Preferences</h2><form data-form="preferences">
+      return `<section class="card"><h2>Preferences</h2><form data-form="preferences" data-gate>
         <div class="field"><label>Controller name</label><input name="device_name" maxlength="120" value="${esc(state.preferences.device_name || "")}" placeholder="Up to 30 characters"></div>
         <div class="field"><label>Temperature units</label><select name="temp_unit"><option value="celsius" ${state.preferences.temp_unit==="celsius"?"selected":""}>Celsius</option>
           <option value="fahrenheit" ${state.preferences.temp_unit==="fahrenheit"?"selected":""}>Fahrenheit</option></select></div>
@@ -1779,15 +1889,16 @@
     function securitySettings() {
       return `<div class="grid"><section class="card"><h2>Authentication</h2>
         <div class="notice">Web login and API-key authentication are always required.</div>
-        <h3 style="margin-top:24px">Credentials</h3><form data-form="credentials"><div class="field"><label>Username</label><input name="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(state.security.username || "arctic")}"></div>
+        <h3 style="margin-top:24px">Credentials</h3><form data-form="credentials" data-gate><div class="field"><label>Username</label><input name="username" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(state.security.username || "arctic")}"></div>
           <div class="field"><label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password"></div><button class="btn" type="submit">Save credentials</button></form>
         <h3 style="margin-top:24px">API key</h3><div class="field"><input readonly value="${esc(state.security.api_key || "")}"></div>
         <div class="btn-row"><button class="btn" data-action="copy-key">Copy</button><button class="btn danger" data-action="regenerate-key">Regenerate</button></div></section>
         <section class="card"><div class="card-head"><h2>TLS certificate</h2><span class="badge ${state.tls.https_active?"good":""}">${state.tls.https_active?"HTTPS active":state.tls.has_certs?"Reboot required":"HTTP only"}</span></div>
+          ${!state.tls.auth_ready ? `<div class="notice">Enable both authentication methods before provisioning TLS.</div>` : ""}
+          <details class="fold" data-fold="tls" ${foldOpen("tls")}><summary>Install a certificate</summary>
           <form data-form="tls"><div class="field"><label>Certificate chain (PEM)</label><textarea name="cert"></textarea></div>
-          <div class="field"><label>Private key (PEM)</label><textarea name="key"></textarea></div><button class="btn primary" type="submit" ${!state.tls.auth_ready?"disabled":""}>Upload certificate</button></form>
-          ${state.tls.has_certs ? `<p><button class="btn danger" data-action="delete-tls">Delete certificate</button></p>` : ""}
-          ${!state.tls.auth_ready ? `<div class="notice">Enable both authentication methods before provisioning TLS.</div>` : ""}</section></div>`;
+          <div class="field"><label>Private key (PEM)</label><textarea name="key"></textarea></div><button class="btn primary" type="submit" ${!state.tls.auth_ready?"disabled":""}>Upload certificate</button></form></details>
+          ${state.tls.has_certs ? `<p><button class="btn danger" data-action="delete-tls">Delete certificate</button></p>` : ""}</section></div>`;
     }
     function homeAssistantSettings() {
       const ha = state.ha || {};
@@ -2021,13 +2132,14 @@
           <a class="btn" href="/api/heatpump/diagnostic" download>Download report</a><a class="btn" href="/api/screenshot?format=jpeg" target="_blank">Device screenshot</a></div></section>`;
     }
     function systemSettings() {
-      return `<div class="grid"><section class="card"><h2>Controller</h2>
+      return `<section class="card"><h2>Controller</h2>
         <div class="kv"><span>Firmware</span><strong>${esc(state.info.version || "--")}</strong></div>
         <div class="kv"><span>Platform</span><strong>${esc(state.info.platform || "--")}</strong></div>
         <div class="kv"><span>Free memory</span><strong>${fmtBytes(state.info.free_heap)}</strong></div>
-        <p><button class="btn" data-action="reboot">Restart controller</button></p></section>
-        <section class="card"><h2 style="color:var(--cp-danger)">Factory reset</h2><div class="notice bad">Permanently erases WiFi, settings, certificates, event history, and stored files.</div>
-          <p><button class="btn danger" data-action="factory-reset">Erase and reset</button></p></section></div>`;
+        <p><button class="btn" data-action="reboot">Restart controller</button></p>
+        <details class="fold danger" data-fold="factory-reset" ${foldOpen("factory-reset")}><summary>Factory reset</summary>
+          <div class="notice bad">Permanently erases WiFi, settings, certificates, event history, and stored files.</div>
+          <p><button class="btn danger" data-action="factory-reset">Erase and reset</button></p></details></section>`;
     }
     function settingsPage() {
       const pages = { wifi: wifiSettings, firmware: firmwareSettings, time: timeSettings, display: displaySettings,
@@ -2036,7 +2148,8 @@
       if (!state.settingsLoaded) {
         return settingsShell(`<section class="card"><div class="spinner"></div></section>`);
       }
-      return settingsShell((pages[state.settingsPage] || wifiSettings)());
+      const section = pages[state.settingsPage];
+      return settingsShell(section ? section() : "");
     }
     // Failures after which the sign-in error starts pointing at password recovery.
     const LOGIN_RECOVERY_HINT_AFTER = 3;
@@ -3013,6 +3126,7 @@
       if (state.route === "history") histFitChart();
       if (state.route === "energy") energyFitChart();
       perfSyncSaves();
+      gateInit();
       if (state.settingsPage === "diagnostics") {
         const logs = $("#log-container"); if (logs) logs.scrollTop = logs.scrollHeight;
       }
@@ -3041,7 +3155,7 @@
     async function loadSettings() {
       const results = await Promise.allSettled([
         api("/api/time/config"), api("/api/auth/config"), api("/api/auth/apikey"), api("/api/tls/status"),
-        api("/api/location")
+        api("/api/location"), loadHaStatus()
       ]);
       if (results[0].status === "fulfilled") state.timeConfig = results[0].value;
       if (results[1].status === "fulfilled") state.security = results[1].value;
@@ -3269,6 +3383,23 @@
     }
     // Grey out Save while the form matches what's saved. An incomplete form
     // keeps Save live so pressing it explains what's missing.
+    // Grey out Save while the form matches what's saved. A form's baseline is
+    // taken when it's rendered; saving re-renders it from the new state.
+    function gateSnapshot(form) {
+      return JSON.stringify([...form.elements]
+        .filter(e => e.name && !e.disabled && !e.dataset.action && e.type !== "submit" && e.type !== "button")
+        .map(e => [e.name, e.type === "checkbox" ? e.checked : e.value]));
+    }
+    function gateSync(form) {
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn) btn.disabled = gateSnapshot(form) === form.dataset.saved;
+    }
+    function gateInit() {
+      document.querySelectorAll("form[data-gate]").forEach(form => {
+        if (form.dataset.saved === undefined) form.dataset.saved = gateSnapshot(form);
+        gateSync(form);
+      });
+    }
     function perfSyncSaves() {
       const p = state.perf;
       if (!p) return;
@@ -3300,12 +3431,19 @@
       stopPerfPolling();
       if (historyRoutes.includes(route)) state.historyLast = route;
       state.route = route;
-      if (settingsPage) state.settingsPage = settingsPage;
+      if (route === "settings" && settingsPage === null) {
+        // The Settings button opens the list on a phone; wide screens reopen the last section.
+        settingsPage = settingsWide() ? (state.settingsPage || "wifi") : "";
+      }
+      if (settingsPage !== null && settingsPage !== undefined) state.settingsPage = settingsPage;
       if (route === "history" && !state.tempHistory.data) state.tempHistory.loading = true;
       if (route === "energy" && !state.energy.data) state.energy.loading = true;
-      const targetHash = route === "settings" ? `#/settings/${state.settingsPage}` : `#/${route}`;
+      const targetHash = route === "settings"
+        ? (state.settingsPage ? `#/settings/${state.settingsPage}` : "#/settings")
+        : `#/${route}`;
       if (location.hash !== targetHash) history.pushState(null, "", targetHash);
       render();
+      if (route === "settings") window.scrollTo(0, 0);
       try {
         if (route === "control" && !Object.keys(state.params).length) await loadParams();
         if (route === "history") await loadHistory();
@@ -3491,6 +3629,8 @@
       }
       if (type === "credentials") {
         await mutate("/api/auth/credentials", jsonOptions("POST", { username: data.get("username"), password: data.get("password") }), "Credentials saved");
+        state.security.username = data.get("username");
+        render();
       }
       if (type === "tls") {
         await mutate("/api/tls/certificate", jsonOptions("POST", { cert: data.get("cert"), key: data.get("key") }), "Certificate saved; restart required");
@@ -4119,8 +4259,12 @@
         }
       }
       if (event.target.closest?.('form[data-form^="perf-"]')) perfSyncSaves();
+      const gated = event.target.closest?.("form[data-gate]");
+      if (gated) gateSync(gated);
     });
     document.addEventListener("change", event => {
+      const gated = event.target.closest?.("form[data-gate]");
+      if (gated) gateSync(gated);
       if (event.target.matches("select.perf-pick-select")) {
         const option = event.target.selectedOptions[0];
         if (option?.dataset.pick) handleAction(option.dataset.pick, option).catch(toastUnlessShown);
@@ -4196,6 +4340,11 @@
       }
       if (event.target.closest?.('form[data-form^="perf-"]')) perfSyncSaves();
     });
+    // <details> folds survive re-renders. "toggle" doesn't bubble, so capture it.
+    document.addEventListener("toggle", event => {
+      const fold = event.target;
+      if (fold.matches?.("details[data-fold]")) state.folds[fold.dataset.fold] = fold.open;
+    }, true);
     async function navigateFromLocation() {
       routeFromHash();
       await navigate(state.route, state.settingsPage);
