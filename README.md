@@ -132,6 +132,12 @@ name that points at it) under **Settings → Security → TLS certificate**, or 
 API only on `https://` (port 443); `http://` answers with a notice telling you to switch,
 apart from `/api/health`. Deleting the certificate restarts it back into HTTP mode.
 
+To go back to HTTP without the dashboard, open **Settings → Web Interface** on the
+touchscreen and tap **Remove certificate**. If HTTPS ever fails to start with the
+installed certificate, the controller falls back to serving the dashboard over HTTP
+(and logs an "HTTPS unavailable" event) instead of leaving it unreachable; restart to
+retry, or remove the certificate.
+
 Home Assistant is unaffected either way: it always uses the dedicated, pinned TLS port
 8443.
 

@@ -2678,7 +2678,9 @@ static esp_err_t stack_watermarks_get_handler(httpd_req_t* req)
 // POST /api/test/wifi-bounce — drop and re-join WiFi (servers must survive)
 // POST /api/test/api-server-kill — stop the web/API servers behind the
 //   supervisor's back. Body (optional): {"fail_starts": N} makes the next N
-//   start attempts fail, to exercise the in-place restart and the reboot path.
+//   start attempts fail, to exercise the in-place restart and the reboot path;
+//   {"fail_https_starts": N} makes the next N port-443 starts fail, so the
+//   restart falls back to HTTP mode while a certificate is installed.
 // Both reply first and act from a short-lived task: the connection being
 // served would otherwise be torn down mid-response (and httpd_stop() cannot
 // run on the server's own task).
@@ -2846,8 +2848,9 @@ static esp_err_t wifi_roam_post_handler(httpd_req_t* req)
 static esp_err_t api_server_kill_post_handler(httpd_req_t* req)
 {
     int fail_starts = 0;
+    int fail_https_starts = 0;
     if (req->content_len > 0) {
-        char buf[64] = {0};
+        char buf[96] = {0};
         if (req->content_len >= sizeof(buf)) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
             return ESP_FAIL;
@@ -2866,8 +2869,14 @@ static esp_err_t api_server_kill_post_handler(httpd_req_t* req)
         if (cJSON_IsNumber(n) && n->valueint > 0) {
             fail_starts = n->valueint > 1000 ? 1000 : n->valueint;
         }
+        const cJSON* h = cJSON_GetObjectItem(body, "fail_https_starts");
+        if (cJSON_IsNumber(h) && h->valueint > 0) {
+            fail_https_starts = h->valueint > 1000 ? 1000 : h->valueint;
+        }
         cJSON_Delete(body);
     }
+    // Only consumed by the next start, after the kill task stops the servers.
+    api_server_test_fail_https_starts(fail_https_starts);
     if (xTaskCreate(api_kill_task, "t_apikill", 4096,
                     (void*)(intptr_t)fail_starts, 5, NULL) != pdPASS) {
         httpd_resp_set_status(req, "500 Internal Server Error");

@@ -14,7 +14,9 @@ The controller runs in one of two modes, chosen at boot:
     redirect, and never the full UI.
 
 Uploading a certificate restarts the controller into HTTPS mode; deleting it
-restarts it into HTTP mode. This module walks that lifecycle and leaves the
+(over the API or from the touchscreen) restarts it into HTTP mode. If port 443
+fails to start while a certificate is installed, the controller falls back to
+serving everything on port 80 rather than leaving no web UI. This module walks that lifecycle and leaves the
 controller in the mode it found it in. If it starts in HTTPS mode, the
 administrator certificate can only be put back when ARCTIC_ADMIN_CERT_FILE
 and ARCTIC_ADMIN_KEY_FILE name its PEM files (CI's "HTTP to HTTPS" step writes
@@ -97,31 +99,43 @@ def _wait_for_mode(mode: str, timeout: float = RESTART_TIMEOUT) -> bool:
     The wrong mode can never satisfy the check: in HTTP mode 443 is closed,
     and in HTTPS mode port 80 has no /api/tls/status route.
     """
-    base = HTTPS_URL if mode == "https" else HTTP_URL
     want_certs = mode == "https"
+    return _poll_tls_status(
+        HTTPS_URL if want_certs else HTTP_URL,
+        lambda s: (s.get("has_certs") is want_certs
+                   and s.get("https_active") is want_certs
+                   and (want_certs or not _https_open())),
+        timeout,
+    ) is not None
+
+
+def _poll_tls_status(base: str, ready, timeout: float) -> dict | None:
+    """Poll ``base``/api/tls/status until ``ready(status)``; the status, or None."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
             status = _tls_status(base)
-            if (status.get("has_certs") is want_certs
-                    and status.get("https_active") is want_certs
-                    and (mode == "https" or not _https_open())):
-                return True
+            if ready(status):
+                return status
         except (requests.RequestException, ValueError):
             pass
         time.sleep(2)
-    return False
+    return None
 
 
 def _follow(device: DeviceClient, mode: str) -> None:
     """Point the shared device client at ``mode`` after a restart into it.
 
     The suite's autouse fixtures talk to the controller through ``device``
-    before every test, so it must use whichever port is serving. A restart
+    before every test, so it must use whichever port is serving. A reboot
     also clears the in-memory test lock.
     """
     device.base_url = HTTPS_URL if mode == "https" else HTTP_URL
-    device.lock(ttl_seconds=900)
+    # An in-place server restart (no reboot) keeps our lock; re-locking would
+    # then be refused as "another session".
+    status = device.check_lock()
+    if not (status.get("locked") and status.get("session_id") == device._session_id):
+        device.lock(ttl_seconds=900)
 
 
 def _upload(base: str, cert_pem: str, key_pem: str) -> requests.Response:
@@ -135,6 +149,27 @@ def _delete(base: str) -> requests.Response:
     return requests.delete(
         f"{base}/api/tls/certificate", headers=_headers(), verify=False, timeout=15,
     )
+
+
+def _kill_servers(device: DeviceClient, base: str, **body) -> None:
+    """Stop the web/API servers; the WiFi supervisor restarts them in place."""
+    r = device.session.post(f"{base}/api/test/api-server-kill", json=body,
+                            verify=False, timeout=10)
+    assert r.status_code == 202, r.text[:300]
+
+
+def _wait_for_https_fallback(timeout: float = RESTART_TIMEOUT) -> dict | None:
+    """Wait for HTTP mode with the certificate still installed (443 failed)."""
+    return _poll_tls_status(
+        HTTP_URL, lambda s: s.get("has_certs") and s.get("https_failed"), timeout)
+
+
+def _open_web_screen(device: DeviceClient) -> None:
+    device.click(tag="settings")
+    assert device.wait_for_screen("settings", timeout=5.0)
+    assert device.wait_for_widget(tag="settings_web", timeout=5.0)
+    device.click(tag="settings_web")
+    assert device.wait_for_screen("web", timeout=5.0)
 
 
 def _generate_self_signed_cert() -> tuple[str, str]:
@@ -329,6 +364,35 @@ class TestHttpsLifecycle:
         r = requests.get(f"{HTTP_URL}/api/health", allow_redirects=False, timeout=10)
         assert r.status_code == 200
 
+    def test_https_start_failure_falls_back_to_http(self, device, http_mode):
+        """A failed port-443 start serves the full UI on port 80, not nothing."""
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        _kill_servers(device, HTTPS_URL, fail_https_starts=1)
+
+        status = _wait_for_https_fallback()
+        assert status is not None, "Controller did not fall back to HTTP"
+        assert status["https_active"] is False
+        device.base_url = HTTP_URL
+        assert not _https_open()
+        r = requests.get(f"{HTTP_URL}/", timeout=10)
+        assert r.status_code == 200
+        assert "text/html" in r.headers.get("Content-Type", "")
+
+        events = _get(HTTP_URL, "/api/events", params={"limit": 50}).json()
+        fallback = [e for e in events["events"]
+                    if e["type"] == "https_fallback"
+                    and e["boot_id"] == events["current_boot_id"]]
+        assert fallback, "no https_fallback event"
+        assert fallback[0]["category"] == "problems"
+        assert fallback[0]["cause"] == "test"
+
+        # The next server restart retries HTTPS with the stored certificate.
+        _kill_servers(device, HTTP_URL)
+        assert _wait_for_mode("https"), "Controller did not return to HTTPS"
+        _follow(device, "https")
+        assert _tls_status(HTTPS_URL)["https_failed"] is False
+
     def test_delete_restarts_into_http_mode(self, device, http_mode):
         if not _https_open():
             pytest.skip("HTTPS not active -- previous test failed")
@@ -341,3 +405,40 @@ class TestHttpsLifecycle:
         _follow(device, "http")
         r = requests.get(f"{HTTP_URL}/", timeout=10)
         assert r.status_code == 200
+
+    def test_reupload_restarts_into_https_mode(self, device, http_mode, self_signed_cert):
+        assert not _https_open(), "Still in HTTPS mode -- previous test failed"
+        cert_pem, key_pem = self_signed_cert
+        r = _upload(HTTP_URL, cert_pem, key_pem)
+        assert r.status_code == 200, r.text[:300]
+        assert _wait_for_mode("https"), "Controller did not restart into HTTPS mode"
+        _follow(device, "https")
+
+    def test_touchscreen_removes_certificate(self, device, http_mode):
+        """Settings -> Web Interface -> Remove certificate restarts into HTTP."""
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        _open_web_screen(device)
+        assert device.wait_for_widget(tag="web_remove_cert", timeout=5.0)
+        cert_status = device.find_widget(tag="web_cert_status")
+        assert cert_status is not None and cert_status.text
+
+        # Cancel leaves the certificate alone.
+        device.click(tag="web_remove_cert")
+        assert device.wait_for_widget(tag="web_remove_cert_cancel", timeout=5.0)
+        device.click(tag="web_remove_cert_cancel")
+        device.wait_until(
+            "the remove-certificate dialog to close",
+            lambda: device.find_widget(tag="web_remove_cert_overlay") is None,
+            timeout=5.0)
+        assert _tls_status(HTTPS_URL)["has_certs"] is True
+
+        device.click(tag="web_remove_cert")
+        assert device.wait_for_widget(tag="web_remove_cert_confirm", timeout=5.0)
+        try:
+            device.click(tag="web_remove_cert_confirm")
+        except requests.RequestException:
+            pass  # the restart can race the click's response
+        assert _wait_for_mode("http"), "Controller did not restart into HTTP mode"
+        _follow(device, "http")
+        assert _tls_status(HTTP_URL)["has_certs"] is False

@@ -84,6 +84,7 @@ static const char* s_event_names[] = {
     "wifi_unstable",
     "wifi_roamed",
     "firmware_updated",
+    "https_fallback",
 };
 
 static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
@@ -383,6 +384,7 @@ event_category_t event_type_category(event_type_t type) {
         case EVENT_WIFI_LOST:
         case EVENT_WIFI_RESTORED:
         case EVENT_WIFI_UNSTABLE:
+        case EVENT_HTTPS_FALLBACK:
             return EVENT_CATEGORY_PROBLEMS;
 
         case EVENT_COMPRESSOR_ON:

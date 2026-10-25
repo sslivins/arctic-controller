@@ -137,6 +137,7 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_WIFI_UNSTABLE:       return STR_EVENT_WIFI_UNSTABLE;
         case EVENT_WIFI_ROAMED:         return STR_EVENT_WIFI_ROAMED;
         case EVENT_FIRMWARE_UPDATED:    return STR_EVENT_FIRMWARE_UPDATED;
+        case EVENT_HTTPS_FALLBACK:      return STR_EVENT_HTTPS_FALLBACK;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -174,6 +175,7 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_WIFI_UNSTABLE:       return LV_SYMBOL_WIFI;
         case EVENT_WIFI_ROAMED:         return LV_SYMBOL_WIFI;
         case EVENT_FIRMWARE_UPDATED:    return LV_SYMBOL_DOWNLOAD;
+        case EVENT_HTTPS_FALLBACK:      return LV_SYMBOL_WARNING;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -204,6 +206,7 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_WEB_SERVER_DOWN:
         case EVENT_WIFI_LOST:
         case EVENT_WIFI_UNSTABLE:
+        case EVENT_HTTPS_FALLBACK:
             return COLOR_WARNING;
 
         case EVENT_DEFROST_START:
@@ -296,7 +299,8 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
                     break;
             }
             break;
-        case EVENT_WEB_SERVER_DOWN: {
+        case EVENT_WEB_SERVER_DOWN:
+        case EVENT_HTTPS_FALLBACK: {
             string_id_t id = STR_EVENT_WEB_SERVER_UNKNOWN;
             switch (p) {
                 case EVENT_WEB_SERVER_CAUSE_NO_MEMORY:    id = STR_EVENT_WEB_SERVER_NO_MEMORY; break;

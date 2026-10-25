@@ -1688,6 +1688,14 @@ paths:
                     type: boolean
                     description: Whether the web UI and API are being served over HTTPS on port 443
                     example: false
+                  https_failed:
+                    type: boolean
+                    description: |
+                      An administrator certificate is installed but HTTPS (port 443)
+                      failed to start, so the web UI and API fell back to plain HTTP on
+                      port 80. Restart the controller to retry, or delete the
+                      certificate. An `https_fallback` event records the cause.
+                    example: false
                   auth_ready:
                     type: boolean
                     description: Whether both web and API key authentication are enabled (required before uploading certificates)
@@ -5593,6 +5601,7 @@ components:
           - wifi_unstable
           - wifi_roamed
           - firmware_updated
+          - https_fallback
           example: power_on
         category:
           type: string
@@ -5619,7 +5628,7 @@ components:
             - `error_appeared` / `error_cleared`: opaque fault site id
             - `watchdog_reset`: `(rom_reset_code << 8) | reason`, where `reason` is the ESP-IDF reset reason and `rom_reset_code` the chip's raw reset code (0 on events recorded before it was kept)
             - `network_recovered`: 0=came back on its own, 1=WiFi reconnect, 2=controller reboot
-            - `web_server_down`: 0=unknown, 1=out of memory, 2=no TLS certificate, 3=other startup failure, 4=injected by a test
+            - `web_server_down` / `https_fallback`: 0=unknown, 1=out of memory, 2=no TLS certificate, 3=other startup failure, 4=injected by a test
             - `web_server_recovered`: 0=servers restarted in place, 1=controller reboot
             - `wifi_lost`: ESP-IDF disconnect reason (`wifi_err_reason_t`)
             - `wifi_restored`: outage length in seconds
@@ -5686,7 +5695,7 @@ components:
           example: wifi_bounce
         cause:
           type: string
-          description: "`web_server_down` only: why the web/API servers were down."
+          description: "`web_server_down`: why the web/API servers were down. `https_fallback`: why HTTPS could not start."
           enum: [unknown, no_memory, no_identity, start_failed, test]
           example: no_memory
         reason:

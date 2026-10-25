@@ -56,6 +56,7 @@ void add_event_details(cJSON* evt, const event_entry_t& e)
             break;
         }
         case EVENT_WEB_SERVER_DOWN:
+        case EVENT_HTTPS_FALLBACK:
             cJSON_AddStringToObject(evt, "cause", event_web_server_cause_key(p));
             break;
         case EVENT_WEB_SERVER_RECOVERED: {
