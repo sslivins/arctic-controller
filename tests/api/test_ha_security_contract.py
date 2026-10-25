@@ -103,7 +103,8 @@ def test_factory_credential_replacement_requires_physical_tls_flow() -> None:
     assert 'strcmp(state.username, "arctic")' not in auth
     assert "strcmp(state.username, AUTH_FACTORY_USERNAME)" not in auth
     assert "setup_pairing_authorize(code)" in api
-    assert "Failed to start mandatory HTTPS server" in api
+    # A certificate that will not serve falls back to HTTP, never to no UI.
+    assert "Failed to start HTTPS server: %s -- falling back to HTTP" in api
     assert "setup_pairing_authorize" in pairing
 
 

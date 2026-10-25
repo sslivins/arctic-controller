@@ -127,11 +127,15 @@ def _follow(device: DeviceClient, mode: str) -> None:
     """Point the shared device client at ``mode`` after a restart into it.
 
     The suite's autouse fixtures talk to the controller through ``device``
-    before every test, so it must use whichever port is serving. A restart
+    before every test, so it must use whichever port is serving. A reboot
     also clears the in-memory test lock.
     """
     device.base_url = HTTPS_URL if mode == "https" else HTTP_URL
-    device.lock(ttl_seconds=900)
+    # An in-place server restart (no reboot) keeps our lock; re-locking would
+    # then be refused as "another session".
+    status = device.check_lock()
+    if not (status.get("locked") and status.get("session_id") == device._session_id):
+        device.lock(ttl_seconds=900)
 
 
 def _upload(base: str, cert_pem: str, key_pem: str) -> requests.Response:
