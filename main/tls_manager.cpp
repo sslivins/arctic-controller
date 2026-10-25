@@ -482,8 +482,13 @@ bool tls_mgr_store_certs(const char* cert, size_t cert_len,
         return false;
     }
 
-    nvs_commit(nvs);
+    // Only report success (and so reboot into HTTPS) once both are on flash.
+    err = nvs_commit(nvs);
     nvs_close(nvs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit certs: %s", esp_err_to_name(err));
+        return false;
+    }
 
     // Update in-memory state
     memcpy(state.cert, cert, cert_len);
@@ -506,10 +511,19 @@ bool tls_mgr_clear_certs(void)
         return false;
     }
 
-    nvs_erase_key(nvs, NVS_KEY_CERT);
-    nvs_erase_key(nvs, NVS_KEY_KEY);
-    nvs_commit(nvs);
+    // Not-found is fine: the goal is that neither key is left behind.
+    esp_err_t cert_err = nvs_erase_key(nvs, NVS_KEY_CERT);
+    esp_err_t key_err = nvs_erase_key(nvs, NVS_KEY_KEY);
+    err = nvs_commit(nvs);
     nvs_close(nvs);
+    if (cert_err == ESP_ERR_NVS_NOT_FOUND) cert_err = ESP_OK;
+    if (key_err == ESP_ERR_NVS_NOT_FOUND) key_err = ESP_OK;
+    if (cert_err != ESP_OK || key_err != ESP_OK || err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to clear certs (cert=%s key=%s commit=%s)",
+                 esp_err_to_name(cert_err), esp_err_to_name(key_err),
+                 esp_err_to_name(err));
+        return false;
+    }
 
     state.has_certs = false;
     state.cert_len = 0;

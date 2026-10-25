@@ -17,6 +17,8 @@ typedef enum {
     API_START_ERR_NO_IDENTITY,  // no TLS certificate/identity for HTTPS
     API_START_ERR_FAILED,       // any other startup failure
     API_START_ERR_INJECTED,     // test-only injected failure
+    API_START_ERR_BAD_CERT,     // the administrator certificate/key will not load
+    API_START_ERR_UNRESPONSIVE, // running, but not answering the self-probe
 } api_start_error_t;
 
 /**
@@ -38,7 +40,10 @@ bool api_server_init_mdns(void);
  * Should be called after WiFi is connected. Serialized with stop/ensure by an
  * internal lock; a partially started server is torn down and restarted.
  * 
- * @return true if the mandatory servers (HTTP 80 + HTTPS 443) are running
+ * @return true if the server carrying the web UI and API is running (443
+ *         in HTTPS mode, 80 in HTTP mode). Port 80 in HTTPS mode and the
+ *         Home Assistant server (8443) are secondary: if they fail the start
+ *         still succeeds and api_server_ensure_running() repairs them later.
  */
 bool api_server_start(void);
 
@@ -58,23 +63,49 @@ void api_server_shutdown(void);
 bool api_server_is_shut_down(void);
 
 /**
- * @brief Check if the mandatory servers are fully started (routes included)
+ * @brief The server carrying the web UI and API is fully started (routes
+ *        included): 443 in HTTPS mode, 80 in HTTP mode.
  */
 bool api_server_is_running(void);
 
 /**
- * @brief Mandatory servers running AND the Home Assistant server (8443) is
- *        up whenever a device identity exists to serve it.
+ * @brief Running AND every secondary server is up: port 80 (health notice)
+ *        in HTTPS mode, and the Home Assistant server (8443) whenever a
+ *        device identity exists to serve it.
  */
 bool api_server_is_healthy(void);
 
 /**
- * @brief Restart the servers if they are not healthy.
+ * @brief Start the servers if the web UI/API server is not running, or
+ *        restart only the missing secondary servers (8443, port 80 in HTTPS
+ *        mode) without touching the running web UI/API server.
  *
  * No-op when already healthy or after api_server_shutdown().
- * @return true if healthy afterwards
+ * @return true if the web UI/API server is running afterwards
  */
 bool api_server_ensure_running(void);
+
+/**
+ * @brief Connect to the running web UI/API server over loopback and check
+ *        that GET /api/health answers 200 (TLS handshake included in HTTPS
+ *        mode). Blocks for up to ~16 s (8 s each to connect and to read);
+ *        must not be called from an httpd task.
+ *
+ * @return true if the server answered, or if it is not running (nothing to
+ *         probe -- api_server_is_running() covers that case)
+ */
+bool api_server_probe(void);
+
+/**
+ * @brief Stop serving HTTPS for the rest of this boot and fall back to HTTP
+ *        on port 80, recording @p cause. Stops the servers when HTTPS is
+ *        currently running; the caller restarts them with
+ *        api_server_ensure_running().
+ */
+void api_server_disable_https(api_start_error_t cause);
+
+/** @brief True while the web UI/API is served over HTTPS (port 443). */
+bool api_server_https_active(void);
 
 /** @brief Cause of the most recent failed or degraded start. */
 api_start_error_t api_server_last_start_error(void);
@@ -91,6 +122,20 @@ void api_server_test_fail_starts(int count);
  *        HTTP mode while an administrator certificate is installed.
  */
 void api_server_test_fail_https_starts(int count);
+
+/**
+ * @brief Test hooks (CONFIG_TEST_ENDPOINTS builds only). Make the next
+ *        @p count self-probes fail, the next @p count certificate checks
+ *        reject the stored pair, or the next @p count Home Assistant (8443)
+ *        or port 80 (HTTPS mode) starts fail.
+ */
+void api_server_test_fail_probes(int count);
+void api_server_test_fail_cert_checks(int count);
+void api_server_test_fail_integration_starts(int count);
+void api_server_test_fail_http_starts(int count);
+
+/** @brief Test hook: undo api_server_disable_https() (servers keep running). */
+void api_server_test_reenable_https(void);
 
 /**
  * @brief True when an administrator certificate is installed but HTTPS failed

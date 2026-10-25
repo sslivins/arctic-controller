@@ -77,7 +77,7 @@ def test_routes_registered_and_handler_budget_bumped() -> None:
     # and those routes answer 404 (see the slot-exhaustion fix). Assert a floor
     # with headroom rather than pinning an exact literal, so a legitimate bump
     # does not break this test while a regression below the safe floor does.
-    match = re.search(r"const int uri_handlers = (\d+);", source)
+    match = re.search(r"constexpr int API_URI_HANDLERS = (\d+);", source)
     assert match, "uri_handlers declaration not found in api_server.cpp"
     uri_handlers = int(match.group(1))
     assert uri_handlers >= 130, (

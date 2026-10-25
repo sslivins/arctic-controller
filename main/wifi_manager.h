@@ -233,9 +233,27 @@ void wifi_mgr_request_api_start(void);
  *
  * Used by the WiFi supervisor's safety net. All starts are executed by the
  * single API service task, so callers never race each other.
- * @return true if the servers are healthy afterwards
+ * @return true if the web UI/API server is running afterwards (a missing
+ *         secondary server -- 8443, or port 80 in HTTPS mode -- is retried
+ *         but does not make this false)
  */
 bool wifi_mgr_api_ensure_running(uint32_t timeout_ms);
+
+/**
+ * @brief Stop the web/API servers and start them again, on the API service
+ *        task, waiting up to @p timeout_ms. With @p disable_https, HTTPS is
+ *        turned off for the rest of this boot first (see
+ *        api_server_disable_https), recording @p cause.
+ * @return true if the web UI/API server is running afterwards
+ */
+bool wifi_mgr_api_restart(bool disable_https, int cause, uint32_t timeout_ms);
+
+/**
+ * @brief Run api_server_probe() on the API service task, waiting up to
+ *        @p timeout_ms. A probe that does not finish in time (the task is
+ *        stuck, e.g. in a hung server stop) counts as a failure.
+ */
+bool wifi_mgr_api_probe(uint32_t timeout_ms);
 
 #ifdef __cplusplus
 }

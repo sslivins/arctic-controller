@@ -455,6 +455,8 @@ const char* event_web_server_cause_key(uint32_t payload) {
         case EVENT_WEB_SERVER_CAUSE_NO_IDENTITY:  return "no_identity";
         case EVENT_WEB_SERVER_CAUSE_START_FAILED: return "start_failed";
         case EVENT_WEB_SERVER_CAUSE_TEST:         return "test";
+        case EVENT_WEB_SERVER_CAUSE_BAD_CERT:     return "bad_certificate";
+        case EVENT_WEB_SERVER_CAUSE_UNRESPONSIVE: return "unresponsive";
         default:                                  return "unknown";
     }
 }

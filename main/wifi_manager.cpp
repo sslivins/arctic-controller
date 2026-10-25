@@ -81,6 +81,14 @@ static TaskHandle_t s_api_svc_task = NULL;
 static std::atomic<uint32_t> s_api_req_gen{0};
 static std::atomic<uint32_t> s_api_done_gen{0};
 static std::atomic<bool> s_api_last_ok{false};
+// A start request may first stop the servers (restart) and/or disable HTTPS.
+static constexpr uint32_t API_REQ_RESTART = 1u << 0;
+static constexpr uint32_t API_REQ_DISABLE_HTTPS = 1u << 1;
+static std::atomic<uint32_t> s_api_req_flags{0};
+static std::atomic<int> s_api_disable_cause{0};
+static std::atomic<uint32_t> s_probe_req_gen{0};
+static std::atomic<uint32_t> s_probe_done_gen{0};
+static std::atomic<bool> s_probe_last_ok{true};
 
 // Forward declarations
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
@@ -97,25 +105,44 @@ static void notify_state_change(wifi_mgr_state_t new_state);
 // the httpd tasks and registers routes (no NVS or flash access, measured peak
 // ~6 KB), so it must not take a large INTERNAL block -- that is exactly what
 // the httpd stacks it is about to create need.
+//
+// It also runs the supervisor's self-probe, so a probe never overlaps a start
+// or stop, and a task stuck in a hung server stop makes the probe time out
+// (a failure) instead of passing.
 static void api_service_task(void* arg)
 {
     (void)arg;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         const uint32_t gen = s_api_req_gen.load();
-        bool ok = false;
-        if (wifi_state.current_ip[0] != '\0' && !api_server_is_shut_down()) {
-            // mDNS is best effort: a failure must never keep the API down.
-            if (!api_server_init_mdns()) {
-                ESP_LOGW(TAG, "mDNS unavailable; starting API server anyway");
+        if (gen != s_api_done_gen.load()) {
+            const uint32_t flags = s_api_req_flags.exchange(0);
+            bool ok = false;
+            if (wifi_state.current_ip[0] != '\0' && !api_server_is_shut_down()) {
+                if (flags & API_REQ_DISABLE_HTTPS) {
+                    api_server_disable_https(
+                        (api_start_error_t)s_api_disable_cause.load());
+                }
+                if (flags & API_REQ_RESTART) {
+                    api_server_stop();
+                }
+                // mDNS is best effort: a failure must never keep the API down.
+                if (!api_server_init_mdns()) {
+                    ESP_LOGW(TAG, "mDNS unavailable; starting API server anyway");
+                }
+                ok = api_server_ensure_running();
+                if (!ok) {
+                    ESP_LOGE(TAG, "API server startup failed");
+                }
             }
-            ok = api_server_ensure_running();
-            if (!ok) {
-                ESP_LOGE(TAG, "API server startup failed");
-            }
+            s_api_last_ok.store(ok);
+            s_api_done_gen.store(gen);
         }
-        s_api_last_ok.store(ok);
-        s_api_done_gen.store(gen);
+        const uint32_t probe_gen = s_probe_req_gen.load();
+        if (probe_gen != s_probe_done_gen.load()) {
+            s_probe_last_ok.store(api_server_probe());
+            s_probe_done_gen.store(probe_gen);
+        }
     }
 }
 
@@ -128,6 +155,19 @@ void wifi_mgr_request_api_start(void)
     xTaskNotifyGive(s_api_svc_task);
 }
 
+static bool wait_api_gen(const std::atomic<uint32_t>& done, uint32_t gen,
+                         const std::atomic<bool>& result, uint32_t timeout_ms)
+{
+    const TickType_t step = pdMS_TO_TICKS(100);
+    for (uint32_t waited = 0; waited < timeout_ms; waited += 100) {
+        if ((int32_t)(done.load() - gen) >= 0) {
+            return result.load();
+        }
+        vTaskDelay(step);
+    }
+    return false;
+}
+
 bool wifi_mgr_api_ensure_running(uint32_t timeout_ms)
 {
     if (s_api_svc_task == NULL) {
@@ -135,14 +175,33 @@ bool wifi_mgr_api_ensure_running(uint32_t timeout_ms)
     }
     const uint32_t gen = s_api_req_gen.fetch_add(1) + 1;
     xTaskNotifyGive(s_api_svc_task);
-    const TickType_t step = pdMS_TO_TICKS(100);
-    for (uint32_t waited = 0; waited < timeout_ms; waited += 100) {
-        if ((int32_t)(s_api_done_gen.load() - gen) >= 0) {
-            return s_api_last_ok.load();
-        }
-        vTaskDelay(step);
+    return wait_api_gen(s_api_done_gen, gen, s_api_last_ok, timeout_ms);
+}
+
+bool wifi_mgr_api_restart(bool disable_https, int cause, uint32_t timeout_ms)
+{
+    if (s_api_svc_task == NULL) {
+        return false;
     }
-    return false;
+    uint32_t flags = API_REQ_RESTART;
+    if (disable_https) {
+        s_api_disable_cause.store(cause);
+        flags |= API_REQ_DISABLE_HTTPS;
+    }
+    s_api_req_flags.fetch_or(flags);
+    const uint32_t gen = s_api_req_gen.fetch_add(1) + 1;
+    xTaskNotifyGive(s_api_svc_task);
+    return wait_api_gen(s_api_done_gen, gen, s_api_last_ok, timeout_ms);
+}
+
+bool wifi_mgr_api_probe(uint32_t timeout_ms)
+{
+    if (s_api_svc_task == NULL) {
+        return true;  // nothing can (re)start the servers either
+    }
+    const uint32_t gen = s_probe_req_gen.fetch_add(1) + 1;
+    xTaskNotifyGive(s_api_svc_task);
+    return wait_api_gen(s_probe_done_gen, gen, s_probe_last_ok, timeout_ms);
 }
 
 static void start_api_service_task(void)

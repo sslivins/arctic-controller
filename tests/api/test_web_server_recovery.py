@@ -10,7 +10,11 @@ These tests drive the real recovery paths through test-firmware hooks:
     running across it (no reboot, HTTPS and the HA server reachable).
   - POST /api/test/api-server-kill stops the servers behind the supervisor's
     back, optionally making the next N start attempts fail. The supervisor
-    must restart them in place, or reboot when restarts keep failing.
+    must restart them in place, or reboot when restarts keep failing. The
+    same hook can make the supervisor's loopback /api/health self-probe fail
+    (a server that is running but not answering) or make only the Home
+    Assistant server (8443) fail to start, which must be repaired without
+    touching the working web UI.
 
 They are destructive (the device is offline for up to a few minutes); the
 reboot case is last in this module.
@@ -38,6 +42,10 @@ HA_URL = os.environ.get(
 # after 90 s of failed restarts. Generous slack on top.
 RESTART_TIMEOUT_S = 90
 REBOOT_TIMEOUT_S = 240
+# Self-probe every 60 s; three failures 15 s apart before the restart.
+UNRESPONSIVE_TIMEOUT_S = 150
+# 8443 is retried every 60 s once the web UI is back.
+SECONDARY_REPAIR_TIMEOUT_S = 150
 
 
 def _session(paced: bool) -> requests.Session:
@@ -172,6 +180,56 @@ def test_killed_servers_are_restarted_in_place():
     assert up[0]["recovery"] == "restarted"
     assert up[0]["uptime_ms"] >= down[0]["uptime_ms"]
     assert _wait_for(_ha_reachable, "the HA server (8443) after the restart", 30)
+
+
+def _wait_for_recovered(boot_id: int, since: int, timeout: float):
+    def recovered():
+        data = _events()
+        if not data:
+            return None
+        evts = _web_server_events(data, boot_id, since)
+        if any(e["type"] == "web_server_recovered" for e in evts):
+            return data, evts
+        return None
+    return _wait_for(recovered, "web_server_recovered", timeout)
+
+
+def test_unresponsive_servers_are_restarted():
+    """Running but not answering its own /api/health -> restarted in place."""
+    boot_id, since = _snapshot()
+
+    r = _post("/api/test/api-server-kill", json={"fail_probes": 3, "stop": False})
+    assert r.status_code == 202, r.text
+
+    data, evts = _wait_for_recovered(boot_id, since, UNRESPONSIVE_TIMEOUT_S)
+    assert data["current_boot_id"] == boot_id, "an in-place restart must not reboot"
+    down = [e for e in evts if e["type"] == "web_server_down"]
+    up = [e for e in evts if e["type"] == "web_server_recovered"]
+    assert len(down) == 1, evts
+    assert down[0]["cause"] == "unresponsive"
+    assert up[0]["recovery"] == "restarted"
+    assert _wait_for(_ha_reachable, "the HA server (8443) after the restart", 30)
+
+
+def test_ha_server_failure_does_not_disturb_the_web_ui():
+    """8443 failing to start is repaired on its own, without another web UI
+    restart (or a reboot)."""
+    boot_id, since = _snapshot()
+
+    # Kill everything; the restart brings the web UI back but 8443 fails, and
+    # so does the first separate repair of 8443.
+    r = _post("/api/test/api-server-kill", json={"fail_integration_starts": 2})
+    assert r.status_code == 202, r.text
+    _wait_for(lambda: _events(paced=False) is None, "the servers to stop", 15)
+    _wait_for_recovered(boot_id, since, RESTART_TIMEOUT_S)
+
+    assert _wait_for(_ha_reachable, "the HA server (8443) to be repaired",
+                     SECONDARY_REPAIR_TIMEOUT_S)
+    data = _events()
+    assert data and data["current_boot_id"] == boot_id, "must not reboot"
+    evts = _web_server_events(data, boot_id, since)
+    assert [e["type"] for e in evts].count("web_server_down") == 1, evts
+    assert [e["type"] for e in evts].count("web_server_recovered") == 1, evts
 
 
 def test_servers_that_will_not_restart_trigger_a_reboot():

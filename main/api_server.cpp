@@ -60,10 +60,13 @@
 #include "jpeg_screenshot.h"
 #include <esp_http_server.h>
 #include <esp_https_server.h>
+#include <esp_tls.h>
+#include <mbedtls/ssl.h>
 #include <esp_log.h>
 #include <lwip/sockets.h>
 #include <mdns.h>
 #include <cJSON.h>
+#include <atomic>
 #include <ctype.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -119,10 +122,35 @@ static bool s_https_mode = false;
 static bool s_https_fallback = false;
 static bool s_https_fallback_logged = false;  // event recorded once per boot
 static httpd_handle_t server_integration = NULL;  // HA HTTPS/WSS (port 8443)
+// Set when HTTPS proved unusable for this boot (the certificate/key pair will
+// not load, or 443 stopped answering the self-probe): every later start goes
+// straight to HTTP mode instead of retrying a server that cannot serve the
+// web UI. Cleared only by a reboot (installing or removing a certificate
+// reboots anyway).
+static std::atomic<bool> s_https_disabled{false};
+static api_start_error_t s_https_disabled_cause = API_START_ERR_NONE;
 #ifdef CONFIG_TEST_ENDPOINTS
 static httpd_handle_t websocket_test_server = NULL;  // WS feasibility (port 81)
-static int s_test_fail_starts = 0;
-static int s_test_fail_https_starts = 0;
+// Set from test handlers without the lifecycle lock (an httpd handler must
+// not wait on a lock held by a start/stop that is waiting on that handler).
+static std::atomic<int> s_test_fail_starts{0};
+static std::atomic<int> s_test_fail_https_starts{0};
+static std::atomic<int> s_test_fail_http_starts{0};
+static std::atomic<int> s_test_fail_integration_starts{0};
+static std::atomic<int> s_test_fail_cert_checks{0};
+static std::atomic<int> s_test_fail_probes{0};
+
+// Takes one queued injected failure, if any.
+static bool take_injected(std::atomic<int>& counter)
+{
+    int n = counter.load();
+    while (n > 0) {
+        if (counter.compare_exchange_weak(n, n - 1)) {
+            return true;
+        }
+    }
+    return false;
+}
 #endif
 
 // Server lifecycle. Every start/stop goes through one recursive lock (the
@@ -533,28 +561,349 @@ bool api_server_start(void)
         api_server_stop();
     }
 #ifdef CONFIG_TEST_ENDPOINTS
-    if (s_test_fail_starts > 0) {
-        s_test_fail_starts--;
+    if (take_injected(s_test_fail_starts)) {
         s_last_start_error = API_START_ERR_INJECTED;
         ESP_LOGE(TAG, "Server start failed (test injection, %d more queued)",
-                 s_test_fail_starts);
+                 s_test_fail_starts.load());
         return false;
     }
 #endif
     s_last_start_error = API_START_ERR_FAILED;
     if (!api_server_start_locked()) {
-        if (server != NULL || server_ssl != NULL) {
+        if (server != NULL || server_ssl != NULL || server_integration != NULL) {
             api_server_stop();
         }
         return false;
     }
-    if (server_integration == NULL && tls_mgr_has_identity()) {
-        // Degraded: keep the cause the 8443 start recorded.
-        ESP_LOGW(TAG, "Started without the Home Assistant server (8443)");
+    s_started = true;
+    if (!api_server_is_healthy()) {
+        // Degraded: keep the cause the failed secondary start recorded.
+        ESP_LOGW(TAG, "Started without %s%s",
+                 server_integration == NULL ? "the Home Assistant server (8443) " : "",
+                 s_https_mode && server == NULL ? "port 80 " : "");
     } else {
         s_last_start_error = API_START_ERR_NONE;
     }
-    s_started = true;
+    return true;
+}
+
+// ---- Settings shared by the web UI/API servers (443 and 80) ----
+//
+// URI-handler table size for the server that carries the web UI and API
+// (port 443 in HTTPS mode, port 80 in HTTP mode). This must exceed the
+// total number of handlers registered on a single server. The worst case
+// is the CONFIG_TEST_ENDPOINTS build, where the production handlers are
+// joined by the /api/test/* instrumentation handlers (see
+// test_endpoints_register); together they reached 142 when the energy
+// routes landed. Each slot costs only a pointer, so keep ample headroom:
+// an overflow makes httpd_register_uri_handler return "no slots left" and
+// the affected route then answers 404. (Production builds register far
+// fewer handlers, so they are unaffected either way.)
+static constexpr int API_URI_HANDLERS = 180;
+static constexpr int API_STACK_SIZE   = 16384;  // Default task stack
+static constexpr int API_MAX_HEADERS  = 16;
+static constexpr int API_RECV_TIMEOUT = 10;     // seconds
+
+static void log_internal_heap(int needed_stack)
+{
+    // ESP_ERR_HTTPD_TASK means the server task stack allocation failed. That
+    // needs a CONTIGUOUS block, so report the largest free block, not just
+    // the total.
+    ESP_LOGE(TAG,
+             "  internal heap: free=%u largest_block=%u (needed %d for stack)",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             needed_stack);
+}
+
+// Starts port 80: the whole web UI and API in HTTP mode (@p full; routes are
+// registered by the caller), or in HTTPS mode just /api/health plus the
+// "HTTPS required" 404 notice. In HTTPS mode port 80 is secondary: if it
+// fails the web UI stays up on 443 and api_server_ensure_running() retries it.
+static esp_err_t start_http_locked(bool full)
+{
+    ESP_LOGI(TAG, "Starting HTTP server on port 80 (%s)...",
+             full ? "web UI and API" : "health only");
+
+    // Health-only, port 80 serves exactly one route (/api/health) plus the
+    // "HTTPS required" 404 notice -- in test builds too, since test endpoints
+    // are registered on the HTTPS server. It therefore needs neither the full
+    // handler table nor more than two sockets.
+    //
+    // The handler table is trimmed, but the stack deliberately is NOT:
+    // esp_http_server gives every server task the name "httpd" (httpd_config_t
+    // has no task_name field, still true in 6.1), so
+    // tests/api/test_stack_watermark_budget.py collapses all four servers into
+    // a single "httpd" key and reports the smallest headroom among them.
+    // Right-sizing this one silently retargets the guard at port 80 and stops
+    // it protecting the servers that actually run handlers. The RAM saved is
+    // not needed now that the real internal-RAM shortfall (LVGL being placed
+    // in IRAM) has been fixed.
+    //
+    // httpd task stacks must live in internal RAM: handlers write NVS, and a
+    // PSRAM stack trips esp_task_stack_is_sane_cache_disabled() while the
+    // flash cache is disabled.
+    //
+    // Port 80 carries the whole web UI in HTTP mode, where browsers open up to
+    // ~6 parallel connections; it gets the same 7 sockets as port 443 (see the
+    // note there). Only one of 80/443 is full-size at a time, so the LWIP
+    // socket budget is unchanged.
+    httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
+    http_config.lru_purge_enable   = true;
+    http_config.uri_match_fn       = httpd_uri_match_wildcard;
+    http_config.max_uri_handlers   = full ? API_URI_HANDLERS : 8;
+    http_config.stack_size         = API_STACK_SIZE;
+    http_config.max_resp_headers   = API_MAX_HEADERS;
+    http_config.recv_wait_timeout  = API_RECV_TIMEOUT;
+    http_config.max_open_sockets   = full ? 7 : 2;
+    // TCP keepalive reaps dead ESTABLISHED sockets left behind when a
+    // client vanishes mid-request (e.g. slow TLS clients that abandon a
+    // handshake, or the test suite's connection storm). Without this the
+    // stuck PCBs are never freed on the single-threaded server, leaking
+    // heap + sockets until the whole network stack wedges (associated but
+    // unreachable, no watchdog). ~10s idle + 3x5s probes => dead peers are
+    // dropped in ~25s. Harmless to live-but-idle clients: their TCP stack
+    // auto-ACKs the keepalive probes.
+    http_config.keep_alive_enable   = true;
+    http_config.keep_alive_idle     = 10;
+    http_config.keep_alive_interval = 5;
+    http_config.keep_alive_count    = 3;
+
+    esp_err_t ret;
+#ifdef CONFIG_TEST_ENDPOINTS
+    if (!full && take_injected(s_test_fail_http_starts)) {
+        ESP_LOGE(TAG, "HTTP start failed (test injection)");
+        server = NULL;
+        return ESP_ERR_HTTPD_TASK;
+    }
+#endif
+    ret = httpd_start(&server, &http_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
+        log_internal_heap(API_STACK_SIZE);
+        server = NULL;
+        return ret;
+    }
+    if (full) {
+        return ESP_OK;
+    }
+
+    // Health-only routes. The 404 notice does NOT redirect: once an
+    // administrator has installed a certificate, port 80 must stay a dead end
+    // so secret-bearing requests are never normalised onto plaintext HTTP (see
+    // tests/api/test_ha_security_contract.py). Parser-level 400s answer in
+    // JSON on every server; see http_bad_request_handler.
+    httpd_uri_t health_uri = {
+        .uri = "/api/health",
+        .method = HTTP_GET,
+        .handler = health_get_handler,
+        .user_ctx = NULL
+    };
+    ret = httpd_register_uri_handler(server, &health_uri);
+    if (ret == ESP_OK) {
+        ret = httpd_register_err_handler(server, HTTPD_404_NOT_FOUND,
+                                         http_https_required_handler);
+    }
+    if (ret == ESP_OK) {
+        ret = httpd_register_err_handler(server, HTTPD_400_BAD_REQUEST,
+                                         http_bad_request_handler);
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set up port 80 routes: %s", esp_err_to_name(ret));
+        httpd_stop(server);
+        server = NULL;
+    }
+    return ret;
+}
+
+static void stop_integration_locked(void)
+{
+    if (server_integration != NULL) {
+        ha_websocket_stop();
+        ESP_LOGI(TAG, "Stopping integration HTTPS server...");
+        httpd_ssl_stop(server_integration);
+        server_integration = NULL;
+    }
+}
+
+// Starts the Home Assistant server (8443) with all of its routes. It is
+// secondary to the web UI: any failure here stops only 8443 (recording the
+// cause in s_last_start_error) and api_server_ensure_running() retries it
+// without touching the web UI/API servers.
+static bool start_integration_locked(void)
+{
+    if (!tls_mgr_has_identity()) {
+        ESP_LOGE(TAG, "Home Assistant REST disabled: integration HTTPS "
+                 "identity is unavailable");
+        return false;
+    }
+    size_t cert_len = 0;
+    size_t key_len = 0;
+    const uint8_t* cert = tls_mgr_get_identity_cert(&cert_len);
+    const uint8_t* key = tls_mgr_get_identity_key(&key_len);
+
+    httpd_ssl_config_t integration_config = HTTPD_SSL_CONFIG_DEFAULT();
+    integration_config.port_secure = 8443;
+    integration_config.httpd.ctrl_port = 32771;
+    // 8 core HA handlers (pair, capabilities, state, events/WSS, power,
+    // mode, setpoint + WSS worker) plus the 3 OTA control endpoints the
+    // integration drives (status, releases, github) plus headroom.
+    integration_config.httpd.max_uri_handlers = 14;
+    integration_config.httpd.max_open_sockets = 5;
+    integration_config.httpd.stack_size = 12288;
+    // Reject surplus connections instead of evicting established WSS
+    // clients. Three WSS slots leave capacity for REST reconciliation
+    // while another TLS connection is still closing or handshaking.
+    integration_config.httpd.lru_purge_enable = false;
+    integration_config.httpd.recv_wait_timeout = 10;
+    // Match recv_wait_timeout. A very short send timeout truncates HA REST
+    // and WSS responses (empty/partial body) whenever the single-threaded
+    // server is briefly busy, and tears down the TLS connection — do not
+    // shorten it.
+    integration_config.httpd.send_wait_timeout = 10;
+    // TCP keepalive: reap dead WSS/REST sockets (see port 80 note). Extra
+    // important here since lru_purge is off — dead ESTABLISHED sockets are
+    // never evicted, so keepalive is the only thing that frees them.
+    integration_config.httpd.keep_alive_enable   = true;
+    integration_config.httpd.keep_alive_idle     = 10;
+    integration_config.httpd.keep_alive_interval = 5;
+    integration_config.httpd.keep_alive_count    = 3;
+    integration_config.servercert = cert;
+    integration_config.servercert_len = cert_len;
+    integration_config.prvtkey_pem = key;
+    integration_config.prvtkey_len = key_len;
+
+    esp_err_t ret;
+#ifdef CONFIG_TEST_ENDPOINTS
+    if (take_injected(s_test_fail_integration_starts)) {
+        ESP_LOGE(TAG, "Integration HTTPS start failed (test injection)");
+        server_integration = NULL;
+        s_last_start_error = API_START_ERR_INJECTED;
+        return false;
+    }
+#endif
+    ret = httpd_ssl_start(&server_integration, &integration_config);
+    if (ret != ESP_OK) {
+        server_integration = NULL;
+        ESP_LOGE(TAG,
+                 "Failed to start integration HTTPS server: %s "
+                 "(the web UI and API are unaffected)",
+                 esp_err_to_name(ret));
+        log_internal_heap(integration_config.httpd.stack_size);
+        s_last_start_error = start_error_from(ret);
+        return false;
+    }
+    ESP_LOGI(TAG, "Integration HTTPS server started on port 8443");
+
+    // The OTA control endpoints are here because the Home Assistant
+    // integration connects ONLY to port 8443 with its integration token, so
+    // the firmware "update" entity's check/status/install calls land here,
+    // not on the main server where the OTA routes also live. These handlers
+    // accept the integration token via check_api_or_integration_auth. The raw
+    // upload endpoint (/api/ota/update) is intentionally NOT exposed here.
+    const httpd_uri_t routes[] = {
+        {.uri = "/api/v1/pair", .method = HTTP_POST,
+         .handler = ha_pair_post_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/capabilities", .method = HTTP_GET,
+         .handler = ha_capabilities_get_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/state", .method = HTTP_GET,
+         .handler = ha_state_get_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/diagnostics", .method = HTTP_GET,
+         .handler = ha_diagnostics_get_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/control/restart", .method = HTTP_POST,
+         .handler = ha_restart_post_handler, .user_ctx = NULL},
+        {
+            .uri = "/api/v1/events",
+            .method = HTTP_GET,
+            .handler = ha_websocket_handler,
+            .user_ctx = NULL,
+            .is_websocket = true,
+            .handle_ws_control_frames = true,
+            .supported_subprotocol = NULL,
+            .ws_pre_handshake_cb = ha_websocket_pre_handshake,
+            .ws_post_handshake_cb = ha_websocket_post_handshake,
+        },
+        {.uri = "/api/ota/status", .method = HTTP_GET,
+         .handler = ota_status_get_handler, .user_ctx = NULL},
+        {.uri = "/api/ota/releases", .method = HTTP_GET,
+         .handler = ota_releases_get_handler, .user_ctx = NULL},
+        {.uri = "/api/ota/github", .method = HTTP_POST,
+         .handler = ota_github_update_post_handler, .user_ctx = NULL},
+    };
+    for (const httpd_uri_t& route : routes) {
+        ret = httpd_register_uri_handler(server_integration, &route);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA route %s: %s", route.uri,
+                     esp_err_to_name(ret));
+            s_last_start_error = API_START_ERR_FAILED;
+            stop_integration_locked();
+            return false;
+        }
+    }
+
+    if (!ha_websocket_start(server_integration)) {
+        ESP_LOGE(TAG, "Home Assistant WebSocket push unavailable");
+        s_last_start_error = API_START_ERR_FAILED;
+        stop_integration_locked();
+        return false;
+    }
+
+    // The control routes report their result over the WebSocket push.
+    const httpd_uri_t control_routes[] = {
+        {.uri = "/api/v1/control/power", .method = HTTP_PUT,
+         .handler = ha_power_put_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/control/mode", .method = HTTP_PUT,
+         .handler = ha_mode_put_handler, .user_ctx = NULL},
+        {.uri = "/api/v1/control/setpoint", .method = HTTP_PUT,
+         .handler = ha_setpoint_put_handler, .user_ctx = NULL},
+    };
+    for (const httpd_uri_t& route : control_routes) {
+        ret = httpd_register_uri_handler(server_integration, &route);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register HA route %s: %s", route.uri,
+                     esp_err_to_name(ret));
+            s_last_start_error = API_START_ERR_FAILED;
+            stop_integration_locked();
+            return false;
+        }
+    }
+
+    // See https_api_method_not_allowed_handler (issue #234) and
+    // http_bad_request_handler.
+    esp_err_t rerr = httpd_register_err_handler(
+        server_integration, HTTPD_405_METHOD_NOT_ALLOWED,
+        https_api_method_not_allowed_handler);
+    if (rerr != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to register HA 405 handler: %s",
+                 esp_err_to_name(rerr));
+    }
+    rerr = httpd_register_err_handler(
+        server_integration, HTTPD_400_BAD_REQUEST, http_bad_request_handler);
+    if (rerr != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to register HA 400 handler: %s",
+                 esp_err_to_name(rerr));
+    }
+
+    ESP_LOGI(TAG, "Home Assistant REST foundation enabled");
+    if (s_mdns_ready && !s_mdns_ha_added) {
+        mdns_txt_item_t integration_txt[] = {
+            {"device", "arctic-controller"},
+            {"id", arctic::ha::deviceId()},
+            {"version", "1"},
+            {"tls", "1"},
+            {"push", "1"},
+        };
+        ret = mdns_service_add(
+            "Arctic Home Assistant", "_arctic", "_tcp", 8443,
+            integration_txt,
+            sizeof(integration_txt) / sizeof(integration_txt[0]));
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "HA mDNS service add failed: %s",
+                     esp_err_to_name(ret));
+        } else {
+            s_mdns_ha_added = true;
+        }
+    }
     return true;
 }
 
@@ -566,21 +915,6 @@ static bool api_server_start_locked(void)
         return false;
     }
 
-    // URI-handler table size for the server that carries the web UI and API
-    // (port 443 in HTTPS mode, port 80 in HTTP mode). This must exceed the
-    // total number of handlers registered on a single server. The worst case
-    // is the CONFIG_TEST_ENDPOINTS build, where the production handlers are
-    // joined by the /api/test/* instrumentation handlers (see
-    // test_endpoints_register); together they reached 142 when the energy
-    // routes landed. Each slot costs only a pointer, so keep ample headroom:
-    // an overflow makes httpd_register_uri_handler return "no slots left" and
-    // the affected route then answers 404. (Production builds register far
-    // fewer handlers, so they are unaffected either way.)
-    const int uri_handlers = 180;
-    const int stack_size   = 16384;  // Default task stack
-    const int max_headers  = 16;
-    const int recv_timeout = 10;     // seconds
-
     // Only an administrator-installed certificate turns HTTPS on. The
     // persistent device identity is self-signed, so serving the web UI with it
     // made every browser show a certificate warning; it is now used only by
@@ -588,6 +922,12 @@ static bool api_server_start_locked(void)
     s_https_mode = tls_mgr_has_certs();
     s_https_fallback = false;
     api_start_error_t https_fail_cause = API_START_ERR_NONE;
+    if (s_https_mode && s_https_disabled.load()) {
+        ESP_LOGW(TAG, "HTTPS disabled for this boot -- serving HTTP on port 80");
+        s_https_mode = false;
+        s_https_fallback = true;
+        https_fail_cause = s_https_disabled_cause;
+    }
 
     esp_err_t ret;
 
@@ -616,10 +956,10 @@ static bool api_server_start_locked(void)
         httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
         ssl_config.httpd.lru_purge_enable   = true;
         ssl_config.httpd.uri_match_fn       = httpd_uri_match_wildcard;
-        ssl_config.httpd.max_uri_handlers   = uri_handlers;
-        ssl_config.httpd.stack_size         = stack_size;
-        ssl_config.httpd.max_resp_headers   = max_headers;
-        ssl_config.httpd.recv_wait_timeout  = recv_timeout;
+        ssl_config.httpd.max_uri_handlers   = API_URI_HANDLERS;
+        ssl_config.httpd.stack_size         = API_STACK_SIZE;
+        ssl_config.httpd.max_resp_headers   = API_MAX_HEADERS;
+        ssl_config.httpd.recv_wait_timeout  = API_RECV_TIMEOUT;
         // TCP keepalive: reap dead TLS sockets abandoned mid-handshake/session
         // so they can't accumulate and wedge the stack (see port 80 note).
         ssl_config.httpd.keep_alive_enable   = true;
@@ -652,11 +992,31 @@ static bool api_server_start_locked(void)
         ssl_config.prvtkey_pem   = key;
         ssl_config.prvtkey_len   = key_len;
         
+        // esp_https_server only copies the certificate and key here; they
+        // are parsed on every TLS handshake. A pair that will not load would
+        // therefore leave 443 "running" while every connection fails, with
+        // port 80 serving only the "use HTTPS" notice -- no web UI at all.
+        // Check the pair first; a bad pair cannot fix itself, so HTTPS stays
+        // off for the rest of this boot.
+        bool cert_ok = tls_mgr_key_matches_cert(
+            (const char*)cert, cert_len, (const char*)key, key_len);
 #ifdef CONFIG_TEST_ENDPOINTS
-        if (s_test_fail_https_starts > 0) {
-            s_test_fail_https_starts--;
+        if (cert_ok && take_injected(s_test_fail_cert_checks)) {
+            ESP_LOGE(TAG, "Certificate check failed (test injection)");
+            cert_ok = false;
+        }
+#endif
+        if (!cert_ok) {
+            ESP_LOGE(TAG, "The administrator certificate and key will not load");
+            ret = ESP_ERR_INVALID_ARG;
+            https_fail_cause = API_START_ERR_BAD_CERT;
+            s_https_disabled_cause = API_START_ERR_BAD_CERT;
+            s_https_disabled.store(true);
+        } else
+#ifdef CONFIG_TEST_ENDPOINTS
+        if (take_injected(s_test_fail_https_starts)) {
             ESP_LOGE(TAG, "HTTPS start failed (test injection, %d more queued)",
-                     s_test_fail_https_starts);
+                     s_test_fail_https_starts.load());
             ret = ESP_ERR_HTTPD_TASK;
             https_fail_cause = API_START_ERR_INJECTED;
         } else
@@ -667,6 +1027,8 @@ static bool api_server_start_locked(void)
         }
         if (ret == ESP_OK) {
             tls_mgr_set_https_active(true);
+            // A later fallback is a new episode and is logged again.
+            s_https_fallback_logged = false;
             ESP_LOGI(TAG,
                      "HTTPS server started on port 443 using the administrator "
                      "certificate");
@@ -674,81 +1036,24 @@ static bool api_server_start_locked(void)
             ESP_LOGE(
                 TAG, "Failed to start HTTPS server: %s -- falling back to HTTP",
                 esp_err_to_name(ret));
-            // ESP_ERR_HTTPD_TASK means the server task stack allocation
-            // failed. That needs a CONTIGUOUS block, so report the largest
-            // free block, not just the total.
-            ESP_LOGE(
-                TAG,
-                "  internal heap: free=%u largest_block=%u (needed %d for stack)",
-                (unsigned)heap_caps_get_free_size(
-                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                (unsigned)heap_caps_get_largest_free_block(
-                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                stack_size);
+            log_internal_heap(API_STACK_SIZE);
             server_ssl = NULL;
             s_https_mode = false;
             s_https_fallback = true;
         }
     }
 
-    // In HTTPS mode port 80 serves exactly one route (/api/health) plus the
-    // "HTTPS required" 404 notice -- in test builds too, since test endpoints
-    // are registered on the HTTPS server. It therefore needs neither the full
-    // handler table nor more than two sockets.
-    //
-    // The handler table is trimmed, but the stack deliberately is NOT:
-    // esp_http_server gives every server task the name "httpd" (httpd_config_t
-    // has no task_name field, still true in 6.1), so
-    // tests/api/test_stack_watermark_budget.py collapses all four servers into
-    // a single "httpd" key and reports the smallest headroom among them.
-    // Right-sizing this one silently retargets the guard at port 80 and stops
-    // it protecting the servers that actually run handlers. The RAM saved is
-    // not needed now that the real internal-RAM shortfall (LVGL being placed
-    // in IRAM) has been fixed.
-    //
-    // httpd task stacks must live in internal RAM: handlers write NVS, and a
-    // PSRAM stack trips esp_task_stack_is_sane_cache_disabled() while the
-    // flash cache is disabled.
-    const int http_uri_handlers = s_https_mode ? 8 : uri_handlers;
-    // Port 80 carries the whole web UI in HTTP mode, where browsers open up to
-    // ~6 parallel connections; it gets the same 7 sockets as port 443 (see the
-    // note there). Only one of 80/443 is full-size at a time, so the LWIP
-    // socket budget is unchanged.
-    const int http_open_sockets = s_https_mode ? 2 : 7;
-
-    // ---- Always start HTTP on port 80 ----
-    {
-        ESP_LOGI(TAG, "Starting HTTP server on port 80 (%s)...",
-                 s_https_mode ? "health only" : "web UI and API");
-        
-        httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
-        http_config.lru_purge_enable   = true;
-        http_config.uri_match_fn       = httpd_uri_match_wildcard;
-        http_config.max_uri_handlers   = http_uri_handlers;
-        http_config.stack_size         = stack_size;
-        http_config.max_resp_headers   = max_headers;
-        http_config.recv_wait_timeout  = recv_timeout;
-        http_config.max_open_sockets   = http_open_sockets;
-        // TCP keepalive reaps dead ESTABLISHED sockets left behind when a
-        // client vanishes mid-request (e.g. slow TLS clients that abandon a
-        // handshake, or the test suite's connection storm). Without this the
-        // stuck PCBs are never freed on the single-threaded server, leaking
-        // heap + sockets until the whole network stack wedges (associated but
-        // unreachable, no watchdog). ~10s idle + 3x5s probes => dead peers are
-        // dropped in ~25s. Harmless to live-but-idle clients: their TCP stack
-        // auto-ACKs the keepalive probes.
-        http_config.keep_alive_enable   = true;
-        http_config.keep_alive_idle     = 10;
-        http_config.keep_alive_interval = 5;
-        http_config.keep_alive_count    = 3;
-        
-        ret = httpd_start(&server, &http_config);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
-            s_last_start_error = start_error_from(ret);
-            server = NULL;
+    // ---- Port 80 ----
+    // Carries the web UI and API in HTTP mode, where it is mandatory. In HTTPS
+    // mode it only serves /api/health and the "use HTTPS" notice, so a
+    // failure there must not take down a working 443.
+    ret = start_http_locked(!s_https_mode);
+    if (ret != ESP_OK) {
+        s_last_start_error = start_error_from(ret);
+        if (!s_https_mode) {
             return false;
         }
+        ESP_LOGW(TAG, "Continuing with HTTPS only; port 80 will be retried");
     }
 
     if (s_https_fallback && !s_https_fallback_logged) {
@@ -757,67 +1062,9 @@ static bool api_server_start_locked(void)
                          api_server_start_error_event_cause(https_fail_cause));
     }
 
-    if (tls_mgr_has_identity()) {
-        size_t cert_len = 0;
-        size_t key_len = 0;
-        const uint8_t* cert = tls_mgr_get_identity_cert(&cert_len);
-        const uint8_t* key = tls_mgr_get_identity_key(&key_len);
-
-        httpd_ssl_config_t integration_config = HTTPD_SSL_CONFIG_DEFAULT();
-        integration_config.port_secure = 8443;
-        integration_config.httpd.ctrl_port = 32771;
-        // 8 core HA handlers (pair, capabilities, state, events/WSS, power,
-        // mode, setpoint + WSS worker) plus the 3 OTA control endpoints the
-        // integration drives (status, releases, github) plus headroom.
-        integration_config.httpd.max_uri_handlers = 14;
-        integration_config.httpd.max_open_sockets = 5;
-        integration_config.httpd.stack_size = 12288;
-        // Reject surplus connections instead of evicting established WSS
-        // clients. Three WSS slots leave capacity for REST reconciliation
-        // while another TLS connection is still closing or handshaking.
-        integration_config.httpd.lru_purge_enable = false;
-        integration_config.httpd.recv_wait_timeout = 10;
-        // Match recv_wait_timeout. A very short send timeout truncates HA REST
-        // and WSS responses (empty/partial body) whenever the single-threaded
-        // server is briefly busy, and tears down the TLS connection — do not
-        // shorten it.
-        integration_config.httpd.send_wait_timeout = 10;
-        // TCP keepalive: reap dead WSS/REST sockets (see port 80 note). Extra
-        // important here since lru_purge is off — dead ESTABLISHED sockets are
-        // never evicted, so keepalive is the only thing that frees them.
-        integration_config.httpd.keep_alive_enable   = true;
-        integration_config.httpd.keep_alive_idle     = 10;
-        integration_config.httpd.keep_alive_interval = 5;
-        integration_config.httpd.keep_alive_count    = 3;
-        integration_config.servercert = cert;
-        integration_config.servercert_len = cert_len;
-        integration_config.prvtkey_pem = key;
-        integration_config.prvtkey_len = key_len;
-
-        ret = httpd_ssl_start(&server_integration, &integration_config);
-        if (ret != ESP_OK) {
-            server_integration = NULL;
-            ESP_LOGE(TAG,
-                     "Failed to start integration HTTPS server: %s "
-                     "(HTTP remains available on port 80)",
-                     esp_err_to_name(ret));
-            // ESP_ERR_HTTPD_TASK means the task stack allocation failed, which
-            // needs a CONTIGUOUS block -- report the largest free block too.
-            ESP_LOGE(
-                TAG,
-                "  internal heap: free=%u largest_block=%u (needed %d for stack)",
-                (unsigned)heap_caps_get_free_size(
-                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                (unsigned)heap_caps_get_largest_free_block(
-                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-                integration_config.httpd.stack_size);
-            s_last_start_error = start_error_from(ret);
-        } else {
-            ESP_LOGI(TAG, "Integration HTTPS server started on port 8443");
-        }
-    } else {
-        ESP_LOGE(TAG, "Integration HTTPS identity is unavailable");
-    }
+    // The Home Assistant server (8443) is secondary: a failure is logged and
+    // repaired later by api_server_ensure_running().
+    start_integration_locked();
     
     // Helper macro - abort if URI registration fails (catches max_uri_handlers issues)
     // Registers on HTTPS in HTTPS mode, otherwise on HTTP.
@@ -828,22 +1075,6 @@ static bool api_server_start_locked(void)
             ESP_LOGE(TAG, "FATAL: Failed to register URI '%s': %s", (uri_struct).uri, esp_err_to_name(err)); \
             ESP_LOGE(TAG, "Increase max_uri_handlers in httpd config!"); \
             abort(); \
-        } \
-    } while(0)
-    
-    // Register on both HTTP and HTTPS only for explicitly public health checks.
-    #define REGISTER_URI_ESSENTIAL(uri_struct) do { \
-        esp_err_t err = httpd_register_uri_handler(server, &(uri_struct)); \
-        if (err != ESP_OK) { \
-            ESP_LOGE(TAG, "FATAL: Failed to register URI '%s': %s", (uri_struct).uri, esp_err_to_name(err)); \
-            abort(); \
-        } \
-        if (server_ssl != NULL) { \
-            err = httpd_register_uri_handler(server_ssl, &(uri_struct)); \
-            if (err != ESP_OK) { \
-                ESP_LOGE(TAG, "FATAL: Failed to register URI '%s' on HTTPS: %s", (uri_struct).uri, esp_err_to_name(err)); \
-                abort(); \
-            } \
         } \
     } while(0)
     
@@ -906,7 +1137,8 @@ static bool api_server_start_locked(void)
         .handler = health_get_handler,
         .user_ctx = NULL
     };
-    REGISTER_URI_ESSENTIAL(health_uri);
+    // Also on port 80 in HTTPS mode (start_http_locked).
+    REGISTER_URI(health_uri);
     
     // GET /api/status
     httpd_uri_t status_uri = {
@@ -1594,249 +1826,7 @@ static bool api_server_start_locked(void)
     ESP_LOGI(TAG, "WebSocket feasibility server started on port 81");
 #endif
 
-    if (server_integration != NULL) {
-        httpd_uri_t ha_pair_uri = {
-            .uri = "/api/v1/pair",
-            .method = HTTP_POST,
-            .handler = ha_pair_post_handler,
-            .user_ctx = NULL
-        };
-        ret = httpd_register_uri_handler(server_integration, &ha_pair_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA pairing: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        httpd_uri_t ha_capabilities_uri = {
-            .uri = "/api/v1/capabilities",
-            .method = HTTP_GET,
-            .handler = ha_capabilities_get_handler,
-            .user_ctx = NULL
-        };
-        ret = httpd_register_uri_handler(
-            server_integration, &ha_capabilities_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA capabilities: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        httpd_uri_t ha_state_uri = {
-            .uri = "/api/v1/state",
-            .method = HTTP_GET,
-            .handler = ha_state_get_handler,
-            .user_ctx = NULL
-        };
-        ret = httpd_register_uri_handler(server_integration, &ha_state_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA state: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        httpd_uri_t ha_diagnostics_uri = {
-            .uri = "/api/v1/diagnostics",
-            .method = HTTP_GET,
-            .handler = ha_diagnostics_get_handler,
-            .user_ctx = NULL
-        };
-        ret = httpd_register_uri_handler(
-            server_integration, &ha_diagnostics_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA diagnostics: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        httpd_uri_t ha_restart_uri = {
-            .uri = "/api/v1/control/restart",
-            .method = HTTP_POST,
-            .handler = ha_restart_post_handler,
-            .user_ctx = NULL
-        };
-        ret = httpd_register_uri_handler(
-            server_integration, &ha_restart_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA restart: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        httpd_uri_t ha_events_uri = {
-            .uri = "/api/v1/events",
-            .method = HTTP_GET,
-            .handler = ha_websocket_handler,
-            .user_ctx = NULL,
-            .is_websocket = true,
-            .handle_ws_control_frames = true,
-            .supported_subprotocol = NULL,
-            .ws_pre_handshake_cb = ha_websocket_pre_handshake,
-            .ws_post_handshake_cb = ha_websocket_post_handshake,
-        };
-        ret = httpd_register_uri_handler(
-            server_integration, &ha_events_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA WebSocket: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        // OTA control endpoints on the integration server. The Home Assistant
-        // integration connects ONLY to port 8443 with its integration token,
-        // so the firmware "update" entity's check/status/install calls land
-        // here, not on the main server where the OTA routes also live. These
-        // handlers accept the integration Bearer token via
-        // check_api_or_integration_auth. Registered independently of the WPS
-        // websocket since OTA does not depend on it. The raw upload endpoint
-        // (/api/ota/update) is intentionally NOT exposed here.
-        httpd_uri_t ha_ota_status_uri = {
-            .uri = "/api/ota/status",
-            .method = HTTP_GET,
-            .handler = ota_status_get_handler,
-            .user_ctx = NULL
-        };
-        ret = httpd_register_uri_handler(
-            server_integration, &ha_ota_status_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA OTA status: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        httpd_uri_t ha_ota_releases_uri = {
-            .uri = "/api/ota/releases",
-            .method = HTTP_GET,
-            .handler = ota_releases_get_handler,
-            .user_ctx = NULL
-        };
-        ret = httpd_register_uri_handler(
-            server_integration, &ha_ota_releases_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA OTA releases: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        httpd_uri_t ha_ota_github_uri = {
-            .uri = "/api/ota/github",
-            .method = HTTP_POST,
-            .handler = ota_github_update_post_handler,
-            .user_ctx = NULL
-        };
-        ret = httpd_register_uri_handler(
-            server_integration, &ha_ota_github_uri);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to register HA OTA github: %s",
-                     esp_err_to_name(ret));
-            api_server_stop();
-            return false;
-        }
-
-        if (!ha_websocket_start(server_integration)) {
-            ESP_LOGE(TAG, "Home Assistant WebSocket push unavailable");
-            httpd_ssl_stop(server_integration);
-            server_integration = NULL;
-        } else {
-            httpd_uri_t ha_power_uri = {
-                .uri = "/api/v1/control/power",
-                .method = HTTP_PUT,
-                .handler = ha_power_put_handler,
-                .user_ctx = NULL
-            };
-            ret = httpd_register_uri_handler(
-                server_integration, &ha_power_uri);
-            if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to register HA power control: %s",
-                         esp_err_to_name(ret));
-                api_server_stop();
-                return false;
-            }
-
-            httpd_uri_t ha_mode_uri = {
-                .uri = "/api/v1/control/mode",
-                .method = HTTP_PUT,
-                .handler = ha_mode_put_handler,
-                .user_ctx = NULL
-            };
-            ret = httpd_register_uri_handler(
-                server_integration, &ha_mode_uri);
-            if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to register HA mode control: %s",
-                         esp_err_to_name(ret));
-                api_server_stop();
-                return false;
-            }
-
-            httpd_uri_t ha_setpoint_uri = {
-                .uri = "/api/v1/control/setpoint",
-                .method = HTTP_PUT,
-                .handler = ha_setpoint_put_handler,
-                .user_ctx = NULL
-            };
-            ret = httpd_register_uri_handler(
-                server_integration, &ha_setpoint_uri);
-            if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to register HA setpoint control: %s",
-                         esp_err_to_name(ret));
-                api_server_stop();
-                return false;
-            }
-        }
-    }
-
-    if (server_integration != NULL) {
-        ESP_LOGI(TAG, "Home Assistant REST foundation enabled");
-
-        if (s_mdns_ready && !s_mdns_ha_added) {
-            mdns_txt_item_t integration_txt[] = {
-                {"device", "arctic-controller"},
-                {"id", arctic::ha::deviceId()},
-                {"version", "1"},
-                {"tls", "1"},
-                {"push", "1"},
-            };
-            ret = mdns_service_add(
-                "Arctic Home Assistant", "_arctic", "_tcp", 8443,
-                integration_txt,
-                sizeof(integration_txt) / sizeof(integration_txt[0]));
-            if (ret != ESP_OK) {
-                ESP_LOGW(TAG, "HA mDNS service add failed: %s",
-                         esp_err_to_name(ret));
-            } else {
-                s_mdns_ha_added = true;
-            }
-        }
-    } else {
-        ESP_LOGE(TAG, "Home Assistant REST disabled: no identity server");
-    }
-    
     #undef REGISTER_URI
-    #undef REGISTER_URI_ESSENTIAL
-
-    // In HTTPS mode port 80 only serves the essential bootstrap routes; any
-    // other path (e.g. a browser opening http://<device>) would otherwise hit
-    // the bare "Nothing matches the given URI" 404. Register a 404 handler on
-    // the HTTP server that returns a clean "use HTTPS" notice instead. It does
-    // NOT redirect: once an administrator has installed a certificate, port 80
-    // must stay a dead end so secret-bearing requests are never normalised
-    // onto plaintext HTTP (see tests/api/test_ha_security_contract.py).
-    if (server != NULL && server_ssl != NULL) {
-        esp_err_t rerr = httpd_register_err_handler(
-            server, HTTPD_404_NOT_FOUND, http_https_required_handler);
-        if (rerr != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to register HTTP 404 handler: %s",
-                     esp_err_to_name(rerr));
-        }
-    }
 
     // The server carrying the web UI and API (443 in HTTPS mode, 80 in HTTP
     // mode).
@@ -1869,32 +1859,18 @@ static bool api_server_start_locked(void)
                      esp_err_to_name(rerr));
         }
     }
-    if (server_integration != NULL) {
-        esp_err_t rerr = httpd_register_err_handler(
-            server_integration, HTTPD_405_METHOD_NOT_ALLOWED,
-            https_api_method_not_allowed_handler);
-        if (rerr != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to register HA 405 handler: %s",
-                     esp_err_to_name(rerr));
-        }
-    }
-
     // Parser-level 400s answer in JSON on every server; see
-    // http_bad_request_handler.
-    httpd_handle_t parse_err_servers[] = {server, server_ssl, server_integration};
-    for (httpd_handle_t hd : parse_err_servers) {
-        if (hd == NULL) {
-            continue;
-        }
+    // http_bad_request_handler. Port 80 in HTTPS mode and 8443 register their
+    // own.
+    if (api_handle != NULL) {
         esp_err_t rerr = httpd_register_err_handler(
-            hd, HTTPD_400_BAD_REQUEST, http_bad_request_handler);
+            api_handle, HTTPD_400_BAD_REQUEST, http_bad_request_handler);
         if (rerr != ESP_OK) {
             ESP_LOGW(TAG, "Failed to register 400 handler: %s",
                      esp_err_to_name(rerr));
         }
     }
 
-    ESP_LOGI(TAG, "HTTP server started on port 80");
     if (server_ssl != NULL) {
         ESP_LOGI(TAG, "HTTPS server started on port 443");
         ESP_LOGI(TAG, "Web UI: https://%s.local/", hostname);
@@ -1916,12 +1892,7 @@ void api_server_stop(void)
         websocket_test_server = NULL;
     }
 #endif
-    if (server_integration != NULL) {
-        ha_websocket_stop();
-        ESP_LOGI(TAG, "Stopping integration HTTPS server...");
-        httpd_ssl_stop(server_integration);
-        server_integration = NULL;
-    }
+    stop_integration_locked();
     if (server_ssl != NULL) {
         ESP_LOGI(TAG, "Stopping HTTPS server...");
         httpd_ssl_stop(server_ssl);
@@ -1937,12 +1908,15 @@ void api_server_stop(void)
 
 bool api_server_is_running(void)
 {
-    return s_started && server != NULL && (server_ssl != NULL || !s_https_mode);
+    return s_started && (s_https_mode ? server_ssl != NULL : server != NULL);
 }
 
 bool api_server_is_healthy(void)
 {
     if (!api_server_is_running()) {
+        return false;
+    }
+    if (s_https_mode && server == NULL) {
         return false;
     }
     return server_integration != NULL || !tls_mgr_has_identity();
@@ -1972,11 +1946,129 @@ bool api_server_ensure_running(void)
     if (api_server_is_healthy()) {
         return true;
     }
-    if (s_started) {
-        ESP_LOGW(TAG, "Server degraded (8443 missing) - restarting all servers");
+    if (!api_server_is_running()) {
+        if (s_started) {
+            ESP_LOGW(TAG, "Web UI/API server missing - restarting all servers");
+            api_server_stop();
+        }
+        return api_server_start();
+    }
+    // Only a secondary server is missing: restart just that one, so the web
+    // UI is never torn down to repair the Home Assistant server or the port
+    // 80 notice.
+    bool repaired = true;
+    if (s_https_mode && server == NULL) {
+        ESP_LOGW(TAG, "Port 80 missing - restarting it");
+        const esp_err_t ret = start_http_locked(false);
+        if (ret != ESP_OK) {
+            s_last_start_error = start_error_from(ret);
+            repaired = false;
+        }
+    }
+    if (server_integration == NULL && tls_mgr_has_identity()) {
+        ESP_LOGW(TAG, "Home Assistant server (8443) missing - restarting it");
+        if (!start_integration_locked()) {
+            repaired = false;
+        }
+    }
+    if (repaired) {
+        s_last_start_error = API_START_ERR_NONE;
+    }
+    return true;
+}
+
+// Loopback probe of our own server: only liveness matters, not identity.
+static esp_err_t probe_skip_verify(void* conf)
+{
+    mbedtls_ssl_conf_authmode((mbedtls_ssl_config*)conf, MBEDTLS_SSL_VERIFY_NONE);
+    return ESP_OK;
+}
+
+bool api_server_probe(void)
+{
+    bool tls;
+    {
+        LifecycleLock lock;
+        if (s_shut_down || !api_server_is_running()) {
+            return true;
+        }
+        tls = server_ssl != NULL;
+    }
+    const int port = tls ? 443 : 80;
+#ifdef CONFIG_TEST_ENDPOINTS
+    if (take_injected(s_test_fail_probes)) {
+        ESP_LOGW(TAG, "Self-probe of port %d failed (test injection)", port);
+        return false;
+    }
+#endif
+    esp_tls_t* conn = esp_tls_init();
+    if (conn == NULL) {
+        // Exhausted memory starves the servers too, so this counts as a
+        // failure; the supervisor still needs several in a row to act.
+        ESP_LOGW(TAG, "Self-probe of port %d failed: out of memory", port);
+        return false;
+    }
+    esp_tls_cfg_t cfg = {};
+    cfg.timeout_ms = 8000;
+    if (tls) {
+        cfg.crt_bundle_attach = probe_skip_verify;
+        cfg.common_name = "localhost";
+    } else {
+        cfg.is_plain_tcp = true;
+    }
+    bool ok = false;
+    if (esp_tls_conn_new_sync("127.0.0.1", 9, port, &cfg, conn) == 1) {
+        static const char request[] =
+            "GET /api/health HTTP/1.1\r\nHost: localhost\r\n"
+            "Connection: close\r\n\r\n";
+        size_t sent = 0;
+        while (sent < sizeof(request) - 1) {
+            const ssize_t n = esp_tls_conn_write(conn, request + sent,
+                                                 sizeof(request) - 1 - sent);
+            if (n <= 0) {
+                break;
+            }
+            sent += (size_t)n;
+        }
+        if (sent == sizeof(request) - 1) {
+            static const char expected[] = "HTTP/1.1 200";
+            char status[sizeof(expected)] = {0};
+            size_t got = 0;
+            while (got < sizeof(expected) - 1) {
+                const ssize_t n = esp_tls_conn_read(conn, status + got,
+                                                    sizeof(expected) - 1 - got);
+                if (n <= 0) {
+                    break;
+                }
+                got += (size_t)n;
+            }
+            ok = got == sizeof(expected) - 1 &&
+                 memcmp(status, expected, sizeof(expected) - 1) == 0;
+        }
+    }
+    esp_tls_conn_destroy(conn);
+    if (!ok) {
+        ESP_LOGW(TAG, "Self-probe of port %d failed", port);
+    }
+    return ok;
+}
+
+void api_server_disable_https(api_start_error_t cause)
+{
+    LifecycleLock lock;
+    if (!s_https_disabled.load()) {
+        ESP_LOGE(TAG, "Disabling HTTPS for this boot (cause %d)", (int)cause);
+        s_https_disabled_cause = cause;
+        s_https_disabled.store(true);
+    }
+    if (server_ssl != NULL) {
         api_server_stop();
     }
-    return api_server_start() && api_server_is_healthy();
+}
+
+bool api_server_https_active(void)
+{
+    return server_ssl != NULL;
 }
 
 api_start_error_t api_server_last_start_error(void)
@@ -1991,6 +2083,8 @@ uint32_t api_server_start_error_event_cause(api_start_error_t err)
         case API_START_ERR_NO_IDENTITY: return EVENT_WEB_SERVER_CAUSE_NO_IDENTITY;
         case API_START_ERR_FAILED:      return EVENT_WEB_SERVER_CAUSE_START_FAILED;
         case API_START_ERR_INJECTED:    return EVENT_WEB_SERVER_CAUSE_TEST;
+        case API_START_ERR_BAD_CERT:    return EVENT_WEB_SERVER_CAUSE_BAD_CERT;
+        case API_START_ERR_UNRESPONSIVE: return EVENT_WEB_SERVER_CAUSE_UNRESPONSIVE;
         default:                        return EVENT_WEB_SERVER_CAUSE_UNKNOWN;
     }
 }
@@ -2000,23 +2094,29 @@ bool api_server_https_failed(void)
     return s_https_fallback;
 }
 
-void api_server_test_fail_https_starts(int count)
-{
 #ifdef CONFIG_TEST_ENDPOINTS
-    LifecycleLock lock;
-    s_test_fail_https_starts = count < 0 ? 0 : count;
+#define TEST_FAIL_HOOK(fn, counter)              \
+    void fn(int count)                           \
+    {                                            \
+        counter.store(count < 0 ? 0 : count);    \
+    }
 #else
-    (void)count;
+#define TEST_FAIL_HOOK(fn, counter) \
+    void fn(int count) { (void)count; }
 #endif
-}
+TEST_FAIL_HOOK(api_server_test_fail_starts, s_test_fail_starts)
+TEST_FAIL_HOOK(api_server_test_fail_https_starts, s_test_fail_https_starts)
+TEST_FAIL_HOOK(api_server_test_fail_http_starts, s_test_fail_http_starts)
+TEST_FAIL_HOOK(api_server_test_fail_integration_starts,
+               s_test_fail_integration_starts)
+TEST_FAIL_HOOK(api_server_test_fail_cert_checks, s_test_fail_cert_checks)
+TEST_FAIL_HOOK(api_server_test_fail_probes, s_test_fail_probes)
+#undef TEST_FAIL_HOOK
 
-void api_server_test_fail_starts(int count)
+void api_server_test_reenable_https(void)
 {
 #ifdef CONFIG_TEST_ENDPOINTS
-    LifecycleLock lock;
-    s_test_fail_starts = count < 0 ? 0 : count;
-#else
-    (void)count;
+    s_https_disabled.store(false);
 #endif
 }
 
