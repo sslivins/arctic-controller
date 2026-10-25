@@ -54,6 +54,7 @@ typedef enum {
     EVENT_WIFI_UNSTABLE,        // Repeated short WiFi drops (payload: drops in the last hour)
     EVENT_WIFI_ROAMED,          // Moved to a stronger access point (payload: wifi_roam_pack)
     EVENT_FIRMWARE_UPDATED,     // Firmware version changed since the last boot (payload: from << 16 | to, see event_firmware_version_pack)
+    EVENT_HTTPS_FALLBACK,       // HTTPS failed to start with the administrator certificate; serving HTTP (payload: event_web_server_cause_t)
     EVENT_TYPE_COUNT
 } event_type_t;
 
@@ -79,7 +80,8 @@ typedef enum {
     EVENT_NETWORK_RECOVERED_REBOOT = 2,      // gave up and rebooted
 } event_network_recovery_t;
 
-// Why the web/API servers were down, as the EVENT_WEB_SERVER_DOWN payload.
+// Why the web/API servers were down (EVENT_WEB_SERVER_DOWN payload), or why
+// HTTPS could not start (EVENT_HTTPS_FALLBACK payload).
 typedef enum {
     EVENT_WEB_SERVER_CAUSE_UNKNOWN = 0,      // stopped for an unknown reason
     EVENT_WEB_SERVER_CAUSE_NO_MEMORY = 1,    // a server task could not get memory

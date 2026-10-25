@@ -153,6 +153,7 @@ void event_names_are_the_documented_api_strings() {
     CHECK(std::strcmp(event_type_name(EVENT_WIFI_LOST), "wifi_lost") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_WIFI_RESTORED), "wifi_restored") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_WIFI_UNSTABLE), "wifi_unstable") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_HTTPS_FALLBACK), "https_fallback") == 0);
 }
 
 void event_payloads_decode_to_the_documented_api_keys() {
@@ -215,7 +216,8 @@ void categories_match_the_intended_grouping() {
         EVENT_BROWNOUT_RESET, EVENT_APPLICATION_CRASH, EVENT_WATCHDOG_RESET,
         EVENT_NETWORK_UNREACHABLE, EVENT_NETWORK_RECOVERED,
         EVENT_WEB_SERVER_DOWN, EVENT_WEB_SERVER_RECOVERED,
-        EVENT_WIFI_LOST, EVENT_WIFI_RESTORED, EVENT_WIFI_UNSTABLE};
+        EVENT_WIFI_LOST, EVENT_WIFI_RESTORED, EVENT_WIFI_UNSTABLE,
+        EVENT_HTTPS_FALLBACK};
     for (event_type_t t : problems) {
         CHECK(event_type_category(t) == EVENT_CATEGORY_PROBLEMS);
     }

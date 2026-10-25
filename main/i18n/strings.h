@@ -198,6 +198,13 @@ typedef enum {
     STR_WEB_SCAN_HINT,
     STR_WEB_URL_LABEL,
     STR_WEB_URL_UNAVAILABLE,
+    STR_WEB_HTTPS_ON,
+    STR_WEB_HTTPS_FAILED,
+    STR_WEB_REMOVE_CERT,
+    STR_WEB_REMOVE_CERT_TITLE,
+    STR_WEB_REMOVE_CERT_BODY,
+    STR_WEB_REMOVE_CERT_CONFIRM,
+    STR_WEB_REMOVE_CERT_FAILED,
     
     // ========================================================================
     // Heat Pump - Main Screen
@@ -459,6 +466,7 @@ typedef enum {
     STR_EVENT_WIFI_ROAMED,
     STR_EVENT_WIFI_ROAMED_FMT,
     STR_EVENT_FIRMWARE_UPDATED,
+    STR_EVENT_HTTPS_FALLBACK,
     STR_EVENT_CLEAR,
     STR_EVENT_NO_EVENTS,
     STR_EVENT_SHOW_OLDER,

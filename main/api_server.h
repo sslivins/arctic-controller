@@ -86,6 +86,22 @@ api_start_error_t api_server_last_start_error(void);
 void api_server_test_fail_starts(int count);
 
 /**
+ * @brief Test hook (CONFIG_TEST_ENDPOINTS builds only): make the next
+ *        @p count HTTPS (port 443) starts fail, so the servers fall back to
+ *        HTTP mode while an administrator certificate is installed.
+ */
+void api_server_test_fail_https_starts(int count);
+
+/**
+ * @brief True when an administrator certificate is installed but HTTPS failed
+ *        to start, so the web UI and API are being served over HTTP instead.
+ */
+bool api_server_https_failed(void);
+
+/** @brief The event_web_server_cause_t value for a start error. */
+uint32_t api_server_start_error_event_cause(api_start_error_t err);
+
+/**
  * @brief Get the device hostname for mDNS
  * 
  * @return hostname (e.g., "arctic-3f2a")

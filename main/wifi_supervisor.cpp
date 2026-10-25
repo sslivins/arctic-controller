@@ -119,16 +119,6 @@ RTC_NOINIT_ATTR static uint32_t s_api_reboot_magic;
 RTC_NOINIT_ATTR static uint32_t s_api_reboot_count;
 RTC_NOINIT_ATTR static uint32_t s_api_reboot_ours;  // magic if we caused the last reset
 
-static uint32_t web_server_cause(api_start_error_t err) {
-    switch (err) {
-        case API_START_ERR_NO_MEMORY:   return EVENT_WEB_SERVER_CAUSE_NO_MEMORY;
-        case API_START_ERR_NO_IDENTITY: return EVENT_WEB_SERVER_CAUSE_NO_IDENTITY;
-        case API_START_ERR_FAILED:      return EVENT_WEB_SERVER_CAUSE_START_FAILED;
-        case API_START_ERR_INJECTED:    return EVENT_WEB_SERVER_CAUSE_TEST;
-        default:                        return EVENT_WEB_SERVER_CAUSE_UNKNOWN;
-    }
-}
-
 struct ApiWatch {
     int64_t down_since_us = 0;
     int64_t healthy_since_us = 0;
@@ -183,7 +173,7 @@ static void supervise_api_server(ApiWatch& w) {
 
     if (!w.down_logged) {
         const api_start_error_t cause = ok ? prior : api_server_last_start_error();
-        event_log_record(EVENT_WEB_SERVER_DOWN, web_server_cause(cause));
+        event_log_record(EVENT_WEB_SERVER_DOWN, api_server_start_error_event_cause(cause));
         log_persist_flush_now(LOG_PERSIST_REASON_MANUAL);
         w.down_logged = true;
     }

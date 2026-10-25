@@ -1580,14 +1580,15 @@
       network_unreachable: "Network unreachable", network_recovered: "Network recovered",
       web_server_down: "Web server down", web_server_recovered: "Web server recovered",
       wifi_lost: "WiFi lost", wifi_restored: "WiFi restored", wifi_unstable: "WiFi unstable",
-      wifi_roamed: "WiFi access point changed", firmware_updated: "Firmware updated"
+      wifi_roamed: "WiFi access point changed", firmware_updated: "Firmware updated",
+      https_fallback: "HTTPS unavailable"
     };
     // Colour and icon per event type, matching the device's Events screen.
     const eventTones = {
       power_on: "good", compressor_on: "good", fan_on: "good", pump_on: "good", aux_heater_on: "good",
       connected: "good", error_cleared: "good", network_recovered: "good", web_server_recovered: "good", wifi_restored: "good",
       error_appeared: "bad", brownout_reset: "bad", application_crash: "bad", watchdog_reset: "bad",
-      network_unreachable: "warn", web_server_down: "warn", wifi_lost: "warn", wifi_unstable: "warn", defrost_start: "defrost", defrost_end: "defrost",
+      network_unreachable: "warn", web_server_down: "warn", https_fallback: "warn", wifi_lost: "warn", wifi_unstable: "warn", defrost_start: "defrost", defrost_end: "defrost",
       mode_changed: "info", setpoint_changed: "info", system_start: "info", wifi_roamed: "info", firmware_updated: "info"
     };
     const eventIcons = {
@@ -1598,7 +1599,8 @@
       connected: "⇆", disconnected: "⇆", brownout_reset: "⚠\uFE0E", application_crash: "⚠\uFE0E",
       watchdog_reset: "⚠\uFE0E", network_unreachable: "⚠\uFE0E", network_recovered: "✓",
       web_server_down: "⚠\uFE0E", web_server_recovered: "✓",
-      wifi_lost: "⚠\uFE0E", wifi_restored: "✓", wifi_unstable: "⚠\uFE0E", wifi_roamed: "⇆", firmware_updated: "⬇\uFE0E"
+      wifi_lost: "⚠\uFE0E", wifi_restored: "✓", wifi_unstable: "⚠\uFE0E", wifi_roamed: "⇆", firmware_updated: "⬇\uFE0E",
+      https_fallback: "⚠\uFE0E"
     };
     const setpointNames = { cooling: "Cooling", heating: "Heating", hot_water: "Hot water" };
     const watchdogNames = { interrupt: "Interrupt watchdog", task: "Task watchdog", other: "System watchdog", startup: "Stalled at startup (likely power loss)" };
@@ -1634,7 +1636,7 @@
           return event.fault_code ? `(${event.fault_code}) ${event.fault_label || ""}`.trim() : "";
         case "watchdog_reset": return watchdogNames[event.watchdog] || "";
         case "network_recovered": case "web_server_recovered": return recoveryNames[event.recovery] || "";
-        case "web_server_down": return webServerCauseNames[event.cause] || "";
+        case "web_server_down": case "https_fallback": return webServerCauseNames[event.cause] || "";
         case "wifi_lost": return wifiReasonNames[event.reason_key] || (event.reason != null ? `Disconnected (reason ${event.reason})` : "");
         case "wifi_restored": return event.down_s != null ? `Down for ${fmtDownFor(event.down_s)}` : "";
         case "wifi_unstable": return event.drops != null ? `${event.drops} short drops in an hour` : "";
@@ -1755,7 +1757,7 @@
           return { text: tz ? tz[0] : "" };
         }
         case "display": return { text: p.brightness != null ? `${p.brightness}%` : "" };
-        case "security": return { text: state.tls?.https_active ? "HTTPS" : (state.tls ? "HTTP only" : "") };
+        case "security": return { text: state.tls?.https_active ? "HTTPS" : state.tls?.https_failed ? "HTTPS failed" : (state.tls ? "HTTP only" : "") };
         case "firmware": {
           const update = state.release?.update_available
             ? state.release.latest_version
@@ -1893,7 +1895,8 @@
           <div class="field"><label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password"></div><button class="btn" type="submit">Save credentials</button></form>
         <h3 style="margin-top:24px">API key</h3><div class="field"><input readonly value="${esc(state.security.api_key || "")}"></div>
         <div class="btn-row"><button class="btn" data-action="copy-key">Copy</button><button class="btn danger" data-action="regenerate-key">Regenerate</button></div></section>
-        <section class="card"><div class="card-head"><h2>TLS certificate</h2><span class="badge ${state.tls.https_active?"good":""}">${state.tls.https_active?"HTTPS":state.tls.has_certs?"Restart required":"HTTP"}</span></div>
+        <section class="card"><div class="card-head"><h2>TLS certificate</h2><span class="badge ${state.tls.https_active?"good":state.tls.https_failed?"bad":""}" data-tls-badge>${state.tls.https_active?"HTTPS":state.tls.https_failed?"HTTPS failed":state.tls.has_certs?"Restart required":"HTTP"}</span></div>
+          ${state.tls.https_failed ? `<div class="notice bad" data-tls-failed>HTTPS could not start with the installed certificate, so the dashboard is being served over HTTP. Restart the controller to try again, or delete the certificate.</div>` : ""}
           <p class="metric-sub">${state.tls.https_active
             ? "The dashboard is served over HTTPS with your certificate. Deleting it switches the dashboard back to HTTP."
             : "The dashboard is served over HTTP. Install a certificate issued for the name you use to reach this controller to switch to HTTPS."}

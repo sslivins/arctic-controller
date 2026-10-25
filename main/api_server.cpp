@@ -107,15 +107,22 @@ static void add_wifi_bss(cJSON* obj)
 //              port 443 is not started.
 //   HTTPS mode (administrator cert):    port 443 serves the full web UI and
 //              API; port 80 only serves /api/health plus a "use HTTPS" 404.
+//   If port 443 fails to start in HTTPS mode, the start falls back to HTTP
+//   mode (s_https_fallback) rather than leaving no web UI at all.
 // The integration server on 8443 always uses the persistent device identity
 // (pinned by Home Assistant) and is independent of this choice.
 static httpd_handle_t server = NULL;      // HTTP (port 80) — always running
 static httpd_handle_t server_ssl = NULL;  // HTTPS (port 443) — administrator cert only
 static bool s_https_mode = false;
+// Set when an administrator certificate is installed but port 443 failed to
+// start, so the servers fell back to HTTP mode (see api_server_start_locked).
+static bool s_https_fallback = false;
+static bool s_https_fallback_logged = false;  // event recorded once per boot
 static httpd_handle_t server_integration = NULL;  // HA HTTPS/WSS (port 8443)
 #ifdef CONFIG_TEST_ENDPOINTS
 static httpd_handle_t websocket_test_server = NULL;  // WS feasibility (port 81)
 static int s_test_fail_starts = 0;
+static int s_test_fail_https_starts = 0;
 #endif
 
 // Server lifecycle. Every start/stop goes through one recursive lock (the
@@ -579,32 +586,9 @@ static bool api_server_start_locked(void)
     // made every browser show a certificate warning; it is now used only by
     // the Home Assistant server on 8443, which pins it.
     s_https_mode = tls_mgr_has_certs();
+    s_https_fallback = false;
+    api_start_error_t https_fail_cause = API_START_ERR_NONE;
 
-    // In HTTPS mode port 80 serves exactly one route (/api/health) plus the
-    // "HTTPS required" 404 notice -- in test builds too, since test endpoints
-    // are registered on the HTTPS server. It therefore needs neither the full
-    // handler table nor more than two sockets.
-    //
-    // The handler table is trimmed, but the stack deliberately is NOT:
-    // esp_http_server gives every server task the name "httpd" (httpd_config_t
-    // has no task_name field, still true in 6.1), so
-    // tests/api/test_stack_watermark_budget.py collapses all four servers into
-    // a single "httpd" key and reports the smallest headroom among them.
-    // Right-sizing this one silently retargets the guard at port 80 and stops
-    // it protecting the servers that actually run handlers. The RAM saved is
-    // not needed now that the real internal-RAM shortfall (LVGL being placed
-    // in IRAM) has been fixed.
-    //
-    // httpd task stacks must live in internal RAM: handlers write NVS, and a
-    // PSRAM stack trips esp_task_stack_is_sane_cache_disabled() while the
-    // flash cache is disabled.
-    const int http_uri_handlers = s_https_mode ? 8 : uri_handlers;
-    // Port 80 carries the whole web UI in HTTP mode, where browsers open up to
-    // ~6 parallel connections; it gets the same 7 sockets as port 443 (see the
-    // note there). Only one of 80/443 is full-size at a time, so the LWIP
-    // socket budget is unchanged.
-    const int http_open_sockets = s_https_mode ? 2 : 7;
-    
     esp_err_t ret;
 
     if (s_ha_command_mutex == nullptr) {
@@ -615,45 +599,13 @@ static bool api_server_start_locked(void)
         }
     }
     
-    // ---- Always start HTTP on port 80 ----
-    {
-        ESP_LOGI(TAG, "Starting HTTP server on port 80 (%s)...",
-                 s_https_mode ? "health only" : "web UI and API");
-        
-        httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
-        http_config.lru_purge_enable   = true;
-        http_config.uri_match_fn       = httpd_uri_match_wildcard;
-        http_config.max_uri_handlers   = http_uri_handlers;
-        http_config.stack_size         = stack_size;
-        http_config.max_resp_headers   = max_headers;
-        http_config.recv_wait_timeout  = recv_timeout;
-        http_config.max_open_sockets   = http_open_sockets;
-        // TCP keepalive reaps dead ESTABLISHED sockets left behind when a
-        // client vanishes mid-request (e.g. slow TLS clients that abandon a
-        // handshake, or the test suite's connection storm). Without this the
-        // stuck PCBs are never freed on the single-threaded server, leaking
-        // heap + sockets until the whole network stack wedges (associated but
-        // unreachable, no watchdog). ~10s idle + 3x5s probes => dead peers are
-        // dropped in ~25s. Harmless to live-but-idle clients: their TCP stack
-        // auto-ACKs the keepalive probes.
-        http_config.keep_alive_enable   = true;
-        http_config.keep_alive_idle     = 10;
-        http_config.keep_alive_interval = 5;
-        http_config.keep_alive_count    = 3;
-        
-        ret = httpd_start(&server, &http_config);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
-            s_last_start_error = start_error_from(ret);
-            server = NULL;
-            return false;
-        }
-    }
-    
     // ---- HTTPS on port 443, only with an administrator certificate ----
-    // Once an administrator has installed a certificate HTTPS is mandatory:
-    // if it cannot start, the whole start fails rather than falling back to
-    // plaintext HTTP.
+    // Started before port 80 so that, if it fails, port 80 can still be set
+    // up for HTTP mode. A certificate that will not load (or a server task
+    // that cannot get memory) must not leave the controller unmanageable: the
+    // web UI and API fall back to plain HTTP on port 80 and the failure is
+    // reported (event log, /api/tls/status, the web UI and the touchscreen),
+    // so the administrator can restart to retry or remove the certificate.
     if (s_https_mode) {
         size_t cert_len = 0, key_len = 0;
         const uint8_t* cert = tls_mgr_get_cert(&cert_len);
@@ -700,7 +652,19 @@ static bool api_server_start_locked(void)
         ssl_config.prvtkey_pem   = key;
         ssl_config.prvtkey_len   = key_len;
         
-        ret = httpd_ssl_start(&server_ssl, &ssl_config);
+#ifdef CONFIG_TEST_ENDPOINTS
+        if (s_test_fail_https_starts > 0) {
+            s_test_fail_https_starts--;
+            ESP_LOGE(TAG, "HTTPS start failed (test injection, %d more queued)",
+                     s_test_fail_https_starts);
+            ret = ESP_ERR_HTTPD_TASK;
+            https_fail_cause = API_START_ERR_INJECTED;
+        } else
+#endif
+        {
+            ret = httpd_ssl_start(&server_ssl, &ssl_config);
+            https_fail_cause = start_error_from(ret);
+        }
         if (ret == ESP_OK) {
             tls_mgr_set_https_active(true);
             ESP_LOGI(TAG,
@@ -708,7 +672,7 @@ static bool api_server_start_locked(void)
                      "certificate");
         } else {
             ESP_LOGE(
-                TAG, "Failed to start mandatory HTTPS server: %s",
+                TAG, "Failed to start HTTPS server: %s -- falling back to HTTP",
                 esp_err_to_name(ret));
             // ESP_ERR_HTTPD_TASK means the server task stack allocation
             // failed. That needs a CONTIGUOUS block, so report the largest
@@ -721,10 +685,76 @@ static bool api_server_start_locked(void)
                 (unsigned)heap_caps_get_largest_free_block(
                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
                 stack_size);
+            server_ssl = NULL;
+            s_https_mode = false;
+            s_https_fallback = true;
+        }
+    }
+
+    // In HTTPS mode port 80 serves exactly one route (/api/health) plus the
+    // "HTTPS required" 404 notice -- in test builds too, since test endpoints
+    // are registered on the HTTPS server. It therefore needs neither the full
+    // handler table nor more than two sockets.
+    //
+    // The handler table is trimmed, but the stack deliberately is NOT:
+    // esp_http_server gives every server task the name "httpd" (httpd_config_t
+    // has no task_name field, still true in 6.1), so
+    // tests/api/test_stack_watermark_budget.py collapses all four servers into
+    // a single "httpd" key and reports the smallest headroom among them.
+    // Right-sizing this one silently retargets the guard at port 80 and stops
+    // it protecting the servers that actually run handlers. The RAM saved is
+    // not needed now that the real internal-RAM shortfall (LVGL being placed
+    // in IRAM) has been fixed.
+    //
+    // httpd task stacks must live in internal RAM: handlers write NVS, and a
+    // PSRAM stack trips esp_task_stack_is_sane_cache_disabled() while the
+    // flash cache is disabled.
+    const int http_uri_handlers = s_https_mode ? 8 : uri_handlers;
+    // Port 80 carries the whole web UI in HTTP mode, where browsers open up to
+    // ~6 parallel connections; it gets the same 7 sockets as port 443 (see the
+    // note there). Only one of 80/443 is full-size at a time, so the LWIP
+    // socket budget is unchanged.
+    const int http_open_sockets = s_https_mode ? 2 : 7;
+
+    // ---- Always start HTTP on port 80 ----
+    {
+        ESP_LOGI(TAG, "Starting HTTP server on port 80 (%s)...",
+                 s_https_mode ? "health only" : "web UI and API");
+        
+        httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
+        http_config.lru_purge_enable   = true;
+        http_config.uri_match_fn       = httpd_uri_match_wildcard;
+        http_config.max_uri_handlers   = http_uri_handlers;
+        http_config.stack_size         = stack_size;
+        http_config.max_resp_headers   = max_headers;
+        http_config.recv_wait_timeout  = recv_timeout;
+        http_config.max_open_sockets   = http_open_sockets;
+        // TCP keepalive reaps dead ESTABLISHED sockets left behind when a
+        // client vanishes mid-request (e.g. slow TLS clients that abandon a
+        // handshake, or the test suite's connection storm). Without this the
+        // stuck PCBs are never freed on the single-threaded server, leaking
+        // heap + sockets until the whole network stack wedges (associated but
+        // unreachable, no watchdog). ~10s idle + 3x5s probes => dead peers are
+        // dropped in ~25s. Harmless to live-but-idle clients: their TCP stack
+        // auto-ACKs the keepalive probes.
+        http_config.keep_alive_enable   = true;
+        http_config.keep_alive_idle     = 10;
+        http_config.keep_alive_interval = 5;
+        http_config.keep_alive_count    = 3;
+        
+        ret = httpd_start(&server, &http_config);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(ret));
             s_last_start_error = start_error_from(ret);
-            api_server_stop();
+            server = NULL;
             return false;
         }
+    }
+
+    if (s_https_fallback && !s_https_fallback_logged) {
+        s_https_fallback_logged = true;
+        event_log_record(EVENT_HTTPS_FALLBACK,
+                         api_server_start_error_event_cause(https_fail_cause));
     }
 
     if (tls_mgr_has_identity()) {
@@ -1952,6 +1982,32 @@ bool api_server_ensure_running(void)
 api_start_error_t api_server_last_start_error(void)
 {
     return s_last_start_error;
+}
+
+uint32_t api_server_start_error_event_cause(api_start_error_t err)
+{
+    switch (err) {
+        case API_START_ERR_NO_MEMORY:   return EVENT_WEB_SERVER_CAUSE_NO_MEMORY;
+        case API_START_ERR_NO_IDENTITY: return EVENT_WEB_SERVER_CAUSE_NO_IDENTITY;
+        case API_START_ERR_FAILED:      return EVENT_WEB_SERVER_CAUSE_START_FAILED;
+        case API_START_ERR_INJECTED:    return EVENT_WEB_SERVER_CAUSE_TEST;
+        default:                        return EVENT_WEB_SERVER_CAUSE_UNKNOWN;
+    }
+}
+
+bool api_server_https_failed(void)
+{
+    return s_https_fallback;
+}
+
+void api_server_test_fail_https_starts(int count)
+{
+#ifdef CONFIG_TEST_ENDPOINTS
+    LifecycleLock lock;
+    s_test_fail_https_starts = count < 0 ? 0 : count;
+#else
+    (void)count;
+#endif
 }
 
 void api_server_test_fail_starts(int count)
@@ -7902,6 +7958,7 @@ static esp_err_t tls_status_get_handler(httpd_req_t* req)
     cJSON* root = cJSON_CreateObject();
     cJSON_AddBoolToObject(root, "has_certs", tls_mgr_has_certs());
     cJSON_AddBoolToObject(root, "https_active", tls_mgr_is_https_active());
+    cJSON_AddBoolToObject(root, "https_failed", s_https_fallback);
     cJSON_AddBoolToObject(root, "auth_ready",
                           auth_mgr_web_auth_enabled() && auth_mgr_api_auth_enabled());
     cJSON_AddBoolToObject(
