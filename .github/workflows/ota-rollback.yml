@@ -256,7 +256,6 @@ jobs:
         # (CONFIG_TEST_ENDPOINTS), then log in.
         run: |
           set -uo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           TEST_USERNAME="arctic"
           TEST_PASSWORD="ArcticTest!2026"
           BODY="{\"username\": \"$TEST_USERNAME\", \"password\": \"$TEST_PASSWORD\"}"
@@ -264,17 +263,17 @@ jobs:
 
           for i in $(seq 1 12); do
             curl -sk --connect-timeout 3 --max-time 8 \
-              -X POST "$ARCTIC_URL_HTTPS/api/test/credentials" \
+              -X POST "$(bash .github/scripts/device_url.sh)/api/test/credentials" \
               -H "Content-Type: application/json" \
               -d "$BODY" > /dev/null 2>&1 || true
 
             JAR=$(mktemp)
             curl -sk -c "$JAR" --connect-timeout 3 --max-time 8 \
-              -X POST "$ARCTIC_URL_HTTPS/login" \
+              -X POST "$(bash .github/scripts/device_url.sh)/login" \
               -H "Content-Type: application/json" \
               -d "$BODY" > /dev/null 2>&1 || true
             RESP=$(curl -sk -b "$JAR" --connect-timeout 3 --max-time 8 \
-              "$ARCTIC_URL_HTTPS/api/auth/apikey" 2>/dev/null) || true
+              "$(bash .github/scripts/device_url.sh)/api/auth/apikey" 2>/dev/null) || true
             rm -f "$JAR"
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
             if [ -n "$DEVICE_KEY" ]; then break; fi
@@ -297,8 +296,7 @@ jobs:
         # would have its next OTA rejected with ESP_ERR_OTA_ROLLBACK_INVALID_STATE.
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status")
           echo "Baseline /api/ota/status: $RESP"
 
           BASE_SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))")
@@ -338,13 +336,12 @@ jobs:
         id: rollback
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
 
           echo "Uploading poison image (device will crash on purpose and roll back)..."
           CODE=$(curl -sk -o /tmp/upload.txt -w '%{http_code}' \
             -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
             --data-binary "@poison/arctic_controller.bin" \
-            "$ARCTIC_URL_HTTPS/api/ota/upload") || true
+            "$(bash .github/scripts/device_url.sh)/api/ota/upload") || true
           echo "Upload: HTTP $CODE — $(cat /tmp/upload.txt)"
           if [ "$CODE" != "200" ]; then
             echo "::error::Poison upload was rejected (HTTP $CODE); rollback was never exercised."
@@ -356,7 +353,7 @@ jobs:
           # boot cycles, so allow generously.
           echo "Waiting for the device to return on its previous image..."
           for i in $(seq 1 120); do
-            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || RESP=""
             if [ -n "$RESP" ]; then
               SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || SHA=""
               if [ -n "$SHA" ] && [ "$SHA" = "$BASELINE_SHA" ]; then
@@ -379,8 +376,7 @@ jobs:
       - name: Assert the rollback is complete and durable
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status")
           echo "Post-rollback /api/ota/status: $RESP"
           python3 - "$RESP" <<'PY'
           import json, os, sys
@@ -466,7 +462,6 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           # /api/ota/status is auth-gated. Probing it without a key returns
           # {"error":"API key required"}, which parses to an empty build_sha and
           # would misreport a perfectly healthy controller as unrecoverable —
@@ -474,7 +469,7 @@ jobs:
           # declaring the rig DOWN. Fall back to the secret when the sync step
           # never ran (this step is `if: always()`).
           PROBE_KEY="${ARCTIC_API_KEY:-$RECOVERY_API_KEY}"
-          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${PROBE_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${PROBE_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || RESP=""
           SHA=""
           if [ -n "$RESP" ]; then
             SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || SHA=""
@@ -533,7 +528,7 @@ jobs:
           # RECOVERY_API_KEY, so that — not any previously-synced device key —
           # is the credential the device now expects.
           for i in $(seq 1 90); do
-            R=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${RECOVERY_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || R=""
+            R=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${RECOVERY_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || R=""
             if [ -n "$R" ]; then
               S=$(echo "$R" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || S=""
               case "$S" in

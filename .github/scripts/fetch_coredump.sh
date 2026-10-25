@@ -3,14 +3,15 @@
 #
 #   fetch_coredump.sh <output-file>
 #
-# Needs ARCTIC_URL (https://...) and ARCTIC_API_KEY. Exit codes:
+# Needs ARCTIC_URL (either scheme; see device_url.sh) and ARCTIC_API_KEY.
+# Exit codes:
 #   0  a dump was saved to <output-file>
 #   1  the device has no dump
 #   2  the device could not be asked (unreachable, auth, bad response)
 set -uo pipefail
 
 out="${1:?usage: fetch_coredump.sh <output-file>}"
-url="${ARCTIC_URL/http:/https:}/api/logs/coredump"
+url="$(bash "$(dirname "$0")/device_url.sh")/api/logs/coredump"
 
 for attempt in 1 2 3 4 5 6; do
   code=$(curl -sk --connect-timeout 5 --max-time 60 -o "$out" -w '%{http_code}' \

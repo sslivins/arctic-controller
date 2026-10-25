@@ -1,27 +1,36 @@
 """
-Test: HTTPS / TLS Certificate Lifecycle
+Test: HTTP / HTTPS mode and the administrator certificate lifecycle
 
-Verifies the administrator TLS certificate lifecycle on the device:
-  1. Upload a self-signed certificate
-  2. Reboot to activate HTTPS
-  3. Confirm HTTPS is serving on port 443
-  4. Verify API endpoints work over HTTPS
-  5. Delete the administrator certificate and reboot
-  6. Confirm HTTPS falls back to the persistent device identity
+The controller runs in one of two modes, chosen at boot:
 
-These tests require both web auth and API key auth to be enabled
-(firmware prerequisite for cert upload). The fixture handles enabling
-auth before tests and restoring the original state afterwards.
+  HTTP mode (no administrator certificate, the default)
+    Port 80 serves the full web UI and API. Port 443 is closed. The
+    self-signed device identity is used only by the Home Assistant server on
+    8443, never by the web UI.
 
-The test generates a self-signed EC certificate at runtime — no external
-cert files or DNS records are needed. DeviceClient uses verify=False,
-so hostname mismatch is not an issue.
+  HTTPS mode (administrator certificate installed)
+    Port 443 serves the web UI and API with that certificate. Port 80 serves
+    only /api/health plus a 404 telling the user to use HTTPS -- never a
+    redirect, and never the full UI.
+
+Uploading a certificate restarts the controller into HTTPS mode; deleting it
+restarts it into HTTP mode. This module walks that lifecycle and leaves the
+controller in the mode it found it in. If it starts in HTTPS mode, the
+administrator certificate can only be put back when ARCTIC_ADMIN_CERT_FILE
+and ARCTIC_ADMIN_KEY_FILE name its PEM files (CI's "HTTP to HTTPS" step writes
+them), so without them the lifecycle tests are skipped rather than discarding
+a certificate they cannot restore.
+
+The test generates a self-signed EC certificate at runtime -- no external
+cert files or DNS records are needed. Requests use verify=False, so the
+hostname mismatch does not matter.
 """
 
+import datetime
 import os
-import subprocess
-import tempfile
 import time
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import requests
@@ -35,70 +44,126 @@ ARCTIC_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 API_KEY = os.environ.get("ARCTIC_API_KEY", "")
 
 
-def _api_headers() -> dict:
-    headers = {}
-    if API_KEY:
-        headers["X-API-Key"] = API_KEY
-    return headers
+def _read_pem(env: str) -> str:
+    path = os.environ.get(env, "")
+    return Path(path).read_text() if path and Path(path).is_file() else ""
 
 
-def _api_get(path: str, **kwargs) -> requests.Response:
-    return requests.get(
-        f"{ARCTIC_URL}{path}", headers=_api_headers(), verify=False, timeout=10, **kwargs
-    )
+ADMIN_CERT = _read_pem("ARCTIC_ADMIN_CERT_FILE")
+ADMIN_KEY = _read_pem("ARCTIC_ADMIN_KEY_FILE")
+
+HOST = urlsplit(ARCTIC_URL).netloc
+HTTP_URL = f"http://{HOST}"
+HTTPS_URL = f"https://{HOST}"
+
+# Covers the 500 ms response delay, a full boot and the servers starting.
+RESTART_TIMEOUT = 120.0
 
 
-def _api_post(path: str, **kwargs) -> requests.Response:
+def _headers() -> dict:
+    return {"X-API-Key": API_KEY} if API_KEY else {}
+
+
+def _get(base: str, path: str, **kwargs) -> requests.Response:
+    kwargs.setdefault("timeout", 10)
+    return requests.get(f"{base}{path}", headers=_headers(), verify=False, **kwargs)
+
+
+def _https_open() -> bool:
+    try:
+        return _get(HTTPS_URL, "/api/health", timeout=5).status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def _mode() -> str:
+    """'https' when port 443 answers, otherwise 'http'."""
+    return "https" if _https_open() else "http"
+
+
+def _base() -> str:
+    return HTTPS_URL if _mode() == "https" else HTTP_URL
+
+
+def _tls_status(base: str) -> dict:
+    r = _get(base, "/api/tls/status")
+    r.raise_for_status()
+    return r.json()
+
+
+def _wait_for_mode(mode: str, timeout: float = RESTART_TIMEOUT) -> bool:
+    """Wait until the controller has restarted into ``mode``.
+
+    The wrong mode can never satisfy the check: in HTTP mode 443 is closed,
+    and in HTTPS mode port 80 has no /api/tls/status route.
+    """
+    base = HTTPS_URL if mode == "https" else HTTP_URL
+    want_certs = mode == "https"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            status = _tls_status(base)
+            if (status.get("has_certs") is want_certs
+                    and status.get("https_active") is want_certs
+                    and (mode == "https" or not _https_open())):
+                return True
+        except (requests.RequestException, ValueError):
+            pass
+        time.sleep(2)
+    return False
+
+
+def _follow(device: DeviceClient, mode: str) -> None:
+    """Point the shared device client at ``mode`` after a restart into it.
+
+    The suite's autouse fixtures talk to the controller through ``device``
+    before every test, so it must use whichever port is serving. A restart
+    also clears the in-memory test lock.
+    """
+    device.base_url = HTTPS_URL if mode == "https" else HTTP_URL
+    device.lock(ttl_seconds=900)
+
+
+def _upload(base: str, cert_pem: str, key_pem: str) -> requests.Response:
     return requests.post(
-        f"{ARCTIC_URL}{path}", headers=_api_headers(), verify=False, timeout=10, **kwargs
+        f"{base}/api/tls/certificate", headers=_headers(),
+        json={"cert": cert_pem, "key": key_pem}, verify=False, timeout=15,
     )
 
 
-def _api_delete(path: str, **kwargs) -> requests.Response:
+def _delete(base: str) -> requests.Response:
     return requests.delete(
-        f"{ARCTIC_URL}{path}", headers=_api_headers(), verify=False, timeout=10, **kwargs
+        f"{base}/api/tls/certificate", headers=_headers(), verify=False, timeout=15,
     )
-
-
-def _https_url() -> str:
-    """Derive HTTPS URL from the HTTP ARCTIC_URL."""
-    return ARCTIC_URL.replace("http://", "https://")
-
-
-def _tls_status() -> dict:
-    return _api_get("/api/tls/status").json()
 
 
 def _generate_self_signed_cert() -> tuple[str, str]:
-    """Generate a self-signed EC P-256 certificate and private key.
+    """A self-signed EC P-256 certificate and its key, as PEM strings."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
 
-    Returns (cert_pem, key_pem) as strings.
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        key_path = f"{tmpdir}/key.pem"
-        cert_path = f"{tmpdir}/cert.pem"
-
-        # Generate EC private key
-        subprocess.run(
-            ["openssl", "ecparam", "-genkey", "-name", "prime256v1",
-             "-noout", "-out", key_path],
-            check=True, capture_output=True,
-        )
-
-        # Generate self-signed certificate (valid 1 day)
-        subprocess.run(
-            ["openssl", "req", "-new", "-x509", "-key", key_path,
-             "-out", cert_path, "-days", "1",
-             "-subj", "/CN=arctic-test"],
-            check=True, capture_output=True,
-        )
-
-        with open(cert_path) as f:
-            cert_pem = f.read()
-        with open(key_path) as f:
-            key_pem = f.read()
-
-    return cert_pem, key_pem
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "arctic-test")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name).issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .sign(key, hashes.SHA256())
+    )
+    return (
+        cert.public_bytes(serialization.Encoding.PEM).decode(),
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -107,285 +172,172 @@ def _generate_self_signed_cert() -> tuple[str, str]:
 
 @pytest.fixture(scope="module")
 def self_signed_cert() -> tuple[str, str]:
-    """Generate a self-signed cert once for the module."""
     return _generate_self_signed_cert()
-
-
-def _ensure_no_admin_cert(device: DeviceClient, verify_timeout: float = 30.0) -> bool:
-    """Delete any administrator TLS cert and reboot to the device identity.
-
-    Unlike a fire-and-forget delete, this polls ``/api/tls/status`` until
-    ``has_certs`` is *externally* observable as ``False`` — so the restored
-    baseline is confirmed, not merely requested. This matters because a leftover
-    administrator cert changes which certificate HTTPS serves and would leak
-    into later suites (api/web) sharing the same physical device in a CI run.
-
-    Returns ``True`` once the device is confirmed on the identity cert.
-    """
-    if not _tls_status().get("has_certs"):
-        return True
-    _api_delete("/api/tls/certificate")
-    device.reboot()
-    if not device.wait_for_device(timeout=verify_timeout):
-        return False
-    return device.wait_until(
-        "administrator tls cert cleared",
-        lambda: not _tls_status().get("has_certs"),
-        timeout=verify_timeout,
-        raise_on_timeout=False,
-    )
-
-
-def _restore_auth_config(original: dict, verify_timeout: float = 10.0) -> None:
-    """Restore auth config to ``original`` and poll until it takes effect."""
-    want_web = original.get("web_auth_enabled", True)
-    want_api = original.get("api_auth_enabled", True)
-    _api_post(
-        "/api/auth/config",
-        json={"web_auth_enabled": want_web, "api_auth_enabled": want_api},
-    )
-    deadline = time.time() + verify_timeout
-    while time.time() < deadline:
-        try:
-            cur = _api_get("/api/auth/config").json()
-            if (cur.get("web_auth_enabled") == want_web
-                    and cur.get("api_auth_enabled") == want_api):
-                return
-        except Exception:
-            pass
-        time.sleep(0.5)
 
 
 @pytest.fixture(scope="module")
 def auth_enabled(device: DeviceClient):
-    """Ensure both web and API auth are enabled (required for cert upload).
-
-    Restores previous auth config after the module completes, verified.
-    """
-    # Read current config
-    r = _api_get("/api/auth/config")
-    original = r.json()
-
-    # Enable both if not already
+    """Both auth methods must be on before a certificate can be uploaded."""
+    base = _base()
+    original = _get(base, "/api/auth/config").json()
     if not original.get("web_auth_enabled") or not original.get("api_auth_enabled"):
-        _api_post(
-            "/api/auth/config",
+        requests.post(
+            f"{base}/api/auth/config", headers=_headers(), verify=False, timeout=10,
             json={"web_auth_enabled": True, "api_auth_enabled": True},
         )
+    yield
+    base = _base()
+    requests.post(
+        f"{base}/api/auth/config", headers=_headers(), verify=False, timeout=10,
+        json={
+            "web_auth_enabled": original.get("web_auth_enabled", True),
+            "api_auth_enabled": original.get("api_auth_enabled", True),
+        },
+    )
+
+
+@pytest.fixture(scope="module")
+def http_mode(device: DeviceClient, auth_enabled):
+    """Put the controller in HTTP mode for the lifecycle, and back afterwards."""
+    started_in = _mode()
+    if started_in == "https":
+        if not (ADMIN_CERT and ADMIN_KEY):
+            # ARCTIC_ADMIN_CERT_FILE / ARCTIC_ADMIN_KEY_FILE are needed to put it back.
+            pytest.skip("Cannot restore the administrator certificate afterwards")
+        assert _delete(HTTPS_URL).status_code == 200
+        assert _wait_for_mode("http"), "Controller did not restart into HTTP mode"
+        _follow(device, "http")
 
     yield
 
-    # Restore original auth config (verified: poll until externally visible)
-    _restore_auth_config(original)
-
-
-@pytest.fixture(autouse=True, scope="module")
-def clean_tls_state(device: DeviceClient, auth_enabled):
-    """Ensure no leftover certs before tests and clean up after."""
-    assert _ensure_no_admin_cert(device), \
-        "Device retained an administrator TLS cert before HTTPS tests"
-
-    yield
-
-    # Verified cleanup: a leftover admin cert would change the certificate
-    # served to later suites (api/web) in the same CI run, so confirm the
-    # identity restore rather than firing and forgetting.
     try:
-        if not _ensure_no_admin_cert(device):
-            print("WARNING: HTTPS teardown could not confirm identity-cert restore; "
-                  "later suites may see a leftover administrator cert.")
+        if started_in == "https":
+            if _mode() == "http":
+                _upload(HTTP_URL, ADMIN_CERT, ADMIN_KEY)
+            restored = _wait_for_mode("https")
+        else:
+            if _mode() == "https":
+                _delete(HTTPS_URL)
+            restored = _wait_for_mode("http")
+        if not restored:
+            print(f"WARNING: could not restore {started_in.upper()} mode after "
+                  "the HTTPS tests; later suites may fail.")
+        _follow(device, started_in)
     except Exception as e:
-        print(f"WARNING: HTTPS teardown cleanup error: {e}")
+        print(f"WARNING: HTTPS teardown error: {e}")
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestTlsStatus:
-    """Verify /api/tls/status reports correct state."""
-
-    def test_no_certs_initially(self, device: DeviceClient, auth_enabled):
-        """Without an administrator cert, HTTPS uses the device identity."""
-        status = _tls_status()
-        assert status["has_certs"] is False
-        assert status["https_active"] is True
-        assert status["integration_identity"] is True
+class TestCertUploadValidation:
+    """Rejected uploads never store anything, so they need no mode change."""
 
     def test_status_requires_auth(self):
-        """TLS status endpoint requires API key authentication."""
-        r = requests.get(f"{ARCTIC_URL}/api/tls/status", verify=False, timeout=10)
+        r = requests.get(f"{_base()}/api/tls/status", verify=False, timeout=10)
         assert r.status_code == 401
 
-
-class TestCertUpload:
-    """Verify certificate upload validation."""
-
     def test_upload_requires_auth(self, self_signed_cert):
-        """Cert upload without API key returns 401."""
         cert_pem, key_pem = self_signed_cert
         r = requests.post(
-            f"{ARCTIC_URL}/api/tls/certificate",
-            json={"cert": cert_pem, "key": key_pem},
-            verify=False, timeout=10,
+            f"{_base()}/api/tls/certificate",
+            json={"cert": cert_pem, "key": key_pem}, verify=False, timeout=10,
         )
         assert r.status_code == 401
 
     def test_upload_rejects_invalid_cert(self, auth_enabled):
-        """Non-PEM cert is rejected with 400."""
-        r = _api_post(
-            "/api/tls/certificate",
-            json={"cert": "not a valid cert", "key": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----"},
-        )
+        r = _upload(_base(), "not a valid cert",
+                    "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----")
         assert r.status_code == 400
         assert "PEM" in r.json().get("error", "")
 
     def test_upload_rejects_invalid_key(self, self_signed_cert, auth_enabled):
-        """Non-PEM key is rejected with 400."""
         cert_pem, _ = self_signed_cert
-        r = _api_post(
-            "/api/tls/certificate",
-            json={"cert": cert_pem, "key": "not a valid key"},
-        )
+        r = _upload(_base(), cert_pem, "not a valid key")
         assert r.status_code == 400
         assert "PEM" in r.json().get("error", "")
 
     def test_upload_rejects_missing_fields(self, auth_enabled):
-        """Missing cert or key field returns 400."""
-        r = _api_post("/api/tls/certificate", json={"cert": "something"})
+        r = requests.post(
+            f"{_base()}/api/tls/certificate", headers=_headers(),
+            json={"cert": "something"}, verify=False, timeout=10,
+        )
         assert r.status_code == 400
 
 
-class TestHttpsLifecycle:
-    """Full lifecycle: upload → reboot → HTTPS active → delete → reboot → HTTP only."""
+class TestHttpMode:
+    """Without an administrator certificate the dashboard is plain HTTP."""
 
-    def test_upload_cert(self, device: DeviceClient, self_signed_cert, auth_enabled):
-        """Upload self-signed cert succeeds and sets has_certs."""
-        cert_pem, key_pem = self_signed_cert
-        r = _api_post(
-            "/api/tls/certificate",
-            json={"cert": cert_pem, "key": key_pem},
-        )
+    def test_status_reports_http_mode(self, http_mode):
+        status = _tls_status(HTTP_URL)
+        assert status["has_certs"] is False
+        assert status["https_active"] is False
+        assert status["integration_identity"] is True
+
+    def test_port_443_is_closed(self, http_mode):
+        assert not _https_open()
+
+    def test_dashboard_is_served_over_http(self, http_mode):
+        r = requests.get(f"{HTTP_URL}/", allow_redirects=False, timeout=10)
         assert r.status_code == 200
+        assert "text/html" in r.headers.get("Content-Type", "")
+
+
+class TestHttpsLifecycle:
+    """Upload -> restart into HTTPS mode -> delete -> restart into HTTP mode."""
+
+    def test_upload_restarts_into_https_mode(self, device, http_mode, self_signed_cert):
+        cert_pem, key_pem = self_signed_cert
+        r = _upload(HTTP_URL, cert_pem, key_pem)
+        assert r.status_code == 200, r.text[:300]
         data = r.json()
         assert data["success"] is True
+        assert data["restarting"] is True
+        assert data["scheme"] == "https"
+        assert _wait_for_mode("https"), "Controller did not restart into HTTPS mode"
+        _follow(device, "https")
 
-        # The current HTTPS server keeps using the device identity until reboot.
-        status = _tls_status()
+    def test_api_works_over_https(self, http_mode):
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        status = _tls_status(HTTPS_URL)
         assert status["has_certs"] is True
         assert status["https_active"] is True
-
-    def test_reboot_activates_https(self, device: DeviceClient, self_signed_cert, auth_enabled):
-        """After uploading cert and rebooting, HTTPS should be active on port 443."""
-        # Ensure cert is uploaded
-        cert_pem, key_pem = self_signed_cert
-        status = _tls_status()
-        if not status.get("has_certs"):
-            r = _api_post(
-                "/api/tls/certificate",
-                json={"cert": cert_pem, "key": key_pem},
-            )
-            assert r.status_code == 200
-
-        device.reboot()
-        assert device.wait_for_device(timeout=30.0), "Device did not come back after reboot"
-        assert device.wait_for_https_ready(timeout=30.0), \
-            "HTTPS server did not start serving after reboot"
-
-        # HTTPS should now be active
-        https_url = _https_url()
-        r = requests.get(f"{https_url}/api/health", verify=False, timeout=10)
+        r = requests.get(f"{HTTPS_URL}/", verify=False, timeout=10)
         assert r.status_code == 200
-        data = r.json()
-        assert data["status"] == "ok"
 
-    def test_api_works_over_https(self, device: DeviceClient, self_signed_cert, auth_enabled):
-        """Production API endpoints work over HTTPS."""
-        # Ensure HTTPS is active (cert uploaded + rebooted from previous test)
-        https_url = _https_url()
-        try:
-            r = requests.get(f"{https_url}/api/health", verify=False, timeout=10)
-            if r.status_code != 200:
-                pytest.skip("HTTPS not active — previous test may have failed")
-        except Exception:
-            pytest.skip("HTTPS not reachable")
-
-        # Test authenticated endpoint over HTTPS
-        r = requests.get(
-            f"{https_url}/api/tls/status",
-            headers=_api_headers(), verify=False, timeout=10,
-        )
-        assert r.status_code == 200
-        status = r.json()
-        assert status["has_certs"] is True
-        assert status["https_active"] is True
-
-    def test_delete_cert_and_revert_to_identity(self, device: DeviceClient, auth_enabled):
-        """Deleting the administrator cert restores identity-backed HTTPS."""
-        https_url = _https_url()
-
-        # Delete cert (try HTTPS first since that's where routes are registered
-        # when HTTPS is active, fall back to HTTP)
-        deleted = False
-        for url in [https_url, ARCTIC_URL]:
-            try:
-                r = requests.delete(
-                    f"{url}/api/tls/certificate",
-                    headers=_api_headers(), verify=False, timeout=10,
-                )
-                if r.status_code == 200:
-                    deleted = True
-                    break
-            except Exception:
-                continue
-
-        assert deleted, "Failed to delete certificate on both HTTP and HTTPS"
-
-        device.reboot()
-        assert device.wait_for_device(timeout=30.0), "Device did not come back after reboot"
-
-        # HTTPS remains mandatory and falls back to the persistent identity.
-        status = _tls_status()
-        assert status["has_certs"] is False
-        assert status["https_active"] is True
-        assert status["integration_identity"] is True
-        response = requests.get(
-            f"{https_url}/api/health", verify=False, timeout=10
-        )
-        assert response.status_code == 200
-
-
-class TestHttpNonEssentialRoutes:
-    """Under mandatory HTTPS, port 80 is a dead end for non-essential routes.
-
-    Instead of redirecting (which would normalise sending secret-bearing
-    requests over plaintext HTTP), the device returns a clean 404 pointing at
-    its HTTPS URL. Essential bootstrap routes remain available over HTTP.
-    """
-
-    def _http_url(self) -> str:
-        return ARCTIC_URL.replace("https://", "http://")
-
-    def test_http_root_returns_404_not_redirect(self):
-        """GET http://<device>/ returns 404 and does NOT redirect."""
-        r = requests.get(
-            f"{self._http_url()}/", allow_redirects=False, timeout=10
-        )
-        assert r.status_code == 404
-        assert "Location" not in r.headers
-
-    def test_http_404_body_points_to_https(self):
-        """The 404 body tells the user to use the HTTPS URL."""
-        r = requests.get(
-            f"{self._http_url()}/settings", allow_redirects=False, timeout=10
-        )
+    def test_http_root_is_a_404_not_a_redirect(self, http_mode):
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        r = requests.get(f"{HTTP_URL}/", allow_redirects=False, timeout=10)
         assert r.status_code == 404
         assert "Location" not in r.headers
         assert "https" in r.text.lower()
 
-    def test_http_health_still_served(self):
-        """Essential bootstrap routes remain available over plain HTTP."""
-        r = requests.get(
-            f"{self._http_url()}/api/health", allow_redirects=False, timeout=10
-        )
+    def test_http_api_is_not_served_in_https_mode(self, http_mode):
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        r = requests.get(f"{HTTP_URL}/api/tls/status", headers=_headers(),
+                         allow_redirects=False, timeout=10)
+        assert r.status_code == 404
+        assert "Location" not in r.headers
+
+    def test_http_health_still_served_in_https_mode(self, http_mode):
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        r = requests.get(f"{HTTP_URL}/api/health", allow_redirects=False, timeout=10)
+        assert r.status_code == 200
+
+    def test_delete_restarts_into_http_mode(self, device, http_mode):
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        r = _delete(HTTPS_URL)
+        assert r.status_code == 200, r.text[:300]
+        data = r.json()
+        assert data["restarting"] is True
+        assert data["scheme"] == "http"
+        assert _wait_for_mode("http"), "Controller did not restart into HTTP mode"
+        _follow(device, "http")
+        r = requests.get(f"{HTTP_URL}/", timeout=10)
         assert r.status_code == 200

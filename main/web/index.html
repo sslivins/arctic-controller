@@ -1893,7 +1893,11 @@
           <div class="field"><label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password"></div><button class="btn" type="submit">Save credentials</button></form>
         <h3 style="margin-top:24px">API key</h3><div class="field"><input readonly value="${esc(state.security.api_key || "")}"></div>
         <div class="btn-row"><button class="btn" data-action="copy-key">Copy</button><button class="btn danger" data-action="regenerate-key">Regenerate</button></div></section>
-        <section class="card"><div class="card-head"><h2>TLS certificate</h2><span class="badge ${state.tls.https_active?"good":""}">${state.tls.https_active?"HTTPS active":state.tls.has_certs?"Reboot required":"HTTP only"}</span></div>
+        <section class="card"><div class="card-head"><h2>TLS certificate</h2><span class="badge ${state.tls.https_active?"good":""}">${state.tls.https_active?"HTTPS":state.tls.has_certs?"Restart required":"HTTP"}</span></div>
+          <p class="metric-sub">${state.tls.https_active
+            ? "The dashboard is served over HTTPS with your certificate. Deleting it switches the dashboard back to HTTP."
+            : "The dashboard is served over HTTP. Install a certificate issued for the name you use to reach this controller to switch to HTTPS."}
+            Either change restarts the controller. Home Assistant is not affected.</p>
           ${!state.tls.auth_ready ? `<div class="notice">Enable both authentication methods before provisioning TLS.</div>` : ""}
           <details class="fold" data-fold="tls" ${foldOpen("tls")}><summary>Install a certificate</summary>
           <form data-form="tls"><div class="field"><label>Certificate chain (PEM)</label><textarea name="cert"></textarea></div>
@@ -3635,8 +3639,10 @@
         render();
       }
       if (type === "tls") {
-        await mutate("/api/tls/certificate", jsonOptions("POST", { cert: data.get("cert"), key: data.get("key") }), "Certificate saved; restart required");
-        await loadSettings(); render();
+        if (!await askConfirm({ title: "Install this certificate?", message: `The controller restarts and the dashboard moves to ${schemeUrl("https")}`, confirmLabel: "Install & restart" })) return;
+        const before = await fetch("/api/health", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
+        await mutate("/api/tls/certificate", jsonOptions("POST", { cert: data.get("cert"), key: data.get("key") }));
+        restartToScheme("https", before.uptime_ms);
       }
       if (type === "firmware") {
         const file = data.get("firmware");
@@ -3740,6 +3746,54 @@
         setTimeout(tick, 2000);
       };
       setTimeout(tick, 2000);
+    }
+    // The dashboard's address in the given scheme. Uses the name the user typed (hostname or IP),
+    // so a certificate change keeps them on the same controller.
+    function schemeUrl(scheme) { return `${scheme}://${location.hostname}/`; }
+    // A certificate change restarts the controller into HTTP or HTTPS mode, so follow it there.
+    function restartToScheme(scheme, uptimeBefore) {
+      const target = schemeUrl(scheme);
+      const same = location.protocol === `${scheme}:`;
+      showOverlay(`<div class="confirm-dialog restarting" role="status"><div class="spinner"></div>
+        <h3>Restarting…</h3><p id="restart-note">${same ? "This page reconnects automatically."
+          : `The dashboard will open at <a href="${esc(target)}">${esc(target)}</a> when the controller is back.`}</p></div>`);
+      if (same) { waitForRestart(uptimeBefore); return; }
+      const started = Date.now();
+      let wentDown = 0;
+      const tick = async () => {
+        const health = await fetch("/api/health", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+        // HTTP -> HTTPS: port 80 keeps answering /api/health, so a fresh boot is visible from here.
+        if (health && uptimeBefore != null && health.uptime_ms < uptimeBefore) { location.href = target; return; }
+        // HTTPS -> HTTP: port 443 closes for good, and the browser won't let an https page probe
+        // http://, so allow the controller time to boot after it goes away.
+        if (!health && !wentDown) wentDown = Date.now();
+        if (wentDown && Date.now() - wentDown > 30 * 1000) { location.href = target; return; }
+        if (Date.now() - started > 3 * 60 * 1000) {
+          const note = document.getElementById("restart-note");
+          if (note) note.innerHTML = `This is taking longer than expected. Open <a href="${esc(target)}">${esc(target)}</a> to check on the controller.`;
+          return;
+        }
+        setTimeout(tick, 2000);
+      };
+      setTimeout(tick, 2000);
+    }
+    // navigator.clipboard only exists in secure contexts, and the dashboard is usually served over
+    // plain HTTP, so fall back to a hidden textarea and execCommand("copy").
+    async function copyText(text, success) {
+      let ok = false;
+      if (navigator.clipboard && window.isSecureContext) {
+        ok = await navigator.clipboard.writeText(text).then(() => true, () => false);
+      }
+      if (!ok) {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.setAttribute("readonly", "");
+        ta.style.position = "fixed"; ta.style.top = "0"; ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { ok = document.execCommand("copy"); } catch { ok = false; }
+        ta.remove();
+      }
+      toast(ok ? success : "Couldn't copy. Select the text and copy it manually.", ok ? "good" : "bad");
     }
     async function startInstallWatch() {
       const startVersion = state.ota.current_version || state.info.version || "";
@@ -3952,16 +4006,18 @@
       }
       if (action === "ota-dismiss") { state.otaInstall = null; render(); }
       if (action === "reboot" && await askConfirm({ title: "Restart the controller?", message: "It will be unavailable for about a minute.", confirmLabel: "Restart" })) await mutate("/api/ota/reboot", { method: "POST" }, "Controller restarting");
-      if (action === "copy-key") { await navigator.clipboard.writeText(state.security.api_key || ""); toast("API key copied", "good"); }
+      if (action === "copy-key") await copyText(state.security.api_key || "", "API key copied");
       if (action === "regenerate-key" && await askConfirm({ title: "Regenerate the API key?", message: "Existing integrations using the current key will stop working.", confirmLabel: "Regenerate", danger: true })) {
         const data = await mutate("/api/auth/apikey/regenerate", { method: "POST" }, "API key regenerated");
         state.security.api_key = data.api_key; render();
       }
-      if (action === "delete-tls" && await askConfirm({ title: "Delete the TLS certificate?", message: "A restart is required for this to take effect.", confirmLabel: "Delete", danger: true })) {
-        await mutate("/api/tls/certificate", { method: "DELETE" }, "Certificate deleted; restart required"); await loadSettings(); render();
+      if (action === "delete-tls" && await askConfirm({ title: "Delete the TLS certificate?", message: `The controller restarts and the dashboard moves to ${schemeUrl("http")}`, confirmLabel: "Delete & restart", danger: true })) {
+        const before = await fetch("/api/health", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
+        await mutate("/api/tls/certificate", { method: "DELETE" });
+        restartToScheme("http", before.uptime_ms);
       }
       if (action === "logout") { await api("/logout", { method: "POST" }).catch(() => {}); location.reload(); return; }
-      if (action === "copy-ha-code") { await navigator.clipboard.writeText(state.ha.code || ""); toast("Pairing code copied", "good"); }
+      if (action === "copy-ha-code") await copyText(state.ha.code || "", "Pairing code copied");
       if (action === "perf-test") {
         const slot = el.dataset.slot;
         const form = el.closest("form");

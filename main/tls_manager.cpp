@@ -379,6 +379,69 @@ bool tls_mgr_cert_is_valid(const char* cert, size_t cert_len)
     return cert_is_parseable(cert, cert_len);
 }
 
+// Copies a PEM string into a buffer whose length includes exactly one NUL,
+// which mbedtls' PEM parsers require. Returns NULL on empty input or OOM.
+static unsigned char* pem_dup(const char* pem, size_t len, size_t* out_len)
+{
+    while (len > 0 && pem[len - 1] == '\0') {
+        len--;
+    }
+    if (len == 0) {
+        return NULL;
+    }
+    unsigned char* buf = (unsigned char*)calloc(1, len + 1);
+    if (buf != NULL) {
+        memcpy(buf, pem, len);
+        *out_len = len + 1;
+    }
+    return buf;
+}
+
+bool tls_mgr_key_matches_cert(const char* cert, size_t cert_len,
+                              const char* key, size_t key_len)
+{
+    if (cert == NULL || key == NULL) {
+        return false;
+    }
+    size_t cert_buf_len = 0;
+    size_t key_buf_len = 0;
+    unsigned char* cert_buf = pem_dup(cert, cert_len, &cert_buf_len);
+    unsigned char* key_buf = pem_dup(key, key_len, &key_buf_len);
+    if (cert_buf == NULL || key_buf == NULL) {
+        free(cert_buf);
+        free(key_buf);
+        return false;
+    }
+
+    mbedtls_x509_crt crt;
+    mbedtls_pk_context pk;
+    mbedtls_x509_crt_init(&crt);
+    mbedtls_pk_init(&pk);
+
+    bool ok = false;
+    int ret = mbedtls_x509_crt_parse(&crt, cert_buf, cert_buf_len);
+    if (ret != 0) {
+        ESP_LOGE(TAG, "Rejecting unparseable certificate: -0x%04x", -ret);
+    } else if ((ret = mbedtls_pk_parse_key(&pk, key_buf, key_buf_len,
+                                           NULL, 0)) != 0) {
+        ESP_LOGE(TAG, "Rejecting unparseable private key: -0x%04x", -ret);
+    } else if ((ret = mbedtls_pk_check_pair(&crt.pk, &pk)) != 0) {
+        // The leaf (first certificate of the chain) is what HTTPS presents.
+        ESP_LOGE(TAG, "Private key does not match the certificate: -0x%04x",
+                 -ret);
+    } else {
+        ok = true;
+    }
+
+    mbedtls_pk_free(&pk);
+    mbedtls_x509_crt_free(&crt);
+    // The key buffer held a private key; clear it before freeing.
+    memset(key_buf, 0, key_buf_len);
+    free(key_buf);
+    free(cert_buf);
+    return ok;
+}
+
 bool tls_mgr_store_certs(const char* cert, size_t cert_len,
                          const char* key, size_t key_len)
 {

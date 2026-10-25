@@ -74,6 +74,9 @@ INFRA_SKIP_PATTERNS = [
     r"firmware not built with config_test_endpoints",
     r"device firmware does not expose test instrumentation",
     r"https not (?:active|reachable)",
+    # test_https.py found the controller in HTTPS mode without the certificate
+    # it would need to restore that mode afterwards.
+    r"cannot restore the administrator certificate",
     r"firmware binary not found",
     r"pending_verify not in firmware",
 ]

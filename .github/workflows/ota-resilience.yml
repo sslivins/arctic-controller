@@ -142,21 +142,20 @@ jobs:
         # unauthenticated, test-only /api/test/credentials endpoint first.
         run: |
           set -uo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           BODY='{"username": "arctic", "password": "ArcticTest!2026"}'
           DEVICE_KEY=""
 
           for i in $(seq 1 12); do
             curl -sk --connect-timeout 3 --max-time 8 \
-              -X POST "$ARCTIC_URL_HTTPS/api/test/credentials" \
+              -X POST "$(bash .github/scripts/device_url.sh)/api/test/credentials" \
               -H "Content-Type: application/json" -d "$BODY" > /dev/null 2>&1 || true
 
             JAR=$(mktemp)
             curl -sk -c "$JAR" --connect-timeout 3 --max-time 8 \
-              -X POST "$ARCTIC_URL_HTTPS/login" \
+              -X POST "$(bash .github/scripts/device_url.sh)/login" \
               -H "Content-Type: application/json" -d "$BODY" > /dev/null 2>&1 || true
             RESP=$(curl -sk -b "$JAR" --connect-timeout 3 --max-time 8 \
-              "$ARCTIC_URL_HTTPS/api/auth/apikey" 2>/dev/null) || true
+              "$(bash .github/scripts/device_url.sh)/api/auth/apikey" 2>/dev/null) || true
             rm -f "$JAR"
             DEVICE_KEY=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_key',''))" 2>/dev/null) || true
             if [ -n "$DEVICE_KEY" ]; then break; fi
@@ -180,8 +179,7 @@ jobs:
         # rejection we are trying to prove.
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status")
           echo "Baseline /api/ota/status: $RESP"
 
           BASE_SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))")
@@ -218,7 +216,6 @@ jobs:
         # accept and boot it, there would be no application to run at all.
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           SIZE=$(stat -c%s recovery/arctic_controller.bin)
           # head must read from /dev/zero directly rather than from a tr
           # pipeline: when head closes the pipe after $SIZE bytes, tr dies of
@@ -231,7 +228,7 @@ jobs:
           CODE=$(curl -sk -o /tmp/blank_resp.txt -w '%{http_code}' --max-time 120 \
             -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
             --data-binary "@/tmp/blank.bin" \
-            "$ARCTIC_URL_HTTPS/api/ota/upload") || CODE="000"
+            "$(bash .github/scripts/device_url.sh)/api/ota/upload") || CODE="000"
           echo "Blank upload: HTTP $CODE — $(head -c 300 /tmp/blank_resp.txt)"
 
           if [ "$CODE" = "200" ]; then
@@ -246,7 +243,6 @@ jobs:
         # validate the transfer".
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           SIZE=$(stat -c%s recovery/arctic_controller.bin)
           head -c "$SIZE" /dev/urandom > /tmp/garbage.bin
           test "$(stat -c%s /tmp/garbage.bin)" = "$SIZE"
@@ -254,7 +250,7 @@ jobs:
           CODE=$(curl -sk -o /tmp/garbage_resp.txt -w '%{http_code}' --max-time 120 \
             -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
             --data-binary "@/tmp/garbage.bin" \
-            "$ARCTIC_URL_HTTPS/api/ota/upload") || CODE="000"
+            "$(bash .github/scripts/device_url.sh)/api/ota/upload") || CODE="000"
           echo "Corrupt upload: HTTP $CODE — $(head -c 300 /tmp/garbage_resp.txt)"
 
           if [ "$CODE" = "200" ]; then
@@ -266,8 +262,7 @@ jobs:
       - name: 'T-03: the running firmware is untouched'
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status")
           echo "/api/ota/status: $RESP"
           python3 - "$RESP" <<'PY'
           import json, os, sys
@@ -290,13 +285,12 @@ jobs:
         # drops, or the CMS goes away, half way through a transfer.
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           echo "Starting an upload and killing it mid-stream..."
           set +e
           curl -sk --max-time 6 --limit-rate 300k \
             -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
             --data-binary "@recovery/arctic_controller.bin" \
-            "$ARCTIC_URL_HTTPS/api/ota/upload" -o /tmp/interrupted.txt
+            "$(bash .github/scripts/device_url.sh)/api/ota/upload" -o /tmp/interrupted.txt
           RC=$?
           set -e
           echo "curl exited $RC (28 = timed out mid-transfer, which is the intent)"
@@ -313,12 +307,11 @@ jobs:
         # answers every other request perfectly.
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
 
           echo "Waiting for the device to answer again..."
           HEALTHY=0
           for i in $(seq 1 60); do
-            C=$(curl -sk --connect-timeout 2 -o /dev/null -w '%{http_code}' "$ARCTIC_URL_HTTPS/api/health" 2>/dev/null) || C="000"
+            C=$(curl -sk --connect-timeout 2 -o /dev/null -w '%{http_code}' "$(bash .github/scripts/device_url.sh)/api/health" 2>/dev/null) || C="000"
             if [ "$C" = "200" ]; then HEALTHY=1; echo "Device healthy after ${i}s"; break; fi
             sleep 2
           done
@@ -330,7 +323,7 @@ jobs:
           echo "Waiting for the OTA state machine to settle..."
           SETTLED=0
           for i in $(seq 1 60); do
-            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || RESP=""
             STATE=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('state',''))" 2>/dev/null) || STATE=""
             case "$STATE" in
               idle|failed) SETTLED=1; echo "OTA state settled to '$STATE' after ${i}s"; break ;;
@@ -348,12 +341,11 @@ jobs:
         id: real_ota
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           echo "Uploading the known-good image for real..."
           CODE=$(curl -sk -o /tmp/real.txt -w '%{http_code}' --max-time 300 \
             -X POST -H "X-API-Key: $ARCTIC_API_KEY" \
             --data-binary "@recovery/arctic_controller.bin" \
-            "$ARCTIC_URL_HTTPS/api/ota/upload") || CODE="000"
+            "$(bash .github/scripts/device_url.sh)/api/ota/upload") || CODE="000"
           echo "Upload: HTTP $CODE — $(head -c 300 /tmp/real.txt)"
           if [ "$CODE" != "200" ]; then
             echo "::error::A legitimate OTA was rejected (HTTP $CODE) after an interrupted one. The device survived the interruption but can no longer be updated, which is the failure mode that strands a field device."
@@ -365,7 +357,7 @@ jobs:
           # the one already running, which would make a SHA check vacuous.
           echo "Waiting for the device to come back on the other slot..."
           for i in $(seq 1 120); do
-            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || RESP=""
             if [ -n "$RESP" ]; then
               PART=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('running_partition',''))" 2>/dev/null) || PART=""
               if [ -n "$PART" ] && [ "$PART" != "$BASELINE_PARTITION" ]; then
@@ -382,11 +374,10 @@ jobs:
       - name: 'T-04: the reinstalled image commits itself'
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           # Allow for the commit criteria: the UI must be up and the network
           # reachable before the image marks itself valid (#252 T-05).
           for i in $(seq 1 60); do
-            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+            RESP=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${ARCTIC_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || RESP=""
             CS=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('commit_status',''))" 2>/dev/null) || CS=""
             if [ "$CS" = "committed" ] || [ "$CS" = "not_pending" ]; then
               echo "commit_status=$CS after ${i} polls"
@@ -437,9 +428,8 @@ jobs:
         if: always()
         run: |
           set -uo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           PROBE_KEY="${ARCTIC_API_KEY:-$RECOVERY_API_KEY}"
-          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${PROBE_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${PROBE_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || RESP=""
           SHA=""
           if [ -n "$RESP" ]; then
             SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || SHA=""
@@ -481,7 +471,7 @@ jobs:
 
           echo "Waiting for the recovered controller..."
           for i in $(seq 1 90); do
-            R=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${RECOVERY_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || R=""
+            R=$(curl -sk --connect-timeout 2 -H "X-API-Key: ${RECOVERY_API_KEY}" "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || R=""
             if [ -n "$R" ]; then
               S=$(echo "$R" | python3 -c "import sys,json;print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || S=""
               if [ -n "$S" ]; then

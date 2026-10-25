@@ -417,13 +417,12 @@ jobs:
 
           # The release must come up, authenticate and report its own version,
           # or the OTA below would not be starting from what the field runs.
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           deadline=$((SECONDS + 180))
           LAST=""
           while [ "$SECONDS" -lt "$deadline" ]; do
             RESP=$(curl -sk --connect-timeout 2 --max-time 5 \
               -H "X-API-Key: ${ARCTIC_API_KEY}" \
-              "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+              "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || RESP=""
             CUR=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('current_version',''))" 2>/dev/null) || CUR=""
             if [ "${CUR#v}" = "$VERSION" ]; then
               echo "Device is running $TAG (baseline ready after ${SECONDS}s)"
@@ -445,7 +444,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p upgrade-check
-          export ARCTIC_URL="${ARCTIC_URL/http:/https:}"
+          # Whichever scheme the release serves: HTTPS with its identity
+          # certificate for releases from before HTTP mode, HTTP after.
+          ARCTIC_URL="$(bash .github/scripts/device_url.sh)"
+          export ARCTIC_URL
           python tests/upgrade/upgrade_check.py seed --defaults upgrade-check/defaults.json
           python tests/upgrade/upgrade_check.py snapshot --out upgrade-check/before.json
 
@@ -481,7 +483,12 @@ jobs:
           # field devices actually use: /api/ota/update tells the device to download
           # the build-under-test from its ci-nightly GitHub release and A/B-flash it
           # itself.
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          #
+          # The release being upgraded from may serve HTTPS (identity
+          # certificate, releases from before HTTP mode) while the build under
+          # test, with no administrator certificate, serves HTTP. So the scheme
+          # is resolved for the release here and again after the reboot.
+          DEVICE_URL="$(bash .github/scripts/device_url.sh)"
 
           # Wait for mDNS name resolution (up to 30s)
           HOSTNAME="${ARCTIC_URL#*://}"   # strip scheme → arctic.local
@@ -500,11 +507,11 @@ jobs:
           fi
 
           # Quick connectivity check — bail fast if device isn't actually responding
-          if ! curl -sk --connect-timeout 3 --max-time 5 "$ARCTIC_URL_HTTPS/api/health" > /dev/null 2>&1; then
-            echo "ERROR: Device resolved but not responding on HTTPS"
+          if ! curl -sk --connect-timeout 3 --max-time 5 "$DEVICE_URL/api/health" > /dev/null 2>&1; then
+            echo "ERROR: Device resolved but not responding at $DEVICE_URL"
             exit 1
           fi
-          echo "Device responding at $ARCTIC_URL_HTTPS"
+          echo "Device responding at $DEVICE_URL"
 
           # An OTA "succeeded" only if the device is actually running the image
           # we just sent. Everything before this point — an HTTP 200, a success
@@ -540,7 +547,7 @@ jobs:
             while [ "$SECONDS" -lt "$deadline" ]; do
               RESP=$(curl -sk --connect-timeout 2 --max-time 5 \
                 -H "X-API-Key: ${ARCTIC_API_KEY}" \
-                "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || RESP=""
+                "$(bash .github/scripts/device_url.sh)/api/ota/status" 2>/dev/null) || RESP=""
               if [ -n "$RESP" ]; then
                 ACTUAL=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('build_sha',''))" 2>/dev/null) || ACTUAL=""
                 if [ "$ACTUAL" = "$EXPECTED" ]; then
@@ -576,7 +583,7 @@ jobs:
               -H "X-API-Key: ${ARCTIC_API_KEY}" \
               --connect-timeout 5 --max-time 20 \
               -d "{\"url\": \"$ASSET_URL\"}" \
-              "$ARCTIC_URL_HTTPS/api/ota/update") || true
+              "$DEVICE_URL/api/ota/update") || true
             echo "Update trigger: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt 2>/dev/null || echo '<no response body>')"
             if [ "$HTTP_CODE" != "200" ]; then
               echo "::error::/api/ota/update was rejected (HTTP $HTTP_CODE). Nightly pull-path OTA failed to start."
@@ -593,7 +600,7 @@ jobs:
             for i in $(seq 1 90); do
               ST=$(curl -sk --connect-timeout 2 --max-time 5 \
                 -H "X-API-Key: ${ARCTIC_API_KEY}" \
-                "$ARCTIC_URL_HTTPS/api/ota/status" 2>/dev/null) || ST=""
+                "$DEVICE_URL/api/ota/status" 2>/dev/null) || ST=""
               if [ -z "$ST" ]; then
                 if [ "$SAW_PROGRESS" = "true" ]; then
                   echo "Device went offline after download progress — quiesce/flash/reboot underway"
@@ -658,7 +665,7 @@ jobs:
               --connect-timeout 5 \
               --max-time 300 \
               --data-binary @build/arctic_controller.bin \
-              "$ARCTIC_URL_HTTPS/api/ota/upload") || true
+              "$DEVICE_URL/api/ota/upload") || true
             echo "Response: HTTP $HTTP_CODE — $(cat /tmp/ota_response.txt 2>/dev/null || echo '<no response body>')"
             if [ "$HTTP_CODE" = "200" ]; then
               echo "OTA upload successful, waiting for reboot..."
@@ -763,11 +770,9 @@ jobs:
       - name: Wait for device boot (USB)
         if: steps.ota_flash.outcome == 'failure'
         run: |
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
           sleep 15
           for i in $(seq 1 45); do
-            if curl -skL --connect-timeout 2 "$ARCTIC_URL/api/heatpump/status" > /dev/null 2>&1 || \
-               curl -skL --connect-timeout 2 "$ARCTIC_URL_HTTPS/api/heatpump/status" > /dev/null 2>&1; then
+            if curl -sk --connect-timeout 2 "$(bash .github/scripts/device_url.sh)/api/health" > /dev/null 2>&1; then
               echo "Device is back online after $((i + 15))s"
               exit 0
             fi
@@ -776,10 +781,13 @@ jobs:
           echo "Device did not come back online within 60s"
           exit 1
 
-      - name: Require HTTPS readiness
+      - name: Require HTTP-mode readiness
         run: |
-          # Production routes are HTTPS-only. Retry transient TLS startup or
-          # handshake failures before any authenticated setup or test traffic.
+          # With no administrator certificate the build under test serves the
+          # web UI and API over plain HTTP and keeps port 443 closed. Everything
+          # up to "HTTP to HTTPS" below runs in that mode, which is how a field
+          # unit comes up after this update. Retry transient startup failures
+          # before any authenticated setup or test traffic.
           #
           # If the device never answers it may be wedged/offline (e.g. a firmware
           # panic coinciding with a runner outage — the failure that motivated
@@ -787,9 +795,10 @@ jobs:
           # esptool hard-reset and re-poll before failing, so the most common
           # overnight failure self-heals instead of leaving the board wedged for
           # a human to reset over SSH.
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
+          HOST="${ARCTIC_URL#*://}"
+          ARCTIC_URL_HTTP="http://${HOST%%/*}"
 
-          poll_https() {
+          poll_http() {
             local attempts="$1"
             for i in $(seq 1 "$attempts"); do
               # Require BOTH a core route (/api/health) AND a test-instrumentation
@@ -800,11 +809,11 @@ jobs:
               # it POSTs to /api/test/credentials, which can 404 in the gap between
               # core-handler readiness and test-handler registration. Gating on a
               # test endpoint here closes that gap.
-              if curl -skf --connect-timeout 5 --max-time 10 \
-                   "$ARCTIC_URL_HTTPS/api/health" > /dev/null \
-                 && curl -skf --connect-timeout 5 --max-time 10 \
-                   "$ARCTIC_URL_HTTPS/api/test/stack-watermarks" > /dev/null; then
-                echo "Mandatory HTTPS + test instrumentation ready (attempt $i)"
+              if curl -sf --connect-timeout 5 --max-time 10 \
+                   "$ARCTIC_URL_HTTP/api/health" > /dev/null \
+                 && curl -sf --connect-timeout 5 --max-time 10 \
+                   "$ARCTIC_URL_HTTP/api/test/stack-watermarks" > /dev/null; then
+                echo "HTTP mode + test instrumentation ready (attempt $i)"
                 return 0
               fi
               sleep 2
@@ -812,12 +821,24 @@ jobs:
             return 1
           }
 
-          if poll_https 12; then
-            echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> "$GITHUB_ENV"
+          # Port 443 must be closed: no administrator certificate is installed,
+          # and the identity certificate is only for the Home Assistant server.
+          require_https_closed() {
+            if curl -sk --connect-timeout 5 --max-time 10 -o /dev/null \
+                 "https://${HOST%%/*}/api/health"; then
+              echo "::error::Port 443 answers with no administrator certificate installed. The build under test must serve the web UI over HTTP only until a certificate is installed."
+              exit 1
+            fi
+            echo "Port 443 is closed, as expected in HTTP mode"
+          }
+
+          if poll_http 12; then
+            require_https_closed
+            echo "ARCTIC_URL=$ARCTIC_URL_HTTP" >> "$GITHUB_ENV"
             exit 0
           fi
 
-          echo "::warning::HTTPS not ready after initial poll — attempting USB hard-reset recovery"
+          echo "::warning::HTTP not ready after initial poll — attempting USB hard-reset recovery"
           if [ -z "${CONTROLLER_PORT:-}" ]; then
             echo "::error::Device unreachable and no CONTROLLER_PORT known — cannot recover"
             exit 1
@@ -830,13 +851,14 @@ jobs:
 
           # Allow time for the board to boot and rejoin WiFi before re-polling.
           sleep 20
-          if poll_https 30; then
-            echo "ARCTIC_URL=$ARCTIC_URL_HTTPS" >> "$GITHUB_ENV"
+          if poll_http 30; then
+            require_https_closed
+            echo "ARCTIC_URL=$ARCTIC_URL_HTTP" >> "$GITHUB_ENV"
             echo "::notice::Device recovered after USB hard-reset"
             exit 0
           fi
 
-          echo "::error::Mandatory HTTPS did not become ready even after USB hard-reset recovery"
+          echo "::error::The device did not become ready over HTTP even after USB hard-reset recovery"
           exit 1
 
       - name: Start controller serial capture
@@ -961,7 +983,7 @@ jobs:
               echo "Device API key differs from secret — overriding ARCTIC_API_KEY"
             fi
           else
-            echo "ERROR: Could not read device API key after HTTPS became ready"
+            echo "ERROR: Could not read device API key after the device became ready"
             exit 1
           fi
 
@@ -983,11 +1005,10 @@ jobs:
             exit 1
           fi
           echo "Expected build_sha: $EXPECTED"
-          # HTTPS-only: this request carries the X-API-Key secret, and the
-          # security contract (tests/api/test_ha_security_contract.py) forbids
-          # secret-bearing automation from ever falling back to plain HTTP.
-          # ARCTIC_URL is already https:// and the preceding "Require HTTPS
-          # readiness" step guarantees the TLS server is up.
+          # ARCTIC_URL is the build under test's HTTP-mode URL, set by
+          # "Require HTTP-mode readiness". It is never a fallback: the device
+          # has no administrator certificate yet, so HTTP is the only scheme
+          # it serves.
           ACTUAL=""
           for attempt in $(seq 1 15); do
             RESP=$(curl -sk --connect-timeout 3 --max-time 8 \
@@ -1060,8 +1081,7 @@ jobs:
           OTA_OUTCOME: ${{ steps.ota_flash.outcome }}
         run: |
           set -euo pipefail
-          ARCTIC_URL_HTTPS="${ARCTIC_URL/http:/https:}"
-          RESP=$(curl -sk --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL_HTTPS/api/ota/status")
+          RESP=$(curl -s --connect-timeout 5 -H "X-API-Key: ${ARCTIC_API_KEY}" "$ARCTIC_URL/api/ota/status")
           echo "/api/ota/status: $RESP"
           OTA_OUTCOME="$OTA_OUTCOME" python3 - "$RESP" <<'PY'
           import json, os, sys
@@ -1127,8 +1147,22 @@ jobs:
             echo "::warning title=Core dump from before the tests::The controller had a core dump saved before the test suites started. It is in the controller-coredump artifact."
           fi
           curl -sk --max-time 30 -X DELETE -H "X-API-Key: ${ARCTIC_API_KEY}" \
-            "${ARCTIC_URL/http:/https:}/api/logs/coredump" || true
+            "${ARCTIC_URL}/api/logs/coredump" || true
           echo
+
+      - name: HTTP to HTTPS — install an administrator certificate
+        # Everything above ran in HTTP mode. Check that HTTP mode serves the
+        # dashboard and API with 443 closed, upload a throwaway self-signed
+        # certificate over HTTP, and check that the controller restarts into
+        # HTTPS mode: HTTP serves only /api/health and a 404 (no redirect),
+        # and HTTPS serves the API with the uploaded certificate. The suites
+        # below then run over HTTPS; tests/device/test_https.py walks the
+        # reverse direction and puts the certificate back.
+        #
+        # Allowed to fail the job: the suites need HTTPS, so if this fails they
+        # are skipped and the job fails here with the reason.
+        id: tls_transition
+        run: python .github/scripts/tls_mode.py to-https --cert-dir "$RUNNER_TEMP/ci-admin-cert"
 
       - name: Run device UI tests
         id: ui_tests
@@ -1153,9 +1187,6 @@ jobs:
         id: web_tests
         continue-on-error: true
         run: python -m pytest tests/web/ -v -rs --tb=short --junitxml=web-test-results.xml
-        env:
-          TLS_FULLCHAIN_PEM: ${{ secrets.TLS_FULLCHAIN_PEM }}
-          TLS_PRIVKEY_PEM: ${{ secrets.TLS_PRIVKEY_PEM }}
 
       - name: Run RS-485 end-to-end tests (arctic-simulator)
         id: rs485_tests
@@ -1243,41 +1274,59 @@ jobs:
           UNIFI_DEVICE_MAC: dc:1e:d5:95:01:b0
           PYTHONDONTWRITEBYTECODE: '1'
 
+      - name: HTTPS to HTTP — remove the administrator certificate
+        # The reverse of "HTTP to HTTPS": delete the certificate over HTTPS and
+        # check that the controller restarts back into HTTP-only mode, with
+        # 443 closed and the dashboard, API and test API served over HTTP.
+        # This is what a user who disables HTTPS gets. Runs whenever the
+        # forward switch succeeded, however the suites ended; it fails the job
+        # if the controller is not in HTTPS mode by then (test_https.py puts
+        # the certificate back after its own round trip).
+        id: tls_revert
+        if: always() && steps.tls_transition.outcome == 'success'
+        run: python .github/scripts/tls_mode.py to-http
+
       - name: Reset device to baseline TLS/auth state
         if: always()
         run: |
           # Safety net for finding F-12 (shared TLS/auth state across suites):
-          # regardless of how the three test suites above exited, force the
-          # device back to a known baseline — no administrator TLS cert
-          # (identity only) and web auth disabled — and confirm it. A leftover
-          # self-signed admin cert (the HTTPS suite uploads one valid for 1 day)
-          # would otherwise linger onto the *next* CI run and, once expired,
-          # break TLS handshakes before that run gets a chance to clean up.
+          # regardless of how the steps above exited, force the device back to
+          # a known baseline — no administrator TLS cert (HTTP mode) and web
+          # auth disabled — and confirm it. The run installs a throwaway
+          # self-signed certificate that is valid for 2 days; left behind, it
+          # would carry into the next job on this bench and, once expired,
+          # break its TLS handshakes.
           set -uo pipefail
-          BASE="${ARCTIC_URL}"   # already https:// at this point
           has_cert() {
             curl -sk --max-time 10 -H "X-API-Key: ${ARCTIC_API_KEY}" \
-              "${BASE}/api/tls/status" 2>/dev/null \
-              | python3 -c "import sys,json;print(json.load(sys.stdin).get('has_certs',False))" 2>/dev/null \
+              "$(bash .github/scripts/device_url.sh)/api/tls/status" 2>/dev/null \
+              | python3 -c "import sys,json;print(json.load(sys.stdin)['has_certs'])" 2>/dev/null \
               || echo Unknown
           }
           STATE="$(has_cert)"
           echo "TLS status before reset: has_certs=${STATE}"
           if [ "$STATE" = "True" ]; then
-            echo "Administrator cert present — deleting and rebooting to identity."
-            curl -sk --max-time 10 -X DELETE -H "X-API-Key: ${ARCTIC_API_KEY}" \
-              "${BASE}/api/tls/certificate" >/dev/null 2>&1 || true
-            curl -sk --max-time 10 -X POST -H "X-API-Key: ${ARCTIC_API_KEY}" \
-              "${BASE}/api/ota/reboot" >/dev/null 2>&1 || true
-            for _ in $(seq 1 30); do
+            echo "Administrator cert present — deleting it."
+            BASE="$(bash .github/scripts/device_url.sh)"
+            RESP="$(curl -sk --max-time 10 -X DELETE -H "X-API-Key: ${ARCTIC_API_KEY}" \
+              "${BASE}/api/tls/certificate" 2>/dev/null || true)"
+            echo "DELETE /api/tls/certificate: ${RESP}"
+            # The build under test restarts by itself; a rolled-back release
+            # does not.
+            if ! echo "$RESP" | grep -q '"restarting"[[:space:]]*:[[:space:]]*true'; then
+              curl -sk --max-time 10 -X POST -H "X-API-Key: ${ARCTIC_API_KEY}" \
+                "${BASE}/api/ota/reboot" >/dev/null 2>&1 || true
+            fi
+            sleep 5
+            for _ in $(seq 1 45); do
+              STATE="$(has_cert)"
+              [ "$STATE" = "False" ] && break
               sleep 2
-              curl -sk --max-time 5 "${BASE}/api/health" >/dev/null 2>&1 && break
             done
-            STATE="$(has_cert)"
-            if [ "$STATE" = "True" ]; then
+            if [ "$STATE" != "False" ]; then
               echo "::warning::Baseline reset could not remove the administrator TLS cert (has_certs=${STATE}); the next run may inherit it."
             else
-              echo "Administrator cert removed — device on identity cert (has_certs=${STATE})."
+              echo "Administrator cert removed (has_certs=${STATE})."
             fi
           else
             echo "No administrator cert to remove (has_certs=${STATE})."
@@ -1285,7 +1334,7 @@ jobs:
           # Permissive web-auth baseline for the next run (best-effort).
           curl -sk --max-time 10 -X POST -H "X-API-Key: ${ARCTIC_API_KEY}" \
             -H "Content-Type: application/json" -d '{"web_auth_enabled": false}' \
-            "${BASE}/api/auth/config" >/dev/null 2>&1 || true
+            "$(bash .github/scripts/device_url.sh)/api/auth/config" >/dev/null 2>&1 || true
           echo "Baseline TLS/auth reset complete."
 
       - name: Collect core dump from the test run

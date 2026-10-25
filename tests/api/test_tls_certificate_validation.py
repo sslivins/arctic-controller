@@ -9,8 +9,8 @@ the device over HTTPS to undo it. The certificate is now parsed before it is
 stored, so bad input is a 400 the user can see and act on.
 
 Every case here is REJECTED input. Nothing in this file ever stores a
-certificate: a test that replaced the identity of the shared CI controller
-would break every later HTTPS test in the run.
+certificate: storing one restarts the shared CI controller into HTTPS mode and
+would break every later test in the run.
 
 Prerequisites:
   - Device reachable at ARCTIC_URL
@@ -173,4 +173,46 @@ def test_an_oversized_certificate_is_rejected_without_wedging_the_device():
 def test_rejected_certificates_leave_the_device_serving():
     for cert in (PEM_SHAPED_GARBAGE, TRUNCATED_CERT, "not pem"):
         _post_cert(cert)
+    assert _https_still_works()
+
+
+def _self_signed_pair():
+    """A real certificate and the key that signed it, as PEM strings."""
+    import datetime
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "arctic-test")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name).issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=30))
+        .sign(key, hashes.SHA256())
+    )
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
+    key_pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    return cert_pem, key_pem
+
+
+@pytest.mark.skipif(not API_KEY, reason="ARCTIC_API_KEY not set")
+def test_a_key_that_does_not_match_the_certificate_is_rejected():
+    # Storing this pair would restart the controller into HTTPS mode with a
+    # server that can never start, leaving no network path to undo it.
+    cert_pem, _ = _self_signed_pair()
+    _, other_key_pem = _self_signed_pair()
+    resp = _post_cert(cert_pem, other_key_pem)
+    assert resp.status_code == 400, resp.text[:300]
+    assert "key" in resp.text.lower()
     assert _https_still_works()

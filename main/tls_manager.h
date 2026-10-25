@@ -88,6 +88,18 @@ bool tls_mgr_store_certs(const char* cert, size_t cert_len,
 bool tls_mgr_cert_is_valid(const char* cert, size_t cert_len);
 
 /**
+ * Check that a PEM private key parses and belongs to the (leaf) certificate.
+ *
+ * Installing a certificate restarts the controller into HTTPS mode, and HTTPS
+ * cannot start with a key that does not match -- which would leave no web
+ * server to fix it from. Callers reject the upload instead.
+ *
+ * @return true if both parse and the key pairs with the certificate
+ */
+bool tls_mgr_key_matches_cert(const char* cert, size_t cert_len,
+                              const char* key, size_t key_len);
+
+/**
  * @brief Remove stored certificates from NVS
  *
  * After clearing, the next boot will fall back to HTTP.
