@@ -32,8 +32,8 @@ def test_socket_budget_covers_all_three_http_servers() -> None:
     assert "CONFIG_LWIP_MAX_SOCKETS=24" in sdkconfig
     # Port 80 is the full web server in HTTP mode and a health-only stub in
     # HTTPS mode; only one of 80/443 is ever full-size.
-    assert "s_https_mode ? 2 : 7" in api
-    assert "http_config.max_open_sockets   = http_open_sockets;" in api
+    assert "http_config.max_open_sockets   = full ? 7 : 2;" in api
+    assert "start_http_locked(!s_https_mode)" in api
     assert "ssl_config.httpd.max_open_sockets   = 7;" in api
     assert "integration_config.httpd.max_open_sockets = 5;" in api
     assert "websocket_config.max_open_sockets = 2;" in api
@@ -117,11 +117,9 @@ def test_https_mode_follows_administrator_certificate() -> None:
     full UI, and certificate changes must restart into the new mode.
     """
     api = (ROOT / "main" / "api_server.cpp").read_text(encoding="utf-8")
-    start = api[
-        api.index("static bool api_server_start_locked"):
-        api.index("integration_config.port_secure = 8443;")
-    ]
-    https = start[start.index("if (s_https_mode) {"):start.index("if (tls_mgr_has_identity())")]
+    start = api[api.index("static bool api_server_start_locked(void)\n{"):]
+    start = start[:start.index("\n}\n")]
+    https = start[start.index("if (s_https_mode) {"):start.index("// ---- Port 80 ----")]
 
     assert "s_https_mode = tls_mgr_has_certs();" in start
     assert "tls_mgr_get_cert(&cert_len)" in https
@@ -130,7 +128,7 @@ def test_https_mode_follows_administrator_certificate() -> None:
         api.index("integration_config.port_secure = 8443;") - 600:
         api.index("integration_config.port_secure = 8443;")
     ]
-    assert "server_ssl != NULL || !s_https_mode" in api
+    assert "s_https_mode ? server_ssl != NULL : server != NULL" in api
     assert "tls_mgr_key_matches_cert" in api
     post = api[api.index("static esp_err_t tls_cert_post_handler(httpd_req_t* req)\n{"):]
     post = post[:post.index("\n}\n")]
