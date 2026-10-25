@@ -88,6 +88,8 @@ typedef enum {
     EVENT_WEB_SERVER_CAUSE_NO_IDENTITY = 2,  // no TLS certificate for HTTPS
     EVENT_WEB_SERVER_CAUSE_START_FAILED = 3, // any other startup failure
     EVENT_WEB_SERVER_CAUSE_TEST = 4,         // injected by a test
+    EVENT_WEB_SERVER_CAUSE_BAD_CERT = 5,     // HTTPS certificate/key will not load
+    EVENT_WEB_SERVER_CAUSE_UNRESPONSIVE = 6, // running but not answering requests
 } event_web_server_cause_t;
 
 // How the web/API servers came back, as the EVENT_WEB_SERVER_RECOVERED payload.
@@ -243,7 +245,8 @@ const char* event_network_recovery_key(uint32_t payload);
 
 /**
  * @brief Stable API key for an EVENT_WEB_SERVER_DOWN payload
- *        ("unknown", "no_memory", "no_identity", "start_failed", "test").
+ *        ("unknown", "no_memory", "no_identity", "start_failed", "test",
+ *        "bad_certificate", "unresponsive").
  */
 const char* event_web_server_cause_key(uint32_t payload);
 

@@ -307,6 +307,8 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
                 case EVENT_WEB_SERVER_CAUSE_NO_IDENTITY:  id = STR_EVENT_WEB_SERVER_NO_IDENTITY; break;
                 case EVENT_WEB_SERVER_CAUSE_START_FAILED: id = STR_EVENT_WEB_SERVER_START_FAILED; break;
                 case EVENT_WEB_SERVER_CAUSE_TEST:         id = STR_EVENT_WEB_SERVER_TEST; break;
+                case EVENT_WEB_SERVER_CAUSE_BAD_CERT:     id = STR_EVENT_WEB_SERVER_BAD_CERT; break;
+                case EVENT_WEB_SERVER_CAUSE_UNRESPONSIVE: id = STR_EVENT_WEB_SERVER_UNRESPONSIVE; break;
                 default: break;
             }
             snprintf(buf, buf_size, "%s", i18n_get(id));

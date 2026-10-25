@@ -5695,8 +5695,8 @@ components:
           example: wifi_bounce
         cause:
           type: string
-          description: "`web_server_down`: why the web/API servers were down. `https_fallback`: why HTTPS could not start."
-          enum: [unknown, no_memory, no_identity, start_failed, test]
+          description: "`web_server_down`: why the web/API servers were down (`unresponsive`: running but not answering the controller's own health probe). `https_fallback`: why HTTPS is not being served (`bad_certificate`: the stored certificate and key will not load; `unresponsive`: port 443 stopped answering and a restart did not help)."
+          enum: [unknown, no_memory, no_identity, start_failed, test, bad_certificate, unresponsive]
           example: no_memory
         reason:
           type: integer

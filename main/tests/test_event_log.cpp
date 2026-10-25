@@ -189,6 +189,8 @@ void event_payloads_decode_to_the_documented_api_keys() {
     CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_NO_IDENTITY), "no_identity") == 0);
     CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_START_FAILED), "start_failed") == 0);
     CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_TEST), "test") == 0);
+    CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_BAD_CERT), "bad_certificate") == 0);
+    CHECK(std::strcmp(event_web_server_cause_key(EVENT_WEB_SERVER_CAUSE_UNRESPONSIVE), "unresponsive") == 0);
     CHECK(std::strcmp(event_web_server_cause_key(99), "unknown") == 0);
     CHECK(std::strcmp(event_web_server_recovery_key(EVENT_WEB_SERVER_RECOVERED_RESTARTED), "restarted") == 0);
     CHECK(std::strcmp(event_web_server_recovery_key(EVENT_WEB_SERVER_RECOVERED_REBOOT), "reboot") == 0);

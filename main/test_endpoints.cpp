@@ -2681,6 +2681,11 @@ static esp_err_t stack_watermarks_get_handler(httpd_req_t* req)
 //   start attempts fail, to exercise the in-place restart and the reboot path;
 //   {"fail_https_starts": N} makes the next N port-443 starts fail, so the
 //   restart falls back to HTTP mode while a certificate is installed.
+//   Also: "fail_probes" (the supervisor's next N self-probes fail),
+//   "fail_cert_checks" (the next N cert/key checks fail -> HTTPS disabled as
+//   bad_certificate), "fail_integration_starts" (8443), "fail_http_starts"
+//   (port 80), "reenable_https" (undo a per-boot HTTPS disable) and
+//   "stop": false (arm the injections without stopping the servers).
 // Both reply first and act from a short-lived task: the connection being
 // served would otherwise be torn down mid-response (and httpd_stop() cannot
 // run on the server's own task).
@@ -2847,10 +2852,18 @@ static esp_err_t wifi_roam_post_handler(httpd_req_t* req)
 
 static esp_err_t api_server_kill_post_handler(httpd_req_t* req)
 {
+    struct { const char* key; void (*set)(int); int value; } counts[] = {
+        {"fail_https_starts", api_server_test_fail_https_starts, 0},
+        {"fail_probes", api_server_test_fail_probes, 0},
+        {"fail_cert_checks", api_server_test_fail_cert_checks, 0},
+        {"fail_integration_starts", api_server_test_fail_integration_starts, 0},
+        {"fail_http_starts", api_server_test_fail_http_starts, 0},
+    };
     int fail_starts = 0;
-    int fail_https_starts = 0;
+    bool stop = true;
+    bool reenable_https = false;
     if (req->content_len > 0) {
-        char buf[96] = {0};
+        char buf[256] = {0};
         if (req->content_len >= sizeof(buf)) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Body too large");
             return ESP_FAIL;
@@ -2865,18 +2878,25 @@ static esp_err_t api_server_kill_post_handler(httpd_req_t* req)
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
             return ESP_FAIL;
         }
-        const cJSON* n = cJSON_GetObjectItem(body, "fail_starts");
-        if (cJSON_IsNumber(n) && n->valueint > 0) {
-            fail_starts = n->valueint > 1000 ? 1000 : n->valueint;
-        }
-        const cJSON* h = cJSON_GetObjectItem(body, "fail_https_starts");
-        if (cJSON_IsNumber(h) && h->valueint > 0) {
-            fail_https_starts = h->valueint > 1000 ? 1000 : h->valueint;
-        }
+        auto count = [&](const char* key) {
+            const cJSON* n = cJSON_GetObjectItem(body, key);
+            if (!cJSON_IsNumber(n) || n->valueint <= 0) return 0;
+            return n->valueint > 1000 ? 1000 : n->valueint;
+        };
+        fail_starts = count("fail_starts");
+        for (auto& c : counts) c.value = count(c.key);
+        stop = !cJSON_IsFalse(cJSON_GetObjectItem(body, "stop"));
+        reenable_https = cJSON_IsTrue(cJSON_GetObjectItem(body, "reenable_https"));
         cJSON_Delete(body);
     }
-    // Only consumed by the next start, after the kill task stops the servers.
-    api_server_test_fail_https_starts(fail_https_starts);
+    // These are only consumed by later starts/probes, so arming them now is
+    // safe even though the kill task stops the servers afterwards.
+    for (auto& c : counts) c.set(c.value);
+    if (reenable_https) api_server_test_reenable_https();
+    if (!stop) {
+        api_server_test_fail_starts(fail_starts);
+        return send_accepted(req);
+    }
     if (xTaskCreate(api_kill_task, "t_apikill", 4096,
                     (void*)(intptr_t)fail_starts, 5, NULL) != pdPASS) {
         httpd_resp_set_status(req, "500 Internal Server Error");

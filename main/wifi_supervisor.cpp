@@ -98,10 +98,22 @@ static const uint32_t RECOVER_REBOOT = EVENT_NETWORK_RECOVERED_REBOOT;
 // Web/API server safety net. The servers are started once and kept running
 // across WiFi drops, but if they are ever found down while we hold an IP the
 // device is pingable yet unmanageable (the field failure that needed a power
-// cycle). Restart them in place every check; if that keeps failing, reboot.
+// cycle). Three layers, all run from this task:
+//   - Down: the web UI server (443 in HTTPS mode, 80 in HTTP mode) is not
+//     running. Restart it every check; if that keeps failing, reboot.
+//   - Unresponsive: it is running but the controller's own loopback request
+//     for /api/health (api_server_probe) fails API_PROBE_FAILS_TO_ACT times in
+//     a row. Restart it; if HTTPS is still unresponsive after that, fall back
+//     to HTTP for the rest of the boot; then reboot like "down". The loopback
+//     probe cannot see a LAN-side network wedge (see above) -- that is the
+//     reachability supervisor's job -- only a stuck or broken server.
+//   - Degraded: the web UI works but a secondary server (8443 for Home
+//     Assistant, or the port 80 notice in HTTPS mode) is missing. Retry just
+//     that one every API_REPAIR_EVERY_MS; never restart the working UI or
+//     reboot for it.
 //   - API_BOOT_GRACE_MS: never judge before this uptime unless the servers
 //     have already been healthy once (the boot-time start may be in flight).
-//   - API_DOWN_REBOOT_MS: continuously down this long -> reboot.
+//   - API_DOWN_REBOOT_MS: continuously down/unresponsive this long -> reboot.
 //   - API_MAX_REBOOTS: consecutive safety-net reboots allowed before we stop
 //     rebooting (and just keep retrying in place) so a fault that survives a
 //     reboot cannot boot-loop the controller. Only back-to-back safety-net
@@ -113,6 +125,10 @@ static const int      API_DOWN_REBOOT_MS     = 90000;
 static const int64_t  API_HEALTHY_RESET_MS   = 600000;
 static const uint32_t API_MAX_REBOOTS        = 2;
 static const uint32_t API_REBOOT_MAGIC       = 0x41504952;  // "APIR"
+static const int64_t  API_PROBE_EVERY_MS     = 60000;  // while answering
+static const int      API_PROBE_TIMEOUT_MS   = 20000;
+static const int      API_PROBE_FAILS_TO_ACT = 3;      // ~30 s at the 15 s check
+static const int64_t  API_REPAIR_EVERY_MS    = 60000;
 
 // Survive software resets (not power loss) so the reboot cap spans reboots.
 RTC_NOINIT_ATTR static uint32_t s_api_reboot_magic;
@@ -120,73 +136,48 @@ RTC_NOINIT_ATTR static uint32_t s_api_reboot_count;
 RTC_NOINIT_ATTR static uint32_t s_api_reboot_ours;  // magic if we caused the last reset
 
 struct ApiWatch {
-    int64_t down_since_us = 0;
+    int64_t down_since_us = 0;      // start of a down/unresponsive episode
     int64_t healthy_since_us = 0;
+    int64_t last_probe_us = 0;
+    int64_t last_repair_us = 0;
     bool    ever_healthy = false;
     bool    down_logged = false;
     bool    budget_note_logged = false;
-    int     attempts = 0;
+    bool    degraded_logged = false;
+    int     attempts = 0;           // restarts this episode
+    int     probe_failures = 0;     // consecutive, since the last action
 };
 
-// One safety-net step; called each check while associated with an IP.
-static void supervise_api_server(ApiWatch& w) {
-    if (api_server_is_shut_down()) {
-        return;  // OTA flashing: a reboot follows
-    }
-    const int64_t now = esp_timer_get_time();
-
-    if (api_server_is_healthy()) {
-        if (w.down_since_us != 0) {
-            // Came back without our restart (e.g. a GOT_IP start finished).
-            event_log_record(EVENT_WEB_SERVER_RECOVERED,
-                             EVENT_WEB_SERVER_RECOVERED_RESTARTED);
-            ESP_LOGW(TAG, "web/API servers healthy again");
-            w.down_since_us = 0;
-        }
-        w.ever_healthy = true;
-        if (w.healthy_since_us == 0) w.healthy_since_us = now;
-        if (s_api_reboot_count != 0 &&
-            (now - w.healthy_since_us) / 1000 >= API_HEALTHY_RESET_MS) {
-            s_api_reboot_count = 0;
-        }
-        return;
-    }
-
-    w.healthy_since_us = 0;
-    if (!w.ever_healthy && now / 1000 < API_BOOT_GRACE_MS) {
-        return;
-    }
+static void api_episode_begin(ApiWatch& w, int64_t now) {
     if (w.down_since_us == 0) {
         w.down_since_us = now;
         w.down_logged = false;
         w.budget_note_logged = false;
         w.attempts = 0;
     }
+}
 
-    const api_start_error_t prior = api_server_last_start_error();
-    w.attempts++;
-    ESP_LOGE(TAG, "web/API servers down while online - restart attempt %d "
-             "(internal free=%u largest=%u)", w.attempts,
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    const bool ok = wifi_mgr_api_ensure_running(API_RESTART_TIMEOUT_MS);
+static void api_episode_end(ApiWatch& w, const char* how) {
+    if (w.down_since_us != 0 && w.down_logged) {
+        event_log_record(EVENT_WEB_SERVER_RECOVERED,
+                         EVENT_WEB_SERVER_RECOVERED_RESTARTED);
+        ESP_LOGW(TAG, "web/API servers %s after %d restart attempt(s)", how,
+                 w.attempts);
+    }
+    w.down_since_us = 0;
+    w.probe_failures = 0;
+}
 
+static void api_log_down(ApiWatch& w, uint32_t cause) {
     if (!w.down_logged) {
-        const api_start_error_t cause = ok ? prior : api_server_last_start_error();
-        event_log_record(EVENT_WEB_SERVER_DOWN, api_server_start_error_event_cause(cause));
+        event_log_record(EVENT_WEB_SERVER_DOWN, cause);
         log_persist_flush_now(LOG_PERSIST_REASON_MANUAL);
         w.down_logged = true;
     }
+}
 
-    if (ok) {
-        ESP_LOGW(TAG, "web/API servers restarted after %d attempt(s)", w.attempts);
-        event_log_record(EVENT_WEB_SERVER_RECOVERED,
-                         EVENT_WEB_SERVER_RECOVERED_RESTARTED);
-        w.down_since_us = 0;
-        w.ever_healthy = true;
-        return;
-    }
-
+// Last resort once an episode has lasted API_DOWN_REBOOT_MS (within budget).
+static void api_maybe_reboot(ApiWatch& w) {
     const int down_ms = (int)((esp_timer_get_time() - w.down_since_us) / 1000);
     if (down_ms < API_DOWN_REBOOT_MS) {
         return;
@@ -212,6 +203,107 @@ static void supervise_api_server(ApiWatch& w) {
     log_persist_flush_now(LOG_PERSIST_REASON_MANUAL);
     vTaskDelay(pdMS_TO_TICKS(500));
     system_safe_restart();
+}
+
+// The web UI server is not running: restart it every check.
+static void api_handle_down(ApiWatch& w, int64_t now) {
+    api_episode_begin(w, now);
+    const api_start_error_t prior = api_server_last_start_error();
+    w.attempts++;
+    ESP_LOGE(TAG, "web/API servers down while online - restart attempt %d "
+             "(internal free=%u largest=%u)", w.attempts,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    const bool ok = wifi_mgr_api_ensure_running(API_RESTART_TIMEOUT_MS);
+    api_log_down(w, api_server_start_error_event_cause(
+                        ok ? prior : api_server_last_start_error()));
+    if (ok) {
+        w.ever_healthy = true;
+        w.last_probe_us = 0;  // confirm it answers on the next check
+        api_episode_end(w, "restarted");
+        return;
+    }
+    api_maybe_reboot(w);
+}
+
+// Running but not answering: restart, then (HTTPS) fall back to HTTP.
+static void api_handle_unresponsive(ApiWatch& w) {
+    w.probe_failures = 0;
+    api_log_down(w, EVENT_WEB_SERVER_CAUSE_UNRESPONSIVE);
+    const bool fall_back = w.attempts > 0 && api_server_https_active();
+    w.attempts++;
+    ESP_LOGE(TAG, "web/API server not answering - %s (attempt %d)",
+             fall_back ? "falling back to HTTP" : "restarting", w.attempts);
+    wifi_mgr_api_restart(fall_back, API_START_ERR_UNRESPONSIVE,
+                         API_RESTART_TIMEOUT_MS);
+    api_maybe_reboot(w);
+}
+
+// The web UI works; retry any missing secondary server now and then.
+static void api_repair_secondary(ApiWatch& w, int64_t now) {
+    if (api_server_is_healthy()) {
+        w.degraded_logged = false;
+        return;
+    }
+    if (w.last_repair_us != 0 &&
+        (now - w.last_repair_us) / 1000 < API_REPAIR_EVERY_MS) {
+        return;
+    }
+    w.last_repair_us = now;
+    if (!w.degraded_logged) {
+        ESP_LOGW(TAG, "web UI up but a secondary server is down - repairing");
+        w.degraded_logged = true;
+    }
+    wifi_mgr_api_ensure_running(API_RESTART_TIMEOUT_MS);
+}
+
+// One safety-net step; called each check while associated with an IP.
+static void supervise_api_server(ApiWatch& w) {
+    if (api_server_is_shut_down()) {
+        return;  // OTA flashing: a reboot follows
+    }
+    const int64_t now = esp_timer_get_time();
+
+    if (!api_server_is_running()) {
+        w.healthy_since_us = 0;
+        w.probe_failures = 0;
+        if (!w.ever_healthy && now / 1000 < API_BOOT_GRACE_MS) {
+            return;
+        }
+        api_handle_down(w, now);
+        return;
+    }
+
+    // Probe every minute, and every check while a failure is unresolved.
+    const bool due = w.probe_failures > 0 || w.down_since_us != 0 ||
+                     w.last_probe_us == 0 ||
+                     (now - w.last_probe_us) / 1000 >= API_PROBE_EVERY_MS;
+    if (due) {
+        w.last_probe_us = now;
+        if (!wifi_mgr_api_probe(API_PROBE_TIMEOUT_MS)) {
+            w.healthy_since_us = 0;
+            w.probe_failures++;
+            ESP_LOGW(TAG, "web/API self-probe failed (%d/%d)", w.probe_failures,
+                     API_PROBE_FAILS_TO_ACT);
+            api_episode_begin(w, now);
+            if (w.probe_failures >= API_PROBE_FAILS_TO_ACT) {
+                api_handle_unresponsive(w);
+            } else if (w.down_logged) {
+                api_maybe_reboot(w);
+            }
+            return;
+        }
+        w.probe_failures = 0;
+        api_episode_end(w, "answering again");
+    }
+
+    w.ever_healthy = true;
+    if (w.healthy_since_us == 0) w.healthy_since_us = now;
+    if (s_api_reboot_count != 0 &&
+        (now - w.healthy_since_us) / 1000 >= API_HEALTHY_RESET_MS) {
+        s_api_reboot_count = 0;
+    }
+    api_repair_secondary(w, now);
 }
 
 static TaskHandle_t s_task = nullptr;

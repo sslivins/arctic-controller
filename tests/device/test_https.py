@@ -60,6 +60,9 @@ HTTPS_URL = f"https://{HOST}"
 
 # Covers the 500 ms response delay, a full boot and the servers starting.
 RESTART_TIMEOUT = 120.0
+# Self-probe every 60 s, three failures 15 s apart before each action, and two
+# actions (restart, then fall back) before HTTPS is abandoned.
+UNRESPONSIVE_TIMEOUT = 240.0
 
 
 def _headers() -> dict:
@@ -109,18 +112,38 @@ def _wait_for_mode(mode: str, timeout: float = RESTART_TIMEOUT) -> bool:
     ) is not None
 
 
-def _poll_tls_status(base: str, ready, timeout: float) -> dict | None:
-    """Poll ``base``/api/tls/status until ``ready(status)``; the status, or None."""
+def _poll(probe, timeout: float):
+    """Call ``probe()`` until it returns something truthy; that value, or None.
+    Request errors count as "not yet"."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            status = _tls_status(base)
-            if ready(status):
-                return status
+            value = probe()
+            if value:
+                return value
         except (requests.RequestException, ValueError):
             pass
         time.sleep(2)
     return None
+
+
+def _poll_tls_status(base: str, ready, timeout: float) -> dict | None:
+    """Poll ``base``/api/tls/status until ``ready(status)``; the status, or None."""
+    def probe():
+        status = _tls_status(base)
+        return status if ready(status) else None
+    return _poll(probe, timeout)
+
+
+def _events(base: str) -> dict:
+    return _get(base, "/api/events", params={"limit": 100}).json()
+
+
+def _boot_events(base: str, kind: str) -> list:
+    """This boot's events of type ``kind``, newest first."""
+    data = _events(base)
+    return [e for e in data["events"]
+            if e["type"] == kind and e["boot_id"] == data["current_boot_id"]]
 
 
 def _follow(device: DeviceClient, mode: str) -> None:
@@ -379,10 +402,7 @@ class TestHttpsLifecycle:
         assert r.status_code == 200
         assert "text/html" in r.headers.get("Content-Type", "")
 
-        events = _get(HTTP_URL, "/api/events", params={"limit": 50}).json()
-        fallback = [e for e in events["events"]
-                    if e["type"] == "https_fallback"
-                    and e["boot_id"] == events["current_boot_id"]]
+        fallback = _boot_events(HTTP_URL, "https_fallback")
         assert fallback, "no https_fallback event"
         assert fallback[0]["category"] == "problems"
         assert fallback[0]["cause"] == "test"
@@ -392,6 +412,81 @@ class TestHttpsLifecycle:
         assert _wait_for_mode("https"), "Controller did not return to HTTPS"
         _follow(device, "https")
         assert _tls_status(HTTPS_URL)["https_failed"] is False
+
+    def test_bad_certificate_falls_back_to_http(self, device, http_mode):
+        """A cert/key pair that will not load is caught before 443 starts.
+
+        Otherwise 443 would come up, fail every handshake, and never fall back.
+        HTTPS then stays off for the rest of the boot (a restart cannot fix the
+        stored pair).
+        """
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        _kill_servers(device, HTTPS_URL, fail_cert_checks=1)
+
+        status = _wait_for_https_fallback()
+        assert status is not None, "Controller did not fall back to HTTP"
+        device.base_url = HTTP_URL
+        assert _boot_events(HTTP_URL, "https_fallback")[0]["cause"] == "bad_certificate"
+
+        # A plain restart keeps HTTPS off for this boot...
+        restarts = len(_boot_events(HTTP_URL, "web_server_recovered"))
+        _kill_servers(device, HTTP_URL)
+        assert _poll(lambda: len(_boot_events(HTTP_URL, "web_server_recovered")) > restarts,
+                     RESTART_TIMEOUT), "servers were not restarted"
+        assert _tls_status(HTTP_URL)["https_failed"] is True
+        assert not _https_open()
+
+        # ...until the test hook re-enables it.
+        _kill_servers(device, HTTP_URL, reenable_https=True)
+        assert _wait_for_mode("https"), "Controller did not return to HTTPS"
+        _follow(device, "https")
+
+    def test_port_80_failure_leaves_https_running(self, device, http_mode):
+        """Port 80 is secondary in HTTPS mode: a failed start there neither
+        takes 443 down nor triggers a fallback, and is retried by itself."""
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        fallbacks = len(_boot_events(HTTPS_URL, "https_fallback"))
+        restarts = len(_boot_events(HTTPS_URL, "web_server_recovered"))
+        _kill_servers(device, HTTPS_URL, fail_http_starts=1)
+
+        # The supervisor restarts the killed servers (443 comes back), then
+        # repairs port 80 on its slower secondary-server cadence.
+        assert _poll(lambda: len(_boot_events(HTTPS_URL, "web_server_recovered")) > restarts,
+                     RESTART_TIMEOUT), "servers were not restarted"
+        assert _wait_for_mode("https"), "HTTPS did not come back"
+        r = _poll(lambda: _get(HTTP_URL, "/api/health", timeout=5).status_code == 200,
+                  RESTART_TIMEOUT)
+        assert r, "port 80 was not repaired"
+        assert _https_open()
+        assert len(_boot_events(HTTPS_URL, "https_fallback")) == fallbacks
+
+    def test_unresponsive_https_falls_back_to_http(self, device, http_mode):
+        """443 running but not answering: restart, then fall back to HTTP.
+
+        The supervisor's loopback /api/health probe is made to fail (it runs
+        every minute), so it restarts the servers after three failures and,
+        when 443 still does not answer, serves the UI on port 80 instead.
+        """
+        if not _https_open():
+            pytest.skip("HTTPS not active -- previous test failed")
+        _kill_servers(device, HTTPS_URL, fail_probes=6, stop=False)
+
+        status = _wait_for_https_fallback(timeout=UNRESPONSIVE_TIMEOUT)
+        assert status is not None, "Controller did not fall back to HTTP"
+        device.base_url = HTTP_URL
+        assert _boot_events(HTTP_URL, "https_fallback")[0]["cause"] == "unresponsive"
+        down = _boot_events(HTTP_URL, "web_server_down")
+        assert down and down[0]["cause"] == "unresponsive"
+        # Once port 80 answers the probe, the outage is closed.
+        assert _poll(lambda: [e for e in _boot_events(HTTP_URL, "web_server_recovered")
+                              if e["uptime_ms"] > down[0]["uptime_ms"]],
+                     RESTART_TIMEOUT), "no web_server_recovered after the fallback"
+
+        _kill_servers(device, HTTP_URL, reenable_https=True)
+        assert _wait_for_mode("https"), "Controller did not return to HTTPS"
+        _follow(device, "https")
 
     def test_delete_restarts_into_http_mode(self, device, http_mode):
         if not _https_open():
