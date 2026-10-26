@@ -189,7 +189,17 @@ extern const uint8_t index_html_gz_start[] asm("_binary_index_html_gz_start");
 extern const uint8_t index_html_gz_end[] asm("_binary_index_html_gz_end");
 
 // Session cookie name
+// HTTP mode uses its own cookie name. A browser that signed in while the
+// device served HTTPS still holds a Secure "arctic_session" cookie, and an
+// insecure origin may not overwrite a Secure cookie of the same name, so a
+// shared name would bounce every HTTP sign-in back to the login page.
 static const char* SESSION_COOKIE_NAME = "arctic_session";
+static const char* SESSION_COOKIE_NAME_HTTP = "arctic_session_http";
+
+static const char* session_cookie_name(void)
+{
+    return tls_mgr_is_https_active() ? SESSION_COOKIE_NAME : SESSION_COOKIE_NAME_HTTP;
+}
 
 // Home Assistant commands are serialized and retained only after an
 // acknowledged write. This bounds memory and makes a retry with the same
@@ -324,28 +334,38 @@ static esp_err_t ha_manage_revoke_post_handler(httpd_req_t* req);
 
 static bool get_session_from_cookie(httpd_req_t* req, char* token_out)
 {
-    char cookie_buf[256] = {0};
+    // Cookies are shared across ports on the same host, so other apps on
+    // this address can add theirs; parse a truncated header rather than
+    // treating it as signed out.
+    char cookie_buf[512] = {0};
     size_t cookie_len = sizeof(cookie_buf);
     
-    if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, cookie_len) != ESP_OK) {
+    esp_err_t err = httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, cookie_len);
+    if (err != ESP_OK && err != ESP_ERR_HTTPD_RESULT_TRUNC) {
         return false;
     }
     
-    // Look for arctic_session=...
-    char* session_start = strstr(cookie_buf, SESSION_COOKIE_NAME);
-    if (session_start == NULL) return false;
-    
-    session_start += strlen(SESSION_COOKIE_NAME) + 1;  // Skip "arctic_session="
-    
-    // Extract token until ; or end
-    int i = 0;
-    while (session_start[i] != '\0' && session_start[i] != ';' && i < AUTH_SESSION_TOKEN_LEN) {
-        token_out[i] = session_start[i];
-        i++;
+    // Match the cookie name exactly ("arctic_session" is a prefix of
+    // "arctic_session_http"), so walk the "name=value; name=value" pairs.
+    const char* name = session_cookie_name();
+    size_t name_len = strlen(name);
+    const char* p = cookie_buf;
+    while (*p != '\0') {
+        while (*p == ' ' || *p == ';') p++;
+        if (strncmp(p, name, name_len) == 0 && p[name_len] == '=') {
+            const char* value = p + name_len + 1;
+            int i = 0;
+            while (value[i] != '\0' && value[i] != ';' && i < AUTH_SESSION_TOKEN_LEN) {
+                token_out[i] = value[i];
+                i++;
+            }
+            token_out[i] = '\0';
+            return i > 0;
+        }
+        p = strchr(p, ';');
+        if (p == NULL) break;
     }
-    token_out[i] = '\0';
-    
-    return i > 0;
+    return false;
 }
 
 static bool get_api_key_from_header(httpd_req_t* req, char* key_out)
@@ -437,7 +457,7 @@ static void set_session_cookie(httpd_req_t* req, const char* token)
     } else {
         snprintf(cookie, sizeof(cookie),
                  "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict",
-                 SESSION_COOKIE_NAME, token, AUTH_SESSION_LIFETIME_SEC);
+                 SESSION_COOKIE_NAME_HTTP, token, AUTH_SESSION_LIFETIME_SEC);
     }
     httpd_resp_set_hdr(req, "Set-Cookie", cookie);
 }
@@ -452,7 +472,7 @@ static void clear_session_cookie(httpd_req_t* req)
     } else {
         snprintf(cookie, sizeof(cookie),
                  "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict",
-                 SESSION_COOKIE_NAME);
+                 SESSION_COOKIE_NAME_HTTP);
     }
     httpd_resp_set_hdr(req, "Set-Cookie", cookie);
 }

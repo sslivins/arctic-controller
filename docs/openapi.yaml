@@ -28,7 +28,10 @@ info:
 
     ### Web Authentication (Session-based)
     When enabled, users must log in via `/login` with username/password. 
-    A session cookie (`arctic_session`) is returned and must be included in subsequent requests.
+    A session cookie is returned and must be included in subsequent requests. It is
+    named `arctic_session` (with `Secure`) when the web UI is served over HTTPS and
+    `arctic_session_http` when it is served over HTTP, so a Secure cookie left from
+    HTTPS can't shadow an HTTP sign-in.
 
     ### API Key Authentication
     When enabled, programmatic API access requires the `X-API-Key` header.
@@ -123,10 +126,10 @@ paths:
           description: Login successful
           headers:
             Set-Cookie:
-              description: Session cookie
+              description: Session cookie (`arctic_session` over HTTPS, `arctic_session_http` over HTTP)
               schema:
                 type: string
-                example: arctic_session=abc123...; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict
+                example: arctic_session_http=abc123...; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict
           content:
             application/json:
               schema:
@@ -4709,7 +4712,7 @@ components:
       type: apiKey
       in: cookie
       name: arctic_session
-      description: Session cookie obtained from /login endpoint
+      description: Session cookie obtained from /login endpoint (`arctic_session_http` when the web UI is served over HTTP)
     integrationBearer:
       type: http
       scheme: bearer
