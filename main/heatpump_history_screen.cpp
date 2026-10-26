@@ -374,7 +374,8 @@ static const char* sample_state_name(const history_telemetry_sample_t& s,
 
 // The operating-state row of a cursor popup: a band swatch and the name.
 static void draw_state_row(lv_layer_t* layer, const lv_area_t& row,
-                           const history_telemetry_sample_t& s) {
+                           const history_telemetry_sample_t& s,
+                           const char* length) {
     lv_color_t color;
     const char* name = sample_state_name(s, &color);
     lv_draw_rect_dsc_t sw;
@@ -387,6 +388,80 @@ static void draw_state_row(lv_layer_t* layer, const lv_area_t& row,
     const lv_area_t name_area = {row.x1 + 24, row.y1, row.x2, row.y2};
     draw_label(layer, name_area, name, color, LV_TEXT_ALIGN_LEFT,
                &montserrat_24_latin);
+    if (length[0] != '\0') {
+        draw_label(layer, row, length, UI_COLOR_TEXT, LV_TEXT_ALIGN_RIGHT,
+                   &montserrat_24_latin);
+    }
+}
+
+static bool compressor_on(const history_telemetry_sample_t& s) {
+    return (s.flags & HISTORY_TELEMETRY_COMPRESSOR_VALID) &&
+           (s.flags & HISTORY_TELEMETRY_COMPRESSOR_RUNNING);
+}
+
+// Start/end of the compressor run holding sample `i`, as the web dashboard
+// groups them (a defrost's mode-less samples included). In the compressor
+// pause inside a defrost, the defrost itself. A run beginning at the window's
+// left edge may have started earlier (clip_start); `open` means it is still
+// going at the window's last sample.
+struct RunSpan { uint32_t start, end; bool clip_start, open; };
+static bool cursor_run(size_t i, RunSpan* run) {
+    static constexpr uint32_t GAP = HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC * 5 / 2;
+    const uint32_t t = state.samples[i].timestamp;
+    const fault_interval_t* defrost = nullptr;
+    for (size_t d = 0; d < state.defrost_count && defrost == nullptr; d++) {
+        const auto& df = state.defrosts[d];
+        if (df.start <= t && t <= (df.end != 0 ? df.end : state.window_end)) {
+            defrost = &df;
+        }
+    }
+    // Matches the popup's state row, which reads "Idle" otherwise.
+    if (compressor_on(state.samples[i]) &&
+        (running_sample(state.samples[i]) || defrost != nullptr)) {
+        size_t lo = i, hi = i;
+        while (lo > 0 && compressor_on(state.samples[lo - 1]) &&
+               state.samples[lo].timestamp - state.samples[lo - 1].timestamp <= GAP) {
+            lo--;
+        }
+        while (hi + 1 < state.sample_count && compressor_on(state.samples[hi + 1]) &&
+               state.samples[hi + 1].timestamp - state.samples[hi].timestamp <= GAP) {
+            hi++;
+        }
+        run->start = state.samples[lo].timestamp;
+        run->end = state.samples[hi].timestamp + HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+        run->clip_start = run->start < state.window_start + GAP;
+        run->open = hi + 1 == state.sample_count;
+        return true;
+    }
+    if (defrost == nullptr) return false;
+    run->start = defrost->start;
+    run->end = defrost->end != 0 ? defrost->end : state.window_end;
+    run->clip_start = defrost->start < state.window_start;
+    run->open = defrost->end == 0;
+    return true;
+}
+
+// Popup text for the run under sample `i`: "…2:00 AM – 2:25 AM" (… where the
+// window cuts it off, "now" while it runs in the live window) and "25 min".
+static bool format_cursor_run(size_t i, char* span, size_t span_len,
+                              char* length, size_t length_len) {
+    RunSpan run;
+    if (!cursor_run(i, &run)) return false;
+    const bool live = state.window_end >= state.latest_end;
+    char from[12], to[12];
+    format_clock(from, sizeof(from), run.start);
+    if (run.open && live) {
+        snprintf(to, sizeof(to), "%s", i18n_get(STR_HOME_NOW));
+    } else {
+        format_clock(to, sizeof(to), run.end);
+    }
+    snprintf(span, span_len, "%s%s \xE2\x80\x93 %s%s",
+             run.clip_start ? "\xE2\x80\xA6" : "", from, to,
+             run.open && !live ? "\xE2\x80\xA6" : "");
+    snprintf(length, length_len, i18n_get(STR_HOME_MINUTES),
+             (unsigned)((run.end - run.start + 30) / 60));
+    if (run.clip_start || (run.open && !live)) strlcat(length, "+", length_len);
+    return true;
 }
 
 static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
@@ -441,8 +516,13 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
         }
     }
 
-    static constexpr int32_t BOX_W = 250, TIME_H = 30, ROW_H = 30, PAD = 10;
-    const int32_t BOX_H = 6 + TIME_H + (4 + fault_row_count) * ROW_H + 8;
+    // The run under the cursor: "…2:00 AM – 2:25 AM" and its length.
+    char span[48] = "", length[16] = "";
+    const bool has_run = format_cursor_run(i, span, sizeof(span), length, sizeof(length));
+
+    static constexpr int32_t TIME_H = 30, ROW_H = 30, PAD = 10;
+    const int32_t BOX_W = has_run ? 300 : 250;
+    const int32_t BOX_H = 6 + TIME_H + (4 + (has_run ? 1 : 0) + fault_row_count) * ROW_H + 8;
     int32_t bx = x + 16;
     if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
     if (bx < plot.x1) bx = plot.x1;
@@ -463,7 +543,13 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
     lv_area_t row = {time_row.x1, time_row.y2 - ROW_H, time_row.x2, time_row.y2};
     row.y1 += ROW_H;
     row.y2 += ROW_H;
-    draw_state_row(layer, row, s);
+    draw_state_row(layer, row, s, length);
+    if (has_run) {
+        row.y1 += ROW_H;
+        row.y2 += ROW_H;
+        draw_label(layer, row, span, UI_COLOR_TEXT_DIM, LV_TEXT_ALIGN_LEFT,
+                   &montserrat_24_latin);
+    }
     struct Row { lv_color_t color; const char* name; const char* value; };
     const Row rows[] = {
         {COLOR_OUTLET, i18n_get(STR_HISTORY_OUTLET), outlet},
@@ -673,8 +759,12 @@ static void draw_power_cursor(lv_layer_t* layer, const lv_area_t& plot,
     format_tenths(kw, sizeof(kw), ((uint32_t)s.average_power_w + 50) / 100, true);
     snprintf(power, sizeof(power), "%s kW", kw);
 
-    static constexpr int32_t BOX_W = 250, TIME_H = 30, ROW_H = 30, PAD = 10;
-    const int32_t BOX_H = 6 + TIME_H + 2 * ROW_H + 8;
+    static constexpr int32_t TIME_H = 30, ROW_H = 30, PAD = 10;
+    char span[48] = "", length[16] = "";
+    const bool has_run = format_cursor_run((size_t)state.cursor, span, sizeof(span),
+                                           length, sizeof(length));
+    const int32_t BOX_W = has_run ? 300 : 250;
+    const int32_t BOX_H = 6 + TIME_H + (has_run ? 3 : 2) * ROW_H + 8;
     int32_t bx = x + 16;
     if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
     if (bx < plot.x1) bx = plot.x1;
@@ -697,7 +787,13 @@ static void draw_power_cursor(lv_layer_t* layer, const lv_area_t& plot,
                &montserrat_24_latin);
     row.y1 += ROW_H;
     row.y2 += ROW_H;
-    draw_state_row(layer, row, s);
+    draw_state_row(layer, row, s, length);
+    if (has_run) {
+        row.y1 += ROW_H;
+        row.y2 += ROW_H;
+        draw_label(layer, row, span, UI_COLOR_TEXT_DIM, LV_TEXT_ALIGN_LEFT,
+                   &montserrat_24_latin);
+    }
 }
 
 // Electrical draw: an area per pixel column (the tallest sample in it) under

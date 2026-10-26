@@ -319,6 +319,8 @@
     .hist-tip-fault { color: var(--cp-danger); }
     .hist-fault-label { fill: var(--cp-danger); font-size: 13px; font-weight: 600; }
     .hist-tip-time { color: var(--cp-text-muted); font-size: 12px; }
+    .hist-tip-run { color: var(--cp-text-muted); font-size: 12px; }
+    .hist-runs-title { margin: 18px 0 8px; font-size: 16px; }
     .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
     .hist-nav { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; }
     .hist-nav-group { display: flex; gap: 8px; }
@@ -2513,7 +2515,8 @@
         <line class="hist-hover-line" y1="${plotT}" y2="${bottom}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
         <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/>${showPower ? `<circle data-key="p" r="4" fill="var(--hist-power)"/>` : ""}</g>`;
       series.p = samples.map(s => s.p ?? null);
-      histGeom = { W, plotL, plotR, mapX, mapY, mapP, samples, series, faults: data.faults || [], defrosts: data.defrosts || [], start, end, showPower, interval };
+      histGeom = { W, plotL, plotR, mapX, mapY, mapP, samples, series, faults: data.faults || [], defrosts: data.defrosts || [], start, end, showPower, interval,
+        runs: histRuns(data) };
 
       svg += `</svg>`;
       return svg;
@@ -2654,9 +2657,18 @@
       const [runText, runColor] = defrost ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
         : (s.run && HIST_RUN_STATE[s.mode]) || ["Idle", ""];
       const tip = wrap.querySelector(".hist-tip");
+      // The run under the cursor, or for the compressor pause inside a
+      // defrost, the defrost itself.
+      const live = state.tempHistory.data?.end >= state.tempHistory.data?.latest_end;
+      let run = runColor ? g.runs.find(r => r.start <= s.t && s.t < r.end) : null;
+      if (!run && defrost) {
+        const df = g.defrosts.find(d => d.start <= s.t && s.t <= (d.end ?? g.end));
+        run = { start: df.start, end: df.end ?? g.end, clipStart: df.start < g.start, open: df.end == null };
+      }
       tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(s.t, true))}</div>
-        <div class="hist-tip-state">${runColor ? `<i class="band" style="background:${runColor}"></i>` : ""}${esc(runText)}</div>
-        <div><i style="background:var(--hist-out)"></i>Outlet <strong>${fmt(s.out)}</strong></div>
+        <div class="hist-tip-state">${runColor ? `<i class="band" style="background:${runColor}"></i>` : ""}${esc(runText)}</div>` +
+        (run ? `<div class="hist-tip-run">${esc(fmtRunSpan(run, live))} · ${fmtRunLength(run, live)}</div>` : "") +
+        `<div><i style="background:var(--hist-out)"></i>Outlet <strong>${fmt(s.out)}</strong></div>
         <div><i style="background:var(--hist-in)"></i>Inlet <strong>${fmt(s.in)}</strong></div>
         <div><i style="background:var(--hist-set)"></i>Setpoint <strong>${fmt(s.set)}</strong></div>` +
         (g.showPower && s.p != null ? `<div><i style="background:var(--hist-power)"></i>Power <strong>${fmtPower(s.p)}</strong></div>` : "") +
@@ -2666,6 +2678,16 @@
       const px = x / g.W * rect.width;
       const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
       tip.style.left = `${Math.max(0, left)}px`;
+    }
+    function histRuns(data) {
+      return buildRuns(data.samples || [], data.defrosts || [], data.sample_interval_sec || 30, data.start);
+    }
+    // The window's compressor runs, as on the Energy day; View centres one.
+    function histRunsCard(data) {
+      const runs = histRuns(data), win = data.window_seconds, snap = histSnap(win);
+      if (!runs.length) return `<p class="hist-muted en-runs-msg">No compressor runs in this window.</p>`;
+      return `<h3 class="hist-runs-title">Compressor runs</h3>` + runRows(runs, data.end >= data.latest_end,
+        run => `data-action="history-view-run" data-t="${Math.round(((run.start + run.end) / 2 + win / 2) / snap) * snap}"`);
     }
     function histWindowEnergy(data) {
       const samples = data.samples || [], interval = data.sample_interval_sec || 30;
@@ -2720,6 +2742,7 @@
             </div>
           </div>
           <p class="hist-muted hist-hint">Double-click the chart to centre it on that moment, or drag it sideways.</p>
+          ${histRunsCard(data)}
         </section>`;
       }
       return `<div class="page">
@@ -2801,29 +2824,53 @@
     // Group 30 s samples into compressor runs. A run that mostly falls inside
     // a defrost span is a defrost: the unit splits the heating run around it
     // and the samples carry no mode while it lasts.
-    function buildRuns(samples, defrosts, interval) {
-      const runs = [];
+    // `from` is where the samples begin (window or day start): a run that
+    // starts there may have begun earlier (clipStart), and one still going at
+    // the last sample is `open`.
+    function buildRuns(samples, defrosts, interval, from) {
+      const runs = [], gap = interval * 2.5;
       let cur = null;
-      const close = () => {
+      const close = (open = false) => {
         if (!cur) return;
         const start = cur.start, end = cur.last + interval;
         const inDefrost = (defrosts || []).reduce((sum, d) =>
           sum + Math.max(0, Math.min(end, d.end ?? end) - Math.max(start, d.start)), 0);
         const code = Object.entries(cur.modes).sort((a, b) => b[1] - a[1])[0]?.[0];
-        runs.push({ start, end, wh: cur.metered ? cur.wh : null,
+        runs.push({ start, end, wh: cur.metered ? cur.wh : null, clipStart: start - from < gap, open,
           mode: inDefrost * 2 > end - start ? "defrost" : ENERGY_RUN_MODE[code] });
         cur = null;
       };
       for (const s of samples) {
         if (!s.run) { close(); continue; }
-        if (cur && s.t - cur.last > interval * 2.5) close();
+        if (cur && s.t - cur.last > gap) close();
         if (!cur) cur = { start: s.t, last: s.t, wh: 0, metered: false, modes: {} };
         cur.last = s.t;
         if (s.p != null) { cur.wh += s.p * interval / 3600; cur.metered = true; }
         cur.modes[s.mode] = (cur.modes[s.mode] || 0) + 1;
       }
-      close();
+      close(true);
       return runs;
+    }
+    // "…2 AM – 2:25 AM" for a run cut off by the window/day start; an open
+    // run reads "– now" when live, otherwise "…" after its last sample.
+    function fmtRunSpan(run, live) {
+      const end = run.open && live ? "now" : `${fmtHistClock(run.end)}${run.open ? "…" : ""}`;
+      return `${run.clipStart ? "…" : ""}${fmtHistClock(run.start)} – ${end}`;
+    }
+    function fmtRunLength(run, live) {
+      return `${fmtDuration(run.end - run.start)}${run.clipStart || (run.open && !live) ? "+" : ""}`;
+    }
+    const RUN_DEFROST = ["defrost", "Defrost", "var(--home-defrost)"];
+    // The "Compressor runs" rows shared by the Energy day and the Cycles page.
+    function runRows(runs, live, viewT) {
+      return `<div class="en-runs">${runs.map(run => {
+        const mode = run.mode === "defrost" ? RUN_DEFROST : ENERGY_MODES.find(([m]) => m === run.mode);
+        return `<div class="en-run"><i class="en-swatch" style="background:${mode ? mode[2] : "var(--energy-other)"}"></i>
+          <span class="en-run-time">${esc(fmtRunSpan(run, live))}</span>
+          <span class="en-run-meta">${fmtRunLength(run, live)}${mode ? ` · ${mode[1]}` : ""}</span>
+          <strong>${run.wh == null ? "--" : fmtKwh(run.wh)}</strong>
+          <button class="btn en-run-view" ${viewT(run)}>View ›</button></div>`;
+      }).join("")}</div>`;
     }
     // Compressor runs for one day, rebuilt from the 30 s cycle history (kept
     // about 14 days): three 8 h pages cover the day.
@@ -2843,7 +2890,7 @@
         }
         const samples = [...byTime.values()].sort((a, b) => a.t - b.t);
         entry.samples = samples.length;
-        entry.runs = buildRuns(samples, [...defrosts.values()], interval);
+        entry.runs = buildRuns(samples, [...defrosts.values()], interval, midnight);
       } catch (error) {
         entry.error = error.message || "Failed to load runs";
       } finally {
@@ -3037,14 +3084,8 @@
       else if (r.error) runs = `<p class="hist-muted en-runs-msg">${esc(r.error)}</p>`;
       else if (!r.samples) runs = `<p class="hist-muted en-runs-msg">Run detail is kept for about 14 days, so it isn't available for this day.</p>`;
       else if (!r.runs.length) runs = `<p class="hist-muted en-runs-msg">No compressor runs${day.final === false ? " yet today" : " this day"}.</p>`;
-      else runs = `<div class="en-runs">${r.runs.map(run => {
-        const mode = run.mode === "defrost" ? ["defrost", "Defrost", "var(--home-defrost)"] : ENERGY_MODES.find(([m]) => m === run.mode);
-        return `<div class="en-run"><i class="en-swatch" style="background:${mode ? mode[2] : "var(--energy-other)"}"></i>
-          <span class="en-run-time">${esc(fmtHistClock(run.start))} – ${esc(fmtHistClock(run.end))}</span>
-          <span class="en-run-meta">${fmtDuration(run.end - run.start)}${mode ? ` · ${mode[1]}` : ""}</span>
-          <strong>${run.wh == null ? "--" : fmtKwh(run.wh)}</strong>
-          <button class="btn en-run-view" data-action="energy-view" data-t="${viewEnd((run.start + run.end) / 2 + 4 * 3600)}">View ›</button></div>`;
-      }).join("")}</div>`;
+      else runs = runRows(r.runs, day.final === false,
+        run => `data-action="energy-view" data-t="${viewEnd((run.start + run.end) / 2 + 4 * 3600)}"`);
 
       return `<section class="card en-detail" data-energy-day="${day.date}">
         <div class="card-head"><h2>${esc(fmtDay(day.date, true))}${day.final === false ? ` <span class="badge">so far</span>` : ""}</h2>
@@ -3918,6 +3959,7 @@
       if (action === "reload-params") { await loadParams(); render(); }
       if (action === "home-problems") { state.eventFilters.category = "problems"; await navigate("events"); }
       if (action === "history-latest") { state.tempHistory.end = null; await loadHistory(); render(); }
+      if (action === "history-view-run") { await histGoto(Number(el.dataset.t)); }
       if (action === "history-prev") { const d = state.tempHistory.data; if (d) await histGoto(d.end - d.window_seconds); }
       if (action === "history-next") { const d = state.tempHistory.data; if (d) await histGoto(d.end + d.window_seconds); }
       if (action === "history-back-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end - histStep(d.window_seconds)); }
