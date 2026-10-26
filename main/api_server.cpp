@@ -619,7 +619,7 @@ bool api_server_start(void)
 // an overflow makes httpd_register_uri_handler return "no slots left" and
 // the affected route then answers 404. (Production builds register far
 // fewer handlers, so they are unaffected either way.)
-static constexpr int API_URI_HANDLERS = 180;
+static constexpr int API_URI_HANDLERS = 182;
 static constexpr int API_STACK_SIZE   = 16384;  // Default task stack
 static constexpr int API_MAX_HEADERS  = 16;
 static constexpr int API_RECV_TIMEOUT = 10;     // seconds
