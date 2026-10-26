@@ -2798,6 +2798,33 @@
       en.to = en.today && to >= en.today ? null : to;
       await loadEnergy(); render();
     }
+    // Group 30 s samples into compressor runs. A run that mostly falls inside
+    // a defrost span is a defrost: the unit splits the heating run around it
+    // and the samples carry no mode while it lasts.
+    function buildRuns(samples, defrosts, interval) {
+      const runs = [];
+      let cur = null;
+      const close = () => {
+        if (!cur) return;
+        const start = cur.start, end = cur.last + interval;
+        const inDefrost = (defrosts || []).reduce((sum, d) =>
+          sum + Math.max(0, Math.min(end, d.end ?? end) - Math.max(start, d.start)), 0);
+        const code = Object.entries(cur.modes).sort((a, b) => b[1] - a[1])[0]?.[0];
+        runs.push({ start, end, wh: cur.metered ? cur.wh : null,
+          mode: inDefrost * 2 > end - start ? "defrost" : ENERGY_RUN_MODE[code] });
+        cur = null;
+      };
+      for (const s of samples) {
+        if (!s.run) { close(); continue; }
+        if (cur && s.t - cur.last > interval * 2.5) close();
+        if (!cur) cur = { start: s.t, last: s.t, wh: 0, metered: false, modes: {} };
+        cur.last = s.t;
+        if (s.p != null) { cur.wh += s.p * interval / 3600; cur.metered = true; }
+        cur.modes[s.mode] = (cur.modes[s.mode] || 0) + 1;
+      }
+      close();
+      return runs;
+    }
     // Compressor runs for one day, rebuilt from the 30 s cycle history (kept
     // about 14 days): three 8 h pages cover the day.
     async function loadEnergyRuns(date) {
@@ -2807,30 +2834,16 @@
       try {
         const midnight = energyMidnight(day), next = midnight + 86400;
         const pages = await Promise.all([8, 16, 24].map(h => api(`/api/heatpump/temperature-history?end=${midnight + h * 3600}`)));
-        const byTime = new Map();
+        const byTime = new Map(), defrosts = new Map();
         let interval = 30;
         for (const page of pages) {
           interval = page.sample_interval_sec || interval;
           for (const s of page.samples || []) if (s.t >= midnight && s.t < next) byTime.set(s.t, s);
+          for (const d of page.defrosts || []) defrosts.set(d.start, d);
         }
         const samples = [...byTime.values()].sort((a, b) => a.t - b.t);
         entry.samples = samples.length;
-        let cur = null;
-        const close = () => {
-          if (!cur) return;
-          const mode = Object.entries(cur.modes).sort((a, b) => b[1] - a[1])[0]?.[0];
-          entry.runs.push({ start: cur.start, end: cur.last + interval, wh: cur.metered ? cur.wh : null, mode: ENERGY_RUN_MODE[mode] });
-          cur = null;
-        };
-        for (const s of samples) {
-          if (!s.run) { close(); continue; }
-          if (cur && s.t - cur.last > interval * 2.5) close();
-          if (!cur) cur = { start: s.t, last: s.t, wh: 0, metered: false, modes: {} };
-          cur.last = s.t;
-          if (s.p != null) { cur.wh += s.p * interval / 3600; cur.metered = true; }
-          cur.modes[s.mode] = (cur.modes[s.mode] || 0) + 1;
-        }
-        close();
+        entry.runs = buildRuns(samples, [...defrosts.values()], interval);
       } catch (error) {
         entry.error = error.message || "Failed to load runs";
       } finally {
@@ -3025,7 +3038,7 @@
       else if (!r.samples) runs = `<p class="hist-muted en-runs-msg">Run detail is kept for about 14 days, so it isn't available for this day.</p>`;
       else if (!r.runs.length) runs = `<p class="hist-muted en-runs-msg">No compressor runs${day.final === false ? " yet today" : " this day"}.</p>`;
       else runs = `<div class="en-runs">${r.runs.map(run => {
-        const mode = ENERGY_MODES.find(([m]) => m === run.mode);
+        const mode = run.mode === "defrost" ? ["defrost", "Defrost", "var(--home-defrost)"] : ENERGY_MODES.find(([m]) => m === run.mode);
         return `<div class="en-run"><i class="en-swatch" style="background:${mode ? mode[2] : "var(--energy-other)"}"></i>
           <span class="en-run-time">${esc(fmtHistClock(run.start))} – ${esc(fmtHistClock(run.end))}</span>
           <span class="en-run-meta">${fmtDuration(run.end - run.start)}${mode ? ` · ${mode[1]}` : ""}</span>
