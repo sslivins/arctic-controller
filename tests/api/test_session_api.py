@@ -38,6 +38,11 @@ BASE_URL = os.environ.get("ARCTIC_URL", "http://arctic.local")
 API_KEY = os.environ.get("ARCTIC_API_KEY")
 USERNAME = os.environ.get("ARCTIC_USERNAME", "arctic")
 PASSWORD = os.environ.get("ARCTIC_PASSWORD", "arctic")
+# HTTP mode uses its own cookie name so a Secure cookie left from HTTPS can't
+# shadow it (see set_session_cookie in api_server.cpp).
+SESSION_COOKIE = (
+    "arctic_session" if BASE_URL.startswith("https://") else "arctic_session_http"
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -186,13 +191,13 @@ class TestSessionLogin:
     """POST /login — credential validation and cookie issuance."""
 
     def test_login_returns_session_cookie(self):
-        """Successful login sets an arctic_session cookie."""
+        """Successful login sets the session cookie for the current scheme."""
         _enable_web_auth()
         s = requests.Session()
         r = _login(s)
         assert r.status_code == 200
         assert r.json().get("success") is True
-        assert "arctic_session" in s.cookies
+        assert SESSION_COOKIE in s.cookies
 
     def test_login_wrong_password_returns_401(self):
         _enable_web_auth()
@@ -248,9 +253,28 @@ class TestSessionAccess:
         """A fabricated / invalid cookie should be rejected."""
         _enable_web_auth()
         s = requests.Session()
-        s.cookies.set("arctic_session", "00000000deadbeef00000000deadbeef")
+        s.cookies.set(SESSION_COOKIE, "00000000deadbeef00000000deadbeef")
         r = s.get(f"{BASE_URL}/api/info", timeout=5)
         assert r.status_code == 401
+
+    def test_other_scheme_cookie_does_not_shadow_session(self):
+        """A leftover cookie from the other scheme must not hide the session.
+
+        A browser that signed in over HTTPS keeps a Secure ``arctic_session``
+        cookie that HTTP can't overwrite, so HTTP uses its own name and the
+        two must be told apart exactly.
+        """
+        _enable_web_auth()
+        s = requests.Session()
+        _login(s)
+        token = s.cookies[SESSION_COOKIE]
+        other = "arctic_session_http" if SESSION_COOKIE == "arctic_session" else "arctic_session"
+        for cookie in (
+            f"{other}=00000000deadbeef00000000deadbeef; {SESSION_COOKIE}={token}",
+            f"{SESSION_COOKIE}={token}; {other}=00000000deadbeef00000000deadbeef",
+        ):
+            r = requests.get(f"{BASE_URL}/api/info", headers={"Cookie": cookie}, timeout=5)
+            assert r.status_code == 200, cookie
 
     def test_session_and_api_key_both_work(self):
         """Both auth methods should independently grant access."""
@@ -290,7 +314,7 @@ class TestConcurrentSessions:
         assert r2.status_code == 200
 
         # Tokens should differ
-        assert s1.cookies["arctic_session"] != s2.cookies["arctic_session"]
+        assert s1.cookies[SESSION_COOKIE] != s2.cookies[SESSION_COOKIE]
 
     def test_logout_one_does_not_affect_other(self):
         """Logging out session A should leave session B working."""
