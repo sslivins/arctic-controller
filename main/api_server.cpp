@@ -47,6 +47,7 @@
 #include "factory_reset.h"
 #include "boot_stats.h"
 #include "fault_notice.h"
+#include "ext_sensor_notice.h"
 #include "fault_history.h"
 #include "home_last_run.h"
 #include "home_stats.h"
@@ -306,6 +307,7 @@ static esp_err_t events_get_handler(httpd_req_t* req);
 static esp_err_t events_clear_handler(httpd_req_t* req);
 static esp_err_t brownout_clear_handler(httpd_req_t* req);
 static esp_err_t fault_notice_clear_handler(httpd_req_t* req);
+static esp_err_t ext_sensor_notice_clear_handler(httpd_req_t* req);
 static esp_err_t display_brightness_get_handler(httpd_req_t* req);
 static esp_err_t display_brightness_put_handler(httpd_req_t* req);
 static esp_err_t preferences_get_handler(httpd_req_t* req);
@@ -1639,6 +1641,15 @@ static bool api_server_start_locked(void)
         .user_ctx = NULL
     };
     REGISTER_URI(fault_notice_clear_uri);
+
+    // POST /api/performance/sensor-notice/clear - Acknowledge sensor outages
+    httpd_uri_t ext_sensor_notice_clear_uri = {
+        .uri = "/api/performance/sensor-notice/clear",
+        .method = HTTP_POST,
+        .handler = ext_sensor_notice_clear_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(ext_sensor_notice_clear_uri);
 
     // GET /api/display/brightness - Get current display brightness
     httpd_uri_t display_brightness_uri = {
@@ -6266,6 +6277,7 @@ static const char* notify_type_key(status_bar_notify_type_t type)
         case STATUS_BAR_NOTIFY_LOW_BATTERY:     return "low_battery";
         case STATUS_BAR_NOTIFY_BROWNOUT:        return "brownout";
         case STATUS_BAR_NOTIFY_HEATPUMP_FAULT:  return "heatpump_fault";
+        case STATUS_BAR_NOTIFY_EXT_SENSOR:      return "ext_sensor";
         default:                                return "unknown";
     }
 }
@@ -6304,6 +6316,14 @@ static esp_err_t notifications_get_handler(httpd_req_t* req)
                 cJSON_AddStringToObject(f, "latest_name", bit ? bit->label : "");
                 cJSON_AddNumberToObject(f, "first_at", (double)fn.first);
                 cJSON_AddNumberToObject(f, "latest_at", (double)fn.latest);
+            }
+        } else if (items[i].type == STATUS_BAR_NOTIFY_EXT_SENSOR) {
+            ext_sensor_notice_t en;
+            if (ext_sensor_notice_get(&en)) {
+                cJSON* o = cJSON_AddObjectToObject(n, "sensor");
+                cJSON_AddBoolToObject(o, "ongoing", en.ongoing);
+                cJSON_AddNumberToObject(o, "count", en.count);
+                cJSON_AddNumberToObject(o, "last_down_s", en.last_down_s);
             }
         }
         cJSON_AddItemToArray(arr, n);
@@ -7272,6 +7292,24 @@ static esp_err_t fault_notice_clear_handler(httpd_req_t* req)
     fault_notice_clear();
     bsp_display_lock(0);
     status_bar_clear_notification(STATUS_BAR_NOTIFY_HEATPUMP_FAULT);
+    bsp_display_unlock();
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// POST /api/performance/sensor-notice/clear - Acknowledge the "temperature
+// sensor offline" notification
+static esp_err_t ext_sensor_notice_clear_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+
+    ext_sensor_notice_clear();
+    bsp_display_lock(0);
+    status_bar_clear_notification(STATUS_BAR_NOTIFY_EXT_SENSOR);
     bsp_display_unlock();
     httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;

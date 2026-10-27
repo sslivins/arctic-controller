@@ -34,6 +34,7 @@ typedef enum {
     STATUS_BAR_NOTIFY_LOW_BATTERY,          // Low battery warning
     STATUS_BAR_NOTIFY_BROWNOUT,             // Brownout reset detected (power sag)
     STATUS_BAR_NOTIFY_HEATPUMP_FAULT,       // Heat pump fault(s) since last acknowledged (fault_notice)
+    STATUS_BAR_NOTIFY_EXT_SENSOR,           // External temperature sensor outage (ext_sensor_notice)
     STATUS_BAR_NOTIFY_MAX
 } status_bar_notify_type_t;
 

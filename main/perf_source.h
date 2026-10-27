@@ -101,6 +101,46 @@ private:
     uint32_t settle_until_ms_ = 0;
 };
 
+// Decides when an external sensor counts as lost (failing on every poll for
+// kOutageLostMs) and when as back (reading on every poll for kOutageRestoreMs).
+// The long restore wait keeps a flapping sensor as one outage rather than a
+// stream of lost/restored events.
+constexpr uint32_t kOutageLostMs = 5 * 60 * 1000;
+constexpr uint32_t kOutageRestoreMs = 10 * 60 * 1000;
+
+enum class OutageChange : uint8_t { None, Lost, Restored };
+
+class OutageTracker {
+public:
+    // Forget all state; the timing set by set_timing() stays.
+    void reset() {
+        OutageTracker fresh;
+        fresh.set_timing(lost_ms_, restore_ms_);
+        *this = fresh;
+    }
+    // The result of one poll of a configured sensor. On Restored, *down_ms is
+    // the outage length: first failure to the start of the clean run.
+    OutageChange on_poll(int slot, uint32_t now_ms, bool ok, uint32_t* down_ms = nullptr);
+    // The poll couldn't tell (no network): restart the timers, keep the state.
+    void on_unknown(int slot);
+    bool lost(int slot) const { return lost_[slot]; }
+    // Shorter thresholds, for tests on the device.
+    void set_timing(uint32_t lost_ms, uint32_t restore_ms) {
+        lost_ms_ = lost_ms;
+        restore_ms_ = restore_ms;
+    }
+
+private:
+    bool lost_[kSlotCount] = {};
+    bool failing_[kSlotCount] = {};
+    bool reading_[kSlotCount] = {};
+    uint32_t fail_since_ms_[kSlotCount] = {};
+    uint32_t ok_since_ms_[kSlotCount] = {};
+    uint32_t outage_start_ms_[kSlotCount] = {};
+    uint32_t lost_ms_ = kOutageLostMs;
+    uint32_t restore_ms_ = kOutageRestoreMs;
+};
+
 // Thermux (github.com/sslivins/thermux) Modbus map v1: channel temperatures
 // at input registers 100..199 in 0.01 °C, 0x8000 when invalid.
 namespace thermux {

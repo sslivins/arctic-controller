@@ -85,6 +85,8 @@ static const char* s_event_names[] = {
     "wifi_roamed",
     "firmware_updated",
     "https_fallback",
+    "ext_sensor_lost",
+    "ext_sensor_restored",
 };
 
 static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
@@ -385,6 +387,8 @@ event_category_t event_type_category(event_type_t type) {
         case EVENT_WIFI_RESTORED:
         case EVENT_WIFI_UNSTABLE:
         case EVENT_HTTPS_FALLBACK:
+        case EVENT_EXT_SENSOR_LOST:
+        case EVENT_EXT_SENSOR_RESTORED:
             return EVENT_CATEGORY_PROBLEMS;
 
         case EVENT_COMPRESSOR_ON:
@@ -466,6 +470,25 @@ const char* event_web_server_recovery_key(uint32_t payload) {
         case EVENT_WEB_SERVER_RECOVERED_RESTARTED: return "restarted";
         case EVENT_WEB_SERVER_RECOVERED_REBOOT:    return "reboot";
         default:                                   return NULL;
+    }
+}
+
+const char* event_ext_sensor_slot_key(uint32_t payload) {
+    switch (event_ext_sensor_slot(payload)) {
+        case 0:  return "supply";
+        case 1:  return "return";
+        default: return NULL;
+    }
+}
+
+const char* event_ext_sensor_cause_key(uint32_t payload) {
+    switch (event_ext_sensor_cause(payload)) {
+        case EVENT_EXT_SENSOR_CAUSE_UNREACHABLE: return "unreachable";
+        case EVENT_EXT_SENSOR_CAUSE_NO_ANSWER:   return "no_answer";
+        case EVENT_EXT_SENSOR_CAUSE_REFUSED:     return "refused";
+        case EVENT_EXT_SENSOR_CAUSE_NO_READING:  return "no_reading";
+        case EVENT_EXT_SENSOR_CAUSE_REPLACED:    return "replaced";
+        default:                                 return "other";
     }
 }
 

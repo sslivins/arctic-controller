@@ -55,6 +55,8 @@ typedef enum {
     EVENT_WIFI_ROAMED,          // Moved to a stronger access point (payload: wifi_roam_pack)
     EVENT_FIRMWARE_UPDATED,     // Firmware version changed since the last boot (payload: from << 16 | to, see event_firmware_version_pack)
     EVENT_HTTPS_FALLBACK,       // HTTPS failed to start with the administrator certificate; serving HTTP (payload: event_web_server_cause_t)
+    EVENT_EXT_SENSOR_LOST,      // External temperature sensor failing for minutes (payload: event_ext_sensor_lost_pack)
+    EVENT_EXT_SENSOR_RESTORED,  // External sensor reading again after EVENT_EXT_SENSOR_LOST (payload: event_ext_sensor_restored_pack)
     EVENT_TYPE_COUNT
 } event_type_t;
 
@@ -97,6 +99,17 @@ typedef enum {
     EVENT_WEB_SERVER_RECOVERED_RESTARTED = 0, // restarted in place
     EVENT_WEB_SERVER_RECOVERED_REBOOT = 1,    // gave up and rebooted
 } event_web_server_recovery_t;
+
+// Why an external temperature sensor stopped reading, as the
+// EVENT_EXT_SENSOR_LOST cause.
+typedef enum {
+    EVENT_EXT_SENSOR_CAUSE_OTHER = 0,
+    EVENT_EXT_SENSOR_CAUSE_UNREACHABLE = 1, // can't resolve or connect
+    EVENT_EXT_SENSOR_CAUSE_NO_ANSWER = 2,   // connected, no (valid) reply
+    EVENT_EXT_SENSOR_CAUSE_REFUSED = 3,     // device turned the request down
+    EVENT_EXT_SENSOR_CAUSE_NO_READING = 4,  // no reading, or not a believable one
+    EVENT_EXT_SENSOR_CAUSE_REPLACED = 5,    // a different sensor answers
+} event_ext_sensor_cause_t;
 
 // ============================================================================
 // Event Entry
@@ -281,6 +294,30 @@ static inline uint16_t event_firmware_from(uint32_t payload) { return (uint16_t)
 
 /** "After" version of an EVENT_FIRMWARE_UPDATED payload. */
 static inline uint16_t event_firmware_to(uint32_t payload) { return (uint16_t)(payload & 0xFFFF); }
+
+/** EVENT_EXT_SENSOR_LOST payload: sensor slot (0 supply, 1 return) in bits 0..7, cause in 8..15. */
+static inline uint32_t event_ext_sensor_lost_pack(int slot, event_ext_sensor_cause_t cause) {
+    return ((uint32_t)slot & 0xFF) | (((uint32_t)cause & 0xFF) << 8);
+}
+
+/** EVENT_EXT_SENSOR_RESTORED payload: slot in bits 0..7, seconds down in 8..31. */
+static inline uint32_t event_ext_sensor_restored_pack(int slot, uint32_t down_s) {
+    if (down_s > 0xFFFFFF) down_s = 0xFFFFFF;
+    return ((uint32_t)slot & 0xFF) | (down_s << 8);
+}
+
+static inline int event_ext_sensor_slot(uint32_t payload) { return (int)(payload & 0xFF); }
+static inline uint32_t event_ext_sensor_cause(uint32_t payload) { return (payload >> 8) & 0xFF; }
+static inline uint32_t event_ext_sensor_down_s(uint32_t payload) { return payload >> 8; }
+
+/** Stable API key for an external sensor slot ("supply", "return"), or NULL. */
+const char* event_ext_sensor_slot_key(uint32_t payload);
+
+/**
+ * @brief Stable API key for an EVENT_EXT_SENSOR_LOST cause ("unreachable",
+ *        "no_answer", "refused", "no_reading", "replaced" or "other").
+ */
+const char* event_ext_sensor_cause_key(uint32_t payload);
 
 #ifdef __cplusplus
 }

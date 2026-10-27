@@ -154,6 +154,8 @@ void event_names_are_the_documented_api_strings() {
     CHECK(std::strcmp(event_type_name(EVENT_WIFI_RESTORED), "wifi_restored") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_WIFI_UNSTABLE), "wifi_unstable") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_HTTPS_FALLBACK), "https_fallback") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_EXT_SENSOR_LOST), "ext_sensor_lost") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_EXT_SENSOR_RESTORED), "ext_sensor_restored") == 0);
 }
 
 void event_payloads_decode_to_the_documented_api_keys() {
@@ -202,6 +204,28 @@ void event_payloads_decode_to_the_documented_api_keys() {
     CHECK(std::strcmp(event_wifi_reason_key(4), "ap_disconnected") == 0);
     CHECK(std::strcmp(event_wifi_reason_key(206), "ap_restarted") == 0);
     CHECK(std::strcmp(event_wifi_reason_key(0), "other") == 0);
+
+    // ext_sensor_lost: slot | cause << 8; ext_sensor_restored: slot | down_s << 8.
+    const uint32_t lost = event_ext_sensor_lost_pack(1, EVENT_EXT_SENSOR_CAUSE_NO_ANSWER);
+    CHECK(std::strcmp(event_ext_sensor_slot_key(lost), "return") == 0);
+    CHECK(std::strcmp(event_ext_sensor_cause_key(lost), "no_answer") == 0);
+    CHECK(std::strcmp(event_ext_sensor_slot_key(event_ext_sensor_lost_pack(0, EVENT_EXT_SENSOR_CAUSE_UNREACHABLE)),
+                      "supply") == 0);
+    CHECK(event_ext_sensor_slot_key(5) == nullptr);
+    CHECK(std::strcmp(event_ext_sensor_cause_key(event_ext_sensor_lost_pack(0, EVENT_EXT_SENSOR_CAUSE_UNREACHABLE)),
+                      "unreachable") == 0);
+    CHECK(std::strcmp(event_ext_sensor_cause_key(event_ext_sensor_lost_pack(0, EVENT_EXT_SENSOR_CAUSE_REFUSED)),
+                      "refused") == 0);
+    CHECK(std::strcmp(event_ext_sensor_cause_key(event_ext_sensor_lost_pack(0, EVENT_EXT_SENSOR_CAUSE_NO_READING)),
+                      "no_reading") == 0);
+    CHECK(std::strcmp(event_ext_sensor_cause_key(event_ext_sensor_lost_pack(0, EVENT_EXT_SENSOR_CAUSE_REPLACED)),
+                      "replaced") == 0);
+    CHECK(std::strcmp(event_ext_sensor_cause_key(99u << 8), "other") == 0);
+    const uint32_t back = event_ext_sensor_restored_pack(0, 3615);
+    CHECK(event_ext_sensor_slot(back) == 0);
+    CHECK(event_ext_sensor_down_s(back) == 3615);
+    // About 194 days at most; longer saturates instead of wrapping.
+    CHECK(event_ext_sensor_down_s(event_ext_sensor_restored_pack(1, 0xFFFFFFFFu)) == 0xFFFFFFu);
 }
 
 void every_event_type_maps_to_a_valid_category() {
@@ -219,7 +243,7 @@ void categories_match_the_intended_grouping() {
         EVENT_NETWORK_UNREACHABLE, EVENT_NETWORK_RECOVERED,
         EVENT_WEB_SERVER_DOWN, EVENT_WEB_SERVER_RECOVERED,
         EVENT_WIFI_LOST, EVENT_WIFI_RESTORED, EVENT_WIFI_UNSTABLE,
-        EVENT_HTTPS_FALLBACK};
+        EVENT_HTTPS_FALLBACK, EVENT_EXT_SENSOR_LOST, EVENT_EXT_SENSOR_RESTORED};
     for (event_type_t t : problems) {
         CHECK(event_type_category(t) == EVENT_CATEGORY_PROBLEMS);
     }

@@ -933,11 +933,11 @@ paths:
                       properties:
                         type:
                           type: integer
-                          description: Numeric notification type (0=firmware, 1=wifi, 2=battery, 3=brownout, 4=heat pump fault)
+                          description: Numeric notification type (0=firmware, 1=wifi, 2=battery, 3=brownout, 4=heat pump fault, 5=temperature sensor offline)
                           example: 0
                         key:
                           type: string
-                          enum: [firmware_update, wifi_unstable, low_battery, brownout, heatpump_fault, unknown]
+                          enum: [firmware_update, wifi_unstable, low_battery, brownout, heatpump_fault, ext_sensor, unknown]
                           description: Stable, language-independent notification key
                           example: firmware_update
                         message:
@@ -969,6 +969,28 @@ paths:
                               type: integer
                               description: Unix time of the latest fault; 0 if the clock was not set
                               example: 1782998040
+                        sensor:
+                          type: object
+                          description: |
+                            Only for `ext_sensor`. External temperature sensor
+                            (BACnet / Modbus TCP) outages since the notification
+                            was last acknowledged. A sensor counts as offline
+                            after 5 minutes of failed reads and as back after 10
+                            minutes of good ones, so a flapping sensor is one
+                            outage. Kept in RAM only.
+                          properties:
+                            ongoing:
+                              type: boolean
+                              description: A sensor is offline now (COP uses the heat pump's sensors)
+                              example: false
+                            count:
+                              type: integer
+                              description: Number of outages (stops at 9999)
+                              example: 1
+                            last_down_s:
+                              type: integer
+                              description: Length of the latest finished outage, in seconds
+                              example: 2700
         '401':
           description: Unauthorized
           content:
@@ -3919,6 +3941,36 @@ paths:
 
         '400':
           $ref: '#/components/responses/BadRequest'
+  /api/performance/sensor-notice/clear:
+    post:
+      tags:
+      - HeatPump
+      summary: Acknowledge the temperature sensor offline notification
+      description: |
+        Clears the "temperature sensor offline" bell entry. An outage still in
+        progress is not raised again; the next one is. Does not touch the event
+        log.
+      operationId: clearSensorNotice
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Notification acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/heatpump/fault-notice/clear:
     post:
       tags:
@@ -5608,6 +5660,8 @@ components:
           - wifi_roamed
           - firmware_updated
           - https_fallback
+          - ext_sensor_lost
+          - ext_sensor_restored
           example: power_on
         category:
           type: string
@@ -5640,6 +5694,8 @@ components:
             - `wifi_restored`: outage length in seconds
             - `wifi_unstable`: number of short drops in the hour
             - `wifi_roamed`: `(channel << 16) | (-to_rssi << 8) | -from_rssi`
+            - `ext_sensor_lost`: `(cause << 8) | slot`, slot 0=supply, 1=return; cause 0=other, 1=unreachable, 2=no answer, 3=refused, 4=no reading, 5=replaced
+            - `ext_sensor_restored`: `(seconds_down << 8) | slot`
             - `firmware_updated`: `(from << 16) | to`, each version packed as `(major << 12) | (minor << 7) | patch`, 0 if unknown
             - All other events: 0
           example: 0
@@ -5702,8 +5758,19 @@ components:
         cause:
           type: string
           description: "`web_server_down`: why the web/API servers were down (`unresponsive`: running but not answering the controller's own health probe). `https_fallback`: why HTTPS is not being served (`bad_certificate`: the stored certificate and key will not load; `unresponsive`: port 443 stopped answering and a restart did not help)."
-          enum: [unknown, no_memory, no_identity, start_failed, test, bad_certificate, unresponsive]
+          enum: [unknown, no_memory, no_identity, start_failed, test, bad_certificate, unresponsive, unreachable, no_answer, refused, no_reading, replaced, other]
           example: no_memory
+        sensor:
+          type: string
+          description: |
+            `ext_sensor_lost` / `ext_sensor_restored` only: which external
+            temperature sensor. Lost is logged after 5 minutes of failed reads
+            (`cause` says why: `unreachable` can't connect, `no_answer` no valid
+            reply, `refused` the device turned the request down, `no_reading`
+            no believable value, `replaced` a different sensor answered);
+            restored after 10 minutes of good reads.
+          enum: [supply, return]
+          example: supply
         reason:
           type: integer
           description: |
@@ -5717,7 +5784,7 @@ components:
           example: signal_lost
         down_s:
           type: integer
-          description: "`wifi_restored` only: how long the WiFi link was down, in seconds."
+          description: "`wifi_restored` / `ext_sensor_restored` only: how long the WiFi link or the sensor was down, in seconds."
           example: 252
         drops:
           type: integer

@@ -837,6 +837,111 @@ class TestPolling:
 
 
 # ---------------------------------------------------------------------------
+# Outage events and bell notice
+# ---------------------------------------------------------------------------
+
+# Shortened from the 5 min / 10 min production thresholds by a test endpoint.
+OUTAGE_LOST_MS, OUTAGE_RESTORE_MS = 20_000, 30_000
+SENSOR_ITEM_TAG = "notify_item_ext_sensor"
+
+
+def _set_outage_timing(device: DeviceClient, body: dict):
+    r = device.session.post(_url(device, "/api/test/ext-sensor-outage-timing"), json=body,
+                            timeout=device.timeout)
+    r.raise_for_status()
+
+
+def _new_events(device: DeviceClient, kind: str, since: tuple) -> list:
+    r = device.session.get(_url(device, "/api/events?limit=30"), timeout=device.timeout)
+    r.raise_for_status()
+    boot, uptime = since
+    return [e for e in r.json()["events"]
+            if e["type"] == kind and e["boot_id"] == boot and e["uptime_ms"] > uptime]
+
+
+def _event_mark(device: DeviceClient) -> tuple:
+    r = device.session.get(_url(device, "/api/events?limit=1"), timeout=device.timeout)
+    r.raise_for_status()
+    body = r.json()
+    events = body["events"]
+    latest = events[0]["uptime_ms"] if events and events[0]["boot_id"] == body["current_boot_id"] else 0
+    return body["current_boot_id"], latest
+
+
+def _sensor_notices(device: DeviceClient) -> list:
+    r = device.session.get(_url(device, "/api/notifications"), timeout=device.timeout)
+    r.raise_for_status()
+    return [n for n in r.json()["notifications"] if n["key"] == "ext_sensor"]
+
+
+class TestOutageNotice:
+
+    @pytest.fixture(autouse=True)
+    def _timing(self, device: DeviceClient):
+        if device.has_widget(tag="notify_title"):
+            device.click(tag="notifications")
+        device.notification_mock_reset()
+        _set_outage_timing(device, {"lost_ms": OUTAGE_LOST_MS, "restore_ms": OUTAGE_RESTORE_MS})
+        yield
+        _set_outage_timing(device, {})
+        device.notification_mock_reset()
+
+    def test_outage_logs_events_and_raises_one_bell_entry(self, device: DeviceClient, thermux,
+                                                          fake):
+        _configure_both(device, fake)
+        _wait_readings(device)
+        mark = _event_mark(device)
+        assert _sensor_notices(device) == []
+
+        thermux.stop()
+        try:
+            device.wait_until(
+                "both sensors logged as lost",
+                lambda: len(_new_events(device, "ext_sensor_lost", mark)) == 2,
+                timeout=90.0, poll=2.0)
+            lost = _new_events(device, "ext_sensor_lost", mark)
+            assert {e["sensor"] for e in lost} == {"supply", "return"}, lost
+            assert all(e["category"] == "problems" and e["cause"] == "unreachable"
+                       for e in lost), lost
+
+            # Both sensors dropping together is one outage, one bell entry.
+            device.wait_until("bell entry raised", lambda: len(_sensor_notices(device)) == 1,
+                              timeout=5.0)
+            notice = _sensor_notices(device)[0]
+            assert notice["sensor"] == {"ongoing": True, "count": 1, "last_down_s": 0}, notice
+
+            # The display can go idle during the wait; a tap on a dark screen only wakes it.
+            device.set_display_idle("wake")
+            device.click(tag="notifications")
+            assert device.wait_for_widget(tag=SENSOR_ITEM_TAG, timeout=5.0), \
+                "sensor entry not in dropdown"
+            device.click(tag=SENSOR_ITEM_TAG)
+            assert device.wait_for_screen("performance", timeout=5.0), \
+                f"Expected Performance, got '{device.screen}'"
+            device.wait_until("entry acknowledged", lambda: _sensor_notices(device) == [],
+                              timeout=5.0)
+            device.click(tag="perf_back")
+            assert device.wait_for_screen("main", timeout=5.0)
+        finally:
+            thermux.start()
+
+        device.wait_until(
+            "both sensors logged as restored",
+            lambda: len(_new_events(device, "ext_sensor_restored", mark)) == 2,
+            timeout=90.0, poll=2.0)
+        restored = _new_events(device, "ext_sensor_restored", mark)
+        assert all(e["down_s"] >= OUTAGE_LOST_MS // 1000 for e in restored), restored
+        # Acknowledged while it was ongoing, so the recovery does not re-raise it.
+        assert _sensor_notices(device) == []
+
+    def test_clear_endpoint(self, device: DeviceClient):
+        r = device.session.post(_url(device, "/api/performance/sensor-notice/clear"),
+                                timeout=device.timeout)
+        r.raise_for_status()
+        assert r.json().get("success") is True
+
+
+# ---------------------------------------------------------------------------
 # Device screen
 # ---------------------------------------------------------------------------
 

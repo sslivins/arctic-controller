@@ -75,6 +75,17 @@ void add_event_details(cJSON* evt, const event_entry_t& e)
         case EVENT_WIFI_UNSTABLE:
             cJSON_AddNumberToObject(evt, "drops", p);
             break;
+        case EVENT_EXT_SENSOR_LOST:
+        case EVENT_EXT_SENSOR_RESTORED: {
+            const char* slot = event_ext_sensor_slot_key(p);
+            if (slot) cJSON_AddStringToObject(evt, "sensor", slot);
+            else cJSON_AddNullToObject(evt, "sensor");
+            if (e.type == EVENT_EXT_SENSOR_LOST)
+                cJSON_AddStringToObject(evt, "cause", event_ext_sensor_cause_key(p));
+            else
+                cJSON_AddNumberToObject(evt, "down_s", event_ext_sensor_down_s(p));
+            break;
+        }
         case EVENT_WIFI_ROAMED:
             cJSON_AddNumberToObject(evt, "from_rssi_dbm", -(int)(p & 0xFF));
             cJSON_AddNumberToObject(evt, "to_rssi_dbm", -(int)((p >> 8) & 0xFF));
