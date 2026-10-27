@@ -41,6 +41,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/log_persist.cpp
   ${MAIN_DIR}/boot_stats.cpp
   ${MAIN_DIR}/fault_notice.cpp
+  ${MAIN_DIR}/ext_sensor_notice.cpp
   ${MAIN_DIR}/fault_history.cpp
   ${MAIN_DIR}/home_stats.cpp
   ${MAIN_DIR}/time_manager.cpp
@@ -150,6 +151,12 @@ add_test(NAME boot_stats COMMAND test_boot_stats)
 add_executable(test_fault_notice test_fault_notice.cpp)
 target_link_libraries(test_fault_notice PRIVATE arctic_main_host)
 add_test(NAME fault_notice COMMAND test_fault_notice)
+
+# The "temperature sensor offline" bell entry: one entry per outage, acknowledgement
+# and the localized text.
+add_executable(test_ext_sensor_notice test_ext_sensor_notice.cpp)
+target_link_libraries(test_ext_sensor_notice PRIVATE arctic_main_host)
+add_test(NAME ext_sensor_notice COMMAND test_ext_sensor_notice)
 
 # Fault spans for the history charts, paired from error_appeared/cleared
 # events. Pure logic over a hand-built event list; no event log or clock.

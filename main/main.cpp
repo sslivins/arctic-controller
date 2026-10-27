@@ -53,6 +53,7 @@
 #include "event_log.h"
 #include "boot_stats.h"
 #include "fault_notice.h"
+#include "ext_sensor_notice.h"
 #include "wifi_supervisor.h"
 #include "wifi_roam.h"
 #include "telemetry_history.h"
@@ -139,6 +140,27 @@ static void sync_fault_notice_bell(void)
         status_bar_add_notification(STATUS_BAR_NOTIFY_HEATPUMP_FAULT, msg);
     } else {
         status_bar_clear_notification(STATUS_BAR_NOTIFY_HEATPUMP_FAULT);
+    }
+}
+
+// External temperature sensor outages -> notification bell, mirrored the same
+// way (the notice is written by the sensor worker task).
+static uint32_t s_ext_sensor_notice_rev = 0;
+static lv_obj_t* s_ext_sensor_return_screen = nullptr;
+
+// Runs on the LVGL task with the display lock held.
+static void sync_ext_sensor_notice_bell(void)
+{
+    const uint32_t rev = ext_sensor_notice_revision();
+    if (rev == s_ext_sensor_notice_rev) return;
+    s_ext_sensor_notice_rev = rev;
+    ext_sensor_notice_t n;
+    if (ext_sensor_notice_get(&n)) {
+        char msg[128];
+        ext_sensor_notice_format(msg, sizeof(msg), &n, LANG_ENGLISH);
+        status_bar_add_notification(STATUS_BAR_NOTIFY_EXT_SENSOR, msg);
+    } else {
+        status_bar_clear_notification(STATUS_BAR_NOTIFY_EXT_SENSOR);
     }
 }
 
@@ -688,9 +710,11 @@ void create_ui(void)
     // Heat pump problems: show any restored from NVS now, then keep the bell in
     // step with new faults and with acknowledgements made from the web UI.
     sync_fault_notice_bell();
+    sync_ext_sensor_notice_bell();
     lv_timer_create([](lv_timer_t* t) {
         (void)t;
         sync_fault_notice_bell();
+        sync_ext_sensor_notice_bell();
     }, 1000, NULL);
 }
 
@@ -1033,6 +1057,29 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
                         s_fault_notice_return_screen = nullptr;
                     }
                 });
+            }
+            bsp_display_unlock();
+            break;
+        }
+
+        case STATUS_BAR_NOTIFY_EXT_SENSOR: {
+            // Acknowledge and show the sensor settings, which have each
+            // sensor's live status.
+            ext_sensor_notice_clear();
+            s_ext_sensor_notice_rev = ext_sensor_notice_revision();
+            bsp_display_lock(0);
+            if (!perf_screen_is_visible()) {
+                s_ext_sensor_return_screen = lv_scr_act();
+                perf_screen_config_t perf_cfg = {
+                    .on_back = []() {
+                        if (s_ext_sensor_return_screen) {
+                            lv_screen_load_anim(s_ext_sensor_return_screen, LV_SCR_LOAD_ANIM_NONE,
+                                                0, 0, true);
+                            s_ext_sensor_return_screen = nullptr;
+                        }
+                    },
+                };
+                perf_screen_create(&perf_cfg);
             }
             bsp_display_unlock();
             break;

@@ -138,6 +138,8 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_WIFI_ROAMED:         return STR_EVENT_WIFI_ROAMED;
         case EVENT_FIRMWARE_UPDATED:    return STR_EVENT_FIRMWARE_UPDATED;
         case EVENT_HTTPS_FALLBACK:      return STR_EVENT_HTTPS_FALLBACK;
+        case EVENT_EXT_SENSOR_LOST:     return STR_EVENT_EXT_SENSOR_LOST;
+        case EVENT_EXT_SENSOR_RESTORED: return STR_EVENT_EXT_SENSOR_RESTORED;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -176,6 +178,8 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_WIFI_ROAMED:         return LV_SYMBOL_WIFI;
         case EVENT_FIRMWARE_UPDATED:    return LV_SYMBOL_DOWNLOAD;
         case EVENT_HTTPS_FALLBACK:      return LV_SYMBOL_WARNING;
+        case EVENT_EXT_SENSOR_LOST:     return LV_SYMBOL_WARNING;
+        case EVENT_EXT_SENSOR_RESTORED: return LV_SYMBOL_OK;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -192,6 +196,7 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_NETWORK_RECOVERED:
         case EVENT_WEB_SERVER_RECOVERED:
         case EVENT_WIFI_RESTORED:
+        case EVENT_EXT_SENSOR_RESTORED:
             return COLOR_SUCCESS;
         
         case EVENT_ERROR_APPEARED:
@@ -207,6 +212,7 @@ static lv_color_t event_type_color(event_type_t type) {
         case EVENT_WIFI_LOST:
         case EVENT_WIFI_UNSTABLE:
         case EVENT_HTTPS_FALLBACK:
+        case EVENT_EXT_SENSOR_LOST:
             return COLOR_WARNING;
 
         case EVENT_DEFROST_START:
@@ -234,6 +240,15 @@ static const char* mode_name_i18n(int mode) {
         case 5: return i18n_get(STR_HP_MODE_HOT_WATER);
         case 6: return i18n_get(STR_HP_MODE_HOT_WATER_COOLING);
         default: return "?";
+    }
+}
+
+static void format_outage(char* buf, size_t len, uint32_t seconds) {
+    if (seconds >= 3600) {
+        snprintf(buf, len, "%u h %02u min", (unsigned)(seconds / 3600),
+                 (unsigned)(seconds % 3600 / 60));
+    } else {
+        snprintf(buf, len, "%u min %02u s", (unsigned)(seconds / 60), (unsigned)(seconds % 60));
     }
 }
 
@@ -338,14 +353,32 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
         }
         case EVENT_WIFI_RESTORED: {
             char dur[24];
-            if (p >= 3600) {
-                snprintf(dur, sizeof(dur), "%u h %02u min", (unsigned)(p / 3600),
-                         (unsigned)(p % 3600 / 60));
-            } else {
-                snprintf(dur, sizeof(dur), "%u min %02u s", (unsigned)(p / 60),
-                         (unsigned)(p % 60));
-            }
+            format_outage(dur, sizeof(dur), p);
             snprintf(buf, buf_size, i18n_get(STR_EVENT_WIFI_DOWN_FOR_FMT), dur);
+            break;
+        }
+        case EVENT_EXT_SENSOR_LOST:
+        case EVENT_EXT_SENSOR_RESTORED: {
+            const char* sensor = event_ext_sensor_slot(p) == 1 ? i18n_get(STR_PERF_RETURN)
+                                                               : i18n_get(STR_PERF_SUPPLY);
+            char what[64];
+            if (evt->type == EVENT_EXT_SENSOR_RESTORED) {
+                char dur[24];
+                format_outage(dur, sizeof(dur), event_ext_sensor_down_s(p));
+                snprintf(what, sizeof(what), i18n_get(STR_EVENT_WIFI_DOWN_FOR_FMT), dur);
+            } else {
+                string_id_t id = STR_EVENT_EXT_SENSOR_OTHER;
+                switch (event_ext_sensor_cause(p)) {
+                    case EVENT_EXT_SENSOR_CAUSE_UNREACHABLE: id = STR_EVENT_EXT_SENSOR_UNREACHABLE; break;
+                    case EVENT_EXT_SENSOR_CAUSE_NO_ANSWER:   id = STR_EVENT_EXT_SENSOR_NO_ANSWER; break;
+                    case EVENT_EXT_SENSOR_CAUSE_REFUSED:     id = STR_EVENT_EXT_SENSOR_REFUSED; break;
+                    case EVENT_EXT_SENSOR_CAUSE_NO_READING:  id = STR_EVENT_EXT_SENSOR_NO_READING; break;
+                    case EVENT_EXT_SENSOR_CAUSE_REPLACED:    id = STR_EVENT_EXT_SENSOR_REPLACED; break;
+                    default: break;
+                }
+                snprintf(what, sizeof(what), "%s", i18n_get(id));
+            }
+            snprintf(buf, buf_size, "%s · %s", sensor, what);
             break;
         }
         case EVENT_WIFI_UNSTABLE:

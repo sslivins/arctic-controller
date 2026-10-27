@@ -11,6 +11,7 @@
 #include "fonts/fonts.h"
 #include "i18n/i18n.h"
 #include "fault_notice.h"
+#include "ext_sensor_notice.h"
 #include <esp_log.h>
 #include <string.h>
 #include <stdio.h>
@@ -731,6 +732,7 @@ static void show_dropdown(void)
             case STATUS_BAR_NOTIFY_LOW_BATTERY:     item_tag = "notify_item_battery";  break;
             case STATUS_BAR_NOTIFY_BROWNOUT:        item_tag = "notify_item_brownout"; break;
             case STATUS_BAR_NOTIFY_HEATPUMP_FAULT:  item_tag = "notify_item_heatpump_fault"; break;
+            case STATUS_BAR_NOTIFY_EXT_SENSOR:      item_tag = "notify_item_ext_sensor"; break;
             default: break;
         }
         lv_obj_set_user_data(item, (void*)item_tag);
@@ -751,6 +753,7 @@ static void show_dropdown(void)
                 icon_text = LV_SYMBOL_CHARGE;
                 break;
             case STATUS_BAR_NOTIFY_HEATPUMP_FAULT:
+            case STATUS_BAR_NOTIFY_EXT_SENSOR:
                 icon_text = LV_SYMBOL_WARNING;
                 break;
             default:
@@ -773,6 +776,12 @@ static void show_dropdown(void)
             fault_notice_t fn;
             if (fault_notice_get(&fn) &&
                 fault_notice_format(msg_buf, sizeof(msg_buf), &fn, i18n_get_language()) > 0) {
+                msg = msg_buf;
+            }
+        } else if (i == STATUS_BAR_NOTIFY_EXT_SENSOR) {
+            ext_sensor_notice_t en;
+            if (ext_sensor_notice_get(&en) &&
+                ext_sensor_notice_format(msg_buf, sizeof(msg_buf), &en, i18n_get_language()) > 0) {
                 msg = msg_buf;
             }
         } else if (msg[0] == '\0' || i18n_get_language() != LANG_ENGLISH) {

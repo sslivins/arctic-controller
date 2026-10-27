@@ -16,6 +16,8 @@
 #include <lwip/sockets.h>
 
 #include "bacnet_frame.h"
+#include "event_log.h"
+#include "ext_sensor_notice.h"
 #include "mbtcp_frame.h"
 #include "wifi_manager.h"
 
@@ -69,6 +71,7 @@ bool s_worker_allowed = false;
 bool s_save_pending = false;  // learned ROM ID awaiting service(); guarded by s_mutex
 perf::Settings s_settings;
 perf::SourceSelector s_selector;
+perf::OutageTracker s_outage;
 Slot s_slots[perf::kSlotCount];
 uint16_t s_transaction = 0;
 uint8_t s_bacnet_invoke = 0;
@@ -650,6 +653,54 @@ BacnetRead bacnet_read_value(BacnetClient& c, const perf::SensorConfig& cfg) {
 // scarce internal RAM, and needlessly churns the sensor's connection slots.
 Connection s_conns[perf::kSlotCount];
 
+event_ext_sensor_cause_t outage_cause(Error e) {
+    switch (e) {
+        case Error::Resolve:
+        case Error::Connect: return EVENT_EXT_SENSOR_CAUSE_UNREACHABLE;
+        case Error::Timeout:
+        case Error::Protocol: return EVENT_EXT_SENSOR_CAUSE_NO_ANSWER;
+        case Error::Exception:
+        case Error::Rejected:
+        case Error::Units:
+        case Error::WrongDevice: return EVENT_EXT_SENSOR_CAUSE_REFUSED;
+        case Error::NoReading:
+        case Error::OutOfRange: return EVENT_EXT_SENSOR_CAUSE_NO_READING;
+        case Error::SensorChanged: return EVENT_EXT_SENSOR_CAUSE_REPLACED;
+        default: return EVENT_EXT_SENSOR_CAUSE_OTHER;
+    }
+}
+
+struct OutageReport {
+    perf::OutageChange change = perf::OutageChange::None;
+    uint32_t down_ms = 0;
+};
+
+// Caller holds the lock. With the network down the poll says nothing about
+// the sensor (Wi-Fi has its own events), so the timers restart instead.
+OutageReport track_outage_locked(int i, uint32_t now, Error e, bool net_up) {
+    OutageReport rep;
+    if (!net_up) {
+        s_outage.on_unknown(i);
+    } else {
+        rep.change = s_outage.on_poll(i, now, e == Error::None, &rep.down_ms);
+    }
+    return rep;
+}
+
+// Call without the lock held.
+void report_outage(int i, const OutageReport& rep, Error e) {
+    if (rep.change == perf::OutageChange::Lost) {
+        ESP_LOGW(TAG, "Sensor %d lost (%s)", i, error_name(e));
+        event_log_record(EVENT_EXT_SENSOR_LOST, event_ext_sensor_lost_pack(i, outage_cause(e)));
+        ext_sensor_notice_record_lost(i);
+    } else if (rep.change == perf::OutageChange::Restored) {
+        uint32_t down_s = rep.down_ms / 1000;
+        ESP_LOGI(TAG, "Sensor %d restored after %lu s", i, (unsigned long)down_s);
+        event_log_record(EVENT_EXT_SENSOR_RESTORED, event_ext_sensor_restored_pack(i, down_s));
+        ext_sensor_notice_record_restored(i, down_s);
+    }
+}
+
 void poll_bacnet_slot(int i, const perf::SensorConfig& cfg, bool net_up) {
     BacnetRead r;
     if (!net_up) {
@@ -674,8 +725,10 @@ void poll_bacnet_slot(int i, const perf::SensorConfig& cfg, bool net_up) {
     }
 
     uint32_t now = now_ms();
+    OutageReport outage;
     lock();
     if (perf::same_source(s_settings.sensors[i], cfg)) {
+        outage = track_outage_locked(i, now, r.error, net_up);
         Slot& slot = s_slots[i];
         slot.status.error = r.error;
         slot.status.exception = r.exception;
@@ -695,6 +748,7 @@ void poll_bacnet_slot(int i, const perf::SensorConfig& cfg, bool net_up) {
         }
     }
     unlock();
+    report_outage(i, outage, r.error);
     if (r.error != Error::None) {
         ESP_LOGD(TAG, "BACnet sensor %d (%s:%u object %lu): %s", i, cfg.host, cfg.port,
                  (unsigned long)cfg.bacnet_instance, error_name(r.error));
@@ -742,9 +796,11 @@ void poll_slot(int i, const perf::SensorConfig& cfg, Connection& c, bool net_up)
     }
 
     uint32_t now = now_ms();
+    OutageReport outage;
     lock();
     // The settings may have changed while this read was in flight.
     if (perf::same_source(s_settings.sensors[i], cfg)) {
+        outage = track_outage_locked(i, now, r.error, net_up);
         Slot& slot = s_slots[i];
         slot.status.error = r.error;
         slot.status.exception = r.exception;
@@ -765,6 +821,7 @@ void poll_slot(int i, const perf::SensorConfig& cfg, Connection& c, bool net_up)
         }
     }
     unlock();
+    report_outage(i, outage, r.error);
     if (r.error != Error::None) {
         ESP_LOGD(TAG, "Sensor %d (%s:%u reg %u): %s", i, cfg.host, cfg.port, cfg.address,
                  error_name(r.error));
@@ -968,6 +1025,8 @@ void ensure_worker() {
 
 void reset_slots_locked() {
     s_selector.reset();
+    s_outage.reset();
+    ext_sensor_notice_settings_changed();
     for (int i = 0; i < perf::kSlotCount; ++i) {
         s_slots[i] = {};
         s_slots[i].status.configured =
@@ -1139,6 +1198,15 @@ perf::Selection choose_source(const perf::HeatPumpContext& hp) {
     perf::Selection sel = s_selector.evaluate(now_ms(), configured, hp);
     unlock();
     return sel;
+}
+
+void set_outage_timing(uint32_t lost_ms, uint32_t restore_ms) {
+    if (!s_mutex) return;
+    lock();
+    s_outage.set_timing(lost_ms, restore_ms);
+    s_outage.reset();
+    ext_sensor_notice_settings_changed();
+    unlock();
 }
 
 uint32_t test_start(const perf::SensorConfig& cfg) {

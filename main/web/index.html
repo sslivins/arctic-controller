@@ -1078,6 +1078,7 @@
       low_battery:     { icon: "🔋", route: null },
       brownout:        { icon: "⚡", route: ["events", null] },
       heatpump_fault:  { icon: "⚠️", route: ["errors", null] },
+      ext_sensor:      { icon: "🌡️", route: ["settings", "performance"] },
       unknown:         { icon: "🔔", route: null },
     };
     function notifBell() {
@@ -1583,14 +1584,15 @@
       web_server_down: "Web server down", web_server_recovered: "Web server recovered",
       wifi_lost: "WiFi lost", wifi_restored: "WiFi restored", wifi_unstable: "WiFi unstable",
       wifi_roamed: "WiFi access point changed", firmware_updated: "Firmware updated",
-      https_fallback: "HTTPS unavailable"
+      https_fallback: "HTTPS unavailable",
+      ext_sensor_lost: "Temp sensor lost", ext_sensor_restored: "Temp sensor restored"
     };
     // Colour and icon per event type, matching the device's Events screen.
     const eventTones = {
       power_on: "good", compressor_on: "good", fan_on: "good", pump_on: "good", aux_heater_on: "good",
-      connected: "good", error_cleared: "good", network_recovered: "good", web_server_recovered: "good", wifi_restored: "good",
+      connected: "good", error_cleared: "good", network_recovered: "good", web_server_recovered: "good", wifi_restored: "good", ext_sensor_restored: "good",
       error_appeared: "bad", brownout_reset: "bad", application_crash: "bad", watchdog_reset: "bad",
-      network_unreachable: "warn", web_server_down: "warn", https_fallback: "warn", wifi_lost: "warn", wifi_unstable: "warn", defrost_start: "defrost", defrost_end: "defrost",
+      network_unreachable: "warn", web_server_down: "warn", https_fallback: "warn", wifi_lost: "warn", wifi_unstable: "warn", ext_sensor_lost: "warn", defrost_start: "defrost", defrost_end: "defrost",
       mode_changed: "info", setpoint_changed: "info", system_start: "info", wifi_roamed: "info", firmware_updated: "info"
     };
     const eventIcons = {
@@ -1602,7 +1604,7 @@
       watchdog_reset: "⚠\uFE0E", network_unreachable: "⚠\uFE0E", network_recovered: "✓",
       web_server_down: "⚠\uFE0E", web_server_recovered: "✓",
       wifi_lost: "⚠\uFE0E", wifi_restored: "✓", wifi_unstable: "⚠\uFE0E", wifi_roamed: "⇆", firmware_updated: "⬇\uFE0E",
-      https_fallback: "⚠\uFE0E"
+      https_fallback: "⚠\uFE0E", ext_sensor_lost: "⚠\uFE0E", ext_sensor_restored: "✓"
     };
     const setpointNames = { cooling: "Cooling", heating: "Heating", hot_water: "Hot water" };
     const watchdogNames = { interrupt: "Interrupt watchdog", task: "Task watchdog", other: "System watchdog", startup: "Stalled at startup (likely power loss)" };
@@ -1620,6 +1622,11 @@
       auth_failed: "WiFi authentication failed", ap_disconnected: "The access point dropped the connection",
       ap_restarted: "The access point restarted"
     };
+    const extSensorCauseNames = {
+      unreachable: "Can't connect", no_answer: "No answer", refused: "Request refused",
+      no_reading: "No reading", replaced: "A different sensor answered", other: "Can't read"
+    };
+    const extSensorSlotNames = { supply: "Supply", return: "Return" };
     function fmtDownFor(s) {
       return s >= 3600 ? `${Math.floor(s / 3600)} h ${String(Math.floor(s % 3600 / 60)).padStart(2, "0")} min`
         : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
@@ -1642,6 +1649,12 @@
         case "web_server_down": case "https_fallback": return webServerCauseNames[event.cause] || "";
         case "wifi_lost": return wifiReasonNames[event.reason_key] || (event.reason != null ? `Disconnected (reason ${event.reason})` : "");
         case "wifi_restored": return event.down_s != null ? `Down for ${fmtDownFor(event.down_s)}` : "";
+        case "ext_sensor_lost": case "ext_sensor_restored": {
+          const what = event.type === "ext_sensor_lost" ? (extSensorCauseNames[event.cause] || "")
+            : (event.down_s != null ? `Down for ${fmtDownFor(event.down_s)}` : "");
+          const slot = extSensorSlotNames[event.sensor];
+          return slot && what ? `${slot} · ${what}` : (slot || what);
+        }
         case "wifi_unstable": return event.drops != null ? `${event.drops} short drops in an hour` : "";
         case "wifi_roamed": return event.to_rssi_dbm != null ? `${event.from_rssi_dbm} → ${event.to_rssi_dbm} dBm, channel ${event.channel}` : "";
         case "firmware_updated": return event.to_version ? `${event.from_version || "?"} → ${event.to_version}` : "";
@@ -3926,6 +3939,11 @@
           // Acknowledge the heat pump problems; the Errors page has the details.
           await api("/api/heatpump/fault-notice/clear", { method: "POST" }).catch(() => {});
           state.notifications = state.notifications.filter(x => x.key !== "heatpump_fault");
+        }
+        if (n && n.key === "ext_sensor") {
+          // Acknowledge the sensor outage; the sensor settings show live status.
+          await api("/api/performance/sensor-notice/clear", { method: "POST" }).catch(() => {});
+          state.notifications = state.notifications.filter(x => x.key !== "ext_sensor");
         }
         const meta = n && (NOTIF_META[n.key] || NOTIF_META.unknown);
         if (meta && meta.route) await navigate(meta.route[0], meta.route[1]);

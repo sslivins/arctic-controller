@@ -132,6 +132,36 @@ Selection SourceSelector::evaluate(uint32_t now_ms, const bool configured[kSlotC
     return sel;
 }
 
+OutageChange OutageTracker::on_poll(int slot, uint32_t now_ms, bool ok, uint32_t* down_ms) {
+    if (ok) {
+        failing_[slot] = false;
+        if (!lost_[slot]) return OutageChange::None;
+        if (!reading_[slot]) {
+            reading_[slot] = true;
+            ok_since_ms_[slot] = now_ms;
+        }
+        if (now_ms - ok_since_ms_[slot] < restore_ms_) return OutageChange::None;
+        lost_[slot] = false;
+        reading_[slot] = false;
+        if (down_ms) *down_ms = ok_since_ms_[slot] - outage_start_ms_[slot];
+        return OutageChange::Restored;
+    }
+    reading_[slot] = false;
+    if (!failing_[slot]) {
+        failing_[slot] = true;
+        fail_since_ms_[slot] = now_ms;
+    }
+    if (lost_[slot] || now_ms - fail_since_ms_[slot] < lost_ms_) return OutageChange::None;
+    lost_[slot] = true;
+    outage_start_ms_[slot] = fail_since_ms_[slot];
+    return OutageChange::Lost;
+}
+
+void OutageTracker::on_unknown(int slot) {
+    failing_[slot] = false;
+    reading_[slot] = false;
+}
+
 namespace thermux {
 
 bool candidate(const SensorConfig& s) {

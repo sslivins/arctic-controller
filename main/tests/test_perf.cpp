@@ -757,6 +757,99 @@ static void test_selector_median_rejects_spike() {
     CHECK_NEAR(s.supply_c, 35.0, 1e-6);
 }
 
+// ---- Outage tracker -----------------------------------------------------------
+
+// Polls a slot every 15 s from t0 to t1 inclusive; returns the first change.
+static OutageChange poll_range(OutageTracker& t, int slot, uint32_t t0, uint32_t t1, bool ok,
+                               uint32_t* when = nullptr, uint32_t* down_ms = nullptr) {
+    for (uint32_t now = t0; now <= t1; now += 15000) {
+        OutageChange c = t.on_poll(slot, now, ok, down_ms);
+        if (c != OutageChange::None) {
+            if (when) *when = now;
+            return c;
+        }
+    }
+    return OutageChange::None;
+}
+
+static void test_outage_lost_after_five_minutes() {
+    OutageTracker t;
+    uint32_t when = 0;
+    CHECK(poll_range(t, 0, 0, 285000, false) == OutageChange::None);
+    CHECK(!t.lost(0));
+    CHECK(poll_range(t, 0, 300000, 400000, false, &when) == OutageChange::Lost);
+    CHECK(when == 300000);
+    CHECK(t.lost(0));
+    CHECK(!t.lost(1));
+    // Reported once, not on every failing poll.
+    CHECK(poll_range(t, 0, 315000, 900000, false) == OutageChange::None);
+    // A failure run broken by one good read starts again.
+    OutageTracker u;
+    CHECK(poll_range(u, 1, 0, 240000, false) == OutageChange::None);
+    CHECK(u.on_poll(1, 255000, true) == OutageChange::None);
+    CHECK(poll_range(u, 1, 270000, 555000, false) == OutageChange::None);
+    CHECK(u.on_poll(1, 570000, false) == OutageChange::Lost);
+}
+
+static void test_outage_restored_after_ten_clean_minutes() {
+    OutageTracker t;
+    CHECK(poll_range(t, 0, 0, 300000, false) == OutageChange::Lost);
+    // Down until 1 h, then reading again.
+    CHECK(poll_range(t, 0, 315000, 3600000, false) == OutageChange::None);
+    uint32_t when = 0, down = 0;
+    CHECK(poll_range(t, 0, 3615000, 3615000 + 585000, true) == OutageChange::None);
+    CHECK(poll_range(t, 0, 3615000 + 600000, 5000000, true, &when, &down) == OutageChange::Restored);
+    CHECK(when == 3615000 + 600000);
+    // From the first failure to the first good read of the clean run.
+    CHECK(down == 3615000);
+    CHECK(!t.lost(0));
+}
+
+static void test_outage_flapping_is_one_outage() {
+    OutageTracker t;
+    int lost = 0, restored = 0;
+    // 2 h of a sensor that answers for 5 min, then fails for 2 min.
+    for (uint32_t now = 0; now < 7200000; now += 15000) {
+        bool ok = (now / 15000) % 28 < 20;
+        if (now < 300000) ok = false;  // starts with a real outage
+        OutageChange c = t.on_poll(0, now, ok);
+        lost += c == OutageChange::Lost;
+        restored += c == OutageChange::Restored;
+    }
+    CHECK(lost == 1);
+    CHECK(restored == 0);
+    // Once it settles it is restored, once.
+    CHECK(poll_range(t, 0, 7200000, 7200000 + 600000, true) == OutageChange::Restored);
+}
+
+static void test_outage_unknown_polls_do_not_count() {
+    OutageTracker t;
+    CHECK(poll_range(t, 0, 0, 240000, false) == OutageChange::None);
+    // Network down for an hour: no verdict either way.
+    for (uint32_t now = 255000; now < 3855000; now += 15000) t.on_unknown(0);
+    CHECK(!t.lost(0));
+    CHECK(poll_range(t, 0, 3855000, 3855000 + 285000, false) == OutageChange::None);
+    CHECK(t.on_poll(0, 3855000 + 300000, false) == OutageChange::Lost);
+    // While lost, a network gap restarts the clean-run timer but keeps the outage.
+    CHECK(poll_range(t, 0, 5000000, 5000000 + 540000, true) == OutageChange::None);
+    t.on_unknown(0);
+    CHECK(t.lost(0));
+    CHECK(poll_range(t, 0, 5600000, 5600000 + 585000, true) == OutageChange::None);
+    CHECK(t.on_poll(0, 5600000 + 600000, true) == OutageChange::Restored);
+}
+
+static void test_outage_timing_and_reset() {
+    OutageTracker t;
+    t.set_timing(20000, 30000);
+    CHECK(t.on_poll(0, 0, false) == OutageChange::None);
+    CHECK(t.on_poll(0, 20000, false) == OutageChange::Lost);
+    t.reset();
+    CHECK(!t.lost(0));
+    // reset() keeps the test timing.
+    CHECK(t.on_poll(0, 100000, false) == OutageChange::None);
+    CHECK(t.on_poll(0, 120000, false) == OutageChange::Lost);
+}
+
 // ---- Thermux ------------------------------------------------------------------
 
 static void test_thermux() {
@@ -816,6 +909,11 @@ int main() {
         {"selector_running_at_first_sight", test_selector_running_at_first_sight_settles},
         {"selector_single_external_sensor", test_selector_single_external_sensor},
         {"selector_median_rejects_spike", test_selector_median_rejects_spike},
+        {"outage_lost_after_five_minutes", test_outage_lost_after_five_minutes},
+        {"outage_restored_after_ten_clean_minutes", test_outage_restored_after_ten_clean_minutes},
+        {"outage_flapping_is_one_outage", test_outage_flapping_is_one_outage},
+        {"outage_unknown_polls_do_not_count", test_outage_unknown_polls_do_not_count},
+        {"outage_timing_and_reset", test_outage_timing_and_reset},
         {"thermux", test_thermux},
     };
     for (const auto& t : tests) {

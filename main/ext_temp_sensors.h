@@ -138,6 +138,10 @@ void slot_status(SlotStatus out[perf::kSlotCount]);
 // state decode.
 perf::Selection choose_source(const perf::HeatPumpContext& hp);
 
+// Test hook: how long a sensor must fail to count as lost and read again to
+// count as back. Also forgets any outage in progress.
+void set_outage_timing(uint32_t lost_ms, uint32_t restore_ms);
+
 // Test a sensor configuration (which need not be saved). test_start() queues
 // it on the worker and returns a ticket, or 0 when a test is already queued.
 uint32_t test_start(const perf::SensorConfig& cfg);

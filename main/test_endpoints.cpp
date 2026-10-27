@@ -44,6 +44,8 @@
 #include "heatpump_control_screen.h"
 #include "heatpump_errors_screen.h"
 #include "fault_notice.h"
+#include "ext_sensor_notice.h"
+#include "ext_temp_sensors.h"
 #include "event_log.h"
 #include "event_log_screen.h"
 #include "history_storage.h"
@@ -1953,6 +1955,7 @@ static esp_err_t notification_mock_reset_post_handler(httpd_req_t* req)
     // Also forget any heat pump problem notice, or the bell would re-raise it
     // from fault_notice on its next sync.
     fault_notice_clear();
+    ext_sensor_notice_clear();
     bsp_display_lock(0);
     status_bar_clear_all_notifications();
     bsp_display_unlock();
@@ -1964,6 +1967,38 @@ static esp_err_t notification_mock_reset_post_handler(httpd_req_t* req)
     httpd_resp_sendstr(req, json);
     free(json);
     cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
+// POST /api/test/ext-sensor-outage-timing — shorten the sensor outage timing
+// Body: {"lost_ms": 20000, "restore_ms": 30000}; {} restores the defaults.
+// Also forgets any outage in progress, so a test starts clean.
+// ============================================================================
+
+static esp_err_t ext_sensor_outage_timing_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    char buf[128] = {0};
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    cJSON* body = cJSON_Parse(ret > 0 ? buf : "{}");
+    if (!body) {
+        send_json_error(req, "400 Bad Request", "Invalid JSON");
+        return ESP_OK;
+    }
+    cJSON* j_lost = cJSON_GetObjectItem(body, "lost_ms");
+    cJSON* j_restore = cJSON_GetObjectItem(body, "restore_ms");
+    uint32_t lost_ms = cJSON_IsNumber(j_lost) ? (uint32_t)j_lost->valuedouble : perf::kOutageLostMs;
+    uint32_t restore_ms =
+        cJSON_IsNumber(j_restore) ? (uint32_t)j_restore->valuedouble : perf::kOutageRestoreMs;
+    cJSON_Delete(body);
+    ext_temp::set_outage_timing(lost_ms, restore_ms);
+
+    set_json_content_type(req);
+    char out[96];
+    snprintf(out, sizeof(out), "{\"success\":true,\"lost_ms\":%lu,\"restore_ms\":%lu}",
+             (unsigned long)lost_ms, (unsigned long)restore_ms);
+    httpd_resp_sendstr(req, out);
     return ESP_OK;
 }
 
@@ -3536,6 +3571,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &stack_watermarks_uri);
+
+    httpd_uri_t ext_sensor_outage_timing_uri = {
+        .uri = "/api/test/ext-sensor-outage-timing",
+        .method = HTTP_POST,
+        .handler = ext_sensor_outage_timing_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &ext_sensor_outage_timing_uri);
 
     if (s_test_uri_reg_failures > 0) {
         ESP_LOGE(TAG,

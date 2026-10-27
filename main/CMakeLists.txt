@@ -75,6 +75,7 @@ idf_component_register(
         "ui_overlay.cpp"
         "boot_stats.cpp"
         "fault_notice.cpp"
+        "ext_sensor_notice.cpp"
         "fault_history.cpp"
         "home_stats.cpp"
         "home_last_run.cpp"
