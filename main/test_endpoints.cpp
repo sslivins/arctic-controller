@@ -49,6 +49,7 @@
 #include "history_storage.h"
 #include "tab_shell.h"
 #include "history_tab.h"
+#include "heatpump_history_screen.h"
 #include "status_bar.h"
 #include "display_idle.h"
 #include <esp_timer.h>
@@ -2252,6 +2253,48 @@ static esp_err_t clear_faults_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// GET /api/test/history-cursor?x=N — time a chart cursor move (profiling)
+// ============================================================================
+
+static esp_err_t history_cursor_get_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    char query[32] = {}, val[12] = {};
+    int32_t x = 360;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "x", val, sizeof(val)) == ESP_OK) {
+        x = atoi(val);
+    }
+    if (!bsp_display_lock(1000)) {
+        send_json_error(req, "503 Service Unavailable", "display busy");
+        return ESP_OK;
+    }
+    history_cursor_profile_t p = {};
+    const bool ok = heatpump_history_profile_cursor(x, &p);
+    bsp_display_unlock();
+    if (!ok) {
+        send_json_error(req, "409 Conflict", "cycle chart not shown");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddNumberToObject(resp, "cursor", p.cursor);
+    cJSON_AddNumberToObject(resp, "samples", p.samples);
+    cJSON_AddBoolToObject(resp, "power_view", p.power_view);
+    cJSON_AddBoolToObject(resp, "cached", p.cached);
+    cJSON_AddNumberToObject(resp, "press_us", (double)p.press_us);
+    cJSON_AddNumberToObject(resp, "build_us", (double)p.build_us);
+    cJSON_AddNumberToObject(resp, "refr_us", (double)p.refr_us);
+    cJSON_AddNumberToObject(resp, "draw_calls", p.draw_calls);
+    cJSON_AddNumberToObject(resp, "draw_us", (double)p.draw_us);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/populate-temperature-history
 // ============================================================================
 
@@ -3362,6 +3405,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &clear_faults_options_uri);
+
+    httpd_uri_t history_cursor_uri = {
+        .uri = "/api/test/history-cursor",
+        .method = HTTP_GET,
+        .handler = history_cursor_get_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &history_cursor_uri);
 
     httpd_uri_t populate_temperature_history_uri = {
         .uri = "/api/test/populate-temperature-history",

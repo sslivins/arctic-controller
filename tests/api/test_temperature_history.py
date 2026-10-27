@@ -66,7 +66,10 @@ def test_device_history_is_zoomable_custom_draw_page():
     assert "LV_EVENT_DRAW_MAIN_END" in source
     assert "lv_draw_rect" in source
     assert "lv_draw_line" in source
-    assert "lv_canvas" not in source
+    # The chart is custom-drawn; the only canvas is the off-screen cache of
+    # that drawing that makes cursor drags cheap.
+    assert source.count("lv_canvas_create") == 1
+    assert "static_cache_build" in source
     assert "NAV_BAR_H + 18" in source
 
     status = (MAIN / "heatpump_temps_screen.cpp").read_text(encoding="utf-8")

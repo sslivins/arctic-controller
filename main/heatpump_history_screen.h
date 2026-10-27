@@ -16,6 +16,19 @@ bool heatpump_history_is_shown(void);
 // instead of the latest window.
 void heatpump_history_open_centered(uint32_t timestamp);
 
+typedef struct {
+    int32_t cursor;
+    uint32_t samples;
+    bool power_view;
+    bool cached;          // redraw copied the cached static layer
+    uint32_t draw_calls;
+    int64_t press_us;     // cursor move, including any static-layer rebuild
+    int64_t build_us;     // static-layer rebuild alone
+    int64_t refr_us;      // the forced screen refresh
+    int64_t draw_us;      // chart draw callback within it
+} history_cursor_profile_t;
+bool heatpump_history_profile_cursor(int32_t x, history_cursor_profile_t* out);
+
 #ifdef __cplusplus
 }
 #endif

@@ -14,10 +14,13 @@
 #include "ui_common.h"
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <sdkconfig.h>
 #include <bsp/m5stack_tab5.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <limits.h>
+#include <lvgl_private.h>  // layer/display internals for static_cache_build
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -306,12 +309,149 @@ static void format_reading(char* buf, size_t len, const history_telemetry_sample
              app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT ? "F" : "C");
 }
 
+// Everything but the cursor, drawn once into PSRAM so dragging a finger along
+// the chart only redraws the cursor over a copy (a full redraw is 100-160 ms,
+// mostly hatching and line segments). Rebuilt when anything under it changes.
+struct StaticKey {
+    uint32_t data_gen, window_start, window_end;
+    int32_t w, h;
+    bool power_view;
+    uint8_t temp_unit;
+    bool operator==(const StaticKey&) const = default;
+};
+static struct {
+    lv_obj_t* canvas = nullptr;  // hidden; renders into buf
+    lv_draw_buf_t buf = {};
+    void* data = nullptr;
+    size_t data_size = 0;
+    bool valid = false;
+    StaticKey key = {};
+} s_static;
+static uint32_t s_data_gen = 0;
+// Scales the cursor needs, set by whichever static draw ran last.
+static int32_t s_temp_min = 0, s_temp_max = 500, s_power_max_w = 1000;
+
+#if CONFIG_TEST_ENDPOINTS
+static struct {
+    uint32_t calls;
+    int64_t total_us;
+    int64_t build_us;
+    bool cached;
+} s_prof;
+#endif
+
+static int32_t cursor_at(int32_t px);
+static void draw_static(lv_layer_t* layer, const lv_area_t& coords,
+                        const lv_area_t& plot);
+
+static StaticKey static_key() {
+    lv_area_t coords;
+    lv_obj_get_coords(state.chart, &coords);
+    return {s_data_gen, state.window_start, state.window_end,
+            lv_area_get_width(&coords), lv_area_get_height(&coords),
+            state.power_view, (uint8_t)app_prefs_get_temp_unit()};
+}
+
+static bool static_cache_ready() {
+    return s_static.valid && s_static.key == static_key();
+}
+
+static void static_cache_free() {
+    s_static.canvas = nullptr;  // deleted with the overlay
+    s_static.valid = false;
+    heap_caps_free(s_static.data);
+    s_static.data = nullptr;
+    s_static.data_size = 0;
+}
+
+static void static_cache_build() {
+    if (static_cache_ready()) return;
+#if CONFIG_TEST_ENDPOINTS
+    const int64_t t0 = esp_timer_get_time();
+#endif
+    const StaticKey key = static_key();
+    s_static.valid = false;
+    const uint32_t stride = (uint32_t)key.w * 4;
+    const size_t size = (size_t)stride * (size_t)key.h;
+    if (key.w <= 0 || key.h <= 0) return;
+    if (size != s_static.data_size) {
+        heap_caps_free(s_static.data);
+        s_static.data = heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN, size,
+                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        s_static.data_size = s_static.data ? size : 0;
+        if (s_static.data == nullptr) return;  // keep drawing directly
+    }
+    memset(s_static.data, 0, size);
+    lv_draw_buf_init(&s_static.buf, (uint32_t)key.w, (uint32_t)key.h,
+                     LV_COLOR_FORMAT_ARGB8888, stride, s_static.data, size);
+    if (s_static.canvas == nullptr) {
+        s_static.canvas = lv_canvas_create(state.overlay);
+        lv_obj_add_flag(s_static.canvas, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_canvas_set_draw_buf(s_static.canvas, &s_static.buf);
+    lv_layer_t layer;
+    lv_canvas_init_layer(s_static.canvas, &layer);
+    lv_area_t coords;
+    lv_obj_get_coords(state.chart, &coords);
+    lv_area_t plot = plot_area(state.chart);
+    lv_area_move(&plot, -coords.x1, -coords.y1);
+    const lv_area_t local = {0, 0, key.w - 1, key.h - 1};
+    // Pose as a refresh of this layer, as lv_snapshot does, so each draw task
+    // runs as it's added. Otherwise thousands queue up and LVGL's list
+    // handling goes quadratic (8 h chart: ~10 s vs ~0.15 s).
+    lv_display_t* disp = lv_obj_get_display(state.chart);
+    lv_display_t* disp_old = lv_refr_get_disp_refreshing();
+    lv_layer_t* layer_old = disp->layer_head;
+    disp->layer_head = &layer;
+    lv_refr_set_disp_refreshing(disp);
+    draw_static(&layer, local, plot);
+    layer.all_tasks_added = true;
+    while (layer.draw_task_head) {
+        lv_draw_dispatch_wait_for_request();
+        lv_draw_dispatch();
+    }
+    disp->layer_head = layer_old;
+    lv_refr_set_disp_refreshing(disp_old);
+    lv_canvas_finish_layer(s_static.canvas, &layer);
+    s_static.key = key;
+    s_static.valid = true;
+#if CONFIG_TEST_ENDPOINTS
+    s_prof.build_us += esp_timer_get_time() - t0;
+#endif
+}
+
+static bool cursor_dirty_area(lv_area_t* out);
+static lv_area_t s_cursor_area[2];
+static bool s_cursor_area_valid = false;
+
+static void invalidate_cursor_area() {
+    if (!s_cursor_area_valid) return;
+    for (auto& a : s_cursor_area) lv_obj_invalidate_area(state.chart, &a);
+}
+
+// Repaints only the old and new crosshair + popup; the rest comes from the
+// cache unchanged.
+static void set_cursor(int32_t best) {
+    if (best == state.cursor) return;
+    if (best >= 0) static_cache_build();
+    invalidate_cursor_area();
+    state.cursor = best;
+    s_cursor_area_valid = cursor_dirty_area(s_cursor_area);
+    invalidate_cursor_area();
+}
+
 static void chart_press_cb(lv_event_t* event) {
     if (state.sample_count == 0) return;
     lv_indev_t* indev = lv_indev_active();
     if (indev == nullptr) return;
     lv_point_t point;
     lv_indev_get_point(indev, &point);
+    set_cursor(cursor_at(point.x));
+    (void)event;
+}
+
+static int32_t cursor_at(int32_t px) {
+    lv_point_t point = {px, 0};
     const lv_area_t plot = plot_area(state.chart);
     int32_t best = -1;
     int32_t best_dx = INT32_MAX;
@@ -329,11 +469,7 @@ static void chart_press_cb(lv_event_t* event) {
     // Only snap to a sample near the finger, so tapping an empty stretch of
     // the chart clears the crosshair.
     if (best_dx > 30) best = -1;
-    if (best != state.cursor) {
-        state.cursor = best;
-        lv_obj_invalidate(state.chart);
-    }
-    (void)event;
+    return best;
 }
 
 static void draw_dot(lv_layer_t* layer, int32_t x, int32_t y, lv_color_t color) {
@@ -464,35 +600,23 @@ static bool format_cursor_run(size_t i, char* span, size_t span_len,
     return true;
 }
 
+// The crosshair strip (line + dots) plus the popup box, so a cursor move can
+// invalidate just what it covers.
+static void cursor_bounds(int32_t x, const lv_area_t& plot, const lv_area_t& box,
+                          lv_area_t* out) {
+    out[0] = {x - 10, plot.y1 - 10, x + 10, plot.y2 + 10};
+    out[1] = box;
+}
+
+// With layer == nullptr, only measures: stores the crosshair strip and popup
+// box in bounds[0..1].
 static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
-                        int32_t min_value, int32_t max_value) {
+                        int32_t min_value, int32_t max_value,
+                        lv_area_t* bounds = nullptr) {
     if (state.cursor < 0 || (size_t)state.cursor >= state.sample_count) return;
     const size_t i = (size_t)state.cursor;
     const auto& s = state.samples[i];
     const int32_t x = map_x(s.timestamp, plot);
-
-    lv_draw_line_dsc_t line;
-    lv_draw_line_dsc_init(&line);
-    line.color = UI_COLOR_TEXT_DIM;
-    line.width = 2;
-    line.dash_width = 6;
-    line.dash_gap = 5;
-    line.p1.x = x; line.p1.y = plot.y1;
-    line.p2.x = x; line.p2.y = plot.y2;
-    lv_draw_line(layer, &line);
-
-    if (s.flags & HISTORY_TELEMETRY_SETPOINT_VALID) {
-        draw_dot(layer, x, map_y(s.setpoint_deci_c, min_value, max_value, plot),
-                 COLOR_SETPOINT);
-    }
-    if (state.interp_outlet && state.interp_outlet[i] != NO_VALUE) {
-        draw_dot(layer, x, map_y(state.interp_outlet[i], min_value, max_value, plot),
-                 COLOR_OUTLET);
-    }
-    if (state.interp_inlet && state.interp_inlet[i] != NO_VALUE) {
-        draw_dot(layer, x, map_y(state.interp_inlet[i], min_value, max_value, plot),
-                 COLOR_INLET);
-    }
 
     char when[12];
     format_clock(when, sizeof(when), s.timestamp);
@@ -527,6 +651,32 @@ static void draw_cursor(lv_layer_t* layer, const lv_area_t& plot,
     if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
     if (bx < plot.x1) bx = plot.x1;
     const lv_area_t box = {bx, plot.y1 + 4, bx + BOX_W, plot.y1 + 4 + BOX_H};
+    if (bounds) cursor_bounds(x, plot, box, bounds);
+    if (layer == nullptr) return;
+
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = UI_COLOR_TEXT_DIM;
+    line.width = 2;
+    line.dash_width = 6;
+    line.dash_gap = 5;
+    line.p1.x = x; line.p1.y = plot.y1;
+    line.p2.x = x; line.p2.y = plot.y2;
+    lv_draw_line(layer, &line);
+
+    if (s.flags & HISTORY_TELEMETRY_SETPOINT_VALID) {
+        draw_dot(layer, x, map_y(s.setpoint_deci_c, min_value, max_value, plot),
+                 COLOR_SETPOINT);
+    }
+    if (state.interp_outlet && state.interp_outlet[i] != NO_VALUE) {
+        draw_dot(layer, x, map_y(state.interp_outlet[i], min_value, max_value, plot),
+                 COLOR_OUTLET);
+    }
+    if (state.interp_inlet && state.interp_inlet[i] != NO_VALUE) {
+        draw_dot(layer, x, map_y(state.interp_inlet[i], min_value, max_value, plot),
+                 COLOR_INLET);
+    }
+
     lv_draw_rect_dsc_t bg;
     lv_draw_rect_dsc_init(&bg);
     bg.bg_color = COLOR_BG;
@@ -736,22 +886,11 @@ static void format_tenths(char* buf, size_t len, uint32_t tenths, bool keep_deci
 }
 
 static void draw_power_cursor(lv_layer_t* layer, const lv_area_t& plot,
-                              int32_t max_w) {
+                              int32_t max_w, lv_area_t* bounds = nullptr) {
     if (state.cursor < 0 || (size_t)state.cursor >= state.sample_count) return;
     const auto& s = state.samples[state.cursor];
     if (!(s.flags & HISTORY_TELEMETRY_POWER_VALID)) return;
     const int32_t x = map_x(s.timestamp, plot);
-
-    lv_draw_line_dsc_t line;
-    lv_draw_line_dsc_init(&line);
-    line.color = UI_COLOR_TEXT_DIM;
-    line.width = 2;
-    line.dash_width = 6;
-    line.dash_gap = 5;
-    line.p1.x = x; line.p1.y = plot.y1;
-    line.p2.x = x; line.p2.y = plot.y2;
-    lv_draw_line(layer, &line);
-    draw_dot(layer, x, map_y(s.average_power_w, 0, max_w, plot), COLOR_POWER);
 
     char when[12];
     format_clock(when, sizeof(when), s.timestamp);
@@ -769,6 +908,20 @@ static void draw_power_cursor(lv_layer_t* layer, const lv_area_t& plot,
     if (bx + BOX_W > plot.x2) bx = x - 16 - BOX_W;
     if (bx < plot.x1) bx = plot.x1;
     const lv_area_t box = {bx, plot.y1 + 4, bx + BOX_W, plot.y1 + 4 + BOX_H};
+    if (bounds) cursor_bounds(x, plot, box, bounds);
+    if (layer == nullptr) return;
+
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = UI_COLOR_TEXT_DIM;
+    line.width = 2;
+    line.dash_width = 6;
+    line.dash_gap = 5;
+    line.p1.x = x; line.p1.y = plot.y1;
+    line.p2.x = x; line.p2.y = plot.y2;
+    lv_draw_line(layer, &line);
+    draw_dot(layer, x, map_y(s.average_power_w, 0, max_w, plot), COLOR_POWER);
+
     lv_draw_rect_dsc_t bg;
     lv_draw_rect_dsc_init(&bg);
     bg.bg_color = COLOR_BG;
@@ -798,8 +951,8 @@ static void draw_power_cursor(lv_layer_t* layer, const lv_area_t& plot,
 
 // Electrical draw: an area per pixel column (the tallest sample in it) under
 // a line, broken wherever samples are missing.
-static void draw_power_chart(lv_layer_t* layer, const lv_area_t& coords,
-                             const lv_area_t& plot) {
+static void draw_power_static(lv_layer_t* layer, const lv_area_t& coords,
+                              const lv_area_t& plot) {
     uint32_t peak = 0;
     for (size_t i = 0; i < state.sample_count; i++) {
         const auto& s = state.samples[i];
@@ -872,17 +1025,65 @@ static void draw_power_chart(lv_layer_t* layer, const lv_area_t& coords,
     }
 
     draw_fault_labels(layer, plot);
-    draw_power_cursor(layer, plot, max_w);
+    s_power_max_w = max_w;
 }
 
+static void chart_draw_cb_impl(lv_event_t* event);
 static void chart_draw_cb(lv_event_t* event) {
+#if CONFIG_TEST_ENDPOINTS
+    const int64_t t0 = esp_timer_get_time();
+    chart_draw_cb_impl(event);
+    s_prof.total_us += esp_timer_get_time() - t0;
+    s_prof.calls++;
+#else
+    chart_draw_cb_impl(event);
+#endif
+}
+
+static void chart_draw_cb_impl(lv_event_t* event) {
     lv_obj_t* chart = (lv_obj_t*)lv_event_get_target(event);
     lv_layer_t* layer = lv_event_get_layer(event);
     lv_area_t coords;
     lv_obj_get_coords(chart, &coords);
     const lv_area_t plot = plot_area(chart);
+    const bool cached = static_cache_ready();
+    if (cached) {
+        lv_draw_image_dsc_t image;
+        lv_draw_image_dsc_init(&image);
+        image.src = &s_static.buf;
+        lv_draw_image(layer, &image, &coords);
+    } else {
+        draw_static(layer, coords, plot);
+    }
+#if CONFIG_TEST_ENDPOINTS
+    s_prof.cached = cached;
+#endif
     if (state.power_view) {
-        draw_power_chart(layer, coords, plot);
+        draw_power_cursor(layer, plot, s_power_max_w);
+    } else {
+        draw_cursor(layer, plot, s_temp_min, s_temp_max);
+    }
+}
+
+static bool cursor_dirty_area(lv_area_t* out) {
+    if (state.chart == nullptr) return false;
+    const lv_area_t plot = plot_area(state.chart);
+    lv_area_t area[2] = {{0, 0, -1, -1}, {0, 0, -1, -1}};
+    if (state.power_view) {
+        draw_power_cursor(nullptr, plot, s_power_max_w, area);
+    } else {
+        draw_cursor(nullptr, plot, s_temp_min, s_temp_max, area);
+    }
+    if (area[0].x2 < area[0].x1) return false;
+    out[0] = area[0];
+    out[1] = area[1];
+    return true;
+}
+
+static void draw_static(lv_layer_t* layer, const lv_area_t& coords,
+                        const lv_area_t& plot) {
+    if (state.power_view) {
+        draw_power_static(layer, coords, plot);
         return;
     }
 
@@ -926,6 +1127,8 @@ static void chart_draw_cb(lv_event_t* event) {
         chart_axis_nice(display_deci_c(min_value), display_deci_c(max_value));
     min_value = deci_c_from_display(axis.lo);
     max_value = deci_c_from_display(axis.hi);
+    s_temp_min = min_value;
+    s_temp_max = max_value;
 
     draw_mode_bands(layer, plot);
     draw_defrost_zones(layer, plot);
@@ -1003,8 +1206,31 @@ static void chart_draw_cb(lv_event_t* event) {
     }
 
     draw_fault_labels(layer, plot);
-    draw_cursor(layer, plot, min_value, max_value);
 }
+
+#if CONFIG_TEST_ENDPOINTS
+// Test hook: move the cursor as a finger at screen x would, then force a
+// refresh and time both. Caller holds the display lock.
+extern "C" bool heatpump_history_profile_cursor(int32_t x,
+                                                history_cursor_profile_t* out) {
+    if (state.chart == nullptr || state.sample_count == 0) return false;
+    memset(&s_prof, 0, sizeof(s_prof));
+    int64_t t0 = esp_timer_get_time();
+    set_cursor(cursor_at(x));
+    out->press_us = esp_timer_get_time() - t0;
+    t0 = esp_timer_get_time();
+    lv_refr_now(nullptr);
+    out->refr_us = esp_timer_get_time() - t0;
+    out->cursor = state.cursor;
+    out->samples = (uint32_t)state.sample_count;
+    out->power_view = state.power_view;
+    out->draw_calls = s_prof.calls;
+    out->draw_us = s_prof.total_us;
+    out->build_us = s_prof.build_us;
+    out->cached = s_prof.cached;
+    return true;
+}
+#endif
 
 static void update_range_label() {
     time_t start = state.window_start;
@@ -1130,6 +1356,7 @@ static void query_complete(void* data) {
     } else {
         lv_obj_add_flag(state.status_label, LV_OBJ_FLAG_HIDDEN);
     }
+    s_data_gen++;
     lv_obj_invalidate(state.chart);
     delete result;
     start_pending_query_if_needed();
@@ -1582,6 +1809,8 @@ void heatpump_history_hide(void) {
     state.pending_query = false;
     if (state.overlay) lv_obj_delete(state.overlay);
     state.overlay = nullptr;
+    static_cache_free();
+    s_cursor_area_valid = false;
     state.chart = nullptr;
     state.range_label = nullptr;
     state.status_label = nullptr;
