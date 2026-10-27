@@ -2843,7 +2843,10 @@ paths:
                       last:
                         type: object
                         nullable: true
-                        description: The most recent finished run, or null
+                        description: >-
+                          The most recent finished run within the retained
+                          history (14 days), or null. Not limited to the
+                          chart window.
                         properties:
                           start:
                             type: integer

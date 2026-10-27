@@ -167,6 +167,67 @@ static void tank_series_averages_buckets() {
     CHECK_EQ_L(ok[0] || ok[1] || ok[2] || ok[3], 0);
 }
 
+static void older_run_found_when_window_has_none() {
+    // Idle for the whole window; the last run sits in the older samples.
+    auto older = timeline("..HHH....");
+    auto window = timeline("....", T0 + 100 * STEP);
+    home_run_summary_t sum;
+    runs(window, T0 + 104 * STEP, nullptr, 0, &sum);
+    CHECK_EQ_L(home_stats_needs_older(&sum, window.data(), window.size()), 1);
+    home_stats_merge_older(&sum, window.data(), window.size(), older.data(), older.size());
+    CHECK_EQ_L(sum.last.start, T0 + 2 * STEP);
+    CHECK_EQ_L(sum.last.end, T0 + 5 * STEP);
+    CHECK_EQ_L(sum.last.mode, HISTORY_TELEMETRY_MODE_HEATING);
+
+    // Nothing older either.
+    auto idle = timeline("......");
+    runs(window, T0 + 104 * STEP, nullptr, 0, &sum);
+    home_stats_merge_older(&sum, window.data(), window.size(), idle.data(), idle.size());
+    CHECK_EQ_L(sum.last.start, 0);
+}
+
+static void run_cut_off_at_window_start_gets_real_start() {
+    // A cooling run started before the window and stopped inside it.
+    auto older = timeline("..CCCC");
+    auto window = timeline("CC...", T0 + 6 * STEP);
+    home_run_summary_t sum;
+    runs(window, T0 + 11 * STEP, nullptr, 0, &sum);
+    CHECK_EQ_L(sum.last.start, T0 + 6 * STEP);
+    CHECK_EQ_L(home_stats_needs_older(&sum, window.data(), window.size()), 1);
+    home_stats_merge_older(&sum, window.data(), window.size(), older.data(), older.size());
+    CHECK_EQ_L(sum.last.start, T0 + 2 * STEP);
+    CHECK_EQ_L(sum.last.end, T0 + 8 * STEP);
+    CHECK_EQ_L(sum.last.mode, HISTORY_TELEMETRY_MODE_COOLING);
+
+    // After an outage at the window start it really did start there.
+    window = timeline("CC...", T0 + 20 * STEP);
+    runs(window, T0 + 25 * STEP, nullptr, 0, &sum);
+    home_stats_merge_older(&sum, window.data(), window.size(), older.data(), older.size());
+    CHECK_EQ_L(sum.last.start, T0 + 20 * STEP);
+}
+
+static void run_ending_at_window_start_ends_at_first_sample() {
+    auto older = timeline("..HHH");
+    // One sample went missing at the boundary; still the same stretch.
+    auto window = timeline("....", T0 + 6 * STEP);
+    home_run_summary_t sum;
+    runs(window, T0 + 10 * STEP, nullptr, 0, &sum);
+    home_stats_merge_older(&sum, window.data(), window.size(), older.data(), older.size());
+    CHECK_EQ_L(sum.last.start, T0 + 2 * STEP);
+    CHECK_EQ_L(sum.last.end, T0 + 6 * STEP);
+}
+
+static void window_with_its_own_run_needs_nothing_older() {
+    auto window = timeline("..HH..");
+    home_run_summary_t sum;
+    runs(window, T0 + 6 * STEP, nullptr, 0, &sum);
+    CHECK_EQ_L(home_stats_needs_older(&sum, window.data(), window.size()), 0);
+    // Nor does a run in progress.
+    window = timeline("...HH");
+    runs(window, T0 + 5 * STEP, nullptr, 0, &sum);
+    CHECK_EQ_L(home_stats_needs_older(&sum, window.data(), window.size()), 0);
+}
+
 int main() {
     finished_and_current_runs();
     drop_runs_before_keeps_overlapping_and_current();
@@ -177,6 +238,10 @@ int main() {
     setpoint_and_mode();
     unknown_mode_is_not_a_run();
     tank_series_averages_buckets();
+    older_run_found_when_window_has_none();
+    run_cut_off_at_window_start_gets_real_start();
+    run_ending_at_window_start_ends_at_first_sample();
+    window_with_its_own_run_needs_nothing_older();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
         return 1;

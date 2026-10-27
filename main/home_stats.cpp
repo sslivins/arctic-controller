@@ -73,6 +73,39 @@ size_t home_stats_runs(const history_telemetry_sample_t* samples, size_t n,
     return count;
 }
 
+bool home_stats_needs_older(const home_run_summary_t* sum,
+                            const history_telemetry_sample_t* window, size_t n) {
+    if (sum == nullptr || sum->current.start != 0) return false;
+    if (sum->last.start == 0) return true;
+    return n > 0 && is_running(window[0]) && sum->last.start == window[0].timestamp;
+}
+
+void home_stats_merge_older(home_run_summary_t* sum,
+                            const history_telemetry_sample_t* window, size_t n,
+                            const history_telemetry_sample_t* older, size_t m) {
+    if (sum == nullptr || older == nullptr || m == 0) return;
+    const history_telemetry_sample_t& tail = older[m - 1];
+    // The older samples' trailing run carries on into the window.
+    const bool joins = n > 0 && is_running(tail) &&
+                       window[0].timestamp - tail.timestamp <= GAP_SECONDS;
+
+    // A "now" far past the newest sample closes any run open at the end.
+    home_run_summary_t o = {};
+    home_stats_runs(older, m, UINT32_MAX, nullptr, 0, &o);
+
+    if (sum->last.start != 0) {
+        if (joins && is_running(window[0]) && sum->last.start == window[0].timestamp) {
+            sum->last.start = o.last.start;
+            sum->last.mode = o.last.mode;
+            sum->last.seen_start = o.last.seen_start;
+        }
+        return;
+    }
+    sum->last = o.last;
+    // It stopped at the window's first sample, not at the last older one.
+    if (joins && sum->last.start != 0) sum->last.end = window[0].timestamp;
+}
+
 size_t home_stats_drop_runs_before(home_run_t* runs, size_t n, uint32_t start) {
     size_t kept = 0;
     for (size_t i = 0; i < n; i++) {
