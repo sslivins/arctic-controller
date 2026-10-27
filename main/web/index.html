@@ -1462,7 +1462,7 @@
       } else {
         let last = summary.last;
         if (summary.current_start) last = { start: summary.current_start, end: state.homeHistory.data?.end };
-        const lastText = last && last.end > last.start ? `${fmtHistClock(last.start)} · ${fmtDuration(last.end - last.start)}` : "--";
+        const lastText = last && last.end > last.start ? `${fmtDayClock(last.start)} · ${fmtDuration(last.end - last.start)}` : "--";
         const wh = r.energy_today_wh;
         const today = wh == null ? "--" : `${Math.floor(wh / 1000)}.${Math.floor((wh % 1000) / 100)} kWh`;
         strip = homeStripItem("last-run", "Last run", lastText) + homeStripItem("today", "Today", today);
@@ -1660,6 +1660,12 @@
       const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
       if (localDayKey(d) === localDayKey(yesterday)) return "Yesterday";
       return `${monthNames[d.getMonth()]} ${d.getDate()}${d.getFullYear() === now.getFullYear() ? "" : `, ${d.getFullYear()}`}`;
+    }
+    // The home "Last run": the clock time for today, otherwise just the date (matches the device).
+    function fmtDayClock(epoch) {
+      const d = new Date(epoch * 1000);
+      if (localDayKey(d) === localDayKey(new Date())) return fmtClock(d.getHours(), d.getMinutes());
+      return `${monthNames[d.getMonth()]} ${d.getDate()}`;
     }
     function eventTime(event) {
       if (!event.timestamp) return `${fmtUptime(event.uptime_ms)} after start`;

@@ -17,6 +17,7 @@
 #include "history_tab.h"
 #include "heatpump_types.h"
 #include "history_storage.h"
+#include "home_last_run.h"
 #include "home_stats.h"
 #include "i18n/i18n.h"
 #include "macon_faults.h"
@@ -361,6 +362,27 @@ static void format_clock(char* buf, size_t len, uint32_t timestamp) {
         if (hour12 == 0) hour12 = 12;
         snprintf(buf, len, "%d:%02d %s", hour12, local.tm_min,
                  local.tm_hour < 12 ? "AM" : "PM");
+    }
+}
+
+// The clock time for today, otherwise just the date ("Oct 24", "24 oct.") so
+// the home strip is never wider than it is for a run today.
+static void format_day_clock(char* buf, size_t len, uint32_t timestamp) {
+    time_t t = timestamp;
+    struct tm when = {};
+    localtime_r(&t, &when);
+    time_t now = time(nullptr);
+    struct tm today = {};
+    localtime_r(&now, &today);
+    if (when.tm_year == today.tm_year && when.tm_yday == today.tm_yday) {
+        format_clock(buf, len, timestamp);
+        return;
+    }
+    const char* month = i18n_get((string_id_t)(STR_EVENT_MONTH_JAN + when.tm_mon));
+    if (i18n_get_language() == LANG_ENGLISH) {
+        snprintf(buf, len, "%s %d", month, when.tm_mday);
+    } else {
+        snprintf(buf, len, "%d %s", when.tm_mday, month);
     }
 }
 
@@ -789,6 +811,7 @@ static void home_query_task(void* arg) {
                                         CHART_SAMPLE_CAP, &count) == ESP_OK) {
         h.run_count = home_stats_runs(samples, count, h.end, h.runs,
                                       CHART_MAX_RUNS, &h.summary);
+        home_last_run_resolve(&h.summary, samples, count, h.end - SUMMARY_WINDOW_S, h.end);
         h.run_count = home_stats_drop_runs_before(h.runs, h.run_count, h.start);
         home_stats_tank_series(samples, count, h.start, h.end, h.tank,
                                h.tank_ok, CHART_BUCKETS);
@@ -1408,7 +1431,7 @@ void heatpump_screen_update(void) {
         }
     }
 
-    char buf[48];
+    char buf[64];
     if (hp.connected) {
         snprintf(buf, sizeof(buf), "%d", app_prefs_convert_temp(hp.water_tank_temp));
         lv_label_set_text(state.hero_tank_label, buf);
@@ -1513,11 +1536,11 @@ void heatpump_screen_update(void) {
             last.end = state.run_stopped > last.start ? state.run_stopped : history_store().end;
         }
         if (last.start != 0 && last.end > last.start) {
-            char clock[16];
+            char when[32];
             char dur[24];
-            format_clock(clock, sizeof(clock), last.start);
+            format_day_clock(when, sizeof(when), last.start);
             format_duration(dur, sizeof(dur), last.end - last.start);
-            snprintf(buf, sizeof(buf), "%s \xC2\xB7 %s", clock, dur);
+            snprintf(buf, sizeof(buf), "%s \xC2\xB7 %s", when, dur);
         } else {
             snprintf(buf, sizeof(buf), "--");
         }

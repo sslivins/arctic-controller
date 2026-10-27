@@ -38,6 +38,24 @@ size_t home_stats_runs(const history_telemetry_sample_t* samples, size_t n,
                        home_run_summary_t* summary);
 
 /**
+ * True when the window's samples can't settle the last run on their own: no
+ * run is in progress and either none finished in the window, or the newest one
+ * was already running at the window's first sample (it may have started
+ * earlier). Then pass older samples to home_stats_merge_older().
+ */
+bool home_stats_needs_older(const home_run_summary_t* sum,
+                            const history_telemetry_sample_t* window, size_t n);
+
+/**
+ * Settle the last run from `older` samples (oldest first), which all precede
+ * the window's. Finds the newest run there when the window has none, and
+ * extends a run cut off at the window start back to its real start.
+ */
+void home_stats_merge_older(home_run_summary_t* sum,
+                            const history_telemetry_sample_t* window, size_t n,
+                            const history_telemetry_sample_t* older, size_t m);
+
+/**
  * Drop runs that finished at or before `start`, keeping the order. Lets the
  * summary look further back than the chart draws.
  * @return Number of runs kept.

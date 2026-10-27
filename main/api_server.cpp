@@ -48,6 +48,7 @@
 #include "boot_stats.h"
 #include "fault_notice.h"
 #include "fault_history.h"
+#include "home_last_run.h"
 #include "home_stats.h"
 #include "log_buffer.h"
 #include "log_persist.h"
@@ -7052,6 +7053,7 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
     home_run_summary_t summary = {};
     size_t run_count =
         home_stats_runs(w->samples, count, end, w->runs, kMaxRuns, &summary);
+    home_last_run_resolve(&summary, w->samples, count, summary_start, end);
     run_count = home_stats_drop_runs_before(w->runs, run_count, start);
     home_stats_tank_series(w->samples, count, start, end, w->tank, w->tank_ok, kBuckets);
     size_t fault_total = 0;
