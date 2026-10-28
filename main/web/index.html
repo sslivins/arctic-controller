@@ -993,10 +993,12 @@
     function temp(value, kind = "absolute") {
       if (value === null || value === undefined) return "--";
       const fahrenheit = state.preferences.temp_unit === "fahrenheit";
-      const converted = fahrenheit
-        ? (kind === "differential" ? Number(value) * 9 / 5 : Number(value) * 9 / 5 + 32)
-        : Number(value);
-      return `${Math.round(converted)}°${fahrenheit ? "F" : "C"}`;
+      // Rounded as the device does (format_temp): in tenths, Fahrenheit
+      // truncated, then halves away from zero, so -3.5 reads -4 on both.
+      let deci = Math.round(Number(value) * 10);
+      if (fahrenheit) deci = Math.trunc(deci * 9 / 5) + (kind === "differential" ? 0 : 320);
+      const whole = Math.sign(deci) * Math.floor((Math.abs(deci) + 5) / 10);
+      return `${whole || 0}°${fahrenheit ? "F" : "C"}`;
     }
     function tempNumber(value, kind = "absolute") {
       if (state.preferences.temp_unit !== "fahrenheit") return Number(value);
