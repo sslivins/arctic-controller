@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include "heatpump_types.h"
 #include "energy_store.h"
+#include "run_ledger.h"
 #include "macon_listener.h"   // MaconObservedWindow, MaconObservedCatalog, MaconListenerStats
 #include "temp_trend.h"
 
@@ -216,6 +217,10 @@ bool getEnergyLifetime(energy::Lifetime* out);
 // A day that has closed but isn't in flash yet (persisted within ~30 s).
 // Readers add it so totals don't dip while it waits.
 bool getEnergyPendingDay(energy::DayRecord* out);
+
+// Run summaries not in flash yet: finished runs waiting to be stored, then
+// the run in progress (flag energy::RUN_OPEN). Oldest first.
+size_t getEnergyUnstoredRuns(energy::RunRecord* out, size_t capacity);
 
 // Running totals since install or factory reset: closed days, the day
 // waiting to be saved and today so far, read together so they never dip.

@@ -25,6 +25,7 @@ def test_energy_endpoints_registered_with_auth():
     for uri, handler in (
         ("/api/energy/daily", "energy_daily_get_handler"),
         ("/api/energy/totals", "energy_totals_get_handler"),
+        ("/api/energy/runs", "energy_runs_get_handler"),
     ):
         assert f'"{uri}"' in source, uri
         assert "check_api_auth" in _handler_body(source, handler), handler
@@ -47,5 +48,7 @@ def test_openapi_documents_energy():
     spec = (ROOT / "docs" / "openapi.yaml").read_text(encoding="utf-8")
     assert "/api/energy/daily:" in spec
     assert "/api/energy/totals:" in spec
+    assert "/api/energy/runs:" in spec
+    assert "    EnergyRun:" in spec
     assert "    EnergyDay:" in spec
     assert "covered_electrical_wh:" in spec

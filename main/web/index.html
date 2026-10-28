@@ -357,10 +357,12 @@
     .en-facts { margin: 12px 0 4px; }
     .en-note { font-size: 13px; }
     .en-runs { display: grid; gap: 6px; }
-    .en-run { display: grid; grid-template-columns: auto auto 1fr auto auto; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--cp-border); border-radius: 10px; background: var(--cp-surface-soft); }
+    .en-run { display: grid; grid-template-columns: auto auto 1fr auto auto auto; align-items: center; gap: 10px; padding: 6px 10px; border: 1px solid var(--cp-border); border-radius: 10px; background: var(--cp-surface-soft); }
     .en-run .en-swatch { margin: 0; }
     .en-run-time { font-weight: 600; white-space: nowrap; }
     .en-run-meta { color: var(--cp-text-muted); font-size: 13px; }
+    .en-run-perf { color: var(--cp-text-muted); font-size: 13px; white-space: nowrap; }
+    .en-run-perf:empty { display: none; }
     .en-run strong { white-space: nowrap; }
     .en-run-view { min-height: 32px; padding: 4px 10px; font-size: 13px; }
     .en-runs-loading { display: grid; place-items: center; min-height: 80px; }
@@ -822,6 +824,7 @@
       .en-run-meta { grid-column: 2; grid-row: 2; }
       .en-run strong { grid-column: 3; grid-row: 1; }
       .en-run-view { grid-column: 3; grid-row: 2; }
+      .en-run-perf { grid-column: 2 / -1; grid-row: 3; }
       .en-table { font-size: 13px; }
       .en-table th, .en-table td { padding: 6px 5px; }
       .en-table th:nth-child(5), .en-table td:nth-child(5) { display: none; }
@@ -990,10 +993,12 @@
     function temp(value, kind = "absolute") {
       if (value === null || value === undefined) return "--";
       const fahrenheit = state.preferences.temp_unit === "fahrenheit";
-      const converted = fahrenheit
-        ? (kind === "differential" ? Number(value) * 9 / 5 : Number(value) * 9 / 5 + 32)
-        : Number(value);
-      return `${Math.round(converted)}°${fahrenheit ? "F" : "C"}`;
+      // Rounded as the device does (format_temp): in tenths, Fahrenheit
+      // truncated, then halves away from zero, so -3.5 reads -4 on both.
+      let deci = Math.round(Number(value) * 10);
+      if (fahrenheit) deci = Math.trunc(deci * 9 / 5) + (kind === "differential" ? 0 : 320);
+      const whole = Math.sign(deci) * Math.floor((Math.abs(deci) + 5) / 10);
+      return `${whole || 0}°${fahrenheit ? "F" : "C"}`;
     }
     function tempNumber(value, kind = "absolute") {
       if (state.preferences.temp_unit !== "fahrenheit") return Number(value);
@@ -2304,7 +2309,9 @@
       state.tempHistory.loading = true; state.tempHistory.error = "";
       try {
         const end = state.tempHistory.end ? `&end=${state.tempHistory.end}` : "";
-        state.tempHistory.data = await api(`/api/heatpump/temperature-history?window=${state.histWindow}${end}`);
+        const d = await api(`/api/heatpump/temperature-history?window=${state.histWindow}${end}`);
+        d.run_summaries = await fetchRunSummaries(d.start, d.end + 1).catch(() => []);
+        state.tempHistory.data = d;
         state.tempHistory.loadedAt = Date.now();
       } catch (error) {
         state.tempHistory.error = error.message || "Failed to load temperature history";
@@ -2699,7 +2706,9 @@
       tip.style.left = `${Math.max(0, left)}px`;
     }
     function histRuns(data) {
-      return buildRuns(data.samples || [], data.defrosts || [], data.sample_interval_sec || 30, data.start);
+      const interval = data.sample_interval_sec || 30;
+      const runs = buildRuns(data.samples || [], data.defrosts || [], interval, data.start);
+      return attachRunSummaries(runs, data.run_summaries || [], interval);
     }
     // The window's compressor runs, as on the Energy day; View centres one.
     function histRunsCard(data) {
@@ -2880,6 +2889,43 @@
       return `${fmtDuration(run.end - run.start)}${run.clipStart || (run.open && !live) ? "+" : ""}`;
     }
     const RUN_DEFROST = ["defrost", "Defrost", "var(--home-defrost)"];
+    // Per-run summaries (COP, outdoor) from /api/energy/runs, each attached to
+    // the run it overlaps most (padded by a sample interval), as the device
+    // does. Runs from before summaries were kept get none.
+    const RUN_COP_MIN_WH = 100;
+    async function fetchRunSummaries(from, to) {
+      const out = [];
+      // The endpoint serves at most 3 days per request.
+      for (let a = from; a < to; a += 3 * 86400) {
+        const r = await api(`/api/energy/runs?from=${Math.floor(a)}&to=${Math.ceil(Math.min(to, a + 3 * 86400))}`);
+        for (const x of r.runs || []) if (!out.some(y => y.start === x.start)) out.push(x);
+      }
+      return out;
+    }
+    function attachRunSummaries(runs, summaries, pad = 30) {
+      const totals = runs.map(() => null);
+      for (const x of summaries) {
+        let best = -1, bestOverlap = 0;
+        runs.forEach((run, i) => {
+          const o = Math.min(x.end, run.end + pad) - Math.max(x.start, run.start - pad);
+          if (o > bestOverlap) { bestOverlap = o; best = i; }
+        });
+        if (best < 0) continue;
+        const t = totals[best] ||= { thermal: 0, covered: 0, outSum: 0, outS: 0 };
+        t.thermal += x.thermal_wh; t.covered += x.covered_electrical_wh;
+        if (x.outdoor_c != null && x.outdoor_seconds) { t.outSum += x.outdoor_c * x.outdoor_seconds; t.outS += x.outdoor_seconds; }
+      }
+      runs.forEach((run, i) => {
+        const t = totals[i];
+        run.cop = t && t.covered >= RUN_COP_MIN_WH ? t.thermal / t.covered : null;
+        run.outdoor = t && t.outS ? t.outSum / t.outS : null;
+      });
+      return runs;
+    }
+    function fmtRunPerf(run) {
+      if (run.mode === "defrost") return "";
+      return `COP (est.) ${run.cop != null ? (Math.round(run.cop * 10) / 10).toFixed(1) : "--"} · Outdoor ${temp(run.outdoor)}`;
+    }
     // The "Compressor runs" rows shared by the Energy day and the Cycles page.
     function runRows(runs, live, viewT) {
       return `<div class="en-runs">${runs.map(run => {
@@ -2887,6 +2933,7 @@
         return `<div class="en-run"><i class="en-swatch" style="background:${mode ? mode[2] : "var(--energy-other)"}"></i>
           <span class="en-run-time">${esc(fmtRunSpan(run, live))}</span>
           <span class="en-run-meta">${fmtRunLength(run, live)}${mode ? ` · ${mode[1]}` : ""}</span>
+          <span class="en-run-perf">${esc(fmtRunPerf(run))}</span>
           <strong>${run.wh == null ? "--" : fmtKwh(run.wh)}</strong>
           <button class="btn en-run-view" ${viewT(run)}>View ›</button></div>`;
       }).join("")}</div>`;
@@ -2910,6 +2957,8 @@
         const samples = [...byTime.values()].sort((a, b) => a.t - b.t);
         entry.samples = samples.length;
         entry.runs = buildRuns(samples, [...defrosts.values()], interval, midnight);
+        const summaries = await fetchRunSummaries(midnight, next).catch(() => []);
+        attachRunSummaries(entry.runs, summaries, interval);
       } catch (error) {
         entry.error = error.message || "Failed to load runs";
       } finally {

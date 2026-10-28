@@ -7,6 +7,7 @@ and the power-panel tests run against the real device.
 
 import datetime as dt
 import json
+import re
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -241,4 +242,17 @@ class TestCyclesPowerPanel:
             expect(page.locator(".hist-chart .hist-power-area")).to_have_count(0)
         finally:
             page.evaluate("localStorage.removeItem('arcticHistPower')")
+        assert page_errors == []
+
+class TestRunSummaries:
+    def test_cycles_runs_show_cop_and_outdoor(
+        self, dashboard_page: Page, base_url: str, page_errors
+    ):
+        page = dashboard_page
+        _seed_history(base_url)
+        _open_cycles(page)
+        # The fixture's last run (hot water) has a stored summary: COP 2.3 at 5 °C.
+        perf = page.locator(".en-run-perf", has_text="COP (est.) 2.3")
+        expect(perf.first).to_be_visible(timeout=15000)
+        expect(perf.first).to_contain_text(re.compile(r"Outdoor (5°C|41°F)"))
         assert page_errors == []

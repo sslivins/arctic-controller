@@ -18,6 +18,7 @@
 #include "daily_energy_store.h"
 #include "energy_ledger.h"
 #include "energy_store.h"
+#include "run_store.h"
 #include "time_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -62,6 +63,12 @@ static uint64_t s_migrate_ws = 0;
 static SemaphoreHandle_t s_persist_mutex = nullptr;
 static energy::Day s_ledger_day = {};
 static energy::PowerAverager s_power_avg;
+// Per-run summaries, under s_state_mutex. Finished runs wait here for
+// persistEnergyLedger() to store them.
+static energy::RunTracker s_runs;
+static constexpr size_t kRunQueue = 4;
+static energy::RunRecord s_run_queue[kRunQueue];
+static size_t s_run_queued = 0;
 // Updated in applyMaconMapping() under s_state_mutex.
 static TempTrendTracker s_tank_trend = make_tank_trend_tracker();
 static TempTrendTracker s_outlet_trend = make_water_trend_tracker();
@@ -549,6 +556,7 @@ __attribute__((noinline)) static energy::Day localDay(time_t now_s) {
 __attribute__((noinline)) static void updateEnergyLedger(const energy::Input& in) {
     if (!time_mgr_is_synced() || !s_ledger_loaded) {
         s_ledger.pause();
+        s_runs.pause();
         return;
     }
     const time_t now_s = time(nullptr);
@@ -556,6 +564,14 @@ __attribute__((noinline)) static void updateEnergyLedger(const energy::Input& in
     if (s_ledger.add(now_s, day, in) && !s_closed_pending &&
         s_ledger.take_finished(&s_closed_day)) {
         s_closed_pending = true;
+    }
+    if (s_runs.add(now_s, day.date, in)) {
+        if (s_run_queued == kRunQueue) {
+            // Storage is behind; the oldest run gives way.
+            memmove(&s_run_queue[0], &s_run_queue[1], sizeof(s_run_queue[0]) * (kRunQueue - 1));
+            s_run_queued--;
+        }
+        s_runs.take_finished(&s_run_queue[s_run_queued++]);
     }
     if (s_migrate_ws) {
         s_ledger.add_unattributed(s_migrate_ws);
@@ -1025,6 +1041,30 @@ bool isConnected() {
     return connected;
 }
 
+// Store the finished runs, oldest first. Caller holds s_persist_mutex.
+static void persistRuns() {
+    for (size_t i = 0; i < kRunQueue; i++) {
+        energy::RunRecord run;
+        if (xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(500)) != pdTRUE) return;
+        const bool have = s_run_queued > 0;
+        if (have) run = s_run_queue[0];
+        xSemaphoreGive(s_state_mutex);
+        if (!have) return;
+        if (!energy::store_append_run(run)) {
+            ESP_LOGW(TAG, "Energy: storing run at %lu failed, retrying",
+                     (unsigned long)run.start_s);
+            return;
+        }
+        if (xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(500)) != pdTRUE) return;
+        // Unless the queue overflowed meanwhile and dropped it already.
+        if (s_run_queued > 0 && s_run_queue[0].start_s == run.start_s) {
+            memmove(&s_run_queue[0], &s_run_queue[1], sizeof(s_run_queue[0]) * (kRunQueue - 1));
+            s_run_queued--;
+        }
+        xSemaphoreGive(s_state_mutex);
+    }
+}
+
 void persistEnergyLedger(bool force) {
     if (s_state_mutex == nullptr || s_persist_mutex == nullptr || !time_mgr_is_synced()) return;
     // Bounded waits: a restart must not hang on a wedged lock.
@@ -1088,6 +1128,18 @@ void persistEnergyLedger(bool force) {
         if (saved) s_ledger.mark_saved(now_s, accum);
         xSemaphoreGive(s_state_mutex);
     }
+    persistRuns();
+    if (force) {
+        // Ahead of a restart: keep the run so far. The rest of it after the
+        // reboot is a new piece, attached to the same run when listed.
+        energy::RunRecord open;
+        bool have = false;
+        if (xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+            have = s_runs.current(&open);
+            xSemaphoreGive(s_state_mutex);
+        }
+        if (have) energy::store_append_run(open);
+    }
     xSemaphoreGive(s_persist_mutex);
 }
 
@@ -1109,6 +1161,16 @@ bool getEnergyPendingDay(energy::DayRecord* out) {
     if (ok) *out = s_closed_day;
     xSemaphoreGive(s_state_mutex);
     return ok;
+}
+
+size_t getEnergyUnstoredRuns(energy::RunRecord* out, size_t capacity) {
+    if (s_state_mutex == nullptr) return 0;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    size_t n = 0;
+    for (; n < s_run_queued && n < capacity; n++) out[n] = s_run_queue[n];
+    if (n < capacity && s_runs.current(&out[n])) n++;
+    xSemaphoreGive(s_state_mutex);
+    return n;
 }
 
 bool getEnergyTotals(EnergyTotals* out) {
