@@ -37,8 +37,6 @@ def _runs(api, query=""):
 
 def test_seeded_runs_report_cop_and_outdoor(api):
     r = api.post(f"{BASE_URL}/api/test/populate-temperature-history", timeout=30)
-    if r.status_code == 404:
-        pytest.skip("test endpoints not enabled")
     r.raise_for_status()
     assert r.json()["runs"] == 3
 
