@@ -2331,6 +2331,152 @@ static esp_err_t history_cursor_get_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/drag
+// Body: {"x1":200,"y1":600,"x2":500,"y2":600,"hold_ms":0,"duration_ms":300,
+//        "tag":"temperature_history_chart"}
+// Drives a virtual touch pointer through LVGL's normal input pipeline: press
+// at (x1,y1), hold for hold_ms, move to (x2,y2) over duration_ms, release.
+// With "tag", coordinates are relative to that widget's top-left corner.
+// Returns once the pointer has been released.
+// ============================================================================
+
+static struct {
+    lv_indev_t* indev = nullptr;
+    bool active = false;
+    volatile bool done = true;
+    uint32_t t0 = 0;
+    int32_t x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    uint32_t hold_ms = 0, duration_ms = 0;
+    lv_point_t last = {};
+} s_test_drag;
+
+static void test_drag_read_cb(lv_indev_t*, lv_indev_data_t* data)
+{
+    auto& d = s_test_drag;
+    data->point = d.last;
+    data->state = LV_INDEV_STATE_RELEASED;
+    if (!d.active) return;
+    const uint32_t el = lv_tick_elaps(d.t0);
+    lv_point_t p = {d.x2, d.y2};
+    if (el < d.hold_ms) {
+        p = {d.x1, d.y1};
+    } else if (el < d.hold_ms + d.duration_ms) {
+        const int64_t k = el - d.hold_ms;
+        p.x = d.x1 + (int32_t)((d.x2 - d.x1) * k / (int64_t)d.duration_ms);
+        p.y = d.y1 + (int32_t)((d.y2 - d.y1) * k / (int64_t)d.duration_ms);
+    } else if (el >= d.hold_ms + d.duration_ms + 60) {
+        // Rest at the end point for a couple of reads, then let go.
+        d.active = false;
+        d.done = true;
+        return;
+    }
+    d.last = p;
+    data->point = p;
+    data->state = LV_INDEV_STATE_PRESSED;
+}
+
+static esp_err_t drag_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    set_json_content_type(req);
+
+    char buf[256];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        send_json_error(req, "400 Bad Request", "Invalid body");
+        return ESP_OK;
+    }
+    buf[received] = '\0';
+    cJSON* body = cJSON_Parse(buf);
+    const char* keys[4] = {"x1", "y1", "x2", "y2"};
+    int32_t xy[4] = {};
+    for (int i = 0; i < 4; i++) {
+        cJSON* v = body ? cJSON_GetObjectItem(body, keys[i]) : NULL;
+        if (!v || !cJSON_IsNumber(v)) {
+            cJSON_Delete(body);
+            send_json_error(req, "400 Bad Request", "Provide x1, y1, x2, y2");
+            return ESP_OK;
+        }
+        xy[i] = (int32_t)v->valuedouble;
+    }
+    cJSON* j_hold = cJSON_GetObjectItem(body, "hold_ms");
+    cJSON* j_dur = cJSON_GetObjectItem(body, "duration_ms");
+    cJSON* j_tag = cJSON_GetObjectItem(body, "tag");
+    const uint32_t hold_ms = cJSON_IsNumber(j_hold) ? (uint32_t)j_hold->valuedouble : 0;
+    const uint32_t duration_ms = cJSON_IsNumber(j_dur) ? (uint32_t)j_dur->valuedouble : 300;
+    char tag[64] = {0};
+    if (cJSON_IsString(j_tag)) strncpy(tag, j_tag->valuestring, sizeof(tag) - 1);
+    cJSON_Delete(body);
+    if (hold_ms > 10000 || duration_ms == 0 || duration_ms > 10000) {
+        send_json_error(req, "400 Bad Request", "hold_ms 0-10000, duration_ms 1-10000");
+        return ESP_OK;
+    }
+    if (!s_test_drag.done) {
+        send_json_error(req, "409 Conflict", "drag in progress");
+        return ESP_OK;
+    }
+
+    if (tag[0]) {
+        bool lock_timed_out = false;
+        lv_obj_t* found = resolve_tag_locked(tag, &lock_timed_out);
+        if (lock_timed_out) {
+            send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+            return ESP_OK;
+        }
+        if (!found) {
+            send_json_error(req, "404 Not Found", tag);
+            return ESP_OK;
+        }
+        lv_area_t a;
+        lv_obj_get_coords(found, &a);
+        xy[0] += a.x1; xy[2] += a.x1;
+        xy[1] += a.y1; xy[3] += a.y1;
+    } else if (!bsp_display_lock(1000)) {
+        send_json_error(req, "503 Service Unavailable", "Could not acquire display lock");
+        return ESP_OK;
+    }
+    auto& d = s_test_drag;
+    if (d.indev == nullptr) {
+        d.indev = lv_indev_create();
+        lv_indev_set_type(d.indev, LV_INDEV_TYPE_POINTER);
+        lv_indev_set_read_cb(d.indev, test_drag_read_cb);
+    }
+    d.x1 = xy[0]; d.y1 = xy[1]; d.x2 = xy[2]; d.y2 = xy[3];
+    d.hold_ms = hold_ms;
+    d.duration_ms = duration_ms;
+    d.last = {d.x1, d.y1};
+    d.t0 = lv_tick_get();
+    d.done = false;
+    d.active = true;
+    bsp_display_unlock();
+
+    const int64_t deadline = esp_timer_get_time() +
+        (int64_t)(hold_ms + duration_ms + 2000) * 1000;
+    while (!d.done && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(10));
+    if (!d.done) {
+        if (bsp_display_lock(1000)) {
+            d.active = false;
+            d.done = true;
+            bsp_display_unlock();
+        }
+        send_json_error(req, "504 Gateway Timeout", "drag did not finish");
+        return ESP_OK;
+    }
+
+    cJSON* resp = cJSON_CreateObject();
+    cJSON_AddBoolToObject(resp, "success", true);
+    cJSON_AddNumberToObject(resp, "x1", xy[0]);
+    cJSON_AddNumberToObject(resp, "y1", xy[1]);
+    cJSON_AddNumberToObject(resp, "x2", xy[2]);
+    cJSON_AddNumberToObject(resp, "y2", xy[3]);
+    char* json = cJSON_PrintUnformatted(resp);
+    httpd_resp_sendstr(req, json);
+    free(json);
+    cJSON_Delete(resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/populate-temperature-history
 // ============================================================================
 
@@ -3475,6 +3621,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &history_cursor_uri);
+
+    httpd_uri_t drag_uri = {
+        .uri = "/api/test/drag",
+        .method = HTTP_POST,
+        .handler = drag_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &drag_uri);
 
     httpd_uri_t populate_temperature_history_uri = {
         .uri = "/api/test/populate-temperature-history",

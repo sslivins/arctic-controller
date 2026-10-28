@@ -1466,6 +1466,10 @@ static void query_complete(void* data) {
         lv_obj_add_flag(state.status_label, LV_OBJ_FLAG_HIDDEN);
     }
     s_data_gen++;
+    // Build the cached image now rather than on the first touch, so a quick
+    // swipe isn't swallowed by a 150+ ms build at the start of the pan.
+    lv_obj_update_layout(state.chart);
+    static_cache_build();
     lv_obj_invalidate(state.chart);
     delete result;
     start_pending_query_if_needed();
@@ -1671,6 +1675,10 @@ static void apply_view() {
         lv_obj_add_flag(state.legend_power, LV_OBJ_FLAG_HIDDEN);
     }
     state.cursor = -1;
+    if (state.sample_count > 0) {
+        lv_obj_update_layout(state.chart);
+        static_cache_build();
+    }
     lv_obj_invalidate(state.chart);
 }
 

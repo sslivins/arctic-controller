@@ -123,6 +123,41 @@ def test_history_zoom_presets(device: DeviceClient):
         device.wait_for_screen("main", timeout=5.0)
 
 
+def test_history_chart_drag_pans_and_hold_scrubs(device: DeviceClient):
+    """A quick sideways drag pans the window back in time; press-and-hold
+    first, then drag, only moves the cursor."""
+    device.populate_temperature_history()
+    _open_cycles(device)
+    device.wait_for_widget(tag="temperature_history_screen")
+    device.wait_for_widget(tag="temperature_history_chart")
+
+    def next_enabled() -> bool:
+        w = device.find_widget(tag="temperature_history_next")
+        return w is not None and not w.disabled
+
+    try:
+        device.wait_until("chart opens on the latest window",
+                          lambda: not next_enabled(), timeout=5.0)
+        # Hold past the long-press time, then drag: a scrub, not a pan.
+        device.drag(150, 200, 450, 200, tag="temperature_history_chart",
+                    hold_ms=700, duration_ms=300)
+        assert not next_enabled(), "hold-then-drag panned the chart"
+        assert not device.has_widget(tag="temperature_history_latest")
+
+        # Quick drag right reaches back in time.
+        device.drag(150, 200, 450, 200, tag="temperature_history_chart")
+        device.wait_until("drag panned back in time", next_enabled, timeout=5.0)
+        device.wait_for_widget(tag="temperature_history_latest")
+
+        # Dragging left returns to the live window and no further.
+        device.drag(500, 200, 50, 200, tag="temperature_history_chart")
+        device.wait_until("drag panned back to latest",
+                          lambda: not next_enabled(), timeout=5.0)
+    finally:
+        device.click(tag="nav_home")
+        device.wait_for_screen("main", timeout=5.0)
+
+
 def test_history_tab_switches_segments_and_remembers_last(device: DeviceClient):
     device.populate_temperature_history()
     device.click(tag="nav_history")

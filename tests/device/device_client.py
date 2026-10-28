@@ -204,6 +204,31 @@ class DeviceClient:
             raise DeviceError(f"Scroll failed ({r.status_code}): {msg}")
         return r.json()
 
+    def drag(self, x1: int, y1: int, x2: int, y2: int, *, tag: str | None = None,
+             hold_ms: int = 0, duration_ms: int = 300) -> dict:
+        """POST /api/test/drag — press, optionally hold, move, release.
+
+        Runs through LVGL's real input pipeline (long press, double-tap etc.).
+        With ``tag`` the points are relative to that widget's top-left corner.
+        Returns once the virtual finger has lifted.
+        """
+        body = {"x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                "hold_ms": hold_ms, "duration_ms": duration_ms}
+        if tag:
+            body["tag"] = tag
+        r = self.session.post(
+            f"{self.base_url}/api/test/drag",
+            json=body,
+            timeout=self.timeout + (hold_ms + duration_ms) / 1000,
+        )
+        if r.status_code >= 400:
+            try:
+                msg = r.json().get("error", r.text)
+            except Exception:
+                msg = r.text
+            raise DeviceError(f"Drag failed ({r.status_code}): {msg}")
+        return r.json()
+
     def set_roller(self, tag: str, index: int) -> dict:
         """POST /api/test/set-roller — set a roller's selected index by tag.
 
