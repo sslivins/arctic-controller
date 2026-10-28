@@ -49,6 +49,7 @@
 #include "event_log.h"
 #include "event_log_screen.h"
 #include "history_storage.h"
+#include "run_store.h"
 #include "tab_shell.h"
 #include "history_tab.h"
 #include "heatpump_history_screen.h"
@@ -2400,8 +2401,34 @@ static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
                         esp_err_to_name(err));
         return ESP_OK;
     }
+    // Run summaries (COP, outdoor) for three of the four runs; the second is
+    // left bare, like a run from before summaries were kept.
+    energy::store_clear_runs();
+    static const struct { size_t run; uint8_t bucket; uint32_t thermal_wh; int16_t outdoor_deci; } kRuns[] = {
+        {0, energy::BUCKET_HEATING, 9300, -35},
+        {2, energy::BUCKET_COOLING, 7800, 241},
+        {3, energy::BUCKET_HOT_WATER, 6900, 52},
+    };
+    for (const auto& k : kRuns) {
+        energy::RunRecord r = {};
+        r.start_s = start + (uint32_t)(k.run * 240) * HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC -
+                    HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+        r.end_s = r.start_s + 160 * HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+        struct tm local;
+        const time_t t = r.start_s;
+        localtime_r(&t, &local);
+        r.date = (uint32_t)(local.tm_year + 1900) * 10000 + (uint32_t)(local.tm_mon + 1) * 100 +
+                 (uint32_t)local.tm_mday;
+        r.elec_wh = 3100;
+        r.covered_elec_wh = 3000;
+        r.thermal_wh = k.thermal_wh;
+        r.outdoor_s = 4500;
+        r.outdoor_avg_deci = k.outdoor_deci;
+        r.bucket = k.bucket;
+        energy::store_append_run(r);
+    }
     set_json_content_type(req);
-    httpd_resp_sendstr(req, "{\"success\":true,\"samples\":960}");
+    httpd_resp_sendstr(req, "{\"success\":true,\"samples\":960,\"runs\":3}");
     return ESP_OK;
 }
 

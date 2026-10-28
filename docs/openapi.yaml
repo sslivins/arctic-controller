@@ -2972,6 +2972,70 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/energy/runs:
+    get:
+      tags:
+      - HeatPump
+      summary: Get per-run COP and outdoor temperature
+      description: |
+        Summaries of the compressor runs overlapping `[from, to)`, oldest first,
+        including the run in progress (`open: true`). Runs are kept for about
+        15 days. Runs from before summaries were recorded are absent; the run
+        list itself comes from temperature-history, and a client attaches each
+        summary to the run it overlaps most. Defaults to the last 24 h; a range
+        longer than 3 days is cut to its last 3 days.
+      operationId: getEnergyRuns
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: integer
+        description: Range start, unix seconds (default `to` - 24 h)
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: integer
+        description: Range end, unix seconds (default now)
+      responses:
+        '200':
+          description: Run summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [from, to, runs]
+                properties:
+                  from:
+                    type: integer
+                  to:
+                    type: integer
+                  runs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EnergyRun'
+        '400':
+          description: from or to is not unix seconds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Clock not set yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/energy/totals:
     get:
       tags:
@@ -5036,6 +5100,42 @@ components:
         hot_water:
           type: integer
 
+    EnergyRun:
+      type: object
+      required: [start, end, open, mode, electrical_wh, thermal_wh, covered_electrical_wh,
+        cop, outdoor_c, outdoor_seconds]
+      properties:
+        start:
+          type: integer
+          description: First booked second of the run (unix seconds)
+        end:
+          type: integer
+          description: Last booked second so far (unix seconds)
+        open:
+          type: boolean
+          description: True while the run is still going
+        mode:
+          type: string
+          enum: [heating, cooling, hot_water]
+        electrical_wh:
+          type: integer
+        thermal_wh:
+          type: integer
+          description: Estimated heat moved (magnitude), over the covered part of the run
+        covered_electrical_wh:
+          type: integer
+          description: Electrical energy of the part of the run with a valid heat estimate
+        cop:
+          type: number
+          nullable: true
+          description: thermal_wh / covered_electrical_wh, one decimal; null below 100 Wh covered
+        outdoor_c:
+          type: number
+          nullable: true
+          description: Average outdoor (ambient) temperature while running, excluding defrost
+        outdoor_seconds:
+          type: integer
+          description: Seconds averaged into outdoor_c, for weighting when combining runs
     EnergyDay:
       type: object
       required: [date, final, utc_offset_min, electrical_wh, thermal_wh, covered_electrical_wh,

@@ -56,6 +56,7 @@ set(MAIN_HOST_SRCS
   ${MAIN_DIR}/temp_trend.cpp
   ${MAIN_DIR}/chart_axis.cpp
   ${MAIN_DIR}/energy_store.cpp
+  ${MAIN_DIR}/run_store.cpp
 )
 
 # The macon parameter table and its guardrail are linked REAL rather than
@@ -234,6 +235,12 @@ add_test(NAME energy_ledger COMMAND test_energy_ledger)
 add_executable(test_energy_store test_energy_store.cpp)
 target_link_libraries(test_energy_store PRIVATE arctic_main_host)
 add_test(NAME energy_store COMMAND test_energy_store)
+
+# Per-run COP and outdoor temperature: the live tracker, attaching summaries
+# to telemetry runs (pure), and the NVS day store over the NVS fake.
+add_executable(test_run_ledger test_run_ledger.cpp)
+target_link_libraries(test_run_ledger PRIVATE arctic_main_host)
+add_test(NAME run_ledger COMMAND test_run_ledger)
 
 # WiFi drop policy: which outages become wifi_lost/restored/unstable events.
 # Header-only pure logic over a caller-supplied clock.

@@ -69,6 +69,9 @@ def test_energy_run_opens_cycles_and_power_view(device: DeviceClient):
         timeout=10.0,
     )
     if device.has_widget(tag="energy_run"):
+        # Every run row has a second line with its COP and outdoor temperature.
+        perf = device.find_widget(tag="energy_run_perf")
+        assert perf is not None and "COP" in (perf.text or "") and "Outdoor" in (perf.text or "")
         device.click(tag="energy_run")
         device.wait_for_widget(tag="temperature_history_screen")
         assert device.wait_for_screen("history", timeout=5.0)

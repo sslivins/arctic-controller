@@ -23,6 +23,7 @@
 #include "setup_pairing.h"
 #include "ha_websocket.h"
 #include "heatpump_controller.h"
+#include "run_store.h"
 #include "heatpump_types.h"
 #include "macon_master_iface.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
@@ -301,6 +302,7 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req);
 static esp_err_t energy_daily_get_handler(httpd_req_t* req);
 static esp_err_t energy_totals_get_handler(httpd_req_t* req);
+static esp_err_t energy_runs_get_handler(httpd_req_t* req);
 static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req);
 static esp_err_t notifications_get_handler(httpd_req_t* req);
 static esp_err_t events_get_handler(httpd_req_t* req);
@@ -1576,6 +1578,15 @@ static bool api_server_start_locked(void)
         .user_ctx = NULL
     };
     REGISTER_URI(energy_totals_uri);
+
+    // GET /api/energy/runs - Per-run COP and outdoor temperature
+    httpd_uri_t energy_runs_uri = {
+        .uri = "/api/energy/runs",
+        .method = HTTP_GET,
+        .handler = energy_runs_get_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(energy_runs_uri);
 
     // GET /api/notifications - Active status-bar notifications (mirrors the device bell)
     httpd_uri_t notifications_uri = {
@@ -7010,6 +7021,116 @@ static esp_err_t energy_totals_get_handler(httpd_req_t* req)
     httpd_resp_sendstr(req, js ? js : "{}");
     if (js) cJSON_free(js);
     cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static uint32_t local_date_of(time_t t)
+{
+    struct tm local;
+    localtime_r(&t, &local);
+    return (uint32_t)(local.tm_year + 1900) * 10000 + (uint32_t)(local.tm_mon + 1) * 100 +
+           (uint32_t)local.tm_mday;
+}
+
+static bool query_epoch(const char* query, const char* key, uint32_t* out)
+{
+    char param[16];
+    if (httpd_query_key_value(query, key, param, sizeof(param)) != ESP_OK) return true;
+    if (param[0] < '0' || param[0] > '9') return false;
+    char* end = nullptr;
+    const unsigned long long v = strtoull(param, &end, 10);
+    if (end == param || *end != '\0' || v == 0 || v > UINT32_MAX) return false;
+    *out = (uint32_t)v;
+    return true;
+}
+
+// GET /api/energy/runs[?from=<epoch>&to=<epoch>]
+// Per-run summaries (estimated COP and outdoor temperature) for compressor
+// runs overlapping the range, oldest first, including the run in progress.
+// Defaults to the last 24 h; at most kMaxSpan per request. Run lists come
+// from the telemetry (temperature-history); a summary is attached to the run
+// it overlaps most.
+static esp_err_t energy_runs_get_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    constexpr uint32_t kMaxSpan = 3 * 86400;
+    constexpr size_t kCap = 5 * energy::kMaxRunsPerDay + 8;
+    if (!time_mgr_is_synced()) {
+        send_json_error(req, "503 Service Unavailable", "Clock not set");
+        return ESP_OK;
+    }
+    uint32_t to = (uint32_t)time(nullptr) + 1, from = 0;
+    char query[96];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        if (!query_epoch(query, "to", &to) || !query_epoch(query, "from", &from)) {
+            send_json_error(req, "400 Bad Request", "from and to must be unix seconds");
+            return ESP_OK;
+        }
+    }
+    if (from == 0) from = to > 86400 ? to - 86400 : 0;
+    if (from < to && to - from > kMaxSpan) from = to - kMaxSpan;
+
+    auto* runs = static_cast<energy::RunRecord*>(heap_caps_malloc(
+        sizeof(energy::RunRecord) * kCap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!runs) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    // A run is stored under the day it started, so start a day early.
+    size_t n = 0;
+    if (from < to) {
+        const uint32_t last = local_date_of((time_t)to);
+        for (uint32_t d = energy::date_add_days(local_date_of((time_t)from), -1);
+             d <= last && n < kCap; d = energy::date_add_days(d, 1)) {
+            n += energy::store_read_runs(d, runs + n, kCap - n);
+        }
+    }
+    energy::RunRecord live[8];
+    const size_t live_n = arctic::getEnergyUnstoredRuns(live, 8);
+
+    set_json_content_type(req);
+    char buf[320];
+    int len = snprintf(buf, sizeof(buf), "{\"from\":%lu,\"to\":%lu,\"runs\":[",
+                       (unsigned long)from, (unsigned long)to);
+    httpd_resp_send_chunk(req, buf, len);
+    static const char* const kModeNames[] = {"heating", "cooling", "hot_water"};
+    bool first = true;
+    auto emit = [&](const energy::RunRecord& r) {
+        if (r.end_s <= from || r.start_s >= to) return;
+        char cop[16] = "null", outdoor[16] = "null";
+        energy::RunTotals t;
+        t.add(r);
+        const int32_t x10 = t.cop_x10();
+        if (x10 >= 0) snprintf(cop, sizeof(cop), "%ld.%ld", (long)(x10 / 10), (long)(x10 % 10));
+        int16_t deci = 0;
+        if (t.outdoor(&deci)) snprintf(outdoor, sizeof(outdoor), "%.1f", deci / 10.0);
+        len = snprintf(buf, sizeof(buf),
+                       "%s{\"start\":%lu,\"end\":%lu,\"open\":%s,\"mode\":\"%s\","
+                       "\"electrical_wh\":%lu,\"thermal_wh\":%lu,\"covered_electrical_wh\":%lu,"
+                       "\"cop\":%s,\"outdoor_c\":%s,\"outdoor_seconds\":%lu}",
+                       first ? "" : ",", (unsigned long)r.start_s, (unsigned long)r.end_s,
+                       (r.flags & energy::RUN_OPEN) ? "true" : "false",
+                       kModeNames[r.bucket < energy::kModes ? r.bucket : 0],
+                       (unsigned long)r.elec_wh, (unsigned long)r.thermal_wh,
+                       (unsigned long)r.covered_elec_wh, cop, outdoor,
+                       (unsigned long)r.outdoor_s);
+        httpd_resp_send_chunk(req, buf, len);
+        first = false;
+    };
+    // Stored runs come in day and start order; one not yet stored (or the
+    // open one, saved ahead of a restart) replaces a stored copy.
+    for (size_t i = 0; i < n; i++) {
+        bool newer = false;
+        for (size_t j = 0; j < live_n && !newer; j++) newer = live[j].start_s == runs[i].start_s;
+        if (!newer) emit(runs[i]);
+    }
+    heap_caps_free(runs);
+    for (size_t j = 0; j < live_n; j++) emit(live[j]);
+    httpd_resp_send_chunk(req, "]}", 2);
+    httpd_resp_send_chunk(req, NULL, 0);
     return ESP_OK;
 }
 

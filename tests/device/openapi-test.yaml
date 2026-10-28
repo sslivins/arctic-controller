@@ -1054,6 +1054,9 @@ paths:
     post:
       tags: [Mocking]
       summary: Replace telemetry history with an eight-hour graph fixture
+      description: |
+        Also replaces the stored run summaries with three matching ones (the
+        first, third and fourth runs; the second has none).
       parameters:
         - in: header
           name: X-Session-Id
@@ -1071,6 +1074,8 @@ paths:
                   success:
                     type: boolean
                   samples:
+                    type: integer
+                  runs:
                     type: integer
                 required: [success, samples]
         "423":

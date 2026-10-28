@@ -19,6 +19,7 @@
 #include "history_tab.h"
 #include "i18n/i18n.h"
 #include "nav_bar.h"
+#include "run_store.h"
 #include "time_manager.h"
 #include "ui_common.h"
 #include <bsp/m5stack_tab5.h>
@@ -27,6 +28,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <initializer_list>
+#include <new>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -72,6 +74,9 @@ struct Run {
     uint32_t end;
     uint32_t wh;
     uint8_t mode;
+    bool has_outdoor;
+    int16_t outdoor_deci;
+    int32_t cop_x10;  // -1 = no estimate
 };
 
 struct RunsResult {
@@ -852,23 +857,33 @@ static void run_cb(lv_event_t* e) {
 static void add_run_row(size_t index, const Run& r) {
     lv_obj_t* row = lv_obj_create(s.runs_list);
     lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, LV_PCT(100), 60);
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_style_bg_color(row, COLOR_PANEL, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(row, UI_COLOR_BTN_PRESSED, LV_STATE_PRESSED);
     lv_obj_set_style_radius(row, 10, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(row, 14, LV_PART_MAIN);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row, 14, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(row, 10, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(row, 4, LV_PART_MAIN);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(row, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
     lv_obj_set_user_data(row, (void*)"energy_run");
     lv_obj_add_event_cb(row, run_cb, LV_EVENT_CLICKED, (void*)(uintptr_t)index);
 
-    lv_obj_t* swatch = lv_obj_create(row);
+    lv_obj_t* top = lv_obj_create(row);
+    lv_obj_remove_style_all(top);
+    lv_obj_set_size(top, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(top, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(top, 14, LV_PART_MAIN);
+    lv_obj_remove_flag(top, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(top, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_remove_flag(top, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* swatch = lv_obj_create(top);
     lv_obj_remove_style_all(swatch);
     lv_obj_set_size(swatch, 16, 16);
     lv_obj_set_style_bg_color(swatch, mode_color(r.mode), LV_PART_MAIN);
@@ -879,12 +894,27 @@ static void add_run_row(size_t index, const Run& r) {
     format_clock(when, sizeof(when), r.start);
     format_duration(duration, sizeof(duration), r.end - r.start);
     format_kwh(kwh, sizeof(kwh), r.wh);
-    lv_obj_t* t = make_label(row, UI_FONT_SMALL, UI_COLOR_TEXT, when);
+    lv_obj_t* t = make_label(top, UI_FONT_SMALL, UI_COLOR_TEXT, when);
     lv_obj_set_width(t, 150);
-    lv_obj_t* dur = make_label(row, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, duration);
+    lv_obj_t* dur = make_label(top, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, duration);
     lv_obj_set_flex_grow(dur, 1);
-    make_label(row, UI_FONT_SMALL, UI_COLOR_TEXT, kwh);
-    make_label(row, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, LV_SYMBOL_RIGHT);
+    make_label(top, UI_FONT_SMALL, UI_COLOR_TEXT, kwh);
+    make_label(top, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, LV_SYMBOL_RIGHT);
+
+    // "COP (est.) 3.4 · Outdoor -2°C", lined up under the start time.
+    char cop[16], cop_text[48], outdoor[16], perf[112];
+    format_cop(cop, sizeof(cop), r.cop_x10);
+    snprintf(cop_text, sizeof(cop_text), i18n_get(STR_ENERGY_COP_FMT), cop);
+    if (r.has_outdoor) {
+        format_temp(outdoor, sizeof(outdoor), r.outdoor_deci, true);
+    } else {
+        snprintf(outdoor, sizeof(outdoor), "--");
+    }
+    snprintf(perf, sizeof(perf), "%s  \xc2\xb7  %s %s", cop_text, i18n_get(STR_ENERGY_OUTDOOR),
+             outdoor);
+    lv_obj_t* p = make_label(row, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, perf);
+    lv_obj_set_style_pad_left(p, 30, LV_PART_MAIN);
+    lv_obj_set_user_data(p, (void*)"energy_run_perf");
 }
 
 static void runs_complete(void* arg) {
@@ -918,6 +948,52 @@ static void runs_complete(void* arg) {
         s.day_pending = false;
         request_runs();
     }
+}
+
+// Run summaries (estimated COP, outdoor temperature) recorded as runs end:
+// each goes to the listed run it overlaps most. A run stored under the
+// previous day can reach into this one; one not yet stored replaces its
+// stored copy.
+static void attach_run_summaries(RunsResult* result) {
+    constexpr size_t kCap = 2 * energy::kMaxRunsPerDay;
+    constexpr size_t kLive = 8;
+    uint32_t starts[MAX_RUNS], ends[MAX_RUNS];
+    for (size_t i = 0; i < result->count; i++) {
+        starts[i] = result->runs[i].start;
+        ends[i] = result->runs[i].end;
+        result->runs[i].cop_x10 = -1;
+        result->runs[i].has_outdoor = false;
+    }
+    if (result->count == 0) return;
+    // In PSRAM: this runs on a small internal stack.
+    struct Work {
+        energy::RunRecord recs[kCap + kLive];
+        energy::RunTotals totals[MAX_RUNS];
+    };
+    auto* w = static_cast<Work*>(heap_caps_malloc(sizeof(Work), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (w == nullptr) return;
+    new (w) Work();
+    energy::RunRecord* recs = w->recs;
+    energy::RunTotals* totals = w->totals;
+    size_t n = energy::store_read_runs(date_add(result->date, -1), recs, kCap);
+    n += energy::store_read_runs(result->date, recs + n, kCap - n);
+    const size_t live = arctic::getEnergyUnstoredRuns(recs + n, kLive);
+    for (size_t i = 0; i < n + live; i++) {
+        bool replaced = false;
+        for (size_t j = n; i < n && j < n + live && !replaced; j++) {
+            replaced = recs[j].start_s == recs[i].start_s;
+        }
+        if (replaced) continue;
+        const int k = energy::best_run(recs[i], starts, ends, result->count,
+                                       HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC);
+        if (k >= 0) totals[k].add(recs[i]);
+    }
+    for (size_t i = 0; i < result->count; i++) {
+        if (!totals[i].any) continue;
+        result->runs[i].cop_x10 = totals[i].cop_x10();
+        result->runs[i].has_outdoor = totals[i].outdoor(&result->runs[i].outdoor_deci);
+    }
+    heap_caps_free(w);
 }
 
 // Runs are stretches of compressor-on samples; a gap longer than a couple of
@@ -985,6 +1061,7 @@ static void runs_task(void* arg) {
         }
         close_run();
         heap_caps_free(samples);
+        attach_run_summaries(result);
     }
     bsp_display_lock(0);
     lv_async_call(runs_complete, result);
