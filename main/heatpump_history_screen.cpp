@@ -440,14 +440,98 @@ static void set_cursor(int32_t best) {
     invalidate_cursor_area();
 }
 
+// Touch gestures on the chart: a quick horizontal drag pans through time
+// (the cached image slides with the finger, the new window loads on
+// release); press-and-hold first, then drag, scrubs the cursor.
+static constexpr int32_t PAN_START_PX = 14;
+static struct {
+    int32_t x0 = 0;
+    int32_t dx = 0;
+    bool panning = false;
+    bool scrubbing = false;
+    uint32_t ended_ms = 0;
+} s_drag;
+
+// Pan offset limits in px: no further forward than now, no further back
+// than retention.
+static void pan_limits(int32_t* min_dx, int32_t* max_dx) {
+    const lv_area_t plot = plot_area(state.chart);
+    const int64_t w = lv_area_get_width(&plot);
+    const uint32_t earliest = state.latest_end > RETENTION_SECONDS
+                                  ? state.latest_end - RETENTION_SECONDS
+                                  : 0;
+    const uint32_t fwd = state.latest_end > state.window_end
+                             ? state.latest_end - state.window_end : 0;
+    const uint32_t back = state.window_start > earliest
+                              ? state.window_start - earliest : 0;
+    *min_dx = -(int32_t)((int64_t)fwd * w / state.window_seconds);
+    *max_dx = (int32_t)((int64_t)back * w / state.window_seconds);
+}
+
+static void pan_end(bool apply) {
+    if (!s_drag.panning) return;
+    s_drag.panning = false;
+    s_drag.ended_ms = lv_tick_get();
+    const int32_t dx = s_drag.dx;
+    s_drag.dx = 0;
+    lv_obj_invalidate(state.chart);
+    if (!apply || dx == 0) return;
+    const lv_area_t plot = plot_area(state.chart);
+    const uint32_t snap = history_window_snap(state.window_seconds);
+    const int64_t secs = -(int64_t)dx * state.window_seconds /
+                         lv_area_get_width(&plot);
+    const int64_t steps = (secs >= 0 ? secs + snap / 2 : secs - (int64_t)snap / 2) / snap;
+    if (steps == 0) return;
+    request_window(history_window_shift(state.window_end, (int32_t)(steps * snap),
+                                        state.window_seconds, state.latest_end));
+}
+
 static void chart_press_cb(lv_event_t* event) {
-    if (state.sample_count == 0) return;
     lv_indev_t* indev = lv_indev_active();
     if (indev == nullptr) return;
     lv_point_t point;
     lv_indev_get_point(indev, &point);
+    switch (lv_event_get_code(event)) {
+        case LV_EVENT_PRESSED:
+            s_drag.x0 = point.x;
+            s_drag.dx = 0;
+            s_drag.panning = false;
+            s_drag.scrubbing = false;
+            break;
+        case LV_EVENT_LONG_PRESSED:
+            if (!s_drag.panning) s_drag.scrubbing = true;
+            return;
+        case LV_EVENT_RELEASED:
+        case LV_EVENT_PRESS_LOST:
+            pan_end(lv_event_get_code(event) == LV_EVENT_RELEASED);
+            s_drag.scrubbing = false;
+            return;
+        default:
+            break;
+    }
+    if (s_drag.panning) {
+        int32_t lo, hi;
+        pan_limits(&lo, &hi);
+        int32_t dx = point.x - s_drag.x0;
+        if (dx < lo) dx = lo;
+        if (dx > hi) dx = hi;
+        if (dx != s_drag.dx) {
+            s_drag.dx = dx;
+            lv_obj_invalidate(state.chart);
+        }
+        return;
+    }
+    if (!s_drag.scrubbing && abs(point.x - s_drag.x0) > PAN_START_PX) {
+        set_cursor(-1);
+        static_cache_build();
+        if (static_cache_ready()) {
+            s_drag.panning = true;
+            s_drag.x0 = point.x;  // start sliding from here, no jump
+            return;
+        }
+    }
+    if (state.sample_count == 0) return;
     set_cursor(cursor_at(point.x));
-    (void)event;
 }
 
 static int32_t cursor_at(int32_t px) {
@@ -1047,6 +1131,31 @@ static void chart_draw_cb_impl(lv_event_t* event) {
     lv_obj_get_coords(chart, &coords);
     const lv_area_t plot = plot_area(chart);
     const bool cached = static_cache_ready();
+    if (cached && s_drag.panning && s_drag.dx != 0) {
+        // Axis labels stay put; the plot band (data, bands, time axis)
+        // slides with the finger.
+        lv_draw_image_dsc_t image;
+        lv_draw_image_dsc_init(&image);
+        image.src = &s_static.buf;
+        const lv_area_t saved = layer->_clip_area;
+        const lv_area_t fixed[2] = {
+            {coords.x1, coords.y1, plot.x1 - 1, coords.y2},
+            {plot.x2 + 1, coords.y1, coords.x2, coords.y2},
+        };
+        for (const auto& part : fixed) {
+            if (lv_area_intersect(&layer->_clip_area, &saved, &part)) {
+                lv_draw_image(layer, &image, &coords);
+            }
+        }
+        const lv_area_t band = {plot.x1, coords.y1, plot.x2, coords.y2};
+        if (lv_area_intersect(&layer->_clip_area, &saved, &band)) {
+            lv_area_t shifted = coords;
+            lv_area_move(&shifted, s_drag.dx, 0);
+            lv_draw_image(layer, &image, &shifted);
+        }
+        layer->_clip_area = saved;
+        return;
+    }
     if (cached) {
         lv_draw_image_dsc_t image;
         lv_draw_image_dsc_init(&image);
@@ -1516,6 +1625,8 @@ static void zoom_cb(lv_event_t* event) {
 // Double-tap: re-centre the window on the tapped moment, e.g. to see a run
 // that straddled two windows in one piece.
 static void chart_double_click_cb(lv_event_t*) {
+    // Two quick pans in a row aren't a double-tap.
+    if (s_drag.panning || lv_tick_elaps(s_drag.ended_ms) < 600) return;
     lv_indev_t* indev = lv_indev_active();
     if (indev == nullptr) return;
     lv_point_t point;
@@ -1737,6 +1848,9 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
     lv_obj_set_user_data(state.chart, (void*)"temperature_history_chart");
     lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_PRESSED, nullptr);
     lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_PRESSING, nullptr);
+    lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_LONG_PRESSED, nullptr);
+    lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(state.chart, chart_press_cb, LV_EVENT_PRESS_LOST, nullptr);
     lv_obj_add_event_cb(state.chart, chart_double_click_cb,
                         LV_EVENT_DOUBLE_CLICKED, nullptr);
     lv_obj_add_event_cb(state.chart, chart_draw_cb, LV_EVENT_DRAW_MAIN_END,
