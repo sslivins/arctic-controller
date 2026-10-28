@@ -19,8 +19,9 @@ extern "C" {
 #define AUTH_INTEGRATION_TOKEN_LEN 64
 // Maximum concurrent sessions
 #define AUTH_MAX_SESSIONS 4
-// Session lifetime in seconds (7 days)
-#define AUTH_SESSION_LIFETIME_SEC (7 * 24 * 60 * 60)
+// Session lifetime in seconds (30 days from sign-in). Sessions are kept in
+// NVS, so they survive reboots and OTA updates.
+#define AUTH_SESSION_LIFETIME_SEC (30 * 24 * 60 * 60)
 // Maximum username length
 #define AUTH_MAX_USERNAME_LEN 32
 // Maximum password length

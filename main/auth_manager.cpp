@@ -11,6 +11,7 @@
 #include <mbedtls/platform_util.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <stddef.h>
 #include <string.h>
 #include <time.h>
 
@@ -24,14 +25,29 @@ static const char* NVS_KEY_USERNAME = "username";
 static const char* NVS_KEY_PASS_HASH = "pass_hash";
 static const char* NVS_KEY_API_KEY = "api_key";
 static const char* NVS_KEY_INTEGRATION_HASH = "ha_hash";
+static const char* NVS_KEY_SESSIONS = "sessions";
 
-// Session structure
+// Session structure. Only the SHA-256 of the token is held, in RAM and in
+// flash, so reading the NVS partition does not yield a usable cookie.
 typedef struct {
     bool active;
-    char token[AUTH_SESSION_TOKEN_LEN + 1];
+    uint8_t token_hash[32];
     time_t created_at;
     time_t last_used;
 } session_t;
+
+// Sessions are saved so a reboot (an OTA update, a power cut) does not sign
+// every browser out. Blob: version, count, then `count` records.
+static constexpr uint8_t SESSIONS_BLOB_VERSION = 1;
+typedef struct __attribute__((packed)) {
+    int64_t created_at;
+    uint8_t token_hash[32];
+} stored_session_t;
+typedef struct __attribute__((packed)) {
+    uint8_t version;
+    uint8_t count;
+    stored_session_t sessions[AUTH_MAX_SESSIONS];
+} stored_sessions_t;
 
 // Local state
 static struct {
@@ -50,6 +66,9 @@ static struct {
 static portMUX_TYPE integration_token_lock = portMUX_INITIALIZER_UNLOCKED;
 static StaticSemaphore_t integration_token_mutex_buffer;
 static SemaphoreHandle_t integration_token_mutex = NULL;
+// Guards the session table and its NVS copy.
+static StaticSemaphore_t session_mutex_buffer;
+static SemaphoreHandle_t session_mutex = NULL;
 
 // ============================================================================
 // Helper Functions
@@ -204,19 +223,87 @@ static bool save_to_nvs(void)
     return first_err == ESP_OK;
 }
 
-static session_t* find_session(const char* token)
+class SessionLock {
+public:
+    SessionLock() { if (session_mutex) xSemaphoreTake(session_mutex, portMAX_DELAY); }
+    ~SessionLock() { if (session_mutex) xSemaphoreGive(session_mutex); }
+    SessionLock(const SessionLock&) = delete;
+    SessionLock& operator=(const SessionLock&) = delete;
+};
+
+// Caller holds the session lock. A failed write only costs the sessions at the
+// next reboot, so it is logged rather than failing the request.
+static void save_sessions(void)
 {
-    if (token == NULL || token[0] == '\0') return NULL;
-    
+    stored_sessions_t blob = {};
+    blob.version = SESSIONS_BLOB_VERSION;
     for (int i = 0; i < AUTH_MAX_SESSIONS; i++) {
-        if (state.sessions[i].active && 
-            strcmp(state.sessions[i].token, token) == 0) {
-            return &state.sessions[i];
-        }
+        const session_t& s = state.sessions[i];
+        if (!s.active) continue;
+        stored_session_t& out = blob.sessions[blob.count++];
+        out.created_at = (int64_t)s.created_at;
+        memcpy(out.token_hash, s.token_hash, sizeof(out.token_hash));
     }
-    return NULL;
+
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        const size_t len = offsetof(stored_sessions_t, sessions) +
+                           blob.count * sizeof(stored_session_t);
+        err = nvs_set_blob(nvs, NVS_KEY_SESSIONS, &blob, len);
+        if (err == ESP_OK) err = nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to save sessions: %s", esp_err_to_name(err));
+    }
 }
 
+static void load_sessions(void)
+{
+    nvs_handle_t nvs = 0;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) return;
+    stored_sessions_t blob = {};
+    size_t len = sizeof(blob);
+    const esp_err_t err = nvs_get_blob(nvs, NVS_KEY_SESSIONS, &blob, &len);
+    nvs_close(nvs);
+    if (err != ESP_OK) return;
+
+    const size_t header = offsetof(stored_sessions_t, sessions);
+    if (len < header || blob.version != SESSIONS_BLOB_VERSION ||
+        blob.count > AUTH_MAX_SESSIONS ||
+        len != header + blob.count * sizeof(stored_session_t)) {
+        ESP_LOGW(TAG, "Ignoring unreadable saved sessions (len=%u)", (unsigned)len);
+        return;
+    }
+    for (int i = 0; i < blob.count; i++) {
+        session_t& s = state.sessions[i];
+        s.active = true;
+        memcpy(s.token_hash, blob.sessions[i].token_hash, sizeof(s.token_hash));
+        s.created_at = (time_t)blob.sessions[i].created_at;
+        s.last_used = s.created_at;
+    }
+    ESP_LOGI(TAG, "Restored %d saved session(s)", blob.count);
+}
+
+// Caller holds the session lock.
+static session_t* find_session(const char* token)
+{
+    if (token == NULL || strlen(token) != AUTH_SESSION_TOKEN_LEN) return NULL;
+
+    uint8_t hash[32];
+    if (!hash_password(token, hash)) return NULL;
+    session_t* found = NULL;
+    for (int i = 0; i < AUTH_MAX_SESSIONS; i++) {
+        if (state.sessions[i].active &&
+            constant_time_equal(state.sessions[i].token_hash, hash, sizeof(hash))) {
+            found = &state.sessions[i];
+        }
+    }
+    return found;
+}
+
+// Caller holds the session lock.
 static session_t* find_free_session(void)
 {
     session_t* oldest = NULL;
@@ -267,6 +354,11 @@ void auth_mgr_init(void)
         ESP_LOGE(TAG, "Failed to create integration token mutex");
         return;
     }
+    session_mutex = xSemaphoreCreateMutexStatic(&session_mutex_buffer);
+    if (session_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create session mutex");
+        return;
+    }
     
     memset(&state, 0, sizeof(state));
     bool loaded = load_from_nvs();
@@ -285,6 +377,9 @@ void auth_mgr_init(void)
     } else {
         ESP_LOGI(TAG, "Credentials loaded from NVS: username='%s', password_set=%d", 
                  state.username, state.password_set ? 1 : 0);
+        // Sessions belong to these credentials; with factory defaults above
+        // any saved ones are stale and stay unloaded.
+        load_sessions();
     }
 
     // Remote administration is always authenticated. The factory credential
@@ -435,20 +530,32 @@ bool auth_mgr_login(const char* username, const char* password, char* session_to
     }
     
     // Create session
-    session_t* session = find_free_session();
-    if (session == NULL) {
-        ESP_LOGE(TAG, "Login failed: no session slots");
+    char token[AUTH_SESSION_TOKEN_LEN + 1];
+    generate_random_hex(token, AUTH_SESSION_TOKEN_LEN);
+    uint8_t token_hash[32];
+    if (!hash_password(token, token_hash)) {
+        ESP_LOGE(TAG, "Login failed: could not hash the session token");
         return false;
     }
-    
-    session->active = true;
-    generate_random_hex(session->token, AUTH_SESSION_TOKEN_LEN);
-    session->created_at = time(NULL);
-    session->last_used = session->created_at;
+
+    {
+        SessionLock lock;
+        session_t* session = find_free_session();
+        if (session == NULL) {
+            ESP_LOGE(TAG, "Login failed: no session slots");
+            return false;
+        }
+        session->active = true;
+        memcpy(session->token_hash, token_hash, sizeof(token_hash));
+        session->created_at = time(NULL);
+        session->last_used = session->created_at;
+        save_sessions();
+    }
     
     if (session_token != NULL) {
-        strcpy(session_token, session->token);
+        strcpy(session_token, token);
     }
+    mbedtls_platform_zeroize(token, sizeof(token));
     
     ESP_LOGI(TAG, "Login successful, session created");
     return true;
@@ -456,6 +563,7 @@ bool auth_mgr_login(const char* username, const char* password, char* session_to
 
 bool auth_mgr_validate_session(const char* token)
 {
+    SessionLock lock;
     session_t* session = find_session(token);
     if (session == NULL) {
         return false;
@@ -464,28 +572,33 @@ bool auth_mgr_validate_session(const char* token)
     if (is_session_expired(session)) {
         ESP_LOGI(TAG, "Session expired");
         session->active = false;
+        save_sessions();
         return false;
     }
     
-    // Update last used time
+    // Update last used time (RAM only; it only orders evictions)
     session->last_used = time(NULL);
     return true;
 }
 
 void auth_mgr_logout(const char* token)
 {
+    SessionLock lock;
     session_t* session = find_session(token);
     if (session != NULL) {
         session->active = false;
+        save_sessions();
         ESP_LOGI(TAG, "Session logged out");
     }
 }
 
 void auth_mgr_logout_all(void)
 {
+    SessionLock lock;
     for (int i = 0; i < AUTH_MAX_SESSIONS; i++) {
         state.sessions[i].active = false;
     }
+    save_sessions();
     ESP_LOGI(TAG, "All sessions logged out");
 }
 

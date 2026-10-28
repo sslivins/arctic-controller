@@ -103,6 +103,8 @@ paths:
       description: |
         Authenticates a user and returns a session cookie.
         The session cookie is automatically set via `Set-Cookie` header.
+        A session lasts 30 days from sign-in and survives reboots and firmware
+        updates; changing the credentials ends every session.
       operationId: login
       requestBody:
         required: true
@@ -129,7 +131,7 @@ paths:
               description: Session cookie (`arctic_session` over HTTPS, `arctic_session_http` over HTTP)
               schema:
                 type: string
-                example: arctic_session_http=abc123...; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict
+                example: arctic_session_http=abc123...; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict
           content:
             application/json:
               schema:

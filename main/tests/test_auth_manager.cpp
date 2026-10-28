@@ -31,6 +31,7 @@
 #include "nvs_fake.h"
 #include "psa/crypto.h"
 
+#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -60,6 +61,7 @@ namespace {
 constexpr const char *NS = "auth";
 constexpr const char *KEY_PASS_HASH = "pass_hash";
 constexpr const char *KEY_INTEGRATION_HASH = "ha_hash";
+constexpr const char *KEY_SESSIONS = "sessions";
 constexpr const char *USER = "arctic";
 constexpr const char *GOOD_PASS = "correct horse";
 constexpr const char *OTHER_PASS = "battery staple";
@@ -422,7 +424,141 @@ void logout_all_ends_every_session() {
 }
 
 // ---------------------------------------------------------------------------
-// Token uniqueness under a hostile RNG.
+// Sessions across a reboot. auth_mgr_init() runs once per process, so the
+// earlier boot runs in a forked child and only its committed NVS is carried
+// back -- RAM is gone, exactly as after an OTA update or a power cut.
+// ---------------------------------------------------------------------------
+
+struct PreviousBoot {
+    bool ok;
+    char tokens[2][AUTH_SESSION_TOKEN_LEN + 1];
+    char username[AUTH_MAX_USERNAME_LEN + 1];
+    char api_key[AUTH_API_KEY_LEN + 1];
+    uint8_t pass_hash[32];
+    bool has_sessions;
+    size_t sessions_len;
+    uint8_t sessions[512];
+};
+
+void copy_token(char *dst, const std::string &token) {
+    std::snprintf(dst, AUTH_SESSION_TOKEN_LEN + 1, "%s", token.c_str());
+}
+
+PreviousBoot reboot_after(void (*previous_boot)(PreviousBoot *)) {
+    auto *shared = static_cast<PreviousBoot *>(
+        mmap(nullptr, sizeof(PreviousBoot), PROT_READ | PROT_WRITE,
+             MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+    std::memset(shared, 0, sizeof(*shared));
+    std::fflush(stdout);
+    const pid_t pid = fork();
+    if (pid == 0) {
+        previous_boot(shared);
+        std::string s;
+        std::vector<uint8_t> b;
+        if (nvs_fake::peek_str(NS, "username", &s)) {
+            std::snprintf(shared->username, sizeof(shared->username), "%s", s.c_str());
+        }
+        if (nvs_fake::peek_str(NS, "api_key", &s)) {
+            std::snprintf(shared->api_key, sizeof(shared->api_key), "%s", s.c_str());
+        }
+        if (nvs_fake::peek_blob(NS, KEY_PASS_HASH, &b) && b.size() == 32) {
+            std::memcpy(shared->pass_hash, b.data(), 32);
+        }
+        if (nvs_fake::peek_blob(NS, KEY_SESSIONS, &b) &&
+            b.size() <= sizeof(shared->sessions)) {
+            shared->has_sessions = true;
+            shared->sessions_len = b.size();
+            std::memcpy(shared->sessions, b.data(), b.size());
+        }
+        shared->ok = g_failures == 0;
+        std::fflush(stdout);
+        _exit(0);
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    PreviousBoot snap = *shared;
+    munmap(shared, sizeof(PreviousBoot));
+    CHECK(snap.ok);
+
+    nvs_fake::reset();
+    psa_fake::reset();
+    nvs_fake::seed_str(NS, "username", snap.username);
+    nvs_fake::seed_str(NS, "api_key", snap.api_key);
+    nvs_fake::seed_blob(NS, KEY_PASS_HASH,
+                        std::vector<uint8_t>(snap.pass_hash, snap.pass_hash + 32));
+    if (snap.has_sessions) {
+        nvs_fake::seed_blob(NS, KEY_SESSIONS,
+                            std::vector<uint8_t>(snap.sessions,
+                                                 snap.sessions + snap.sessions_len));
+    }
+    auth_mgr_init();
+    return snap;
+}
+
+void a_session_survives_a_reboot() {
+    PreviousBoot before = reboot_after([](PreviousBoot *out) {
+        boot_with_credentials();
+        copy_token(out->tokens[0], login_or_empty(GOOD_PASS));
+    });
+    CHECK(std::strlen(before.tokens[0]) == AUTH_SESSION_TOKEN_LEN);
+    CHECK(auth_mgr_validate_session(before.tokens[0]));
+    std::string tampered = before.tokens[0];
+    tampered[0] = (tampered[0] == 'a') ? 'b' : 'a';
+    CHECK(!auth_mgr_validate_session(tampered.c_str()));
+}
+
+void a_logged_out_session_stays_out_after_a_reboot() {
+    PreviousBoot before = reboot_after([](PreviousBoot *out) {
+        boot_with_credentials();
+        std::string kept = login_or_empty(GOOD_PASS);
+        std::string gone = login_or_empty(GOOD_PASS);
+        auth_mgr_logout(gone.c_str());
+        copy_token(out->tokens[0], kept);
+        copy_token(out->tokens[1], gone);
+    });
+    CHECK(auth_mgr_validate_session(before.tokens[0]));
+    CHECK(!auth_mgr_validate_session(before.tokens[1]));
+}
+
+// A stolen cookie must not come back to life on the next boot just because
+// the credential change only cleared RAM.
+void changing_credentials_clears_the_saved_sessions() {
+    PreviousBoot before = reboot_after([](PreviousBoot *out) {
+        boot_with_credentials();
+        copy_token(out->tokens[0], login_or_empty(GOOD_PASS));
+        CHECK(auth_mgr_set_credentials(USER, OTHER_PASS));
+    });
+    CHECK(!auth_mgr_validate_session(before.tokens[0]));
+}
+
+// Flash holds digests only: reading the partition must not yield a cookie.
+void flash_holds_no_usable_session_token() {
+    boot_with_credentials();
+    std::string token = login_or_empty(GOOD_PASS);
+    std::vector<uint8_t> blob;
+    CHECK(nvs_fake::peek_blob(NS, KEY_SESSIONS, &blob));
+    std::string raw(blob.begin(), blob.end());
+    CHECK(raw.find(token) == std::string::npos);
+    CHECK(raw.find(token.substr(0, 8)) == std::string::npos);
+}
+
+void an_unreadable_saved_session_blob_is_ignored() {
+    nvs_fake::reset();
+    psa_fake::reset();
+    nvs_fake::seed_str(NS, "username", USER);
+    uint8_t hash[32];
+    size_t len = 0;
+    CHECK(psa_hash_compute(PSA_ALG_SHA_256, (const uint8_t *)GOOD_PASS,
+                           std::strlen(GOOD_PASS), hash, sizeof(hash),
+                           &len) == PSA_SUCCESS);
+    nvs_fake::seed_blob(NS, KEY_PASS_HASH, std::vector<uint8_t>(hash, hash + 32));
+    nvs_fake::seed_blob(NS, KEY_SESSIONS, std::vector<uint8_t>(7, 0xFF));
+    auth_mgr_init();
+    CHECK(!auth_mgr_validate_session(std::string(AUTH_SESSION_TOKEN_LEN, 'f').c_str()));
+    std::string fresh = login_or_empty(GOOD_PASS);
+    CHECK(!fresh.empty());
+    CHECK(auth_mgr_validate_session(fresh.c_str()));
+}
 // ---------------------------------------------------------------------------
 
 // generate_random_hex maps esp_random() onto hex digits. Forcing the RNG to
@@ -612,14 +748,13 @@ void a_token_change_waits_for_an_in_flight_control_write() {
     CHECK(!auth_mgr_has_integration_token());
 }
 
-// Many threads logging in and out at once. The session table has no lock, so
-// the point of this test is the end state: however the interleavings land, the
-// table must not be left wedged or inconsistent -- a fresh login must still
-// work and validate, and no more than AUTH_MAX_SESSIONS may be live.
+// Many threads logging in and out at once. Every login and logout now writes
+// NVS, so the session table is guarded by its own mutex; the end state must be
+// usable -- a fresh login must still work and validate, and no more than
+// AUTH_MAX_SESSIONS may be live.
 //
-// (On the device these calls run on the single httpd task today, so this
-// guards a property the code does not enforce with a lock. If a second HTTP
-// worker is ever enabled, this is the test that should start failing.)
+// (On the device these calls run on the httpd task, but the lock means a
+// second HTTP worker would be safe too.)
 void a_login_storm_leaves_the_session_table_usable() {
     boot_with_credentials();
 
@@ -781,6 +916,16 @@ int main() {
     TEST("an unknown session token is rejected",
          an_unknown_session_token_is_rejected);
     TEST("logout all ends every session", logout_all_ends_every_session);
+
+    TEST("a session survives a reboot", a_session_survives_a_reboot);
+    TEST("a logged out session stays out after a reboot",
+         a_logged_out_session_stays_out_after_a_reboot);
+    TEST("changing credentials clears the saved sessions",
+         changing_credentials_clears_the_saved_sessions);
+    TEST("flash holds no usable session token",
+         flash_holds_no_usable_session_token);
+    TEST("an unreadable saved session blob is ignored",
+         an_unreadable_saved_session_blob_is_ignored);
 
     TEST("a repeating rng produces a repeating token",
          a_repeating_rng_produces_a_repeating_token);
