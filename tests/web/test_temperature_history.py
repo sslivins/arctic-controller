@@ -267,6 +267,43 @@ class TestTemperatureHistoryWeb:
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
         assert_no_reload(130_000)
 
+    def test_touch_drag_pans_and_hold_scrubs(self, dashboard_page: Page, base_url: str):
+        """On touch, a quick sideways drag pans back in time; press-and-hold
+        first, then drag, moves the readout and leaves the window alone."""
+        _seed_history(base_url)
+        dashboard_page.clock.install()
+        dashboard_page.reload()
+        dashboard_page.wait_for_selector(".rail", timeout=15000)
+        _open_history(dashboard_page)
+
+        def touch(kind: str, frac: float) -> None:
+            dashboard_page.evaluate(
+                """([kind, frac]) => {
+                  const svg = document.querySelector('.hist-chart'), r = svg.getBoundingClientRect();
+                  svg.dispatchEvent(new PointerEvent(kind, { bubbles: true, isPrimary: true,
+                    pointerType: 'touch', clientX: r.left + frac * r.width,
+                    clientY: r.top + r.height / 2 }));
+                }""",
+                [kind, frac],
+            )
+
+        # Hold past the long-press time, then drag: the readout follows.
+        touch("pointerdown", 0.3)
+        dashboard_page.clock.fast_forward(600)
+        touch("pointermove", 0.45)
+        touch("pointermove", 0.7)
+        expect(dashboard_page.locator(".hist-chart-wrap .hist-tip")).to_be_visible()
+        touch("pointerup", 0.7)
+        assert dashboard_page.evaluate("state.tempHistory.end") is None
+
+        # Quick drag right: pans back in time.
+        touch("pointerdown", 0.3)
+        touch("pointermove", 0.45)
+        touch("pointermove", 0.7)
+        touch("pointerup", 0.7)
+        assert dashboard_page.evaluate("state.tempHistory.end") is not None
+        expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
+
 
 def _post(base_url: str, path: str, body: dict | None = None) -> None:
     r = requests.post(f"{base_url}{path}", json=body, timeout=30, verify=False)

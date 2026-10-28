@@ -310,7 +310,7 @@
       color-mix(in srgb, var(--band) 20%, transparent)) !important;
       border-bottom: 3px solid var(--band); border-radius: 2px !important; box-sizing: border-box; }
     .hist-chart-wrap { width: 100%; position: relative; overflow-x: clip; }
-    .hist-chart { width: 100%; height: auto; display: block; touch-action: pan-y; }
+    .hist-chart { width: 100%; height: auto; display: block; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     @media (pointer: fine) { .hist-chart { cursor: grab; } .hist-chart.dragging { cursor: grabbing; user-select: none; } }
     .hist-hint { font-size: 13px; text-align: center; margin: 8px 0 0; }
     .hist-tip { display: none; position: absolute; top: 12px; pointer-events: none; background: var(--cp-surface, #1e293b); border: 1px solid var(--cp-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.6; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
@@ -2598,16 +2598,25 @@
       const snap = histSnap(d.window_seconds);
       histGoto(Math.round((t + d.window_seconds / 2) / snap) * snap);
     }
-    // Mouse drag pans the window (touch keeps its drag for the readout).
+    // Drag pans the window. On touch, as on the device, a quick sideways drag
+    // pans and press-and-hold first, then drag, scrubs the readout.
+    const HIST_HOLD_MS = 400;
     function histDragStart(event) {
       const svg = event.target.closest?.(".hist-chart");
-      if (!svg || event.pointerType !== "mouse" || event.button !== 0 || !histGeom) return;
-      histDrag = { svg, x0: event.clientX, dx: 0, moved: false };
+      if (!svg || !histGeom || !event.isPrimary) return;
+      const touch = event.pointerType !== "mouse";
+      if (!touch && event.button !== 0) return;
+      histDrag = { svg, x0: event.clientX, dx: 0, moved: false, touch, scrub: false, hold: 0 };
+      if (touch) {
+        histHover(event);
+        const drag = histDrag;
+        drag.hold = setTimeout(() => { if (!drag.moved) drag.scrub = true; }, HIST_HOLD_MS);
+      }
     }
     function histDragMove(event) {
-      if (!histDrag) return;
+      if (!histDrag || !event.isPrimary || histDrag.scrub) return;
       histDrag.dx = event.clientX - histDrag.x0;
-      if (!histDrag.moved && Math.abs(histDrag.dx) < 5) return;
+      if (!histDrag.moved && Math.abs(histDrag.dx) < (histDrag.touch ? 10 : 5)) return;
       if (!histDrag.moved) {
         histDrag.moved = true;
         histDrag.svg.classList.add("dragging");
@@ -2627,10 +2636,14 @@
         }
       });
     }
-    function histDragEnd() {
+    function histDragEnd(event) {
       const drag = histDrag, d = state.tempHistory.data;
+      if (!drag || !event.isPrimary) return;
       histDrag = null;
-      if (!drag || !drag.moved || !d || !histGeom) return;
+      clearTimeout(drag.hold);
+      if (!drag.moved || !d || !histGeom) return;
+      // The browser took the gesture (e.g. a page scroll): put the chart back.
+      if (event.type === "pointercancel") { histPanPreview(drag.svg, 0); drag.svg.classList.remove("dragging"); return; }
       const g = histGeom, rect = drag.svg.getBoundingClientRect();
       const plotPx = rect.width * (g.plotR - g.plotL) / g.W;
       const snap = histSnap(g.end - g.start);
@@ -4421,6 +4434,10 @@
     document.addEventListener("pointermove", histDragMove);
     document.addEventListener("pointerup", histDragEnd);
     document.addEventListener("pointercancel", histDragEnd);
+    // Holding a finger on the chart scrubs; don't pop the long-press menu.
+    document.addEventListener("contextmenu", event => {
+      if (histDrag?.touch && event.target.closest?.(".hist-chart")) event.preventDefault();
+    });
     document.addEventListener("pointermove", homeHover);
     document.addEventListener("pointerdown", homeHover);
     document.addEventListener("input", event => {
