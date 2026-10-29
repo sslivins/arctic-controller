@@ -1495,8 +1495,6 @@
     function statusPage() {
       const h = state.hp, r = h.readings, t = h.temperatures;
       return `<div class="page">${pageHead("Status", "Complete temperature, electrical, and mechanical telemetry.")}
-        <section class="card"><div class="card-head"><h2>Cycle history</h2><button class="btn" data-route="history">View cycle history</button></div>
-          <p class="hist-muted">Compressor run cycles with inlet, outlet, and setpoint temperatures over recent hours.</p></section>
         <h2>Operating state</h2><div class="grid grid-2">
           ${metricCard("Selected mode", modeLabel(h.mode), "Configured mode policy from the mainboard")}
           ${metricCard("Actual operation", titleCase(h.operation || "unknown"), "Live operating status from the mainboard")}

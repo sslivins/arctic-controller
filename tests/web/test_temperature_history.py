@@ -23,8 +23,8 @@ def _seed_history(base_url: str) -> dict:
 
 
 def _open_history(page: Page) -> None:
-    page.locator(".rail .nav-link", has_text="Status").click()
-    page.get_by_role("button", name="View cycle history").click()
+    page.locator(".rail .nav-link", has_text="History").click()
+    page.locator(".hist-seg-btn", has_text="Cycles").click()
     page.wait_for_selector(".hist-chart", timeout=10000)
 
 

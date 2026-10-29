@@ -143,11 +143,6 @@ class TestHome:
         dashboard_page.locator(".home-chart").get_by_role("button", name="Cycle history").click()
         self._expect_history_cycles(dashboard_page)
 
-    def test_status_cycle_history_link(self, dashboard_page: Page):
-        dashboard_page.locator(".rail .nav-link", has_text="Status").click()
-        dashboard_page.get_by_role("button", name="View cycle history").click()
-        self._expect_history_cycles(dashboard_page)
-
     def test_status_survives_poll(self, dashboard_page: Page):
         dashboard_page.wait_for_timeout(5500)
         expect(dashboard_page.locator(".hero")).to_be_visible()
