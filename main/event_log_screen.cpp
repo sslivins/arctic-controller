@@ -9,6 +9,7 @@
 #include "nav_bar.h"
 #include "event_log.h"
 #include "heatpump_errors.h"
+#include "macon_advanced_params.h"
 #include "macon_faults.h"
 #include "time_manager.h"
 #include "ui_common.h"
@@ -140,6 +141,7 @@ static string_id_t event_type_to_str_id(event_type_t type) {
         case EVENT_HTTPS_FALLBACK:      return STR_EVENT_HTTPS_FALLBACK;
         case EVENT_EXT_SENSOR_LOST:     return STR_EVENT_EXT_SENSOR_LOST;
         case EVENT_EXT_SENSOR_RESTORED: return STR_EVENT_EXT_SENSOR_RESTORED;
+        case EVENT_PARAM_CHANGED:       return STR_EVENT_PARAM_CHANGED;
         default:                    return STR_EVENT_SYSTEM_START;
     }
 }
@@ -180,6 +182,7 @@ static const char* event_type_icon(event_type_t type) {
         case EVENT_HTTPS_FALLBACK:      return LV_SYMBOL_WARNING;
         case EVENT_EXT_SENSOR_LOST:     return LV_SYMBOL_WARNING;
         case EVENT_EXT_SENSOR_RESTORED: return LV_SYMBOL_OK;
+        case EVENT_PARAM_CHANGED:       return LV_SYMBOL_EDIT;
         default:                    return LV_SYMBOL_FILE;
     }
 }
@@ -221,6 +224,7 @@ static lv_color_t event_type_color(event_type_t type) {
         
         case EVENT_MODE_CHANGED:
         case EVENT_SETPOINT_CHANGED:
+        case EVENT_PARAM_CHANGED:
         case EVENT_SYSTEM_START:
         case EVENT_FIRMWARE_UPDATED:
             return COLOR_ACCENT;
@@ -250,6 +254,20 @@ static void format_outage(char* buf, size_t len, uint32_t seconds) {
     } else {
         snprintf(buf, len, "%u min %02u s", (unsigned)(seconds / 60), (unsigned)(seconds % 60));
     }
+}
+
+// One advanced-parameter value from an EVENT_PARAM_CHANGED payload: the option
+// label for a choice, otherwise the number and unit.
+static void format_param_value(char* buf, size_t n, uint8_t ap, int value) {
+    if (value == EVENT_PARAM_UNKNOWN) { snprintf(buf, n, "?"); return; }
+    if (arctic::advanced_enum_option_count(ap) > 0) {
+        const arctic::AdvEnumOption* o = arctic::advanced_enum_option_at(ap, (size_t)value);
+        if (o && o->label) { snprintf(buf, n, "%s", o->label); return; }
+    }
+    const char* unit = arctic::advanced_display_unit(ap);
+    if (unit && strcmp(unit, "steps") == 0) unit = i18n_get(STR_HP_UNIT_STEPS);
+    if (unit && unit[0]) snprintf(buf, n, "%d %s", value, unit);
+    else snprintf(buf, n, "%d", value);
 }
 
 static void format_event_detail(char* buf, size_t buf_size, const event_entry_t* evt) {
@@ -393,6 +411,17 @@ static void format_event_detail(char* buf, size_t buf_size, const event_entry_t*
             event_firmware_version_format(event_firmware_from(p), from, sizeof(from));
             event_firmware_version_format(event_firmware_to(p), to, sizeof(to));
             snprintf(buf, buf_size, "%s → %s", from, to);
+            break;
+        }
+        case EVENT_PARAM_CHANGED: {
+            const uint8_t ap = event_param_ap(p);
+            const arctic::AdvancedParam* param = arctic::advanced_param_lookup(ap);
+            char from[40], to[40];
+            format_param_value(from, sizeof(from), ap, event_param_from(p));
+            format_param_value(to, sizeof(to), ap, event_param_to(p));
+            snprintf(buf, buf_size, "%s (AP%u): %s → %s",
+                     param ? i18n_get_key(param->name_msg_id, param->name) : "?",
+                     (unsigned)ap, from, to);
             break;
         }
         default:

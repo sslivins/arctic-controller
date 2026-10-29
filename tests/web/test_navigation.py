@@ -72,6 +72,75 @@ class TestNavigation:
         assert dashboard_page.locator('.ap-row input[type="range"]').count() > 0
         assert dashboard_page.locator(".ap-row select.choice-select").count() > 0
 
+    def test_advanced_save_gated_and_keeps_group_open(self, dashboard_page: Page):
+        primary(dashboard_page, "Control").click()
+        group = dashboard_page.locator("details.ap-group", has_text="Defrost").first
+        group.locator(":scope > summary").click()
+        row = group.locator('form[data-key="AP29"]')
+        save = row.locator('button[type="submit"]')
+        slider = row.locator('input[type="range"]')
+        expect(save).to_be_disabled()
+
+        original = slider.input_value()
+        changed = str(int(original) - 1 if int(original) > 0 else 1)
+        set_value = "(el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }"
+        slider.evaluate(set_value, changed)
+        expect(save).to_be_enabled()
+        slider.evaluate(set_value, original)
+        expect(save).to_be_disabled()
+
+        try:
+            slider.evaluate(set_value, changed)
+            with dashboard_page.expect_response(lambda r: "/api/heatpump/advanced/AP29" in r.url and r.request.method == "PUT"):
+                save.click()
+            expect(group).to_have_attribute("open", "")
+            expect(slider).to_have_value(changed)
+            expect(save).to_be_disabled()
+        finally:
+            slider.evaluate(set_value, original)
+            with dashboard_page.expect_response(lambda r: "/api/heatpump/advanced/AP29" in r.url and r.request.method == "PUT"):
+                save.click()
+
+        events = dashboard_page.request.get(dashboard_page.url.split("#")[0].rstrip("/") + "/api/events?limit=5").json()
+        logged = [e for e in events["events"] if e["type"] == "param_changed" and e.get("param") == "AP29"]
+        assert logged and logged[0]["from"] == int(changed) and logged[0]["to"] == int(original), logged
+
+    def test_advanced_revert_and_use_default(self, dashboard_page: Page):
+        primary(dashboard_page, "Control").click()
+        group = dashboard_page.locator("details.ap-group", has_text="Defrost").first
+        group.locator(":scope > summary").click()
+        row = group.locator('form[data-key="AP29"]')
+        save = row.locator('button[type="submit"]')
+        revert = row.locator('[data-action="form-revert"]')
+        use_default = row.locator('[data-action="ap-default"]')
+        slider = row.locator('input[type="range"]')
+        output = row.locator("[data-range-output]")
+        default = use_default.get_attribute("data-default")
+        expect(row.locator(".ap-default")).to_contain_text(f"Default: {default}")
+        expect(revert).to_be_disabled()
+
+        original = slider.input_value()
+        other = str(int(default) + 1)
+        slider.evaluate("(el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }", other)
+        expect(revert).to_be_enabled()
+        expect(use_default).to_be_enabled()
+
+        use_default.click()
+        expect(slider).to_have_value(default)
+        expect(output).to_contain_text(default)
+        expect(use_default).to_be_disabled()
+        if default == original:
+            expect(save).to_be_disabled()
+        else:
+            expect(save).to_be_enabled()
+
+        if default == original:
+            slider.evaluate("(el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }", other)
+        revert.click()
+        expect(slider).to_have_value(original)
+        expect(save).to_be_disabled()
+        expect(revert).to_be_disabled()
+
     def test_discrete_control_labels_wrap_on_desktop(self, dashboard_page: Page):
         primary(dashboard_page, "Control").click()
         frequency = dashboard_page.locator("details", has_text="Frequency").first

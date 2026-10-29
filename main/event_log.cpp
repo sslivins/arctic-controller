@@ -87,6 +87,7 @@ static const char* s_event_names[] = {
     "https_fallback",
     "ext_sensor_lost",
     "ext_sensor_restored",
+    "param_changed",
 };
 
 static_assert(sizeof(s_event_names) / sizeof(s_event_names[0]) == EVENT_TYPE_COUNT,
@@ -407,6 +408,7 @@ event_category_t event_type_category(event_type_t type) {
         case EVENT_POWER_OFF:
         case EVENT_MODE_CHANGED:
         case EVENT_SETPOINT_CHANGED:
+        case EVENT_PARAM_CHANGED:
             return EVENT_CATEGORY_CHANGES;
 
         case EVENT_SYSTEM_START:
