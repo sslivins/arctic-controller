@@ -1,7 +1,7 @@
 """
-Test: Errors Screen
+Test: History › Faults
 
-Navigates to the errors sub-screen and verifies the no-errors state,
+Opens the Faults segment and verifies the no-errors state,
 active error injection via demo fields, error cards, clear history,
 and error display via the /api/heatpump/errors endpoint.
 
@@ -15,29 +15,31 @@ from device_client import DeviceClient
 
 UI_SETTLE = 1.5
 
-# Default demo fault restored after each test (matches initDemoState()).
+# Injected by tests that just need the errors screen open: the home fault
+# banner (the way in) only shows while a fault is active.
 DEMO_FAULT = "P02"
 
 
 @pytest.fixture(autouse=True)
 def _restore_error_state(device: DeviceClient):
-    """Clear error state after each test."""
+    """Clear error state after each test (the demo default has no fault)."""
     yield
     device.clear_all_faults()
-    device.inject_fault(DEMO_FAULT, True)  # restore default demo fault
     device.clear_error_history()
 
 
 def _open_errors(device: DeviceClient):
-    """Navigate from main to the errors screen via the error card."""
+    """Open History › Faults from the home fault banner."""
+    assert device.wait_for_widget(tag="error_label", timeout=5.0), \
+        "fault banner not shown (no active fault?)"
     device.click(tag="error_label")
-    assert device.wait_for_screen("errors", timeout=5.0), \
-        f"Expected 'errors' screen, got '{device.screen}'"
+    assert device.wait_for_screen("faults", timeout=5.0), \
+        f"Expected 'faults' screen, got '{device.screen}'"
 
 
 def _close_errors(device: DeviceClient):
-    """Close the errors screen back to main."""
-    device.click(tag="errors_close")
+    """Leave the Faults segment for the Home tab."""
+    device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0), \
         f"Expected 'main' screen after close, got '{device.screen}'"
 
@@ -86,33 +88,111 @@ def _active_codes(device: DeviceClient) -> list:
 # =========================================================================
 
 class TestErrorsNavigation:
-    """Navigate to/from the errors screen."""
+    """History › Faults is reachable from the home banner and the segment bar."""
 
     def test_open_errors_via_error_card(self, device: DeviceClient):
-        """Clicking the error card on main opens the errors screen."""
+        """Clicking the home fault banner opens History › Faults."""
+        device.inject_fault(DEMO_FAULT, True)
         _open_errors(device)
 
     def test_close_errors_screen(self, device: DeviceClient):
-        """Clicking close returns to the main screen."""
+        """The nav bar leaves the Faults segment like any other tab."""
+        device.inject_fault(DEMO_FAULT, True)
         _open_errors(device)
         _close_errors(device)
 
+    def test_open_from_history_segment(self, device: DeviceClient):
+        """The Faults segment opens without an active fault."""
+        assert device.open_faults(), f"Expected 'faults', got '{device.screen}'"
+        assert device.wait_for_widget(tag="errors_no_errors", timeout=5.0)
+
 
 # =========================================================================
-# Title
+# Segment dot
 # =========================================================================
 
-class TestErrorsTitle:
-    """Verify the title shows 'Error Status'."""
+class TestFaultsSegmentDot:
+    """A red dot on the Faults segment button marks an active fault."""
 
-    def test_title_text(self, device: DeviceClient):
-        """The title should display the Error Status i18n string."""
+    def test_dot_follows_active_faults(self, device: DeviceClient):
+        device.clear_all_faults()
+        device.click(tag="nav_history")
+        assert device.wait_for_widget(tag="history_seg_faults", timeout=5.0)
+        assert device.find_widget(tag="history_seg_faults_dot") is None
+        device.inject_fault(DEMO_FAULT, True)
+        assert device.wait_for_widget(tag="history_seg_faults_dot", timeout=5.0), \
+            "Faults segment dot didn't appear for an active fault"
+        device.clear_all_faults()
+        device.wait_until(
+            "Faults segment dot to clear",
+            lambda: device.find_widget(tag="history_seg_faults_dot") is None,
+            timeout=5.0, expect_within=UI_SETTLE,
+        )
+
+
+# =========================================================================
+# Show on chart
+# =========================================================================
+
+class TestShowOnChart:
+    """An opened fault card jumps to the cycle chart."""
+
+    def test_show_on_chart_centres_the_fault(self, device: DeviceClient):
+        device.clear_all_faults()
+        device.clear_error_history()
+        device.inject_fault("P02", True)
         _open_errors(device)
-        title = device.find_widget(tag="errors_title")
-        assert title is not None, "Errors title widget not found"
-        text = title.text_en or title.text
-        assert "error status" in text.lower(), \
-            f"Expected 'Error Status' in title, got: {text!r}"
+        _wait_screen_text(device, "pressure too high")
+        assert device.find_widget(tag="error_show_on_chart") is None, \
+            "Closed cards shouldn't show the chart button"
+        device.click(label_contains="pressure too high")
+        assert device.wait_for_widget(tag="error_show_on_chart", timeout=5.0)
+
+        device.click(tag="error_show_on_chart")
+        assert device.wait_for_screen("history", timeout=5.0), \
+            f"Expected the cycle chart, got '{device.screen}'"
+        assert device.wait_for_widget(tag="temperature_history_screen", timeout=10.0)
+
+    def test_bottom_card_scrolls_into_view_and_back(self, device: DeviceClient):
+        """Opening the last card brings it above the nav bar; closing it leaves no gap."""
+        device.clear_all_faults()
+        device.clear_error_history()
+        # P06 first, so it is the oldest and lands at the bottom of the list.
+        for codes in (("P06",), ("P02", "E19", "E18", "E13")):
+            for code in codes:
+                device.inject_fault(code, True)
+            device.wait_until("faults active",
+                              lambda: len(device.get_heatpump_errors()["active"]) == len(codes),
+                              timeout=10.0)
+            device.clear_all_faults()
+            device.wait_until("faults cleared",
+                              lambda: not device.get_heatpump_errors()["active"], timeout=10.0)
+        assert device.open_faults()
+        _wait_screen_text(device, "pressure too low")
+        device.click(label_contains="pressure too low")
+        assert device.wait_for_widget(tag="error_show_on_chart", timeout=5.0)
+        nav = device.find_widget(tag="nav_home")
+        assert nav
+
+        def btn_clear_of_nav():
+            btn = device.find_widget(tag="error_show_on_chart")
+            return btn is not None and btn.y + btn.h <= nav.y
+
+        # Opening the bottom card scrolls it into view by itself.
+        device.wait_until("opened card scrolled above the nav bar", btn_clear_of_nav, timeout=5.0)
+
+        def label_y():
+            return next(w.y for w in device.widgets
+                        if "pressure too low" in (w.text_en or w.text or "").lower())
+
+        # Closing it leaves no blank space: the list is already at its end.
+        device.click(label_contains="pressure too low")
+        device.wait_until("card closed",
+                          lambda: device.find_widget(tag="error_show_on_chart") is None, timeout=5.0)
+        before = label_y()
+        device.scroll_to("errors_list", 100000)
+        assert label_y() == before, "closing the card left the list scrolled past its end"
+        device.click(tag="nav_home")
 
 
 # =========================================================================
@@ -217,6 +297,7 @@ class TestClearHistory:
 
     def test_clear_history_button_visible(self, device: DeviceClient):
         """The clear history button should be visible when there's history."""
+        device.inject_fault(DEMO_FAULT, True)
         _open_errors(device)
 
         clear_btn = device.find_widget(tag="errors_clear")

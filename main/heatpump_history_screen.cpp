@@ -112,6 +112,12 @@ static struct {
     uint32_t window_seconds = HISTORY_WINDOW_DEFAULT_SECONDS;
     lv_obj_t* zoom_buttons[sizeof(HISTORY_WINDOW_PRESETS) /
                            sizeof(HISTORY_WINDOW_PRESETS[0])] = {};
+    // Shown over the strip of new data while it loads.
+    lv_obj_t* spinner = nullptr;
+    int32_t spin_permille = 500;  // across the plot, 0 = left edge
+    // A load that finished mid-gesture, applied once the finger lifts:
+    // rebuilding the chart then would stall the drag for 0.2-0.5 s.
+    QueryResult* deferred = nullptr;
 } state;
 
 static void request_window(uint32_t end);
@@ -356,6 +362,27 @@ static bool static_cache_ready() {
     return s_static.valid && s_static.key == static_key();
 }
 
+// While a new window loads, the cached image of the previous one (same
+// length, same data) is drawn moved by the difference, so the old data
+// already sits where it belongs and only the strip being loaded is blank.
+// *shift_px is how far right to draw it; 0 when the cache is current.
+static bool static_cache_shift(int32_t* shift_px) {
+    if (!s_static.valid) return false;
+    const StaticKey now = static_key();
+    StaticKey moved = s_static.key;
+    if (moved.window_end - moved.window_start != now.window_end - now.window_start) {
+        return false;
+    }
+    moved.window_start = now.window_start;
+    moved.window_end = now.window_end;
+    if (!(moved == now)) return false;
+    const lv_area_t plot = plot_area(state.chart);
+    *shift_px = (int32_t)(((int64_t)s_static.key.window_end - (int64_t)now.window_end) *
+                          lv_area_get_width(&plot) /
+                          (int64_t)(now.window_end - now.window_start));
+    return true;
+}
+
 static void static_cache_free() {
     s_static.canvas = nullptr;  // deleted with the overlay
     s_static.valid = false;
@@ -449,8 +476,45 @@ static struct {
     int32_t dx = 0;
     bool panning = false;
     bool scrubbing = false;
+    bool down = false;       // finger on the chart
+    bool springing = false;  // easing back after a drag that didn't move
     uint32_t ended_ms = 0;
 } s_drag;
+
+static constexpr uint32_t SPRING_MS = 180;
+
+static void query_complete(void* data);
+
+static void apply_deferred() {
+    if (state.deferred == nullptr || s_drag.down || s_drag.springing) return;
+    QueryResult* result = state.deferred;
+    state.deferred = nullptr;
+    query_complete(result);
+}
+
+static void spring_exec_cb(void*, int32_t v) {
+    if (state.chart == nullptr) return;
+    s_drag.dx = v;
+    lv_obj_invalidate(state.chart);
+}
+
+static void spring_done_cb(lv_anim_t*) {
+    s_drag.springing = false;
+    s_drag.dx = 0;
+    if (state.chart) lv_obj_invalidate(state.chart);
+    apply_deferred();
+}
+
+static void spring_stop() {
+    if (!s_drag.springing) return;
+    lv_anim_delete(&s_drag, spring_exec_cb);
+    s_drag.springing = false;
+    s_drag.dx = 0;
+}
+
+static bool loading() {
+    return state.query_running || state.pending_query || state.deferred;
+}
 
 // Pan offset limits in px: no further forward than now, no further back
 // than retention.
@@ -472,18 +536,50 @@ static void pan_end(bool apply) {
     if (!s_drag.panning) return;
     s_drag.panning = false;
     s_drag.ended_ms = lv_tick_get();
-    const int32_t dx = s_drag.dx;
+    const int32_t shown = s_drag.dx;
+    int32_t lo, hi;
+    pan_limits(&lo, &hi);
+    const int32_t dx = LV_CLAMP(lo, shown, hi);
+    int64_t steps = 0;
+    const uint32_t snap = history_window_snap(state.window_seconds);
+    if (apply && dx != 0) {
+        const lv_area_t plot = plot_area(state.chart);
+        const int64_t secs = -(int64_t)dx * state.window_seconds /
+                             lv_area_get_width(&plot);
+        steps = (secs >= 0 ? secs + snap / 2 : secs - (int64_t)snap / 2) / snap;
+    }
+    if (steps == 0) {
+        // Nowhere new to go (too small a drag, or pulled past either end):
+        // ease back into place.
+        s_drag.dx = 0;
+        if (shown == 0 || !apply) {
+            lv_obj_invalidate(state.chart);
+            return;
+        }
+        s_drag.springing = true;
+        s_drag.dx = shown;
+        lv_anim_t anim;
+        lv_anim_init(&anim);
+        lv_anim_set_var(&anim, &s_drag);
+        lv_anim_set_exec_cb(&anim, spring_exec_cb);
+        lv_anim_set_values(&anim, shown, 0);
+        lv_anim_set_duration(&anim, SPRING_MS);
+        lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+        lv_anim_set_completed_cb(&anim, spring_done_cb);
+        lv_anim_start(&anim);
+        return;
+    }
     s_drag.dx = 0;
     lv_obj_invalidate(state.chart);
-    if (!apply || dx == 0) return;
-    const lv_area_t plot = plot_area(state.chart);
-    const uint32_t snap = history_window_snap(state.window_seconds);
-    const int64_t secs = -(int64_t)dx * state.window_seconds /
-                         lv_area_get_width(&plot);
-    const int64_t steps = (secs >= 0 ? secs + snap / 2 : secs - (int64_t)snap / 2) / snap;
-    if (steps == 0) return;
     request_window(history_window_shift(state.window_end, (int32_t)(steps * snap),
                                         state.window_seconds, state.latest_end));
+}
+
+// Past either end the chart follows the finger at a third of the speed.
+static int32_t rubber_band(int32_t dx, int32_t lo, int32_t hi) {
+    if (dx > hi) return hi + (dx - hi) / 3;
+    if (dx < lo) return lo + (dx - lo) / 3;
+    return dx;
 }
 
 static void chart_press_cb(lv_event_t* event) {
@@ -493,6 +589,8 @@ static void chart_press_cb(lv_event_t* event) {
     lv_indev_get_point(indev, &point);
     switch (lv_event_get_code(event)) {
         case LV_EVENT_PRESSED:
+            s_drag.down = true;
+            spring_stop();
             s_drag.x0 = point.x;
             s_drag.dx = 0;
             s_drag.panning = false;
@@ -505,6 +603,8 @@ static void chart_press_cb(lv_event_t* event) {
         case LV_EVENT_PRESS_LOST:
             pan_end(lv_event_get_code(event) == LV_EVENT_RELEASED);
             s_drag.scrubbing = false;
+            s_drag.down = false;
+            apply_deferred();
             return;
         default:
             break;
@@ -512,9 +612,7 @@ static void chart_press_cb(lv_event_t* event) {
     if (s_drag.panning) {
         int32_t lo, hi;
         pan_limits(&lo, &hi);
-        int32_t dx = point.x - s_drag.x0;
-        if (dx < lo) dx = lo;
-        if (dx > hi) dx = hi;
+        const int32_t dx = rubber_band(point.x - s_drag.x0, lo, hi);
         if (dx != s_drag.dx) {
             s_drag.dx = dx;
             lv_obj_invalidate(state.chart);
@@ -523,14 +621,18 @@ static void chart_press_cb(lv_event_t* event) {
     }
     if (!s_drag.scrubbing && abs(point.x - s_drag.x0) > PAN_START_PX) {
         set_cursor(-1);
-        static_cache_build();
-        if (static_cache_ready()) {
+        // Mid-load the old window's image, drawn moved into place, is what
+        // slides; building now would draw the stale data into the new window.
+        int32_t shift;
+        const bool ready = loading() ? static_cache_shift(&shift)
+                                     : (static_cache_build(), static_cache_ready());
+        if (ready) {
             s_drag.panning = true;
             s_drag.x0 = point.x;  // start sliding from here, no jump
             return;
         }
     }
-    if (state.sample_count == 0) return;
+    if (state.sample_count == 0 || loading()) return;
     set_cursor(cursor_at(point.x));
 }
 
@@ -1124,14 +1226,89 @@ static void chart_draw_cb(lv_event_t* event) {
 #endif
 }
 
+// Hatched strip with nothing to show (before the oldest record or after
+// now), its boundary line and a label beside it, inside the hatch.
+static void draw_edge_zone(lv_layer_t* layer, const lv_area_t& plot, int32_t x1,
+                           int32_t x2, int32_t edge_x, const char* text,
+                           bool label_right) {
+    static constexpr int32_t HATCH_STEP = 12;
+    const lv_area_t saved = layer->_clip_area;
+    const lv_area_t zone = {x1, plot.y1, x2, plot.y2};
+    if (!lv_area_intersect(&layer->_clip_area, &saved, &zone)) {
+        layer->_clip_area = saved;
+        return;
+    }
+    lv_draw_line_dsc_t hatch;
+    lv_draw_line_dsc_init(&hatch);
+    hatch.color = COLOR_GRID;
+    hatch.width = 2;
+    hatch.opa = LV_OPA_70;
+    // Lines x + y = c, anchored to the boundary so they move with it.
+    int32_t c = edge_x + plot.y1;
+    c -= ((c - (x1 + plot.y1)) / HATCH_STEP + 1) * HATCH_STEP;
+    for (; c < x2 + plot.y2; c += HATCH_STEP) {
+        const int32_t xa = LV_MAX(x1, c - plot.y2);
+        const int32_t xb = LV_MIN(x2, c - plot.y1);
+        if (xa >= xb) continue;
+        hatch.p1.x = xa;
+        hatch.p1.y = c - xa;
+        hatch.p2.x = xb;
+        hatch.p2.y = c - xb;
+        lv_draw_line(layer, &hatch);
+    }
+    draw_line(layer, {edge_x, plot.y1}, {edge_x, plot.y2}, UI_COLOR_TEXT_DIM, 2);
+
+    const lv_font_t* font = &montserrat_16_latin;
+    lv_point_t size;
+    lv_text_get_size(&size, text, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    const int32_t lx = label_right ? edge_x + 12 : edge_x - 12 - size.x;
+    const lv_area_t text_area = {lx, plot.y1 + 10, lx + size.x, plot.y1 + 10 + size.y};
+    lv_draw_rect_dsc_t bg;
+    lv_draw_rect_dsc_init(&bg);
+    bg.bg_color = COLOR_PANEL;
+    bg.radius = 4;
+    const lv_area_t bg_area = {text_area.x1 - 4, text_area.y1 - 2, text_area.x2 + 4,
+                               text_area.y2 + 2};
+    lv_draw_rect(layer, &bg, &bg_area);
+    draw_label(layer, text_area, text, UI_COLOR_TEXT_DIM, LV_TEXT_ALIGN_LEFT, font);
+    layer->_clip_area = saved;
+}
+
+// While the chart is shown moved by dx (the cached image's window), hatch
+// whatever lies past the start of history or past now.
+static void draw_edge_zones(lv_layer_t* layer, const lv_area_t& plot, int32_t dx) {
+    const int64_t w = lv_area_get_width(&plot);
+    const uint32_t start = s_static.key.window_start;
+    const int64_t span = (int64_t)s_static.key.window_end - start;
+    if (span <= 0) return;
+    auto x_at = [&](uint32_t t) {
+        return plot.x1 + ((int64_t)t - start) * w / span + dx;
+    };
+    const uint32_t earliest = state.latest_end > RETENTION_SECONDS
+                                  ? state.latest_end - RETENTION_SECONDS
+                                  : 0;
+    const int64_t xs = x_at(earliest);
+    const int64_t xn = x_at(state.latest_end);
+    if (xs > plot.x1) {
+        draw_edge_zone(layer, plot, plot.x1, (int32_t)LV_MIN(xs, (int64_t)plot.x2),
+                       (int32_t)xs, i18n_get(STR_HISTORY_START), false);
+    }
+    if (xn < plot.x2) {
+        draw_edge_zone(layer, plot, (int32_t)LV_MAX(xn, (int64_t)plot.x1), plot.x2,
+                       (int32_t)xn, i18n_get(STR_HISTORY_NOW), true);
+    }
+}
+
 static void chart_draw_cb_impl(lv_event_t* event) {
     lv_obj_t* chart = (lv_obj_t*)lv_event_get_target(event);
     lv_layer_t* layer = lv_event_get_layer(event);
     lv_area_t coords;
     lv_obj_get_coords(chart, &coords);
     const lv_area_t plot = plot_area(chart);
-    const bool cached = static_cache_ready();
-    if (cached && s_drag.panning && s_drag.dx != 0) {
+    int32_t shift = 0;
+    const bool cached = static_cache_shift(&shift);
+    const int32_t dx = shift + ((s_drag.panning || s_drag.springing) ? s_drag.dx : 0);
+    if (cached && dx != 0) {
         // Axis labels stay put; the plot band (data, bands, time axis)
         // slides with the finger.
         lv_draw_image_dsc_t image;
@@ -1150,10 +1327,11 @@ static void chart_draw_cb_impl(lv_event_t* event) {
         const lv_area_t band = {plot.x1, coords.y1, plot.x2, coords.y2};
         if (lv_area_intersect(&layer->_clip_area, &saved, &band)) {
             lv_area_t shifted = coords;
-            lv_area_move(&shifted, s_drag.dx, 0);
+            lv_area_move(&shifted, dx, 0);
             lv_draw_image(layer, &image, &shifted);
         }
         layer->_clip_area = saved;
+        draw_edge_zones(layer, plot, dx);
         return;
     }
     if (cached) {
@@ -1402,6 +1580,25 @@ static void start_pending_query_if_needed() {
     request_window(end);
 }
 
+static void spinner_hide() {
+    if (state.spinner) lv_obj_add_flag(state.spinner, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Shown as soon as a load starts, unlike the web's 200 ms grace: a load here
+// is never quick (~0.2 s flash read, then a 0.2-0.5 s rebuild during which
+// the screen holds its last frame, spinner included).
+static void spinner_place() {
+    if (state.spinner == nullptr || state.chart == nullptr) return;
+    lv_area_t coords;
+    lv_obj_get_coords(state.chart, &coords);
+    const lv_area_t plot = plot_area(state.chart);
+    const int32_t size = lv_obj_get_width(state.spinner);
+    const int32_t x = plot.x1 + lv_area_get_width(&plot) * state.spin_permille / 1000;
+    const int32_t y = (plot.y1 + plot.y2) / 2;
+    lv_obj_set_pos(state.spinner, x - coords.x1 - size / 2, y - coords.y1 - size / 2);
+    lv_obj_remove_flag(state.spinner, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void query_complete(void* data) {
     auto* result = static_cast<QueryResult*>(data);
     state.query_running = false;
@@ -1412,6 +1609,11 @@ static void query_complete(void* data) {
         start_pending_query_if_needed();
         return;
     }
+    if (s_drag.down || s_drag.springing) {
+        state.deferred = result;
+        return;
+    }
+    spinner_hide();
 
     heap_caps_free(state.samples);
     state.samples = result->samples;
@@ -1504,12 +1706,28 @@ static void query_task(void* data) {
 }
 
 static void request_window(uint32_t end) {
+    // The spinner goes over the middle of the strip of new data: with the
+    // old data drawn moved into place (static_cache_shift) that's the strip
+    // the move uncovers, or the whole plot after a jump or zoom.
+    const int64_t shift = (int64_t)end - (int64_t)state.window_end;
+    const int64_t span = state.window_seconds;
+    const bool moved_same_length =
+        state.window_end - state.window_start == state.window_seconds;
+    if (state.sample_count == 0 || !moved_same_length || llabs(shift) >= span) {
+        state.spin_permille = 500;
+    } else if (shift == 0) {
+        // Same window again (a queued request starting): leave it be.
+    } else if (shift < 0) {
+        state.spin_permille = (int32_t)(-shift * 500 / span);
+    } else {
+        state.spin_permille = (int32_t)(1000 - shift * 500 / span);
+    }
     state.window_end = end;
     state.window_start = end - state.window_seconds;
     update_range_label();
     update_navigation();
-    lv_label_set_text(state.status_label, i18n_get(STR_HISTORY_LOADING));
-    lv_obj_remove_flag(state.status_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(state.status_label, LV_OBJ_FLAG_HIDDEN);
+    spinner_place();
 
     state.generation++;
     if (state.query_running) {
@@ -1526,8 +1744,10 @@ static void request_window(uint32_t end) {
         pdPASS) {
         state.query_running = false;
         delete result;
+        spinner_hide();
         lv_label_set_text(state.status_label,
                           i18n_get(STR_HISTORY_STORAGE_ERROR));
+        lv_obj_remove_flag(state.status_label, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -1874,6 +2094,17 @@ lv_obj_t* heatpump_history_create_in(lv_obj_t* parent) {
                                 LV_PART_MAIN);
     lv_obj_center(state.status_label);
 
+    state.spinner = lv_spinner_create(state.chart);
+    lv_obj_set_size(state.spinner, 44, 44);
+    lv_spinner_set_anim_params(state.spinner, 800, 90);
+    lv_obj_set_style_arc_width(state.spinner, 5, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(state.spinner, 5, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(state.spinner, COLOR_GRID, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(state.spinner, UI_COLOR_TEXT, LV_PART_INDICATOR);
+    lv_obj_remove_flag(state.spinner, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(state.spinner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_user_data(state.spinner, (void*)"temperature_history_spinner");
+
     lv_obj_t* actions = lv_obj_create(state.overlay);
     lv_obj_remove_style_all(actions);
     lv_obj_set_size(actions, LV_PCT(100), 68);
@@ -1929,6 +2160,15 @@ void heatpump_history_hide(void) {
     state.shown = false;
     state.generation++;
     state.pending_query = false;
+    spring_stop();
+    s_drag.down = false;
+    if (state.deferred) {
+        QueryResult* result = state.deferred;
+        state.deferred = nullptr;
+        query_complete(result);  // not shown any more: just frees it
+    }
+    spinner_hide();
+    state.spinner = nullptr;  // deleted with the overlay
     if (state.overlay) lv_obj_delete(state.overlay);
     state.overlay = nullptr;
     static_cache_free();
@@ -1973,4 +2213,12 @@ void heatpump_history_open_centered(uint32_t timestamp) {
     } else {
         state.pending_center = timestamp;
     }
+}
+
+void heatpump_history_open_span(uint32_t start, uint32_t end) {
+    if (end < start) end = start;
+    // The whole span if it fits in the window, otherwise its start.
+    heatpump_history_open_centered(end - start <= state.window_seconds
+                                       ? start + (end - start) / 2
+                                       : start);
 }

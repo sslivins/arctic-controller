@@ -101,8 +101,8 @@ bool describeFaultCode(const char* code, const char** name_out,
 // Update error history from the five opaque Macon fault-byte groups.
 // Should be called each poll/feed cycle. Each newly appeared fault is also
 // recorded in the bell's fault notice (fault_notice.h) unless notify is false;
-// the demo seed passes false so a demo device does not raise its canned fault
-// as a new problem on every boot.
+// the demo seed passes false so seeding the demo state never raises the bell
+// on boot.
 void updateErrorHistory(uint8_t fault_run, uint8_t fault_ee, uint8_t fault_comp,
                         uint8_t fault_elec, uint8_t fault_ref, bool notify = true);
 

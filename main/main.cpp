@@ -45,7 +45,7 @@
 #include "tuya/macon_master_iface.h"
 #include "heatpump_screen.h"
 #include "heatpump_control_screen.h"
-#include "heatpump_errors_screen.h"
+#include "history_tab.h"
 #include "event_log_screen.h"
 #include "nav_bar.h"
 #include "tab_shell.h"
@@ -76,10 +76,6 @@ void app_navigation_return_home(void)
 
     event_log_screen_dismiss_overlays();
     heatpump_control_dismiss_overlays();
-
-    if (heatpump_errors_is_shown()) {
-        heatpump_errors_hide();
-    }
 
     // Owners of top-layer dialogs get to tear their own down first: they hold
     // raw pointers to those objects, so sweeping the top layer before they run
@@ -122,7 +118,6 @@ static void on_update_check_complete(bool update_available, const char* new_vers
 // fault_notice (written by the poll path); the bell mirrors it from the LVGL
 // timer below so status-bar calls stay on the UI task.
 static uint32_t s_fault_notice_rev = 0;             // revision last shown in the bell
-static lv_obj_t* s_fault_notice_return_screen = nullptr;
 
 // Runs on the LVGL task with the display lock held.
 static void sync_fault_notice_bell(void)
@@ -1044,20 +1039,12 @@ static void on_status_bar_notify_item_click(status_bar_notify_type_t type)
 
         case STATUS_BAR_NOTIFY_HEATPUMP_FAULT: {
             // Acknowledge the problems (also forgets the saved copy) and show
-            // the error screen, which has the details and the history.
+            // History › Faults, which has the details and the history.
             fault_notice_clear();
             s_fault_notice_rev = fault_notice_revision();
             bsp_display_lock(0);
-            if (!heatpump_errors_is_shown()) {
-                s_fault_notice_return_screen = lv_scr_act();
-                heatpump_errors_show([]() {
-                    if (s_fault_notice_return_screen) {
-                        lv_screen_load_anim(s_fault_notice_return_screen, LV_SCR_LOAD_ANIM_NONE,
-                                            0, 0, true);
-                        s_fault_notice_return_screen = nullptr;
-                    }
-                });
-            }
+            app_navigation_return_home();
+            history_tab_open(HISTORY_SEG_FAULTS);
             bsp_display_unlock();
             break;
         }

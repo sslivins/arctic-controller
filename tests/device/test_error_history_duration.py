@@ -20,7 +20,6 @@ from device_client import DeviceClient
 UI_SETTLE = 1.5  # Wait for 1s main screen timer
 
 # Default demo fault (matches initDemoState()).
-DEMO_FAULT = "P02"
 ERROR_HOLD_SECONDS = 3
 
 # Duration labels render as "<label> | <sep> <n><unit>" e.g. "Duration: | 3s".
@@ -49,10 +48,9 @@ def _has_duration_label(device: DeviceClient) -> bool:
 
 @pytest.fixture(autouse=True)
 def _restore_demo_state(device: DeviceClient):
-    """Restore default demo state after each test."""
+    """Restore default demo state (no fault, unit on) after each test."""
     yield
     device.clear_all_faults()
-    device.inject_fault(DEMO_FAULT, True)
     device.set_demo_fields(unit_on=1)
 
 
@@ -85,8 +83,8 @@ class TestErrorHistoryDuration:
         assert device.wait_for_widget(tag="error_label", timeout=5.0), \
             "Home fault banner did not appear for P02"
         device.click(tag="error_label")
-        assert device.wait_for_screen("errors", timeout=5.0), \
-            f"Expected 'errors' screen, got '{device.screen}'"
+        assert device.wait_for_screen("faults", timeout=5.0), \
+            f"Expected 'faults' screen, got '{device.screen}'"
 
         # 4. Hold for a known duration. This sleep is INTENTIONAL: the test
         #    measures how long the fault was active, so it must stay active for
@@ -138,8 +136,8 @@ class TestErrorHistoryDuration:
         assert ERROR_HOLD_SECONDS - 1 <= seconds <= ERROR_HOLD_SECONDS + 3, \
             f"Duration {seconds}s outside expected range ({ERROR_HOLD_SECONDS}±2s)"
 
-        # 8. Close panel
-        device.click(symbol="CLOSE")
+        # 8. Leave the Faults segment
+        device.click(tag="nav_home")
         device.wait_for_screen("main", timeout=5.0, raise_on_timeout=False)
 
         # 9. Clean up error history

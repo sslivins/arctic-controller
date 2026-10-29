@@ -104,9 +104,8 @@ def _running(device: DeviceClient, **overrides):
 def _ensure_demo_defaults(device: DeviceClient):
     """Restore demo state defaults after each test in this module."""
     yield
-    # Restore: unit on, compressor+fan+pump running, floor heating, P02 fault
+    # Restore: unit on, compressor+fan+pump running, floor heating, no fault
     device.clear_all_faults()
-    device.inject_fault(DEMO_FAULT, True)
     device.set_demo_fields(
         working_mode=MODE_HEATING,
         cooling_on=0,
@@ -139,7 +138,7 @@ class TestHeroState:
 
     def test_hero_shows_fault_with_error(self, device: DeviceClient):
         """With an active fault, hero should show 'Fault · <code>'."""
-        # Default demo state has the P02 fault active, so hero = Fault
+        device.inject_fault(DEMO_FAULT, True)
         _wait(device, lambda: _hero_text(device, "Fault"),
               "hero_state == Fault")
         hero = self._assert_hero(device, "Fault")

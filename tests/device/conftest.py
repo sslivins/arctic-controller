@@ -132,26 +132,13 @@ def _return_to_main(device: DeviceClient):
         except Exception:
             pass
 
-    # Status / Control / Events are persistent panels in the tab shell — return
-    # to the Home tab via the nav bar (there is no per-panel close button).
-    if current in ("status", "control", "event_log", "history", "energy"):
+    # Status / Control / History segments are persistent panels in the tab
+    # shell — return to the Home tab via the nav bar (no per-panel close button).
+    if current in ("status", "control", "event_log", "history", "energy", "faults"):
         try:
             device.click(tag="nav_home")
         except Exception:
             pass
-        device.try_wait_screen("main", timeout=5.0)
-        device.try_wait_widget(tag="settings", timeout=3.0)
-        return
-
-    # The errors screen is still a standalone overlay opened from the Home tab.
-    if current == "errors":
-        try:
-            device.click(tag="errors_close")
-        except Exception:
-            try:
-                device.click(symbol="CLOSE")
-            except Exception:
-                pass
         device.try_wait_screen("main", timeout=5.0)
         device.try_wait_widget(tag="settings", timeout=3.0)
         return

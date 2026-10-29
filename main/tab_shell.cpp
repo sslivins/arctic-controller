@@ -8,7 +8,6 @@
 #include "heatpump_temps_screen.h"
 #include "heatpump_control_screen.h"
 #include "event_log_screen.h"
-#include "heatpump_errors_screen.h"
 #include "history_tab.h"
 #include <esp_log.h>
 
@@ -153,9 +152,6 @@ void ui_language_changed(void) {
 
     event_log_screen_dismiss_overlays();
     heatpump_control_dismiss_overlays();
-    if (heatpump_errors_is_shown()) {
-        heatpump_errors_hide();
-    }
 
     heatpump_screen_delete();
     heatpump_temps_hide();

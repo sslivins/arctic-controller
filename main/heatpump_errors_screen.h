@@ -1,8 +1,8 @@
 /*
  * Arctic Heat Pump Controller
- * Heat Pump Error Details Screen
- * 
- * Full-screen display of active errors with descriptions and severity
+ * History › Faults: active faults and fault history, each card expanding in
+ * place to show the resolution, a troubleshooting QR code and a jump to the
+ * fault on the cycle chart.
  */
 #pragma once
 
@@ -12,25 +12,10 @@
 extern "C" {
 #endif
 
-/**
- * @brief Callback when screen is closed
- */
-typedef void (*heatpump_errors_close_cb_t)(void);
-
-/**
- * @brief Show the error details screen
- * @param on_close Callback when screen is closed
- */
-void heatpump_errors_show(heatpump_errors_close_cb_t on_close);
-
-/**
- * @brief Hide/close the error details screen
- */
+// Builds the faults list into parent (the History tab's Faults host).
+void heatpump_errors_create_in(lv_obj_t* parent);
+// Tears the list down and stops its refresh timers.
 void heatpump_errors_hide(void);
-
-/**
- * @brief Check if error details screen is visible
- */
 bool heatpump_errors_is_shown(void);
 
 #ifdef __cplusplus

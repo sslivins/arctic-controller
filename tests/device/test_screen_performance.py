@@ -125,14 +125,14 @@ class TestNavScreenPerformance:
         device.click(tag="nav_home")
 
     def test_errors_screen_render(self, device: DeviceClient):
-        """Errors screen opens within budget (single demo fault)."""
+        """History › Faults opens within budget (single demo fault)."""
         # The fault banner only shows while a fault is active.
         device.inject_fault("P02", True)
         _wait_fault_banner(device)
         result = device.click(tag="error_label")
         _assert_under_budget(result, "errors")
-        device.wait_for_screen("errors", timeout=5.0)
-        device.click(tag="errors_close")
+        device.wait_for_screen("faults", timeout=5.0)
+        device.click(tag="nav_home")
 
     def test_settings_screen_render(self, device: DeviceClient):
         """Settings screen opens within budget."""
@@ -193,11 +193,11 @@ class TestHeavyStatePerformance:
             us = _assert_under_budget(
                 result, "errors_heavy", ERROR_INITIAL_BUDGET_US
             )
-            device.wait_for_screen("errors", timeout=5.0)
+            device.wait_for_screen("faults", timeout=5.0)
         finally:
-            # Close errors screen if open, then restore normal state
+            # Leave the Faults segment if open, then restore normal state
             try:
-                device.click(tag="errors_close")
+                device.click(tag="nav_home")
                 device.try_wait_screen("main", timeout=5.0)
             except Exception:
                 pass
@@ -236,11 +236,11 @@ class TestHeavyStatePerformance:
             us = _assert_under_budget(
                 result, "errors_with_history", ERROR_INITIAL_BUDGET_US
             )
-            device.wait_for_screen("errors", timeout=5.0)
+            device.wait_for_screen("faults", timeout=5.0)
         finally:
-            # Close errors screen if open, then restore
+            # Leave the Faults segment if open, then restore
             try:
-                device.click(tag="errors_close")
+                device.click(tag="nav_home")
                 device.try_wait_screen("main", timeout=5.0)
             except Exception:
                 pass

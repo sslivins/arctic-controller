@@ -398,12 +398,11 @@ void initDemoState() {
     s_image.set_value(MaconField::CompressorFreq, 60);  // Hz
     s_image.set_value(MaconField::RealtimePower, 1200); // W
 
-    // Mark all five fault registers present (so faults decode as valid), keep
-    // the unit running, then light the demo's default high-pressure protection
-    // fault by semantic identity — no OEM code string here.
+    // Mark all five fault registers present (so faults decode as valid) with
+    // no fault active, and keep the unit running. Faults are injected on
+    // demand (PATCH /api/heatpump/demo, /api/test/inject-fault).
     s_image.clear_faults();
     s_image.set_flag(MaconFlag::UnitOn, true);
-    s_image.set_fault(MaconFaultId::HighPressureProtection, true);
     imageUnlock();
 
     // Decode the seeded cache into HeatPumpState and mark connected.
@@ -420,7 +419,7 @@ void initDemoState() {
     xSemaphoreGive(s_state_mutex);
 
     // Seed error history with the current fault state. Not a new problem, so
-    // the demo's canned fault does not raise the bell on every boot.
+    // nothing seeded here raises the bell on boot.
     updateErrorHistory(f_run, f_ee, f_comp, f_elec, f_ref, false);
 
     // Also seed some cleared historical errors

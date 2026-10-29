@@ -1,12 +1,14 @@
 /*
  * Arctic Heat Pump Controller
- * Heat Pump Error Details Screen Implementation
- * 
- * Full-screen display of active errors with descriptions and severity
+ * History › Faults view: active faults and fault history
  */
 
 #include "heatpump_errors_screen.h"
 #include "heatpump_errors.h"
+#include "heatpump_history_screen.h"
+#include "history_storage.h"
+#include "history_tab.h"
+#include "nav_bar.h"
 #include "fault_help_links.h"
 #include "heatpump_controller.h"
 #include "ui_common.h"
@@ -17,6 +19,7 @@
 #include <esp_log.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <esp_attr.h>
 
 static const char* TAG = "hp_errors_scr";
@@ -43,8 +46,7 @@ static constexpr int ERROR_LOAD_INTERVAL_MS = 50;
 // ============================================================================
 EXT_RAM_BSS_ATTR static struct {
     bool shown = false;
-    lv_obj_t* screen = nullptr;
-    heatpump_errors_close_cb_t on_close = nullptr;
+    lv_obj_t* root = nullptr;
     lv_timer_t* update_timer = nullptr;
     
     // Error list container
@@ -110,10 +112,31 @@ struct ErrorCardCtx {
     lv_obj_t* resolution_cont;
     lv_obj_t* qr_plate;
     const char* help_url;
+    uint32_t chart_start;
+    uint32_t chart_end;
 };
+
+static constexpr time_t CHART_RETENTION_S =
+    (time_t)HISTORY_TELEMETRY_RETENTION_DAYS * 24 * 60 * 60;
 
 static void error_card_delete_cb(lv_event_t* e) {
     lv_free(lv_event_get_user_data(e));
+}
+
+static struct { uint32_t start, end; } s_chart_span;
+
+static void show_on_chart_async(void* /*unused*/) {
+    heatpump_history_open_span(s_chart_span.start, s_chart_span.end);
+    history_tab_open(HISTORY_SEG_CYCLES);
+}
+
+static void show_on_chart_cb(lv_event_t* e) {
+    const ErrorCardCtx* ctx = (const ErrorCardCtx*)lv_event_get_user_data(e);
+    if (!ctx) return;
+    s_chart_span.start = ctx->chart_start;
+    s_chart_span.end = ctx->chart_end;
+    // Switching segments deletes this card, so not from inside its own event.
+    lv_async_call(show_on_chart_async, nullptr);
 }
 
 static void ensure_help_qr(ErrorCardCtx* ctx) {
@@ -160,6 +183,15 @@ static void error_card_tap_cb(lv_event_t* e) {
                 memcpy(buf + len - 3, sym, 3);
             }
             lv_label_set_text(code_label, buf);
+        }
+
+        lv_obj_update_layout(card);
+        if (is_hidden) {
+            // Bring the opened card (and its buttons) out from under the nav bar.
+            lv_obj_scroll_to_view_recursive(card, LV_ANIM_ON);
+        } else if (state.error_list) {
+            // The list got shorter: drop any space left below its new end.
+            lv_obj_readjust_scroll(state.error_list, LV_ANIM_OFF);
         }
     }
 }
@@ -326,12 +358,46 @@ static lv_obj_t* create_error_card(lv_obj_t* parent, const arctic::ActiveError* 
     lv_obj_set_style_text_color(help_hint, COLOR_TEXT, LV_PART_MAIN);
     lv_obj_set_user_data(help_hint, (void*)"error_help_hint");
 
+    // Jump to the fault on the cycle chart while the telemetry still covers it.
+    lv_obj_t* chart_btn_obj = nullptr;
+    uint32_t chart_start = 0, chart_end = 0;
+    const time_t now = time(nullptr);
+    const bool on_chart = error->first_seen > 0 && error->first_seen <= now &&
+                          now - error->first_seen < CHART_RETENTION_S;
+    if (on_chart) {
+        lv_obj_t* chart_btn = lv_button_create(resolution_cont);
+        lv_obj_set_size(chart_btn, LV_SIZE_CONTENT, 60);
+        lv_obj_set_style_bg_color(chart_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(chart_btn, lv_color_hex(0x4d5f7f), LV_STATE_PRESSED);
+        lv_obj_set_style_radius(chart_btn, 10, LV_PART_MAIN);
+        lv_obj_set_style_shadow_width(chart_btn, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_hor(chart_btn, 24, LV_PART_MAIN);
+        lv_obj_set_style_margin_top(chart_btn, 6, LV_PART_MAIN);
+        lv_obj_set_user_data(chart_btn, (void*)"error_show_on_chart");
+        lv_obj_t* chart_lbl = lv_label_create(chart_btn);
+        lv_label_set_text_fmt(chart_lbl, "%s " LV_SYMBOL_RIGHT, i18n_get(STR_HP_SHOW_ON_CHART));
+        lv_obj_set_style_text_font(chart_lbl, &montserrat_24_latin, LV_PART_MAIN);
+        lv_obj_set_style_text_color(chart_lbl, COLOR_ACCENT, LV_PART_MAIN);
+        lv_obj_center(chart_lbl);
+        chart_start = (uint32_t)error->first_seen;
+        chart_end = error->active || error->last_seen < error->first_seen
+                        ? (uint32_t)now : (uint32_t)error->last_seen;
+        chart_btn_obj = chart_btn;
+    }
+
     ErrorCardCtx* ctx = (ErrorCardCtx*)lv_malloc(sizeof(ErrorCardCtx));
     if (ctx) {
         ctx->resolution_cont = resolution_cont;
         ctx->qr_plate = qr_plate;
         ctx->help_url = arctic::faultHelpUrl(error->code);
+        ctx->chart_start = chart_start;
+        ctx->chart_end = chart_end;
         lv_obj_add_event_cb(card, error_card_delete_cb, LV_EVENT_DELETE, ctx);
+        if (chart_btn_obj) {
+            lv_obj_add_event_cb(chart_btn_obj, show_on_chart_cb, LV_EVENT_CLICKED, ctx);
+        }
+    } else if (chart_btn_obj) {
+        lv_obj_delete(chart_btn_obj);
     }
     
     // Make card clickable to expand/collapse resolution
@@ -586,6 +652,8 @@ static void update_error_list() {
     }
 }
 
+static uint64_t fault_signature(const arctic::HeatPumpState& hp);
+
 static void error_screen_timer_cb(lv_timer_t* timer) {
     (void)timer;
     arctic::HeatPumpState hp = arctic::getState();
@@ -594,11 +662,7 @@ static void error_screen_timer_cb(lv_timer_t* timer) {
     arctic::ErrorHistoryEntry hist[arctic::ERROR_HISTORY_SIZE];
     int hist_count = arctic::getErrorHistory(hist, arctic::ERROR_HISTORY_SIZE);
     
-    // Pack the five raw fault-register bytes into a signature for change detection.
-    uint64_t fault_sig =
-        (uint64_t)hp.fault_run | ((uint64_t)hp.fault_ee << 8) |
-        ((uint64_t)hp.fault_comp << 16) | ((uint64_t)hp.fault_elec << 24) |
-        ((uint64_t)hp.fault_ref << 32);
+    uint64_t fault_sig = fault_signature(hp);
     if (fault_sig != state.prev_fault_sig ||
         hist_count != state.prev_history_count) {
         state.prev_fault_sig = fault_sig;
@@ -608,145 +672,61 @@ static void error_screen_timer_cb(lv_timer_t* timer) {
     }
 }
 
-static void back_btn_cb(lv_event_t* e) {
-    (void)e;
-    ESP_LOGI(TAG, "Back button clicked");
-    
-    stop_load_timer();
-
-    // Stop timer first to prevent use-after-free
-    if (state.update_timer) {
-        lv_timer_del(state.update_timer);
-        state.update_timer = nullptr;
-    }
-    
-    // Save and clear callback
-    heatpump_errors_close_cb_t cb = state.on_close;
-    state.on_close = nullptr;
-    state.shown = false;
-    state.screen = nullptr;
-    state.error_list = nullptr;
-    
-    // Call callback - it will load the previous screen with auto_del=true
-    if (cb) {
-        cb();
-    }
+static uint64_t fault_signature(const arctic::HeatPumpState& hp) {
+    // The five raw fault-register bytes, for change detection.
+    return (uint64_t)hp.fault_run | ((uint64_t)hp.fault_ee << 8) |
+           ((uint64_t)hp.fault_comp << 16) | ((uint64_t)hp.fault_elec << 24) |
+           ((uint64_t)hp.fault_ref << 32);
 }
 
 // ============================================================================
 // Public Functions
 // ============================================================================
 
-void heatpump_errors_show(heatpump_errors_close_cb_t on_close) {
-    if (state.shown) return;
-    
-    ESP_LOGI(TAG, "Showing error details screen");
-    state.on_close = on_close;
+void heatpump_errors_create_in(lv_obj_t* parent) {
+    if (state.shown || !parent) return;
     state.shown = true;
-    
-    // Create screen
-    state.screen = lv_obj_create(NULL);
-    lv_obj_set_size(state.screen, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_color(state.screen, COLOR_BG, LV_PART_MAIN);
-    lv_obj_clear_flag(state.screen, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Header (8% height)
-    lv_obj_t* header = lv_obj_create(state.screen);
-    lv_obj_set_size(header, LV_PCT(100), LV_PCT(8));
-    lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(header, COLOR_HEADER_BG, LV_PART_MAIN);
-    lv_obj_set_style_border_width(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_radius(header, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(header, 15, LV_PART_MAIN);
-    lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
-    
-    // Close button (X on right) with circular background - matches system screen
-    lv_obj_t* back_btn = lv_btn_create(header);
-    lv_obj_set_size(back_btn, 50, 50);
-    lv_obj_align(back_btn, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x3d4f6f), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-    lv_obj_set_style_shadow_width(back_btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(back_btn, 2, LV_PART_MAIN);
-    lv_obj_set_style_border_color(back_btn, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_set_style_border_opa(back_btn, LV_OPA_50, LV_PART_MAIN);
-    lv_obj_add_event_cb(back_btn, back_btn_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_set_user_data(back_btn, (void*)"errors_close");
-    
-    lv_obj_t* back_icon = lv_label_create(back_btn);
-    lv_label_set_text(back_icon, LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_font(back_icon, UI_FONT_ICON, LV_PART_MAIN);
-    lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, LV_PART_MAIN);
-    lv_obj_center(back_icon);
-    
-    // Title
-    lv_obj_t* title = lv_label_create(header);
-    lv_label_set_text(title, i18n_get(STR_HP_ERROR_STATUS));
-    lv_obj_set_style_text_color(title, COLOR_TEXT, LV_PART_MAIN);
-    lv_obj_set_style_text_font(title, UI_FONT_HEADER, LV_PART_MAIN);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_user_data(title, (void*)"errors_title");
-    
-    // Note: Error count label removed - visual distinction between active/cleared is sufficient
-    
-    // Scrollable content (92% height)
-    lv_obj_t* content = lv_obj_create(state.screen);
-    lv_obj_set_size(content, LV_PCT(100), LV_PCT(92));
-    lv_obj_align(content, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    lv_obj_t* content = lv_obj_create(parent);
+    lv_obj_set_size(content, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(content, 20, LV_PART_MAIN);
+    lv_obj_set_style_radius(content, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_hor(content, 18, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(content, 12, LV_PART_MAIN);
+    // The nav bar overlays the bottom of the tab body.
+    lv_obj_set_style_pad_bottom(content, NAV_BAR_H + 15, LV_PART_MAIN);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(content, 15, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
-    
-    // Error list container
+    lv_obj_set_user_data(content, (void*)"errors_list");
+    state.root = content;
     state.error_list = content;
-    
-    // Snapshot current error state for change detection
+
     arctic::HeatPumpState hp = arctic::getState();
-    state.prev_fault_sig =
-        (uint64_t)hp.fault_run | ((uint64_t)hp.fault_ee << 8) |
-        ((uint64_t)hp.fault_comp << 16) | ((uint64_t)hp.fault_elec << 24) |
-        ((uint64_t)hp.fault_ref << 32);
+    state.prev_fault_sig = fault_signature(hp);
     arctic::ErrorHistoryEntry hist_snap[arctic::ERROR_HISTORY_SIZE];
     state.prev_history_count = arctic::getErrorHistory(hist_snap, arctic::ERROR_HISTORY_SIZE);
-    
-    // Initial update
+
     update_error_list();
-    
-    // Periodic check — only rebuilds when error registers or history actually change
+
+    // Only rebuilds when the fault registers or the history actually change.
     state.update_timer = lv_timer_create(error_screen_timer_cb, 2000, nullptr);
-    
-    // Match persistent tab navigation: switch screens immediately.
-    lv_screen_load(state.screen);
-    
-    ESP_LOGI(TAG, "Error details screen shown");
+    ESP_LOGI(TAG, "Faults view shown");
 }
 
 void heatpump_errors_hide(void) {
     if (!state.shown) return;
-    
     stop_load_timer();
-
     if (state.update_timer) {
         lv_timer_del(state.update_timer);
         state.update_timer = nullptr;
     }
-    
-    // Save and clear callback
-    heatpump_errors_close_cb_t cb = state.on_close;
-    state.on_close = nullptr;
-    state.shown = false;
+    if (state.root) lv_obj_delete(state.root);
+    state.root = nullptr;
     state.error_list = nullptr;
-    
-    // Call callback - it will load the previous screen with auto_del=true
-    if (cb) {
-        cb();
-    }
-    
-    ESP_LOGI(TAG, "Error details screen hidden");
+    state.shown = false;
+    ESP_LOGI(TAG, "Faults view hidden");
 }
 
 bool heatpump_errors_is_shown(void) {

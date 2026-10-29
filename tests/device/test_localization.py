@@ -84,11 +84,11 @@ TILE_CAPTIONS = {
     "Español":  ["IMPULSIÓN", "RETORNO", "POTENCIA"],
 }
 
-# Bottom strip labels while the compressor is not running.
+# Bottom strip labels: idle ones, or the running ones while the demo heats.
 HOME_STRIP_LABELS = {
-    "English":  ["Last run", "Today"],
-    "Français": ["Dernier cycle", "Aujourd'hui"],
-    "Español":  ["Último ciclo", "Hoy"],
+    "English":  [("Last run", "Running"), ("Today", "Starts")],
+    "Français": [("Dernier cycle", "En marche"), ("Aujourd'hui", "Démarrages")],
+    "Español":  [("Último ciclo", "En marcha"), ("Hoy", "Arranques")],
 }
 
 # Caption under the hero tank temperature ("Tank", "Tank · target", ...).
@@ -154,9 +154,9 @@ SETTINGS_SUBSCREEN_LABELS = {
     ],
 }
 
-ERRORS_OVERLAY_LABELS = {
-    "Français": ["Historique des erreurs"],
-    "Español":  ["Historial de errores"],
+FAULTS_LABELS = {
+    "Français": ["Historique des erreurs", "Défauts"],
+    "Español":  ["Historial de errores", "Fallos"],
 }
 
 # Fault card severity words (#304). The JSON API keeps the English words.
@@ -195,8 +195,8 @@ def _tank_caption_shown(device: DeviceClient, lang_name: str) -> bool:
             and w.text.startswith(TANK_DESCRIPTION[lang_name]))
 
 
-def _open_errors_overlay(device: DeviceClient):
-    """Open the errors overlay via the Home fault banner.
+def _open_faults(device: DeviceClient):
+    """Open History › Faults via the Home fault banner.
 
     The banner is hidden while there are no faults, so make sure the demo fault
     is active first.
@@ -205,7 +205,7 @@ def _open_errors_overlay(device: DeviceClient):
     assert device.wait_for_widget(tag="error_label", timeout=5.0), \
         "fault banner did not appear after injecting the demo fault"
     device.click(tag="error_label")
-    assert device.wait_for_screen("errors", timeout=5.0)
+    assert device.wait_for_screen("faults", timeout=5.0)
 
 
 def _has_text_containing(device: DeviceClient, expected: str) -> bool:
@@ -291,9 +291,8 @@ def _switch_language(device: DeviceClient, lang_name: str):
 def _restore_english_and_demo(device: DeviceClient):
     """Restore English and default demo state after each test."""
     yield
-    # Restore demo defaults
+    # Restore demo defaults (no fault)
     device.clear_all_faults()
-    device.inject_fault(DEMO_FAULT, True)
     _set_running(device, working_mode=MODE_HEATING)
     # Restore English if switched
     prefs = device.get_preferences()
@@ -508,11 +507,11 @@ def test_tabs_settings_and_overlays_refresh_after_touch_language_change(
 
     device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0)
-    _open_errors_overlay(device)
-    for label in ERRORS_OVERLAY_LABELS[lang_name]:
+    _open_faults(device)
+    for label in FAULTS_LABELS[lang_name]:
         _assert_visible_text(device, label)
-    _assert_all_text_drawable(device, "errors overlay")
-    device.click(tag="errors_close")
+    _assert_all_text_drawable(device, "faults")
+    device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0)
 
     _open_settings(device)
@@ -536,7 +535,7 @@ def test_fault_cards_translate_severity_and_month(device: DeviceClient, lang_nam
     """Severity and start date on fault cards follow the device language (#304)."""
     # The demo fault gives at least one card with a real start time.
     _switch_language(device, lang_name)
-    _open_errors_overlay(device)
+    _open_faults(device)
     try:
         device.wait_until(
             "fault cards rendered",
@@ -554,9 +553,9 @@ def test_fault_cards_translate_severity_and_month(device: DeviceClient, lang_nam
         assert dated, f"no dated fault card; saw {started}"
         english = [s for s in dated if any(m in s for m in ENGLISH_MONTHS)]
         assert not english, f"English month on {lang_name} fault cards: {english}"
-        _assert_all_text_drawable(device, "errors overlay")
+        _assert_all_text_drawable(device, "faults")
     finally:
-        device.click(tag="errors_close")
+        device.click(tag="nav_home")
         assert device.wait_for_screen("main", timeout=5.0)
 
     # The API must stay English; Home Assistant depends on it.

@@ -440,6 +440,14 @@ char* getErrorHistoryAsJson() {
     for (int i = 0; i < count; i++) {
         cJSON* entry = cJSON_CreateObject();
         cJSON_AddStringToObject(entry, "code", history[i].code);
+        const char* name = nullptr;
+        const char* resolution = nullptr;
+        ErrorSeverity sev = ErrorSeverity::INFO;
+        if (describeFaultCode(history[i].code, &name, nullptr, &resolution, &sev)) {
+            cJSON_AddStringToObject(entry, "name", name ? name : "");
+            if (resolution) cJSON_AddStringToObject(entry, "resolution", resolution);
+            cJSON_AddStringToObject(entry, "severity", severityToString(sev));
+        }
         cJSON_AddStringToObject(entry, "help_url", faultHelpUrl(history[i].code));
 
         if (history[i].occurred > 0) {
