@@ -153,8 +153,8 @@ class TestShowOnChart:
             f"Expected the cycle chart, got '{device.screen}'"
         assert device.wait_for_widget(tag="temperature_history_screen", timeout=10.0)
 
-    def test_bottom_card_button_clears_nav_bar(self, device: DeviceClient):
-        """The last history card's button can be scrolled above the nav bar."""
+    def test_bottom_card_scrolls_into_view_and_back(self, device: DeviceClient):
+        """Opening the last card brings it above the nav bar; closing it leaves no gap."""
         device.clear_all_faults()
         device.clear_error_history()
         # P06 first, so it is the oldest and lands at the bottom of the list.
@@ -171,11 +171,27 @@ class TestShowOnChart:
         _wait_screen_text(device, "pressure too low")
         device.click(label_contains="pressure too low")
         assert device.wait_for_widget(tag="error_show_on_chart", timeout=5.0)
-        device.scroll_to("errors_list", 100000)
-        btn = device.find_widget(tag="error_show_on_chart")
         nav = device.find_widget(tag="nav_home")
-        assert btn and nav
-        assert btn.y + btn.h <= nav.y, (btn, nav)
+        assert nav
+
+        def btn_clear_of_nav():
+            btn = device.find_widget(tag="error_show_on_chart")
+            return btn is not None and btn.y + btn.h <= nav.y
+
+        # Opening the bottom card scrolls it into view by itself.
+        device.wait_until("opened card scrolled above the nav bar", btn_clear_of_nav, timeout=5.0)
+
+        def label_y():
+            return next(w.y for w in device.widgets
+                        if "pressure too low" in (w.text_en or w.text or "").lower())
+
+        # Closing it leaves no blank space: the list is already at its end.
+        device.click(label_contains="pressure too low")
+        device.wait_until("card closed",
+                          lambda: device.find_widget(tag="error_show_on_chart") is None, timeout=5.0)
+        before = label_y()
+        device.scroll_to("errors_list", 100000)
+        assert label_y() == before, "closing the card left the list scrolled past its end"
         device.click(tag="nav_home")
 
 

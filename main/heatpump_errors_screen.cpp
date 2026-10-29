@@ -184,6 +184,15 @@ static void error_card_tap_cb(lv_event_t* e) {
             }
             lv_label_set_text(code_label, buf);
         }
+
+        lv_obj_update_layout(card);
+        if (is_hidden) {
+            // Bring the opened card (and its buttons) out from under the nav bar.
+            lv_obj_scroll_to_view_recursive(card, LV_ANIM_ON);
+        } else if (state.error_list) {
+            // The list got shorter: drop any space left below its new end.
+            lv_obj_readjust_scroll(state.error_list, LV_ANIM_OFF);
+        }
     }
 }
 
