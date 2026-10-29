@@ -20,7 +20,6 @@ from device_client import DeviceClient
 UI_SETTLE = 1.5  # Wait for 1s main screen timer
 
 # Default demo fault (matches initDemoState()).
-DEMO_FAULT = "P02"
 ERROR_HOLD_SECONDS = 3
 
 # Duration labels render as "<label> | <sep> <n><unit>" e.g. "Duration: | 3s".
@@ -49,10 +48,9 @@ def _has_duration_label(device: DeviceClient) -> bool:
 
 @pytest.fixture(autouse=True)
 def _restore_demo_state(device: DeviceClient):
-    """Restore default demo state after each test."""
+    """Restore default demo state (no fault, unit on) after each test."""
     yield
     device.clear_all_faults()
-    device.inject_fault(DEMO_FAULT, True)
     device.set_demo_fields(unit_on=1)
 
 

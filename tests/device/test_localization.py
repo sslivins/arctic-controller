@@ -84,11 +84,11 @@ TILE_CAPTIONS = {
     "Español":  ["IMPULSIÓN", "RETORNO", "POTENCIA"],
 }
 
-# Bottom strip labels while the compressor is not running.
+# Bottom strip labels: idle ones, or the running ones while the demo heats.
 HOME_STRIP_LABELS = {
-    "English":  ["Last run", "Today"],
-    "Français": ["Dernier cycle", "Aujourd'hui"],
-    "Español":  ["Último ciclo", "Hoy"],
+    "English":  [("Last run", "Running"), ("Today", "Starts")],
+    "Français": [("Dernier cycle", "En marche"), ("Aujourd'hui", "Démarrages")],
+    "Español":  [("Último ciclo", "En marcha"), ("Hoy", "Arranques")],
 }
 
 # Caption under the hero tank temperature ("Tank", "Tank · target", ...).
@@ -291,9 +291,8 @@ def _switch_language(device: DeviceClient, lang_name: str):
 def _restore_english_and_demo(device: DeviceClient):
     """Restore English and default demo state after each test."""
     yield
-    # Restore demo defaults
+    # Restore demo defaults (no fault)
     device.clear_all_faults()
-    device.inject_fault(DEMO_FAULT, True)
     _set_running(device, working_mode=MODE_HEATING)
     # Restore English if switched
     prefs = device.get_preferences()

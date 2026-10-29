@@ -61,20 +61,15 @@ FAULT_DEFS = [
     ("P01", "Water flow too low"),
 ]
 
-# Default demo fault restored after each test (matches initDemoState()).
-DEMO_DEFAULT_FAULT = "P02"
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
 def _restore_demo_faults(device: DeviceClient):
-    """Restore the default demo fault state after each test."""
+    """Restore the default demo state (no fault, unit on) after each test."""
     yield
     device.clear_all_faults()
-    device.inject_fault(DEMO_DEFAULT_FAULT, True)
     device.set_demo_fields(unit_on=1)
 
 
@@ -95,7 +90,7 @@ class TestFaultCardCodes:
         device.inject_fault(code, True)
         # The error card is repainted by a ~1s main-screen timer, so a fixed
         # sleep-then-read-once races that tick and can observe the previous
-        # test's restored default fault (P02). Poll for the card to reflect the
+        # test's fault. Poll for the card to reflect the
         # injected code instead; expect_within keeps the normal-case settle
         # budget visible to the latency gate.
         ok = device.wait_until(

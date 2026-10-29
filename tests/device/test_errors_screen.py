@@ -15,21 +15,23 @@ from device_client import DeviceClient
 
 UI_SETTLE = 1.5
 
-# Default demo fault restored after each test (matches initDemoState()).
+# Injected by tests that just need the errors screen open: the home fault
+# banner (the way in) only shows while a fault is active.
 DEMO_FAULT = "P02"
 
 
 @pytest.fixture(autouse=True)
 def _restore_error_state(device: DeviceClient):
-    """Clear error state after each test."""
+    """Clear error state after each test (the demo default has no fault)."""
     yield
     device.clear_all_faults()
-    device.inject_fault(DEMO_FAULT, True)  # restore default demo fault
     device.clear_error_history()
 
 
 def _open_errors(device: DeviceClient):
     """Navigate from main to the errors screen via the error card."""
+    assert device.wait_for_widget(tag="error_label", timeout=5.0), \
+        "fault banner not shown (no active fault?)"
     device.click(tag="error_label")
     assert device.wait_for_screen("errors", timeout=5.0), \
         f"Expected 'errors' screen, got '{device.screen}'"
@@ -90,10 +92,12 @@ class TestErrorsNavigation:
 
     def test_open_errors_via_error_card(self, device: DeviceClient):
         """Clicking the error card on main opens the errors screen."""
+        device.inject_fault(DEMO_FAULT, True)
         _open_errors(device)
 
     def test_close_errors_screen(self, device: DeviceClient):
         """Clicking close returns to the main screen."""
+        device.inject_fault(DEMO_FAULT, True)
         _open_errors(device)
         _close_errors(device)
 
@@ -107,6 +111,7 @@ class TestErrorsTitle:
 
     def test_title_text(self, device: DeviceClient):
         """The title should display the Error Status i18n string."""
+        device.inject_fault(DEMO_FAULT, True)
         _open_errors(device)
         title = device.find_widget(tag="errors_title")
         assert title is not None, "Errors title widget not found"
@@ -217,6 +222,7 @@ class TestClearHistory:
 
     def test_clear_history_button_visible(self, device: DeviceClient):
         """The clear history button should be visible when there's history."""
+        device.inject_fault(DEMO_FAULT, True)
         _open_errors(device)
 
         clear_btn = device.find_widget(tag="errors_clear")
