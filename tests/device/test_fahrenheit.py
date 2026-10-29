@@ -111,11 +111,8 @@ def _restore_celsius(device: DeviceClient):
     try:
         current = device.screen
         if current != "main":
-            if current in ("status", "control", "event_log", "history", "energy"):
+            if current in ("status", "control", "event_log", "history", "energy", "faults"):
                 device.click(tag="nav_home")
-                device.wait_for_screen("main", timeout=5.0)
-            elif current == "errors":
-                device.click(tag="errors_close")
                 device.wait_for_screen("main", timeout=5.0)
             elif current == "settings":
                 device.click(tag="settings_close")

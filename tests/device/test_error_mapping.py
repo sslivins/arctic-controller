@@ -124,8 +124,8 @@ class TestFaultPanel:
         device.wait_for_widget(tag="error_label", timeout=5.0,
                                expect_within=UI_SETTLE, raise_on_timeout=False)
         device.click(tag="error_label")
-        assert device.wait_for_screen("errors", timeout=5.0), \
-            f"Expected 'errors' screen, got '{device.screen}'"
+        assert device.wait_for_screen("faults", timeout=5.0), \
+            f"Expected 'faults' screen, got '{device.screen}'"
 
         # Panel cards render asynchronously after the screen settles, so poll for
         # every code to appear before the authoritative assert below.
@@ -144,7 +144,7 @@ class TestFaultPanel:
                 f"Fault code '{code}' not found in error panel"
 
         # Close panel
-        device.click(symbol="CLOSE")
+        device.click(tag="nav_home")
         device.wait_for_screen("main", timeout=5.0, raise_on_timeout=False)
 
     def test_all_descriptions_in_panel(self, device: DeviceClient):
@@ -156,8 +156,8 @@ class TestFaultPanel:
         device.wait_for_widget(tag="error_label", timeout=5.0,
                                expect_within=UI_SETTLE, raise_on_timeout=False)
         device.click(tag="error_label")
-        assert device.wait_for_screen("errors", timeout=5.0), \
-            f"Expected 'errors' screen, got '{device.screen}'"
+        assert device.wait_for_screen("faults", timeout=5.0), \
+            f"Expected 'faults' screen, got '{device.screen}'"
 
         device.wait_until(
             "all fault descriptions present in panel",
@@ -173,5 +173,5 @@ class TestFaultPanel:
             assert label in all_text, \
                 f"Description '{label}' for {code} not found in panel"
 
-        device.click(symbol="CLOSE")
+        device.click(tag="nav_home")
         device.wait_for_screen("main", timeout=5.0, raise_on_timeout=False)

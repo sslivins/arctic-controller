@@ -2214,3 +2214,11 @@ void heatpump_history_open_centered(uint32_t timestamp) {
         state.pending_center = timestamp;
     }
 }
+
+void heatpump_history_open_span(uint32_t start, uint32_t end) {
+    if (end < start) end = start;
+    // The whole span if it fits in the window, otherwise its start.
+    heatpump_history_open_centered(end - start <= state.window_seconds
+                                       ? start + (end - start) / 2
+                                       : start);
+}

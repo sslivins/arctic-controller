@@ -232,9 +232,13 @@ class TestErrorHelpLinks:
         import json
         dashboard_page.route("**/api/heatpump/errors", lambda route: route.fulfill(
             status=200, content_type="application/json", body=json.dumps(FAKE_ERRORS)))
+        # The old Errors page link still works: it lands on History › Faults.
         dashboard_page.evaluate("location.hash = '#/errors'")
         dashboard_page.reload()
-        expect(dashboard_page.get_by_role("heading", name="Errors", exact=True)).to_be_visible()
+        expect(history_seg(dashboard_page, "Faults")).to_have_attribute("aria-selected", "true")
+        assert dashboard_page.url.endswith("#/faults")
+        # An active fault puts a dot on the segment.
+        expect(dashboard_page.locator(".hist-seg-btn .hist-seg-dot")).to_have_count(1)
         links = dashboard_page.locator("a[data-help-url]")
         expect(links).to_have_count(1)
         expect(links.first).to_have_text("Troubleshooting guide ↗")
@@ -242,6 +246,69 @@ class TestErrorHelpLinks:
             "href", "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832838")
         expect(links.first).to_have_attribute("target", "_blank")
         expect(links.first).to_have_attribute("rel", "noopener noreferrer")
+
+
+def _fake_fault_history():
+    import time
+    now = int(time.time())
+    started = now - 2 * 3600
+    return {
+        "demo_mode": True, "connected": True, "has_errors": False, "error_count": 0,
+        "active": [],
+        "history": [
+            {"code": "P06", "name": "Water flow fault", "severity": "error", "active": False,
+             "occurred": started, "cleared": started + 130,
+             "help_url": "https://arcticheatpumps.freshdesk.com/support/solutions/articles/60000832840"},
+            {"code": "E19", "name": "Old fault", "severity": "error", "active": False,
+             "occurred": now - 30 * 86400, "cleared": now - 30 * 86400 + 60,
+             "help_url": "https://arcticheatpumps.freshdesk.com/support/solutions"},
+        ],
+    }, started
+
+
+class TestFaultsPage:
+    def test_history_rows_and_view_on_chart(self, dashboard_page: Page):
+        import json
+        data, started = _fake_fault_history()
+        dashboard_page.route("**/api/heatpump/errors", lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(data)))
+        dashboard_page.evaluate("location.hash = '#/faults'")
+        dashboard_page.reload()
+        expect(history_seg(dashboard_page, "Faults")).to_have_attribute("aria-selected", "true")
+        expect(dashboard_page.locator(".hist-seg-dot")).to_have_count(0)
+        expect(dashboard_page.locator(".fault-ok")).to_contain_text("Last fault was P06")
+
+        recent = dashboard_page.locator('.fault-row[data-fault="P06"]')
+        expect(recent).to_contain_text("Water flow fault")
+        expect(recent.locator(".f-dur")).to_have_text("2 min 10 s")
+        expect(recent.locator("a[data-help-url]")).to_have_count(1)
+        # Faults older than the chart's 14 days get no chart link.
+        expect(dashboard_page.locator('.fault-row[data-fault="E19"] [data-action="fault-view"]')).to_have_count(0)
+
+        view = recent.locator('[data-action="fault-view"]')
+        end = int(view.get_attribute("data-end"))
+        window = dashboard_page.evaluate("state.histWindow")
+        assert end % 900 == 0
+        # The 130 s fault sits inside the window, near its middle.
+        assert end - window < started and started + 130 < end
+        assert abs((end - window / 2) - (started + 65)) <= 450
+        view.click()
+        expect(history_seg(dashboard_page, "Cycles")).to_have_attribute("aria-selected", "true")
+        assert dashboard_page.url.endswith("#/history")
+
+    def test_narrow_layout_keeps_both_links(self, dashboard_page: Page):
+        import json
+        data, _ = _fake_fault_history()
+        dashboard_page.route("**/api/heatpump/errors", lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(data)))
+        dashboard_page.set_viewport_size({"width": 420, "height": 900})
+        dashboard_page.evaluate("location.hash = '#/faults'")
+        dashboard_page.reload()
+        recent = dashboard_page.locator('.fault-row[data-fault="P06"]')
+        expect(recent.locator("a[data-help-url]")).to_be_visible()
+        expect(recent.locator('[data-action="fault-view"]')).to_be_visible()
+        expect(recent.locator(".f-lasted")).to_be_visible()
+        expect(recent.locator(".f-dur")).to_be_hidden()
 
 
 def _fake_events():

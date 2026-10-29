@@ -15,6 +15,8 @@ bool heatpump_history_is_shown(void);
 // Opens the next chart (or re-centres the shown one) on the given moment
 // instead of the latest window.
 void heatpump_history_open_centered(uint32_t timestamp);
+// Same, for a span: centred on it if it fits the window, otherwise on start.
+void heatpump_history_open_span(uint32_t start, uint32_t end);
 
 typedef struct {
     int32_t cursor;

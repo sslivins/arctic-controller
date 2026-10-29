@@ -213,6 +213,7 @@ static const char* const strings_en[STR_COUNT] = {
     [STR_NAV_HOME] = "Home",
     [STR_NAV_HISTORY] = "History",
     [STR_HISTORY_SEG_CYCLES] = "Cycles",
+    [STR_HISTORY_SEG_FAULTS] = "Faults",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "COOLING",
@@ -296,6 +297,7 @@ static const char* const strings_en[STR_COUNT] = {
     [STR_HP_RESOLUTION] = "\xEF\x80\x93 Resolution:",
     [STR_HP_CONTACT_DEALER] = "Contact the dealer.",
     [STR_HP_HELP_QR_HINT] = "Scan for troubleshooting steps on the Arctic Heat Pumps support site",
+    [STR_HP_SHOW_ON_CHART] = "Show on chart",
     [STR_HP_STARTED] = "Started:",
     [STR_HP_ACTIVE_FOR] = "Active for",
     [STR_HP_DURATION] = "Duration:",
@@ -840,6 +842,7 @@ static const char* const strings_fr[STR_COUNT] = {
     [STR_NAV_HOME] = "Accueil",
     [STR_NAV_HISTORY] = "Historique",
     [STR_HISTORY_SEG_CYCLES] = "Cycles",
+    [STR_HISTORY_SEG_FAULTS] = "Défauts",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "REFROIDISSEMENT",
@@ -923,6 +926,7 @@ static const char* const strings_fr[STR_COUNT] = {
     [STR_HP_RESOLUTION] = "\xEF\x80\x93 Solution :",
     [STR_HP_CONTACT_DEALER] = "Contactez le revendeur.",
     [STR_HP_HELP_QR_HINT] = "Scannez pour savoir comment le résoudre sur le site d'assistance d'Arctic Heat Pumps (en anglais)",
+    [STR_HP_SHOW_ON_CHART] = "Voir sur le graphique",
     [STR_HP_STARTED] = "Début :",
     [STR_HP_ACTIVE_FOR] = "Active depuis",
     [STR_HP_DURATION] = "Durée :",
@@ -1468,6 +1472,7 @@ static const char* const strings_es[STR_COUNT] = {
     [STR_NAV_HOME] = "Inicio",
     [STR_NAV_HISTORY] = "Historial",
     [STR_HISTORY_SEG_CYCLES] = "Ciclos",
+    [STR_HISTORY_SEG_FAULTS] = "Fallos",
     
     // Heat Pump - Mode Names
     [STR_HP_MODE_COOLING] = "ENFRIAMIENTO",
@@ -1551,6 +1556,7 @@ static const char* const strings_es[STR_COUNT] = {
     [STR_HP_RESOLUTION] = "\xEF\x80\x93 Solución:",
     [STR_HP_CONTACT_DEALER] = "Contacta con tu instalador.",
     [STR_HP_HELP_QR_HINT] = "Escanea para ver cómo solucionarlo en el sitio de soporte de Arctic Heat Pumps (en inglés)",
+    [STR_HP_SHOW_ON_CHART] = "Ver en el gráfico",
     [STR_HP_STARTED] = "Inicio:",
     [STR_HP_ACTIVE_FOR] = "Activo desde hace",
     [STR_HP_DURATION] = "Duración:",

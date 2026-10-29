@@ -1,7 +1,7 @@
 /*
  * Arctic Heat Pump Controller
- * History tab: a Cycles | Events switch over the cycle-history chart and the
- * event log.
+ * History tab: a Cycles | Energy | Events | Faults switch over the
+ * cycle-history chart, energy, the event log and the heat pump faults.
  */
 #include "history_tab.h"
 #include "tab_shell.h"
@@ -9,6 +9,8 @@
 #include "ui_common.h"
 #include "event_log_screen.h"
 #include "heatpump_history_screen.h"
+#include "heatpump_errors_screen.h"
+#include "heatpump_errors.h"
 #include "energy_screen.h"
 #include "i18n/i18n.h"
 #include <esp_log.h>
@@ -28,11 +30,15 @@ static const struct {
     { STR_HISTORY_SEG_CYCLES, "history_seg_cycles" },
     { STR_HP_ENERGY,          "history_seg_energy" },
     { STR_EVENT_LOG,          "history_seg_events" },
+    { STR_HISTORY_SEG_FAULTS, "history_seg_faults" },
 };
 
 static lv_obj_t* s_btns[HISTORY_SEG_COUNT];
 static lv_obj_t* s_labels[HISTORY_SEG_COUNT];
 static lv_obj_t* s_hosts[HISTORY_SEG_COUNT];
+// Red dot on the Faults button while a fault is active.
+static lv_obj_t* s_fault_dot = nullptr;
+static lv_timer_t* s_dot_timer = nullptr;
 // Survives tab switches and language rebuilds so the tab reopens where the
 // user left it.
 static history_seg_t s_seg = HISTORY_SEG_CYCLES;
@@ -66,8 +72,10 @@ static void apply_segment(void) {
     const bool cycles = s_active && s_seg == HISTORY_SEG_CYCLES;
     const bool energy = s_active && s_seg == HISTORY_SEG_ENERGY;
     const bool events = s_active && s_seg == HISTORY_SEG_EVENTS;
+    const bool faults = s_active && s_seg == HISTORY_SEG_FAULTS;
     if (!cycles && heatpump_history_is_shown()) heatpump_history_hide();
     if (!energy && energy_screen_is_shown()) energy_screen_hide();
+    if (!faults && heatpump_errors_is_shown()) heatpump_errors_hide();
     event_log_screen_set_active(events);
     if (cycles && !heatpump_history_is_shown()) {
         heatpump_history_create_in(s_hosts[HISTORY_SEG_CYCLES]);
@@ -75,6 +83,23 @@ static void apply_segment(void) {
     if (energy && !energy_screen_is_shown()) {
         energy_screen_create_in(s_hosts[HISTORY_SEG_ENERGY]);
     }
+    if (faults && !heatpump_errors_is_shown()) {
+        heatpump_errors_create_in(s_hosts[HISTORY_SEG_FAULTS]);
+    }
+}
+
+static void update_fault_dot(void) {
+    if (!s_fault_dot) return;
+    if (arctic::getActiveErrorCount() > 0) {
+        lv_obj_clear_flag(s_fault_dot, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_fault_dot, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void dot_timer_cb(lv_timer_t* t) {
+    (void)t;
+    update_fault_dot();
 }
 
 static void seg_cb(lv_event_t* e) {
@@ -115,6 +140,17 @@ void history_tab_create_in(lv_obj_t* parent) {
         lv_obj_center(lbl);
         s_btns[i] = btn;
         s_labels[i] = lbl;
+        if (i == HISTORY_SEG_FAULTS) {
+            s_fault_dot = lv_obj_create(btn);
+            lv_obj_remove_style_all(s_fault_dot);
+            lv_obj_set_size(s_fault_dot, 14, 14);
+            lv_obj_set_style_radius(s_fault_dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+            lv_obj_set_style_bg_color(s_fault_dot, lv_color_hex(0xef4444), LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(s_fault_dot, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_align(s_fault_dot, LV_ALIGN_TOP_RIGHT, 2, -2);
+            lv_obj_clear_flag(s_fault_dot, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_user_data(s_fault_dot, (void*)"history_seg_faults_dot");
+        }
 
         lv_obj_t* host = lv_obj_create(parent);
         lv_obj_remove_style_all(host);
@@ -128,6 +164,8 @@ void history_tab_create_in(lv_obj_t* parent) {
     // The event log keeps its filters and search between visits, so it is
     // built once like the other tabs; the chart is built when shown.
     event_log_screen_create_in(s_hosts[HISTORY_SEG_EVENTS]);
+    update_fault_dot();
+    if (!s_dot_timer) s_dot_timer = lv_timer_create(dot_timer_cb, 1000, nullptr);
     apply_segment();
     ESP_LOGI(TAG, "history tab created (host_h=%ld)", (long)host_h);
 }
@@ -141,7 +179,11 @@ void history_tab_hide(void) {
     s_active = false;
     if (heatpump_history_is_shown()) heatpump_history_hide();
     if (energy_screen_is_shown()) energy_screen_hide();
+    if (heatpump_errors_is_shown()) heatpump_errors_hide();
     event_log_screen_hide();
+    if (s_dot_timer) lv_timer_delete(s_dot_timer);
+    s_dot_timer = nullptr;
+    s_fault_dot = nullptr;
     for (int i = 0; i < HISTORY_SEG_COUNT; i++) {
         s_btns[i] = nullptr;
         s_labels[i] = nullptr;

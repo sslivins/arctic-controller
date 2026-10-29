@@ -3201,6 +3201,16 @@ paths:
                         code:
                           type: string
                           description: Arctic error code
+                        name:
+                          type: string
+                          description: Fault name, when the code is known
+                        resolution:
+                          type: string
+                          description: Suggested fix, when one is known
+                        severity:
+                          type: string
+                          enum: [info, warning, error, critical]
+                          description: Fault severity, when the code is known
                         help_url:
                           type: string
                           description: Arctic's troubleshooting article for this code, or Arctic's support site when there is no article for it

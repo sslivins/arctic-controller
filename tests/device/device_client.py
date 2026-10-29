@@ -703,6 +703,13 @@ class DeviceClient:
         self.click(tag="history_seg_events")
         return self.wait_for_screen("event_log", timeout=timeout)
 
+    def open_faults(self, timeout: float = 5.0) -> bool:
+        """Open History and switch it to the Faults segment."""
+        self.click(tag="nav_history")
+        self.wait_for_widget(tag="history_seg_faults", timeout=timeout)
+        self.click(tag="history_seg_faults")
+        return self.wait_for_screen("faults", timeout=timeout)
+
     def populate_temperature_history(self) -> dict:
         """Replace telemetry history with an eight-hour graph fixture."""
         r = self.session.post(

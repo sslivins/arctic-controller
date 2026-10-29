@@ -42,7 +42,6 @@
 #include "heatpump_errors.h"
 #include "heatpump_temps_screen.h"
 #include "heatpump_control_screen.h"
-#include "heatpump_errors_screen.h"
 #include "fault_notice.h"
 #include "ext_sensor_notice.h"
 #include "ext_temp_sensors.h"
@@ -716,8 +715,8 @@ static lv_obj_t* find_clickable_parent(lv_obj_t* obj)
 // Determine what screen is currently showing
 static const char* get_screen_name(void)
 {
-    // Settings sub-screens and the errors screen are overlays drawn on top of
-    // the persistent tab shell, so they take precedence when visible.
+    // Settings sub-screens are overlays drawn on top of the persistent tab
+    // shell, so they take precedence when visible.
     if (display_screen_is_visible()) return "display";
     if (home_assistant_screen_is_visible()) return "home_assistant";
     if (security_screen_is_visible()) return "security";
@@ -728,7 +727,6 @@ static const char* get_screen_name(void)
     if (time_screen_is_visible()) return "time";
     if (language_screen_is_visible()) return "language";
     if (settings_menu_is_visible()) return "settings";
-    if (heatpump_errors_is_shown()) return "errors";
 
     // Otherwise the tab shell is showing. All four tab panels are persistent
     // (their individual _is_shown() flags are permanently true), so the visible
@@ -741,6 +739,7 @@ static const char* get_screen_name(void)
             switch (history_tab_segment()) {
                 case HISTORY_SEG_EVENTS: return "event_log";
                 case HISTORY_SEG_ENERGY: return "energy";
+                case HISTORY_SEG_FAULTS: return "faults";
                 default:                 return "history";
             }
         default:              return "main";

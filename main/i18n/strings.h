@@ -233,6 +233,7 @@ typedef enum {
     STR_NAV_HOME,
     STR_NAV_HISTORY,
     STR_HISTORY_SEG_CYCLES,
+    STR_HISTORY_SEG_FAULTS,
     
     // Heat Pump - Mode Names
     STR_HP_MODE_COOLING,
@@ -322,6 +323,7 @@ typedef enum {
     STR_HP_RESOLUTION,
     STR_HP_CONTACT_DEALER,
     STR_HP_HELP_QR_HINT,
+    STR_HP_SHOW_ON_CHART,
     STR_HP_STARTED,
     STR_HP_ACTIVE_FOR,
     STR_HP_DURATION,

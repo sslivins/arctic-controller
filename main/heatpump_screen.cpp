@@ -13,7 +13,6 @@
 #include "fonts/home_icons.h"
 #include "heatpump_controller.h"
 #include "heatpump_errors.h"
-#include "heatpump_errors_screen.h"
 #include "history_tab.h"
 #include "heatpump_types.h"
 #include "history_storage.h"
@@ -299,7 +298,6 @@ static struct {
     uint32_t last_query_ms = 0;
     bool queried_once = false;
 
-    lv_obj_t* saved_screen = nullptr;
     lv_timer_t* update_timer = nullptr;
 } state;
 
@@ -471,16 +469,8 @@ static void hero_card_colors(HeroState s, lv_color_t* bg, lv_color_t* border) {
 // Navigation
 // ============================================================================
 
-static void on_errors_close(void) {
-    if (state.saved_screen) {
-        lv_screen_load_anim(state.saved_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, true);
-        state.saved_screen = nullptr;
-    }
-}
-
 static void error_card_cb(lv_event_t*) {
-    state.saved_screen = lv_scr_act();
-    heatpump_errors_show(on_errors_close);
+    history_tab_open(HISTORY_SEG_FAULTS);
 }
 
 static void tile_cb(lv_event_t*) {

@@ -3,7 +3,7 @@ Test: heat pump problems notification
 
 A new heat pump fault adds ONE "heat pump problems" entry to the status-bar
 bell (and /api/notifications). Further faults update the same entry's count
-rather than adding entries, tapping it acknowledges it and opens Error Status,
+rather than adding entries, tapping it acknowledges it and opens History › Faults,
 and POST /api/heatpump/fault-notice/clear acknowledges it from the web.
 
 The flash write policy, count limit and restore-on-boot are covered by the
@@ -52,7 +52,7 @@ def _clean_notice(device: DeviceClient):
     device.notification_mock_reset()
 
 
-def test_fault_raises_bell_and_tap_opens_error_status(device: DeviceClient):
+def test_fault_raises_bell_and_tap_opens_faults(device: DeviceClient):
     assert _fault_entries(device) == []
     device.inject_fault("P06", True)
     entry = _wait_for_fault(device, 1, "P06")
@@ -66,11 +66,11 @@ def test_fault_raises_bell_and_tap_opens_error_status(device: DeviceClient):
         f"dropdown should name the fault; texts: {[t for t in texts if t]}"
 
     device.click(tag=ITEM_TAG)
-    assert device.wait_for_screen("errors", timeout=5.0), \
-        f"Expected Error Status, got '{device.screen}'"
+    assert device.wait_for_screen("faults", timeout=5.0), \
+        f"Expected History › Faults, got '{device.screen}'"
     device.wait_until("entry acknowledged", lambda: _fault_entries(device) == [], timeout=5.0)
 
-    device.click(tag="errors_close")
+    device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0)
     # The fault is still active, but acknowledged: the bell must not re-raise it.
     assert _fault_entries(device) == []

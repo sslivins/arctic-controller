@@ -108,7 +108,7 @@ class TestNotificationBellWeb:
         finally:
             _reset_notifications(base_url)
 
-    def test_heatpump_fault_notification_opens_errors_and_acknowledges(
+    def test_heatpump_fault_notification_opens_faults_and_acknowledges(
         self, dashboard_page: Page, base_url: str
     ):
         _reset_notifications(base_url)
@@ -130,8 +130,9 @@ class TestNotificationBellWeb:
             dashboard_page.locator(".notif-btn").click()
             dashboard_page.locator(".notif-item", has_text="Heat pump problem").click()
 
-            # Lands on the Errors page...
-            expect(dashboard_page.get_by_role("heading", name="Errors", exact=True)).to_be_visible()
+            # Lands on History › Faults...
+            expect(dashboard_page.locator(".hist-seg-btn", has_text="Faults")).to_have_attribute(
+                "aria-selected", "true")
             # ...and acknowledges the entry.
             after = dashboard_page.evaluate(
                 "() => fetch('/api/notifications').then(r => r.json())"
