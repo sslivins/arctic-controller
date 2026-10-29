@@ -12,6 +12,7 @@
 #include "heatpump_types.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
 #include "macon_advanced_params.h"  // arctic::AdvancedParam, AP reg map
+#include <initializer_list>
 #include "advanced_params.h"        // advanced_param_read/write (controller IO)
 
 #include "ui_common.h"
@@ -115,6 +116,7 @@ static struct {
     lv_obj_t* edit_default_btn = nullptr;
     lv_obj_t* edit_default_lbl = nullptr;
     float edit_value = 0;       // Float for F mode precision
+    int edit_initial = 0;       // value the dialog opened with; Save needs a change
     int16_t edit_value_celsius = 0;  // Original value in Celsius (for non-temp params too)
     bool edit_value_unknown = false; // true when disconnected: show "--", no live value
     bool edit_uses_enum = false;
@@ -794,6 +796,9 @@ static void create_edit_dialog(void) {
     lv_obj_set_style_radius(save_btn, 12, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(save_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_border_width(save_btn, 0, LV_PART_MAIN);
+    // Disabled: solid slate fill with dim text, so "Save" stays legible.
+    lv_obj_set_style_bg_color(save_btn, lv_color_hex(0x334155), LV_STATE_DISABLED);
+    lv_obj_set_style_recolor_opa(save_btn, LV_OPA_TRANSP, LV_STATE_DISABLED);  // drop the theme's grey tint
     lv_obj_add_event_cb(save_btn, edit_save_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_user_data(save_btn, (void*)"edit_save");
 
@@ -801,6 +806,7 @@ static void create_edit_dialog(void) {
     lv_label_set_text(save_lbl, i18n_get(STR_SAVE));
     lv_obj_set_style_text_font(save_lbl, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(save_lbl, COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(save_lbl, COLOR_TEXT_DIM, LV_STATE_DISABLED);
     lv_obj_center(save_lbl);
 }
 
@@ -1093,6 +1099,7 @@ static void show_setpoint_edit(int setpoint_type) {
     int display_min = app_prefs_convert_temp(sp.min_val);
     int display_max = app_prefs_convert_temp(sp.max_val);
     configure_slider_editor(display_min, display_max, (int)roundf(state.edit_value));
+    state.edit_initial = (int)roundf(state.edit_value);
     update_edit_value_display();
     
     // Disconnected heat pump: present the setpoint as view-only rather than
@@ -1115,6 +1122,16 @@ static void hide_edit_dialog(void) {
 static void update_edit_value_display(void) {
     const char* unit = "";
     int display_val = (int)roundf(state.edit_value);  // Round float to int for display
+
+    // Nothing to save until the value differs from the one the dialog opened with.
+    if (state.edit_save_btn) {
+        const bool same = display_val == state.edit_initial;
+        // The label takes the state too so its disabled text colour applies.
+        for (lv_obj_t* o : {state.edit_save_btn, lv_obj_get_child(state.edit_save_btn, 0)}) {
+            if (same) lv_obj_add_state(o, LV_STATE_DISABLED);
+            else lv_obj_remove_state(o, LV_STATE_DISABLED);
+        }
+    }
 
     // Disconnected/unavailable: live values are never cached, so there is nothing
     // real to show — display "--" rather than a fabricated default, and clear any
@@ -1480,6 +1497,7 @@ static void show_ap_edit_dialog(uint8_t ap) {
             v, arctic::advanced_display_step(ap));
     }
 
+    state.edit_initial = (int)roundf(state.edit_value);
     update_edit_value_display();
 
     // Disconnected heat pump: view-only so the user can read the parameter and
