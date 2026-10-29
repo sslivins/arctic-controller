@@ -304,6 +304,165 @@ class TestTemperatureHistoryWeb:
         assert dashboard_page.evaluate("state.tempHistory.end") is not None
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
 
+    def test_drag_past_now_rubber_bands_and_springs_back(
+        self, dashboard_page: Page, base_url: str
+    ):
+        """At the newest window a drag towards the future follows the pointer
+        at a third of the speed over the hatched "Now" zone, then springs back
+        without loading anything."""
+        _seed_history(base_url)
+        _open_history(dashboard_page)
+        loads = []
+        dashboard_page.on(
+            "request",
+            lambda r: loads.append(r.url) if "temperature-history" in r.url else None,
+        )
+
+        x, y = _plot_point(dashboard_page, 0.7)
+        dashboard_page.mouse.move(x, y)
+        dashboard_page.mouse.down()
+        dashboard_page.mouse.move(x - 240, y, steps=6)
+        shift = _pan_shift_px(dashboard_page)
+        assert -120 < shift < -60, shift
+        expect(dashboard_page.locator(".hist-chart .hist-edge", has_text="Now")).to_be_visible()
+        dashboard_page.mouse.up()
+
+        dashboard_page.wait_for_function(
+            "!document.querySelector('.hist-chart .hist-pan[transform]')"
+            " && !document.querySelector('.hist-chart.dragging')"
+        )
+        assert not loads, loads
+        assert dashboard_page.evaluate("state.tempHistory.end") is None
+        expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_disabled()
+
+    def test_drag_past_start_of_history_rubber_bands(
+        self, dashboard_page: Page, base_url: str
+    ):
+        _seed_history(base_url)
+
+        # Make the fixture's own start the oldest record, so the window it
+        # opens on is already the oldest one.
+        def patch(route):
+            resp = route.fetch()
+            body = resp.json()
+            body["earliest"] = body["start"]
+            route.fulfill(response=resp, json=body)
+
+        dashboard_page.route("**/api/heatpump/temperature-history*", patch)
+        _open_history(dashboard_page)
+        expect(dashboard_page.locator('[data-action="history-prev"]')).to_be_disabled()
+        end = dashboard_page.evaluate("state.tempHistory.data.end")
+
+        x, y = _plot_point(dashboard_page, 0.3)
+        dashboard_page.mouse.move(x, y)
+        dashboard_page.mouse.down()
+        dashboard_page.mouse.move(x + 240, y, steps=6)
+        shift = _pan_shift_px(dashboard_page)
+        assert 60 < shift < 120, shift
+        expect(
+            dashboard_page.locator(".hist-chart .hist-edge", has_text="Start of history")
+        ).to_be_visible()
+        dashboard_page.mouse.up()
+
+        dashboard_page.wait_for_function(
+            "!document.querySelector('.hist-chart .hist-pan[transform]')"
+        )
+        assert dashboard_page.evaluate("state.tempHistory.data.end") == end
+        expect(dashboard_page.locator('[data-action="history-prev"]')).to_be_disabled()
+
+    def test_spinner_marks_the_revealed_strip(self, dashboard_page: Page, base_url: str):
+        """A slow load after a drag shows a spinner centred on the strip of
+        new data, and removes it once the chart redraws."""
+        _seed_history(base_url)
+        _open_history(dashboard_page)
+        _zoom_1h(dashboard_page)
+        _gate_history_loads(dashboard_page)
+
+        x, y = _plot_point(dashboard_page, 0.3)
+        plot = dashboard_page.evaluate(
+            """() => { const r = document.querySelector('.hist-chart').getBoundingClientRect(),
+                k = r.width / histGeom.W;
+              return { left: r.left + histGeom.plotL * k, width: (histGeom.plotR - histGeom.plotL) * k }; }"""
+        )
+        drag = plot["width"] / 4
+        dashboard_page.mouse.move(x, y)
+        dashboard_page.mouse.down()
+        dashboard_page.mouse.move(x + drag, y, steps=6)
+        dashboard_page.mouse.up()
+
+        spin = dashboard_page.locator(".hist-chart-wrap .hist-spin")
+        expect(spin).to_be_visible()
+        box = spin.bounding_box()
+        centre = box["x"] + box["width"] / 2
+        assert abs(centre - (plot["left"] + drag / 2)) < 4, (centre, plot, drag)
+
+        dashboard_page.evaluate("window.__openHistGate()")
+        expect(spin).to_have_count(0)
+        expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
+
+    def test_steps_during_a_load_are_not_lost(self, dashboard_page: Page, base_url: str):
+        """Clicking Earlier twice while the first load is still in flight lands
+        two windows back, not one."""
+        _seed_history(base_url)
+        _open_history(dashboard_page)
+        _zoom_1h(dashboard_page)
+        d = dashboard_page.evaluate("state.tempHistory.data")
+        _gate_history_loads(dashboard_page)
+
+        prev = dashboard_page.locator('[data-action="history-prev"]')
+        prev.click()
+        prev.click()
+        dashboard_page.evaluate("window.__openHistGate()")
+        target = d["end"] - 2 * d["window_seconds"]
+        dashboard_page.wait_for_function(
+            f"state.tempHistory.data.end === {target} && !state.tempHistory.loading"
+        )
+
+
+def _plot_point(page: Page, frac: float) -> tuple[float, float]:
+    """Client x/y at `frac` across the plot, half way down."""
+    return tuple(
+        page.evaluate(
+            """frac => { const r = document.querySelector('.hist-chart').getBoundingClientRect(),
+                k = r.width / histGeom.W;
+              return [r.left + (histGeom.plotL + frac * (histGeom.plotR - histGeom.plotL)) * k,
+                      r.top + (histGeom.plotT + histGeom.bottom) / 2 * k]; }""",
+            frac,
+        )
+    )
+
+
+def _pan_shift_px(page: Page) -> float:
+    """How far (client px) the time content is currently dragged."""
+    return page.evaluate(
+        """() => { const svg = document.querySelector('.hist-chart'),
+            g = svg.querySelector('.hist-pan[transform]');
+          const m = g && /translate\\(([-\\d.]+)/.exec(g.getAttribute('transform'));
+          return m ? parseFloat(m[1]) * svg.getBoundingClientRect().width / histGeom.W : 0; }"""
+    )
+
+
+def _zoom_1h(page: Page) -> None:
+    """Zoom to 1 h (not remembered) so the 8 h fixture has room to page back."""
+    page.locator('.hist-zoom [data-window="3600"]').click()
+    page.wait_for_function(
+        "state.tempHistory.data?.window_seconds === 3600 && !state.tempHistory.loading"
+    )
+    page.evaluate("localStorage.removeItem('arcticHistWindow')")
+
+
+def _gate_history_loads(page: Page) -> None:
+    """Hold temperature-history fetches until window.__openHistGate()."""
+    page.evaluate(
+        """() => {
+          let open; const gate = new Promise(r => { open = r; });
+          window.__openHistGate = open;
+          const real = window.fetch;
+          window.fetch = (url, ...rest) => String(url).includes('temperature-history')
+            ? gate.then(() => real(url, ...rest)) : real(url, ...rest);
+        }"""
+    )
+
 
 def _post(base_url: str, path: str, body: dict | None = None) -> None:
     r = requests.post(f"{base_url}{path}", json=body, timeout=30, verify=False)
@@ -315,6 +474,15 @@ class TestHistoryFaultMarkers:
         self, dashboard_page: Page, base_url: str
     ):
         _seed_history(base_url)
+        # Fault spans come from the event log; earlier suites leave a crowd of
+        # injected faults in this window whose labels would crowd out P02's.
+        from conftest import API_KEY
+        requests.delete(
+            f"{base_url}/api/events",
+            headers={"X-API-Key": API_KEY} if API_KEY else {},
+            timeout=30,
+            verify=False,
+        ).raise_for_status()
         _post(base_url, "/api/test/inject-fault", {"code": "P02", "active": True})
         try:
             _post(base_url, "/api/test/inject-fault", {"code": "P02", "active": False})

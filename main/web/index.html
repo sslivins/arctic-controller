@@ -322,6 +322,8 @@
     .hist-tip-run { color: var(--cp-text-muted); font-size: 12px; }
     .hist-runs-title { margin: 18px 0 8px; font-size: 16px; }
     .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
+    .hist-edge { fill: var(--cp-text-muted); font-size: 11px; font-weight: 600; font-family: inherit; paint-order: stroke; stroke: var(--cp-surface); stroke-width: 3px; }
+    .hist-spin { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; box-sizing: border-box; border: 3px solid var(--cp-border-strong); border-top-color: var(--cp-text); border-radius: 50%; animation: spin .8s linear infinite; pointer-events: none; }
     .hist-nav { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; }
     .hist-nav-group { display: flex; gap: 8px; }
     .hist-tip i.band, .hist-legend i.dot { width: 10px; height: 10px; border-radius: 2px; }
@@ -2324,19 +2326,48 @@
       }
       return axis;
     }
-    async function loadHistory() {
-      state.tempHistory.loading = true; state.tempHistory.error = "";
-      try {
-        const end = state.tempHistory.end ? `&end=${state.tempHistory.end}` : "";
-        const d = await api(`/api/heatpump/temperature-history?window=${state.histWindow}${end}`);
-        d.run_summaries = await fetchRunSummaries(d.start, d.end + 1).catch(() => []);
-        state.tempHistory.data = d;
-        state.tempHistory.loadedAt = Date.now();
-      } catch (error) {
-        state.tempHistory.error = error.message || "Failed to load temperature history";
-      } finally {
-        state.tempHistory.loading = false;
-      }
+    // spin: where across the plot (0 = left edge, 1 = right) the new data
+    // lands; a spinner shows there if the load isn't quick. A call while a
+    // load is in flight joins it, and if the window or end changed meanwhile
+    // the stale result is dropped and the newest one fetched instead.
+    function loadHistory(spin = null) {
+      const th = state.tempHistory;
+      if (spin !== null) th.spin = spin;
+      return th.inflight ||= (async () => {
+        th.loading = true; th.error = "";
+        try {
+          for (;;) {
+            const win = state.histWindow, end = th.end, frac = th.spin ?? null;
+            th.spin = null;
+            const spinTimer = frac === null ? 0 : setTimeout(() => histShowSpin(frac), 200);
+            let d = null, error = "";
+            try {
+              d = await api(`/api/heatpump/temperature-history?window=${win}${end ? `&end=${end}` : ""}`);
+              d.run_summaries = await fetchRunSummaries(d.start, d.end + 1).catch(() => []);
+            } catch (e) {
+              error = e.message || "Failed to load temperature history";
+            } finally {
+              clearTimeout(spinTimer);
+            }
+            if (state.histWindow !== win || th.end !== end) continue;
+            if (d) { th.data = d; th.loadedAt = Date.now(); } else th.error = error;
+            break;
+          }
+        } finally {
+          th.loading = false; th.inflight = null;
+          document.querySelector(".hist-spin")?.remove();
+        }
+      })();
+    }
+    function histShowSpin(frac) {
+      const wrap = $(".hist-chart-wrap"), svg = wrap?.querySelector(".hist-chart"), g = histGeom;
+      if (!svg || !g || !state.tempHistory.loading) return;
+      const wr = wrap.getBoundingClientRect(), r = svg.getBoundingClientRect(), k = r.width / g.W;
+      let el = wrap.querySelector(".hist-spin");
+      if (!el) { el = document.createElement("div"); el.className = "hist-spin"; wrap.appendChild(el); }
+      const x = g.plotL + Math.min(1, Math.max(0, frac)) * (g.plotR - g.plotL);
+      el.style.left = `${r.left - wr.left + x * k}px`;
+      el.style.top = `${r.top - wr.top + (g.plotT + g.bottom) / 2 * k}px`;
     }
     function historyChartSvg(data) {
       const samples = data.samples || [];
@@ -2374,7 +2405,26 @@
       let svg = `<svg class="hist-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Cycle history chart">`;
       // Time-dependent content sits in .hist-pan groups so a mouse drag can
       // slide it under the fixed y-axis (clipped to the plot while dragging).
-      svg += `<defs><clipPath id="hist-pan-clip"><rect x="${plotL}" y="0" width="${plotW}" height="${H}"/></clipPath></defs>`;
+      svg += `<defs><clipPath id="hist-pan-clip"><rect x="${plotL}" y="0" width="${plotW}" height="${H}"/></clipPath>` +
+        `<pattern id="hist-edge-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">` +
+        `<line x1="0" y1="0" x2="0" y2="8" stroke="var(--cp-border-strong)" stroke-width="2" opacity="0.6"/></pattern></defs>`;
+
+      // Hatch where there's nothing to show: before the oldest record and
+      // after now. It pans with the data, so a drag past either end shows it,
+      // but is always clipped to the plot. Labels run down the boundary inside
+      // the hatch so a thin strip still fits them.
+      const xAt = t => plotL + (t - start) / span * plotW, far = plotW * 4;
+      const edge = (x1, x2, x, label, side) => {
+        const lx = (side > 0 ? x + 5 : x - 15).toFixed(1), ly = plotT + 6;
+        return `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${bottom - plotT}" fill="url(#hist-edge-hatch)"/>` +
+          `<line x1="${x.toFixed(1)}" y1="${plotT}" x2="${x.toFixed(1)}" y2="${bottom}" stroke="var(--cp-text-muted)" stroke-width="1.5"/>` +
+          `<text x="${lx}" y="${ly}" transform="rotate(90 ${lx} ${ly})" class="hist-edge">${label}</text>`;
+      };
+      let edges = "";
+      if (data.earliest) { const x = xAt(data.earliest); if (x > plotL - far) edges += edge(x - far, x, x, "Start of history", -1); }
+      if (data.latest_end) { const x = xAt(data.latest_end); if (x < plotR + far) edges += edge(x, x + far, x, "Now", 1); }
+      if (edges) svg += `<g clip-path="url(#hist-pan-clip)"><g class="hist-pan" data-fixed-clip="1">${edges}</g></g>`;
+
       svg += `<g class="hist-pan">`;
 
       // Mode bands: contiguous running periods tinted by operating mode.
@@ -2560,7 +2610,7 @@
         <line class="hist-hover-line" y1="${plotT}" y2="${bottom}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
         <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/>${showPower ? `<circle data-key="p" r="4" fill="var(--hist-power)"/>` : ""}</g>`;
       series.p = samples.map(s => s.p ?? null);
-      histGeom = { W, plotL, plotR, mapX, mapY, mapP, samples, series, faults: data.faults || [], defrosts: data.defrosts || [], start, end, showPower, interval,
+      histGeom = { W, plotL, plotR, plotT, bottom, mapX, mapY, mapP, samples, series, faults: data.faults || [], defrosts: data.defrosts || [], start, end, showPower, interval,
         runs: histRuns(data) };
 
       svg += `</svg>`;
@@ -2585,14 +2635,21 @@
       });
     });
     // Show the window ending at `end` (unix s), kept within the stored range;
-    // the newest window goes back to the live view.
-    async function histGoto(end) {
+    // the newest window goes back to the live view. `spin` defaults to the
+    // middle of the strip of new data the move brings in.
+    async function histGoto(end, spin = null) {
       const d = state.tempHistory.data;
       if (!d) return;
       end = Math.max(d.earliest + d.window_seconds, Math.min(Math.round(end), d.latest_end));
+      if (spin === null) {
+        const w = d.window_seconds, shift = end - d.end;
+        spin = !shift || Math.abs(shift) >= w ? 0.5 : shift < 0 ? -shift / w / 2 : 1 - shift / w / 2;
+      }
       state.tempHistory.end = end >= d.latest_end ? null : end;
-      await loadHistory(); render();
+      await loadHistory(spin); render();
     }
+    // The end the chart is showing or loading, so quick repeated steps add up.
+    const histTargetEnd = () => state.tempHistory.end ?? state.tempHistory.data?.end;
     // Unix time under a client x, or null outside the plot.
     function histTimeAt(svg, clientX) {
       const g = histGeom, rect = svg.getBoundingClientRect();
@@ -2615,7 +2672,7 @@
       const t = histTimeAt(svg, event.clientX);
       if (t === null) return;
       const snap = histSnap(d.window_seconds);
-      histGoto(Math.round((t + d.window_seconds / 2) / snap) * snap);
+      histGoto(Math.round((t + d.window_seconds / 2) / snap) * snap, 0.5);
     }
     // Drag pans the window. On touch, as on the device, a quick sideways drag
     // pans and press-and-hold first, then drag, scrubs the readout.
@@ -2641,19 +2698,44 @@
         histDrag.svg.classList.add("dragging");
         document.querySelectorAll(".hist-hover, .hist-chart-wrap .hist-tip").forEach(el => { el.style.display = "none"; });
       }
-      histPanPreview(histDrag.svg, histDrag.dx);
+      histPanPreview(histDrag.svg, histDrag.eff = histRubber(histDrag.dx, histDrag.lim ||= histPanLimits(histDrag.svg)));
     }
     function histPanPreview(svg, dx) {
       const units = dx * histGeom.W / svg.getBoundingClientRect().width;
       svg.querySelectorAll(".hist-pan").forEach(g => {
+        const clip = !g.dataset.fixedClip;
         if (dx) {
           g.setAttribute("transform", `translate(${units.toFixed(1)} 0)`);
-          g.setAttribute("clip-path", "url(#hist-pan-clip)");
+          if (clip) g.setAttribute("clip-path", "url(#hist-pan-clip)");
         } else {
           g.removeAttribute("transform");
-          g.removeAttribute("clip-path");
+          if (clip) g.removeAttribute("clip-path");
         }
       });
+    }
+    // How far (px) the chart can be dragged: forward to now, back to the
+    // oldest record.
+    function histPanLimits(svg) {
+      const d = state.tempHistory.data, g = histGeom;
+      const pxPerS = svg.getBoundingClientRect().width * (g.plotR - g.plotL) / g.W / (g.end - g.start);
+      return { min: -Math.max(0, d.latest_end - d.end) * pxPerS, max: Math.max(0, d.start - d.earliest) * pxPerS };
+    }
+    // Past either end the chart follows the finger at a third of the speed.
+    function histRubber(dx, lim) {
+      if (dx > lim.max) return lim.max + (dx - lim.max) / 3;
+      if (dx < lim.min) return lim.min + (dx - lim.min) / 3;
+      return dx;
+    }
+    function histSpringBack(svg, from) {
+      const t0 = performance.now(), ms = 180;
+      const step = now => {
+        if (!svg.isConnected || histDrag) return;
+        const k = Math.min(1, (now - t0) / ms);
+        histPanPreview(svg, k < 1 ? from * (1 - k) * (1 - k) : 0);
+        if (k < 1) requestAnimationFrame(step);
+        else svg.classList.remove("dragging");
+      };
+      requestAnimationFrame(step);
     }
     function histDragEnd(event) {
       const drag = histDrag, d = state.tempHistory.data;
@@ -2665,10 +2747,14 @@
       if (event.type === "pointercancel") { histPanPreview(drag.svg, 0); drag.svg.classList.remove("dragging"); return; }
       const g = histGeom, rect = drag.svg.getBoundingClientRect();
       const plotPx = rect.width * (g.plotR - g.plotL) / g.W;
+      const lim = drag.lim || histPanLimits(drag.svg);
+      const dx = Math.max(lim.min, Math.min(lim.max, drag.dx));
       const snap = histSnap(g.end - g.start);
-      const shift = Math.round(-drag.dx / plotPx * (g.end - g.start) / snap) * snap;
-      if (!shift) { histPanPreview(drag.svg, 0); drag.svg.classList.remove("dragging"); return; }
-      histGoto(d.end + shift);
+      const shift = Math.round(-dx / plotPx * (g.end - g.start) / snap) * snap;
+      if (!shift) { histSpringBack(drag.svg, drag.eff || 0); return; }
+      // Settle back inside the limits and spin over the strip being revealed.
+      histPanPreview(drag.svg, dx);
+      histGoto(d.end + shift, dx > 0 ? dx / 2 / plotPx : 1 + dx / 2 / plotPx);
     }
     // Live view: while showing the newest window, quietly reload once a minute
     // so the chart keeps sliding forward, and put the hover tooltip back.
@@ -4106,19 +4192,19 @@
       }
       if (action === "reload-params") { await loadParams(); render(); }
       if (action === "home-problems") { state.eventFilters.category = "problems"; await navigate("events"); }
-      if (action === "history-latest") { state.tempHistory.end = null; await loadHistory(); render(); }
+      if (action === "history-latest") { const d = state.tempHistory.data; if (d) await histGoto(d.latest_end); else { state.tempHistory.end = null; await loadHistory(); render(); } }
       if (action === "history-view-run") { await histGoto(Number(el.dataset.t)); }
-      if (action === "history-prev") { const d = state.tempHistory.data; if (d) await histGoto(d.end - d.window_seconds); }
-      if (action === "history-next") { const d = state.tempHistory.data; if (d) await histGoto(d.end + d.window_seconds); }
-      if (action === "history-back-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end - histStep(d.window_seconds)); }
-      if (action === "history-forward-hour") { const d = state.tempHistory.data; if (d) await histGoto(d.end + histStep(d.window_seconds)); }
+      if (action === "history-prev") { const d = state.tempHistory.data; if (d) await histGoto(histTargetEnd() - d.window_seconds); }
+      if (action === "history-next") { const d = state.tempHistory.data; if (d) await histGoto(histTargetEnd() + d.window_seconds); }
+      if (action === "history-back-hour") { const d = state.tempHistory.data; if (d) await histGoto(histTargetEnd() - histStep(d.window_seconds)); }
+      if (action === "history-forward-hour") { const d = state.tempHistory.data; if (d) await histGoto(histTargetEnd() + histStep(d.window_seconds)); }
       if (action === "history-window") {
         const w = Number(el.dataset.window);
         if (HIST_WINDOWS.includes(w) && w !== state.histWindow) {
           // Keep the window's end, so zooming from the live view stays live.
           state.histWindow = w;
           localStorage.setItem("arcticHistWindow", String(w));
-          await loadHistory(); render();
+          await loadHistory(0.5); render();
         }
       }
       if (action === "history-power") {
