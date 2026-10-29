@@ -22,7 +22,8 @@
 // not the vendor's raw count of 10-minute units).
 // Fails (returns false) if: unknown AP, register not change-and-capture
 // verified (reg == ADV_REG_UNKNOWN), not connected, or the bus read fails.
-// In demo mode returns the vendor-doc default for known-register params.
+// In demo mode returns the last demo write (held in RAM until reboot), else the
+// vendor-doc default, for known-register params.
 bool advanced_param_read(uint8_t ap, int16_t* value_out);
 
 // Attempt to write user-facing `value` to advanced parameter AP `ap`.
@@ -46,3 +47,7 @@ arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus
 // guardrail pass, *bus_ok reports whether the live bus write succeeded.
 arctic::AdvWriteResult advanced_param_write_option(uint8_t ap, size_t option_index,
                                                    bool* bus_ok = nullptr);
+
+// Bumped by every write through this controller that changed a value (any
+// task: web/API or device). Lets a screen notice changes made elsewhere.
+uint32_t advanced_param_change_count(void);

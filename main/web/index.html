@@ -480,6 +480,8 @@
     .ap-row { padding: 14px 0; border-top: 1px solid var(--cp-border); display: grid; grid-template-columns: 1fr minmax(260px, 360px); gap: 16px; }
     .ap-row p { color: var(--cp-text-muted); margin: 5px 0 0; font-size: 13px; }
     .ap-value { display: grid; gap: 10px; align-content: center; }
+    .ap-default { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--cp-text-muted); }
+    .ap-default .btn { min-height: 30px; padding: 4px 10px; font-size: 12px; }
     .event-toolbar { display: grid; grid-template-columns: 1fr 170px 170px; gap: 10px; margin-bottom: 16px; }
     .search-field { position: relative; }
     .search-field input { padding-right: 44px; }
@@ -1516,9 +1518,10 @@
     function setpointCard(key, label) {
       const limits = state.hp.setpoint_limits[key] || {};
       const min = tempNumber(limits.min ?? 0), max = tempNumber(limits.max ?? 100);
-      return `<section class="card"><h3>${label}</h3><form data-form="setpoint" data-key="${key}">
+      return `<section class="card"><h3>${label}</h3><form data-form="setpoint" data-key="${key}" data-gate>
         <div class="setpoint">${rangeEditor(tempNumber(state.hp.setpoints[key] ?? 0), min, max, 1, unit())}
-          <button class="btn primary" type="submit">Save setpoint</button></div></form></section>`;
+          <div class="btn-row"><button class="btn primary" type="submit">Save setpoint</button>
+          <button class="btn" type="button" data-action="form-revert">Revert</button></div></div></form></section>`;
     }
     function rangeEditor(value, min, max, step, displayUnit) {
       const suffix = displayUnit ? ` ${esc(displayUnit)}` : "";
@@ -1547,9 +1550,19 @@
           <div class="choice-description" aria-live="polite">${esc(selected.en || "")}</div></div>`;
       }
       else input = rangeEditor(value ?? min, min, max, isTemp ? 1 : (p.step || 1), displayUnit);
-      return `<form class="ap-row" data-form="ap" data-key="${esc(key)}" data-kind="${kind}">
-        <div><strong>${esc(key)} · ${esc(p.name)}</strong><p>${esc((p.detail || "").replace(/\{T:(-?\d+)\}/g, (_, c) => temp(c)))}</p></div>
-        <div class="ap-value">${input}${p.writable ? `<button class="btn" type="submit">Save</button>` : ""}</div></form>`;
+      let fallback = "";
+      if (p.default != null && !p.is_trigger) {
+        const def = hasChoices ? p.default : (isTemp ? tempNumber(p.default, kind) : p.default);
+        const defText = hasChoices ? (p.options.find(o => o.id === p.default)?.label ?? p.default)
+          : `${def}${displayUnit ? ` ${displayUnit}` : ""}`;
+        const modified = p.value != null && p.value !== p.default;
+        fallback = `<div class="ap-default"><span>Default: ${esc(defText)}</span>${modified ? `<span class="badge warn">Modified</span>` : ""}${
+          p.writable ? `<button class="btn" type="button" data-action="ap-default" data-default="${esc(def)}">Use default</button>` : ""}</div>`;
+      }
+      return `<form class="ap-row" data-form="ap" data-key="${esc(key)}" data-kind="${kind}" data-gate>
+        <div><strong>${esc(key)} · ${esc(p.name)}</strong><p>${esc((p.detail || "").replace(/\{T:(-?\d+)\}/g, (_, c) => temp(c)))}</p>${fallback}</div>
+        <div class="ap-value">${input}${p.writable ? `<div class="btn-row"><button class="btn primary" type="submit">Save</button>
+          <button class="btn" type="button" data-action="form-revert">Revert</button></div>` : ""}</div></form>`;
     }
     function controlPage() {
       const groups = {};
@@ -1570,7 +1583,7 @@
         <section class="card" style="margin-top:20px"><div class="card-head"><div><h2>Advanced parameters</h2><div class="metric-sub">Changes apply directly to heat-pump controls.</div></div>
           <button class="btn" data-action="reload-params">Refresh</button></div>
           ${Object.keys(groups).length ? Object.entries(groups).map(([category, rows]) =>
-            `<details class="ap-group"><summary>${esc(category)} · ${rows.length}</summary>${rows.map(([k,p]) => apControl(k,p)).join("")}</details>`).join("") :
+            `<details class="ap-group" data-fold="ap-${esc(category)}" ${foldOpen(`ap-${category}`)}><summary>${esc(category)} · ${rows.length}</summary>${rows.map(([k,p]) => apControl(k,p)).join("")}</details>`).join("") :
             `<div class="empty">No advanced parameters available.</div>`}
         </section>
       </div>`;
@@ -1588,7 +1601,7 @@
       network_unreachable: "Network unreachable", network_recovered: "Network recovered",
       web_server_down: "Web server down", web_server_recovered: "Web server recovered",
       wifi_lost: "WiFi lost", wifi_restored: "WiFi restored", wifi_unstable: "WiFi unstable",
-      wifi_roamed: "WiFi access point changed", firmware_updated: "Firmware updated",
+      wifi_roamed: "WiFi access point changed", firmware_updated: "Firmware updated", param_changed: "Advanced parameter changed",
       https_fallback: "HTTPS unavailable",
       ext_sensor_lost: "Temp sensor lost", ext_sensor_restored: "Temp sensor restored"
     };
@@ -1598,7 +1611,7 @@
       connected: "good", error_cleared: "good", network_recovered: "good", web_server_recovered: "good", wifi_restored: "good", ext_sensor_restored: "good",
       error_appeared: "bad", brownout_reset: "bad", application_crash: "bad", watchdog_reset: "bad",
       network_unreachable: "warn", web_server_down: "warn", https_fallback: "warn", wifi_lost: "warn", wifi_unstable: "warn", ext_sensor_lost: "warn", defrost_start: "defrost", defrost_end: "defrost",
-      mode_changed: "info", setpoint_changed: "info", system_start: "info", wifi_roamed: "info", firmware_updated: "info"
+      mode_changed: "info", setpoint_changed: "info", system_start: "info", wifi_roamed: "info", firmware_updated: "info", param_changed: "info"
     };
     const eventIcons = {
       system_start: "↻", power_on: "⏻", power_off: "⏻", mode_changed: "⇄", setpoint_changed: "✎",
@@ -1608,7 +1621,7 @@
       connected: "⇆", disconnected: "⇆", brownout_reset: "⚠\uFE0E", application_crash: "⚠\uFE0E",
       watchdog_reset: "⚠\uFE0E", network_unreachable: "⚠\uFE0E", network_recovered: "✓",
       web_server_down: "⚠\uFE0E", web_server_recovered: "✓",
-      wifi_lost: "⚠\uFE0E", wifi_restored: "✓", wifi_unstable: "⚠\uFE0E", wifi_roamed: "⇆", firmware_updated: "⬇\uFE0E",
+      wifi_lost: "⚠\uFE0E", wifi_restored: "✓", wifi_unstable: "⚠\uFE0E", wifi_roamed: "⇆", firmware_updated: "⬇\uFE0E", param_changed: "✎\uFE0E",
       https_fallback: "⚠\uFE0E", ext_sensor_lost: "⚠\uFE0E", ext_sensor_restored: "✓"
     };
     const setpointNames = { cooling: "Cooling", heating: "Heating", hot_water: "Hot water" };
@@ -1663,6 +1676,12 @@
         case "wifi_unstable": return event.drops != null ? `${event.drops} short drops in an hour` : "";
         case "wifi_roamed": return event.to_rssi_dbm != null ? `${event.from_rssi_dbm} → ${event.to_rssi_dbm} dBm, channel ${event.channel}` : "";
         case "firmware_updated": return event.to_version ? `${event.from_version || "?"} → ${event.to_version}` : "";
+        case "param_changed": {
+          const kind = event.temperature_kind || "none";
+          const show = (v, label) => v == null ? "?" : label ? label
+            : kind !== "none" ? temp(v, kind) : `${v}${event.unit ? ` ${event.unit}` : ""}`;
+          return `${event.param_name || "?"} (${event.param}): ${show(event.from, event.from_label)} → ${show(event.to, event.to_label)}`;
+        }
         default: return "";
       }
     }
@@ -3290,7 +3309,28 @@
       state.coreLoaded = true;
       updateDocumentTitle();
     }
-    async function loadParams() { const data = await api("/api/heatpump/advanced"); state.params = data.params || {}; }
+    async function loadParams() {
+      const data = await api("/api/heatpump/advanced");
+      state.params = data.params || {};
+      state.paramChanges = state.hp?.param_changes;
+    }
+    // Pick up changes made on the device (or another browser) while the
+    // Control page is open, without clobbering an edit in progress.
+    function controlSignature() {
+      const hp = state.hp || {};
+      return JSON.stringify([hp.unit_on, hp.mode, hp.setpoints, hp.param_changes]);
+    }
+    async function refreshControlLive() {
+      const sig = controlSignature();
+      if (sig === state.controlSig) return;
+      const editing = [...document.querySelectorAll("form[data-gate]")]
+        .some(f => gateSnapshot(f) !== f.dataset.saved)
+        || document.activeElement?.matches?.("form select, form textarea, form input:not([type=range])");
+      if (editing) return;  // retried on the next poll
+      if (state.hp?.param_changes !== state.paramChanges) await loadParams();
+      state.controlSig = sig;
+      render();
+    }
     async function loadEvents(reset = false) {
       if (reset) { state.events = []; state.eventOffset = 0; }
       const data = await api(`/api/events?offset=${state.eventOffset}&limit=50`);
@@ -3536,8 +3576,22 @@
         .map(e => [e.name, e.type === "checkbox" ? e.checked : e.value]));
     }
     function gateSync(form) {
+      const clean = gateSnapshot(form) === form.dataset.saved;
       const btn = form.querySelector('button[type="submit"]');
-      if (btn) btn.disabled = gateSnapshot(form) === form.dataset.saved;
+      if (btn) btn.disabled = clean;
+      const revert = form.querySelector('[data-action="form-revert"]');
+      if (revert) revert.disabled = clean;
+      const useDefault = form.querySelector('[data-action="ap-default"]');
+      if (useDefault) useDefault.disabled = String(form.elements.value?.value) === useDefault.dataset.default;
+    }
+    // Put a form's value control back to v and let the usual input/change
+    // listeners refresh the readout, description and buttons.
+    function setFormValue(form, v) {
+      const field = form.elements.value;
+      if (!field) return;
+      field.value = v;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(new Event("change", { bubbles: true }));
     }
     function gateInit() {
       document.querySelectorAll("form[data-gate]").forEach(form => {
@@ -3987,6 +4041,14 @@
     }
 
     async function handleAction(action, el) {
+      if (action === "form-revert" || action === "ap-default") {
+        const form = el.closest("form");
+        if (!form) return;
+        if (action === "ap-default") { setFormValue(form, el.dataset.default); return; }
+        const saved = JSON.parse(form.dataset.saved || "[]").find(([name]) => name === "value");
+        if (saved) setFormValue(form, saved[1]);
+        return;
+      }
       if (action === "notif-toggle") { state.notifOpen = !state.notifOpen; render(); return; }
       if (action === "notif-open") {
         const n = state.notifications[parseInt(el.dataset.index, 10)];
@@ -4625,6 +4687,7 @@
             await loadEvents(true);
             if (state.route === "events") refreshEventsLive();
           } else if (["home", "status", "errors"].includes(state.route)) render();
+          else if (state.route === "control") await refreshControlLive();
           else if (state.notifications.length !== prevNotifCount) render();
           else if (state.route === "settings" && state.settingsPage === "firmware"
                    && ota && ota.state && ota.state !== "idle") render();

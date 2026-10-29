@@ -2063,6 +2063,14 @@ paths:
                     type: boolean
                     description: Whether demo mode is active (simulated values)
                     example: false
+                  param_changes:
+                    type: integer
+                    minimum: 0
+                    description: >-
+                      Count of advanced-parameter changes made through this
+                      controller since boot. Clients reload
+                      /api/heatpump/advanced when it changes.
+                    example: 3
                   unit_on:
                     type: boolean
                     description: Whether the unit is powered on
@@ -5768,6 +5776,7 @@ components:
           - https_fallback
           - ext_sensor_lost
           - ext_sensor_restored
+          - param_changed
           example: power_on
         category:
           type: string
@@ -5803,6 +5812,7 @@ components:
             - `ext_sensor_lost`: `(cause << 8) | slot`, slot 0=supply, 1=return; cause 0=other, 1=unreachable, 2=no answer, 3=refused, 4=no reading, 5=replaced
             - `ext_sensor_restored`: `(seconds_down << 8) | slot`
             - `firmware_updated`: `(from << 16) | to`, each version packed as `(major << 12) | (minor << 7) | patch`, 0 if unknown
+            - `param_changed`: `(ap << 24) | (from << 12) | to`, `from` and `to` as signed 12-bit values, -2048 if unknown
             - All other events: 0
           example: 0
         from_mode:
@@ -5823,12 +5833,47 @@ components:
           example: hot_water
         from:
           type: integer
-          description: "`setpoint_changed` only: the old setpoint in °C."
+          nullable: true
+          description: |
+            `setpoint_changed`: the old setpoint in °C.
+            `param_changed`: the old value, in the same space as the advanced
+            parameter's `value` (option id for a choice), or null if it could
+            not be read.
           example: 50
         to:
           type: integer
-          description: "`setpoint_changed` only: the new setpoint in °C."
+          description: |
+            `setpoint_changed`: the new setpoint in °C.
+            `param_changed`: the new value, same space as `from`.
           example: 45
+        param:
+          type: string
+          description: |
+            `param_changed` only: the advanced parameter that was changed through
+            this controller (web, API, Home Assistant or the touch screen).
+            Changes made on the unit's own panel are not logged.
+          example: AP29
+        param_name:
+          type: string
+          nullable: true
+          description: "`param_changed` only: English name of the parameter."
+          example: Defrost Interval
+        unit:
+          type: string
+          description: "`param_changed` only: unit of `from` / `to` (°C for temperatures), empty if none."
+          example: min
+        temperature_kind:
+          type: string
+          enum: [none, absolute, differential]
+          description: "`param_changed` only: how `from` / `to` convert if they are temperatures."
+        from_label:
+          type: string
+          description: "`param_changed` on a choice parameter only: label of the old option, as shown in the parameter list."
+          example: Intervals
+        to_label:
+          type: string
+          description: "`param_changed` on a choice parameter only: label of the new option."
+          example: Continuous
         fault_code:
           type: string
           nullable: true
@@ -5966,6 +6011,13 @@ components:
           type: string
           enum: [none, absolute, differential]
           description: Conversion semantics for temperature-valued parameters
+        default:
+          type: integer
+          nullable: true
+          description: >-
+            Vendor-documented factory default, in the same space as `value`
+            (option id for a choice). Null for momentary triggers.
+          example: 45
         min:
           type: integer
           description: Minimum allowed value

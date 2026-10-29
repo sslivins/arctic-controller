@@ -57,6 +57,7 @@ typedef enum {
     EVENT_HTTPS_FALLBACK,       // HTTPS failed to start with the administrator certificate; serving HTTP (payload: event_web_server_cause_t)
     EVENT_EXT_SENSOR_LOST,      // External temperature sensor failing for minutes (payload: event_ext_sensor_lost_pack)
     EVENT_EXT_SENSOR_RESTORED,  // External sensor reading again after EVENT_EXT_SENSOR_LOST (payload: event_ext_sensor_restored_pack)
+    EVENT_PARAM_CHANGED,        // Advanced (AP) parameter written by this controller (payload: event_param_changed_pack)
     EVENT_TYPE_COUNT
 } event_type_t;
 
@@ -309,6 +310,26 @@ static inline uint32_t event_ext_sensor_restored_pack(int slot, uint32_t down_s)
 static inline int event_ext_sensor_slot(uint32_t payload) { return (int)(payload & 0xFF); }
 static inline uint32_t event_ext_sensor_cause(uint32_t payload) { return (payload >> 8) & 0xFF; }
 static inline uint32_t event_ext_sensor_down_s(uint32_t payload) { return payload >> 8; }
+
+/**
+ * EVENT_PARAM_CHANGED payload: AP number in bits 24..31, then the old and new
+ * values as 12-bit two's complement (old in 12..23, new in 0..11). Values are
+ * what the API reports: the display value, or the option id for a choice.
+ * EVENT_PARAM_UNKNOWN (-2048) marks an old value that could not be read.
+ */
+#define EVENT_PARAM_UNKNOWN (-2048)
+
+static inline uint32_t event_param_changed_pack(uint8_t ap, int from, int to) {
+    return ((uint32_t)ap << 24) | (((uint32_t)from & 0xFFF) << 12) | ((uint32_t)to & 0xFFF);
+}
+
+static inline int event_param_sext12(uint32_t v) {
+    return (v & 0x800) ? (int)(v & 0xFFF) - 0x1000 : (int)(v & 0xFFF);
+}
+
+static inline uint8_t event_param_ap(uint32_t payload) { return (uint8_t)(payload >> 24); }
+static inline int event_param_from(uint32_t payload) { return event_param_sext12(payload >> 12); }
+static inline int event_param_to(uint32_t payload) { return event_param_sext12(payload); }
 
 /** Stable API key for an external sensor slot ("supply", "return"), or NULL. */
 const char* event_ext_sensor_slot_key(uint32_t payload);

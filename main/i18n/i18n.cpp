@@ -318,6 +318,8 @@ static const char* const strings_en[STR_COUNT] = {
     [STR_HP_HOT_WATER_SETPOINT] = "Hot Water Setpoint",
     [STR_HP_CANNOT_SAVE] = "Cannot save setting: Heat pump not connected",
     [STR_HP_CANNOT_SAVE_SETPOINT] = "Cannot save setpoint: Heat pump not connected",
+    [STR_HP_AP_DEFAULT_FMT] = "Default: %s",
+    [STR_HP_AP_USE_DEFAULT] = "Use default",
     [STR_HP_AP_TRIGGER_PROMPT] =
         "Run this momentary command now? It starts immediately and does not store a value.",
     [STR_HP_AP_TRIGGER_RUN] = "Run",
@@ -442,6 +444,7 @@ static const char* const strings_en[STR_COUNT] = {
     [STR_EVENT_HTTPS_FALLBACK] = "HTTPS Unavailable",
     [STR_EVENT_EXT_SENSOR_LOST] = "Temp Sensor Lost",
     [STR_EVENT_EXT_SENSOR_RESTORED] = "Temp Sensor Restored",
+    [STR_EVENT_PARAM_CHANGED] = "Parameter Changed",
     [STR_EVENT_EXT_SENSOR_UNREACHABLE] = "Can't connect",
     [STR_EVENT_EXT_SENSOR_NO_ANSWER] = "No answer",
     [STR_EVENT_EXT_SENSOR_REFUSED] = "Request refused",
@@ -941,6 +944,8 @@ static const char* const strings_fr[STR_COUNT] = {
     [STR_HP_HOT_WATER_SETPOINT] = "Consigne d'eau chaude",
     [STR_HP_CANNOT_SAVE] = "Impossible d'enregistrer : PAC non connectée",
     [STR_HP_CANNOT_SAVE_SETPOINT] = "Impossible d'enregistrer la consigne : PAC non connectée",
+    [STR_HP_AP_DEFAULT_FMT] = "Par défaut : %s",
+    [STR_HP_AP_USE_DEFAULT] = "Valeur par défaut",
     [STR_HP_AP_TRIGGER_PROMPT] =
         "Exécuter cette commande momentanée maintenant ? Elle démarre immédiatement et "
         "n'enregistre aucune valeur.",
@@ -1066,6 +1071,7 @@ static const char* const strings_fr[STR_COUNT] = {
     [STR_EVENT_HTTPS_FALLBACK] = "HTTPS indisponible",
     [STR_EVENT_EXT_SENSOR_LOST] = "Sonde perdue",
     [STR_EVENT_EXT_SENSOR_RESTORED] = "Sonde rétablie",
+    [STR_EVENT_PARAM_CHANGED] = "Paramètre modifié",
     [STR_EVENT_EXT_SENSOR_UNREACHABLE] = "Connexion impossible",
     [STR_EVENT_EXT_SENSOR_NO_ANSWER] = "Aucune réponse",
     [STR_EVENT_EXT_SENSOR_REFUSED] = "Demande refusée",
@@ -1565,6 +1571,8 @@ static const char* const strings_es[STR_COUNT] = {
     [STR_HP_HOT_WATER_SETPOINT] = "Consigna de agua caliente",
     [STR_HP_CANNOT_SAVE] = "No se puede guardar: bomba de calor no conectada",
     [STR_HP_CANNOT_SAVE_SETPOINT] = "No se puede guardar la consigna: bomba de calor no conectada",
+    [STR_HP_AP_DEFAULT_FMT] = "Predeterminado: %s",
+    [STR_HP_AP_USE_DEFAULT] = "Usar predeterminado",
     [STR_HP_AP_TRIGGER_PROMPT] =
         "¿Ejecutar este comando momentáneo ahora? Se inicia de inmediato y no guarda "
         "ningún valor.",
@@ -1690,6 +1698,7 @@ static const char* const strings_es[STR_COUNT] = {
     [STR_EVENT_HTTPS_FALLBACK] = "HTTPS no disponible",
     [STR_EVENT_EXT_SENSOR_LOST] = "Sonda perdida",
     [STR_EVENT_EXT_SENSOR_RESTORED] = "Sonda restablecida",
+    [STR_EVENT_PARAM_CHANGED] = "Parámetro cambiado",
     [STR_EVENT_EXT_SENSOR_UNREACHABLE] = "No se puede conectar",
     [STR_EVENT_EXT_SENSOR_NO_ANSWER] = "Sin respuesta",
     [STR_EVENT_EXT_SENSOR_REFUSED] = "Solicitud rechazada",

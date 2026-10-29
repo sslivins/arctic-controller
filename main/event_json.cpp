@@ -7,7 +7,10 @@
 
 #include "fault_help_links.h"
 #include "heatpump_types.h"
+#include "macon_advanced_params.h"
 #include "macon_faults.h"
+
+#include <cstdio>
 
 namespace {
 
@@ -101,6 +104,39 @@ void add_event_details(cJSON* evt, const event_entry_t& e)
                 cJSON_AddStringToObject(evt, "to_version", v);
             else
                 cJSON_AddNullToObject(evt, "to_version");
+            break;
+        }
+        case EVENT_PARAM_CHANGED: {
+            const uint8_t ap = event_param_ap(p);
+            char key[8];
+            snprintf(key, sizeof(key), "AP%u", (unsigned)ap);
+            cJSON_AddStringToObject(evt, "param", key);
+            const arctic::AdvancedParam* param = arctic::advanced_param_lookup(ap);
+            if (param) cJSON_AddStringToObject(evt, "param_name", param->name);
+            else cJSON_AddNullToObject(evt, "param_name");
+            const char* unit = arctic::advanced_display_unit(ap);
+            cJSON_AddStringToObject(evt, "unit", unit ? unit : "");
+            const char* kind = "none";
+            switch (arctic::advanced_temperature_kind(ap)) {
+                case arctic::AdvancedTemperatureKind::Absolute: kind = "absolute"; break;
+                case arctic::AdvancedTemperatureKind::Differential: kind = "differential"; break;
+                default: break;
+            }
+            cJSON_AddStringToObject(evt, "temperature_kind", kind);
+            const bool choice = arctic::advanced_enum_option_count(ap) > 0;
+            const int values[2] = {event_param_from(p), event_param_to(p)};
+            const char* names[2] = {"from", "to"};
+            const char* labels[2] = {"from_label", "to_label"};
+            for (int i = 0; i < 2; i++) {
+                if (values[i] == EVENT_PARAM_UNKNOWN) {
+                    cJSON_AddNullToObject(evt, names[i]);
+                    continue;
+                }
+                cJSON_AddNumberToObject(evt, names[i], values[i]);
+                if (!choice) continue;
+                const arctic::AdvEnumOption* o = arctic::advanced_enum_option_at(ap, (size_t)values[i]);
+                if (o && o->label) cJSON_AddStringToObject(evt, labels[i], o->label);
+            }
             break;
         }
         default:

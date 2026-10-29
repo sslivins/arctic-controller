@@ -12,6 +12,7 @@
 #include "heatpump_types.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
 #include "macon_advanced_params.h"  // arctic::AdvancedParam, AP reg map
+#include <initializer_list>
 #include "advanced_params.h"        // advanced_param_read/write (controller IO)
 
 #include "ui_common.h"
@@ -92,6 +93,8 @@ static struct {
     // Parallel arrays: ap number <-> its live-value label. Populated by
     // create_ap_section() in canonical category order.
     lv_obj_t* ap_value_labels[64] = {};
+    uint32_t ap_change_seen = 0;           // advanced_param_change_count() last applied
+    lv_obj_t* ap_default_labels[64] = {};  // "Default: X", shown only when modified
     uint8_t   ap_display_nums[64] = {};
     int       ap_display_count = 0;
     int       current_ap = -1;   // AP being edited (-1 = not editing a AP param)
@@ -110,7 +113,10 @@ static struct {
     lv_obj_t* edit_slider = nullptr;
     lv_obj_t* edit_roller = nullptr;
     lv_obj_t* edit_save_btn = nullptr;
+    lv_obj_t* edit_default_btn = nullptr;
+    lv_obj_t* edit_default_lbl = nullptr;
     float edit_value = 0;       // Float for F mode precision
+    int edit_initial = 0;       // value the dialog opened with; Save needs a change
     int16_t edit_value_celsius = 0;  // Original value in Celsius (for non-temp params too)
     bool edit_value_unknown = false; // true when disconnected: show "--", no live value
     bool edit_uses_enum = false;
@@ -155,6 +161,7 @@ static void sync_setpoint_limits(void) {
 // ============================================================================
 static void close_btn_cb(lv_event_t* e);
 static void edit_cancel_cb(lv_event_t* e);
+static void edit_default_cb(lv_event_t* e);
 static void edit_save_cb(lv_event_t* e);
 static void edit_slider_cb(lv_event_t* e);
 static void edit_roller_cb(lv_event_t* e);
@@ -395,6 +402,17 @@ static void power_btn_event_cb(lv_event_t* e) {
     }
 }
 
+// Re-read every AP row: at once in demo mode, else one bus read per 100 ms.
+static void refresh_ap_rows() {
+    state.ap_change_seen = advanced_param_change_count();
+    if (app_prefs_is_demo_mode()) {
+        for (int i = 0; i < state.ap_display_count; i++) ap_update_display(i);
+    } else if (arctic::getState().connected && !state.load_timer) {
+        state.load_index = 0;
+        state.load_timer = lv_timer_create(load_timer_cb, 100, nullptr);
+    }
+}
+
 static void power_update_timer_cb(lv_timer_t* timer) {
     if (!state.power_btn || state.power_holding) return;  // Don't overwrite hold animation
     arctic::HeatPumpState hp = arctic::getState();
@@ -418,6 +436,14 @@ static void power_update_timer_cb(lv_timer_t* timer) {
         update_mode_btn_styles(mode_idx);
     }
     update_mode_other_label(hp.working_mode);
+
+    // A parameter changed from the web UI or API: refresh the rows. Skipped
+    // while the initial staggered load or an edit dialog is in progress.
+    const uint32_t changes = advanced_param_change_count();
+    if (changes != state.ap_change_seen && !state.load_timer && state.current_ap < 0) {
+        state.ap_change_seen = changes;
+        refresh_ap_rows();
+    }
 }
 
 // ============================================================================
@@ -705,6 +731,27 @@ static void create_edit_dialog(void) {
     lv_obj_set_width(state.edit_description, LV_PCT(100));
     lv_label_set_long_mode(state.edit_description, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(state.edit_description, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+
+    // (6) "Use default (60 min)" — moves the editor to the vendor default; the
+    // user still has to press Save. Advanced parameters only.
+    state.edit_default_btn = lv_btn_create(content);
+    lv_obj_set_height(state.edit_default_btn, 64);
+    lv_obj_set_width(state.edit_default_btn, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_hor(state.edit_default_btn, 24, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(state.edit_default_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_radius(state.edit_default_btn, 12, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(state.edit_default_btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.edit_default_btn, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(state.edit_default_btn, COLOR_TEXT_DIM, LV_PART_MAIN);
+    lv_obj_set_style_opa(state.edit_default_btn, LV_OPA_40, LV_STATE_DISABLED);
+    lv_obj_add_event_cb(state.edit_default_btn, edit_default_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_user_data(state.edit_default_btn, (void*)"edit_use_default");
+    lv_obj_add_flag(state.edit_default_btn, LV_OBJ_FLAG_HIDDEN);
+    state.edit_default_lbl = lv_label_create(state.edit_default_btn);
+    lv_label_set_text(state.edit_default_lbl, i18n_get(STR_HP_AP_USE_DEFAULT));
+    lv_obj_set_style_text_font(state.edit_default_lbl, UI_FONT_SMALL, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.edit_default_lbl, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_center(state.edit_default_lbl);
     
     // Bottom action bar — worded Cancel (left, ghost) + Save (right, accent).
     // UX convention: primary action bottom-right and visually dominant, dismiss
@@ -749,6 +796,9 @@ static void create_edit_dialog(void) {
     lv_obj_set_style_radius(save_btn, 12, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(save_btn, 0, LV_PART_MAIN);
     lv_obj_set_style_border_width(save_btn, 0, LV_PART_MAIN);
+    // Disabled: solid slate fill with dim text, so "Save" stays legible.
+    lv_obj_set_style_bg_color(save_btn, lv_color_hex(0x334155), LV_STATE_DISABLED);
+    lv_obj_set_style_recolor_opa(save_btn, LV_OPA_TRANSP, LV_STATE_DISABLED);  // drop the theme's grey tint
     lv_obj_add_event_cb(save_btn, edit_save_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_user_data(save_btn, (void*)"edit_save");
 
@@ -756,6 +806,7 @@ static void create_edit_dialog(void) {
     lv_label_set_text(save_lbl, i18n_get(STR_SAVE));
     lv_obj_set_style_text_font(save_lbl, UI_FONT_BODY, LV_PART_MAIN);
     lv_obj_set_style_text_color(save_lbl, COLOR_BG, LV_PART_MAIN);
+    lv_obj_set_style_text_color(save_lbl, COLOR_TEXT_DIM, LV_STATE_DISABLED);
     lv_obj_center(save_lbl);
 }
 
@@ -785,10 +836,13 @@ static void set_edit_dialog_readonly(bool readonly) {
         lv_obj_add_state(state.edit_slider, LV_STATE_DISABLED);
         lv_obj_add_state(state.edit_roller, LV_STATE_DISABLED);
         lv_obj_add_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(state.edit_default_btn, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_remove_state(state.edit_slider, LV_STATE_DISABLED);
         lv_obj_remove_state(state.edit_roller, LV_STATE_DISABLED);
         lv_obj_remove_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
+        if (state.current_ap >= 0) lv_obj_remove_flag(state.edit_default_btn, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(state.edit_default_btn, LV_OBJ_FLAG_HIDDEN);
     }
     show_configured_editor();
 }
@@ -813,6 +867,28 @@ static void edit_cancel_cb(lv_event_t* e) {
     hide_edit_dialog();
 }
 
+// The editor value (option id for a choice) that stands for the AP's default.
+static int ap_default_editor_value(const arctic::AdvancedParam* p) {
+    const int16_t def = arctic::advanced_display_value(p->ap, p->default_val);
+    if (arctic::advanced_enum_option_count(p->ap) > 0) {
+        const int idx = arctic::advanced_enum_option_index_for_wire(p->ap, def);
+        return idx < 0 ? 0 : idx;
+    }
+    return def;
+}
+
+static void edit_default_cb(lv_event_t* e) {
+    (void)e;
+    if (state.current_ap < 0) return;
+    const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
+    if (!p) return;
+    const int v = ap_default_editor_value(p);
+    if (state.edit_uses_enum) lv_roller_set_selected(state.edit_roller, (uint32_t)v, LV_ANIM_OFF);
+    else lv_slider_set_value(state.edit_slider, v, LV_ANIM_OFF);
+    state.edit_value = (float)v;
+    update_edit_value_display();
+}
+
 static void edit_save_cb(lv_event_t* e) {
     (void)e;
 
@@ -832,6 +908,7 @@ static void edit_save_cb(lv_event_t* e) {
         }
         if (r == arctic::AdvWriteResult::OK && bus_ok) {
             ESP_LOGI(TAG, "Saved AP%u = %d", (unsigned)ap, save_val);
+            state.ap_change_seen = advanced_param_change_count();  // our own write
             // Refresh the row label for this AP.
             for (int i = 0; i < state.ap_display_count; i++) {
                 if (state.ap_display_nums[i] == ap) { ap_update_display(i); break; }
@@ -1022,6 +1099,7 @@ static void show_setpoint_edit(int setpoint_type) {
     int display_min = app_prefs_convert_temp(sp.min_val);
     int display_max = app_prefs_convert_temp(sp.max_val);
     configure_slider_editor(display_min, display_max, (int)roundf(state.edit_value));
+    state.edit_initial = (int)roundf(state.edit_value);
     update_edit_value_display();
     
     // Disconnected heat pump: present the setpoint as view-only rather than
@@ -1044,6 +1122,16 @@ static void hide_edit_dialog(void) {
 static void update_edit_value_display(void) {
     const char* unit = "";
     int display_val = (int)roundf(state.edit_value);  // Round float to int for display
+
+    // Nothing to save until the value differs from the one the dialog opened with.
+    if (state.edit_save_btn) {
+        const bool same = display_val == state.edit_initial;
+        // The label takes the state too so its disabled text colour applies.
+        for (lv_obj_t* o : {state.edit_save_btn, lv_obj_get_child(state.edit_save_btn, 0)}) {
+            if (same) lv_obj_add_state(o, LV_STATE_DISABLED);
+            else lv_obj_remove_state(o, LV_STATE_DISABLED);
+        }
+    }
 
     // Disconnected/unavailable: live values are never cached, so there is nothing
     // real to show — display "--" rather than a fabricated default, and clear any
@@ -1080,6 +1168,12 @@ static void update_edit_value_display(void) {
             snprintf(val_buf, sizeof(val_buf), "%d", display_val);
         }
         lv_label_set_text(state.edit_value_label, val_buf);
+        if (p && state.edit_default_btn) {
+            if ((int)roundf(state.edit_value) == ap_default_editor_value(p))
+                lv_obj_add_state(state.edit_default_btn, LV_STATE_DISABLED);
+            else
+                lv_obj_remove_state(state.edit_default_btn, LV_STATE_DISABLED);
+        }
         return;
     }
 
@@ -1164,12 +1258,27 @@ static void ap_update_display(int slot) {
     }
 
     int16_t val = 0;
+    bool modified = false;
     if (advanced_param_read(ap, &val)) {
         char buf[32];
         format_ap_value(p, val, buf, sizeof(buf));
         lv_label_set_text(state.ap_value_labels[slot], buf);
+        const int16_t def = arctic::advanced_display_value(ap, p->default_val);
+        modified = val != def;
+        if (modified && state.ap_default_labels[slot]) {
+            char def_val[32], line[64];
+            format_ap_value(p, def, def_val, sizeof(def_val));
+            snprintf(line, sizeof(line), i18n_get(STR_HP_AP_DEFAULT_FMT), def_val);
+            lv_label_set_text(state.ap_default_labels[slot], line);
+        }
     } else {
         lv_label_set_text(state.ap_value_labels[slot], "--");
+    }
+
+    // A changed parameter gets a second line under its name with the default.
+    if (lv_obj_t* def_lbl = state.ap_default_labels[slot]) {
+        if (modified) lv_obj_remove_flag(def_lbl, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(def_lbl, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -1200,13 +1309,16 @@ static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
     const bool active_col = writable || is_trigger;  // accent vs dim text
 
     lv_obj_t* row = lv_obj_create(parent);
-    lv_obj_set_size(row, LV_PCT(100), 70);
+    // Grows past 70 px when a long name wraps or the default line is shown.
+    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(row, 70, LV_PART_MAIN);
     lv_obj_set_style_bg_color(row, COLOR_CARD_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_color(row, COLOR_CARD_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
     lv_obj_set_style_radius(row, 12, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(row, 20, LV_PART_MAIN);
+    lv_obj_set_style_pad_ver(row, 8, LV_PART_MAIN);
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
     if (clickable) {
         lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
@@ -1217,13 +1329,32 @@ static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
     // Name with AP number (left)
     char name_buf[80];
     snprintf(name_buf, sizeof(name_buf), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)p->ap);
-    lv_obj_t* name_lbl = lv_label_create(row);
+    // Name, and under it the default when the value differs from it.
+    lv_obj_t* text_col = lv_obj_create(row);
+    lv_obj_set_size(text_col, 430, LV_SIZE_CONTENT);
+    lv_obj_align(text_col, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_bg_opa(text_col, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(text_col, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(text_col, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(text_col, 2, LV_PART_MAIN);
+    lv_obj_set_flex_flow(text_col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_remove_flag(text_col, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(text_col, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(text_col, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    lv_obj_t* name_lbl = lv_label_create(text_col);
     lv_label_set_text(name_lbl, name_buf);
     lv_obj_set_style_text_font(name_lbl, UI_FONT_SMALL, LV_PART_MAIN);
     lv_obj_set_style_text_color(name_lbl, active_col ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
-    lv_obj_align(name_lbl, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_width(name_lbl, 430);
+    lv_obj_set_width(name_lbl, LV_PCT(100));
     lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+
+    lv_obj_t* def_lbl = lv_label_create(text_col);
+    lv_label_set_text(def_lbl, "");
+    lv_obj_set_style_text_font(def_lbl, &montserrat_16_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_color(def_lbl, COLOR_WARNING, LV_PART_MAIN);
+    lv_obj_set_width(def_lbl, LV_PCT(100));
+    lv_obj_add_flag(def_lbl, LV_OBJ_FLAG_HIDDEN);
 
     // Value (right)
     lv_obj_t* val_lbl = lv_label_create(row);
@@ -1250,6 +1381,7 @@ static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
     lv_obj_align(ind, LV_ALIGN_RIGHT_MID, 0, 0);
 
     state.ap_value_labels[slot] = val_lbl;
+    state.ap_default_labels[slot] = def_lbl;
     state.ap_display_nums[slot] = p->ap;
     state.ap_display_count++;
 }
@@ -1342,6 +1474,13 @@ static void show_ap_edit_dialog(uint8_t ap) {
     // Full plain-language explanation of the parameter (library-sourced English,
     // localized via detail_msg_id where a translation exists). {T:<c>} tokens are
     // expanded to the user's chosen unit at render time.
+    {
+        char def_val[32], def_buf[64];
+        format_ap_value(p, arctic::advanced_display_value(ap, p->default_val), def_val, sizeof(def_val));
+        snprintf(def_buf, sizeof(def_buf), "%s (%s)", i18n_get(STR_HP_AP_USE_DEFAULT), def_val);
+        lv_label_set_text(state.edit_default_lbl, def_buf);
+    }
+
     char detail_buf[320];
     format_detail_temps(i18n_get_key(p->detail_msg_id, p->detail), detail_buf, sizeof(detail_buf));
     edit_label_set_or_hide(state.edit_detail, detail_buf);
@@ -1358,6 +1497,7 @@ static void show_ap_edit_dialog(uint8_t ap) {
             v, arctic::advanced_display_step(ap));
     }
 
+    state.edit_initial = (int)roundf(state.edit_value);
     update_edit_value_display();
 
     // Disconnected heat pump: view-only so the user can read the parameter and
@@ -1653,6 +1793,7 @@ void heatpump_control_create_in(lv_obj_t* parent) {
     // Start staggered loading of parameter values
     // Reads one parameter every 100ms to avoid blocking UI
     state.load_index = 0;
+    state.ap_change_seen = advanced_param_change_count();
     if (demo_mode) {
         // Demo mode: load all simulated values immediately
         ESP_LOGI(TAG, "Using demo values");
@@ -1683,6 +1824,10 @@ void heatpump_control_set_active(bool active) {
             lv_timer_pause(state.power_update_timer);
         }
     }
+
+    // The tab stays built while hidden, so re-read parameters on return to pick
+    // up changes made from the web UI or API in the meantime.
+    if (active && state.shown && !state.load_timer) refresh_ap_rows();
 }
 
 void heatpump_control_dismiss_overlays(void) {
@@ -1744,12 +1889,15 @@ void heatpump_control_hide(void) {
     state.edit_slider = nullptr;
     state.edit_roller = nullptr;
     state.edit_save_btn = nullptr;
+    state.edit_default_btn = nullptr;
+    state.edit_default_lbl = nullptr;
     state.edit_uses_enum = false;
     state.edit_slider_min = 0;
     state.edit_slider_step = 1;
     state.current_setpoint_type = -1;
     state.current_ap = -1;
     memset(state.ap_value_labels, 0, sizeof(state.ap_value_labels));
+    memset(state.ap_default_labels, 0, sizeof(state.ap_default_labels));
     memset(state.ap_display_nums, 0, sizeof(state.ap_display_nums));
     state.ap_display_count = 0;
     

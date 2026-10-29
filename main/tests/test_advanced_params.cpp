@@ -41,6 +41,7 @@
 // Refs #217 (T13).
 
 #include "bus_fake.h"
+#include "esp_partition_fake.h"
 #include "nvs_fake.h"
 
 #include <sys/wait.h>
@@ -48,9 +49,11 @@
 
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "advanced_params.h"
 #include "app_preferences.h"
+#include "event_log.h"
 #include "macon_advanced_params.h"
 
 static int g_failures = 0;
@@ -508,6 +511,42 @@ void demo_mode_accepts_a_valid_write_without_touching_the_bus() {
     CHECK_EQ_INT(bus_fake::writes().size(), 0);
 }
 
+void demo_mode_reads_back_what_was_written() {
+    demo_device();
+    // A save that reads back as the default looks to the user like it failed.
+    const AdvancedParam* p = find_writable();
+    REQUIRE_PARAM(p, "a plainly writable parameter");
+    CHECK(p->max_val != p->default_val);
+    bool bus_ok = false;
+    CHECK(advanced_param_write(p->ap, p->max_val, &bus_ok) == AdvWriteResult::OK);
+    int16_t value = 0;
+    CHECK(advanced_param_read(p->ap, &value) == true);
+    CHECK_EQ_INT(value, p->max_val);
+
+    // Negative values must survive the round trip through the wire encoding.
+    const AdvancedParam* s = nullptr;
+    for (uint8_t ap = 0; ap < AP_MAX && !s; ++ap) {
+        const AdvancedParam* c = arctic::advanced_param_lookup(ap);
+        if (c && c->is_signed && c->min_val < 0 && c->reg != arctic::ADV_REG_UNKNOWN &&
+            !c->needs_sim_confirm && !c->read_only && !c->enum_vals &&
+            c->display_multiplier == 1 && c->min_val != c->default_val) s = c;
+    }
+    REQUIRE_PARAM(s, "a writable signed parameter");
+    CHECK(advanced_param_write(s->ap, s->min_val, &bus_ok) == AdvWriteResult::OK);
+    CHECK(advanced_param_read(s->ap, &value) == true);
+    CHECK_EQ_INT(value, s->min_val);
+
+    const AdvancedParam* e = find_nonidentity_enum();
+    REQUIRE_PARAM(e, "an enum parameter whose wire codes are not 0,1,2,...");
+    size_t idx = e->enum_count - 1;
+    CHECK(advanced_param_write_option(e->ap, idx, &bus_ok) == AdvWriteResult::OK);
+    CHECK(advanced_param_read(e->ap, &value) == true);
+    CHECK_EQ_INT(value, arctic::advanced_display_value(e->ap, e->enum_vals[idx]));
+
+    CHECK_EQ_INT(bus_fake::writes().size(), 0);
+    CHECK_EQ_INT(bus_fake::reads().size(), 0);
+}
+
 void a_null_bus_ok_is_tolerated() {
     live_device();
     const AdvancedParam* p = find_writable();
@@ -659,6 +698,107 @@ void a_locked_parameter_can_be_read_but_not_written() {
     CHECK_EQ_INT(bus_fake::writes().size(), 0);
 }
 
+// ------------------------------------------------------------------------
+// Change log
+// ------------------------------------------------------------------------
+std::vector<event_entry_t> param_events() {
+    std::vector<event_entry_t> all(EVENT_LOG_MAX_ENTRIES), out;
+    int n = event_log_get(all.data(), (int)all.size(), 0);
+    for (int i = 0; i < n; ++i)
+        if (all[i].type == EVENT_PARAM_CHANGED) out.push_back(all[i]);
+    return out;  // newest first
+}
+
+void with_event_log() {
+    flash_fake::install_history_partition();
+    event_log_init();
+}
+
+void a_saved_change_is_logged_with_its_old_value() {
+    live_device();
+    with_event_log();
+    const AdvancedParam* p = find_writable();
+    REQUIRE_PARAM(p, "a plainly writable parameter");
+    CHECK(p->max_val != p->default_val);
+    bus_fake::set_read_value((uint16_t)p->default_val);
+
+    bool bus_ok = false;
+    CHECK(advanced_param_write(p->ap, p->max_val, &bus_ok) == AdvWriteResult::OK);
+    auto ev = param_events();
+    CHECK_EQ_INT(ev.size(), 1);
+    if (ev.empty()) return;
+    CHECK_EQ_INT(event_param_ap(ev[0].payload), p->ap);
+    CHECK_EQ_INT(event_param_from(ev[0].payload), p->default_val);
+    CHECK_EQ_INT(event_param_to(ev[0].payload), p->max_val);
+}
+
+void a_choice_change_is_logged_as_option_ids() {
+    demo_device();
+    with_event_log();
+    const AdvancedParam* p = find_nonidentity_enum();
+    REQUIRE_PARAM(p, "an enum parameter whose wire codes are not 0,1,2,...");
+    const int from = arctic::advanced_enum_option_index_for_wire(
+        p->ap, arctic::advanced_display_value(p->ap, p->default_val));
+    const size_t to = from == 0 ? 1 : 0;
+
+    bool bus_ok = false;
+    CHECK(advanced_param_write_option(p->ap, to, &bus_ok) == AdvWriteResult::OK);
+    auto ev = param_events();
+    CHECK_EQ_INT(ev.size(), 1);
+    if (ev.empty()) return;
+    CHECK_EQ_INT(event_param_from(ev[0].payload), from);
+    CHECK_EQ_INT(event_param_to(ev[0].payload), (int)to);
+}
+
+void nothing_is_logged_when_nothing_changed() {
+    live_device();
+    with_event_log();
+    const AdvancedParam* p = find_writable();
+    REQUIRE_PARAM(p, "a plainly writable parameter");
+    bus_fake::set_read_value((uint16_t)p->default_val);
+    bool bus_ok = false;
+
+    // Same value again, a failed bus write, and a refused value: none changed anything.
+    CHECK(advanced_param_write(p->ap, p->default_val, &bus_ok) == AdvWriteResult::OK);
+    bus_fake::set_write_ok(false);
+    CHECK(advanced_param_write(p->ap, p->max_val, &bus_ok) == AdvWriteResult::OK);
+    CHECK(bus_ok == false);
+    bus_fake::set_write_ok(true);
+    CHECK(advanced_param_write(p->ap, (int16_t)(p->max_val + 1), &bus_ok) != AdvWriteResult::OK);
+    CHECK_EQ_INT(param_events().size(), 0);
+}
+
+void an_unreadable_old_value_is_logged_as_unknown() {
+    live_device();
+    with_event_log();
+    const AdvancedParam* p = find_writable();
+    REQUIRE_PARAM(p, "a plainly writable parameter");
+    bus_fake::set_read_ok(false);
+
+    bool bus_ok = false;
+    CHECK(advanced_param_write(p->ap, p->max_val, &bus_ok) == AdvWriteResult::OK);
+    auto ev = param_events();
+    CHECK_EQ_INT(ev.size(), 1);
+    if (ev.empty()) return;
+    CHECK_EQ_INT(event_param_from(ev[0].payload), EVENT_PARAM_UNKNOWN);
+    CHECK_EQ_INT(event_param_to(ev[0].payload), p->max_val);
+}
+
+// The change log packs values into 12 bits; a parameter outside that range
+// would be logged wrongly.
+void every_value_fits_the_change_log() {
+    for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
+        const AdvancedParam* p = arctic::advanced_param_lookup(ap);
+        if (!p) continue;
+        const int lo = arctic::advanced_display_value(ap, p->min_val);
+        const int hi = arctic::advanced_display_value(ap, p->max_val);
+        CHECK(lo > EVENT_PARAM_UNKNOWN && hi <= 2047);
+        CHECK(p->enum_count < 2048);
+        CHECK_EQ_INT(event_param_from(event_param_changed_pack(ap, lo, hi)), lo);
+        CHECK_EQ_INT(event_param_to(event_param_changed_pack(ap, lo, hi)), hi);
+    }
+}
+
 int run_scenario(const char* name, void (*body)()) {
     std::fflush(nullptr);
     pid_t pid = fork();
@@ -730,6 +870,8 @@ int main() {
     SCENARIO("a rejected bus write is reported", a_rejected_bus_write_is_reported);
     SCENARIO("demo mode accepts a valid write without touching the bus",
              demo_mode_accepts_a_valid_write_without_touching_the_bus);
+    SCENARIO("demo mode reads back what was written",
+             demo_mode_reads_back_what_was_written);
     SCENARIO("a null bus_ok is tolerated", a_null_bus_ok_is_tolerated);
 
     SCENARIO("an unknown option is refused", an_unknown_option_is_refused);
@@ -750,6 +892,15 @@ int main() {
              a_read_only_parameter_can_be_read_but_not_written);
     SCENARIO("a locked parameter can be read but not written",
              a_locked_parameter_can_be_read_but_not_written);
+    SCENARIO("a saved change is logged with its old value",
+             a_saved_change_is_logged_with_its_old_value);
+    SCENARIO("a choice change is logged as option ids",
+             a_choice_change_is_logged_as_option_ids);
+    SCENARIO("nothing is logged when nothing changed",
+             nothing_is_logged_when_nothing_changed);
+    SCENARIO("an unreadable old value is logged as unknown",
+             an_unreadable_old_value_is_logged_as_unknown);
+    SCENARIO("every value fits the change log", every_value_fits_the_change_log);
 
 #undef SCENARIO
 

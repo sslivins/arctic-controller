@@ -4600,6 +4600,7 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     // Connection status
     cJSON_AddBoolToObject(root, "connected", hp.connected);
     cJSON_AddBoolToObject(root, "demo_mode", demo_mode);
+    cJSON_AddNumberToObject(root, "param_changes", advanced_param_change_count());
     
     // Unified path — demo mode populates hp state at the arctic:: level
     cJSON_AddBoolToObject(root, "unit_on", hp.unit_on);
@@ -4842,6 +4843,17 @@ static int16_t ap_value_to_client(uint8_t ap, int16_t read_value) {
     return read_value;
 }
 
+// Vendor-documented default in the same space as "value" (option id for a
+// choice); null for momentary triggers, which have no stored value.
+static void add_ap_default(cJSON* obj, const arctic::AdvancedParam* p) {
+    if (p->is_trigger) {
+        cJSON_AddNullToObject(obj, "default");
+        return;
+    }
+    cJSON_AddNumberToObject(obj, "default",
+                            ap_value_to_client(p->ap, arctic::advanced_display_value(p->ap, p->default_val)));
+}
+
 // Helper to add a single AP (advanced) parameter to a cJSON object, keyed "AP<n>".
 // Sends one response chunk. Returns false once the connection has gone away so
 // that callers streaming a long response stop building the remainder of it.
@@ -4872,6 +4884,7 @@ static cJSON* build_ap_json(const arctic::AdvancedParam* p, bool read_ok, int16_
     } else {
         cJSON_AddNullToObject(obj, "value");
     }
+    add_ap_default(obj, p);
     cJSON_AddNumberToObject(obj, "min", arctic::advanced_display_value(p->ap, p->min_val));
     cJSON_AddNumberToObject(obj, "max", arctic::advanced_display_value(p->ap, p->max_val));
     cJSON_AddNumberToObject(obj, "step", arctic::advanced_display_step(p->ap));
@@ -4992,6 +5005,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON_AddStringToObject(root, "name_msg_id", p->name_msg_id ? p->name_msg_id : "");
     cJSON_AddStringToObject(root, "detail_msg_id", p->detail_msg_id ? p->detail_msg_id : "");
     cJSON_AddStringToObject(root, "category", p->category ? p->category : "");
+    add_ap_default(root, p);
     cJSON_AddNumberToObject(root, "min", arctic::advanced_display_value(p->ap, p->min_val));
     cJSON_AddNumberToObject(root, "max", arctic::advanced_display_value(p->ap, p->max_val));
     cJSON_AddNumberToObject(root, "step", arctic::advanced_display_step(p->ap));

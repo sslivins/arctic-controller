@@ -156,6 +156,7 @@ void event_names_are_the_documented_api_strings() {
     CHECK(std::strcmp(event_type_name(EVENT_HTTPS_FALLBACK), "https_fallback") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_EXT_SENSOR_LOST), "ext_sensor_lost") == 0);
     CHECK(std::strcmp(event_type_name(EVENT_EXT_SENSOR_RESTORED), "ext_sensor_restored") == 0);
+    CHECK(std::strcmp(event_type_name(EVENT_PARAM_CHANGED), "param_changed") == 0);
 }
 
 void event_payloads_decode_to_the_documented_api_keys() {
@@ -258,7 +259,8 @@ void categories_match_the_intended_grouping() {
     }
 
     const event_type_t changes[] = {EVENT_POWER_ON, EVENT_POWER_OFF,
-                                    EVENT_MODE_CHANGED, EVENT_SETPOINT_CHANGED};
+                                    EVENT_MODE_CHANGED, EVENT_SETPOINT_CHANGED,
+                                    EVENT_PARAM_CHANGED};
     for (event_type_t t : changes) {
         CHECK(event_type_category(t) == EVENT_CATEGORY_CHANGES);
     }

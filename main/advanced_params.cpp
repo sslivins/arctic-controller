@@ -4,14 +4,60 @@
  */
 #include "advanced_params.h"
 #include "app_preferences.h"
+#include "event_log.h"
 #include "heatpump_controller.h"
 #include <esp_log.h>
+#include <atomic>
 
 static const char* TAG = "adv_params";
 
 using arctic::AdvWriteResult;
 using arctic::AdvWritePlan;
 using arctic::AdvancedParam;
+
+// Demo mode has no mainboard to hold written values, so keep them here (RAM
+// only, like the demo setpoints) and answer reads from them; otherwise every
+// save would snap back to the default on the next read.
+namespace {
+struct DemoValue { uint8_t ap; uint16_t raw; };
+constexpr int kDemoSlots = 64;
+DemoValue s_demo[kDemoSlots];
+int s_demo_count = 0;
+std::atomic<uint32_t> s_change_count{0};
+
+const DemoValue* demo_find(uint8_t ap) {
+    for (int i = 0; i < s_demo_count; i++) if (s_demo[i].ap == ap) return &s_demo[i];
+    return nullptr;
+}
+
+void demo_store(uint8_t ap, uint16_t raw) {
+    for (int i = 0; i < s_demo_count; i++) {
+        if (s_demo[i].ap == ap) { s_demo[i].raw = raw; return; }
+    }
+    if (s_demo_count < kDemoSlots) s_demo[s_demo_count++] = {ap, raw};
+}
+
+// The value as the API reports it: the display value, or the option id for a
+// choice. EVENT_PARAM_UNKNOWN when it can't be read.
+int client_value(uint8_t ap) {
+    int16_t v = 0;
+    if (!advanced_param_read(ap, &v)) return EVENT_PARAM_UNKNOWN;
+    if (arctic::advanced_enum_option_count(ap) > 0)
+        return arctic::advanced_enum_option_index_for_wire(ap, v);
+    return v;
+}
+
+// Logged so a technician can see, and put back, what a setting was before.
+void log_change(uint8_t ap, int from, int to) {
+    if (from == to) return;
+    s_change_count.fetch_add(1, std::memory_order_relaxed);
+    event_log_record(EVENT_PARAM_CHANGED, event_param_changed_pack(ap, from, to));
+}
+}  // namespace
+
+uint32_t advanced_param_change_count(void) {
+    return s_change_count.load(std::memory_order_relaxed);
+}
 
 bool advanced_param_read(uint8_t ap, int16_t* value_out) {
     if (!value_out) return false;
@@ -28,9 +74,11 @@ bool advanced_param_read(uint8_t ap, int16_t* value_out) {
         return false;
     }
 
-    // Demo mode - no live bus; report the vendor-doc default.
+    // Demo mode - no live bus; report the last demo write, else the vendor-doc default.
     if (app_prefs_is_demo_mode()) {
-        *value_out = arctic::advanced_display_value(ap, p->default_val);
+        const DemoValue* d = demo_find(ap);
+        *value_out = arctic::advanced_display_value(
+            ap, d ? arctic::advanced_decode_raw(ap, d->raw) : p->default_val);
         return true;
     }
 
@@ -63,10 +111,14 @@ arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus
         return r;
     }
 
+    const int from = client_value(ap);
+
     // Demo mode - accept the (valid) write without touching the bus.
     if (app_prefs_is_demo_mode()) {
         ESP_LOGI(TAG, "[DEMO] AP%u = %d (reg%u=%u, not sent)",
                  (unsigned)ap, value, (unsigned)plan.reg, (unsigned)plan.raw);
+        demo_store(ap, plan.raw);
+        log_change(ap, from, value);
         if (bus_ok) *bus_ok = true;
         return AdvWriteResult::OK;
     }
@@ -81,6 +133,7 @@ arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus
     if (ok) {
         ESP_LOGI(TAG, "Wrote AP%u = %d (reg%u = %u)",
                  (unsigned)ap, value, (unsigned)plan.reg, (unsigned)plan.raw);
+        log_change(ap, from, value);
     } else {
         ESP_LOGE(TAG, "AP%u guardrail OK but bus write of reg%u failed",
                  (unsigned)ap, (unsigned)plan.reg);
@@ -103,10 +156,14 @@ arctic::AdvWriteResult advanced_param_write_option(uint8_t ap, size_t option_ind
         return r;
     }
 
+    const int from = client_value(ap);
+
     // Demo mode - accept the (valid) write without touching the bus.
     if (app_prefs_is_demo_mode()) {
         ESP_LOGI(TAG, "[DEMO] AP%u option %u (reg%u=%u, not sent)",
                  (unsigned)ap, (unsigned)option_index, (unsigned)plan.reg, (unsigned)plan.raw);
+        demo_store(ap, plan.raw);
+        log_change(ap, from, (int)option_index);
         if (bus_ok) *bus_ok = true;
         return AdvWriteResult::OK;
     }
@@ -121,6 +178,7 @@ arctic::AdvWriteResult advanced_param_write_option(uint8_t ap, size_t option_ind
     if (ok) {
         ESP_LOGI(TAG, "Wrote AP%u option %u (reg%u = %u)",
                  (unsigned)ap, (unsigned)option_index, (unsigned)plan.reg, (unsigned)plan.raw);
+        log_change(ap, from, (int)option_index);
     } else {
         ESP_LOGE(TAG, "AP%u option guardrail OK but bus write of reg%u failed",
                  (unsigned)ap, (unsigned)plan.reg);
