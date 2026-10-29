@@ -112,7 +112,7 @@ def test_web_dashboard_has_temperature_history_view():
     assert "/api/heatpump/temperature-history" in web
     # Same zoom presets / round-time axis as the device chart.
     assert "HIST_WINDOWS" in web
-    assert "window=${state.histWindow}" in web
+    assert "temperature-history?window=${win}" in web
 
 
 
