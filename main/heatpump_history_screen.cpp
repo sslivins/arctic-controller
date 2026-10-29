@@ -112,9 +112,8 @@ static struct {
     uint32_t window_seconds = HISTORY_WINDOW_DEFAULT_SECONDS;
     lv_obj_t* zoom_buttons[sizeof(HISTORY_WINDOW_PRESETS) /
                            sizeof(HISTORY_WINDOW_PRESETS[0])] = {};
-    // Shown over the strip of new data when a load isn't quick.
+    // Shown over the strip of new data while it loads.
     lv_obj_t* spinner = nullptr;
-    lv_timer_t* spin_timer = nullptr;
     int32_t spin_permille = 500;  // across the plot, 0 = left edge
     // A load that finished mid-gesture, applied once the finger lifts:
     // rebuilding the chart then would stall the drag for 0.2-0.5 s.
@@ -1582,13 +1581,12 @@ static void start_pending_query_if_needed() {
 }
 
 static void spinner_hide() {
-    if (state.spin_timer) {
-        lv_timer_delete(state.spin_timer);
-        state.spin_timer = nullptr;
-    }
     if (state.spinner) lv_obj_add_flag(state.spinner, LV_OBJ_FLAG_HIDDEN);
 }
 
+// Shown as soon as a load starts, unlike the web's 200 ms grace: a load here
+// is never quick (~0.2 s flash read, then a 0.2-0.5 s rebuild during which
+// the screen holds its last frame, spinner included).
 static void spinner_place() {
     if (state.spinner == nullptr || state.chart == nullptr) return;
     lv_area_t coords;
@@ -1599,11 +1597,6 @@ static void spinner_place() {
     const int32_t y = (plot.y1 + plot.y2) / 2;
     lv_obj_set_pos(state.spinner, x - coords.x1 - size / 2, y - coords.y1 - size / 2);
     lv_obj_remove_flag(state.spinner, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void spin_timer_cb(lv_timer_t*) {
-    state.spin_timer = nullptr;  // one-shot, deletes itself
-    if (loading()) spinner_place();
 }
 
 static void query_complete(void* data) {
@@ -1734,14 +1727,7 @@ static void request_window(uint32_t end) {
     update_range_label();
     update_navigation();
     lv_obj_add_flag(state.status_label, LV_OBJ_FLAG_HIDDEN);
-    if (state.spinner && !lv_obj_has_flag(state.spinner, LV_OBJ_FLAG_HIDDEN)) {
-        spinner_place();  // already showing: move it over the new strip
-    } else if (state.spin_timer == nullptr) {
-        state.spin_timer = lv_timer_create(spin_timer_cb, 200, nullptr);
-        lv_timer_set_repeat_count(state.spin_timer, 1);
-    } else {
-        lv_timer_reset(state.spin_timer);
-    }
+    spinner_place();
 
     state.generation++;
     if (state.query_running) {

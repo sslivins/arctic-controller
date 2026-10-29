@@ -370,6 +370,52 @@ class TestTemperatureHistoryWeb:
         assert dashboard_page.evaluate("state.tempHistory.data.end") == end
         expect(dashboard_page.locator('[data-action="history-prev"]')).to_be_disabled()
 
+    def test_empty_window_keeps_chart_and_navigation(
+        self, dashboard_page: Page, base_url: str
+    ):
+        """A window with no samples inside a longer history still shows the
+        chart and its navigation, so the user can move back out of it."""
+        _seed_history(base_url)
+
+        def empty(route):
+            resp = route.fetch()
+            body = resp.json()
+            body["samples"] = []
+            route.fulfill(response=resp, json=body)
+
+        dashboard_page.route("**/api/heatpump/temperature-history*", empty)
+        _open_history(dashboard_page)
+        page = dashboard_page.locator(".page")
+        expect(page.locator(".hist-chart")).to_be_visible()
+        expect(page.locator(".hist-empty")).to_have_text("No samples in this window")
+        expect(page).not_to_contain_text("No cycle history recorded yet")
+        expect(page.locator('[data-action="history-prev"]')).to_be_enabled()
+
+        dashboard_page.unroute("**/api/heatpump/temperature-history*")
+        end = dashboard_page.evaluate("state.tempHistory.data.end")
+        page.locator('[data-action="history-prev"]').click()
+        dashboard_page.wait_for_function(f"state.tempHistory.data.end < {end}")
+        expect(page.locator('[data-action="history-latest"]')).to_be_visible()
+
+    def test_empty_history_shows_the_no_history_message(
+        self, dashboard_page: Page, base_url: str
+    ):
+        _seed_history(base_url)
+
+        def empty(route):
+            resp = route.fetch()
+            body = resp.json()
+            body["samples"] = []
+            body["earliest"] = body["start"]
+            body["latest_end"] = body["end"]
+            route.fulfill(response=resp, json=body)
+
+        dashboard_page.route("**/api/heatpump/temperature-history*", empty)
+        dashboard_page.locator(".rail .nav-link", has_text="Status").click()
+        dashboard_page.get_by_role("button", name="View cycle history").click()
+        expect(dashboard_page.locator(".page")).to_contain_text("No cycle history recorded yet")
+        expect(dashboard_page.locator(".hist-chart")).to_have_count(0)
+
     def test_spinner_marks_the_revealed_strip(self, dashboard_page: Page, base_url: str):
         """A slow load after a drag shows a spinner centred on the strip of
         new data, and removes it once the chart redraws."""

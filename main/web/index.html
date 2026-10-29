@@ -313,6 +313,7 @@
     .hist-chart { width: 100%; height: auto; display: block; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
     @media (pointer: fine) { .hist-chart { cursor: grab; } .hist-chart.dragging { cursor: grabbing; user-select: none; } }
     .hist-hint { font-size: 13px; text-align: center; margin: 8px 0 0; }
+    .hist-empty { position: absolute; left: 0; right: 0; top: 45%; margin: 0; text-align: center; pointer-events: none; }
     .hist-tip { display: none; position: absolute; top: 12px; pointer-events: none; background: var(--cp-surface, #1e293b); border: 1px solid var(--cp-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.6; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
     .hist-tip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: middle; }
     .hist-tip strong { margin-left: 6px; }
@@ -2848,10 +2849,14 @@
         body = `<section class="card"><div class="login" style="min-height:320px"><div class="spinner"></div></div></section>`;
       } else if (th.error && !data) {
         body = `<section class="card"><p class="hist-muted">${esc(th.error)}</p></section>`;
-      } else if (!data || !(data.samples && data.samples.length)) {
+      } else if (!data || !(data.samples && data.samples.length) &&
+                 data.start <= data.earliest && data.end >= data.latest_end) {
         const interval = data ? data.sample_interval_sec : 30;
         body = `<section class="card"><p class="hist-muted">No cycle history recorded yet. Samples are captured every ${interval}s while the heat pump is connected.</p></section>`;
       } else {
+        // An empty window inside a longer history still gets the chart and
+        // its navigation, or there'd be no way out of it.
+        const empty = !data.samples.length;
         const atLatest = data.end >= data.latest_end;
         const atOldest = data.start <= data.earliest;
         const win = data.window_seconds, step = fmtHistSpan(histStep(win)), page = fmtHistSpan(win);
@@ -2875,7 +2880,7 @@
               <button class="hist-toggle ${state.histShowPower ? "on" : ""}" data-action="history-power" aria-pressed="${state.histShowPower}"><span class="box" aria-hidden="true">${state.histShowPower ? "✓" : ""}</span>Power</button>
             </div>
           </div>
-          <div class="hist-chart-wrap">${historyChartSvg(data)}<div class="hist-tip"></div></div>
+          <div class="hist-chart-wrap">${historyChartSvg(data)}${empty ? `<p class="hist-muted hist-empty">No samples in this window</p>` : ""}<div class="hist-tip"></div></div>
           ${histWindowEnergy(data)}
           <div class="hist-nav">
             <div class="hist-nav-group">
