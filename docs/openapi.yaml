@@ -2063,6 +2063,14 @@ paths:
                     type: boolean
                     description: Whether demo mode is active (simulated values)
                     example: false
+                  param_changes:
+                    type: integer
+                    minimum: 0
+                    description: >-
+                      Count of advanced-parameter changes made through this
+                      controller since boot. Clients reload
+                      /api/heatpump/advanced when it changes.
+                    example: 3
                   unit_on:
                     type: boolean
                     description: Whether the unit is powered on

@@ -3309,7 +3309,28 @@
       state.coreLoaded = true;
       updateDocumentTitle();
     }
-    async function loadParams() { const data = await api("/api/heatpump/advanced"); state.params = data.params || {}; }
+    async function loadParams() {
+      const data = await api("/api/heatpump/advanced");
+      state.params = data.params || {};
+      state.paramChanges = state.hp?.param_changes;
+    }
+    // Pick up changes made on the device (or another browser) while the
+    // Control page is open, without clobbering an edit in progress.
+    function controlSignature() {
+      const hp = state.hp || {};
+      return JSON.stringify([hp.unit_on, hp.mode, hp.setpoints, hp.param_changes]);
+    }
+    async function refreshControlLive() {
+      const sig = controlSignature();
+      if (sig === state.controlSig) return;
+      const editing = [...document.querySelectorAll("form[data-gate]")]
+        .some(f => gateSnapshot(f) !== f.dataset.saved)
+        || document.activeElement?.matches?.("form select, form textarea, form input:not([type=range])");
+      if (editing) return;  // retried on the next poll
+      if (state.hp?.param_changes !== state.paramChanges) await loadParams();
+      state.controlSig = sig;
+      render();
+    }
     async function loadEvents(reset = false) {
       if (reset) { state.events = []; state.eventOffset = 0; }
       const data = await api(`/api/events?offset=${state.eventOffset}&limit=50`);
@@ -4666,6 +4687,7 @@
             await loadEvents(true);
             if (state.route === "events") refreshEventsLive();
           } else if (["home", "status", "errors"].includes(state.route)) render();
+          else if (state.route === "control") await refreshControlLive();
           else if (state.notifications.length !== prevNotifCount) render();
           else if (state.route === "settings" && state.settingsPage === "firmware"
                    && ota && ota.state && ota.state !== "idle") render();

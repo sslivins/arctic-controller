@@ -141,6 +141,23 @@ class TestNavigation:
         expect(save).to_be_disabled()
         expect(revert).to_be_disabled()
 
+    def test_advanced_change_elsewhere_refreshes_open_page(self, dashboard_page: Page):
+        """A change made on the device (here: via the API) shows without a reload."""
+        primary(dashboard_page, "Control").click()
+        group = dashboard_page.locator("details.ap-group", has_text="Defrost").first
+        group.locator(":scope > summary").click()
+        slider = group.locator('form[data-key="AP29"] input[type="range"]')
+        original = slider.input_value()
+        changed = str(int(original) - 1 if int(original) > 0 else 1)
+        url = dashboard_page.url.split("#")[0].rstrip("/") + "/api/heatpump/advanced/AP29"
+        headers = {"Content-Type": "text/plain"}
+        try:
+            assert dashboard_page.request.put(url, data=changed, headers=headers).ok
+            expect(slider).to_have_value(changed, timeout=15000)  # next 5 s status poll
+            expect(group).to_have_attribute("open", "")
+        finally:
+            dashboard_page.request.put(url, data=original, headers=headers)
+
     def test_discrete_control_labels_wrap_on_desktop(self, dashboard_page: Page):
         primary(dashboard_page, "Control").click()
         frequency = dashboard_page.locator("details", has_text="Frequency").first

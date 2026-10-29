@@ -4600,6 +4600,7 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     // Connection status
     cJSON_AddBoolToObject(root, "connected", hp.connected);
     cJSON_AddBoolToObject(root, "demo_mode", demo_mode);
+    cJSON_AddNumberToObject(root, "param_changes", advanced_param_change_count());
     
     // Unified path — demo mode populates hp state at the arctic:: level
     cJSON_AddBoolToObject(root, "unit_on", hp.unit_on);
