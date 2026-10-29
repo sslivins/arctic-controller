@@ -153,6 +153,31 @@ class TestShowOnChart:
             f"Expected the cycle chart, got '{device.screen}'"
         assert device.wait_for_widget(tag="temperature_history_screen", timeout=10.0)
 
+    def test_bottom_card_button_clears_nav_bar(self, device: DeviceClient):
+        """The last history card's button can be scrolled above the nav bar."""
+        device.clear_all_faults()
+        device.clear_error_history()
+        # P06 first, so it is the oldest and lands at the bottom of the list.
+        for codes in (("P06",), ("P02", "E19", "E18", "E13")):
+            for code in codes:
+                device.inject_fault(code, True)
+            device.wait_until("faults active",
+                              lambda: len(device.get_heatpump_errors()["active"]) == len(codes),
+                              timeout=10.0)
+            device.clear_all_faults()
+            device.wait_until("faults cleared",
+                              lambda: not device.get_heatpump_errors()["active"], timeout=10.0)
+        assert device.open_faults()
+        _wait_screen_text(device, "pressure too low")
+        device.click(label_contains="pressure too low")
+        assert device.wait_for_widget(tag="error_show_on_chart", timeout=5.0)
+        device.scroll_to("errors_list", 100000)
+        btn = device.find_widget(tag="error_show_on_chart")
+        nav = device.find_widget(tag="nav_home")
+        assert btn and nav
+        assert btn.y + btn.h <= nav.y, (btn, nav)
+        device.click(tag="nav_home")
+
 
 # =========================================================================
 # No Errors State

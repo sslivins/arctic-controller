@@ -8,6 +8,7 @@
 #include "heatpump_history_screen.h"
 #include "history_storage.h"
 #include "history_tab.h"
+#include "nav_bar.h"
 #include "fault_help_links.h"
 #include "heatpump_controller.h"
 #include "ui_common.h"
@@ -683,7 +684,9 @@ void heatpump_errors_create_in(lv_obj_t* parent) {
     lv_obj_set_style_border_width(content, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(content, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_hor(content, 18, LV_PART_MAIN);
-    lv_obj_set_style_pad_ver(content, 12, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(content, 12, LV_PART_MAIN);
+    // The nav bar overlays the bottom of the tab body.
+    lv_obj_set_style_pad_bottom(content, NAV_BAR_H + 15, LV_PART_MAIN);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(content, 15, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
