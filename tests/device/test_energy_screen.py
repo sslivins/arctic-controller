@@ -55,6 +55,40 @@ def test_energy_segment_pages_and_opens_a_day(device: DeviceClient):
     assert device.wait_for_screen("main", timeout=5.0)
 
 
+def test_energy_chart_drag_pans_by_days(device: DeviceClient):
+    """A sideways drag pans the window by whole days without opening the
+    day under the finger; dragging forward stops at today."""
+    device.populate_temperature_history()
+    _open_energy(device)
+    device.wait_for_widget(tag="energy_chart")
+
+    def range_text() -> str:
+        w = device.find_widget(tag="energy_range")
+        return (w.text or "") if w else ""
+
+    try:
+        device.wait_until("chart opens on the latest window",
+                          lambda: _disabled(device, "energy_next_window"), timeout=5.0)
+        latest = range_text()
+
+        device.drag(150, 200, 450, 200, tag="energy_chart")
+        device.wait_until("drag panned back in time",
+                          lambda: _enabled(device, "energy_next_window"), timeout=5.0)
+        device.wait_for_widget(tag="energy_latest")
+        assert range_text() != latest
+        assert not device.has_widget(tag="energy_day_view"), "a drag opened a day"
+
+        # Dragging left returns to the latest window and no further.
+        device.drag(600, 200, 20, 200, tag="energy_chart")
+        device.wait_until("drag panned back to latest",
+                          lambda: _disabled(device, "energy_next_window"), timeout=5.0)
+        assert range_text() == latest
+        assert not device.has_widget(tag="energy_day_view")
+    finally:
+        device.click(tag="nav_home")
+        device.wait_for_screen("main", timeout=5.0)
+
+
 def test_energy_run_opens_cycles_and_power_view(device: DeviceClient):
     device.populate_temperature_history()
     _open_energy(device)

@@ -99,10 +99,25 @@ def _open_cycles(page: Page) -> None:
     page.wait_for_selector(".hist-chart", timeout=10000)
 
 
-def _open_energy(page: Page) -> None:
+def _open_energy(page: Page, neighbours: bool = True) -> None:
+    """Open the Energy tab. With the mocked ledger the live view also fetches
+    the days before the window (for dragging); wait for those too, so later
+    request expectations don't catch them."""
     _open_cycles(page)
     with page.expect_request(lambda r: "/api/energy/daily" in r.url, timeout=10000):
-        page.get_by_role("tab", name="Energy").click()
+        if not neighbours:
+            page.get_by_role("tab", name="Energy").click()
+        else:
+            with page.expect_response(lambda r: "/api/energy/daily" in r.url and "to=" in r.url, timeout=10000):
+                page.get_by_role("tab", name="Energy").click()
+
+
+def _drag(page: Page, x: float, y: float, dx: float, release: bool = True) -> None:
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x + dx, y, steps=12)
+    if release:
+        page.mouse.up()
 
 
 class TestEnergyPage:
@@ -112,10 +127,11 @@ class TestEnergyPage:
 
         expect(page.locator(".en-chart")).to_be_visible()
         expect(page.get_by_role("tab", name="Energy")).to_have_attribute("aria-selected", "true")
-        # 30 days by default: one hit target per day, stacked bars, COP dots.
+        # 30 days by default: one hit target per day, stacked bars, COP dots
+        # (plus the 30 days before, drawn off the plot for dragging).
         expect(page.locator(".en-chart .en-hit")).to_have_count(30)
-        assert page.locator(".en-chart .en-bar").count() >= 30
-        assert page.locator(".en-chart .en-cop").count() == 30
+        assert page.locator(".en-chart .en-bar").count() >= 60
+        assert page.locator(".en-chart .en-cop").count() == 60
         expect(page.locator(".en-stat", has_text="Electricity")).to_contain_text("kWh")
         expect(page.locator(".en-stat", has_text="COP (est.)")).to_contain_text("2.")
         assert page_errors == []
@@ -197,8 +213,67 @@ class TestEnergyPage:
         expect(stat).not_to_contain_text("Day avg")
         assert page_errors == []
 
+    def test_drag_pans_by_whole_days(self, mocked_energy: Page, page_errors):
+        page = mocked_energy
+        _open_energy(page)
+        rng = page.locator(".en-range-text")
+        latest_text = rng.inner_text()
+        box = page.locator(f'.en-hit[data-date="{(TODAY - dt.timedelta(days=15)).isoformat()}"]').bounding_box()
+        x, y, day_px = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, box["width"]
+
+        # Mid-drag the bars (and the days before the window) slide; the axes don't.
+        ticks = page.locator(".en-chart > text").all_inner_texts()
+        _drag(page, x, y, day_px * 3.4, release=False)
+        expect(page.locator(".en-chart")).to_have_class(re.compile("dragging"))
+        assert "translate" in page.locator(".en-chart .en-pan").first.get_attribute("transform")
+        assert page.locator(".en-chart > text").all_inner_texts() == ticks
+        # Release snaps to whole days (3.4 -> 3) without opening a day.
+        with page.expect_request(lambda r: "/api/energy/daily" in r.url and "to=" in r.url) as req:
+            page.mouse.up()
+        query = _query(req.value.url)
+        assert query["to"] == (TODAY - dt.timedelta(days=3)).isoformat()
+        assert query["from"] == (TODAY - dt.timedelta(days=32)).isoformat()
+        expect(page.locator('[data-action="energy-latest"]')).to_be_visible()
+        expect(page.locator('[data-action="energy-next"]')).to_be_enabled()
+        expect(rng).not_to_have_text(latest_text)
+        expect(page.locator(".en-detail")).to_have_count(0)
+
+        # Dragging well past today stops at the live view.
+        with page.expect_request(lambda r: "/api/energy/daily" in r.url and "to=" not in r.url):
+            _drag(page, x, y, -day_px * 10)
+        expect(page.locator('[data-action="energy-next"]')).to_be_disabled()
+        expect(rng).to_have_text(latest_text)
+        expect(page.locator(".en-detail")).to_have_count(0)
+        assert page_errors == []
+
+    def test_drag_past_today_springs_back(self, mocked_energy: Page, page_errors):
+        page = mocked_energy
+        _open_energy(page)
+        box = page.locator(f'.en-hit[data-date="{(TODAY - dt.timedelta(days=15)).isoformat()}"]').bounding_box()
+        _drag(page, box["x"], box["y"] + box["height"] / 2, -box["width"] * 6)
+        chart = page.locator(".en-chart")
+        expect(chart).not_to_have_class(re.compile("dragging"))
+        expect(chart.locator(".en-pan[transform]")).to_have_count(0)
+        expect(page.locator('[data-action="energy-next"]')).to_be_disabled()
+        expect(page.locator(".en-detail")).to_have_count(0)
+        assert page_errors == []
+
+    def test_year_view_fetches_half_a_year_either_side(self, mocked_energy: Page):
+        page = mocked_energy
+        page.route("**/api/energy/totals", lambda route: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps({"reset_id": 1, "since": (TODAY - dt.timedelta(days=1000)).isoformat(),
+                             "through": TODAY.isoformat(), "includes_today": True,
+                             "electrical_wh": 1, "thermal_wh": {}, "covered_electrical_wh": {}})))
+        _open_energy(page)
+        with page.expect_request(lambda r: "/api/energy/daily" in r.url and "to=" in r.url) as req:
+            page.locator('[data-action="energy-range"][data-range="365"]').click()
+        query = _query(req.value.url)
+        assert query["to"] == (TODAY - dt.timedelta(days=365)).isoformat()
+        assert query["from"] == (TODAY - dt.timedelta(days=365 + 181)).isoformat()
+
     def test_energy_page_loads_against_the_device(self, dashboard_page: Page, page_errors):
-        _open_energy(dashboard_page)
+        _open_energy(dashboard_page, neighbours=False)
         expect(
             dashboard_page.locator(".en-chart").or_(
                 dashboard_page.get_by_text("No energy recorded yet.")
