@@ -232,7 +232,7 @@ void draw_series(lv_obj_t *c, lv_layer_t *layer, const Geo &g) {
             // An area per pixel column (its tallest point) down to the
             // baseline, joined to the next column only when contiguous.
             const int32_t base = Y(LV_CLAMP(p.axis.lo, 0, p.axis.hi));
-            const lv_opa_t opa = l.cfg.fill_opa ? l.cfg.fill_opa : LV_OPA_30;
+            const lv_opa_t opa = l.cfg.fill_opa ? l.cfg.fill_opa : (lv_opa_t)LV_OPA_30;
             bool have = false;
             int32_t col_x = 0, col_top = 0;
             for (size_t k = 0; k < n; k++) {
@@ -447,7 +447,8 @@ void draw_end_tags(lv_obj_t *c, lv_layer_t *layer) {
             if (v == NONE) continue;
             char value[24];
             fmt_value(p, v, TSCHART_FMT_TAG, value, sizeof(value));
-            snprintf(labels[n], sizeof(labels[n]), "%s %s", l.tag_name, value);
+            snprintf(labels[n], sizeof(labels[n]), "%s%s%s", l.tag_name,
+                     l.tag_name[0] ? " " : "", value);
             want[n] = ys[n] = map_y(v, p.axis.lo, p.axis.hi, p.slot.y1, p.slot.y2);
             ls[n++] = &l;
         }

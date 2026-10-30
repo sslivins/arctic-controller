@@ -22,6 +22,8 @@ namespace {
 
 lv_obj_class_t s_class;
 
+constexpr lv_obj_flag_t flags(uint32_t f) { return static_cast<lv_obj_flag_t>(f); }
+
 void copy_str(char *dst, size_t cap, const char *src) {
     if (cap == 0) return;
     snprintf(dst, cap, "%s", src ? src : "");
@@ -111,14 +113,14 @@ void style_pill(lv_obj_t *o, lv_color_t border, lv_color_t bg) {
     lv_obj_set_style_bg_color(o, bg, 0);
     lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
     lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE |
-                              LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+    lv_obj_remove_flag(o, flags(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_GESTURE_BUBBLE |
+                                    LV_OBJ_FLAG_SCROLL_ON_FOCUS));
 }
 
 lv_obj_t *passive_child(lv_obj_t *parent) {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_remove_style_all(o);
-    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(o, flags(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
     return o;
 }
 
@@ -270,17 +272,18 @@ void update_status(lv_obj_t *c) {
     }
 }
 
+void make_tag(char *dst, const char *id, const char *suffix, const char *extra = "") {
+    const int n = snprintf(dst, TAG_LEN, "%s%s%s", id, suffix, extra);
+    if (n >= TAG_LEN) dst[TAG_LEN - 1] = '\0';
+}
+
 void retag(lv_obj_t *c) {
     Impl *d = D(c);
-    snprintf(d->tags_btn_tag, sizeof(d->tags_btn_tag), "%s_tags_btn", d->id);
-    snprintf(d->spinner_tag, sizeof(d->spinner_tag), "%s_spinner", d->id);
-    snprintf(d->status_tag, sizeof(d->status_tag), "%s_status", d->id);
-    for (uint8_t i = 0; i < d->ngroups; i++) {
-        snprintf(d->groups[i].tag, TAG_LEN, "%s_chip_%s", d->id, d->groups[i].id);
-    }
-    for (uint8_t i = 0; i < d->npanes; i++) {
-        snprintf(d->panes[i].tag, TAG_LEN, "%s_axis_%s", d->id, d->panes[i].id);
-    }
+    make_tag(d->tags_btn_tag, d->id, "_tags_btn");
+    make_tag(d->spinner_tag, d->id, "_spinner");
+    make_tag(d->status_tag, d->id, "_status");
+    for (uint8_t i = 0; i < d->ngroups; i++) make_tag(d->groups[i].tag, d->id, "_chip_", d->groups[i].id);
+    for (uint8_t i = 0; i < d->npanes; i++) make_tag(d->panes[i].tag, d->id, "_axis_", d->panes[i].id);
 }
 
 // ---- Cursor and gestures -------------------------------------------------
@@ -508,8 +511,8 @@ void constructor_cb(const lv_obj_class_t *, lv_obj_t *obj) {
     d->end_tags = true;
     d->layout_dirty = true;
     d->small_font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-                                LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_remove_flag(obj, flags(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                      LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_GESTURE_BUBBLE));
     lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
 
     d->header = passive_child(obj);
@@ -832,6 +835,7 @@ static void apply_dataset(lv_obj_t *c, const tschart_dataset_t *ds) {
             }
         }
     }
+    if (d->ds.applied) d->ds.applied(c, d->ds.release_ud);
     update_status(c);
     invalidate_static(c);
 }

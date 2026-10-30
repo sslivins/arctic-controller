@@ -121,6 +121,10 @@ typedef struct {
     uint8_t source_count;
     void (*release)(void *ud);
     void *release_ud;
+    /* Optional: runs when the dataset becomes the shown one (possibly later
+     * than set_dataset, after a gesture), before the redraw -- the place to
+     * set this window's spans, notes and status. ud = release_ud. */
+    void (*applied)(lv_obj_t *c, void *ud);
 } tschart_dataset_t;
 
 tschart_source_t *tschart_add_source(lv_obj_t *c, const char *id); /* first = default */
