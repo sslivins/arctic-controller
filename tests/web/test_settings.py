@@ -715,3 +715,156 @@ class TestSettingsWorkspace:
 
         assert not reset_calls
         assert not native_dialogs
+
+
+# ── Firmware install ────────────────────────────────────────────────────────
+# The OTA endpoints are mocked so nothing is ever flashed. The restart is staged
+# the way it looks over a bridged or VPN link, where a controller that has gone
+# away doesn't refuse connections: requests just hang until the page gives up.
+
+RELEASE_NOTES = (
+    "## Arctic Heat Pump Controller v9.9.9\n\n"
+    "### Features\n- per-run COP in compressor run lists (#381)\n\n"
+    "### Fixes\n- show the day on the home Last run (#379)\n\n"
+    "### Tests\n- eee1c40 feat: per-run COP (#381)\n\n"
+    "---\n\n### Installation\n- flash with esptool\n"
+)
+
+
+def _fulfil_json(route, body, status=200):
+    route.fulfill(status=status, content_type="application/json", body=json.dumps(body))
+
+
+class FakeOta:
+    """Stands in for the controller's OTA and health endpoints."""
+
+    def __init__(self, page: Page):
+        self.version = page.evaluate("() => state.ota.current_version || state.info.version || ''")
+        self.ota = {"state": "idle", "progress": 0, "current_version": self.version}
+        self.uptime = 3_600_000
+        self.offline = False
+        self.held = []
+        self.installs = 0
+        page.route("**/api/ota/releases", lambda r: _fulfil_json(r, {
+            "update_available": True, "current_version": self.version, "latest_version": "v9.9.9",
+            "published_at": "2026-10-29T17:00:00Z", "download_ready": True,
+            "release_notes": RELEASE_NOTES}))
+        page.route("**/api/ota/github", self._install)
+        page.route("**/api/ota/upload", self._install)
+        page.route("**/api/ota/status", lambda r: self._answer(r, self.ota))
+        page.route("**/api/health", lambda r: self._answer(r, {"status": "ok", "uptime_ms": self.uptime}))
+
+    def _install(self, route):
+        self.installs += 1
+        _fulfil_json(route, {"status": "started", "success": True})
+
+    def _answer(self, route, body):
+        if self.offline:
+            self.held.append(route)  # never answered: the page has to time it out
+        else:
+            _fulfil_json(route, body)
+
+    def boot(self, version):
+        self.ota = {"state": "idle", "progress": 0, "current_version": version}
+        self.uptime = 20_000
+        self.offline = False
+
+    def close(self):
+        for route in self.held:
+            try:
+                route.abort()
+            except Exception:
+                pass  # the page already gave up on it
+
+
+def offer_update(page: Page):
+    open_settings(page, "Firmware")
+    page.get_by_role("button", name="Check for updates").click()
+    expect(page.get_by_role("button", name="Update to 9.9.9")).to_be_visible(timeout=15000)
+
+
+class TestFirmwareInstall:
+    def test_confirmation_lists_whats_new(self, dashboard_page: Page):
+        page = dashboard_page
+        fake = FakeOta(page)
+        offer_update(page)
+        page.get_by_role("button", name="Update to 9.9.9").click()
+        dialog = page.get_by_role("alertdialog")
+        expect(dialog.locator("h3")).to_have_text("Update to 9.9.9?")
+        expect(dialog.locator(".ota-versions")).to_contain_text(f"{fake.version} → 9.9.9")
+        expect(dialog.locator(".ota-notes li")).to_have_text(
+            ["Per-run COP in compressor run lists", "Show the day on the home Last run"])
+        expect(dialog).to_contain_text("offline for about a minute")
+        dialog.get_by_role("button", name="Cancel").click()
+        expect(dialog).to_have_count(0)
+        assert fake.installs == 0
+
+    def test_update_reconnects_when_requests_hang_during_restart(self, dashboard_page: Page):
+        page = dashboard_page
+        fake = FakeOta(page)
+        offer_update(page)
+        fake.ota = {"state": "downloading", "progress": 40, "current_version": fake.version}
+        page.get_by_role("button", name="Update to 9.9.9").click()
+        page.get_by_role("alertdialog").get_by_role("button", name="Update").click()
+
+        run = page.locator(".ota-run")
+        expect(run.locator("h3")).to_have_text("Updating to 9.9.9")
+        bar = run.get_by_role("progressbar", name="Download progress")
+        expect(bar).to_have_attribute("aria-valuenow", "40", timeout=15000)
+        expect(run.locator(".ota-steps li.current")).to_have_text("Download")
+        assert fake.installs == 1
+
+        # The download finishes and the controller drops off the network.
+        fake.ota = {"state": "downloading", "progress": 95, "current_version": fake.version}
+        expect(bar).to_have_attribute("aria-valuenow", "95", timeout=15000)
+        fake.offline = True
+        expect(run.locator(".ota-steps li.current")).to_have_text("Install & restart", timeout=20000)
+        expect(page.locator(".topbar .hp-status")).to_contain_text("Restarting")
+        expect(run).to_contain_text("reconnects by itself")
+        # Probes go one at a time, so each new one means the last hung probe timed out.
+        for _ in range(2):
+            with page.expect_request("**/api/health", timeout=20000):
+                pass
+
+        with page.expect_navigation(timeout=30000):
+            fake.boot("9.9.9")
+        expect(page.locator(".notice.good")).to_have_text("Updated to 9.9.9 ✓", timeout=30000)
+        expect(page.get_by_role("button", name="Update to 9.9.9")).to_have_count(0)
+        expect(page.locator(".topbar .hp-status")).not_to_contain_text("Restarting")
+        page.get_by_role("button", name="Dismiss").click()
+        expect(page.locator(".notice.good")).to_have_count(0)
+        fake.close()
+
+    def test_update_that_rolls_back_is_reported(self, dashboard_page: Page):
+        page = dashboard_page
+        fake = FakeOta(page)
+        offer_update(page)
+        fake.ota = {"state": "downloading", "progress": 99, "current_version": fake.version}
+        page.get_by_role("button", name="Update to 9.9.9").click()
+        page.get_by_role("alertdialog").get_by_role("button", name="Update").click()
+        expect(page.get_by_role("progressbar")).to_have_attribute("aria-valuenow", "99", timeout=15000)
+        with page.expect_navigation(timeout=30000):
+            # The server stops, then the controller comes back on the old version.
+            page.route("**/api/ota/status", lambda r: r.fulfill(status=503), times=1)
+            fake.boot(fake.version)
+        expect(page.locator(".notice.bad")).to_contain_text(f"still running {fake.version}", timeout=30000)
+
+    def test_file_install_shows_restart_and_reconnects(self, dashboard_page: Page):
+        page = dashboard_page
+        fake = FakeOta(page)
+        open_settings(page, "Firmware")
+        page.locator("summary", has_text="Install from a file").click()
+        page.locator('input[type="file"]').set_input_files(files=[{
+            "name": "arctic_controller.bin", "mimeType": "application/octet-stream",
+            "buffer": b"\xe9" + bytes(64 * 1024)}])
+        page.get_by_role("button", name="Upload and install").click()
+        dialog = page.get_by_role("alertdialog")
+        expect(dialog.locator("h3")).to_have_text("Install this firmware?")
+        expect(dialog).to_contain_text("arctic_controller.bin")
+        dialog.get_by_role("button", name="Install").click()
+        expect(page.locator(".ota-steps li.current")).to_have_text("Restart", timeout=20000)
+        assert fake.installs == 1
+        with page.expect_navigation(timeout=30000):
+            fake.boot(fake.version)
+        expect(page.locator(".notice.good")).to_have_text(
+            f"Firmware installed. The controller is running {fake.version}.", timeout=30000)
