@@ -868,9 +868,8 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
                     TSCHART_SPAN_HATCH);
     // Opaque tints of the legend colours: a translucent band over the navy
     // panel shifts orange/amber towards brown.
-    for (const char* k : {"heating", "cooling", "hot_water"}) {
-        tschart_key_set_fill_strength(c, k, LV_OPA_50);
-    }
+    static const char* const RUN_KEYS[] = {"heating", "cooling", "hot_water"};
+    for (const char* k : RUN_KEYS) tschart_key_set_fill_strength(c, k, LV_OPA_50);
     tschart_key_set_fill_strength(c, "defrost", LV_OPA_60);
     tschart_set_header(c, TSCHART_HEADER_CHIPS | TSCHART_HEADER_KEY |
                               TSCHART_HEADER_TAG_BTN);
