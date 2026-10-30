@@ -28,6 +28,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <initializer_list>
+#include <lvgl_private.h>  // layer clip area, to slide the days under the axes
 #include <new>
 #include <stdio.h>
 #include <string.h>
@@ -36,6 +37,9 @@
 static const char* TAG = "energy_screen";
 
 static constexpr int WINDOW_DAYS = 14;
+// Days loaded either side of the window, so a drag reveals real bars.
+static constexpr int PAD_DAYS = WINDOW_DAYS;
+static constexpr int BUF_DAYS = WINDOW_DAYS + 2 * PAD_DAYS;
 // About as far back as the store keeps (energy::kMonthsKept months).
 static constexpr int MAX_DAYS_BACK = 31 * energy::kMonthsKept;
 static constexpr size_t MAX_RUNS = 48;
@@ -65,8 +69,9 @@ struct MainData {
     bool have_yesterday;
     energy::DayRecord today;
     energy::DayRecord yesterday;
-    // One slot per day of the window, oldest first; date 0 = no record.
-    energy::DayRecord days[WINDOW_DAYS];
+    // One slot per day, oldest first: PAD_DAYS before the window, the window,
+    // then PAD_DAYS after it. date 0 = no record.
+    energy::DayRecord days[BUF_DAYS];
 };
 
 struct Run {
@@ -161,6 +166,12 @@ static uint32_t date_add(uint32_t date, int days) {
 static uint32_t day_start(uint32_t date) {
     struct tm t = tm_of(date);
     return (uint32_t)mktime(&t);
+}
+
+// Whole days from `a` to `b` (negative when b is earlier).
+static int day_diff(uint32_t a, uint32_t b) {
+    const int64_t secs = (int64_t)day_start(b) - (int64_t)day_start(a);
+    return (int)((secs + (secs >= 0 ? 43200 : -43200)) / 86400);
 }
 
 static uint32_t today_date() {
@@ -381,7 +392,7 @@ static void main_complete(void* arg) {
                     thermal_wh(data->yesterday), covered_wh(data->yesterday)};
     }
     for (int i = 0; i < WINDOW_DAYS; i++) {
-        const auto& d = data->days[i];
+        const auto& d = data->days[PAD_DAYS + i];
         if (d.date == 0) continue;
         tiles[2].have = true;
         tiles[2].elec += energy::total_elec_wh(d);
@@ -425,27 +436,24 @@ static void main_complete(void* arg) {
 
 static void main_task(void* arg) {
     auto* data = static_cast<MainData*>(arg);
-    const uint32_t from = date_add(data->end_date, -(WINDOW_DAYS - 1));
+    const uint32_t from = date_add(data->end_date, -(WINDOW_DAYS - 1) - PAD_DAYS);
+    uint32_t to = date_add(data->end_date, PAD_DAYS);
+    if (data->today_date != 0 && to > data->today_date) to = data->today_date;
     energy::DayRecord* read = static_cast<energy::DayRecord*>(
-        psram_alloc(sizeof(energy::DayRecord) * WINDOW_DAYS));
+        psram_alloc(sizeof(energy::DayRecord) * BUF_DAYS));
     if (read != nullptr) {
-        const size_t n = energy::store_read_days(from, data->end_date, read, WINDOW_DAYS);
+        const size_t n = energy::store_read_days(from, to, read, BUF_DAYS);
         for (size_t k = 0; k < n; k++) {
-            for (int i = 0; i < WINDOW_DAYS; i++) {
-                if (date_add(from, i) == read[k].date) {
-                    data->days[i] = read[k];
-                    break;
-                }
-            }
+            const int i = day_diff(from, read[k].date);
+            if (i >= 0 && i < BUF_DAYS) data->days[i] = read[k];
         }
         heap_caps_free(read);
     }
     if (data->today_date != 0) {
         data->have_today = arctic::getEnergyToday(&data->today) &&
                            data->today.date == data->today_date;
-        if (data->have_today && data->end_date == data->today_date) {
-            data->days[WINDOW_DAYS - 1] = data->today;
-        }
+        const int i = data->have_today ? day_diff(from, data->today_date) : -1;
+        if (i >= 0 && i < BUF_DAYS) data->days[i] = data->today;
         const uint32_t yday = date_add(data->today_date, -1);
         data->have_yesterday =
             energy::store_read_days(yday, yday, &data->yesterday, 1) == 1;
@@ -495,12 +503,17 @@ static void request_main() {
     }
 }
 
+// The oldest window end that can be shown.
+static uint32_t earliest_end(uint32_t today) {
+    return date_add(today, -MAX_DAYS_BACK + WINDOW_DAYS - 1);
+}
+
 static void show_window(uint32_t end_date) {
     const uint32_t today = today_date();
     if (today != 0) {
         if (end_date > today) end_date = today;
-        const uint32_t earliest_end = date_add(today, -MAX_DAYS_BACK + WINDOW_DAYS - 1);
-        if (end_date < earliest_end) end_date = earliest_end;
+        const uint32_t oldest = earliest_end(today);
+        if (end_date < oldest) end_date = oldest;
     }
     s.end_date = end_date;
     update_main_header();
@@ -546,8 +559,37 @@ static lv_area_t cop_strip(const lv_area_t& plot) {
     return {plot.x1, plot.y2 + COP_GAP, plot.x2, plot.y2 + COP_GAP + COP_STRIP_H};
 }
 
+// Left edge of window slot i (i may fall outside the window while panning).
 static int32_t slot_x(const lv_area_t& plot, int i) {
-    return plot.x1 + (int32_t)((int64_t)lv_area_get_width(&plot) * i / WINDOW_DAYS);
+    const int64_t n = (int64_t)lv_area_get_width(&plot) * i;
+    return plot.x1 + (int32_t)(n >= 0 ? n / WINDOW_DAYS : -((-n + WINDOW_DAYS - 1) / WINDOW_DAYS));
+}
+
+// The record for window slot j (0 = oldest day on screen). The loaded data
+// can trail the window by a few days, between a pan or button press and the
+// new window loading, so slots are looked up by date.
+static const energy::DayRecord* slot_record(const MainData& d, int offset, int j) {
+    const int b = PAD_DAYS + j + offset;
+    if (b < 0 || b >= BUF_DAYS || d.days[b].date == 0) return nullptr;
+    return &d.days[b];
+}
+
+// Touch gestures on the chart: a sideways drag pans by whole days. The
+// neighbouring days are already loaded, so they slide in with the finger.
+static constexpr int32_t PAN_START_PX = 14;
+static constexpr uint32_t SPRING_MS = 180;
+static struct {
+    int32_t x0 = 0;
+    int32_t dx = 0;
+    bool panning = false;
+    bool springing = false;
+    bool moved = false;  // this press became a pan, so it isn't a tap
+    int32_t lo = 0;      // pan limits, px
+    int32_t hi = 0;
+} s_pan;
+
+static int32_t pan_dx() {
+    return (s_pan.panning || s_pan.springing) ? s_pan.dx : 0;
 }
 
 static void draw_text(lv_layer_t* layer, const lv_area_t& area, const char* text,
@@ -572,34 +614,46 @@ static void draw_hline(lv_layer_t* layer, int32_t x1, int32_t x2, int32_t y) {
     lv_draw_line(layer, &dsc);
 }
 
-// Each day's estimated COP as a dot on its own axis, joined across
-// consecutive days.
-static void draw_cop_strip(lv_layer_t* layer, const lv_area_t& coords, const lv_area_t& plot,
-                           const MainData& d) {
-    const lv_area_t strip = cop_strip(plot);
-    int32_t cops[WINDOW_DAYS];
-    int32_t lo = INT32_MAX, hi = INT32_MIN;
-    for (int i = 0; i < WINDOW_DAYS; i++) {
-        const auto& r = d.days[i];
-        cops[i] = r.date != 0 ? cop_x10(thermal_wh(r), covered_wh(r)) : -1;
-        if (cops[i] < 0) continue;
-        lo = LV_MIN(lo, cops[i] / 10);
-        hi = LV_MAX(hi, (cops[i] + 9) / 10);
+static int32_t slot_cop(const MainData& d, int offset, int j) {
+    const energy::DayRecord* r = slot_record(d, offset, j);
+    return r ? cop_x10(thermal_wh(*r), covered_wh(*r)) : -1;
+}
+
+// The estimated-COP axis in whole numbers, fitted to the days on screen.
+// False when none of them has an estimate.
+static bool cop_range(const MainData& d, int offset, int32_t* lo, int32_t* hi) {
+    *lo = INT32_MAX;
+    *hi = INT32_MIN;
+    for (int j = 0; j < WINDOW_DAYS; j++) {
+        const int32_t c = slot_cop(d, offset, j);
+        if (c < 0) continue;
+        *lo = LV_MIN(*lo, c / 10);
+        *hi = LV_MAX(*hi, (c + 9) / 10);
     }
+    if (*lo > *hi) return false;
+    if (*hi - *lo < 1) *hi = *lo + 1;
+    return true;
+}
+
+static int32_t cop_y(const lv_area_t& strip, int32_t lo, int32_t hi, int32_t x10) {
+    const int32_t y = strip.y2 -
+        (int32_t)((int64_t)(x10 - lo * 10) * COP_STRIP_H / ((hi - lo) * 10));
+    return LV_CLAMP(strip.y1, y, strip.y2);
+}
+
+static void draw_cop_axis(lv_layer_t* layer, const lv_area_t& coords, const lv_area_t& plot,
+                          bool have, int32_t lo, int32_t hi) {
+    const lv_area_t strip = cop_strip(plot);
     const int32_t mid = (strip.y1 + strip.y2) / 2;
     draw_text(layer, {coords.x1 + 4, mid - 10, plot.x1 - 8, mid + 10}, "COP", COLOR_COP);
-    if (lo > hi) {
+    if (!have) {
         draw_hline(layer, plot.x1, plot.x2, strip.y2);
         draw_text(layer, {plot.x1, mid - 10, plot.x2, mid + 10},
                   i18n_get(STR_ENERGY_NO_COP), UI_COLOR_TEXT_DIM);
         return;
     }
-    if (hi - lo < 1) hi = lo + 1;
-    auto y_of = [&](int32_t x10) {
-        return strip.y2 - (int32_t)((int64_t)(x10 - lo * 10) * COP_STRIP_H / ((hi - lo) * 10));
-    };
     for (const int32_t v : {lo, hi}) {
-        const int32_t y = y_of(v * 10);
+        const int32_t y = cop_y(strip, lo, hi, v * 10);
         draw_hline(layer, plot.x1, plot.x2, y);
         char label[8];
         snprintf(label, sizeof(label), "%ld", (long)v);
@@ -607,28 +661,93 @@ static void draw_cop_strip(lv_layer_t* layer, const lv_area_t& coords, const lv_
         const int32_t ty = v == lo ? y - 18 : y;
         draw_text(layer, {plot.x1 - 40, ty, plot.x1 - 8, ty + 18}, label, UI_COLOR_TEXT_DIM);
     }
+}
 
+// Each day's estimated COP as a dot, joined across consecutive days.
+static void draw_cop_data(lv_layer_t* layer, const lv_area_t& plot, const MainData& d,
+                          int offset, int j0, int j1, int32_t dx, int32_t lo, int32_t hi) {
+    const lv_area_t strip = cop_strip(plot);
+    auto cx = [&](int j) { return (slot_x(plot, j) + slot_x(plot, j + 1)) / 2 + dx; };
     lv_draw_line_dsc_t line;
     lv_draw_line_dsc_init(&line);
     line.color = COLOR_COP;
     line.width = 2;
     line.opa = LV_OPA_60;
-    auto cx = [&](int i) { return (slot_x(plot, i) + slot_x(plot, i + 1)) / 2; };
-    for (int i = 1; i < WINDOW_DAYS; i++) {
-        if (cops[i] < 0 || cops[i - 1] < 0) continue;
-        line.p1.x = cx(i - 1); line.p1.y = y_of(cops[i - 1]);
-        line.p2.x = cx(i);     line.p2.y = y_of(cops[i]);
-        lv_draw_line(layer, &line);
+    int32_t prev = -1;
+    for (int j = j0; j <= j1; j++) {
+        const int32_t c = slot_cop(d, offset, j);
+        if (c >= 0 && prev >= 0) {
+            line.p1.x = cx(j - 1); line.p1.y = cop_y(strip, lo, hi, prev);
+            line.p2.x = cx(j);     line.p2.y = cop_y(strip, lo, hi, c);
+            lv_draw_line(layer, &line);
+        }
+        prev = c;
     }
     lv_draw_rect_dsc_t dot;
     lv_draw_rect_dsc_init(&dot);
     dot.bg_color = COLOR_COP;
     dot.radius = LV_RADIUS_CIRCLE;
-    for (int i = 0; i < WINDOW_DAYS; i++) {
-        if (cops[i] < 0) continue;
-        const int32_t x = cx(i), y = y_of(cops[i]);
+    for (int j = j0; j <= j1; j++) {
+        const int32_t c = slot_cop(d, offset, j);
+        if (c < 0) continue;
+        const int32_t x = cx(j), y = cop_y(strip, lo, hi, c);
         const lv_area_t a = {x - 5, y - 5, x + 5, y + 5};
         lv_draw_rect(layer, &dot, &a);
+    }
+}
+
+static void draw_day(lv_layer_t* layer, const lv_area_t& coords, const lv_area_t& plot,
+                     const MainData& d, const energy::DayRecord* r, uint32_t date,
+                     int32_t x1, int32_t x2, uint32_t top_wh) {
+    const int32_t w = x2 - x1;
+    const int32_t bx1 = x1 + w / 5, bx2 = x2 - w / 5;
+    const bool today = date == d.today_date;
+    const int32_t plot_h = lv_area_get_height(&plot);
+    // Days off screen when the axis was fitted can be taller than it.
+    auto y_of = [&](uint32_t wh) {
+        const int64_t y = plot.y2 - (int64_t)wh * plot_h / top_wh;
+        return (int32_t)LV_MAX(y, (int64_t)plot.y1);
+    };
+
+    char label[8];
+    snprintf(label, sizeof(label), "%u", (unsigned)(date % 100));
+    draw_text(layer, {x1, cop_strip(plot).y2 + 8, x2, coords.y2 - 4}, label,
+              today ? UI_COLOR_ACCENT : UI_COLOR_TEXT_DIM);
+    if (r == nullptr) return;
+
+    // Modes stacked from the bottom, as on the web. Idle draw is below the
+    // unit's 100 W metering step, so there is no standby segment.
+    struct Part { uint32_t wh; lv_color_t color; };
+    const Part parts[] = {
+        {r->elec_wh[energy::BUCKET_HEATING], COLOR_HEATING},
+        {r->elec_wh[energy::BUCKET_COOLING], COLOR_COOLING},
+        {r->elec_wh[energy::BUCKET_HOT_WATER], COLOR_HOT_WATER},
+    };
+    uint32_t base = 0;
+    for (const auto& p : parts) {
+        if (p.wh == 0) continue;
+        const int32_t y_lo = y_of(base);
+        base += p.wh;
+        const int32_t y_hi = y_of(base);
+        if (y_lo - y_hi < 1) continue;
+        lv_draw_rect_dsc_t dsc;
+        lv_draw_rect_dsc_init(&dsc);
+        dsc.bg_color = p.color;
+        // Today is still filling up.
+        dsc.bg_opa = today ? LV_OPA_50 : LV_OPA_COVER;
+        const lv_area_t a = {bx1, y_hi, bx2, y_lo - 1};
+        lv_draw_rect(layer, &dsc, &a);
+    }
+
+    if (date == s.selected_date) {
+        lv_draw_rect_dsc_t sel;
+        lv_draw_rect_dsc_init(&sel);
+        sel.bg_opa = LV_OPA_TRANSP;
+        sel.border_color = UI_COLOR_ACCENT;
+        sel.border_width = 2;
+        sel.radius = 6;
+        const lv_area_t a = {x1 + 2, plot.y1, x2 - 2, cop_strip(plot).y2 + 4};
+        lv_draw_rect(layer, &sel, &a);
     }
 }
 
@@ -640,22 +759,22 @@ static void chart_draw_cb(lv_event_t* event) {
     lv_obj_get_coords(chart, &coords);
     const lv_area_t plot = chart_plot(coords);
     const MainData& d = *s.data;
+    const int offset = day_diff(d.end_date, s.end_date);
+    const int32_t dx = pan_dx();
 
+    // The axes fit the window; they stay put while a pan slides the days.
     uint32_t peak = 0;
-    for (int i = 0; i < WINDOW_DAYS; i++) {
-        if (d.days[i].date != 0) peak = LV_MAX(peak, energy::total_elec_wh(d.days[i]));
+    for (int j = 0; j < WINDOW_DAYS; j++) {
+        const energy::DayRecord* r = slot_record(d, offset, j);
+        if (r) peak = LV_MAX(peak, energy::total_elec_wh(*r));
     }
     // Tenths of a kWh, so the round steps read 1 / 2 / 5 / 10 kWh.
     const ChartAxis axis =
         chart_axis_nice(0, LV_MAX((int32_t)((peak + 99) / 100), 10), 5);
-    const int32_t top_wh = axis.hi * 100;
+    const uint32_t top_wh = (uint32_t)axis.hi * 100;
     const int32_t plot_h = lv_area_get_height(&plot);
-    auto y_of = [&](uint32_t wh) {
-        return plot.y2 - (int32_t)((int64_t)wh * plot_h / top_wh);
-    };
-
     for (int32_t v = axis.lo; v <= axis.hi; v += axis.step) {
-        const int32_t y = y_of((uint32_t)v * 100);
+        const int32_t y = plot.y2 - (int32_t)((int64_t)v * 100 * plot_h / top_wh);
         draw_hline(layer, plot.x1, plot.x2, y);
         char label[16];
         if (v % 10 == 0) {
@@ -666,64 +785,150 @@ static void chart_draw_cb(lv_event_t* event) {
         draw_text(layer, {coords.x1 + 4, y - 10, plot.x1 - 8, y + 10}, label,
                   UI_COLOR_TEXT_DIM);
     }
-    const int32_t label_y = cop_strip(plot).y2 + 8;
     draw_text(layer, {coords.x1 + 4, coords.y1 + 4, plot.x1 - 8, coords.y1 + 24}, "kWh",
               UI_COLOR_TEXT_DIM);
+    int32_t lo, hi;
+    const bool have_cop = cop_range(d, offset, &lo, &hi);
+    draw_cop_axis(layer, coords, plot, have_cop, lo, hi);
 
-    for (int i = 0; i < WINDOW_DAYS; i++) {
-        const auto& r = d.days[i];
-        const uint32_t date = date_add(d.end_date, i - (WINDOW_DAYS - 1));
-        const int32_t x1 = slot_x(plot, i), x2 = slot_x(plot, i + 1);
-        const int32_t w = x2 - x1;
-        const int32_t bx1 = x1 + w / 5, bx2 = x2 - w / 5;
-        const bool today = date == d.today_date;
-
-        char label[8];
-        snprintf(label, sizeof(label), "%u", (unsigned)(date % 100));
-        draw_text(layer, {x1, label_y, x2, coords.y2 - 4}, label,
-                  today ? UI_COLOR_ACCENT : UI_COLOR_TEXT_DIM);
-        if (r.date == 0) continue;
-
-        // Modes stacked from the bottom, as on the web. Idle draw is below the
-        // unit's 100 W metering step, so there is no standby segment.
-        struct Part { uint32_t wh; lv_color_t color; };
-        const Part parts[] = {
-            {r.elec_wh[energy::BUCKET_HEATING], COLOR_HEATING},
-            {r.elec_wh[energy::BUCKET_COOLING], COLOR_COOLING},
-            {r.elec_wh[energy::BUCKET_HOT_WATER], COLOR_HOT_WATER},
-        };
-        uint32_t base = 0;
-        for (const auto& p : parts) {
-            if (p.wh == 0) continue;
-            const int32_t y_lo = y_of(base);
-            base += p.wh;
-            const int32_t y_hi = y_of(base);
-            if (y_lo - y_hi < 1) continue;
-            lv_draw_rect_dsc_t dsc;
-            lv_draw_rect_dsc_init(&dsc);
-            dsc.bg_color = p.color;
-            // Today is still filling up.
-            dsc.bg_opa = today ? LV_OPA_50 : LV_OPA_COVER;
-            const lv_area_t a = {bx1, y_hi, bx2, y_lo - 1};
-            lv_draw_rect(layer, &dsc, &a);
+    const lv_area_t saved = layer->_clip_area;
+    const lv_area_t band = {plot.x1, coords.y1, plot.x2, coords.y2};
+    if (lv_area_intersect(&layer->_clip_area, &saved, &band)) {
+        // The slots in view at this pan offset, plus one either side.
+        const int32_t plot_w = LV_MAX(lv_area_get_width(&plot), 1);
+        const int first = (int)(-(int64_t)dx * WINDOW_DAYS / plot_w);
+        const int j0 = first - 1, j1 = first + WINDOW_DAYS;
+        for (int j = j0; j <= j1; j++) {
+            const uint32_t date = date_add(s.end_date, j - (WINDOW_DAYS - 1));
+            if (d.today_date != 0 && date > d.today_date) continue;
+            draw_day(layer, coords, plot, d, slot_record(d, offset, j), date,
+                     slot_x(plot, j) + dx, slot_x(plot, j + 1) + dx, top_wh);
         }
-
-        if (date == s.selected_date) {
-            lv_draw_rect_dsc_t sel;
-            lv_draw_rect_dsc_init(&sel);
-            sel.bg_opa = LV_OPA_TRANSP;
-            sel.border_color = UI_COLOR_ACCENT;
-            sel.border_width = 2;
-            sel.radius = 6;
-            const lv_area_t a = {x1 + 2, plot.y1, x2 - 2, cop_strip(plot).y2 + 4};
-            lv_draw_rect(layer, &sel, &a);
-        }
+        if (have_cop) draw_cop_data(layer, plot, d, offset, j0, j1, dx, lo, hi);
     }
-    draw_cop_strip(layer, coords, plot, d);
+    layer->_clip_area = saved;
+}
+
+static int32_t plot_width() {
+    lv_area_t coords;
+    lv_obj_get_coords(s.chart, &coords);
+    const lv_area_t plot = chart_plot(coords);
+    return lv_area_get_width(&plot);
+}
+
+static void spring_exec_cb(void*, int32_t v) {
+    s_pan.dx = v;
+    if (s.chart) lv_obj_invalidate(s.chart);
+}
+
+static void spring_done_cb(lv_anim_t*) {
+    s_pan.springing = false;
+    s_pan.dx = 0;
+    if (s.chart) lv_obj_invalidate(s.chart);
+}
+
+static void spring_stop() {
+    if (!s_pan.springing) return;
+    lv_anim_delete(&s_pan, spring_exec_cb);
+    s_pan.springing = false;
+    s_pan.dx = 0;
+}
+
+// Ease the days from `from` px back into their slots.
+static void spring_from(int32_t from) {
+    s_pan.dx = from;
+    lv_obj_invalidate(s.chart);
+    if (from == 0) return;
+    s_pan.springing = true;
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, &s_pan);
+    lv_anim_set_exec_cb(&anim, spring_exec_cb);
+    lv_anim_set_values(&anim, from, 0);
+    lv_anim_set_duration(&anim, SPRING_MS);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_set_completed_cb(&anim, spring_done_cb);
+    lv_anim_start(&anim);
+}
+
+// How far (px) the chart can be dragged: forward to today, back to the
+// oldest day kept.
+static void pan_limits(int32_t* lo, int32_t* hi) {
+    const uint32_t today = today_date();
+    if (today == 0) {
+        *lo = *hi = 0;
+        return;
+    }
+    const int64_t w = plot_width();
+    const int fwd = LV_MAX(0, day_diff(s.end_date, today));
+    const int back = LV_MAX(0, day_diff(earliest_end(today), s.end_date));
+    *lo = -(int32_t)(fwd * w / WINDOW_DAYS);
+    *hi = (int32_t)(back * w / WINDOW_DAYS);
+}
+
+// Past either end the chart follows the finger at a third of the speed.
+static int32_t rubber_band(int32_t dx, int32_t lo, int32_t hi) {
+    if (dx > hi) return hi + (dx - hi) / 3;
+    if (dx < lo) return lo + (dx - lo) / 3;
+    return dx;
+}
+
+static void pan_end(bool apply) {
+    if (!s_pan.panning) return;
+    s_pan.panning = false;
+    const int32_t shown = s_pan.dx;
+    const int32_t dx = LV_CLAMP(s_pan.lo, shown, s_pan.hi);
+    const int64_t w = plot_width();
+    int steps = 0;
+    if (apply && w > 0) {
+        const int64_t n = -(int64_t)dx * WINDOW_DAYS;
+        steps = (int)((n >= 0 ? n + w / 2 : n - w / 2) / w);
+    }
+    if (steps != 0) {
+        // The new window draws from the days already loaded, so it shows at
+        // once; the part-day left over eases into place.
+        const uint32_t old_end = s.end_date;
+        show_window(date_add(s.end_date, steps));
+        steps = day_diff(old_end, s.end_date);
+    }
+    spring_from(shown + (int32_t)(steps * w / WINDOW_DAYS));
+}
+
+static void chart_press_cb(lv_event_t* event) {
+    lv_indev_t* indev = lv_indev_active();
+    if (indev == nullptr || s.chart == nullptr) return;
+    lv_point_t point;
+    lv_indev_get_point(indev, &point);
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        spring_stop();
+        s_pan.x0 = point.x;
+        s_pan.dx = 0;
+        s_pan.panning = false;
+        s_pan.moved = false;
+        lv_obj_invalidate(s.chart);
+        return;
+    }
+    if (code != LV_EVENT_PRESSING) {
+        pan_end(code == LV_EVENT_RELEASED);
+        return;
+    }
+    if (!s_pan.panning) {
+        if (s.data == nullptr || LV_ABS(point.x - s_pan.x0) <= PAN_START_PX) return;
+        s_pan.panning = s_pan.moved = true;
+        s_pan.x0 = point.x;  // start sliding from here, no jump
+        pan_limits(&s_pan.lo, &s_pan.hi);
+        return;
+    }
+    const int32_t dx = rubber_band(point.x - s_pan.x0, s_pan.lo, s_pan.hi);
+    if (dx != s_pan.dx) {
+        s_pan.dx = dx;
+        lv_obj_invalidate(s.chart);
+    }
 }
 
 static void chart_click_cb(lv_event_t*) {
-    if (s.data == nullptr) return;
+    if (s.data == nullptr || s_pan.moved) return;
     lv_indev_t* indev = lv_indev_active();
     if (indev == nullptr) return;
     lv_point_t point;
@@ -732,10 +937,12 @@ static void chart_click_cb(lv_event_t*) {
     lv_obj_get_coords(s.chart, &coords);
     const lv_area_t plot = chart_plot(coords);
     if (point.x < plot.x1 || point.x > plot.x2) return;
-    const int i = (int)((int64_t)(point.x - plot.x1) * WINDOW_DAYS /
+    const int j = (int)((int64_t)(point.x - plot.x1) * WINDOW_DAYS /
                         lv_area_get_width(&plot));
-    if (i < 0 || i >= WINDOW_DAYS || s.data->days[i].date == 0) return;
-    open_day(s.data->days[i].date);
+    if (j < 0 || j >= WINDOW_DAYS) return;
+    const energy::DayRecord* r =
+        slot_record(*s.data, day_diff(s.data->end_date, s.end_date), j);
+    if (r) open_day(r->date);
 }
 
 static void tile_cb(lv_event_t* e) {
@@ -755,7 +962,7 @@ static const energy::DayRecord* day_record(uint32_t date) {
     if (s.data == nullptr) return nullptr;
     if (s.data->have_today && s.data->today.date == date) return &s.data->today;
     if (s.data->have_yesterday && s.data->yesterday.date == date) return &s.data->yesterday;
-    for (int i = 0; i < WINDOW_DAYS; i++) {
+    for (int i = 0; i < BUF_DAYS; i++) {
         if (s.data->days[i].date == date) return &s.data->days[i];
     }
     return nullptr;
@@ -1216,6 +1423,10 @@ static void build_main_view() {
     lv_obj_set_user_data(s.chart, (void*)"energy_chart");
     lv_obj_add_event_cb(s.chart, chart_draw_cb, LV_EVENT_DRAW_MAIN_END, nullptr);
     lv_obj_add_event_cb(s.chart, chart_click_cb, LV_EVENT_CLICKED, nullptr);
+    for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_PRESSING, LV_EVENT_RELEASED,
+                                 LV_EVENT_PRESS_LOST}) {
+        lv_obj_add_event_cb(s.chart, chart_press_cb, code, nullptr);
+    }
 
     s.status_label = make_label(s.chart, UI_FONT_SMALL, UI_COLOR_TEXT_DIM,
                                 i18n_get(STR_ENERGY_LOADING));
@@ -1345,6 +1556,9 @@ void energy_screen_hide(void) {
     s.day_pending = false;
     if (s.refresh_timer) lv_timer_delete(s.refresh_timer);
     s.refresh_timer = nullptr;
+    spring_stop();
+    s_pan.panning = s_pan.moved = false;
+    s_pan.dx = 0;
     if (s.root) lv_obj_delete(s.root);
     s.root = nullptr;
     s.main_view = s.day_view = nullptr;
