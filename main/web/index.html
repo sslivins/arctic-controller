@@ -216,6 +216,20 @@
     .ota-indeterminate { margin: 12px 0 6px; height: 6px; border-radius: 3px; background: var(--cp-border); overflow: hidden; }
     .ota-indeterminate-bar { width: 40%; height: 100%; border-radius: 3px; background: var(--cp-accent, #2f81f7); animation: ota-slide 1.3s ease-in-out infinite; }
     @keyframes ota-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
+    .ota-run { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--cp-border); border-radius: 10px; background: var(--cp-surface-soft); }
+    .ota-run h3 { margin: 0 0 10px; font-size: 15px; }
+    .ota-steps { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--cp-text-muted); }
+    .ota-steps li { flex: 1 1 0; padding-top: 6px; border-top: 3px solid var(--cp-border); }
+    .ota-steps li.done { border-color: var(--cp-accent, #2f81f7); }
+    .ota-steps li.current { border-color: var(--cp-accent, #2f81f7); color: var(--cp-text); font-weight: 600; }
+    .ota-bar { margin: 12px 0 6px; height: 6px; border-radius: 3px; background: var(--cp-border); overflow: hidden; }
+    .ota-bar-fill { height: 100%; border-radius: 3px; background: var(--cp-accent, #2f81f7); transition: width .4s ease; }
+    .ota-run .metric-sub { margin: 0; }
+    .ota-run .btn-row { margin-top: 10px; }
+    .confirm-dialog .ota-versions { margin: 0 0 10px; color: var(--cp-text-muted); font-size: 14px; }
+    .confirm-dialog .ota-notes { margin: 0 0 12px; padding-left: 20px; font-size: 14px; max-height: 40vh; overflow-y: auto; }
+    .confirm-dialog .ota-notes li { margin: 2px 0; }
+    .confirm-dialog h4 { margin: 0 0 4px; font-size: 13px; color: var(--cp-text-muted); text-transform: uppercase; letter-spacing: .04em; }
     .layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: calc(100vh - 64px); }
     .rail {
       position: sticky; top: 64px; align-self: start; height: calc(100vh - 64px);
@@ -958,6 +972,8 @@
       hot_water: "Hot water", hot_water_cooling: "Hot water / cooling"
     };
     const modeLabel = mode => modeLabels[mode] || titleCase(mode || "unknown");
+    // GitHub tags carry a "v"; the firmware reports bare versions. Show them one way.
+    const plainVersion = v => String(v || "").trim().replace(/^v(?=\d)/i, "");
 
     const state = {
       auth: { checked: false, required: true, loggedIn: false, changeRequired: false, loginError: "", loginFailures: 0, loginUsername: "", loginCooldownUntil: 0, loginShake: false, recovering: false, recoveryError: "" },
@@ -988,17 +1004,25 @@
 
     const queue = [];
     let activeRequests = 0;
+    // Every request gets a deadline. Over a routed or bridged link a controller that
+    // has gone away (restarting, say) often doesn't refuse the connection; the request
+    // just hangs, and three hung requests would stall this queue for good.
+    const API_TIMEOUT_MS = 30000;
     function api(url, options = {}) {
+      const { timeout = API_TIMEOUT_MS, ...fetchOptions } = options;
       return new Promise((resolve, reject) => {
         queue.push(async () => {
           activeRequests++;
+          const ctl = new AbortController();
+          const timer = setTimeout(() => ctl.abort(), timeout);
+          const send = () => fetch(url, { ...fetchOptions, signal: ctl.signal });
+          let response;
           try {
-            let response;
-            try { response = await fetch(url, options); }
+            try { response = await send(); }
             catch (error) {
-              const method = String(options.method || "GET").toUpperCase();
-              if (method !== "GET") throw error;
-              response = await fetch(url, options);
+              const method = String(fetchOptions.method || "GET").toUpperCase();
+              if (method !== "GET" || ctl.signal.aborted) throw error;
+              response = await send();
             }
             if (response.status === 401) {
               // Re-render only on the transition: background pollers keep
@@ -1022,8 +1046,17 @@
               throw err;
             }
             resolve(data);
-          } catch (error) { reject(error); }
-          finally { activeRequests--; runQueue(); }
+          } catch (error) {
+            if (ctl.signal.aborted) {
+              const err = new Error("The controller didn't respond");
+              err.timeout = err.unreachable = true;
+              reject(err);
+            } else {
+              if (!response && error) error.unreachable = true;
+              reject(error);
+            }
+          }
+          finally { clearTimeout(timer); activeRequests--; runQueue(); }
         });
         runQueue();
       });
@@ -1158,8 +1191,13 @@
     }
     function topbar() {
       const connected = !!state.hp.connected, loading = !state.coreLoaded;
+      const restarting = state.otaInstall?.active && ["installing", "restarting"].includes(state.otaInstall.phase);
       const hpStatus = loading
         ? `<span class="status-item hp-status loading" title="Connecting to controller" aria-label="Connecting to controller"><span class="spinner-inline" aria-hidden="true"></span><span class="status-label">Connecting…</span></span>`
+        : restarting
+        ? `<span class="status-item hp-status loading" title="Controller restarting" aria-label="Controller restarting"><span class="spinner-inline" aria-hidden="true"></span><span class="status-label">Restarting…</span></span>`
+        : state.unreachable
+        ? `<span class="status-item hp-status" title="Controller not responding" aria-label="Controller not responding"><span class="dot bad"></span><span class="status-label">No connection</span></span>`
         : `<span class="status-item hp-status" title="${connected ? "Heat pump online" : "Heat pump offline"}" aria-label="${connected ? "Heat pump online" : "Heat pump offline"}"><span class="dot ${connected ? "good" : "bad"}"></span><span class="status-label">${connected ? "Online" : "Offline"}</span></span>`;
       return `<header class="topbar">
           <div class="brand"><div class="brand-mark">A</div><span>${esc(controllerTitle())}</span></div>
@@ -1917,7 +1955,7 @@
         case "security": return { text: state.tls?.https_active ? "HTTPS" : state.tls?.https_failed ? "HTTPS failed" : (state.tls ? "HTTP only" : "") };
         case "firmware": {
           const update = state.release?.update_available
-            ? state.release.latest_version
+            ? plainVersion(state.release.latest_version)
             : (state.notifications || []).some(n => n.key === "firmware_update") ? "" : null;
           if (update !== null) return { text: update ? `Update ${update}` : "Update available", hl: true };
           return { text: state.ota?.current_version || state.info?.version || "" };
@@ -1962,37 +2000,67 @@
           <div class="notice">Connecting may close this page. Reopen the controller at its new IP address after it joins the network.</div>
           <p><button class="btn primary" type="submit">Save and connect</button></p></form></section>`;
     }
+    function otaElapsed(ms) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    }
+    const OTA_SLOW_MS = 2 * 60 * 1000;
+    // Progress for an install this page started: download (or upload) with a real
+    // percentage, then the offline stretch while the controller writes flash and restarts.
+    function otaRunPanel(inst) {
+      const file = inst.source === "file";
+      const steps = [file ? "Upload" : "Download", file ? "Restart" : "Install & restart", "Done"];
+      const transferring = ["starting", "downloading", "uploading"].includes(inst.phase);
+      const at = transferring ? 0 : 1;
+      const pct = Math.max(0, Math.min(100, Math.round(inst.progress || 0)));
+      const offlineFor = Date.now() - (inst.phaseStarted || inst.started);
+      const slow = !transferring && inst.phase !== "verify" && offlineFor > OTA_SLOW_MS;
+      const sub = inst.phase === "starting" ? "Preparing the download…"
+        : inst.phase === "downloading" ? `Downloading… ${pct}%`
+        : inst.phase === "uploading" ? `Uploading… ${pct}%`
+        : inst.phase === "verify" ? "Reconnected. Checking the installed version…"
+        : slow ? `This is taking longer than usual (${otaElapsed(offlineFor)}). This page keeps trying to reconnect, or you can reload it.`
+        : `${file ? "Restarting" : "Installing and restarting"} · ${otaElapsed(offlineFor)}. The controller is offline for about a minute, and this page reconnects by itself.`;
+      const bar = transferring && inst.phase !== "starting"
+        ? `<div class="ota-bar" role="progressbar" aria-label="${file ? "Upload" : "Download"} progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="ota-bar-fill" style="width:${pct}%"></div></div>`
+        : `<div class="ota-indeterminate"><div class="ota-indeterminate-bar"></div></div>`;
+      return `<div class="ota-run" role="status" aria-live="polite">
+        <h3>${inst.target ? `Updating to ${esc(plainVersion(inst.target))}` : "Installing firmware from a file"}</h3>
+        <ol class="ota-steps">${steps.map((s, i) => `<li class="${i < at ? "done" : i === at ? "current" : ""}">${s}</li>`).join("")}</ol>
+        ${bar}<p class="metric-sub">${sub}</p>
+        ${slow ? `<div class="btn-row"><button class="btn" data-action="ota-reload">Reload page</button></div>` : ""}</div>`;
+    }
     function firmwareSettings() {
       const inst = state.otaInstall;
       const installing = inst && inst.active;
       const installDone = inst && !inst.active && inst.phase === "done";
       const installFailed = inst && !inst.active && (inst.phase === "failed" || inst.phase === "timeout");
-      const indeterminate = installing && ["starting", "applying", "rebooting"].includes(inst.phase);
-      const otaActive = installing || ["downloading", "verifying"].includes(state.ota.state);
-      const showProgress = !inst && (["downloading", "verifying"].includes(state.ota.state) || (state.ota.progress != null && state.ota.progress > 0));
+      const otaBusy = ["downloading", "verifying"].includes(state.ota.state);
+      const current = (installDone && inst.newVersion) || state.ota.current_version || state.info.version || "";
+      const updateReady = state.release?.update_available && state.release?.download_ready && !installDone;
       return `<section class="card"><h2>Firmware</h2>
-        <div class="kv"><span>Current version</span><strong>${esc((installDone && inst.newVersion) || state.ota.current_version || state.info.version || "--")}</strong></div>
-        <div class="kv"><span>Update status</span><strong>${esc(inst ? OTA_PHASE_LABEL[inst.phase] : titleCase(state.ota.state || "idle"))}</strong></div>
-        ${installing && inst.phase === "downloading" ? `<div class="kv"><span>Progress</span><strong>${inst.progress || 0}%</strong></div>` : ""}
-        ${indeterminate ? `<div class="ota-indeterminate"><div class="ota-indeterminate-bar"></div></div>
-          <div class="metric-sub">Installing the update. The controller will restart, and this page will briefly lose its connection.</div>` : ""}
-        ${showProgress ? `<div class="kv"><span>Progress</span><strong>${state.ota.progress || 0}%</strong></div>` : ""}
-        ${installDone ? `<div class="notice good" style="margin-top:16px">Updated to ${esc(inst.newVersion || inst.target || "the latest version")} ✓</div>` : ""}
-        ${installFailed ? `<div class="notice bad" style="margin-top:16px">${inst.phase === "timeout" ? "The device is taking longer than expected. Reload the page to check its status." : "Update failed: " + esc(inst.error || "unknown error")}</div>` : ""}
+        <div class="kv"><span>Current version</span><strong>${esc(plainVersion(current) || "--")}</strong></div>
+        ${!inst && !otaBusy ? `<div class="kv"><span>Update status</span><strong>${esc(titleCase(state.ota.state || "idle"))}</strong></div>` : ""}
+        ${installing ? otaRunPanel(inst) : ""}
+        ${!inst && otaBusy ? otaRunPanel({ source: "github", phase: "downloading", progress: state.ota.progress || 0, target: "" }) : ""}
+        ${installDone ? `<div class="notice good" style="margin-top:16px">${inst.source === "file" && plainVersion(inst.newVersion) === plainVersion(inst.startVersion)
+          ? `Firmware installed. The controller is running ${esc(plainVersion(inst.newVersion))}.`
+          : `Updated to ${esc(plainVersion(inst.newVersion || inst.target))} ✓`}</div>` : ""}
+        ${installFailed ? `<div class="notice bad" style="margin-top:16px">${inst.phase === "timeout"
+          ? "The controller hasn't come back after 10 minutes. Check that it has power and is on the network, then reload this page."
+          : "Update failed: " + esc(inst.error || "unknown error")}</div>` : ""}
         ${!inst && state.ota.error ? `<div class="notice bad" style="margin-top:16px">Update failed: ${esc(state.ota.error)}</div>` : ""}
-        <div class="btn-row" style="margin-top:16px">
-          ${installing
-            ? `<button class="btn" disabled>${indeterminate ? "Applying…" : "Installing…"}</button>`
-            : state.checkingUpdate
+        ${installing ? "" : `<div class="btn-row" style="margin-top:16px">
+          ${state.checkingUpdate
             ? `<button class="btn checking" disabled><span class="btn-spinner" aria-hidden="true"></span>Checking for updates…</button>`
             : `<button class="btn" data-action="check-update">Check for updates</button>
-               ${state.release?.update_available && state.release?.download_ready ? `<button class="btn primary" data-action="install-update">Install ${esc(state.release.latest_version)}</button>` : ""}
-               ${(installDone || installFailed) ? `<button class="btn" data-action="ota-dismiss">Dismiss</button>` : ""}`}
-          ${!installing && state.ota.state === "ready_to_reboot" ? `<button class="btn primary" data-action="reboot">Reboot now</button>` : ""}</div>
-        ${!otaActive && !inst && !state.checkingUpdate && state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(state.release.latest_version)} is available.` : "The controller is up to date."}</div>` : ""}
+               ${updateReady ? `<button class="btn primary" data-action="install-update">Update to ${esc(plainVersion(state.release.latest_version))}</button>` : ""}
+               ${installFailed && inst.phase === "timeout" ? `<button class="btn" data-action="ota-reload">Reload page</button>` : ""}
+               ${(installDone || installFailed) ? `<button class="btn" data-action="ota-dismiss">Dismiss</button>` : ""}`}</div>`}
+        ${!otaBusy && !inst && !state.checkingUpdate && state.release ? `<div class="notice" style="margin-top:16px">${state.release.update_available ? `Version ${esc(plainVersion(state.release.latest_version))} is available.` : "The controller is up to date."}</div>` : ""}
         <details class="fold" data-fold="fw-upload" ${foldOpen("fw-upload")}><summary>Install from a file</summary>
           <form data-form="firmware" data-gate><div class="field"><label>ESP-IDF application image (.bin)</label>
-          <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit">Upload and install</button></form></details>
+          <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit" ${installing ? "disabled" : ""}>Upload and install</button></form></details>
       </section>`;
     }
     function timeSettings() {
@@ -3625,6 +3693,7 @@
       state.notifications = values[7].notifications || [];
       state.weather = values[8];
       state.coreLoaded = true;
+      resolveInstallOutcome();
       updateDocumentTitle();
     }
     async function loadParams() {
@@ -4151,36 +4220,39 @@
       }
       if (type === "tls") {
         if (!await askConfirm({ title: "Install this certificate?", message: `The controller restarts and the dashboard moves to ${schemeUrl("https")}`, confirmLabel: "Install & restart" })) return;
-        const before = await fetch("/api/health", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
+        const before = (await probe("/api/health"))?.data || {};
         await mutate("/api/tls/certificate", jsonOptions("POST", { cert: data.get("cert"), key: data.get("key") }));
         restartToScheme("https", before.uptime_ms);
       }
       if (type === "firmware") {
         const file = data.get("firmware");
         if (!file?.name?.toLowerCase().endsWith(".bin")) return toast("Select a .bin firmware image", "bad");
+        if (state.otaInstall?.active) return;
+        if (!await askConfirm({ title: "Install this firmware?", message: `${file.name} is uploaded and installed, then the controller restarts. It's offline for about a minute, and this page reconnects by itself.`, confirmLabel: "Install" })) return;
+        const before = await probe("/api/health");
+        beginInstall({ source: "file", phase: "uploading", target: "", uptimeBefore: before?.data?.uptime_ms ?? null });
         const xhr = new XMLHttpRequest();
         xhr.open("POST", "/api/ota/upload");
         xhr.setRequestHeader("Content-Type", "application/octet-stream");
-        xhr.upload.onprogress = e => { if (e.lengthComputable) toast(`Uploading ${Math.round(e.loaded / e.total * 100)}%`); };
-        xhr.onload = () => xhr.status === 200 ? toast("Firmware uploaded; controller is restarting", "good") : toast("Firmware upload failed", "bad");
-        xhr.onerror = () => toast("Firmware upload failed", "bad");
+        xhr.upload.onprogress = e => {
+          const inst = state.otaInstall;
+          if (!e.lengthComputable || !inst?.active || inst.phase !== "uploading") return;
+          const pct = Math.floor(e.loaded / e.total * 100);
+          if (pct === inst.progress) return;
+          inst.progress = pct;
+          render();
+        };
+        // The controller answers once the image is written, then restarts a second later.
+        xhr.onload = () => {
+          if (xhr.status === 200) { setInstallPhase("restarting"); scheduleInstallTick(); return; }
+          let message = `HTTP ${xhr.status}`;
+          try { message = JSON.parse(xhr.responseText).error || message; } catch (_) { /* not JSON */ }
+          finishInstall("failed", message);
+        };
+        xhr.onerror = () => finishInstall("failed", "The upload was interrupted");
         xhr.send(file);
       }
     }
-    const OTA_PHASE_LABEL = {
-      starting: "Starting update…",
-      downloading: "Downloading firmware…",
-      applying: "Applying update & rebooting…",
-      rebooting: "Applying update & rebooting…",
-      done: "Update complete",
-      failed: "Update failed",
-      timeout: "Still finishing…",
-    };
-
-    // Drives the OTA install UI through its full lifecycle. The device stops its
-    // web server before erasing/writing flash (to avoid a C6 SDIO wedge), so the
-    // browser loses connection mid-install — we treat that loss as "applying &
-    // rebooting" and wait for the device to come back on the new version.
     // Demo mode only takes effect after a restart, so (like the controller's
     // own screen) toggling it asks first. The dialog lives outside #app so the
     // periodic re-render can't wipe it or the form's unsaved edits.
@@ -4193,12 +4265,13 @@
     }
     function closeOverlay() { document.getElementById("overlay")?.remove(); }
     // Themed stand-in for the browser's built-in confirm and prompt boxes. Resolves true only when
-    // the user confirms (and, with typePhrase, has typed that exact phrase).
-    function askConfirm({ title, message = "", confirmLabel = "Confirm", danger = false, typePhrase = "" }) {
+    // the user confirms (and, with typePhrase, has typed that exact phrase). `html` is trusted,
+    // already-escaped markup for richer bodies.
+    function askConfirm({ title, message = "", html = "", confirmLabel = "Confirm", danger = false, typePhrase = "" }) {
       return new Promise(resolve => {
         const el = showOverlay(`<div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ask-title" aria-describedby="ask-msg">
           <h3 id="ask-title">${esc(title)}</h3>
-          ${message ? `<p id="ask-msg">${esc(message)}</p>` : ""}
+          ${html ? `<div id="ask-msg">${html}</div>` : message ? `<p id="ask-msg">${esc(message)}</p>` : ""}
           ${typePhrase ? `<label class="ask-phrase">Type <strong>${esc(typePhrase)}</strong> to confirm
             <input type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"></label>` : ""}
           <div class="btn-row"><button type="button" class="btn" data-ask="cancel">Cancel</button>
@@ -4234,7 +4307,7 @@
     async function saveDemoModeAndRestart(enable) {
       const form = document.querySelector('form[data-form="preferences"]');
       const data = form ? new FormData(form) : new FormData();
-      const before = await fetch("/api/health", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
+      const before = (await probe("/api/health"))?.data || {};
       await mutate("/api/preferences", jsonOptions("PATCH", {
         device_name: data.get("device_name"), temp_unit: data.get("temp_unit"), language: data.get("language"), demo_mode: enable
       }));
@@ -4243,11 +4316,22 @@
         <h3>Restarting…</h3><p id="restart-note">This page reconnects automatically.</p></div>`);
       waitForRestart(before.uptime_ms);
     }
+    // One request outside the api() queue with a short deadline, for watching a controller
+    // that is restarting. Resolves { status, data } or null when it doesn't answer.
+    async function probe(url, ms = 5000) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), ms);
+      try {
+        const r = await fetch(url, { cache: "no-store", signal: ctl.signal });
+        return { status: r.status, data: r.ok ? await r.json() : null };
+      } catch (_) { return null; }
+      finally { clearTimeout(timer); }
+    }
     // A fresh boot reports a smaller uptime than before the restart.
     function waitForRestart(uptimeBefore) {
       const started = Date.now();
       const tick = async () => {
-        const health = await fetch("/api/health", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+        const health = (await probe("/api/health"))?.data;
         if (health && (uptimeBefore == null || health.uptime_ms < uptimeBefore)) { location.reload(); return; }
         if (Date.now() - started > 3 * 60 * 1000) {
           const note = document.getElementById("restart-note");
@@ -4272,7 +4356,7 @@
       const started = Date.now();
       let wentDown = 0;
       const tick = async () => {
-        const health = await fetch("/api/health", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+        const health = (await probe("/api/health"))?.data;
         // HTTP -> HTTPS: port 80 keeps answering /api/health, so a fresh boot is visible from here.
         if (health && uptimeBefore != null && health.uptime_ms < uptimeBefore) { location.href = target; return; }
         // HTTPS -> HTTP: port 443 closes for good, and the browser won't let an https page probe
@@ -4306,56 +4390,134 @@
       }
       toast(ok ? success : "Couldn't copy. Select the text and copy it manually.", ok ? "good" : "bad");
     }
-    async function startInstallWatch() {
-      const startVersion = state.ota.current_version || state.info.version || "";
+    // An install this page started. It survives the reload that follows the restart (the new
+    // firmware brings a new dashboard), so the result can be shown afterwards.
+    const OTA_KEY = "arcticOtaInstall";
+    const OTA_GIVE_UP_MS = 10 * 60 * 1000;
+    let installTimer = null;
+    function saveInstall() {
+      if (state.otaInstall) sessionStorage.setItem(OTA_KEY, JSON.stringify(state.otaInstall));
+      else sessionStorage.removeItem(OTA_KEY);
+    }
+    function restoreInstall() {
+      let inst = null;
+      try { inst = JSON.parse(sessionStorage.getItem(OTA_KEY) || "null"); } catch (_) { inst = null; }
+      if (!inst || Date.now() - (inst.started || 0) > 60 * 60 * 1000) { sessionStorage.removeItem(OTA_KEY); return null; }
+      // A reload kills an upload in flight.
+      if (inst.active && inst.phase === "uploading") Object.assign(inst, { active: false, phase: "failed", error: "The upload was interrupted" });
+      return inst;
+    }
+    function beginInstall(fields) {
+      const now = Date.now();
       state.otaInstall = {
-        active: true, phase: "starting", startVersion,
-        target: state.release?.latest_version || "", progress: 0,
-        error: "", newVersion: "", started: Date.now(),
+        active: true, phase: "starting", progress: 0, error: "", newVersion: "", target: "",
+        startVersion: state.ota.current_version || state.info.version || "",
+        started: now, phaseStarted: now, uptimeBefore: null, wentDown: false, misses: 0, ...fields,
       };
-      render();
-      const TIMEOUT_MS = 5 * 60 * 1000;
-      const tick = async () => {
-        const inst = state.otaInstall;
-        if (!inst || !inst.active) return;
-        // The reboot drops the session. Pause (and stop the timeout clock)
-        // until the user signs back in, then resume and report the result.
-        if (!state.auth.loggedIn) {
-          inst.started += 2000;
-          setTimeout(tick, 2000);
-          return;
-        }
-        if (Date.now() - inst.started > TIMEOUT_MS) {
-          inst.phase = "timeout"; inst.active = false; render(); return;
-        }
-        let ota = null;
-        try { ota = await api("/api/ota/status"); } catch (_) { ota = null; }
+      saveInstall(); render();
+    }
+    function setInstallPhase(phase) {
+      const inst = state.otaInstall;
+      if (!inst || inst.phase === phase) return;
+      inst.phase = phase; inst.phaseStarted = Date.now();
+      saveInstall(); render();
+    }
+    function finishInstall(phase, error = "") {
+      const inst = state.otaInstall;
+      clearTimeout(installTimer);
+      if (!inst) return;
+      Object.assign(inst, { active: false, phase, error });
+      saveInstall(); render();
+    }
+    function scheduleInstallTick(ms = 2000) {
+      clearTimeout(installTimer);
+      installTimer = setTimeout(installTick, ms);
+    }
+    // The controller stops its web server before it writes flash (see ota_manager.cpp), so the
+    // page loses the controller from the end of the download until it has restarted. Watch with
+    // short, unqueued probes: on a bridged or VPN link a dead controller doesn't refuse
+    // connections, requests just hang.
+    async function installTick() {
+      const inst = state.otaInstall;
+      if (!inst || !inst.active || inst.phase === "verify" || inst.phase === "uploading") return;
+      if (["starting", "downloading"].includes(inst.phase)) {
+        const r = await probe("/api/ota/status");
+        if (state.otaInstall !== inst || !inst.active) return;
+        const ota = r?.data;
         if (ota) {
-          state.ota = ota;
+          state.ota = ota; state.unreachable = false; inst.misses = 0;
           if (ota.state === "downloading") {
-            inst.phase = "downloading"; inst.progress = ota.progress || 0;
-          } else if (ota.state === "verifying") {
-            inst.phase = "applying"; inst.progress = 100;
-          } else if (ota.state === "ready_to_reboot") {
-            inst.phase = "rebooting"; inst.progress = 100;
+            inst.progress = ota.progress || 0;
+            if (inst.phase !== "downloading") setInstallPhase("downloading"); else render();
+          } else if (ota.state === "verifying" || ota.state === "ready_to_reboot") {
+            setInstallPhase("installing");
           } else if (ota.state === "failed") {
-            inst.phase = "failed"; inst.error = ota.error || "Update failed";
-            inst.active = false; render(); return;
-          } else if (ota.state === "idle") {
-            const advanced = ota.current_version && ota.current_version !== inst.startVersion;
-            if (advanced || ["applying", "rebooting"].includes(inst.phase)) {
-              inst.phase = "done"; inst.active = false;
-              inst.newVersion = ota.current_version || inst.target; render(); return;
-            }
+            return finishInstall("failed", ota.error || "The download failed");
+          } else if (ota.state === "idle" && ota.current_version && plainVersion(ota.current_version) !== plainVersion(inst.startVersion)) {
+            setInstallPhase("verify"); location.reload(); return;
+          } else if (inst.phase === "starting" && Date.now() - inst.started > 30000) {
+            return finishInstall("failed", "The update didn't start");
           }
-        } else if (["starting", "downloading", "applying", "rebooting"].includes(inst.phase)) {
-          // Server unreachable: expected while the device flashes and reboots.
-          inst.phase = "rebooting";
+        } else if (!r || r.status >= 500) {
+          // Gone quiet: the download finished and the controller is installing.
+          inst.misses = (inst.misses || 0) + 1;
+          if (inst.misses >= 2 || (inst.phase === "downloading" && inst.progress >= 90)) setInstallPhase("installing");
+        }
+      } else {
+        if (Date.now() - inst.phaseStarted > OTA_GIVE_UP_MS) return finishInstall("timeout");
+        const health = (await probe("/api/health"))?.data;
+        if (state.otaInstall !== inst || !inst.active) return;
+        if (health) {
+          const rebooted = inst.uptimeBefore != null ? health.uptime_ms < inst.uptimeBefore : inst.wentDown;
+          if (rebooted) { setInstallPhase("verify"); location.reload(); return; }
+        } else if (!inst.wentDown) {
+          inst.wentDown = true; saveInstall();
         }
         render();
-        setTimeout(tick, 2000);
-      };
-      setTimeout(tick, 1500);
+      }
+      scheduleInstallTick();
+    }
+    // After the reload: the new firmware's version says whether the update took.
+    function resolveInstallOutcome() {
+      const inst = state.otaInstall;
+      if (!inst || !inst.active || inst.phase !== "verify") return;
+      const current = plainVersion(state.ota?.current_version);
+      if (!current) return;
+      inst.newVersion = current;
+      if (inst.source !== "file" && current === plainVersion(inst.startVersion)) {
+        finishInstall("failed", `The controller restarted but is still running ${current}. The new firmware didn't start, so it went back to the previous version.`);
+      } else finishInstall("done");
+    }
+    // Bullet points from the release notes, without the commit list or install instructions.
+    function releaseHighlights(notes) {
+      const items = [];
+      let skip = false, complete = false;
+      for (const raw of String(notes || "").split(/\r?\n/)) {
+        const line = raw.trim();
+        if (/^-{3,}$/.test(line)) { complete = true; break; }
+        if (line.startsWith("#")) { skip = /test/i.test(line); continue; }
+        if (skip || !line.startsWith("- ")) continue;
+        const text = line.slice(2).replace(/\s*\(#\d+\)\s*$/, "").trim();
+        if (!text || /^[0-9a-f]{7,40}\s/i.test(text)) continue;
+        items.push(text.charAt(0).toUpperCase() + text.slice(1));
+      }
+      // The controller keeps only the first 512 bytes, so the last item may be cut short.
+      if (!complete && String(notes || "").length >= 500) items.pop();
+      return items;
+    }
+    function confirmUpdate(release) {
+      const latest = plainVersion(release.latest_version);
+      const current = plainVersion(state.ota.current_version || state.info.version);
+      const published = release.published_at ? new Date(release.published_at) : null;
+      const date = published && !isNaN(published) ? published.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+      const notes = releaseHighlights(release.release_notes).slice(0, 8);
+      return askConfirm({
+        title: `Update to ${latest}?`,
+        html: `<p class="ota-versions">${current ? `${esc(current)} → ` : ""}${esc(latest)}${date ? ` · released ${esc(date)}` : ""}</p>
+          ${notes.length ? `<h4>What's new</h4><ul class="ota-notes">${notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+          <p>The controller downloads the update, installs it and restarts. It's offline for about a minute, and this page reconnects by itself.</p>`,
+        confirmLabel: "Update",
+      });
     }
 
     async function handleAction(action, el) {
@@ -4523,22 +4685,31 @@
       if (action === "check-update") {
         if (state.checkingUpdate) return;
         state.checkingUpdate = true; render();
-        try { state.release = await mutate("/api/ota/releases", {}, "Update check complete"); }
+        try { state.release = await mutate("/api/ota/releases", { timeout: 60000 }, "Update check complete"); }
         finally { state.checkingUpdate = false; render(); }
       }
-      if (action === "install-update" && await askConfirm({ title: "Install this update?", message: "The controller downloads the update, installs it, and restarts.", confirmLabel: "Install" })) {
-        await mutate("/api/ota/github", { method: "POST" }, "Update started");
-        startInstallWatch();
+      if (action === "install-update" && state.release && !state.otaInstall?.active && await confirmUpdate(state.release)) {
+        const before = await probe("/api/health");
+        await mutate("/api/ota/github", { method: "POST" });
+        beginInstall({ source: "github", target: state.release.latest_version, uptimeBefore: before?.data?.uptime_ms ?? null });
+        scheduleInstallTick(1000);
       }
-      if (action === "ota-dismiss") { state.otaInstall = null; render(); }
-      if (action === "reboot" && await askConfirm({ title: "Restart the controller?", message: "It will be unavailable for about a minute.", confirmLabel: "Restart" })) await mutate("/api/ota/reboot", { method: "POST" }, "Controller restarting");
+      if (action === "ota-dismiss") { state.otaInstall = null; saveInstall(); render(); }
+      if (action === "ota-reload") location.reload();
+      if (action === "reboot" && await askConfirm({ title: "Restart the controller?", message: "It will be unavailable for about a minute.", confirmLabel: "Restart" })) {
+        const before = (await probe("/api/health"))?.data || {};
+        await mutate("/api/ota/reboot", { method: "POST" });
+        showOverlay(`<div class="confirm-dialog restarting" role="status"><div class="spinner"></div>
+          <h3>Restarting…</h3><p id="restart-note">This page reconnects automatically.</p></div>`);
+        waitForRestart(before.uptime_ms);
+      }
       if (action === "copy-key") await copyText(state.security.api_key || "", "API key copied");
       if (action === "regenerate-key" && await askConfirm({ title: "Regenerate the API key?", message: "Existing integrations using the current key will stop working.", confirmLabel: "Regenerate", danger: true })) {
         const data = await mutate("/api/auth/apikey/regenerate", { method: "POST" }, "API key regenerated");
         state.security.api_key = data.api_key; render();
       }
       if (action === "delete-tls" && await askConfirm({ title: "Delete the TLS certificate?", message: `The controller restarts and the dashboard moves to ${schemeUrl("http")}`, confirmLabel: "Delete & restart", danger: true })) {
-        const before = await fetch("/api/health", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
+        const before = (await probe("/api/health"))?.data || {};
         await mutate("/api/tls/certificate", { method: "DELETE" });
         restartToScheme("http", before.uptime_ms);
       }
@@ -4952,6 +5123,7 @@
 
     async function init() {
       routeFromHash();
+      state.otaInstall = restoreInstall();
       try {
         const auth = await fetch("/api/auth/status").then(r => r.json());
         state.auth = {
@@ -4968,6 +5140,8 @@
           const startRoute = state.route;
           await loadCore();
           homeTrackTransitions();
+          // Reloaded mid-install: pick the watch back up.
+          if (state.otaInstall?.active && state.otaInstall.phase !== "verify") scheduleInstallTick(500);
           if (state.route === startRoute) {
             if (state.route === "home") await loadHomeHistory();
             if (state.route === "control") await loadParams();
@@ -4996,6 +5170,8 @@
       }
       state.pollTimer = setInterval(async () => {
         if (!state.auth.loggedIn || state.auth.changeRequired) return;
+        // The install watch has the controller's attention while an update runs.
+        if (state.otaInstall?.active && state.otaInstall.phase !== "verify") return;
         if (state.route === "history") refreshHistoryLive().catch(() => {});
         if (state.route === "energy") refreshEnergyLive().catch(() => {});
         // On a slow link a poll can outlast the interval; skip rather than
@@ -5008,6 +5184,12 @@
             api("/api/weather")
           ]);
           Object.assign(state, { status, hp, wifi, ota, errors, weather });
+          const wasUnreachable = state.unreachable;
+          state.unreachable = false;
+          if (wasUnreachable) render();
+          const wasVerifying = state.otaInstall?.phase === "verify";
+          resolveInstallOutcome();
+          if (wasVerifying) render();
           const hpEdge = homeTrackTransitions();
           if (state.route === "home" && (hpEdge || homeHistoryStale())) await loadHomeHistory();
           const prevNotifCount = (state.notifications || []).length;
@@ -5020,7 +5202,9 @@
           else if (state.notifications.length !== prevNotifCount) render();
           else if (state.route === "settings" && state.settingsPage === "firmware"
                    && ota && ota.state && ota.state !== "idle") render();
-        } catch (_) {}
+        } catch (error) {
+          if (error?.unreachable && !state.unreachable) { state.unreachable = true; render(); }
+        }
         finally { state.polling = false; }
       }, 5000);
     }

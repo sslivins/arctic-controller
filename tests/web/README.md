@@ -38,13 +38,13 @@ pytest tests/web/ -v --headed
 | `test_dashboard.py` | 16 | Home hero, pills, tiles, strip, 24 h chart + tooltip, mobile stacking, polling |
 | `test_navigation.py` | 15 | 6-page nav, logs page, events page (day groups, readable details, filters, help links), params page |
 | `test_notifications.py` | 4 | Notification tray, badge, dismissal |
-| `test_settings.py` | 8 | Settings cards, toggles, buttons, file upload, security tab |
+| `test_settings.py` | 12 | Settings cards, toggles, buttons, security tab, firmware install (confirm, progress, restart reconnect, rollback, file upload) |
 | `test_location_weather.py` | 10 | Location card, place search, automatic timezone, status-bar weather |
 | `test_temperature_history.py` | 3 | History chart, range paging, refresh |
 | `test_i18n.py` | 3 | Language selector, EN→FR→ES switching, persistence |
 | `test_tls.py` | 3 | TLS auth prerequisite, cert install/delete, PEM validation |
 
-**Total: 67 tests**
+**Total: 71 tests**
 
 ## Architecture
 
