@@ -21,7 +21,8 @@ void heatpump_history_open_span(uint32_t start, uint32_t end);
 typedef struct {
     int32_t cursor;
     uint32_t samples;
-    bool power_view;
+    bool power_view;      // power pane shown
+
     bool cached;          // redraw copied the cached static layer
     uint32_t draw_calls;
     int64_t press_us;     // cursor move, including any static-layer rebuild

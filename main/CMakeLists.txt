@@ -171,6 +171,7 @@ idf_component_register(
         arctic-macon
         lwip
         espcoredump
+        tschart
 )
 
 # Build-time: re-gzip whenever the source HTML or the gzip script changes, so
