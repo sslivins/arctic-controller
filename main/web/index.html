@@ -335,11 +335,11 @@
     .hist-tip i.band, .hist-legend i.dot { width: 10px; height: 10px; border-radius: 2px; }
     .hist-legend i.dot { border-radius: 50%; }
     .hist-energy { font-size: 13px; text-align: center; margin: 10px 0 0; }
-    .en-chart-wrap { width: 100%; position: relative; overflow-x: clip; margin-top: 6px; }
-    .en-chart { width: 100%; height: auto; display: block; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-    .en-chart .en-hit { cursor: pointer; }
-    @media (pointer: fine) { .en-chart { cursor: grab; } .en-chart.dragging, .en-chart.dragging .en-hit { cursor: grabbing; } }
-.en-chart:not(.dragging) .en-label-out { display: none; }
+    .en-chart { height: 370px; margin-top: 6px; -webkit-touch-callout: none;
+      --ts-text: var(--cp-text); --ts-dim: var(--cp-text-muted); --ts-grid: var(--cp-border);
+      --ts-panel: var(--cp-surface); --ts-card: var(--cp-panel-strong); --ts-accent: var(--cp-accent); }
+    @media (max-width: 600px) { .en-chart { height: 312px; } }
+    @media (pointer: fine) { .en-chart .tschart-body { cursor: grab; } .en-chart.panning .tschart-body { cursor: grabbing; } }
     .en-ranges { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--cp-border); border-radius: 10px; background: var(--cp-bg-elevated); }
     .en-ranges button { border: 0; background: transparent; color: var(--cp-text-muted); padding: 5px 12px; border-radius: 7px; font-weight: 600; cursor: pointer; }
     .en-ranges button:hover { color: var(--cp-text); }
@@ -2447,19 +2447,6 @@
     }
     // Past either end of a pan the energy chart follows the finger at a third
     // of the speed.
-    function histRubber(dx, lim) {
-      if (dx > lim.max) return lim.max + (dx - lim.max) / 3;
-      if (dx < lim.min) return lim.min + (dx - lim.min) / 3;
-      return dx;
-    }
-    let histResizeFrame = 0;
-    window.addEventListener("resize", () => {
-      if (state.route !== "energy" || histResizeFrame) return;
-      histResizeFrame = requestAnimationFrame(() => {
-        histResizeFrame = 0;
-        if (state.route === "energy") energyFitChart();
-      });
-    });
     // The cycle chart is a tschart widget (components/tschart). It outlives
     // render(): each render re-attaches the same element, so pan state,
     // cursor and chip toggles survive page refreshes.
@@ -2814,7 +2801,7 @@
       const resps = await Promise.all(wanted.filter(([from, to]) => from <= to && missing(from, to))
         .map(([from, to]) => api(`/api/energy/daily?from=${from}&to=${to}`)));
       resps.forEach(energyRemember);
-      if (resps.length && en.data === data && !enDrag && state.route === "energy") energyRedrawChart();
+      if (resps.length && en.data === data && state.route === "energy") energySync();
     }
     async function refreshEnergyLive() {
       const en = state.energy;
@@ -2943,246 +2930,107 @@
         entry.loading = false;
       }
     }
-    // kWh gridlines: the smallest of 0.5, 1, 2, 5, 10 ... that covers the
-    // tallest day in at most five intervals.
-    function energyNiceAxis(maxKwh) {
-      let axis = null;
-      for (const step of [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]) {
-        axis = { hi: Math.max(step, Math.ceil(maxKwh / step) * step), step };
-        if (axis.hi / step <= 5) break;
+    // The energy chart is a tschart bucket chart (TsBars). Like the cycle
+    // chart it outlives render(); it is rebuilt when the range changes.
+    let energyBars = null;
+    function energyCreate(range) {
+      const el = document.createElement("div");
+      el.className = "en-chart";
+      const year = range > 90;
+      const chart = new TsBars(el, {
+        id: "energy_chart", count: range, barWidth: range > 60 ? 0.78 : 0.62,
+        // The year view labels month starts; shorter ranges space out days.
+        labels: year
+          ? { mode: "sparse", text: b => b.key.endsWith("-01") ? MONTH_SHORT[+b.key.slice(5, 7) - 1] : null }
+          : { mode: "every", text: b => fmtDay(b.key) },
+      });
+      // kWh in Wh, so the axis maths stays integral.
+      const kwh = chart.addPane({ id: "kwh", weight: 230, unit: "kWh",
+        range: { auto: true, includeZero: true, minSpan: 500, minStep: 500 },
+        fmt: v => `${+(v / 1000).toFixed(1)}` });
+      // The unit meters power in 100 W steps, so idle draw reads as 0 and
+      // there is no standby segment.
+      for (const [m, label, color] of ENERGY_MODES) {
+        chart.addSeries(kwh, { id: m, name: label, color, stack: "modes",
+          value: b => (b.data?.day.electrical_wh?.[m] || 0) > 0 ? b.data.day.electrical_wh[m] : null });
       }
-      return axis;
+      // Estimated COP in tenths, on its own strip; only the ends are labelled.
+      const cop = chart.addPane({ id: "cop", weight: 64, minHeight: 56, unit: "COP", unitAt: "middle",
+        range: { auto: true, minSpan: 10, minStep: 10 }, maxTicks: 2, tickLabels: "ends",
+        fmt: v => `${Math.round(v / 10)}`, emptyText: "No COP estimate in this range" });
+      chart.addSeries(cop, { id: "cop", name: "COP (est.)", color: "var(--hist-set)", geom: "line",
+        width: 1.5, opacity: 0.55, pointRadius: n => n > 90 ? 2 : 3,
+        value: b => b.data?.sums.cop != null ? Math.round(b.data.sums.cop * 10) : null });
+      chart.setCard(energyCard);
+      el.addEventListener("tsbars:select", event => energySelectDay(event.detail.key));
+      // A drag lands on whole days; load the window it settled on.
+      el.addEventListener("tsbars:view", event => {
+        if (event.detail.lastKey) energyGoto(event.detail.lastKey).catch(toastUnlessShown);
+      });
+      energyBars = { el, chart, range, sig: null };
     }
-    let enGeom = null;
-    function energyChartSvg(data) {
+    function energyCard(b, card) {
+      const day = b.data?.day;
+      if (!day) return;
+      const s = b.data.sums, e = day.electrical_wh || {};
+      card.add("title", `${fmtDay(day.date, true)}${day.final === false ? " · so far" : ""}`);
+      card.add("value", "Total", fmtKwh(s.total));
+      ENERGY_MODES.filter(([m]) => e[m] > 0).forEach(([m, label, color]) => card.add("value", label, fmtKwh(e[m]), color));
+      if (s.cop !== null) card.add("value", "COP (est.)", s.cop.toFixed(1));
+      if (day.outdoor_c) {
+        if (day.outdoor_c.run_avg != null) card.add("value", "Outdoor while running", temp(day.outdoor_c.run_avg));
+        card.add("value", "Outdoor day avg", temp(day.outdoor_c.avg));
+      }
+    }
+    // Attach the chart to the freshly rendered page and hand it any new days.
+    function energyMount() {
+      const host = $(".en-chart-host");
+      if (!host || !state.energy.data) return;
+      if (!energyBars || energyBars.range !== state.energy.range) {
+        energyBars?.chart.destroy();
+        energyCreate(state.energy.range);
+      }
+      if (energyBars.el.parentNode !== host) host.appendChild(energyBars.el);
+      energySync();
+    }
+    // The window plus up to a window's worth of neighbours either side (never
+    // past today), so a drag slides real bars in.
+    function energySync() {
+      const en = state.energy, d = en.data, eb = energyBars;
+      if (!eb || !d) return;
+      eb.chart.setSelected(en.selected);
+      // Only re-feed new data: a render while a dragged-to window loads
+      // mustn't snap the chart back.
+      const sig = `${d.from}|${d.to}|${en.cache.size}|${en.loadedAt}`;
+      if (eb.sig === sig) return;
+      eb.sig = sig;
+      const byDate = new Map((d.days || []).map(x => [x.date, x]));
+      const p = energyPad(), buckets = [];
+      for (let date = dayAdd(d.from, -p); date <= dayAdd(d.to, p); date = dayAdd(date, 1)) {
+        if (en.today && date > en.today) break;
+        const inWindow = date >= d.from && date <= d.to;
+        const day = byDate.get(date) || (!inWindow && en.cache.get(date)) || null;
+        buckets.push({ key: date, data: day ? { day, sums: energySums([day]) } : null,
+          provisional: day?.final === false, accent: date === en.today, selectable: inWindow && !!day });
+      }
+      eb.chart.setBuckets(buckets, { lastKey: d.to });
+      // Forward to today, back to the oldest stored day.
+      eb.chart.setPanLimits(en.since ? Math.max(0, dayDiff(en.since, d.from)) : 0,
+        en.to && en.today ? Math.max(0, dayDiff(d.to, en.today)) : 0);
+      eb.chart.setStatus("ok");
+    }
+    async function energySelectDay(date) {
       const en = state.energy;
-      const W = Math.max(280, Math.round(en.chartW || 960)), narrow = W < 600;
-      const L = narrow ? 40 : 52, R = narrow ? 8 : 16, T = 24, B = 26;
-      const barH = narrow ? 180 : 230, gap = 26, copH = narrow ? 56 : 64;
-      const plotL = L, plotR = W - R, plotW = plotR - plotL;
-      const barT = T, barB = barT + barH, copT = barB + gap, copB = copT + copH, H = copB + B;
-      const byDate = new Map((data.days || []).map(d => [d.date, d]));
-      const n = Math.max(1, dayDiff(data.from, data.to) + 1);
-      const slot = (i, cached) => {
-        const date = dayAdd(data.from, i), day = byDate.get(date) || (cached && en.cache.get(date)) || null;
-        return { i, date, day, sums: day ? energySums([day]) : null };
-      };
-      const slots = Array.from({ length: n }, (_, i) => slot(i, false));
-      // The window plus up to a window's worth of neighbours either side
-      // (never past today), drawn off-plot so a drag slides them in.
-      const p = energyPad(), panSlots = [];
-      for (let i = -p; i < n + p; i++) {
-        if (i >= 0 && i < n) { panSlots.push(slots[i]); continue; }
-        const s = slot(i, true);
-        if (en.today && s.date > en.today) break;
-        panSlots.push(s);
+      en.selected = en.selected === date ? null : date;
+      render();
+      if (!en.selected) return;
+      $(".en-detail")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      // Today's runs keep growing; older days are fixed once loaded.
+      const cached = en.runs[date], today = en.data?.days?.find(d => d.date === date)?.final === false;
+      if (!cached || cached.error || (today && Date.now() - cached.loadedAt > 60000)) {
+        await loadEnergyRuns(date);
+        if (state.route === "energy" && en.selected === date) render();
       }
-      const slotW = plotW / n;
-      const barW = Math.max(1, Math.min(32, slotW * (n > 60 ? 0.78 : 0.62)));
-      const cx = i => plotL + (i + 0.5) * slotW;
-      // Axes fit the window only, so they hold still while dragging.
-      const axis = energyNiceAxis(Math.max(0, ...slots.map(s => (s.sums?.total || 0) / 1000)));
-      const mapY = kwh => Math.max(barT, barB - kwh / axis.hi * barH);
-
-      let svg = `<svg class="en-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Daily energy chart">`;
-      svg += `<defs><clipPath id="en-pan-clip"><rect x="${plotL}" y="0" width="${plotW}" height="${copB + 4}"/></clipPath>` +
-        `<clipPath id="en-label-clip"><rect x="0" y="${copB + 2}" width="${W}" height="${B}"/></clipPath></defs>`;
-      let pan = "";
-      svg += `<text x="${plotL - 8}" y="${barT - 10}" text-anchor="end" class="hist-axis">kWh</text>`;
-      for (let v = 0; v <= axis.hi + 1e-9; v += axis.step) {
-        const y = mapY(v);
-        svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
-        svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${+v.toFixed(1)}</text>`;
-      }
-      const selected = panSlots.find(s => s.date === en.selected);
-      if (selected) pan += `<rect class="en-selected" x="${(plotL + selected.i * slotW).toFixed(1)}" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="var(--cp-accent)" opacity="0.14" rx="3"/>`;
-      svg += `<rect class="en-hover" x="0" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="var(--cp-text-muted)" opacity="0.1" rx="3" pointer-events="none" style="display:none"/>`;
-
-      // Bars stacked by mode. The unit meters power in 100 W steps, so idle draw
-      // reads as 0 and there is no standby segment.
-      panSlots.forEach(s => {
-        if (!s.day) return;
-        const e = s.day.electrical_wh || {};
-        const parts = ENERGY_MODES.map(([m, , color]) => [e[m] || 0, color]);
-        let acc = 0;
-        const x = (cx(s.i) - barW / 2).toFixed(1);
-        for (const [wh, color] of parts) {
-          if (wh <= 0) continue;
-          const y1 = mapY((acc + wh) / 1000), y0 = mapY(acc / 1000);
-          pan += `<rect class="en-bar" x="${x}" y="${y1.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, y0 - y1).toFixed(1)}" fill="${color}"/>`;
-          acc += wh;
-        }
-        if (s.day.final === false && acc > 0) {
-          pan += `<rect x="${x}" y="${mapY(acc / 1000).toFixed(1)}" width="${barW.toFixed(1)}" height="${(barB - mapY(acc / 1000)).toFixed(1)}" fill="none" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="3 2"/>`;
-        }
-      });
-
-      // Estimated COP strip under the bars, on its own axis.
-      const known = slots.map(s => s.sums?.cop ?? null).filter(c => c !== null);
-      svg += `<text x="${plotL - 8}" y="${(copT + copH / 2 + 4).toFixed(1)}" text-anchor="end" class="hist-axis">COP</text>`;
-      if (known.length) {
-        let lo = Math.floor(Math.min(...known)), hi = Math.ceil(Math.max(...known));
-        if (hi - lo < 1) hi = lo + 1;
-        const mapC = c => copB - (Math.max(lo, Math.min(hi, c)) - lo) / (hi - lo) * copH;
-        const step = hi - lo <= 4 ? 1 : Math.ceil((hi - lo) / 4);
-        for (let v = lo; v <= hi; v += step) {
-          const y = mapC(v);
-          svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.5"/>`;
-          // Only the ends are labelled; the middle of the axis carries the title.
-          if (v === lo || v + step > hi) svg += `<text x="${plotL - 8}" y="${(y + (v === lo ? 0 : 8)).toFixed(1)}" text-anchor="end" class="hist-axis">${v}</text>`;
-        }
-        let d = "", pen = false;
-        panSlots.forEach(s => {
-          const c = s.sums?.cop ?? null;
-          if (c === null) { pen = false; return; }
-          d += `${pen ? "L" : "M"}${cx(s.i).toFixed(1)} ${mapC(c).toFixed(1)}`; pen = true;
-        });
-        pan += `<path d="${d}" fill="none" stroke="var(--hist-set)" stroke-width="1.5" opacity="0.55"/>`;
-        const r = n > 90 ? 2 : 3;
-        panSlots.forEach(s => {
-          const c = s.sums?.cop ?? null;
-          if (c !== null) pan += `<circle class="en-cop" cx="${cx(s.i).toFixed(1)}" cy="${mapC(c).toFixed(1)}" r="${r}" fill="var(--hist-set)"/>`;
-        });
-      } else {
-        svg += `<line x1="${plotL}" y1="${copB}" x2="${plotR}" y2="${copB}" stroke="var(--cp-border)" stroke-width="1" opacity="0.5"/>`;
-        svg += `<text x="${(plotL + plotR) / 2}" y="${(copT + copB) / 2 + 4}" text-anchor="middle" class="hist-axis">No COP estimate in this range</text>`;
-      }
-      svg += `<g clip-path="url(#en-pan-clip)"><g class="en-pan">${pan}</g></g>`;
-
-      // Date labels, spaced out and anchored on the newest day; the year view
-      // labels month starts instead.
-      const minGap = narrow ? 52 : 64;
-      // The newest day's label is end-anchored so it isn't clipped; the
-      // neighbours' labels only show while dragging.
-      const dateLabel = (i, text) => {
-        const edge = i === n - 1 && cx(i) + 24 > W, out = i < 0 || i >= n ? " en-label-out" : "";
-        return `<text x="${(edge ? W - 2 : cx(i)).toFixed(1)}" y="${copB + 18}" text-anchor="${edge ? "end" : "middle"}" class="hist-axis${out}">${text}</text>`;
-      };
-      let labels = "";
-      if (n > 90) {
-        let lastX = -Infinity;
-        panSlots.forEach(s => {
-          if (!s.date.endsWith("-01") || cx(s.i) - lastX < minGap * 0.7) return;
-          lastX = cx(s.i);
-          labels += dateLabel(s.i, MONTH_SHORT[+s.date.slice(5, 7) - 1]);
-        });
-      } else {
-        const every = Math.max(1, Math.ceil(minGap / slotW));
-        panSlots.forEach(s => { if ((n - 1 - s.i) % every === 0) labels += dateLabel(s.i, fmtDay(s.date)); });
-      }
-      svg += `<g clip-path="url(#en-label-clip)"><g class="en-pan">${labels}</g></g>`;
-
-      // One full-height target per day with data, so a tap anywhere in the
-      // column (not just on a thin bar) opens that day.
-      slots.forEach((s, i) => {
-        if (s.day) svg += `<rect class="en-hit" data-action="energy-day" data-date="${s.date}" x="${(plotL + i * slotW).toFixed(1)}" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="transparent"/>`;
-      });
-      enGeom = { W, plotL, plotR, slotW, slots };
-      svg += `</svg>`;
-      return svg;
-    }
-    function energyRedrawChart() {
-      const old = $(".en-chart-wrap .en-chart"), data = state.energy.data;
-      if (old && data) old.outerHTML = energyChartSvg(data);
-    }
-    function energyFitChart() {
-      const wrap = $(".en-chart-wrap"), old = wrap?.querySelector(".en-chart"), data = state.energy.data;
-      if (!old || !data) return;
-      const w = Math.round(wrap.clientWidth);
-      if (!w || (enGeom && enGeom.W === Math.max(280, w))) return;
-      state.energy.chartW = w;
-      old.outerHTML = energyChartSvg(data);
-    }
-    function energyTipHtml(day) {
-      const s = energySums([day]), e = day.electrical_wh || {};
-      const row = (color, label, value) => `<div><i class="band" style="background:${color}"></i>${label} <strong>${value}</strong></div>`;
-      return `<div class="hist-tip-time">${esc(fmtDay(day.date, true))}${day.final === false ? " · so far" : ""}</div>
-        <div>Total <strong>${fmtKwh(s.total)}</strong></div>` +
-        ENERGY_MODES.filter(([m]) => e[m] > 0).map(([m, label, color]) => row(color, label, fmtKwh(e[m]))).join("") +
-        (s.cop !== null ? `<div>COP (est.) <strong>${s.cop.toFixed(1)}</strong></div>` : "") +
-        (day.outdoor_c ? (day.outdoor_c.run_avg != null ? `<div>Outdoor while running <strong>${temp(day.outdoor_c.run_avg)}</strong></div>` : "") +
-          `<div>Outdoor day avg <strong>${temp(day.outdoor_c.avg)}</strong></div>` : "");
-    }
-    function energyHover(event) {
-      const svg = event.target.closest?.(".en-chart"), wrap = svg?.closest(".en-chart-wrap");
-      const hide = () => document.querySelectorAll(".en-chart-wrap .hist-tip, .en-hover").forEach(el => { el.style.display = "none"; });
-      if (!svg || !wrap || !enGeom || svg.classList.contains("dragging")) { hide(); return; }
-      const g = enGeom, rect = svg.getBoundingClientRect();
-      const vx = (event.clientX - rect.left) / rect.width * g.W;
-      const i = Math.floor((vx - g.plotL) / g.slotW);
-      const slot = vx >= g.plotL && vx <= g.plotR ? g.slots[i] : null;
-      if (!slot?.day) { hide(); return; }
-      const hover = svg.querySelector(".en-hover");
-      hover.setAttribute("x", (g.plotL + i * g.slotW).toFixed(1));
-      hover.style.display = "";
-      const tip = wrap.querySelector(".hist-tip");
-      tip.innerHTML = energyTipHtml(slot.day);
-      tip.style.display = "block";
-      const px = (g.plotL + (i + 0.5) * g.slotW) / g.W * rect.width;
-      const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
-      tip.style.left = `${Math.max(0, left)}px`;
-    }
-    // Drag pans by whole days, as on the device: neighbouring bars slide in,
-    // the axes hold still, and the release snaps to the nearest day.
-    let enDrag = null, enSuppressClick = false;
-    const enDayPx = svg => enGeom.slotW * svg.getBoundingClientRect().width / enGeom.W;
-    function energyPanPreview(svg, dx) {
-      const units = dx * enGeom.W / svg.getBoundingClientRect().width;
-      svg.querySelectorAll(".en-pan").forEach(g => {
-        if (dx) g.setAttribute("transform", `translate(${units.toFixed(1)} 0)`);
-        else g.removeAttribute("transform");
-      });
-    }
-    // Forward to today, back to the oldest stored day.
-    function energyPanLimits(svg) {
-      const en = state.energy, d = en.data, px = enDayPx(svg);
-      const fwd = en.to && en.today ? Math.max(0, dayDiff(d.to, en.today)) : 0;
-      const back = en.since ? Math.max(0, dayDiff(en.since, d.from)) : 0;
-      return { min: -fwd * px, max: back * px };
-    }
-    function energyDragStart(event) {
-      enSuppressClick = false;
-      const svg = event.target.closest?.(".en-chart");
-      if (!svg || !enGeom || !state.energy.data || state.energy.loading || !event.isPrimary) return;
-      const touch = event.pointerType !== "mouse";
-      if (!touch && event.button !== 0) return;
-      enDrag = { svg, x0: event.clientX, dx: 0, eff: 0, moved: false, touch };
-    }
-    function energyDragMove(event) {
-      if (!enDrag || !event.isPrimary) return;
-      enDrag.dx = event.clientX - enDrag.x0;
-      if (!enDrag.moved && Math.abs(enDrag.dx) < (enDrag.touch ? 10 : 5)) return;
-      if (!enDrag.moved) {
-        enDrag.moved = true;
-        enDrag.svg.classList.add("dragging");
-        document.querySelectorAll(".en-chart-wrap .hist-tip, .en-hover").forEach(el => { el.style.display = "none"; });
-      }
-      energyPanPreview(enDrag.svg, enDrag.eff = histRubber(enDrag.dx, enDrag.lim ||= energyPanLimits(enDrag.svg)));
-    }
-    // Ease from `from` to `to` px; back at rest the chart is interactive again.
-    function energySpring(svg, from, to) {
-      const t0 = performance.now(), ms = 180;
-      const step = now => {
-        if (!svg.isConnected || enDrag?.svg === svg) return;
-        const k = Math.min(1, (now - t0) / ms), r = (1 - k) * (1 - k);
-        energyPanPreview(svg, to + (from - to) * r);
-        if (k < 1) requestAnimationFrame(step);
-        else if (!to) svg.classList.remove("dragging");
-      };
-      requestAnimationFrame(step);
-    }
-    function energyDragEnd(event) {
-      const drag = enDrag, d = state.energy.data;
-      if (!drag || !event.isPrimary) return;
-      enDrag = null;
-      if (!drag.moved || !d || !enGeom) return;
-      // The browser took the gesture (e.g. a page scroll): put the chart back.
-      if (event.type === "pointercancel") { energyPanPreview(drag.svg, 0); drag.svg.classList.remove("dragging"); return; }
-      enSuppressClick = true;
-      const px = enDayPx(drag.svg), lim = drag.lim || energyPanLimits(drag.svg);
-      const steps = Math.round(Math.max(lim.min, Math.min(lim.max, drag.dx)) / px);
-      energySpring(drag.svg, drag.eff, steps * px);
-      if (steps) energyGoto(dayAdd(d.to, -steps)).catch(toastUnlessShown);
     }
     function energyStat(label, value, sub = "") {
       return `<div class="en-stat"><span>${esc(label)}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</div>`;
@@ -3285,7 +3133,7 @@
             ${ENERGY_MODES.map(([, label, color]) => `<span><i class="band" style="background:${color}"></i>${label}</span>`).join("")}
             <span><i class="dot" style="background:var(--hist-set)"></i>COP (est.)</span>
           </div>
-          <div class="en-chart-wrap">${energyChartSvg(data)}<div class="hist-tip"></div></div>
+          <div class="en-chart-host"></div>
           <div class="hist-nav">
             <button class="btn" data-action="energy-prev" ${atOldest ? "disabled" : ""}>‹ ${rangeLabel}</button>
             <button class="btn" data-action="energy-next" ${atLatest ? "disabled" : ""}>${rangeLabel} ›</button>
@@ -3319,7 +3167,7 @@
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
       if (state.route === "home") homeChartLayout();
       if (state.route === "history") histMount();
-      if (state.route === "energy") energyFitChart();
+      if (state.route === "energy") energyMount();
       perfSyncSaves();
       gateInit();
       if (state.settingsPage === "diagnostics") {
@@ -4157,19 +4005,6 @@
       if (action === "energy-prev") { const d = state.energy.data; if (d) await energyGoto(dayAdd(d.from, -1)); }
       if (action === "energy-next") { const d = state.energy.data; if (d) await energyGoto(dayAdd(d.to, state.energy.range)); }
       if (action === "energy-close") { state.energy.selected = null; render(); }
-      if (action === "energy-day") {
-        const en = state.energy, date = el.dataset.date;
-        en.selected = en.selected === date ? null : date;
-        render();
-        if (!en.selected) return;
-        $(".en-detail")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        // Today's runs keep growing; older days are fixed once loaded.
-        const cached = en.runs[date], today = en.data?.days?.find(d => d.date === date)?.final === false;
-        if (!cached || cached.error || (today && Date.now() - cached.loadedAt > 60000)) {
-          await loadEnergyRuns(date);
-          if (state.route === "energy" && en.selected === date) render();
-        }
-      }
       if (action === "energy-view") { state.tempHistory.end = Number(el.dataset.t); await navigate("history"); }
       if (action === "fault-view") { state.tempHistory.end = Number(el.dataset.end); await navigate("history"); }
       if (action === "load-more-events") { await loadEvents(false); render(); }
@@ -4515,17 +4350,6 @@
       document.addEventListener(name, event => {
         if (event.target.closest?.('[data-action="power-hold"]')) cancelPowerHold();
       }));
-    document.addEventListener("pointermove", energyHover);
-    document.addEventListener("pointerdown", energyDragStart);
-    document.addEventListener("pointermove", energyDragMove);
-    document.addEventListener("pointerup", energyDragEnd);
-    document.addEventListener("pointercancel", energyDragEnd);
-    // The click that ends a drag doesn't open a day.
-    document.addEventListener("click", event => {
-      if (!enSuppressClick) return;
-      enSuppressClick = false;
-      if (event.target.closest?.(".en-chart")) { event.stopImmediatePropagation(); event.preventDefault(); }
-    }, true);
     document.addEventListener("pointermove", homeHover);
     document.addEventListener("pointerdown", homeHover);
     document.addEventListener("input", event => {
