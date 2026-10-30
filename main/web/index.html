@@ -2990,19 +2990,21 @@
         energyBars?.chart.destroy();
         energyCreate(state.energy.range);
       }
-      if (energyBars.el.parentNode !== host) host.appendChild(energyBars.el);
-      energySync();
+      const moved = energyBars.el.parentNode !== host;
+      if (moved) host.appendChild(energyBars.el);
+      // Draw now rather than next frame, so the page never shows it empty.
+      if (energySync() || moved) energyBars.chart.flush();
     }
     // The window plus up to a window's worth of neighbours either side (never
     // past today), so a drag slides real bars in.
     function energySync() {
       const en = state.energy, d = en.data, eb = energyBars;
-      if (!eb || !d) return;
+      if (!eb || !d) return false;
       eb.chart.setSelected(en.selected);
       // Only re-feed new data: a render while a dragged-to window loads
       // mustn't snap the chart back.
       const sig = `${d.from}|${d.to}|${en.cache.size}|${en.loadedAt}`;
-      if (eb.sig === sig) return;
+      if (eb.sig === sig) return false;
       eb.sig = sig;
       const byDate = new Map((d.days || []).map(x => [x.date, x]));
       const p = energyPad(), buckets = [];
@@ -3018,6 +3020,7 @@
       eb.chart.setPanLimits(en.since ? Math.max(0, dayDiff(en.since, d.from)) : 0,
         en.to && en.today ? Math.max(0, dayDiff(d.to, en.today)) : 0);
       eb.chart.setStatus("ok");
+      return true;
     }
     async function energySelectDay(date) {
       const en = state.energy;
