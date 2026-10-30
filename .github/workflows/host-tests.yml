@@ -141,6 +141,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          submodules: 'recursive'
+
+      - name: Guard against an unpopulated submodule
+        run: |
+          if [ ! -f components/tschart/tests/CMakeLists.txt ]; then
+            echo "::error::components/tschart was not checked out — the native test suite cannot run."
+            exit 1
+          fi
 
       - name: Configure native test build
         run: cmake -S components/tschart/tests -B build-tschart-tests

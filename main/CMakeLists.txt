@@ -3,12 +3,14 @@
 # sync with the source HTML:
 #   1. execute_process (configure time) guarantees the .gz exists so the initial
 #      EMBED_FILES resolution below succeeds on a clean tree.
-#   2. add_custom_command (build time) re-gzips whenever web/index.html or the
-#      gzip script changes, so a plain `idf.py build` always re-embeds the latest
+#   2. add_custom_command (build time) re-gzips whenever web/index.html, an
+#      inlined script (WEB_INLINES) or the gzip script changes, so a plain `idf.py build` always re-embeds the latest
 #      markup WITHOUT needing an explicit `idf.py reconfigure`.
 set(WEB_SRC "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html")
 set(WEB_GZ "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html.gz")
 set(GZIP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/web/gzip_html.py")
+# Files pulled into index.html by /*@inline <path>@*/ markers.
+set(WEB_INLINES "${CMAKE_CURRENT_SOURCE_DIR}/../components/tschart/web/tschart.js")
 
 # Find Python once - prefer IDF's Python, then system Python.
 if(Python3_EXECUTABLE)
@@ -21,7 +23,13 @@ if(NOT PYTHON_CMD)
 endif()
 
 # Configure-time: ensure the .gz exists for the initial EMBED_FILES resolution.
-if(EXISTS "${WEB_SRC}" AND (NOT EXISTS "${WEB_GZ}" OR "${WEB_SRC}" IS_NEWER_THAN "${WEB_GZ}"))
+set(WEB_GZ_STALE OFF)
+foreach(dep "${WEB_SRC}" ${WEB_INLINES})
+    if(NOT EXISTS "${WEB_GZ}" OR "${dep}" IS_NEWER_THAN "${WEB_GZ}")
+        set(WEB_GZ_STALE ON)
+    endif()
+endforeach()
+if(EXISTS "${WEB_SRC}" AND WEB_GZ_STALE)
     message(STATUS "Compressing web/index.html -> index.html.gz")
     execute_process(
         COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${WEB_SRC}" "${WEB_GZ}"
@@ -179,7 +187,7 @@ idf_component_register(
 add_custom_command(
     OUTPUT "${WEB_GZ}"
     COMMAND "${PYTHON_CMD}" "${GZIP_SCRIPT}" "${WEB_SRC}" "${WEB_GZ}"
-    DEPENDS "${WEB_SRC}" "${GZIP_SCRIPT}"
+    DEPENDS "${WEB_SRC}" ${WEB_INLINES} "${GZIP_SCRIPT}"
     COMMENT "Gzipping web/index.html"
     VERBATIM
 )

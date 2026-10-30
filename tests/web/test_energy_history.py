@@ -294,29 +294,33 @@ class TestCyclesPowerPanel:
         self, dashboard_page: Page, base_url: str, page_errors
     ):
         page = dashboard_page
-        page.evaluate("localStorage.removeItem('arcticHistPower')")
+        page.evaluate(
+            "localStorage.removeItem('arcticHistPower'); localStorage.removeItem('arcticHistChart')"
+        )
         _seed_history(base_url)
         _open_cycles(page)
 
-        toggle = page.locator('[data-action="history-power"]')
-        expect(toggle).to_have_attribute("aria-pressed", "true")
-        assert page.locator(".hist-chart .hist-power-area").count() >= 1
+        chip = page.locator('.hist-chart [data-tschart-chip="power"]')
+        area = page.locator('.hist-chart [data-layer="power"] .tschart-fill')
+        expect(chip).to_have_attribute("aria-pressed", "true")
+        expect(area).to_have_count(1)
         expect(page.get_by_text("kWh of electricity used in this window")).to_be_visible()
 
         try:
-            toggle.click()
-            expect(toggle).to_have_attribute("aria-pressed", "false")
-            expect(page.locator(".hist-chart .hist-power-area")).to_have_count(0)
+            chip.click()
+            expect(chip).to_have_attribute("aria-pressed", "false")
+            expect(area).to_have_count(0)
+            expect(page.get_by_text("kWh of electricity used in this window")).to_have_count(0)
             assert page.evaluate("localStorage.getItem('arcticHistPower')") == "0"
 
             page.reload()
             page.wait_for_selector(".hist-chart", timeout=15000)
-            expect(page.locator('[data-action="history-power"]')).to_have_attribute(
-                "aria-pressed", "false"
-            )
-            expect(page.locator(".hist-chart .hist-power-area")).to_have_count(0)
+            expect(chip).to_have_attribute("aria-pressed", "false")
+            expect(area).to_have_count(0)
         finally:
-            page.evaluate("localStorage.removeItem('arcticHistPower')")
+            page.evaluate(
+                "localStorage.removeItem('arcticHistPower'); localStorage.removeItem('arcticHistChart')"
+            )
         assert page_errors == []
 
 class TestRunSummaries:

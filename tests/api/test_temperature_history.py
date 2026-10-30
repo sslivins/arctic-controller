@@ -112,7 +112,9 @@ def test_web_dashboard_has_temperature_history_view():
     assert "history: historyPage" in web
     assert "function historyPage" in web
     assert "function loadHistory" in web
-    assert "function historyChartSvg" in web
+    # Drawn by the shared tschart widget, inlined into the page at build time.
+    assert "/*@inline ../../components/tschart/web/tschart.js@*/" in web
+    assert "new TsChart(" in web
     # Fetches from the streaming endpoint above.
     assert "/api/heatpump/temperature-history" in web
     # Same zoom presets / round-time axis as the device chart.
@@ -127,7 +129,10 @@ def test_history_api_and_web_mark_faults_from_the_event_log():
     assert '\\"faults\\"' in api
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
     assert "data.faults" in web
-    assert "hist-fault-label" in web
+    # Cycle chart: hatched fault spans plus a coded note above the plot.
+    assert "d.faults" in web
+    assert 'style: "hatch"' in web
+    assert "chart.setNotes(" in web
 
 
 def test_history_api_and_web_mark_defrosts_from_the_event_log():
@@ -135,5 +140,5 @@ def test_history_api_and_web_mark_defrosts_from_the_event_log():
     assert '\\"defrosts\\"' in api
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
     assert "data.defrosts" in web
-    assert "hist-defrost" in web
+    assert "chart.setSpans(1, (d.defrosts" in web
     assert "hc-defrost" in web

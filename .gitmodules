@@ -1,3 +1,6 @@
 [submodule "components/arctic-macon"]
 	path = components/arctic-macon
 	url = https://github.com/sslivins/arctic-macon.git
+[submodule "components/tschart"]
+	path = components/tschart
+	url = https://github.com/sslivins/tschart.git
