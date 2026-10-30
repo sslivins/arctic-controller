@@ -132,6 +132,15 @@ static lv_color_t mode_color(uint8_t mode) {
     }
 }
 
+static const char* mode_key(uint8_t mode) {
+    switch (mode) {
+        case HISTORY_TELEMETRY_MODE_HEATING: return "heating";
+        case HISTORY_TELEMETRY_MODE_COOLING: return "cooling";
+        case HISTORY_TELEMETRY_MODE_HOT_WATER: return "hot_water";
+        default: return nullptr;
+    }
+}
+
 static bool running_sample(const history_telemetry_sample_t& sample) {
     return (sample.flags & HISTORY_TELEMETRY_COMPRESSOR_VALID) &&
            (sample.flags & HISTORY_TELEMETRY_COMPRESSOR_RUNNING) &&
@@ -453,7 +462,7 @@ static void set_overlays(lv_obj_t* c, const WindowData& w) {
                 j++;
             }
             bands[nb++] = {first.timestamp, band_end, mode_color(first.mode), LV_OPA_20,
-                           TSCHART_SPAN_FILL, 0};
+                           TSCHART_SPAN_FILL, 0, mode_key(first.mode)};
             i = j - 1;
         }
     }
@@ -465,7 +474,7 @@ static void set_overlays(lv_obj_t* c, const WindowData& w) {
     tschart_span_t defrosts[MAX_DEFROSTS];
     for (size_t i = 0; i < w.defrost_count; i++) {
         defrosts[i] = {w.defrosts[i].start, w.defrosts[i].end, COLOR_DEFROST, LV_OPA_40,
-                       TSCHART_SPAN_FILL, 3};
+                       TSCHART_SPAN_FILL, 3, "defrost"};
     }
     tschart_set_spans(c, SPANS_DEFROST, defrosts, w.defrost_count);
 
@@ -474,7 +483,7 @@ static void set_overlays(lv_obj_t* c, const WindowData& w) {
     for (size_t i = 0; i < w.fault_count; i++) {
         const auto& f = w.faults[i];
         faults[i] = {f.start, fault_end(f, w), COLOR_FAULT, LV_OPA_COVER,
-                     TSCHART_SPAN_HATCH, 0};
+                     TSCHART_SPAN_HATCH, 0, "fault"};
         notes[i] = {f.start, fault_code(f), COLOR_FAULT};
     }
     tschart_set_spans(c, SPANS_FAULTS, faults, w.fault_count);
@@ -857,6 +866,12 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
                     TSCHART_SPAN_FILL);
     tschart_add_key(c, "fault", i18n_get(STR_HISTORY_LEGEND_FAULT), COLOR_FAULT,
                     TSCHART_SPAN_HATCH);
+    // Opaque tints of the legend colours: a translucent band over the navy
+    // panel shifts orange/amber towards brown.
+    for (const char* k : {"heating", "cooling", "hot_water"}) {
+        tschart_key_set_fill_strength(c, k, LV_OPA_50);
+    }
+    tschart_key_set_fill_strength(c, "defrost", LV_OPA_60);
     tschart_set_header(c, TSCHART_HEADER_CHIPS | TSCHART_HEADER_KEY |
                               TSCHART_HEADER_TAG_BTN);
     if (state.view_saved) {

@@ -98,7 +98,7 @@
       --band-a1: 16%;
       --band-a2: 16%;
       --power-fill-a: 0.25;
-      --hist-band-a: 0.2;
+      --hist-band-strength: 22%; --hist-defrost-strength: 45%;
     }
     html[data-theme="dark"] {
       --cp-bg: #1a1a2e;
@@ -137,7 +137,7 @@
       --band-a1: 10%;
       --band-a2: 6%;
       --power-fill-a: 0.55;
-      --hist-band-a: 0.1;
+      --hist-band-strength: 50%; --hist-defrost-strength: 60%;
     }
     * { box-sizing: border-box; }
 
@@ -2503,10 +2503,11 @@
       chart.addGroup({ id: "temps", label: "Temps", color: "var(--hist-out)", swatch: "line", panes: [temps] });
       chart.addGroup({ id: "power", label: "Power", color: "var(--hist-power)", swatch: "fill", panes: [power],
         visible: state.histShowPower });
-      chart.addKey("heating", "Heating", "var(--band-heat)");
-      chart.addKey("cooling", "Cooling", "var(--band-cool)");
-      chart.addKey("hot_water", "Hot water", "var(--band-dhw)");
-      chart.addKey("defrost", "Defrost", "var(--home-defrost)");
+      const band = { fillStrength: "var(--hist-band-strength)" };
+      chart.addKey("heating", "Heating", "var(--band-heat)", band);
+      chart.addKey("cooling", "Cooling", "var(--band-cool)", band);
+      chart.addKey("hot_water", "Hot water", "var(--band-dhw)", band);
+      chart.addKey("defrost", "Defrost", "var(--home-defrost)", { fillStrength: "var(--hist-defrost-strength)" });
       chart.addKey("fault", "Fault", "var(--cp-danger)", "hatch");
       chart.setCard(histCard);
       state.histShowPower = chart.getGroupVisible("power");
@@ -2555,19 +2556,19 @@
     function histApplied(d) {
       const chart = histChart.chart, samples = d.samples || [], interval = d.sample_interval_sec || 30;
       histChart.applied = d;
-      const bandColor = { 1: "var(--band-heat)", 2: "var(--band-cool)", 3: "var(--band-dhw)" };
+      const bandKey = { 1: "heating", 2: "cooling", 3: "hot_water" };
       const bands = [];
       for (let i = 0; i < samples.length;) {
         const s = samples[i];
-        if (!s.run || !bandColor[s.mode]) { i++; continue; }
+        if (!s.run || !bandKey[s.mode]) { i++; continue; }
         let j = i + 1;
         while (j < samples.length && samples[j].run && samples[j].mode === s.mode) j++;
-        bands.push({ start: s.t, end: samples[j - 1].t + interval, color: bandColor[s.mode], opacity: "var(--hist-band-a)" });
+        bands.push({ start: s.t, end: samples[j - 1].t + interval, key: bandKey[s.mode] });
         i = j;
       }
       chart.setSpans(0, bands);
       chart.setSpans(1, (d.defrosts || []).map(x => ({ start: x.start, end: x.end ?? null,
-        color: "var(--home-defrost)", opacity: 0.4, minWidth: 3 })));
+        key: "defrost", minWidth: 3 })));
       chart.setSpans(2, (d.faults || []).map(x => ({ start: x.start, end: x.end ?? null,
         color: "var(--cp-danger)", style: "hatch" })));
       chart.setNotes((d.faults || []).map(x => ({ time: x.start, text: x.fault_code || "?", color: "var(--cp-danger)" })), "⚠ ");
