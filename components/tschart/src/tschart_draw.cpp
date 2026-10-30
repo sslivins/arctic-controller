@@ -400,17 +400,20 @@ void draw_gutter(lv_obj_t *c, lv_layer_t *layer) {
     const lv_area_t &P = d->plot;
     const int32_t gx = P.x1 + GUTTER_W;
     const int32_t lh = lv_font_get_line_height(d->small_font);
+    // One backdrop for the whole height so gaps between panes don't show through.
+    rect(layer, {P.x1, P.y1, gx, P.y2}, col_panel(c), LV_OPA_90);
     for (uint8_t i = 0; i < d->npanes; i++) {
         const tschart_pane &p = d->panes[i];
         if (!p.visible || p.axis.step <= 0 || p.slot.y2 <= p.slot.y1) continue;
-        rect(layer, {P.x1, p.slot.y1, gx, p.slot.y2}, col_panel(c), LV_OPA_90);
         line(layer, gx, p.slot.y1, gx, p.slot.y2, p.cfg.color, 2);
         for (int32_t v = p.axis.lo; v <= p.axis.hi; v += p.axis.step) {
             const int32_t y = map_y(v, p.axis.lo, p.axis.hi, p.slot.y1, p.slot.y2);
             line(layer, gx - 5, y, gx, y, p.cfg.color, 2);
             char label[24];
             fmt_value(p, v, TSCHART_FMT_AXIS, label, sizeof(label));
-            text(layer, {P.x1, y - lh / 2, gx - 8, y + lh / 2}, label, p.cfg.color,
+            // Keep edge labels inside their own pane so stacked panes don't collide.
+            const int32_t ty = LV_CLAMP(p.slot.y1, y - lh / 2, p.slot.y2 - lh);
+            text(layer, {P.x1, ty, gx - 8, ty + lh}, label, p.cfg.color,
                  LV_TEXT_ALIGN_RIGHT, d->small_font);
         }
     }

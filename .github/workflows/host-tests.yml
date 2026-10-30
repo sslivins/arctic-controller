@@ -134,6 +134,33 @@ jobs:
             exit 1
           fi
 
+  tschart-native-tests:
+    # Host build of the tschart widget's pure logic (scales, ticks, tag
+    # spreading, cursor lookup, window maths); no LVGL needed.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Configure native test build
+        run: cmake -S components/tschart/tests -B build-tschart-tests
+
+      - name: Build native tests
+        run: cmake --build build-tschart-tests --parallel
+
+      - name: Run native tests
+        run: ctest --test-dir build-tschart-tests --output-on-failure
+
+      - name: Assert the suite actually executed tests
+        # ctest exits 0 when it runs zero tests.
+        run: |
+          COUNT=$(ctest --test-dir build-tschart-tests -N | sed -n 's/^Total Tests: //p')
+          echo "ctest reports ${COUNT:-0} registered tests"
+          if [ -z "${COUNT}" ] || [ "${COUNT}" -lt 1 ]; then
+            echo "::error::No tschart native tests were registered."
+            exit 1
+          fi
+
   main-native-tests:
     # Compiles host-testable sources from main/ against the stubs in
     # main/tests/host_stubs/ and runs them. This is the only place firmware
