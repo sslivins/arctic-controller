@@ -2342,6 +2342,7 @@ static esp_err_t history_cursor_get_handler(httpd_req_t* req)
 static struct {
     lv_indev_t* indev = nullptr;
     bool active = false;
+    bool started = false;
     volatile bool done = true;
     uint32_t t0 = 0;
     int32_t x1 = 0, y1 = 0, x2 = 0, y2 = 0;
@@ -2355,6 +2356,13 @@ static void test_drag_read_cb(lv_indev_t*, lv_indev_data_t* data)
     data->point = d.last;
     data->state = LV_INDEV_STATE_RELEASED;
     if (!d.active) return;
+    // Time the gesture from LVGL's first read, not from the request: if LVGL
+    // is busy redrawing when the drag is posted, the press must still land at
+    // (x1,y1) rather than partway along the path.
+    if (!d.started) {
+        d.started = true;
+        d.t0 = lv_tick_get();
+    }
     const uint32_t el = lv_tick_elaps(d.t0);
     lv_point_t p = {d.x2, d.y2};
     if (el < d.hold_ms) {
@@ -2444,7 +2452,7 @@ static esp_err_t drag_post_handler(httpd_req_t* req)
     d.hold_ms = hold_ms;
     d.duration_ms = duration_ms;
     d.last = {d.x1, d.y1};
-    d.t0 = lv_tick_get();
+    d.started = false;
     d.done = false;
     d.active = true;
     bsp_display_unlock();
