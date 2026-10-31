@@ -87,6 +87,10 @@
       --hist-cool: #3b82f6;
       --hist-dhw: #f59e0b;
       --hist-power: #7c3aed;
+      --hist-heatout: #db2777;
+      --hist-cop: #2563eb;
+      --hist-coil: #0891b2;
+      --hist-air: #64748b;
       --energy-other: #94a3b8;
       /* Run-mode bands: fill plus a solid strip along the bottom. A thin flat
          tint over the dark navy background reads as muddy brown/olive, so dark
@@ -129,6 +133,10 @@
       --hist-cool: #3b82f6;
       --hist-dhw: #fbbf24;
       --hist-power: #a78bfa;
+      --hist-heatout: #f472b6;
+      --hist-cop: #60a5fa;
+      --hist-coil: #22d3ee;
+      --hist-air: #94a3b8;
       --energy-other: #64748b;
       --band-heat: #fb923c;
       --band-cool: #60a5fa;
@@ -2474,6 +2482,9 @@
       if (ctx === "axis") return `${Math.round(w / 100) / 10}`;
       return fmtPower(w);
     }
+    function histFmtCop(v, ctx) {
+      return ctx === "axis" ? `${Math.round(v / 10) / 10}` : (v / 100).toFixed(1);
+    }
     function histCreate() {
       const el = document.createElement("div");
       el.className = "hist-chart";
@@ -2490,6 +2501,10 @@
         range: { auto: true, minSpan: 100, padPermille: 100, minPad: 20, minStep: 10 }, fmt: histFmtTemp });
       const power = chart.addPane({ id: "power", weight: 40, unit: "kW", color: "var(--hist-power)",
         range: { auto: true, includeZero: true, hasMax: true, max: 1000, padPermille: 50, minStep: 100 }, fmt: histFmtPower });
+      const cop = chart.addPane({ id: "cop", weight: 30, unit: "COP", color: "var(--hist-cop)",
+        range: { auto: true, includeZero: true, hasMax: true, max: 300, padPermille: 50, minStep: 100 }, fmt: histFmtCop });
+      const outdoor = chart.addPane({ id: "outdoor", weight: 35, unit: f ? "°F" : "°C", color: "var(--hist-coil)",
+        range: { auto: true, minSpan: 100, padPermille: 100, minPad: 20, minStep: 10 }, fmt: histFmtTemp });
       const temp = { geom: "line", interp: "plateau", width: 2, inCursor: true, drivesRange: true };
       chart.addLayer(temps, { ...temp, id: "outlet", name: "Outlet", tag: "out", color: "var(--hist-out)", value: s => histTempValue(s.out) });
       chart.addLayer(temps, { ...temp, id: "inlet", name: "Inlet", tag: "in", color: "var(--hist-in)", value: s => histTempValue(s.in) });
@@ -2497,9 +2512,22 @@
         color: "var(--hist-set)", value: s => histTempValue(s.set) });
       chart.addLayer(power, { id: "power", name: "Power", tag: "", geom: "step", fill: true, fillOpacity: 0.3, width: 1.5,
         color: "var(--hist-power)", inCursor: true, drivesRange: true, value: s => s.p ?? null });
+      // Heat delivered over the power it took: the gap is the COP.
+      chart.addLayer(power, { id: "heat_out", name: "Heat out", tag: "", geom: "step", width: 1.5,
+        color: "var(--hist-heatout)", inCursor: true, drivesRange: true, value: s => s.q ?? null });
+      chart.addLayer(cop, { id: "cop", name: "COP", tag: "", geom: "line", interp: "none", width: 2,
+        color: "var(--hist-cop)", inCursor: true, drivesRange: true,
+        value: s => s.cop == null ? null : Math.round(s.cop * 100) });
+      chart.addLayer(outdoor, { ...temp, id: "outdoor_coil", name: "Coil", tag: "coil", color: "var(--hist-coil)",
+        value: s => histTempValue(s.coil) });
+      chart.addLayer(outdoor, { ...temp, id: "outdoor_air", name: "Air", tag: "air", color: "var(--hist-air)",
+        value: s => histTempValue(s.air) });
       chart.addGroup({ id: "temps", label: "Temps", color: "var(--hist-out)", swatch: "line", panes: [temps] });
       chart.addGroup({ id: "power", label: "Power", color: "var(--hist-power)", swatch: "fill", panes: [power],
         visible: state.histShowPower });
+      chart.addGroup({ id: "cop", label: "COP", color: "var(--hist-cop)", swatch: "line", panes: [cop], visible: false });
+      chart.addGroup({ id: "outdoor", label: "Outdoor", color: "var(--hist-coil)", swatch: "line", panes: [outdoor],
+        visible: false });
       const band = { fillStrength: "var(--hist-band-strength)" };
       chart.addKey("heating", "Heating", "var(--band-heat)", band);
       chart.addKey("cooling", "Cooling", "var(--band-cool)", band);

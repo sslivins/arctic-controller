@@ -691,6 +691,11 @@ typedef enum {
     STR_HISTORY_VIEW_TEMPS,
     STR_HISTORY_VIEW_POWER,
     STR_HISTORY_POWER_WINDOW_FMT,
+    STR_HISTORY_VIEW_COP,
+    STR_HISTORY_VIEW_OUTDOOR,
+    STR_HISTORY_HEAT_OUT,
+    STR_HISTORY_COIL,
+    STR_HISTORY_AIR,
 
     // ========================================================================
     // Must be last - used for array sizing

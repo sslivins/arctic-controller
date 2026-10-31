@@ -2720,6 +2720,35 @@ paths:
                             Average electrical power over the sample interval
                             (watts), or null when unknown or disconnected.
                             Samples from older firmware are null.
+                        q:
+                          type: integer
+                          nullable: true
+                          description: >-
+                            Average heat delivered (heating, hot water) or
+                            removed (cooling) in watts, over the part of the
+                            interval the compressor was running with a valid
+                            performance estimate; null otherwise and for samples
+                            recorded by older firmware.
+                        cop:
+                          type: number
+                          nullable: true
+                          description: >-
+                            Coefficient of performance over the same time as
+                            `q` (heat energy / electrical energy), two decimals.
+                        coil:
+                          type: integer
+                          nullable: true
+                          description: >-
+                            Outdoor coil temperature (deci-°C; whole-degree
+                            resolution from the unit). Null when unknown and for
+                            samples recorded by older firmware.
+                        air:
+                          type: integer
+                          nullable: true
+                          description: >-
+                            Outdoor air temperature (deci-°C; whole-degree
+                            resolution). Null when unknown and for samples
+                            recorded by older firmware.
                   faults:
                     type: array
                     description: >-

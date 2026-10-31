@@ -34,6 +34,17 @@ enum {
     HISTORY_TELEMETRY_POWER_VALID = 1 << 7,
 };
 
+// Second flags byte (journal format 2+). Samples recorded in format 1 read
+// back with none of these set.
+enum {
+    // Heat output and COP, averaged over the time the estimate was valid
+    // within the sample (compressor running, not defrosting).
+    HISTORY_TELEMETRY_HEAT_VALID = 1 << 0,
+    HISTORY_TELEMETRY_COP_VALID = 1 << 1,
+    HISTORY_TELEMETRY_OUTDOOR_COIL_VALID = 1 << 2,
+    HISTORY_TELEMETRY_OUTDOOR_AIR_VALID = 1 << 3,
+};
+
 typedef struct {
     uint32_t timestamp;
     uint32_t sequence;
@@ -46,6 +57,14 @@ typedef struct {
     // Electrical power averaged over the sample interval (W). Meaningful only
     // with HISTORY_TELEMETRY_POWER_VALID.
     uint16_t average_power_w;
+    // Heat delivered (heating/hot water) or removed (cooling), W. Meaningful
+    // only with HISTORY_TELEMETRY_HEAT_VALID.
+    uint16_t average_heat_w;
+    // COP x100. Meaningful only with HISTORY_TELEMETRY_COP_VALID.
+    uint16_t average_cop_x100;
+    int16_t outdoor_coil_deci_c;
+    int16_t outdoor_air_deci_c;
+    uint8_t flags2;
 } history_telemetry_sample_t;
 
 esp_err_t history_storage_init(void);

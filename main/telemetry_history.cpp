@@ -72,6 +72,20 @@ static void recorder_task(void*) {
             sample.average_power_w = avg_w;
             sample.flags |= HISTORY_TELEMETRY_POWER_VALID;
         }
+        uint16_t heat_w = 0, cop_x100 = 0;
+        if (arctic::takeAveragePerformance(&heat_w, &cop_x100) && snapshot.connected) {
+            sample.average_heat_w = heat_w;
+            sample.average_cop_x100 = cop_x100;
+            sample.flags2 |= HISTORY_TELEMETRY_HEAT_VALID | HISTORY_TELEMETRY_COP_VALID;
+        }
+        if (snapshot.outdoor_coil_valid) {
+            sample.flags2 |= HISTORY_TELEMETRY_OUTDOOR_COIL_VALID;
+            sample.outdoor_coil_deci_c = (int16_t)(snapshot.outdoor_coil_c * 10);
+        }
+        if (snapshot.outdoor_air_valid) {
+            sample.flags2 |= HISTORY_TELEMETRY_OUTDOOR_AIR_VALID;
+            sample.outdoor_air_deci_c = (int16_t)(snapshot.outdoor_air_c * 10);
+        }
 
         esp_err_t err = history_storage_append_telemetry(&sample);
         if (err == ESP_OK) {

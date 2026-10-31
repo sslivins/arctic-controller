@@ -26,12 +26,18 @@ static constexpr uint16_t RECORD_KIND_UPSERT = 1;
 static constexpr uint32_t BANK_COMMITTED = 0;
 static constexpr size_t TELEMETRY_REGION_OFFSET = HISTORY_EVENT_REGION_SIZE;
 static constexpr size_t TELEMETRY_SECTOR_HEADER_SIZE = 32;
-static constexpr size_t TELEMETRY_RECORD_SIZE = 32;
+// Format 2 (current, the only one written) and format 1 (still read, so the
+// journal survives the upgrade; it ages out as the ring wraps).
+static constexpr size_t TELEMETRY_RECORD_SIZE = 40;
 static constexpr size_t TELEMETRY_RECORDS_PER_SECTOR =
     (FLASH_SECTOR_SIZE - TELEMETRY_SECTOR_HEADER_SIZE) / TELEMETRY_RECORD_SIZE;
+static constexpr size_t TELEMETRY_V1_RECORD_SIZE = 32;
+static constexpr size_t TELEMETRY_V1_RECORDS_PER_SECTOR =
+    (FLASH_SECTOR_SIZE - TELEMETRY_SECTOR_HEADER_SIZE) / TELEMETRY_V1_RECORD_SIZE;
 static constexpr uint32_t TELEMETRY_SECTOR_MAGIC = 0x48545331;  // HTS1
-static constexpr uint32_t TELEMETRY_RECORD_MAGIC = 0x48545231;  // HTR1
-static constexpr uint16_t TELEMETRY_FORMAT_VERSION = 1;
+static constexpr uint32_t TELEMETRY_V1_RECORD_MAGIC = 0x48545231;  // HTR1
+static constexpr uint16_t TELEMETRY_FORMAT_VERSION = 2;
+static constexpr uint16_t TELEMETRY_V1_FORMAT_VERSION = 1;
 static constexpr uint32_t TELEMETRY_COMMITTED = 0;
 
 typedef struct {
@@ -67,10 +73,9 @@ typedef struct {
     uint32_t committed;
 } telemetry_sector_header_t;
 
-// On-flash sample layout (format version 1). The public sample adds the tank
-// reading and the average power, which live in what used to be the record's
-// reserved words so existing journals stay readable. Unused words are left
-// erased (0xFFFF), so a value only counts alongside its flag.
+// Format 1 record (written by firmware up to 3.4). The tank reading and the average
+// power live in what were once reserved words; unused words are left erased
+// (0xFFFF), so a value only counts alongside its flag.
 typedef struct {
     uint32_t timestamp;
     uint32_t sequence;
@@ -88,6 +93,28 @@ typedef struct {
     int16_t tank_deci_c;
     uint16_t average_power_w;
     uint32_t crc32;
+} telemetry_record_v1_t;
+
+// Format 2 record. No per-record magic or duplicated sequence: the sector
+// header identifies the format and the CRC covers the record. Spare bytes are
+// left erased so a later field can be added the way tank and power were.
+typedef struct {
+    uint32_t sequence;
+    uint32_t timestamp;
+    int16_t inlet_deci_c;
+    int16_t outlet_deci_c;
+    int16_t setpoint_deci_c;
+    uint8_t mode;
+    uint8_t flags;
+    int16_t tank_deci_c;
+    uint16_t average_power_w;
+    uint16_t average_heat_w;
+    uint16_t average_cop_x100;
+    int16_t outdoor_coil_deci_c;
+    int16_t outdoor_air_deci_c;
+    uint8_t flags2;
+    uint8_t spare[7];
+    uint32_t crc32;
 } telemetry_record_t;
 
 static_assert(sizeof(event_bank_header_t) == 32, "Unexpected event bank header size");
@@ -97,6 +124,8 @@ static_assert(sizeof(telemetry_flash_sample_t) == 16,
               "Telemetry samples must remain compact");
 static_assert(sizeof(telemetry_sector_header_t) == TELEMETRY_SECTOR_HEADER_SIZE,
               "Unexpected telemetry sector header size");
+static_assert(sizeof(telemetry_record_v1_t) == TELEMETRY_V1_RECORD_SIZE,
+              "Format 1 telemetry records are fixed on flash");
 static_assert(sizeof(telemetry_record_t) == TELEMETRY_RECORD_SIZE,
               "Telemetry records must remain fixed-size");
 
@@ -397,6 +426,7 @@ static size_t telemetry_sector_offset(size_t sector) {
     return TELEMETRY_REGION_OFFSET + sector * FLASH_SECTOR_SIZE;
 }
 
+// Offset of a slot in a format 2 sector (the only format written).
 static size_t telemetry_record_offset(size_t sector, size_t slot) {
     return telemetry_sector_offset(sector) + TELEMETRY_SECTOR_HEADER_SIZE +
            slot * TELEMETRY_RECORD_SIZE;
@@ -412,22 +442,42 @@ static uint32_t telemetry_record_crc(const telemetry_record_t* record) {
                         offsetof(telemetry_record_t, crc32));
 }
 
-static bool telemetry_header_valid(const telemetry_sector_header_t* header) {
-    return header->magic == TELEMETRY_SECTOR_MAGIC &&
-           header->version == TELEMETRY_FORMAT_VERSION &&
-           header->header_size == TELEMETRY_SECTOR_HEADER_SIZE &&
-           header->record_size == TELEMETRY_RECORD_SIZE &&
-           header->records_per_sector == TELEMETRY_RECORDS_PER_SECTOR &&
-           header->committed == TELEMETRY_COMMITTED &&
-           header->crc32 == telemetry_header_crc(header);
+static uint32_t telemetry_v1_record_crc(const telemetry_record_v1_t* record) {
+    return esp_crc32_le(0, reinterpret_cast<const uint8_t*>(record),
+                        offsetof(telemetry_record_v1_t, crc32));
 }
 
-static bool telemetry_record_valid(const telemetry_record_t* record) {
-    return record->magic == TELEMETRY_RECORD_MAGIC &&
-           record->sequence != 0 &&
-           record->sample.sequence == record->sequence &&
-           record->sample.mode <= HISTORY_TELEMETRY_MODE_HOT_WATER &&
-           record->crc32 == telemetry_record_crc(record);
+// The record format a committed sector holds, or 0 if it holds nothing this
+// firmware can read. Older firmware accepts only format 1 sectors, so after a
+// rollback it skips format 2 ones and reuses them as its ring wraps.
+static uint16_t telemetry_sector_format(const telemetry_sector_header_t* header) {
+    if (header->magic != TELEMETRY_SECTOR_MAGIC ||
+        header->header_size != TELEMETRY_SECTOR_HEADER_SIZE ||
+        header->committed != TELEMETRY_COMMITTED ||
+        header->crc32 != telemetry_header_crc(header)) {
+        return 0;
+    }
+    if (header->version == TELEMETRY_FORMAT_VERSION &&
+        header->record_size == TELEMETRY_RECORD_SIZE &&
+        header->records_per_sector == TELEMETRY_RECORDS_PER_SECTOR) {
+        return TELEMETRY_FORMAT_VERSION;
+    }
+    if (header->version == TELEMETRY_V1_FORMAT_VERSION &&
+        header->record_size == TELEMETRY_V1_RECORD_SIZE &&
+        header->records_per_sector == TELEMETRY_V1_RECORDS_PER_SECTOR) {
+        return TELEMETRY_V1_FORMAT_VERSION;
+    }
+    return 0;
+}
+
+static size_t telemetry_slots_in(uint16_t format) {
+    return format == TELEMETRY_FORMAT_VERSION ? TELEMETRY_RECORDS_PER_SECTOR
+                                              : TELEMETRY_V1_RECORDS_PER_SECTOR;
+}
+
+static size_t telemetry_record_size_of(uint16_t format) {
+    return format == TELEMETRY_FORMAT_VERSION ? TELEMETRY_RECORD_SIZE
+                                              : TELEMETRY_V1_RECORD_SIZE;
 }
 
 static bool generation_newer(uint32_t candidate, uint32_t current) {
@@ -465,138 +515,60 @@ static esp_err_t telemetry_commit_sector(size_t sector,
         &committed, sizeof(committed));
 }
 
-static esp_err_t telemetry_initialize_locked() {
-    if (s_factory_reset_pending) return ESP_ERR_INVALID_STATE;
-    if (s_telemetry_initialized) return ESP_OK;
-
-    esp_err_t err = history_storage_init();
-    if (err != ESP_OK) return err;
-    if (s_partition->size <= TELEMETRY_REGION_OFFSET) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    s_telemetry_sector_count =
-        (s_partition->size - TELEMETRY_REGION_OFFSET) / FLASH_SECTOR_SIZE;
-    if (s_telemetry_sector_count == 0) return ESP_ERR_INVALID_SIZE;
-
-    bool found_header = false;
-    telemetry_sector_header_t newest = {};
-    for (size_t sector = 0; sector < s_telemetry_sector_count; sector++) {
-        telemetry_sector_header_t header;
-        err = esp_partition_read(s_partition, telemetry_sector_offset(sector),
-                                 &header, sizeof(header));
-        if (err != ESP_OK) return err;
-        if (!telemetry_header_valid(&header)) continue;
-        if (!found_header || generation_newer(header.generation, newest.generation)) {
-            newest = header;
-            s_telemetry_active_sector = sector;
-            found_header = true;
-        }
-    }
-
-    if (!found_header) {
-        err = telemetry_commit_sector(0, 1, 1);
-        if (err != ESP_OK) return err;
-        s_telemetry_active_sector = 0;
-        s_telemetry_generation = 1;
-        s_telemetry_next_sequence = 1;
-        s_telemetry_next_slot = 0;
-        s_telemetry_last_timestamp = 0;
-        s_telemetry_initialized = true;
-        ESP_LOGI(TAG, "Initialized telemetry journal (%lu sectors)",
-                 (unsigned long)s_telemetry_sector_count);
-        return ESP_OK;
-    }
-
-    s_telemetry_generation = newest.generation;
-    s_telemetry_next_sequence = newest.first_sequence;
-    s_telemetry_next_slot = 0;
-    s_telemetry_last_timestamp = 0;
-
-    for (size_t sector = 0; sector < s_telemetry_sector_count; sector++) {
-        telemetry_sector_header_t header;
-        err = esp_partition_read(s_partition, telemetry_sector_offset(sector),
-                                 &header, sizeof(header));
-        if (err != ESP_OK) return err;
-        if (!telemetry_header_valid(&header)) continue;
-
-        size_t last_programmed_slot = 0;
-        bool any_programmed = false;
-        for (size_t slot = 0; slot < TELEMETRY_RECORDS_PER_SECTOR; slot++) {
-            telemetry_record_t record;
-            err = esp_partition_read(s_partition,
-                                     telemetry_record_offset(sector, slot),
-                                     &record, sizeof(record));
-            if (err != ESP_OK) return err;
-            if (!bytes_are_erased(&record, sizeof(record))) {
-                any_programmed = true;
-                last_programmed_slot = slot;
-            }
-            if (!telemetry_record_valid(&record)) continue;
-            if (record.sequence >= s_telemetry_next_sequence) {
-                s_telemetry_next_sequence = record.sequence + 1;
-                if (s_telemetry_next_sequence == 0) s_telemetry_next_sequence = 1;
-            }
-            if (record.sample.timestamp > s_telemetry_last_timestamp) {
-                s_telemetry_last_timestamp = record.sample.timestamp;
-            }
-        }
-        if (sector == s_telemetry_active_sector) {
-            s_telemetry_next_slot =
-                any_programmed ? last_programmed_slot + 1 : 0;
-        }
-    }
-
-    s_telemetry_initialized = true;
-    ESP_LOGI(TAG,
-             "Recovered telemetry journal: sector=%lu generation=%lu slot=%lu sequence=%lu",
-             (unsigned long)s_telemetry_active_sector,
-             (unsigned long)s_telemetry_generation,
-             (unsigned long)s_telemetry_next_slot,
-             (unsigned long)s_telemetry_next_sequence);
-    return ESP_OK;
-}
-
-static esp_err_t telemetry_rotate_locked() {
-    const size_t next_sector =
-        (s_telemetry_active_sector + 1) % s_telemetry_sector_count;
-    uint32_t next_generation = s_telemetry_generation + 1;
-    if (next_generation == 0) next_generation = 1;
-    esp_err_t err = telemetry_commit_sector(
-        next_sector, next_generation, s_telemetry_next_sequence);
-    if (err != ESP_OK) return err;
-    s_telemetry_active_sector = next_sector;
-    s_telemetry_generation = next_generation;
-    s_telemetry_next_slot = 0;
-    return ESP_OK;
-}
-
 static void pack_telemetry_record(telemetry_record_t* record,
                                   const history_telemetry_sample_t* sample,
                                   uint32_t sequence) {
     memset(record, 0xFF, sizeof(*record));
-    record->magic = TELEMETRY_RECORD_MAGIC;
     record->sequence = sequence;
-    record->sample.timestamp = sample->timestamp;
-    record->sample.sequence = sequence;
-    record->sample.inlet_deci_c = sample->inlet_deci_c;
-    record->sample.outlet_deci_c = sample->outlet_deci_c;
-    record->sample.setpoint_deci_c = sample->setpoint_deci_c;
-    record->sample.mode = sample->mode;
-    record->sample.flags = sample->flags;
-    if (sample->flags & HISTORY_TELEMETRY_TANK_VALID) {
+    record->timestamp = sample->timestamp;
+    record->inlet_deci_c = sample->inlet_deci_c;
+    record->outlet_deci_c = sample->outlet_deci_c;
+    record->setpoint_deci_c = sample->setpoint_deci_c;
+    record->mode = sample->mode;
+    uint8_t flags = sample->flags;
+    uint8_t flags2 = sample->flags2 &
+                     (HISTORY_TELEMETRY_HEAT_VALID | HISTORY_TELEMETRY_COP_VALID |
+                      HISTORY_TELEMETRY_OUTDOOR_COIL_VALID |
+                      HISTORY_TELEMETRY_OUTDOOR_AIR_VALID);
+    if (flags & HISTORY_TELEMETRY_TANK_VALID) {
         record->tank_deci_c = sample->tank_deci_c;
     }
-    if ((sample->flags & HISTORY_TELEMETRY_POWER_VALID) && sample->average_power_w != 0xFFFF) {
+    // 0xFFFF is the erased marker, so it can never be stored as a reading.
+    if ((flags & HISTORY_TELEMETRY_POWER_VALID) && sample->average_power_w != 0xFFFF) {
         record->average_power_w = sample->average_power_w;
     } else {
-        record->sample.flags &= (uint8_t)~HISTORY_TELEMETRY_POWER_VALID;
+        flags &= (uint8_t)~HISTORY_TELEMETRY_POWER_VALID;
     }
+    if ((flags2 & HISTORY_TELEMETRY_HEAT_VALID) && sample->average_heat_w != 0xFFFF) {
+        record->average_heat_w = sample->average_heat_w;
+    } else {
+        flags2 &= (uint8_t)~HISTORY_TELEMETRY_HEAT_VALID;
+    }
+    if ((flags2 & HISTORY_TELEMETRY_COP_VALID) && sample->average_cop_x100 != 0xFFFF) {
+        record->average_cop_x100 = sample->average_cop_x100;
+    } else {
+        flags2 &= (uint8_t)~HISTORY_TELEMETRY_COP_VALID;
+    }
+    if (flags2 & HISTORY_TELEMETRY_OUTDOOR_COIL_VALID) {
+        record->outdoor_coil_deci_c = sample->outdoor_coil_deci_c;
+    }
+    if (flags2 & HISTORY_TELEMETRY_OUTDOOR_AIR_VALID) {
+        record->outdoor_air_deci_c = sample->outdoor_air_deci_c;
+    }
+    record->flags = flags;
+    record->flags2 = flags2;
     record->crc32 = telemetry_record_crc(record);
 }
 
-static history_telemetry_sample_t unpack_telemetry_record(
-    const telemetry_record_t& record) {
+static bool decode_v1_record(const uint8_t* bytes, history_telemetry_sample_t* out) {
+    telemetry_record_v1_t record;
+    memcpy(&record, bytes, sizeof(record));
+    if (record.magic != TELEMETRY_V1_RECORD_MAGIC || record.sequence == 0 ||
+        record.sample.sequence != record.sequence ||
+        record.sample.mode > HISTORY_TELEMETRY_MODE_HOT_WATER ||
+        record.crc32 != telemetry_v1_record_crc(&record)) {
+        return false;
+    }
     history_telemetry_sample_t sample = {};
     sample.timestamp = record.sample.timestamp;
     sample.sequence = record.sample.sequence;
@@ -613,7 +585,201 @@ static history_telemetry_sample_t unpack_telemetry_record(
     } else {
         sample.flags &= (uint8_t)~HISTORY_TELEMETRY_POWER_VALID;
     }
-    return sample;
+    *out = sample;
+    return true;
+}
+
+static bool decode_v2_record(const uint8_t* bytes, history_telemetry_sample_t* out) {
+    telemetry_record_t record;
+    memcpy(&record, bytes, sizeof(record));
+    if (record.sequence == 0 || record.sequence == 0xFFFFFFFF ||
+        record.mode > HISTORY_TELEMETRY_MODE_HOT_WATER ||
+        record.crc32 != telemetry_record_crc(&record)) {
+        return false;
+    }
+    history_telemetry_sample_t sample = {};
+    sample.timestamp = record.timestamp;
+    sample.sequence = record.sequence;
+    sample.inlet_deci_c = record.inlet_deci_c;
+    sample.outlet_deci_c = record.outlet_deci_c;
+    sample.setpoint_deci_c = record.setpoint_deci_c;
+    sample.mode = record.mode;
+    sample.flags = record.flags;
+    sample.flags2 = record.flags2;
+    if (sample.flags & HISTORY_TELEMETRY_TANK_VALID) {
+        sample.tank_deci_c = record.tank_deci_c;
+    }
+    if ((sample.flags & HISTORY_TELEMETRY_POWER_VALID) && record.average_power_w != 0xFFFF) {
+        sample.average_power_w = record.average_power_w;
+    } else {
+        sample.flags &= (uint8_t)~HISTORY_TELEMETRY_POWER_VALID;
+    }
+    if ((sample.flags2 & HISTORY_TELEMETRY_HEAT_VALID) && record.average_heat_w != 0xFFFF) {
+        sample.average_heat_w = record.average_heat_w;
+    } else {
+        sample.flags2 &= (uint8_t)~HISTORY_TELEMETRY_HEAT_VALID;
+    }
+    if ((sample.flags2 & HISTORY_TELEMETRY_COP_VALID) && record.average_cop_x100 != 0xFFFF) {
+        sample.average_cop_x100 = record.average_cop_x100;
+    } else {
+        sample.flags2 &= (uint8_t)~HISTORY_TELEMETRY_COP_VALID;
+    }
+    if (sample.flags2 & HISTORY_TELEMETRY_OUTDOOR_COIL_VALID) {
+        sample.outdoor_coil_deci_c = record.outdoor_coil_deci_c;
+    }
+    if (sample.flags2 & HISTORY_TELEMETRY_OUTDOOR_AIR_VALID) {
+        sample.outdoor_air_deci_c = record.outdoor_air_deci_c;
+    }
+    *out = sample;
+    return true;
+}
+
+// Decodes one slot of a sector image read into RAM. False for an erased, torn
+// or corrupt slot.
+static bool telemetry_decode_slot(uint16_t format, const uint8_t* sector_data,
+                                  size_t slot, history_telemetry_sample_t* out) {
+    const size_t size = telemetry_record_size_of(format);
+    const uint8_t* bytes = sector_data + TELEMETRY_SECTOR_HEADER_SIZE + slot * size;
+    if (bytes_are_erased(bytes, size)) return false;
+    return format == TELEMETRY_FORMAT_VERSION ? decode_v2_record(bytes, out)
+                                              : decode_v1_record(bytes, out);
+}
+
+static esp_err_t telemetry_rotate_locked() {
+    const size_t next_sector =
+        (s_telemetry_active_sector + 1) % s_telemetry_sector_count;
+    uint32_t next_generation = s_telemetry_generation + 1;
+    if (next_generation == 0) next_generation = 1;
+    esp_err_t err = telemetry_commit_sector(
+        next_sector, next_generation, s_telemetry_next_sequence);
+    if (err != ESP_OK) return err;
+    s_telemetry_active_sector = next_sector;
+    s_telemetry_generation = next_generation;
+    s_telemetry_next_slot = 0;
+    return ESP_OK;
+}
+
+static esp_err_t telemetry_initialize_locked() {
+    if (s_factory_reset_pending) return ESP_ERR_INVALID_STATE;
+    if (s_telemetry_initialized) return ESP_OK;
+
+    esp_err_t err = history_storage_init();
+    if (err != ESP_OK) return err;
+    if (s_partition->size <= TELEMETRY_REGION_OFFSET) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    s_telemetry_sector_count =
+        (s_partition->size - TELEMETRY_REGION_OFFSET) / FLASH_SECTOR_SIZE;
+    if (s_telemetry_sector_count == 0) return ESP_ERR_INVALID_SIZE;
+
+    auto* sector_data = static_cast<uint8_t*>(
+        heap_caps_malloc(FLASH_SECTOR_SIZE, MALLOC_CAP_8BIT));
+    if (sector_data == nullptr) return ESP_ERR_NO_MEM;
+
+    // The active sector is the one holding the newest record, not simply the
+    // highest generation: firmware rolled back to format 1 numbers its new
+    // sectors from its own (lower) generation, so after re-upgrading, the
+    // highest-generation sector can be an old format 2 one. Ties (empty
+    // sectors) go to the newer generation.
+    bool found_header = false;
+    size_t active_sector = 0;
+    uint16_t active_format = 0;
+    uint32_t active_newest = 0;
+    uint32_t active_generation = 0;
+    size_t active_next_slot = 0;
+    uint32_t max_generation = 0;
+    uint32_t next_sequence = 1;
+    uint32_t last_timestamp = 0;
+
+    for (size_t sector = 0; sector < s_telemetry_sector_count; sector++) {
+        err = esp_partition_read(s_partition, telemetry_sector_offset(sector),
+                                 sector_data, FLASH_SECTOR_SIZE);
+        if (err != ESP_OK) break;
+        telemetry_sector_header_t header;
+        memcpy(&header, sector_data, sizeof(header));
+        const uint16_t format = telemetry_sector_format(&header);
+        if (format == 0) continue;
+
+        if (!found_header || generation_newer(header.generation, max_generation)) {
+            max_generation = header.generation;
+        }
+        if (header.first_sequence > next_sequence) next_sequence = header.first_sequence;
+
+        const size_t slots = telemetry_slots_in(format);
+        const size_t size = telemetry_record_size_of(format);
+        uint32_t sector_newest = 0;
+        size_t last_programmed_slot = 0;
+        bool any_programmed = false;
+        for (size_t slot = 0; slot < slots; slot++) {
+            if (!bytes_are_erased(sector_data + TELEMETRY_SECTOR_HEADER_SIZE + slot * size,
+                                  size)) {
+                any_programmed = true;
+                last_programmed_slot = slot;
+            }
+            history_telemetry_sample_t sample;
+            if (!telemetry_decode_slot(format, sector_data, slot, &sample)) continue;
+            if (sample.sequence >= next_sequence) {
+                next_sequence = sample.sequence + 1;
+                if (next_sequence == 0) next_sequence = 1;
+            }
+            if (sample.timestamp > sector_newest) sector_newest = sample.timestamp;
+        }
+        if (sector_newest > last_timestamp) last_timestamp = sector_newest;
+
+        if (!found_header || sector_newest > active_newest ||
+            (sector_newest == active_newest &&
+             generation_newer(header.generation, active_generation))) {
+            active_sector = sector;
+            active_format = format;
+            active_newest = sector_newest;
+            active_generation = header.generation;
+            active_next_slot = any_programmed ? last_programmed_slot + 1 : 0;
+        }
+        found_header = true;
+    }
+    heap_caps_free(sector_data);
+    if (err != ESP_OK) return err;
+
+    if (!found_header) {
+        err = telemetry_commit_sector(0, 1, 1);
+        if (err != ESP_OK) return err;
+        s_telemetry_active_sector = 0;
+        s_telemetry_generation = 1;
+        s_telemetry_next_sequence = 1;
+        s_telemetry_next_slot = 0;
+        s_telemetry_last_timestamp = 0;
+        s_telemetry_initialized = true;
+        ESP_LOGI(TAG, "Initialized telemetry journal (%lu sectors)",
+                 (unsigned long)s_telemetry_sector_count);
+        return ESP_OK;
+    }
+
+    s_telemetry_active_sector = active_sector;
+    // Rotation numbers the next sector above every generation on flash.
+    s_telemetry_generation = max_generation;
+    s_telemetry_next_sequence = next_sequence;
+    s_telemetry_next_slot = active_next_slot;
+    s_telemetry_last_timestamp = last_timestamp;
+
+    // Only the current format is ever appended: leave an older-format active
+    // sector as it is and continue in a fresh one.
+    if (active_format != TELEMETRY_FORMAT_VERSION) {
+        err = telemetry_rotate_locked();
+        if (err != ESP_OK) return err;
+        ESP_LOGI(TAG, "Telemetry journal upgraded to format %u at sector %lu",
+                 (unsigned)TELEMETRY_FORMAT_VERSION,
+                 (unsigned long)s_telemetry_active_sector);
+    }
+
+    s_telemetry_initialized = true;
+    ESP_LOGI(TAG,
+             "Recovered telemetry journal: sector=%lu generation=%lu slot=%lu sequence=%lu",
+             (unsigned long)s_telemetry_active_sector,
+             (unsigned long)s_telemetry_generation,
+             (unsigned long)s_telemetry_next_slot,
+             (unsigned long)s_telemetry_next_sequence);
+    return ESP_OK;
 }
 
 esp_err_t history_storage_append_telemetry(
@@ -709,22 +875,17 @@ esp_err_t history_storage_query_telemetry(
                                  sector_data, FLASH_SECTOR_SIZE);
         if (err != ESP_OK) break;
         memcpy(&header, sector_data, sizeof(header));
-        if (!telemetry_header_valid(&header)) continue;
+        const uint16_t format = telemetry_sector_format(&header);
+        if (format == 0) continue;
 
-        for (size_t slot = 0; slot < TELEMETRY_RECORDS_PER_SECTOR; slot++) {
-            telemetry_record_t record;
-            memcpy(&record,
-                   sector_data + TELEMETRY_SECTOR_HEADER_SIZE +
-                       slot * TELEMETRY_RECORD_SIZE,
-                   sizeof(record));
-            if (bytes_are_erased(&record, sizeof(record))) continue;
-            if (!telemetry_record_valid(&record)) continue;
-            if (record.sample.timestamp < start_timestamp ||
-                record.sample.timestamp >= end_timestamp) {
+        const size_t slots = telemetry_slots_in(format);
+        for (size_t slot = 0; slot < slots; slot++) {
+            history_telemetry_sample_t sample;
+            if (!telemetry_decode_slot(format, sector_data, slot, &sample)) continue;
+            if (sample.timestamp < start_timestamp ||
+                sample.timestamp >= end_timestamp) {
                 continue;
             }
-            const history_telemetry_sample_t sample =
-                unpack_telemetry_record(record);
             if (*count < capacity) {
                 samples[(*count)++] = sample;
             } else {
