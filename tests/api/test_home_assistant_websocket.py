@@ -91,6 +91,29 @@ async def _initial_messages(
     return hello, message["snapshot"]
 
 
+_CLOSE_TYPES = {
+    aiohttp.WSMsgType.CLOSE,
+    aiohttp.WSMsgType.CLOSED,
+    aiohttp.WSMsgType.ERROR,
+}
+
+
+async def _receive_close(
+    websocket: aiohttp.ClientWebSocketResponse, timeout_s: float = 5
+) -> aiohttp.WSMessage:
+    """Wait for the server to close, skipping snapshots pushed meanwhile.
+
+    Live energy totals change every few seconds in demo mode, so a snapshot
+    can be in flight ahead of the close frame.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while True:
+        message = await websocket.receive(timeout=max(0.1, deadline - loop.time()))
+        if message.type != aiohttp.WSMsgType.TEXT:
+            return message
+
+
 @pytest.mark.asyncio
 async def test_websocket_requires_strict_bearer_authentication():
     async with aiohttp.ClientSession() as session:
@@ -209,11 +232,19 @@ async def test_telemetry_only_change_pushes_newer_snapshot():
                 pytest.skip("Device is not running in demo mode")
             update.raise_for_status()
 
-            pushed = await websocket.receive_json(timeout=5)
-            assert pushed["type"] == "snapshot"
-            snapshot = pushed["snapshot"]
-            assert snapshot["revision"] > initial["revision"]
-            assert snapshot["state"]["temperatures_c"]["tank"] == changed
+            # Live energy accrual also pushes snapshots, so skip any that
+            # predate the tank change.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 5
+            while True:
+                pushed = await websocket.receive_json(
+                    timeout=max(0.1, deadline - loop.time())
+                )
+                assert pushed["type"] == "snapshot"
+                snapshot = pushed["snapshot"]
+                assert snapshot["revision"] > initial["revision"]
+                if snapshot["state"]["temperatures_c"]["tank"] == changed:
+                    break
         finally:
             requests.post(
                 f"{BASE_URL}/api/test/set-demo-field",
@@ -253,12 +284,8 @@ async def test_token_rotation_disconnects_existing_websocket():
         websocket = await _connect(session, token)
         await _initial_messages(websocket)
         _test_token()
-        message = await websocket.receive(timeout=5)
-        assert message.type in {
-            aiohttp.WSMsgType.CLOSE,
-            aiohttp.WSMsgType.CLOSED,
-            aiohttp.WSMsgType.ERROR,
-        }
+        message = await _receive_close(websocket)
+        assert message.type in _CLOSE_TYPES
 
 
 @pytest.mark.asyncio
@@ -304,9 +331,5 @@ async def test_unexpected_application_frame_disconnects_client():
         websocket = await _connect(session, token)
         await _initial_messages(websocket)
         await websocket.send_str("unexpected")
-        message = await websocket.receive(timeout=5)
-        assert message.type in {
-            aiohttp.WSMsgType.CLOSE,
-            aiohttp.WSMsgType.CLOSED,
-            aiohttp.WSMsgType.ERROR,
-        }
+        message = await _receive_close(websocket)
+        assert message.type in _CLOSE_TYPES
