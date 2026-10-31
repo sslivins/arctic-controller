@@ -399,7 +399,8 @@ void initDemoState() {
     s_image.set_value(MaconField::FanLevel, 400);      // RPM
     s_image.set_value(MaconField::PrimaryEev, 200);     // EEV steps
     s_image.set_value(MaconField::CompressorFreq, 60);  // Hz
-    s_image.set_value(MaconField::RealtimePower, 1200); // W
+    // ~19 kW heat out (7 K at loop flow) / 5.5 kW in: COP ~3.5.
+    s_image.set_value(MaconField::RealtimePower, 5500); // W
 
     // Mark all five fault registers present (so faults decode as valid) with
     // no fault active, and keep the unit running. Faults are injected on
