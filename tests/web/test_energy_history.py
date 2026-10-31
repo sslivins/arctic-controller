@@ -221,7 +221,9 @@ class TestEnergyPage:
         _open_energy(page)
         rng = page.locator(".en-range-text")
         latest_text = rng.inner_text()
-        box = page.locator(f'.en-chart .tsbars-hit[data-key="{(TODAY - dt.timedelta(days=15)).isoformat()}"]').bounding_box()
+        hit = page.locator(f'.en-chart .tsbars-hit[data-key="{(TODAY - dt.timedelta(days=15)).isoformat()}"]')
+        expect(hit).to_have_count(1)  # neighbour bars render after their fetch
+        box = hit.bounding_box()
         x, y, day_px = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, box["width"]
 
         # Mid-drag the bars (and the days before the window) slide; the axes don't.
