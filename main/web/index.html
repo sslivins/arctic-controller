@@ -87,7 +87,6 @@
       --hist-cool: #3b82f6;
       --hist-dhw: #f59e0b;
       --hist-power: #7c3aed;
-      --hist-heatout: #db2777;
       --hist-cop: #2563eb;
       --hist-coil: #0891b2;
       --hist-air: #64748b;
@@ -133,7 +132,6 @@
       --hist-cool: #3b82f6;
       --hist-dhw: #fbbf24;
       --hist-power: #a78bfa;
-      --hist-heatout: #f472b6;
       --hist-cop: #60a5fa;
       --hist-coil: #22d3ee;
       --hist-air: #94a3b8;
@@ -2512,9 +2510,6 @@
         color: "var(--hist-set)", value: s => histTempValue(s.set) });
       chart.addLayer(power, { id: "power", name: "Power", tag: "", geom: "step", fill: true, fillOpacity: 0.3, width: 1.5,
         color: "var(--hist-power)", inCursor: true, drivesRange: true, value: s => s.p ?? null });
-      // Heat delivered over the power it took: the gap is the COP.
-      chart.addLayer(power, { id: "heat_out", name: "Heat out", tag: "", geom: "step", width: 1.5,
-        color: "var(--hist-heatout)", inCursor: true, drivesRange: true, value: s => s.q ?? null });
       chart.addLayer(cop, { id: "cop", name: "COP", tag: "", geom: "line", interp: "none", width: 2,
         color: "var(--hist-cop)", inCursor: true, drivesRange: true,
         value: s => s.cop == null ? null : Math.round(s.cop * 100) });

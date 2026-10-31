@@ -73,6 +73,24 @@ def test_temperature_history_page_and_navigation(device: DeviceClient):
     assert device.wait_for_screen("main", timeout=5.0)
 
 
+def test_history_chart_chips_fit_one_row_in_every_language(device: DeviceClient):
+    chips = [f"temperature_history_chart_chip_{g}" for g in ("temps", "power", "cop", "outdoor")]
+    original = device.get_preferences()["language_code"]
+    try:
+        for code in ("en", "fr", "es"):
+            device.update_preferences(language=code)
+            device.click(tag="nav_home")
+            assert device.wait_for_screen("main", timeout=5.0)
+            _open_cycles(device)
+            device.wait_for_widget(tag=chips[-1], timeout=5.0)
+            rows = {device.find_widget(tag=t).y for t in chips}
+            assert len(rows) == 1, f"{code}: chips wrap onto {len(rows)} rows"
+    finally:
+        device.update_preferences(language=original)
+        device.click(tag="nav_home")
+        assert device.wait_for_screen("main", timeout=5.0)
+
+
 def test_history_zoom_presets(device: DeviceClient):
     device.populate_temperature_history()
     _open_cycles(device)

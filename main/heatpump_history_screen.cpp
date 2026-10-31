@@ -46,9 +46,6 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 // Icy teal, as on the home screen's defrost tile.
 #define COLOR_DEFROST   lv_color_hex(0x4fb3c9)
 #define COLOR_POWER     lv_color_hex(0x60a5fa)
-// Warm against the power fill it is drawn over: the gap between the two is
-// the COP.
-#define COLOR_HEAT_OUT  lv_color_hex(0xf472b6)
 #define COLOR_COP       lv_color_hex(0xa78bfa)
 #define COLOR_COIL      lv_color_hex(0x22d3ee)
 #define COLOR_AIR       lv_color_hex(0x94a3b8)
@@ -901,17 +898,6 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
     l.color = COLOR_POWER;
     tschart_add_layer(power_pane, &l);
 
-    // Heat delivered, drawn over the electrical power it took.
-    l.id = "heat_out";
-    l.name = i18n_get(STR_HISTORY_HEAT_OUT);
-    l.field = u16_field(offsetof(history_telemetry_sample_t, average_heat_w),
-                        offsetof(history_telemetry_sample_t, flags2),
-                        HISTORY_TELEMETRY_HEAT_VALID);
-    l.geom = TSCHART_GEOM_STEP;
-    l.fill = false;
-    l.color = COLOR_HEAT_OUT;
-    tschart_add_layer(power_pane, &l);
-
     l.id = "cop";
     l.name = i18n_get(STR_HISTORY_VIEW_COP);
     l.tag_name = "";
@@ -920,6 +906,7 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
                         HISTORY_TELEMETRY_COP_VALID);
     l.geom = TSCHART_GEOM_LINE;
     l.interp = TSCHART_INTERP_NONE;
+    l.fill = false;
     l.color = COLOR_COP;
     tschart_add_layer(cop_pane, &l);
 
