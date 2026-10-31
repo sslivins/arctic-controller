@@ -129,9 +129,12 @@ class TestEnergyPage:
         expect(page.get_by_role("tab", name="Energy")).to_have_attribute("aria-selected", "true")
         # 30 days by default: one hit target per day, stacked bars, COP dots
         # (plus the 30 days before, drawn off the plot for dragging).
-        expect(page.locator(".en-chart .en-hit")).to_have_count(30)
-        assert page.locator(".en-chart .en-bar").count() >= 60
-        assert page.locator(".en-chart .en-cop").count() == 60
+        expect(page.locator(".en-chart .tsbars-hit")).to_have_count(30)
+        assert page.locator(".en-chart .tsbars-bar").count() >= 60
+        assert page.locator(".en-chart .tsbars-point").count() == 60
+        # Today is still accruing: striped, with its date in the accent.
+        assert page.locator(".en-chart .tsbars-bar.provisional").count() >= 1
+        expect(page.locator(".en-chart .tsbars-label.accent")).to_have_count(1)
         expect(page.locator(".en-stat", has_text="Electricity")).to_contain_text("kWh")
         expect(page.locator(".en-stat", has_text="COP (est.)")).to_contain_text("2.")
         assert page_errors == []
@@ -152,7 +155,7 @@ class TestEnergyPage:
         with page.expect_request(lambda r: "/api/energy/daily" in r.url) as req:
             page.locator('[data-action="energy-range"][data-range="90"]').click()
         assert _query(req.value.url)["from"] == (TODAY - dt.timedelta(days=89)).isoformat()
-        expect(page.locator(".en-chart .en-hit")).to_have_count(90)
+        expect(page.locator(".en-chart .tsbars-hit")).to_have_count(90)
         expect(page.locator('[data-action="energy-range"][data-range="90"]')).to_have_attribute(
             "aria-pressed", "true"
         )
@@ -180,7 +183,7 @@ class TestEnergyPage:
         _open_energy(page)
 
         day = (TODAY - dt.timedelta(days=3)).isoformat()
-        page.locator(f'.en-hit[data-date="{day}"]').click()
+        page.locator(f'.en-chart .tsbars-hit[data-key="{day}"]').click()
         detail = page.locator(f'.en-detail[data-energy-day="{day}"]')
         expect(detail).to_be_visible()
         expect(detail.locator(".en-table tbody tr", has_text="Heating")).to_be_visible()
@@ -189,7 +192,7 @@ class TestEnergyPage:
         expect(detail.locator(".en-facts")).to_contain_text("2 defrosts")
         # The compressor runs for the day come from the cycle history.
         detail.locator(".en-runs, .en-runs-msg").first.wait_for(timeout=15000)
-        expect(page.locator(f'.en-chart .en-selected')).to_have_count(1)
+        expect(page.locator(".en-chart .tsbars-sel")).to_be_visible()
 
         page.locator('[data-action="energy-close"]').click()
         expect(page.locator(".en-detail")).to_have_count(0)
@@ -202,12 +205,12 @@ class TestEnergyPage:
 
         days = [TODAY - dt.timedelta(days=i) for i in (3, 4)]
         ran, old = sorted(days, key=lambda d: d.toordinal() % 2, reverse=True)
-        page.locator(f'.en-hit[data-date="{ran.isoformat()}"]').click()
+        page.locator(f'.en-chart .tsbars-hit[data-key="{ran.isoformat()}"]').click()
         stat = page.locator(f'.en-detail[data-energy-day="{ran.isoformat()}"] .en-stat', has_text="Outdoor")
         expect(stat).to_contain_text("Outdoor while running")
         expect(stat).to_contain_text("Day avg")
 
-        page.locator(f'.en-hit[data-date="{old.isoformat()}"]').click()
+        page.locator(f'.en-chart .tsbars-hit[data-key="{old.isoformat()}"]').click()
         stat = page.locator(f'.en-detail[data-energy-day="{old.isoformat()}"] .en-stat', has_text="Outdoor")
         expect(stat).not_to_contain_text("while running")
         expect(stat).not_to_contain_text("Day avg")
@@ -218,15 +221,17 @@ class TestEnergyPage:
         _open_energy(page)
         rng = page.locator(".en-range-text")
         latest_text = rng.inner_text()
-        box = page.locator(f'.en-hit[data-date="{(TODAY - dt.timedelta(days=15)).isoformat()}"]').bounding_box()
+        hit = page.locator(f'.en-chart .tsbars-hit[data-key="{(TODAY - dt.timedelta(days=15)).isoformat()}"]')
+        expect(hit).to_have_count(1)  # neighbour bars render after their fetch
+        box = hit.bounding_box()
         x, y, day_px = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, box["width"]
 
         # Mid-drag the bars (and the days before the window) slide; the axes don't.
-        ticks = page.locator(".en-chart > text").all_inner_texts()
+        ticks = page.locator(".en-chart .tsbars-axis text").all_inner_texts()
         _drag(page, x, y, day_px * 3.4, release=False)
-        expect(page.locator(".en-chart")).to_have_class(re.compile("dragging"))
-        assert "translate" in page.locator(".en-chart .en-pan").first.get_attribute("transform")
-        assert page.locator(".en-chart > text").all_inner_texts() == ticks
+        expect(page.locator(".en-chart")).to_have_class(re.compile("panning"))
+        assert "translate" in page.locator(".en-chart .tsbars-pan").first.get_attribute("transform")
+        assert page.locator(".en-chart .tsbars-axis text").all_inner_texts() == ticks
         # Release snaps to whole days (3.4 -> 3) without opening a day.
         with page.expect_request(lambda r: "/api/energy/daily" in r.url and "to=" in r.url) as req:
             page.mouse.up()
@@ -249,11 +254,13 @@ class TestEnergyPage:
     def test_drag_past_today_springs_back(self, mocked_energy: Page, page_errors):
         page = mocked_energy
         _open_energy(page)
-        box = page.locator(f'.en-hit[data-date="{(TODAY - dt.timedelta(days=15)).isoformat()}"]').bounding_box()
+        hit = page.locator(f'.en-chart .tsbars-hit[data-key="{(TODAY - dt.timedelta(days=15)).isoformat()}"]')
+        expect(hit).to_have_count(1)  # neighbour bars render after their fetch
+        box = hit.bounding_box()
         _drag(page, box["x"], box["y"] + box["height"] / 2, -box["width"] * 6)
         chart = page.locator(".en-chart")
-        expect(chart).not_to_have_class(re.compile("dragging"))
-        expect(chart.locator(".en-pan[transform]")).to_have_count(0)
+        expect(chart).not_to_have_class(re.compile("panning"))
+        expect(chart.locator(".tsbars-pan[transform]")).to_have_count(0)
         expect(page.locator('[data-action="energy-next"]')).to_be_disabled()
         expect(page.locator(".en-detail")).to_have_count(0)
         assert page_errors == []
@@ -294,29 +301,33 @@ class TestCyclesPowerPanel:
         self, dashboard_page: Page, base_url: str, page_errors
     ):
         page = dashboard_page
-        page.evaluate("localStorage.removeItem('arcticHistPower')")
+        page.evaluate(
+            "localStorage.removeItem('arcticHistPower'); localStorage.removeItem('arcticHistChart')"
+        )
         _seed_history(base_url)
         _open_cycles(page)
 
-        toggle = page.locator('[data-action="history-power"]')
-        expect(toggle).to_have_attribute("aria-pressed", "true")
-        assert page.locator(".hist-chart .hist-power-area").count() >= 1
+        chip = page.locator('.hist-chart [data-tschart-chip="power"]')
+        area = page.locator('.hist-chart [data-layer="power"] .tschart-fill')
+        expect(chip).to_have_attribute("aria-pressed", "true")
+        expect(area).to_have_count(1)
         expect(page.get_by_text("kWh of electricity used in this window")).to_be_visible()
 
         try:
-            toggle.click()
-            expect(toggle).to_have_attribute("aria-pressed", "false")
-            expect(page.locator(".hist-chart .hist-power-area")).to_have_count(0)
+            chip.click()
+            expect(chip).to_have_attribute("aria-pressed", "false")
+            expect(area).to_have_count(0)
+            expect(page.get_by_text("kWh of electricity used in this window")).to_have_count(0)
             assert page.evaluate("localStorage.getItem('arcticHistPower')") == "0"
 
             page.reload()
             page.wait_for_selector(".hist-chart", timeout=15000)
-            expect(page.locator('[data-action="history-power"]')).to_have_attribute(
-                "aria-pressed", "false"
-            )
-            expect(page.locator(".hist-chart .hist-power-area")).to_have_count(0)
+            expect(chip).to_have_attribute("aria-pressed", "false")
+            expect(area).to_have_count(0)
         finally:
-            page.evaluate("localStorage.removeItem('arcticHistPower')")
+            page.evaluate(
+                "localStorage.removeItem('arcticHistPower'); localStorage.removeItem('arcticHistChart')"
+            )
         assert page_errors == []
 
 class TestRunSummaries:

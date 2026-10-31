@@ -63,14 +63,19 @@ def test_device_history_is_zoomable_custom_draw_page():
     assert "HISTORY_WINDOW_DEFAULT_SECONDS = HISTORY_WINDOW_PRESETS[0]" in window
     assert "state.window_seconds" in source
     assert '"history_zoom_1h"' in source
-    assert "LV_EVENT_DRAW_MAIN_END" in source
-    assert "lv_draw_rect" in source
-    assert "lv_draw_line" in source
-    # The chart is custom-drawn; the only canvas is the off-screen cache of
-    # that drawing that makes cursor drags cheap.
-    assert source.count("lv_canvas_create") == 1
-    assert "static_cache_build" in source
     assert "NAV_BAR_H + 18" in source
+    # The chart is the reusable tschart widget; the screen draws nothing itself.
+    assert "tschart_create(" in source
+    assert "lv_canvas_create" not in source
+    tschart = ROOT / "components" / "tschart" / "src"
+    widget = (tschart / "tschart.cpp").read_text(encoding="utf-8")
+    draw = (tschart / "tschart_draw.cpp").read_text(encoding="utf-8")
+    assert "LV_EVENT_DRAW_MAIN" in widget
+    assert "lv_draw_rect" in draw and "lv_draw_line" in draw
+    # The only canvas is the off-screen cache of the static drawing that
+    # makes cursor drags cheap.
+    assert draw.count("lv_canvas_create") == 1
+    assert "void cache_build" in draw
 
     status = (MAIN / "heatpump_temps_screen.cpp").read_text(encoding="utf-8")
     # History is reached from the nav bar; the Status page no longer carries
@@ -107,7 +112,9 @@ def test_web_dashboard_has_temperature_history_view():
     assert "history: historyPage" in web
     assert "function historyPage" in web
     assert "function loadHistory" in web
-    assert "function historyChartSvg" in web
+    # Drawn by the shared tschart widget, inlined into the page at build time.
+    assert "/*@inline ../../components/tschart/web/tschart.js@*/" in web
+    assert "new TsChart(" in web
     # Fetches from the streaming endpoint above.
     assert "/api/heatpump/temperature-history" in web
     # Same zoom presets / round-time axis as the device chart.
@@ -122,7 +129,10 @@ def test_history_api_and_web_mark_faults_from_the_event_log():
     assert '\\"faults\\"' in api
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
     assert "data.faults" in web
-    assert "hist-fault-label" in web
+    # Cycle chart: hatched fault spans plus a coded note above the plot.
+    assert "d.faults" in web
+    assert 'style: "hatch"' in web
+    assert "chart.setNotes(" in web
 
 
 def test_history_api_and_web_mark_defrosts_from_the_event_log():
@@ -130,5 +140,5 @@ def test_history_api_and_web_mark_defrosts_from_the_event_log():
     assert '\\"defrosts\\"' in api
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
     assert "data.defrosts" in web
-    assert "hist-defrost" in web
-    assert "hc-defrost" in web
+    assert "chart.setSpans(1, (d.defrosts" in web
+    assert "chart.setSpans(1, (data.defrosts" in web  # home chart

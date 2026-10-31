@@ -98,6 +98,7 @@
       --band-a1: 16%;
       --band-a2: 16%;
       --power-fill-a: 0.25;
+      --hist-band-strength: 22%; --hist-defrost-strength: 45%;
     }
     html[data-theme="dark"] {
       --cp-bg: #1a1a2e;
@@ -136,6 +137,7 @@
       --band-a1: 10%;
       --band-a2: 6%;
       --power-fill-a: 0.55;
+      --hist-band-strength: 50%; --hist-defrost-strength: 60%;
     }
     * { box-sizing: border-box; }
 
@@ -327,36 +329,31 @@
     i.band-swatch { background: linear-gradient(to top, color-mix(in srgb, var(--band) 70%, transparent),
       color-mix(in srgb, var(--band) 20%, transparent)) !important;
       border-bottom: 3px solid var(--band); border-radius: 2px !important; box-sizing: border-box; }
-    .hist-chart-wrap { width: 100%; position: relative; overflow-x: clip; }
-    .hist-chart { width: 100%; height: auto; display: block; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-    @media (pointer: fine) { .hist-chart { cursor: grab; } .hist-chart.dragging { cursor: grabbing; user-select: none; } }
+    /* Cycle chart (tschart widget), themed from the page palette. */
+    .hist-chart { height: 440px; -webkit-touch-callout: none;
+      --ts-text: var(--cp-text); --ts-dim: var(--cp-text-muted); --ts-grid: var(--cp-border);
+      --ts-panel: var(--cp-surface); --ts-card: var(--cp-panel-strong); --ts-danger: var(--cp-danger); }
+    @media (max-width: 600px) { .hist-chart { height: 360px; } }
+    @media (pointer: fine) { .hist-chart .tschart-body { cursor: grab; } }
     .hist-hint { font-size: 13px; text-align: center; margin: 8px 0 0; }
-    .hist-empty { position: absolute; left: 0; right: 0; top: 45%; margin: 0; text-align: center; pointer-events: none; }
     .hist-tip { display: none; position: absolute; top: 12px; pointer-events: none; background: var(--cp-surface, #1e293b); border: 1px solid var(--cp-border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.6; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,.3); }
     .hist-tip i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: middle; }
     .hist-tip strong { margin-left: 6px; }
     .hist-tip-fault { color: var(--cp-danger); }
-    .hist-fault-label { fill: var(--cp-danger); font-size: 13px; font-weight: 600; }
     .hist-tip-time { color: var(--cp-text-muted); font-size: 12px; }
     .hist-tip-run { color: var(--cp-text-muted); font-size: 12px; }
     .hist-runs-title { margin: 18px 0 8px; font-size: 16px; }
     .hist-axis { fill: var(--cp-text-muted); font-size: 12px; font-family: inherit; }
-    .hist-edge { fill: var(--cp-text-muted); font-size: 11px; font-weight: 600; font-family: inherit; paint-order: stroke; stroke: var(--cp-surface); stroke-width: 3px; }
-    .hist-spin { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; box-sizing: border-box; border: 3px solid var(--cp-border-strong); border-top-color: var(--cp-text); border-radius: 50%; animation: spin .8s linear infinite; pointer-events: none; }
     .hist-nav { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; }
     .hist-nav-group { display: flex; gap: 8px; }
     .hist-tip i.band, .hist-legend i.dot { width: 10px; height: 10px; border-radius: 2px; }
     .hist-legend i.dot { border-radius: 50%; }
-    .hist-toggle { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--cp-border-strong); background: transparent; color: var(--cp-text-muted); border-radius: 999px; padding: 2px 10px 2px 6px; font: inherit; font-size: 13px; cursor: pointer; }
-    .hist-toggle .box { width: 14px; height: 14px; border-radius: 4px; border: 2px solid var(--hist-power); display: inline-grid; place-items: center; font-size: 10px; line-height: 1; color: var(--cp-surface); }
-    .hist-toggle.on { color: var(--cp-text); }
-    .hist-toggle.on .box { background: var(--hist-power); }
     .hist-energy { font-size: 13px; text-align: center; margin: 10px 0 0; }
-    .en-chart-wrap { width: 100%; position: relative; overflow-x: clip; margin-top: 6px; }
-    .en-chart { width: 100%; height: auto; display: block; touch-action: pan-y; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-    .en-chart .en-hit { cursor: pointer; }
-    @media (pointer: fine) { .en-chart { cursor: grab; } .en-chart.dragging, .en-chart.dragging .en-hit { cursor: grabbing; } }
-.en-chart:not(.dragging) .en-label-out { display: none; }
+    .en-chart { height: 370px; margin-top: 6px; -webkit-touch-callout: none;
+      --ts-text: var(--cp-text); --ts-dim: var(--cp-text-muted); --ts-grid: var(--cp-border);
+      --ts-panel: var(--cp-surface); --ts-card: var(--cp-panel-strong); --ts-accent: var(--cp-accent); }
+    @media (max-width: 600px) { .en-chart { height: 312px; } }
+    @media (pointer: fine) { .en-chart .tschart-body { cursor: grab; } .en-chart.panning .tschart-body { cursor: grabbing; } }
     .en-ranges { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--cp-border); border-radius: 10px; background: var(--cp-bg-elevated); }
     .en-ranges button { border: 0; background: transparent; color: var(--cp-text-muted); padding: 5px 12px; border-radius: 7px; font-weight: 600; cursor: pointer; }
     .en-ranges button:hover { color: var(--cp-text); }
@@ -770,39 +767,12 @@
     .chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .chart-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
     .chart-legend i.line { height: 3px; width: 14px; border-radius: 2px; }
-    .hc { position: relative; flex: 1; height: 260px; min-height: 260px; padding: 28px 0 26px; touch-action: pan-y; user-select: none; }
-    .hc-area { position: absolute; top: 0; bottom: 0; left: 46px; right: 0; }
-    .hc-flabels { position: absolute; top: 0; left: 46px; right: 0; height: 28px; }
-    .hc-xaxis { position: absolute; bottom: 0; left: 46px; right: 0; height: 26px; }
-    .hc-plot { position: absolute; inset: 28px 0 26px; border: 1px solid var(--cp-border); border-radius: 10px;
-      background: var(--cp-bg-elevated); overflow: hidden; }
-    .hc-band, .hc-fault, .hc-defrost, .hc-vgrid, .hc-hgrid, .hc-sp, .hc-cursor { position: absolute; }
-    .hc-band { top: 0; bottom: 0; border-bottom: 3px solid var(--band); background: linear-gradient(to top,
-      color-mix(in srgb, var(--band) var(--band-a0), transparent),
-      color-mix(in srgb, var(--band) var(--band-a1), transparent) 70%,
-      color-mix(in srgb, var(--band) var(--band-a2), transparent)); }
-    /* Defrost: an icy block over the run it interrupts, with a solid cap. */
-    .hc-defrost { top: 0; bottom: 0; min-width: 3px;
-      background: color-mix(in srgb, var(--home-defrost) 40%, transparent); }
-    .hc-fault { top: 0; bottom: 0; background:
-      repeating-linear-gradient(135deg, color-mix(in srgb, var(--cp-danger) 45%, transparent) 0 2px, transparent 2px 9px),
-      color-mix(in srgb, var(--cp-danger) 10%, transparent); }
-    .hc-vgrid { top: 0; bottom: 0; width: 0; border-left: 1px solid var(--cp-border); }
-    .hc-hgrid { left: 46px; right: 0; height: 0; border-top: 1px solid var(--cp-border); }
-    .hc-sp { left: 0; right: 0; height: 0; border-top: 2px dashed color-mix(in srgb, var(--cp-text-muted) 75%, transparent); }
-    .hc-sp-label { position: absolute; right: 6px; transform: translateY(-100%); margin-top: -3px; padding: 0 5px;
-      border-radius: 4px; background: var(--cp-bg-elevated); color: var(--cp-text-muted); font-size: 13px; font-weight: 600; z-index: 2; }
-    .hc-y { position: absolute; left: 8px; color: var(--cp-text-muted); font-size: 12px; font-weight: 600; }
-    .hc svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; z-index: 1; }
-    .hc-tank { fill: none; stroke: var(--cp-text); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-    .hc-flabel { position: absolute; top: 4px; color: var(--cp-danger); font-size: 13px; font-weight: 700; white-space: nowrap; }
-    .hc-x { position: absolute; bottom: 2px; color: var(--cp-text-muted); font-size: 13px; transform: translateX(-50%); white-space: nowrap; }
-    .hc-x.first { transform: none; } .hc-x.last { transform: translateX(-100%); }
-    .hc-cursor { z-index: 2; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--cp-text-muted); display: none; }
-    .hc-dot { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%;
-      background: var(--cp-text); border: 2px solid var(--cp-surface); display: none; z-index: 2; }
-    .hc .hist-tip { top: 34px; z-index: 3; }
+    .hc, .home-chart-host { position: relative; flex: 1; min-height: 260px; }
     .hc-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--cp-text-muted); font-size: 14px; }
+    /* 4-hour chart (tschart widget), themed from the page palette. */
+    .home-chart-host .home-tschart { position: absolute; inset: 0; -webkit-touch-callout: none;
+      --ts-text: var(--cp-text); --ts-dim: var(--cp-text-muted); --ts-grid: var(--cp-border);
+      --ts-panel: var(--cp-bg-elevated); --ts-card: var(--cp-panel-strong); --ts-danger: var(--cp-danger); }
     .fault-caption { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 12px; padding: 10px 14px;
       border-radius: 10px; border: 1px solid color-mix(in srgb, var(--cp-danger) 50%, var(--cp-border));
       background: color-mix(in srgb, var(--cp-danger) 7%, var(--cp-surface)); color: var(--cp-text); text-align: left; }
@@ -899,8 +869,7 @@
       .tile-value { font-size: 22px; }
       .tile .chev { display: none; }
       .strip-groups { gap: 6px 18px; }
-      .hc { height: 220px; }
-      .hc-x.mid-q { display: none; }
+      .hc, .home-chart-host { min-height: 220px; }
       .fault-caption { flex-wrap: wrap; }
       .fault-caption .fc-text { flex-basis: 100%; }
     }
@@ -909,6 +878,7 @@
 <body>
   <div id="app"></div>
   <div id="toasts" class="toast-stack"></div>
+  <script>/*@inline ../../components/tschart/web/tschart.js@*/</script>
   <script>
     const $ = (selector, root = document) => root.querySelector(selector);
     const esc = value => String(value ?? "")
@@ -989,7 +959,7 @@
         ? Number(localStorage.getItem("arcticHistWindow")) : 28800,
       energy: { range: 30, to: null, today: null, since: null, data: null, loading: false, error: "", selected: null, runs: {},
         cache: new Map(), known: new Set() },
-      homeHistory: { loading: false, error: "", data: null, loadedAt: 0 }, homeTrack: {}, homeHover: null,
+      homeHistory: { loading: false, error: "", data: null, loadedAt: 0 }, homeTrack: {},
       currentBootId: 0, eventOffset: 0, eventFilters: { search: "", category: "all", time: "all" },
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
       weather: {}, location: {},
@@ -1343,68 +1313,23 @@
     }
     function homeChart() {
       const hh = state.homeHistory, data = hh.data;
+      const sw = band => `background:color-mix(in srgb, ${band} var(--hist-band-strength), var(--cp-surface));border:1px solid ${band}`;
       const head = `<div class="card-head">
           <h2>Last 4 hours</h2>
           <button class="btn" data-route="history">Cycle history ›</button></div>
           <div class="chart-legend">
               <span><i class="line" style="background:var(--cp-text)"></i>Tank</span>
-              <span><i class="band-swatch" style="--band:var(--band-heat)"></i>Heating</span>
-              <span><i class="band-swatch" style="--band:var(--band-cool)"></i>Cooling</span>
-              <span><i class="band-swatch" style="--band:var(--band-dhw)"></i>Hot water</span>
-              <span><i style="background:var(--home-defrost)"></i>Defrost</span>
+              <span><i style="${sw("var(--band-heat)")}"></i>Heating</span>
+              <span><i style="${sw("var(--band-cool)")}"></i>Cooling</span>
+              <span><i style="${sw("var(--band-dhw)")}"></i>Hot water</span>
+              <span><i style="background:color-mix(in srgb, var(--home-defrost) var(--hist-defrost-strength), var(--cp-surface));border:1px solid var(--home-defrost)"></i>Defrost</span>
               <span><i style="background:repeating-linear-gradient(135deg, var(--cp-danger) 0 2px, transparent 2px 5px)"></i>Fault</span>
             </div>`;
       if (!data) {
         const body = hh.error ? `<div class="hc-empty">${esc(hh.error)}</div>` : `<div class="hc-empty"><div class="spinner"></div></div>`;
         return `<section class="card home-chart">${head}<div class="hc">${body}</div></section>`;
       }
-      const start = data.start, end = data.end, span = Math.max(1, end - start);
-      const pct = t => (Math.min(Math.max(t, start), end) - start) / span * 100;
-      const ax = homeAxis();
-      const yPct = v => (ax.hi - Math.min(Math.max(v, ax.lo), ax.hi)) / (ax.hi - ax.lo) * 100;
-      const tank = data.tank || [], bs = data.bucket_seconds || span / Math.max(1, tank.length);
-
-      const bands = (data.runs || []).map(r => {
-        const l = pct(r.start), w = pct(r.end ?? end) - l;
-        const band = HOME_RUN_BAND[r.mode] || HOME_RUN_BAND.heating;
-        return w > 0 ? `<div class="hc-band" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0.15).toFixed(3)}%;--band:${band}"></div>` : "";
-      }).join("");
-      const defrosts = (data.defrosts || []).map(df => {
-        const l = pct(df.start), w = pct(df.end ?? end) - l;
-        return `<div class="hc-defrost" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0).toFixed(3)}%"></div>`;
-      }).join("");
       const faults = (data.faults || []).slice().sort((a, b) => a.start - b.start);
-      const zones = faults.map(f => {
-        const l = pct(f.start), w = pct(f.end ?? end) - l;
-        return `<div class="hc-fault" style="left:${l.toFixed(3)}%;width:${Math.max(w, 0.3).toFixed(3)}%"></div>`;
-      }).join("");
-      const flabels = faults.map(f => `<span class="hc-flabel" style="left:${pct(f.start).toFixed(3)}%">⚠ ${esc(f.fault_code || "?")}</span>`).join("");
-
-      let d = "", pen = false, points = 0;
-      tank.forEach((v, i) => {
-        if (v == null) { pen = false; return; }
-        const x = ((start + (i + 0.5) * bs - start) / span * 1000).toFixed(1);
-        const y = (yPct(histDeciToDisplay(v) / 10) * 10).toFixed(1);
-        d += pen ? `L${x} ${y}` : `M${x} ${y}l0.01 0`;
-        pen = true; points++;
-      });
-
-      const ylabels = [0, 1, 2, 3, 4].map(g => {
-        const top = g / 4 * 100;
-        const shift = g === 0 ? "translateY(2px)" : g === 4 ? "translateY(calc(-100% - 2px))" : "translateY(-50%)";
-        return `<span class="hc-y" style="top:${top}%;transform:${shift}">${ax.hi - g * ax.step}°</span>`;
-      }).join("");
-      const hgrid = [1, 2, 3].map(g => `<div class="hc-hgrid" style="top:${g * 25}%"></div>`).join("");
-      const vgrid = [1, 2, 3].map(g => `<div class="hc-vgrid" style="left:${g * 25}%"></div>`).join("");
-      const sp = homeSetpoint();
-      const spLine = sp == null ? "" : (() => {
-        const top = yPct(tempNumber(sp));
-        return `<div class="hc-sp" style="top:${top.toFixed(2)}%"><span class="hc-sp-label">${temp(sp)}</span></div>`;
-      })();
-      const xl = [[0, "4 h", "first"], [25, "3 h", "mid-q"], [50, "2 h", ""], [75, "1 h", "mid-q"], [100, "now", "last"]]
-        .map(([l, t, c]) => `<span class="hc-x ${c}" style="left:${l}%">${t}</span>`).join("");
-      const empty = points ? "" : `<div class="hc-empty">No tank readings in the last 4 hours</div>`;
-
       let caption = "";
       const latest = faults[faults.length - 1];
       if (latest) {
@@ -1416,79 +1341,94 @@
           ${more > 0 ? `<span class="fc-more">+${more} more</span>` : ""}<span class="chev" aria-hidden="true">›</span></button>`;
       }
       return `<section class="card home-chart">${head}
-        <div class="hc" data-home-chart>
-          <div class="hc-flabels">${flabels}</div>
-          <div class="hc-plot">${ylabels}${hgrid}
-            <div class="hc-area">${bands}${defrosts}${zones}${vgrid}${spLine}
-              <svg viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"><path class="hc-tank" d="${d}"/></svg>
-              <div class="hc-cursor"></div><div class="hc-dot"></div>${empty}
-            </div>
-          </div>
-          <div class="hc-xaxis">${xl}</div>
-          <div class="hist-tip"></div>
-        </div>${caption}</section>`;
+        <div class="home-chart-host" data-home-chart></div>${caption}</section>`;
     }
-    // Hide fault labels that would collide with the one before, like the device.
-    function homeChartLayout() {
-      const box = document.querySelector(".hc-flabels")?.getBoundingClientRect();
-      let lastRight = -Infinity;
-      document.querySelectorAll(".hc-flabel").forEach(el => {
-        el.style.transform = "";
-        let r = el.getBoundingClientRect();
-        if (box && r.right > box.right) { el.style.transform = "translateX(-100%)"; r = el.getBoundingClientRect(); }
-        el.style.visibility = r.left < lastRight + 6 ? "hidden" : "";
-        if (el.style.visibility !== "hidden") lastRight = r.right;
+    // The 4-hour chart: a tschart with a fixed window (no panning; hover or
+    // drag for the card), fixed per-mode scale and the setpoint line.
+    let homeTs = null;
+    function homeCreate() {
+      const el = document.createElement("div");
+      el.className = "home-tschart";
+      const chart = new TsChart(el, {
+        id: "home_chart",
+        header: { chips: false, key: false, tagsButton: false },
+        input: { pan: false },
+        axis: "outside",
+        relativeTime: "now",
       });
-      if (state.homeHover != null) homeHoverAt(state.homeHover);
+      chart.setEndTags(false);
+      chart.addSource("tank");
+      const f = state.preferences.temp_unit === "fahrenheit";
+      const pane = chart.addPane({ id: "tank", color: "var(--cp-text-muted)", maxTicks: 5,
+        fmt: (v, ctx) => ctx === "axis" ? `${Math.round(v / 10)}°` : `${(v / 10).toFixed(1)} °${f ? "F" : "C"}` });
+      chart.addLayer(pane, { id: "tank", name: "Tank", tag: null, geom: "line", width: 3, color: "var(--cp-text)",
+        inCursor: true, value: s => s.v });
+      const band = { fillStrength: "var(--hist-band-strength)" };
+      chart.addKey("heating", "Heating", "var(--band-heat)", band);
+      chart.addKey("cooling", "Cooling", "var(--band-cool)", band);
+      chart.addKey("hot_water", "Hot water", "var(--band-dhw)", band);
+      chart.addKey("defrost", "Defrost", "var(--home-defrost)", { fillStrength: "var(--hist-defrost-strength)" });
+      chart.addKey("fault", "Fault", "var(--cp-danger)", "hatch");
+      chart.setCard(homeCard);
+      homeTs = { el, chart, sig: "", data: null, unit: state.preferences.temp_unit };
     }
-    function homeHoverAt(frac) {
-      const chart = document.querySelector("[data-home-chart]"), data = state.homeHistory.data;
-      if (!chart || !data) return;
-      const area = chart.querySelector(".hc-area"), tip = chart.querySelector(".hist-tip");
-      const cursor = chart.querySelector(".hc-cursor"), dot = chart.querySelector(".hc-dot");
-      if (frac == null) { [tip, cursor, dot].forEach(el => { el.style.display = "none"; }); return; }
-      const tank = data.tank || [], n = tank.length;
-      if (!n) return;
-      const span = data.end - data.start, bs = data.bucket_seconds || span / n;
-      const i = Math.min(n - 1, Math.max(0, Math.floor(frac * n)));
-      const t = Math.round(data.start + (i + 0.5) * bs);
-      const xPct = (i + 0.5) / n * 100;
-      cursor.style.display = "block"; cursor.style.left = `${xPct}%`;
-      const v = tank[i];
-      if (v != null) {
-        const ax = homeAxis(), dv = histDeciToDisplay(v) / 10;
-        dot.style.display = "block"; dot.style.left = `${xPct}%`;
-        dot.style.top = `${(ax.hi - Math.min(Math.max(dv, ax.lo), ax.hi)) / (ax.hi - ax.lo) * 100}%`;
-      } else dot.style.display = "none";
-      const b0 = data.start + i * bs, b1 = b0 + bs;
+    // Card: time, tank, what the unit was doing in that bucket, active faults.
+    function homeCard(info, card) {
+      const data = homeTs?.data, s = info.sample;
+      if (!data || !s) return;
+      const b0 = s.b0, b1 = s.b0 + s.bs;
+      card.add("title", fmtHistClock(Math.round(s.t), true));
+      card.addLayers();
       const run = (data.runs || []).find(r => r.start < b1 && (r.end ?? data.end) > b0);
       // A defrost isn't part of a run span, so check it first or it reads "Idle".
       const defrost = (data.defrosts || []).some(df => df.start < b1 && (df.end ?? data.end) > b0);
       const [runText, runColor] = defrost ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
         : run ? HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating : ["Idle", ""];
-      const faults = (data.faults || []).filter(f => f.start < b1 && (f.end ?? data.end) > b0);
-      tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(t, true))}</div>
-        <div>Tank <strong>${v == null ? "--" : temp(v / 10)}</strong></div>
-        <div>${runColor ? `<i style="background:${runColor}"></i>` : ""}${esc(runText)}</div>` +
-        faults.map(f => `<div class="hist-tip-fault">⚠ ${esc(f.fault_code || "?")} ${esc(f.fault_label || "")}</div>`).join("");
-      tip.style.display = "block";
-      const cw = chart.clientWidth, px = area.offsetLeft + area.clientWidth * xPct / 100;
-      const left = px + 14 + tip.offsetWidth > cw ? px - 14 - tip.offsetWidth : px + 14;
-      tip.style.left = `${Math.max(0, left)}px`;
+      card.add("block", runText, "", runColor || "var(--cp-text-muted)");
+      (data.faults || []).filter(x => x.start < b1 && (x.end ?? data.end) > b0).slice(0, 2)
+        .forEach(x => card.add("warning", `⚠ ${x.fault_code || "?"} ${x.fault_label || ""}`.trim()));
     }
-    function homeHover(event) {
-      if (state.route !== "home") return;
-      const chart = event.target.closest?.("[data-home-chart]");
-      const area = chart?.querySelector(".hc-area");
-      if (!chart || !area || event.type === "pointerleave") {
-        if (state.homeHover != null) { state.homeHover = null; homeHoverAt(null); }
-        return;
+    function homeMount() {
+      const host = $(".home-chart-host");
+      if (!host) return;
+      if (!homeTs || homeTs.unit !== state.preferences.temp_unit) {
+        homeTs?.chart.destroy();
+        homeCreate();
       }
-      const r = area.getBoundingClientRect();
-      const frac = (event.clientX - r.left) / r.width;
-      if (frac < 0 || frac > 1) { state.homeHover = null; homeHoverAt(null); return; }
-      state.homeHover = frac;
-      homeHoverAt(frac);
+      // Fixed scale for the mode (heating/hot water or cooling).
+      const ax = homeAxis();
+      homeTs.chart.setPaneRange("tank", ax.lo * 10, ax.hi * 10, ax.step * 10);
+      const moved = homeTs.el.parentNode !== host;
+      if (moved) host.appendChild(homeTs.el);
+      if (homeSync() || moved) homeTs.chart.flush();
+    }
+    // Feeds new history (or a new setpoint) to the chart; true if it did.
+    function homeSync() {
+      const data = state.homeHistory.data, hc = homeTs;
+      if (!hc || !data) return false;
+      const sp = homeSetpoint();
+      const sig = `${data.start}|${data.end}|${state.homeHistory.loadedAt}|${sp}`;
+      if (sig === hc.sig) return false;
+      hc.sig = sig;
+      hc.data = data;
+      const chart = hc.chart, start = data.start, end = data.end, span = Math.max(1, end - start);
+      const tank = data.tank || [], bs = data.bucket_seconds || span / Math.max(1, tank.length);
+      const samples = tank.map((v, i) => ({ t: start + (i + 0.5) * bs, b0: start + i * bs, bs,
+        v: v == null ? null : histDeciToDisplay(v) }));
+      chart.setDataset({ requestId: 0, start, end,
+        sources: { tank: { samples, time: "t", gap: bs * 2.5 } },
+        applied: () => {
+          chart.setSpans(0, (data.runs || []).map(r => ({ start: r.start, end: r.end ?? null, minWidth: 2,
+            key: HOME_RUN_BAND[r.mode] ? r.mode : "heating" })));
+          chart.setSpans(1, (data.defrosts || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "defrost" })));
+          chart.setSpans(2, (data.faults || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "fault" })));
+          chart.setNotes((data.faults || []).map(x => ({ time: x.start, text: x.fault_code || "?", color: "var(--cp-danger)" })), "⚠ ");
+          chart.setRefLines(sp == null ? [] : [{ pane: "tank", value: tempNumber(sp) * 10,
+            color: "color-mix(in srgb, var(--cp-text-muted) 75%, transparent)", label: temp(sp) }]);
+          const any = samples.some(x => x.v != null);
+          chart.setStatus(any ? "ok" : "empty", any ? "" : "No tank readings in the last 4 hours");
+        } });
+      return true;
     }
     function homePage() {
       const hp = state.hp, r = hp.readings || {}, t = hp.temperatures || {}, trends = hp.trends || {};
@@ -2488,517 +2428,226 @@
     function histDeciToDisplay(deciC) {
       return state.preferences.temp_unit === "fahrenheit" ? (deciC * 9 / 5 + 320) : deciC;
     }
-    function histDisplayToDeci(v) {
-      return state.preferences.temp_unit === "fahrenheit" ? (v - 320) * 5 / 9 : v;
-    }
-    // Gridlines on round degrees of the display unit (same rule as the
-    // device, chart_axis.cpp): the smallest step of 1, 2, 5, 10, 20, 50 or
-    // 100 degrees that covers the range in at most six intervals.
-    function histNiceAxis(lo, hi) {
-      let axis = null;
-      for (const step of [10, 20, 50, 100, 200, 500, 1000]) {
-        axis = { lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step };
-        if (axis.hi === axis.lo) axis.hi += step;
-        if ((axis.hi - axis.lo) / step <= 6) break;
-      }
-      return axis;
-    }
-    // spin: where across the plot (0 = left edge, 1 = right) the new data
-    // lands; a spinner shows there if the load isn't quick. A call while a
-    // load is in flight joins it, and if the window or end changed meanwhile
-    // the stale result is dropped and the newest one fetched instead.
-    function loadHistory(spin = null) {
+    // Loads state.histWindow ending at tempHistory.end (null = live). A call
+    // while a load is in flight joins it, and if the window, end or chart
+    // request changed meanwhile the stale result is dropped and the newest one
+    // fetched instead. `dataReq` is the chart request the data answers.
+    function loadHistory() {
       const th = state.tempHistory;
-      if (spin !== null) th.spin = spin;
       return th.inflight ||= (async () => {
         th.loading = true; th.error = "";
         try {
           for (;;) {
-            const win = state.histWindow, end = th.end, frac = th.spin ?? null;
-            th.spin = null;
-            const spinTimer = frac === null ? 0 : setTimeout(() => histShowSpin(frac), 200);
+            const win = state.histWindow, end = th.end, req = th.req || 0;
             let d = null, error = "";
             try {
               d = await api(`/api/heatpump/temperature-history?window=${win}${end ? `&end=${end}` : ""}`);
               d.run_summaries = await fetchRunSummaries(d.start, d.end + 1).catch(() => []);
             } catch (e) {
               error = e.message || "Failed to load temperature history";
-            } finally {
-              clearTimeout(spinTimer);
             }
-            if (state.histWindow !== win || th.end !== end) continue;
-            if (d) { th.data = d; th.loadedAt = Date.now(); } else th.error = error;
+            if (state.histWindow !== win || th.end !== end || (th.req || 0) !== req) continue;
+            if (d) { th.data = d; th.dataReq = req; th.loadedAt = Date.now(); } else th.error = error;
             break;
           }
         } finally {
           th.loading = false; th.inflight = null;
-          document.querySelector(".hist-spin")?.remove();
         }
       })();
     }
-    function histShowSpin(frac) {
-      const wrap = $(".hist-chart-wrap"), svg = wrap?.querySelector(".hist-chart"), g = histGeom;
-      if (!svg || !g || !state.tempHistory.loading) return;
-      const wr = wrap.getBoundingClientRect(), r = svg.getBoundingClientRect(), k = r.width / g.W;
-      let el = wrap.querySelector(".hist-spin");
-      if (!el) { el = document.createElement("div"); el.className = "hist-spin"; wrap.appendChild(el); }
-      const x = g.plotL + Math.min(1, Math.max(0, frac)) * (g.plotR - g.plotL);
-      el.style.left = `${r.left - wr.left + x * k}px`;
-      el.style.top = `${r.top - wr.top + (g.plotT + g.bottom) / 2 * k}px`;
+    // Past either end of a pan the energy chart follows the finger at a third
+    // of the speed.
+    // The cycle chart is a tschart widget (components/tschart). It outlives
+    // render(): each render re-attaches the same element, so pan state,
+    // cursor and chip toggles survive page refreshes.
+    let histChart = null;
+    // Tenths of the display unit, converted as temp() does.
+    const histTempValue = v => v === null || v === undefined ? null
+      : state.preferences.temp_unit === "fahrenheit" ? Math.trunc(v * 9 / 5) + 320 : v;
+    function histFmtTemp(v, ctx) {
+      const deci = Math.round(v);
+      const whole = Math.sign(deci) * Math.floor((Math.abs(deci) + 5) / 10) || 0;
+      if (ctx === "axis") return `${deci / 10}°`;
+      return ctx === "cursor" ? `${whole}°${state.preferences.temp_unit === "fahrenheit" ? "F" : "C"}` : `${whole}°`;
     }
-    function historyChartSvg(data) {
-      const samples = data.samples || [];
-      // T is the fault-label strip above the plot, so a code never sits on a line.
-      // Drawn at the wrap's real pixel width (histFitChart) so text keeps its
-      // CSS size; a fixed 960-wide viewBox shrank labels to ~4 px on phones.
-      const W = Math.max(280, Math.round(state.histChartW || 960)), narrow = W < 600;
-      const H0 = narrow ? 260 : Math.round(Math.min(384, Math.max(260, W * 0.4)));
-      const L = narrow ? 42 : 58, R = narrow ? 10 : 16, T = 40, B = 34;
-      const plotL = L, plotR = W - R, plotT = T, plotB = H0 - B;
-      const plotW = plotR - plotL, plotH = plotB - plotT;
-      // Optional power panel under the temperatures, on the same time axis.
-      const showPower = state.histShowPower && samples.some(s => s.p != null);
-      const powT = plotB + 30, powB = showPower ? powT + (narrow ? 84 : 104) : plotB;
-      const bottom = showPower ? powB : plotB, fullH = bottom - plotT;
-      const H = bottom + B;
-      const start = data.start, end = data.end, span = Math.max(1, end - start);
-      const mapX = t => plotL + (Math.min(Math.max(t, start), end) - start) / span * plotW;
-
-      let lo = Infinity, hi = -Infinity;
-      for (const s of samples) {
-        for (const v of [s.in, s.out, s.set]) {
-          if (v === null || v === undefined) continue;
-          if (v < lo) lo = v;
-          if (v > hi) hi = v;
-        }
-      }
-      if (!isFinite(lo)) { lo = 0; hi = 400; }
-      if (hi - lo < 20) { const mid = (hi + lo) / 2; lo = mid - 10; hi = mid + 10; }
-      const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
-      const axis = histNiceAxis(histDeciToDisplay(lo), histDeciToDisplay(hi));
-      lo = histDisplayToDeci(axis.lo); hi = histDisplayToDeci(axis.hi);
-      const mapY = v => plotB - (v - lo) / (hi - lo) * plotH;
-
-      let svg = `<svg class="hist-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Cycle history chart">`;
-      // Time-dependent content sits in .hist-pan groups so a mouse drag can
-      // slide it under the fixed y-axis (clipped to the plot while dragging).
-      svg += `<defs><clipPath id="hist-pan-clip"><rect x="${plotL}" y="0" width="${plotW}" height="${H}"/></clipPath>` +
-        `<pattern id="hist-edge-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">` +
-        `<line x1="0" y1="0" x2="0" y2="8" stroke="var(--cp-border-strong)" stroke-width="2" opacity="0.6"/></pattern></defs>`;
-
-      // Hatch where there's nothing to show: before the oldest record and
-      // after now. It pans with the data, so a drag past either end shows it,
-      // but is always clipped to the plot. Labels run down the boundary inside
-      // the hatch so a thin strip still fits them.
-      const xAt = t => plotL + (t - start) / span * plotW, far = plotW * 4;
-      const edge = (x1, x2, x, label, side) => {
-        const lx = (side > 0 ? x + 5 : x - 15).toFixed(1), ly = plotT + 6;
-        return `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${bottom - plotT}" fill="url(#hist-edge-hatch)"/>` +
-          `<line x1="${x.toFixed(1)}" y1="${plotT}" x2="${x.toFixed(1)}" y2="${bottom}" stroke="var(--cp-text-muted)" stroke-width="1.5"/>` +
-          `<text x="${lx}" y="${ly}" transform="rotate(90 ${lx} ${ly})" class="hist-edge">${label}</text>`;
-      };
-      let edges = "";
-      if (data.earliest) { const x = xAt(data.earliest); if (x > plotL - far) edges += edge(x - far, x, x, "Start of history", -1); }
-      if (data.latest_end) { const x = xAt(data.latest_end); if (x < plotR + far) edges += edge(x, x + far, x, "Now", 1); }
-      if (edges) svg += `<g clip-path="url(#hist-pan-clip)"><g class="hist-pan" data-fixed-clip="1">${edges}</g></g>`;
-
-      svg += `<g class="hist-pan">`;
-
-      // Mode bands: contiguous running periods tinted by operating mode.
-      const bandColor = { 1: "var(--band-heat)", 2: "var(--band-cool)", 3: "var(--band-dhw)" };
-      svg += `<defs>${Object.entries(bandColor).map(([m, c]) => `<linearGradient id="hist-band-${m}" x1="0" y1="1" x2="0" y2="0">` +
-        `<stop offset="0" style="stop-color:${c};stop-opacity:var(--band-a0)"/>` +
-        `<stop offset="0.7" style="stop-color:${c};stop-opacity:var(--band-a1)"/>` +
-        `<stop offset="1" style="stop-color:${c};stop-opacity:var(--band-a2)"/></linearGradient>`).join("")}</defs>`;
-      const interval = data.sample_interval_sec || 30;
-      let i = 0;
-      while (i < samples.length) {
+    function histFmtPower(w, ctx) {
+      if (ctx === "axis") return `${Math.round(w / 100) / 10}`;
+      return fmtPower(w);
+    }
+    function histCreate() {
+      const el = document.createElement("div");
+      el.className = "hist-chart";
+      const chart = new TsChart(el, {
+        id: "temperature_history_chart",
+        timeFormat: t => fmtHistClock(t, false),
+        edgeText: { before: "Start of history", after: "Now" },
+        panSnap: histSnap,
+        storageKey: "arcticHistChart",
+      });
+      chart.addSource("telemetry");
+      const f = state.preferences.temp_unit === "fahrenheit";
+      const temps = chart.addPane({ id: "temps", weight: 60, unit: f ? "°F" : "°C", color: "var(--hist-out)",
+        range: { auto: true, minSpan: 100, padPermille: 100, minPad: 20, minStep: 10 }, fmt: histFmtTemp });
+      const power = chart.addPane({ id: "power", weight: 40, unit: "kW", color: "var(--hist-power)",
+        range: { auto: true, includeZero: true, hasMax: true, max: 1000, padPermille: 50, minStep: 100 }, fmt: histFmtPower });
+      const temp = { geom: "line", interp: "plateau", width: 2, inCursor: true, drivesRange: true };
+      chart.addLayer(temps, { ...temp, id: "outlet", name: "Outlet", tag: "out", color: "var(--hist-out)", value: s => histTempValue(s.out) });
+      chart.addLayer(temps, { ...temp, id: "inlet", name: "Inlet", tag: "in", color: "var(--hist-in)", value: s => histTempValue(s.in) });
+      chart.addLayer(temps, { ...temp, id: "setpoint", name: "Setpoint", tag: "set", geom: "step", interp: "none",
+        color: "var(--hist-set)", value: s => histTempValue(s.set) });
+      chart.addLayer(power, { id: "power", name: "Power", tag: "", geom: "step", fill: true, fillOpacity: 0.3, width: 1.5,
+        color: "var(--hist-power)", inCursor: true, drivesRange: true, value: s => s.p ?? null });
+      chart.addGroup({ id: "temps", label: "Temps", color: "var(--hist-out)", swatch: "line", panes: [temps] });
+      chart.addGroup({ id: "power", label: "Power", color: "var(--hist-power)", swatch: "fill", panes: [power],
+        visible: state.histShowPower });
+      const band = { fillStrength: "var(--hist-band-strength)" };
+      chart.addKey("heating", "Heating", "var(--band-heat)", band);
+      chart.addKey("cooling", "Cooling", "var(--band-cool)", band);
+      chart.addKey("hot_water", "Hot water", "var(--band-dhw)", band);
+      chart.addKey("defrost", "Defrost", "var(--home-defrost)", { fillStrength: "var(--hist-defrost-strength)" });
+      chart.addKey("fault", "Fault", "var(--cp-danger)", "hatch");
+      chart.setCard(histCard);
+      state.histShowPower = chart.getGroupVisible("power");
+      el.addEventListener("tschart:window-request", event => {
+        const th = state.tempHistory, d = th.data, { requestId, end } = event.detail;
+        th.req = requestId;
+        th.end = d && end >= d.latest_end ? null : end;
+        loadHistory().then(histRefresh);
+      });
+      el.addEventListener("tschart:double-tap", event => {
+        const w = state.histWindow, snap = histSnap(w);
+        histGoto(Math.round((event.detail.time + w / 2) / snap) * snap);
+      });
+      el.addEventListener("tschart:group-toggled", event => {
+        if (event.detail.id !== "power") return;
+        state.histShowPower = event.detail.visible;
+        localStorage.setItem("arcticHistPower", state.histShowPower ? "1" : "0");
+        const below = $("#hist-below"), d = state.tempHistory.data;
+        if (below && d) below.innerHTML = histBelow(d);
+      });
+      const th = state.tempHistory;
+      th.req = 0; th.dataReq = 0;
+      histChart = { el, chart, data: null, applied: null, unit: state.preferences.temp_unit };
+    }
+    // Hover card: time, what the unit was doing and the run it belongs to,
+    // the series values, then any active fault.
+    function histCard(info, card) {
+      const s = info.sample, d = histChart.applied;
+      if (!s || !d) return;
+      const defrosts = d.defrosts || [], end = d.end;
+      card.add("title", fmtHistClock(s.t, true));
+      // A defrost pauses the run, so check it first or it reads "Idle".
+      const df = defrosts.find(x => x.start <= s.t && s.t <= (x.end ?? end));
+      const [runText, runColor] = df ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
+        : (s.run && HIST_RUN_STATE[s.mode]) || ["Idle", ""];
+      const live = d.end >= d.latest_end;
+      let run = runColor ? histRuns(d).find(r => r.start <= s.t && s.t < r.end) : null;
+      if (!run && df) run = { start: df.start, end: df.end ?? end, clipStart: df.start < d.start, open: df.end == null };
+      card.add("block", runText, run ? fmtRunLength(run, live) : "", runColor || "var(--cp-text-muted)");
+      if (run) card.add("text", fmtRunSpan(run, live));
+      card.addLayers();
+      (d.faults || []).filter(x => x.start <= s.t && s.t <= (x.end ?? end)).slice(0, 2)
+        .forEach(x => card.add("warning", `⚠ ${x.fault_code || "?"} ${x.fault_label || ""}`.trim()));
+    }
+    // Spans, notes and status for a window, once the chart accepts it.
+    function histApplied(d) {
+      const chart = histChart.chart, samples = d.samples || [], interval = d.sample_interval_sec || 30;
+      histChart.applied = d;
+      const bandKey = { 1: "heating", 2: "cooling", 3: "hot_water" };
+      const bands = [];
+      for (let i = 0; i < samples.length;) {
         const s = samples[i];
-        if (!s.run || !(s.mode >= 1 && s.mode <= 3)) { i++; continue; }
+        if (!s.run || !bandKey[s.mode]) { i++; continue; }
         let j = i + 1;
         while (j < samples.length && samples[j].run && samples[j].mode === s.mode) j++;
-        const x1 = mapX(s.t), x2 = mapX(samples[j - 1].t + interval);
-        const bw = Math.max(1, x2 - x1).toFixed(1);
-        svg += `<rect class="hist-band" x="${x1.toFixed(1)}" y="${plotT}" width="${bw}" height="${fullH}" fill="url(#hist-band-${s.mode})"/>`;
-        svg += `<rect x="${x1.toFixed(1)}" y="${(plotT + fullH - 3).toFixed(1)}" width="${bw}" height="3" fill="${bandColor[s.mode]}"/>`;
+        bands.push({ start: s.t, end: samples[j - 1].t + interval, key: bandKey[s.mode] });
         i = j;
       }
-
-      // Defrost (matches the device): an icy block over the run it
-      // interrupts, at least 3 px wide so a short one shows at this zoom.
-      for (const df of data.defrosts || []) {
-        const x1 = Math.max(plotL, mapX(df.start));
-        const x2 = Math.min(plotR, Math.max(x1 + 3, mapX(df.end ?? end)));
-        if (x2 <= x1) continue;
-        svg += `<rect class="hist-defrost" x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${fullH}" fill="var(--home-defrost)" opacity="0.4"/>`;
-      }
-
-      // Fault zones (matches the device): a faint hatched fill over the
-      // fault's span plus a solid full-height line where it started. Red is
-      // reserved for faults; heating bands are orange.
-      const faults = data.faults || [];
-      svg += `<defs><pattern id="hist-hatch" patternUnits="userSpaceOnUse" width="12" height="12" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="12" stroke="var(--cp-danger)" stroke-width="2" opacity="0.4"/></pattern></defs>`;
-      // Fault codes go in the strip above the plot. Labels that would overlap
-      // are dropped (the hover tooltip still names every fault), and only a
-      // labelled fault's line reaches up into the strip, so no line crosses
-      // a neighbour's label.
-      const faultLabels = new Map();
-      let labelEnd = -Infinity;
-      for (const f of faults) {
-        const x1 = Math.max(plotL, mapX(f.start)) + 6;
-        if (x1 < labelEnd) continue;
-        // Too close to the right edge: put the label left of its line.
-        const right = x1 + 54 <= plotR;
-        const lx = right ? x1 : x1 - 12 - 54;
-        if (lx < Math.max(labelEnd, plotL)) continue;
-        faultLabels.set(f, lx);
-        labelEnd = right ? lx + 60 : plotR;
-      }
-      for (const f of faults) {
-        const x1 = Math.max(plotL, mapX(f.start)), x2 = Math.min(plotR, mapX(f.end ?? end));
-        if (x2 - x1 >= 8) {
-          svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${fullH}" fill="var(--cp-danger)" opacity="0.1"/>`;
-          svg += `<rect x="${x1.toFixed(1)}" y="${plotT}" width="${(x2 - x1).toFixed(1)}" height="${fullH}" fill="url(#hist-hatch)"/>`;
-        }
-        const y1 = faultLabels.has(f) ? plotT - 26 : plotT;
-        svg += `<line class="hist-fault" x1="${x1.toFixed(1)}" y1="${y1}" x2="${x1.toFixed(1)}" y2="${bottom}" stroke="var(--cp-danger)" stroke-width="2" opacity="0.7"/>`;
-      }
-
-      svg += `</g>`;
-
-      // Horizontal gridlines + y-axis temperature labels.
-      for (let val = axis.lo; val <= axis.hi; val += axis.step) {
-        const y = plotB - (val - axis.lo) / (axis.hi - axis.lo) * plotH;
-        svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
-        svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${val / 10}°</text>`;
-      }
-      // Power panel gridlines: whole kW (or halves) in at most three steps.
-      let mapP = null;
-      if (showPower) {
-        const maxKw = Math.max(0.5, ...samples.map(s => (s.p || 0) / 1000));
-        let pAxis = null;
-        for (const step of [0.5, 1, 2, 5, 10]) {
-          pAxis = { hi: Math.ceil(maxKw / step) * step, step };
-          if (pAxis.hi / step <= 3) break;
-        }
-        mapP = w => powB - Math.min(w / 1000, pAxis.hi) / pAxis.hi * (powB - powT);
-        for (let v = 0; v <= pAxis.hi + 1e-9; v += pAxis.step) {
-          const y = mapP(v * 1000);
-          svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
-          svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${v ? `${+v.toFixed(1)} kW` : "0"}</text>`;
-        }
-      }
-      svg += `<g class="hist-pan">`;
-
-      // Vertical gridlines on round local times, 4-5 per window (matches the
-      // device): every 2 h at 8 h down to every 15 min at 1 h.
-      const tickStep = histTick(end - start), startDate = new Date(start * 1000);
-      const sinceMidnight = startDate.getHours() * 3600 + startDate.getMinutes() * 60 + startDate.getSeconds();
-      for (let ts = start + (tickStep - sinceMidnight % tickStep) % tickStep; ts <= end; ts += tickStep) {
-        if (ts < start) continue;
-        const x = mapX(ts);
-        svg += `<line x1="${x.toFixed(1)}" y1="${plotT}" x2="${x.toFixed(1)}" y2="${bottom}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
-        svg += `<text x="${x.toFixed(1)}" y="${bottom + 20}" text-anchor="middle" class="hist-axis">${fmtHistClock(ts, false)}</text>`;
-      }
-
-      // Series paths (setpoint is a step line, temps are interpolated).
-      // Inlet/outlet arrive as whole degrees, so a raw line staircases. Each
-      // run of identical readings is a plateau; the true temperature crossed
-      // that value somewhere inside it, so the line is drawn through each
-      // plateau's midpoint instead (30° for 10 min then 31° reads 30.5° at the
-      // changeover). Plateau values, including peaks, are kept exactly, and a
-      // gap in the data breaks the line.
-      const isNum = v => v !== null && v !== undefined;
-      const interpolated = key => {
-        const vals = new Array(samples.length).fill(null);
-        let a = 0;
-        while (a < samples.length) {
-          if (!isNum(samples[a][key])) { a++; continue; }
-          let b = a;
-          while (b + 1 < samples.length && isNum(samples[b + 1][key])) b++;
-          const pts = [{ t: samples[a].t, v: samples[a][key] }];
-          for (let i = a; i <= b;) {
-            let j = i;
-            while (j + 1 <= b && samples[j + 1][key] === samples[i][key]) j++;
-            pts.push({ t: (samples[i].t + samples[j].t) / 2, v: samples[i][key] });
-            i = j + 1;
-          }
-          pts.push({ t: samples[b].t, v: samples[b][key] });
-          let p = 0;
-          for (let k = a; k <= b; k++) {
-            const t = samples[k].t;
-            while (p + 1 < pts.length - 1 && pts[p + 1].t <= t) p++;
-            const p0 = pts[p], p1 = pts[p + 1];
-            vals[k] = p1.t > p0.t ? p0.v + (p1.v - p0.v) * (t - p0.t) / (p1.t - p0.t) : p1.v;
-          }
-          a = b + 1;
-        }
-        return vals;
-      };
-      const series = {
-        set: samples.map(s => s.set),
-        out: interpolated("out"),
-        in: interpolated("in"),
-      };
-      const line = (key, color, step) => {
-        const vals = series[key];
-        let d = "", pen = false;
-        for (let k = 0; k < samples.length; k++) {
-          const v = vals[k];
-          if (!isNum(v)) { pen = false; continue; }
-          const x = mapX(samples[k].t), y = mapY(v);
-          if (!pen) { d += `M${x.toFixed(1)} ${y.toFixed(1)}`; pen = true; }
-          else if (step) { d += `H${x.toFixed(1)}V${y.toFixed(1)}`; }
-          else { d += `L${x.toFixed(1)} ${y.toFixed(1)}`; }
-        }
-        return d ? `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : "";
-      };
-      svg += line("set", "var(--hist-set)", true);
-      svg += line("out", "var(--hist-out)", false);
-      svg += line("in", "var(--hist-in)", false);
-
-      // Power: each 30 s reading held until the next sample, as a filled step.
-      if (showPower) {
-        let area = "", edge = "", run = null;
-        const flush = () => {
-          if (!run) return;
-          area += `M${run[0][0].toFixed(1)} ${powB}` + run.map(([x1, x2, y]) => `V${y.toFixed(1)}H${x2.toFixed(1)}`).join("") + `V${powB}Z`;
-          edge += `M${run[0][0].toFixed(1)} ${run[0][2].toFixed(1)}` + run.map(([x1, x2, y]) => `V${y.toFixed(1)}H${x2.toFixed(1)}`).join("");
-          run = null;
-        };
-        samples.forEach((s, k) => {
-          if (s.p == null || (run && s.t - samples[k - 1].t > interval * 2.5)) flush();
-          if (s.p == null) return;
-          (run ||= []).push([mapX(s.t), mapX(s.t + interval), mapP(s.p)]);
-        });
-        flush();
-        svg += `<path class="hist-power-area" d="${area}" fill="var(--hist-power)" style="opacity:var(--power-fill-a)"/>`;
-        svg += `<path d="${edge}" fill="none" stroke="var(--hist-power)" stroke-width="1.5" stroke-linejoin="round"/>`;
-      }
-
-      for (const [f, lx] of faultLabels) {
-        svg += `<text x="${lx.toFixed(1)}" y="${plotT - 12}" class="hist-fault-label">${esc(`⚠ ${f.fault_code || "?"}`)}</text>`;
-      }
-      svg += `</g>`;
-
-      // Hover crosshair: a vertical line plus a dot on each series, driven by
-      // histHover() from the pointer position.
-      svg += `<g class="hist-hover" style="display:none">
-        <line class="hist-hover-line" y1="${plotT}" y2="${bottom}" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="4 3"/>
-        <circle data-key="set" r="4" fill="var(--hist-set)"/><circle data-key="out" r="4" fill="var(--hist-out)"/><circle data-key="in" r="4" fill="var(--hist-in)"/>${showPower ? `<circle data-key="p" r="4" fill="var(--hist-power)"/>` : ""}</g>`;
-      series.p = samples.map(s => s.p ?? null);
-      histGeom = { W, plotL, plotR, plotT, bottom, mapX, mapY, mapP, samples, series, faults: data.faults || [], defrosts: data.defrosts || [], start, end, showPower, interval,
-        runs: histRuns(data) };
-
-      svg += `</svg>`;
-      return svg;
+      chart.setSpans(0, bands);
+      chart.setSpans(1, (d.defrosts || []).map(x => ({ start: x.start, end: x.end ?? null,
+        key: "defrost", minWidth: 3 })));
+      chart.setSpans(2, (d.faults || []).map(x => ({ start: x.start, end: x.end ?? null,
+        color: "var(--cp-danger)", style: "hatch" })));
+      chart.setNotes((d.faults || []).map(x => ({ time: x.start, text: x.fault_code || "?", color: "var(--cp-danger)" })), "⚠ ");
+      chart.setStatus(samples.length ? "ok" : "empty", samples.length ? "" : "No samples in this window");
     }
-    let histGeom = null, histPointer = null, histDrag = null;
-    // Redraw the chart if its wrap's width no longer matches the drawn width.
-    function histFitChart() {
-      const wrap = $(".hist-chart-wrap"), old = wrap?.querySelector(".hist-chart"), data = state.tempHistory.data;
-      if (!old || !data) return;
-      const w = Math.round(wrap.clientWidth);
-      if (!w || (histGeom && histGeom.W === Math.max(280, w))) return;
-      state.histChartW = w;
-      old.outerHTML = historyChartSvg(data);
+    // Attach the chart to the freshly rendered page and hand it any new data.
+    function histMount() {
+      const host = $(".hist-chart-host");
+      if (!host) return;
+      if (!histChart || histChart.unit !== state.preferences.temp_unit) {
+        histChart?.chart.destroy();
+        histCreate();
+      }
+      if (histChart.el.parentNode !== host) host.appendChild(histChart.el);
+      histSync();
     }
-    let histResizeFrame = 0;
-    window.addEventListener("resize", () => {
-      if ((state.route !== "history" && state.route !== "energy") || histResizeFrame) return;
-      histResizeFrame = requestAnimationFrame(() => {
-        histResizeFrame = 0;
-        if (state.route === "history") histFitChart(); else energyFitChart();
-      });
-    });
+    function histSync() {
+      const th = state.tempHistory, d = th.data, hc = histChart;
+      if (!hc || !d) return;
+      const chart = hc.chart;
+      chart.setBounds(d.earliest, d.latest_end);
+      if (hc.data !== d) {
+        const pending = chart.pending;
+        const requestId = pending && th.dataReq === pending.id ? th.dataReq : 0;
+        const ok = chart.setDataset({ requestId, start: d.start, end: d.end,
+          sources: { telemetry: { samples: d.samples || [], time: "t", gap: (d.sample_interval_sec || 30) * 2.5 } },
+          applied: () => histApplied(d) });
+        if (ok) {
+          hc.data = d;
+          if (requestId && th.req === requestId) th.req = 0;
+        }
+      }
+      if (th.error && !th.loading && chart.pending) {
+        // The requested window didn't load: stay on the one that's showing.
+        chart.cancelPending();
+        th.req = 0;
+        th.end = d.end >= d.latest_end ? null : d.end;
+        state.histWindow = d.window_seconds;
+        toast(th.error, "bad");
+      }
+    }
+    // After a load: refresh the text around the chart without re-rendering
+    // the page, so a gesture in progress isn't interrupted.
+    function histRefresh() {
+      if (state.route !== "history") return;
+      const top = $("#hist-top"), below = $("#hist-below"), d = state.tempHistory.data;
+      if (!top || !below || !d || histNoHistory(d)) { render(); return; }
+      top.innerHTML = histTop(d);
+      below.innerHTML = histBelow(d);
+      histMount();
+    }
     // Show the window ending at `end` (unix s), kept within the stored range;
-    // the newest window goes back to the live view. `spin` defaults to the
-    // middle of the strip of new data the move brings in.
-    async function histGoto(end, spin = null) {
-      const d = state.tempHistory.data;
-      if (!d) return;
-      end = Math.max(d.earliest + d.window_seconds, Math.min(Math.round(end), d.latest_end));
-      if (spin === null) {
-        const w = d.window_seconds, shift = end - d.end;
-        spin = !shift || Math.abs(shift) >= w ? 0.5 : shift < 0 ? -shift / w / 2 : 1 - shift / w / 2;
+    // the newest window goes back to the live view.
+    function histGoto(end) {
+      const th = state.tempHistory, d = th.data;
+      if (!d) return Promise.resolve();
+      const w = state.histWindow;
+      end = Math.max(d.earliest + w, Math.min(Math.round(end), d.latest_end));
+      if (histChart?.el.isConnected) {
+        histChart.chart.requestWindow(end - w, end);
+        return th.inflight || Promise.resolve();
       }
-      state.tempHistory.end = end >= d.latest_end ? null : end;
-      await loadHistory(spin); render();
+      th.end = end >= d.latest_end ? null : end;
+      return loadHistory().then(histRefresh);
     }
     // The end the chart is showing or loading, so quick repeated steps add up.
     const histTargetEnd = () => state.tempHistory.end ?? state.tempHistory.data?.end;
-    // Unix time under a client x, or null outside the plot.
-    function histTimeAt(svg, clientX) {
-      const g = histGeom, rect = svg.getBoundingClientRect();
-      const vx = (clientX - rect.left) / rect.width * g.W;
-      if (vx < g.plotL || vx > g.plotR) return null;
-      return g.start + (vx - g.plotL) / (g.plotR - g.plotL) * (g.end - g.start);
-    }
     const HIST_SNAP = 15 * 60;
-    // Zoom presets (same as the device), widest first, plus the step, gridline
-    // and "centre here" snap each one uses (history_window.h).
+    // Zoom presets (same as the device), widest first, plus the step and
+    // "centre here" snap each one uses (history_window.h).
     const HIST_WINDOWS = [28800, 14400, 7200, 3600];
     const histStep = w => Math.max(HIST_SNAP, w / 8);
-    const histTick = w => w / 4;
     const histSnap = w => Math.min(HIST_SNAP, w / 12);
     const fmtHistSpan = s => s % 3600 ? `${s / 60} min` : `${s / 3600} h`;
     const HIST_RUN_STATE = { 1: ["Heating", "var(--hist-heat)"], 2: ["Cooling", "var(--hist-cool)"], 3: ["Hot water", "var(--hist-dhw)"] };
-    function histDoubleClick(event) {
-      const svg = event.target.closest?.(".hist-chart"), d = state.tempHistory.data;
-      if (!svg || !histGeom || !d) return;
-      const t = histTimeAt(svg, event.clientX);
-      if (t === null) return;
-      const snap = histSnap(d.window_seconds);
-      histGoto(Math.round((t + d.window_seconds / 2) / snap) * snap, 0.5);
-    }
-    // Drag pans the window. On touch, as on the device, a quick sideways drag
-    // pans and press-and-hold first, then drag, scrubs the readout.
-    const HIST_HOLD_MS = 400;
-    function histDragStart(event) {
-      const svg = event.target.closest?.(".hist-chart");
-      if (!svg || !histGeom || !event.isPrimary) return;
-      const touch = event.pointerType !== "mouse";
-      if (!touch && event.button !== 0) return;
-      histDrag = { svg, x0: event.clientX, dx: 0, moved: false, touch, scrub: false, hold: 0 };
-      if (touch) {
-        histHover(event);
-        const drag = histDrag;
-        drag.hold = setTimeout(() => { if (!drag.moved) drag.scrub = true; }, HIST_HOLD_MS);
-      }
-    }
-    function histDragMove(event) {
-      if (!histDrag || !event.isPrimary || histDrag.scrub) return;
-      histDrag.dx = event.clientX - histDrag.x0;
-      if (!histDrag.moved && Math.abs(histDrag.dx) < (histDrag.touch ? 10 : 5)) return;
-      if (!histDrag.moved) {
-        histDrag.moved = true;
-        histDrag.svg.classList.add("dragging");
-        document.querySelectorAll(".hist-hover, .hist-chart-wrap .hist-tip").forEach(el => { el.style.display = "none"; });
-      }
-      histPanPreview(histDrag.svg, histDrag.eff = histRubber(histDrag.dx, histDrag.lim ||= histPanLimits(histDrag.svg)));
-    }
-    function histPanPreview(svg, dx) {
-      const units = dx * histGeom.W / svg.getBoundingClientRect().width;
-      svg.querySelectorAll(".hist-pan").forEach(g => {
-        const clip = !g.dataset.fixedClip;
-        if (dx) {
-          g.setAttribute("transform", `translate(${units.toFixed(1)} 0)`);
-          if (clip) g.setAttribute("clip-path", "url(#hist-pan-clip)");
-        } else {
-          g.removeAttribute("transform");
-          if (clip) g.removeAttribute("clip-path");
-        }
-      });
-    }
-    // How far (px) the chart can be dragged: forward to now, back to the
-    // oldest record.
-    function histPanLimits(svg) {
-      const d = state.tempHistory.data, g = histGeom;
-      const pxPerS = svg.getBoundingClientRect().width * (g.plotR - g.plotL) / g.W / (g.end - g.start);
-      return { min: -Math.max(0, d.latest_end - d.end) * pxPerS, max: Math.max(0, d.start - d.earliest) * pxPerS };
-    }
-    // Past either end the chart follows the finger at a third of the speed.
-    function histRubber(dx, lim) {
-      if (dx > lim.max) return lim.max + (dx - lim.max) / 3;
-      if (dx < lim.min) return lim.min + (dx - lim.min) / 3;
-      return dx;
-    }
-    function histSpringBack(svg, from) {
-      const t0 = performance.now(), ms = 180;
-      const step = now => {
-        if (!svg.isConnected || histDrag) return;
-        const k = Math.min(1, (now - t0) / ms);
-        histPanPreview(svg, k < 1 ? from * (1 - k) * (1 - k) : 0);
-        if (k < 1) requestAnimationFrame(step);
-        else svg.classList.remove("dragging");
-      };
-      requestAnimationFrame(step);
-    }
-    function histDragEnd(event) {
-      const drag = histDrag, d = state.tempHistory.data;
-      if (!drag || !event.isPrimary) return;
-      histDrag = null;
-      clearTimeout(drag.hold);
-      if (!drag.moved || !d || !histGeom) return;
-      // The browser took the gesture (e.g. a page scroll): put the chart back.
-      if (event.type === "pointercancel") { histPanPreview(drag.svg, 0); drag.svg.classList.remove("dragging"); return; }
-      const g = histGeom, rect = drag.svg.getBoundingClientRect();
-      const plotPx = rect.width * (g.plotR - g.plotL) / g.W;
-      const lim = drag.lim || histPanLimits(drag.svg);
-      const dx = Math.max(lim.min, Math.min(lim.max, drag.dx));
-      const snap = histSnap(g.end - g.start);
-      const shift = Math.round(-dx / plotPx * (g.end - g.start) / snap) * snap;
-      if (!shift) { histSpringBack(drag.svg, drag.eff || 0); return; }
-      // Settle back inside the limits and spin over the strip being revealed.
-      histPanPreview(drag.svg, dx);
-      histGoto(d.end + shift, dx > 0 ? dx / 2 / plotPx : 1 + dx / 2 / plotPx);
-    }
     // Live view: while showing the newest window, quietly reload once a minute
-    // so the chart keeps sliding forward, and put the hover tooltip back.
+    // so the chart keeps sliding forward.
     async function refreshHistoryLive() {
       const th = state.tempHistory;
-      if (th.end || th.loading || Date.now() - (th.loadedAt || 0) < 60000) return;
+      if (th.end || th.loading || th.req || Date.now() - (th.loadedAt || 0) < 60000) return;
       await loadHistory();
-      if (state.route !== "history" || state.tempHistory.end) return;
-      render();
-      const p = histPointer, el = p && document.elementFromPoint(p.clientX, p.clientY);
-      if (el?.closest(".hist-chart")) histHover({ target: el, clientX: p.clientX, clientY: p.clientY });
-    }
-    function histHover(event) {
-      if (histDrag?.moved) return;
-      const svg = event.target.closest?.(".hist-chart");
-      histPointer = svg ? { clientX: event.clientX, clientY: event.clientY } : null;
-      const wrap = svg?.closest(".hist-chart-wrap");
-      const hide = () => document.querySelectorAll(".hist-hover, .hist-chart-wrap .hist-tip").forEach(el => { el.style.display = "none"; });
-      if (!svg || !wrap || !histGeom || !histGeom.samples.length) { hide(); return; }
-      const g = histGeom, rect = svg.getBoundingClientRect();
-      const vx = (event.clientX - rect.left) / rect.width * g.W;
-      if (vx < g.plotL || vx > g.plotR) { hide(); return; }
-      let best = -1, bestDx = Infinity;
-      g.samples.forEach((s, k) => {
-        if (g.series.in[k] === null && g.series.out[k] === null) return;
-        const dx = Math.abs(g.mapX(s.t) - vx);
-        if (dx < bestDx) { bestDx = dx; best = k; }
-      });
-      if (best < 0 || bestDx > 24) { hide(); return; }
-      const s = g.samples[best], x = g.mapX(s.t);
-      const hover = svg.querySelector(".hist-hover");
-      hover.style.display = "";
-      const ln = hover.querySelector(".hist-hover-line");
-      ln.setAttribute("x1", x.toFixed(1)); ln.setAttribute("x2", x.toFixed(1));
-      hover.querySelectorAll("circle").forEach(c => {
-        const v = g.series[c.dataset.key][best];
-        if (v === null || v === undefined) { c.style.display = "none"; return; }
-        const y = c.dataset.key === "p" ? g.mapP(v) : g.mapY(v);
-        c.style.display = ""; c.setAttribute("cx", x.toFixed(1)); c.setAttribute("cy", y.toFixed(1));
-      });
-      const fmt = v => (v === null || v === undefined) ? "--" : temp(v / 10);
-      // A defrost pauses the run, so check it first or it reads "Idle".
-      const defrost = g.defrosts.some(df => df.start <= s.t && s.t <= (df.end ?? g.end));
-      const [runText, runColor] = defrost ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
-        : (s.run && HIST_RUN_STATE[s.mode]) || ["Idle", ""];
-      const tip = wrap.querySelector(".hist-tip");
-      // The run under the cursor, or for the compressor pause inside a
-      // defrost, the defrost itself.
-      const live = state.tempHistory.data?.end >= state.tempHistory.data?.latest_end;
-      let run = runColor ? g.runs.find(r => r.start <= s.t && s.t < r.end) : null;
-      if (!run && defrost) {
-        const df = g.defrosts.find(d => d.start <= s.t && s.t <= (d.end ?? g.end));
-        run = { start: df.start, end: df.end ?? g.end, clipStart: df.start < g.start, open: df.end == null };
-      }
-      tip.innerHTML = `<div class="hist-tip-time">${esc(fmtHistClock(s.t, true))}</div>
-        <div class="hist-tip-state">${runColor ? `<i class="band" style="background:${runColor}"></i>` : ""}${esc(runText)}</div>` +
-        (run ? `<div class="hist-tip-run">${esc(fmtRunSpan(run, live))} · ${fmtRunLength(run, live)}</div>` : "") +
-        `<div><i style="background:var(--hist-out)"></i>Outlet <strong>${fmt(s.out)}</strong></div>
-        <div><i style="background:var(--hist-in)"></i>Inlet <strong>${fmt(s.in)}</strong></div>
-        <div><i style="background:var(--hist-set)"></i>Setpoint <strong>${fmt(s.set)}</strong></div>` +
-        (g.showPower && s.p != null ? `<div><i style="background:var(--hist-power)"></i>Power <strong>${fmtPower(s.p)}</strong></div>` : "") +
-        g.faults.filter(f => f.start <= s.t && s.t <= (f.end ?? g.end))
-          .map(f => `<div class="hist-tip-fault">⚠ ${esc(f.fault_code || "?")} ${esc(f.fault_label || "")}</div>`).join("");
-      tip.style.display = "block";
-      const px = x / g.W * rect.width;
-      const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
-      tip.style.left = `${Math.max(0, left)}px`;
+      if (!state.tempHistory.end) histRefresh();
     }
     function histRuns(data) {
       const interval = data.sample_interval_sec || 30;
@@ -3018,46 +2667,21 @@
       const wh = samples.reduce((sum, s) => sum + (s.p || 0) * interval / 3600, 0);
       return `<p class="hist-muted hist-energy"><strong>${fmtKwh(wh)}</strong> of electricity used in this window</p>`;
     }
-    function historyPage() {
-      const th = state.tempHistory, data = th.data;
-      let body;
-      if (th.loading && !data) {
-        body = `<section class="card"><div class="login" style="min-height:320px"><div class="spinner"></div></div></section>`;
-      } else if (th.error && !data) {
-        body = `<section class="card"><p class="hist-muted">${esc(th.error)}</p></section>`;
-      } else if (!data || !(data.samples && data.samples.length) &&
-                 data.start <= data.earliest && data.end >= data.latest_end) {
-        const interval = data ? data.sample_interval_sec : 30;
-        body = `<section class="card"><p class="hist-muted">No cycle history recorded yet. Samples are captured every ${interval}s while the heat pump is connected.</p></section>`;
-      } else {
-        // An empty window inside a longer history still gets the chart and
-        // its navigation, or there'd be no way out of it.
-        const empty = !data.samples.length;
-        const atLatest = data.end >= data.latest_end;
-        const atOldest = data.start <= data.earliest;
-        const win = data.window_seconds, step = fmtHistSpan(histStep(win)), page = fmtHistSpan(win);
-        body = `<section class="card">
-          <div class="hist-toolbar">
-            <div class="hist-range-row"><span class="hist-range"><span>${esc(fmtHistClock(data.start, true))} —</span> <span>${esc(fmtHistClock(data.end, true))}</span></span>
-              <div class="hist-range-actions">
-                <div class="en-ranges hist-zoom" role="group" aria-label="Window">${HIST_WINDOWS.map(w =>
-                  `<button class="${win === w ? "active" : ""}" data-action="history-window" data-window="${w}" aria-pressed="${win === w}">${fmtHistSpan(w)}</button>`).join("")}</div>
-                <button class="btn primary hist-latest" data-action="history-latest" ${atLatest ? "hidden disabled" : ""}>Latest<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.6 7.4 10.2 12l-4.6 4.6L7 18l6-6-6-6-1.4 1.4ZM16 6h2v12h-2V6Z"/></svg></button>
-              </div></div>
-            <div class="hist-legend">
-              <span><i style="background:var(--hist-in)"></i>Inlet</span>
-              <span><i style="background:var(--hist-out)"></i>Outlet</span>
-              <span><i style="background:var(--hist-set)"></i>Setpoint</span>
-              <span><i class="band band-swatch" style="--band:var(--band-heat)"></i>Heating</span>
-              <span><i class="band band-swatch" style="--band:var(--band-cool)"></i>Cooling</span>
-              <span><i class="band band-swatch" style="--band:var(--band-dhw)"></i>Hot Water</span>
-              <span><i class="band" style="background:var(--home-defrost)"></i>Defrost</span>
-              <span><i style="background:var(--cp-danger);width:3px;height:14px"></i>Fault</span>
-              <button class="hist-toggle ${state.histShowPower ? "on" : ""}" data-action="history-power" aria-pressed="${state.histShowPower}"><span class="box" aria-hidden="true">${state.histShowPower ? "✓" : ""}</span>Power</button>
-            </div>
-          </div>
-          <div class="hist-chart-wrap">${historyChartSvg(data)}${empty ? `<p class="hist-muted hist-empty">No samples in this window</p>` : ""}<div class="hist-tip"></div></div>
-          ${histWindowEnergy(data)}
+    const histNoHistory = data => !(data.samples && data.samples.length) &&
+      data.start <= data.earliest && data.end >= data.latest_end;
+    function histTop(data) {
+      const atLatest = data.end >= data.latest_end, win = data.window_seconds;
+      return `<div class="hist-range-row"><span class="hist-range"><span>${esc(fmtHistClock(data.start, true))} —</span> <span>${esc(fmtHistClock(data.end, true))}</span></span>
+          <div class="hist-range-actions">
+            <div class="en-ranges hist-zoom" role="group" aria-label="Window">${HIST_WINDOWS.map(w =>
+              `<button class="${win === w ? "active" : ""}" data-action="history-window" data-window="${w}" aria-pressed="${win === w}">${fmtHistSpan(w)}</button>`).join("")}</div>
+            <button class="btn primary hist-latest" data-action="history-latest" ${atLatest ? "hidden disabled" : ""}>Latest<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.6 7.4 10.2 12l-4.6 4.6L7 18l6-6-6-6-1.4 1.4ZM16 6h2v12h-2V6Z"/></svg></button>
+          </div></div>`;
+    }
+    function histBelow(data) {
+      const atLatest = data.end >= data.latest_end, atOldest = data.start <= data.earliest;
+      const win = data.window_seconds, step = fmtHistSpan(histStep(win)), page = fmtHistSpan(win);
+      return `${histWindowEnergy(data)}
           <div class="hist-nav">
             <div class="hist-nav-group">
               <button class="btn" data-action="history-prev" ${atOldest ? "disabled" : ""}>‹ ${page}</button>
@@ -3069,7 +2693,25 @@
             </div>
           </div>
           <p class="hist-muted hist-hint">Double-click the chart to centre it on that moment, or drag it sideways.</p>
-          ${histRunsCard(data)}
+          ${histRunsCard(data)}`;
+    }
+    function historyPage() {
+      const th = state.tempHistory, data = th.data;
+      let body;
+      if (th.loading && !data) {
+        body = `<section class="card"><div class="login" style="min-height:320px"><div class="spinner"></div></div></section>`;
+      } else if (th.error && !data) {
+        body = `<section class="card"><p class="hist-muted">${esc(th.error)}</p></section>`;
+      } else if (!data || histNoHistory(data)) {
+        const interval = data ? data.sample_interval_sec : 30;
+        body = `<section class="card"><p class="hist-muted">No cycle history recorded yet. Samples are captured every ${interval}s while the heat pump is connected.</p></section>`;
+      } else {
+        // An empty window inside a longer history still gets the chart and
+        // its navigation, or there'd be no way out of it.
+        body = `<section class="card">
+          <div class="hist-toolbar" id="hist-top">${histTop(data)}</div>
+          <div class="hist-chart-host"></div>
+          <div id="hist-below">${histBelow(data)}</div>
         </section>`;
       }
       return `<div class="page">
@@ -3169,7 +2811,7 @@
       const resps = await Promise.all(wanted.filter(([from, to]) => from <= to && missing(from, to))
         .map(([from, to]) => api(`/api/energy/daily?from=${from}&to=${to}`)));
       resps.forEach(energyRemember);
-      if (resps.length && en.data === data && !enDrag && state.route === "energy") energyRedrawChart();
+      if (resps.length && en.data === data && state.route === "energy") energySync();
     }
     async function refreshEnergyLive() {
       const en = state.energy;
@@ -3298,246 +2940,110 @@
         entry.loading = false;
       }
     }
-    // kWh gridlines: the smallest of 0.5, 1, 2, 5, 10 ... that covers the
-    // tallest day in at most five intervals.
-    function energyNiceAxis(maxKwh) {
-      let axis = null;
-      for (const step of [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]) {
-        axis = { hi: Math.max(step, Math.ceil(maxKwh / step) * step), step };
-        if (axis.hi / step <= 5) break;
+    // The energy chart is a tschart bucket chart (TsBars). Like the cycle
+    // chart it outlives render(); it is rebuilt when the range changes.
+    let energyBars = null;
+    function energyCreate(range) {
+      const el = document.createElement("div");
+      el.className = "en-chart";
+      const year = range > 90;
+      const chart = new TsBars(el, {
+        id: "energy_chart", count: range, barWidth: range > 60 ? 0.78 : 0.62,
+        // The year view labels month starts; shorter ranges space out days.
+        labels: year
+          ? { mode: "sparse", text: b => b.key.endsWith("-01") ? MONTH_SHORT[+b.key.slice(5, 7) - 1] : null }
+          : { mode: "every", text: b => fmtDay(b.key) },
+      });
+      // kWh in Wh, so the axis maths stays integral.
+      const kwh = chart.addPane({ id: "kwh", weight: 230, unit: "kWh",
+        range: { auto: true, includeZero: true, minSpan: 500, minStep: 500 },
+        fmt: v => `${+(v / 1000).toFixed(1)}` });
+      // The unit meters power in 100 W steps, so idle draw reads as 0 and
+      // there is no standby segment.
+      for (const [m, label, color] of ENERGY_MODES) {
+        chart.addSeries(kwh, { id: m, name: label, color, stack: "modes",
+          value: b => (b.data?.day.electrical_wh?.[m] || 0) > 0 ? b.data.day.electrical_wh[m] : null });
       }
-      return axis;
+      // Estimated COP in tenths, on its own strip; only the ends are labelled.
+      const cop = chart.addPane({ id: "cop", weight: 64, minHeight: 56, unit: "COP", unitAt: "middle",
+        range: { auto: true, minSpan: 10, minStep: 10 }, maxTicks: 2, tickLabels: "ends",
+        fmt: v => `${Math.round(v / 10)}`, emptyText: "No COP estimate in this range" });
+      chart.addSeries(cop, { id: "cop", name: "COP (est.)", color: "var(--hist-set)", geom: "line",
+        width: 1.5, opacity: 0.55, pointRadius: n => n > 90 ? 2 : 3,
+        value: b => b.data?.sums.cop != null ? Math.round(b.data.sums.cop * 10) : null });
+      chart.setCard(energyCard);
+      el.addEventListener("tsbars:select", event => energySelectDay(event.detail.key));
+      // A drag lands on whole days; load the window it settled on.
+      el.addEventListener("tsbars:view", event => {
+        if (event.detail.lastKey) energyGoto(event.detail.lastKey).catch(toastUnlessShown);
+      });
+      energyBars = { el, chart, range, sig: null };
     }
-    let enGeom = null;
-    function energyChartSvg(data) {
+    function energyCard(b, card) {
+      const day = b.data?.day;
+      if (!day) return;
+      const s = b.data.sums, e = day.electrical_wh || {};
+      card.add("title", `${fmtDay(day.date, true)}${day.final === false ? " · so far" : ""}`);
+      card.add("value", "Total", fmtKwh(s.total));
+      ENERGY_MODES.filter(([m]) => e[m] > 0).forEach(([m, label, color]) => card.add("value", label, fmtKwh(e[m]), color));
+      if (s.cop !== null) card.add("value", "COP (est.)", s.cop.toFixed(1));
+      if (day.outdoor_c) {
+        if (day.outdoor_c.run_avg != null) card.add("value", "Outdoor while running", temp(day.outdoor_c.run_avg));
+        card.add("value", "Outdoor day avg", temp(day.outdoor_c.avg));
+      }
+    }
+    // Attach the chart to the freshly rendered page and hand it any new days.
+    function energyMount() {
+      const host = $(".en-chart-host");
+      if (!host || !state.energy.data) return;
+      if (!energyBars || energyBars.range !== state.energy.range) {
+        energyBars?.chart.destroy();
+        energyCreate(state.energy.range);
+      }
+      const moved = energyBars.el.parentNode !== host;
+      if (moved) host.appendChild(energyBars.el);
+      // Draw now rather than next frame, so the page never shows it empty.
+      if (energySync() || moved) energyBars.chart.flush();
+    }
+    // The window plus up to a window's worth of neighbours either side (never
+    // past today), so a drag slides real bars in.
+    function energySync() {
+      const en = state.energy, d = en.data, eb = energyBars;
+      if (!eb || !d) return false;
+      eb.chart.setSelected(en.selected);
+      // Only re-feed new data: a render while a dragged-to window loads
+      // mustn't snap the chart back.
+      const sig = `${d.from}|${d.to}|${en.cache.size}|${en.loadedAt}`;
+      if (eb.sig === sig) return false;
+      eb.sig = sig;
+      const byDate = new Map((d.days || []).map(x => [x.date, x]));
+      const p = energyPad(), buckets = [];
+      for (let date = dayAdd(d.from, -p); date <= dayAdd(d.to, p); date = dayAdd(date, 1)) {
+        if (en.today && date > en.today) break;
+        const inWindow = date >= d.from && date <= d.to;
+        const day = byDate.get(date) || (!inWindow && en.cache.get(date)) || null;
+        buckets.push({ key: date, data: day ? { day, sums: energySums([day]) } : null,
+          provisional: day?.final === false, accent: date === en.today, selectable: inWindow && !!day });
+      }
+      eb.chart.setBuckets(buckets, { lastKey: d.to });
+      // Forward to today, back to the oldest stored day.
+      eb.chart.setPanLimits(en.since ? Math.max(0, dayDiff(en.since, d.from)) : 0,
+        en.to && en.today ? Math.max(0, dayDiff(d.to, en.today)) : 0);
+      eb.chart.setStatus("ok");
+      return true;
+    }
+    async function energySelectDay(date) {
       const en = state.energy;
-      const W = Math.max(280, Math.round(en.chartW || 960)), narrow = W < 600;
-      const L = narrow ? 40 : 52, R = narrow ? 8 : 16, T = 24, B = 26;
-      const barH = narrow ? 180 : 230, gap = 26, copH = narrow ? 56 : 64;
-      const plotL = L, plotR = W - R, plotW = plotR - plotL;
-      const barT = T, barB = barT + barH, copT = barB + gap, copB = copT + copH, H = copB + B;
-      const byDate = new Map((data.days || []).map(d => [d.date, d]));
-      const n = Math.max(1, dayDiff(data.from, data.to) + 1);
-      const slot = (i, cached) => {
-        const date = dayAdd(data.from, i), day = byDate.get(date) || (cached && en.cache.get(date)) || null;
-        return { i, date, day, sums: day ? energySums([day]) : null };
-      };
-      const slots = Array.from({ length: n }, (_, i) => slot(i, false));
-      // The window plus up to a window's worth of neighbours either side
-      // (never past today), drawn off-plot so a drag slides them in.
-      const p = energyPad(), panSlots = [];
-      for (let i = -p; i < n + p; i++) {
-        if (i >= 0 && i < n) { panSlots.push(slots[i]); continue; }
-        const s = slot(i, true);
-        if (en.today && s.date > en.today) break;
-        panSlots.push(s);
+      en.selected = en.selected === date ? null : date;
+      render();
+      if (!en.selected) return;
+      $(".en-detail")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      // Today's runs keep growing; older days are fixed once loaded.
+      const cached = en.runs[date], today = en.data?.days?.find(d => d.date === date)?.final === false;
+      if (!cached || cached.error || (today && Date.now() - cached.loadedAt > 60000)) {
+        await loadEnergyRuns(date);
+        if (state.route === "energy" && en.selected === date) render();
       }
-      const slotW = plotW / n;
-      const barW = Math.max(1, Math.min(32, slotW * (n > 60 ? 0.78 : 0.62)));
-      const cx = i => plotL + (i + 0.5) * slotW;
-      // Axes fit the window only, so they hold still while dragging.
-      const axis = energyNiceAxis(Math.max(0, ...slots.map(s => (s.sums?.total || 0) / 1000)));
-      const mapY = kwh => Math.max(barT, barB - kwh / axis.hi * barH);
-
-      let svg = `<svg class="en-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Daily energy chart">`;
-      svg += `<defs><clipPath id="en-pan-clip"><rect x="${plotL}" y="0" width="${plotW}" height="${copB + 4}"/></clipPath>` +
-        `<clipPath id="en-label-clip"><rect x="0" y="${copB + 2}" width="${W}" height="${B}"/></clipPath></defs>`;
-      let pan = "";
-      svg += `<text x="${plotL - 8}" y="${barT - 10}" text-anchor="end" class="hist-axis">kWh</text>`;
-      for (let v = 0; v <= axis.hi + 1e-9; v += axis.step) {
-        const y = mapY(v);
-        svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.7"/>`;
-        svg += `<text x="${plotL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="hist-axis">${+v.toFixed(1)}</text>`;
-      }
-      const selected = panSlots.find(s => s.date === en.selected);
-      if (selected) pan += `<rect class="en-selected" x="${(plotL + selected.i * slotW).toFixed(1)}" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="var(--cp-accent)" opacity="0.14" rx="3"/>`;
-      svg += `<rect class="en-hover" x="0" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="var(--cp-text-muted)" opacity="0.1" rx="3" pointer-events="none" style="display:none"/>`;
-
-      // Bars stacked by mode. The unit meters power in 100 W steps, so idle draw
-      // reads as 0 and there is no standby segment.
-      panSlots.forEach(s => {
-        if (!s.day) return;
-        const e = s.day.electrical_wh || {};
-        const parts = ENERGY_MODES.map(([m, , color]) => [e[m] || 0, color]);
-        let acc = 0;
-        const x = (cx(s.i) - barW / 2).toFixed(1);
-        for (const [wh, color] of parts) {
-          if (wh <= 0) continue;
-          const y1 = mapY((acc + wh) / 1000), y0 = mapY(acc / 1000);
-          pan += `<rect class="en-bar" x="${x}" y="${y1.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0.5, y0 - y1).toFixed(1)}" fill="${color}"/>`;
-          acc += wh;
-        }
-        if (s.day.final === false && acc > 0) {
-          pan += `<rect x="${x}" y="${mapY(acc / 1000).toFixed(1)}" width="${barW.toFixed(1)}" height="${(barB - mapY(acc / 1000)).toFixed(1)}" fill="none" stroke="var(--cp-text-muted)" stroke-width="1" stroke-dasharray="3 2"/>`;
-        }
-      });
-
-      // Estimated COP strip under the bars, on its own axis.
-      const known = slots.map(s => s.sums?.cop ?? null).filter(c => c !== null);
-      svg += `<text x="${plotL - 8}" y="${(copT + copH / 2 + 4).toFixed(1)}" text-anchor="end" class="hist-axis">COP</text>`;
-      if (known.length) {
-        let lo = Math.floor(Math.min(...known)), hi = Math.ceil(Math.max(...known));
-        if (hi - lo < 1) hi = lo + 1;
-        const mapC = c => copB - (Math.max(lo, Math.min(hi, c)) - lo) / (hi - lo) * copH;
-        const step = hi - lo <= 4 ? 1 : Math.ceil((hi - lo) / 4);
-        for (let v = lo; v <= hi; v += step) {
-          const y = mapC(v);
-          svg += `<line x1="${plotL}" y1="${y.toFixed(1)}" x2="${plotR}" y2="${y.toFixed(1)}" stroke="var(--cp-border)" stroke-width="1" opacity="0.5"/>`;
-          // Only the ends are labelled; the middle of the axis carries the title.
-          if (v === lo || v + step > hi) svg += `<text x="${plotL - 8}" y="${(y + (v === lo ? 0 : 8)).toFixed(1)}" text-anchor="end" class="hist-axis">${v}</text>`;
-        }
-        let d = "", pen = false;
-        panSlots.forEach(s => {
-          const c = s.sums?.cop ?? null;
-          if (c === null) { pen = false; return; }
-          d += `${pen ? "L" : "M"}${cx(s.i).toFixed(1)} ${mapC(c).toFixed(1)}`; pen = true;
-        });
-        pan += `<path d="${d}" fill="none" stroke="var(--hist-set)" stroke-width="1.5" opacity="0.55"/>`;
-        const r = n > 90 ? 2 : 3;
-        panSlots.forEach(s => {
-          const c = s.sums?.cop ?? null;
-          if (c !== null) pan += `<circle class="en-cop" cx="${cx(s.i).toFixed(1)}" cy="${mapC(c).toFixed(1)}" r="${r}" fill="var(--hist-set)"/>`;
-        });
-      } else {
-        svg += `<line x1="${plotL}" y1="${copB}" x2="${plotR}" y2="${copB}" stroke="var(--cp-border)" stroke-width="1" opacity="0.5"/>`;
-        svg += `<text x="${(plotL + plotR) / 2}" y="${(copT + copB) / 2 + 4}" text-anchor="middle" class="hist-axis">No COP estimate in this range</text>`;
-      }
-      svg += `<g clip-path="url(#en-pan-clip)"><g class="en-pan">${pan}</g></g>`;
-
-      // Date labels, spaced out and anchored on the newest day; the year view
-      // labels month starts instead.
-      const minGap = narrow ? 52 : 64;
-      // The newest day's label is end-anchored so it isn't clipped; the
-      // neighbours' labels only show while dragging.
-      const dateLabel = (i, text) => {
-        const edge = i === n - 1 && cx(i) + 24 > W, out = i < 0 || i >= n ? " en-label-out" : "";
-        return `<text x="${(edge ? W - 2 : cx(i)).toFixed(1)}" y="${copB + 18}" text-anchor="${edge ? "end" : "middle"}" class="hist-axis${out}">${text}</text>`;
-      };
-      let labels = "";
-      if (n > 90) {
-        let lastX = -Infinity;
-        panSlots.forEach(s => {
-          if (!s.date.endsWith("-01") || cx(s.i) - lastX < minGap * 0.7) return;
-          lastX = cx(s.i);
-          labels += dateLabel(s.i, MONTH_SHORT[+s.date.slice(5, 7) - 1]);
-        });
-      } else {
-        const every = Math.max(1, Math.ceil(minGap / slotW));
-        panSlots.forEach(s => { if ((n - 1 - s.i) % every === 0) labels += dateLabel(s.i, fmtDay(s.date)); });
-      }
-      svg += `<g clip-path="url(#en-label-clip)"><g class="en-pan">${labels}</g></g>`;
-
-      // One full-height target per day with data, so a tap anywhere in the
-      // column (not just on a thin bar) opens that day.
-      slots.forEach((s, i) => {
-        if (s.day) svg += `<rect class="en-hit" data-action="energy-day" data-date="${s.date}" x="${(plotL + i * slotW).toFixed(1)}" y="${barT}" width="${slotW.toFixed(1)}" height="${copB - barT}" fill="transparent"/>`;
-      });
-      enGeom = { W, plotL, plotR, slotW, slots };
-      svg += `</svg>`;
-      return svg;
-    }
-    function energyRedrawChart() {
-      const old = $(".en-chart-wrap .en-chart"), data = state.energy.data;
-      if (old && data) old.outerHTML = energyChartSvg(data);
-    }
-    function energyFitChart() {
-      const wrap = $(".en-chart-wrap"), old = wrap?.querySelector(".en-chart"), data = state.energy.data;
-      if (!old || !data) return;
-      const w = Math.round(wrap.clientWidth);
-      if (!w || (enGeom && enGeom.W === Math.max(280, w))) return;
-      state.energy.chartW = w;
-      old.outerHTML = energyChartSvg(data);
-    }
-    function energyTipHtml(day) {
-      const s = energySums([day]), e = day.electrical_wh || {};
-      const row = (color, label, value) => `<div><i class="band" style="background:${color}"></i>${label} <strong>${value}</strong></div>`;
-      return `<div class="hist-tip-time">${esc(fmtDay(day.date, true))}${day.final === false ? " · so far" : ""}</div>
-        <div>Total <strong>${fmtKwh(s.total)}</strong></div>` +
-        ENERGY_MODES.filter(([m]) => e[m] > 0).map(([m, label, color]) => row(color, label, fmtKwh(e[m]))).join("") +
-        (s.cop !== null ? `<div>COP (est.) <strong>${s.cop.toFixed(1)}</strong></div>` : "") +
-        (day.outdoor_c ? (day.outdoor_c.run_avg != null ? `<div>Outdoor while running <strong>${temp(day.outdoor_c.run_avg)}</strong></div>` : "") +
-          `<div>Outdoor day avg <strong>${temp(day.outdoor_c.avg)}</strong></div>` : "");
-    }
-    function energyHover(event) {
-      const svg = event.target.closest?.(".en-chart"), wrap = svg?.closest(".en-chart-wrap");
-      const hide = () => document.querySelectorAll(".en-chart-wrap .hist-tip, .en-hover").forEach(el => { el.style.display = "none"; });
-      if (!svg || !wrap || !enGeom || svg.classList.contains("dragging")) { hide(); return; }
-      const g = enGeom, rect = svg.getBoundingClientRect();
-      const vx = (event.clientX - rect.left) / rect.width * g.W;
-      const i = Math.floor((vx - g.plotL) / g.slotW);
-      const slot = vx >= g.plotL && vx <= g.plotR ? g.slots[i] : null;
-      if (!slot?.day) { hide(); return; }
-      const hover = svg.querySelector(".en-hover");
-      hover.setAttribute("x", (g.plotL + i * g.slotW).toFixed(1));
-      hover.style.display = "";
-      const tip = wrap.querySelector(".hist-tip");
-      tip.innerHTML = energyTipHtml(slot.day);
-      tip.style.display = "block";
-      const px = (g.plotL + (i + 0.5) * g.slotW) / g.W * rect.width;
-      const left = px + 14 + tip.offsetWidth > rect.width ? px - 14 - tip.offsetWidth : px + 14;
-      tip.style.left = `${Math.max(0, left)}px`;
-    }
-    // Drag pans by whole days, as on the device: neighbouring bars slide in,
-    // the axes hold still, and the release snaps to the nearest day.
-    let enDrag = null, enSuppressClick = false;
-    const enDayPx = svg => enGeom.slotW * svg.getBoundingClientRect().width / enGeom.W;
-    function energyPanPreview(svg, dx) {
-      const units = dx * enGeom.W / svg.getBoundingClientRect().width;
-      svg.querySelectorAll(".en-pan").forEach(g => {
-        if (dx) g.setAttribute("transform", `translate(${units.toFixed(1)} 0)`);
-        else g.removeAttribute("transform");
-      });
-    }
-    // Forward to today, back to the oldest stored day.
-    function energyPanLimits(svg) {
-      const en = state.energy, d = en.data, px = enDayPx(svg);
-      const fwd = en.to && en.today ? Math.max(0, dayDiff(d.to, en.today)) : 0;
-      const back = en.since ? Math.max(0, dayDiff(en.since, d.from)) : 0;
-      return { min: -fwd * px, max: back * px };
-    }
-    function energyDragStart(event) {
-      enSuppressClick = false;
-      const svg = event.target.closest?.(".en-chart");
-      if (!svg || !enGeom || !state.energy.data || state.energy.loading || !event.isPrimary) return;
-      const touch = event.pointerType !== "mouse";
-      if (!touch && event.button !== 0) return;
-      enDrag = { svg, x0: event.clientX, dx: 0, eff: 0, moved: false, touch };
-    }
-    function energyDragMove(event) {
-      if (!enDrag || !event.isPrimary) return;
-      enDrag.dx = event.clientX - enDrag.x0;
-      if (!enDrag.moved && Math.abs(enDrag.dx) < (enDrag.touch ? 10 : 5)) return;
-      if (!enDrag.moved) {
-        enDrag.moved = true;
-        enDrag.svg.classList.add("dragging");
-        document.querySelectorAll(".en-chart-wrap .hist-tip, .en-hover").forEach(el => { el.style.display = "none"; });
-      }
-      energyPanPreview(enDrag.svg, enDrag.eff = histRubber(enDrag.dx, enDrag.lim ||= energyPanLimits(enDrag.svg)));
-    }
-    // Ease from `from` to `to` px; back at rest the chart is interactive again.
-    function energySpring(svg, from, to) {
-      const t0 = performance.now(), ms = 180;
-      const step = now => {
-        if (!svg.isConnected || enDrag?.svg === svg) return;
-        const k = Math.min(1, (now - t0) / ms), r = (1 - k) * (1 - k);
-        energyPanPreview(svg, to + (from - to) * r);
-        if (k < 1) requestAnimationFrame(step);
-        else if (!to) svg.classList.remove("dragging");
-      };
-      requestAnimationFrame(step);
-    }
-    function energyDragEnd(event) {
-      const drag = enDrag, d = state.energy.data;
-      if (!drag || !event.isPrimary) return;
-      enDrag = null;
-      if (!drag.moved || !d || !enGeom) return;
-      // The browser took the gesture (e.g. a page scroll): put the chart back.
-      if (event.type === "pointercancel") { energyPanPreview(drag.svg, 0); drag.svg.classList.remove("dragging"); return; }
-      enSuppressClick = true;
-      const px = enDayPx(drag.svg), lim = drag.lim || energyPanLimits(drag.svg);
-      const steps = Math.round(Math.max(lim.min, Math.min(lim.max, drag.dx)) / px);
-      energySpring(drag.svg, drag.eff, steps * px);
-      if (steps) energyGoto(dayAdd(d.to, -steps)).catch(toastUnlessShown);
     }
     function energyStat(label, value, sub = "") {
       return `<div class="en-stat"><span>${esc(label)}</span><strong>${value}</strong>${sub ? `<small>${sub}</small>` : ""}</div>`;
@@ -3640,7 +3146,7 @@
             ${ENERGY_MODES.map(([, label, color]) => `<span><i class="band" style="background:${color}"></i>${label}</span>`).join("")}
             <span><i class="dot" style="background:var(--hist-set)"></i>COP (est.)</span>
           </div>
-          <div class="en-chart-wrap">${energyChartSvg(data)}<div class="hist-tip"></div></div>
+          <div class="en-chart-host"></div>
           <div class="hist-nav">
             <button class="btn" data-action="energy-prev" ${atOldest ? "disabled" : ""}>‹ ${rangeLabel}</button>
             <button class="btn" data-action="energy-next" ${atLatest ? "disabled" : ""}>${rangeLabel} ›</button>
@@ -3672,9 +3178,9 @@
         history: historyPage, energy: energyPage, faults: faultsPage, settings: settingsPage };
       updateDocumentTitle();
       $("#app").innerHTML = shell((pages[state.route] || homePage)());
-      if (state.route === "home") homeChartLayout();
-      if (state.route === "history") histFitChart();
-      if (state.route === "energy") energyFitChart();
+      if (state.route === "home") homeMount();
+      if (state.route === "history") histMount();
+      if (state.route === "energy") energyMount();
       perfSyncSaves();
       gateInit();
       if (state.settingsPage === "diagnostics") {
@@ -4598,32 +4104,14 @@
           // Keep the window's end, so zooming from the live view stays live.
           state.histWindow = w;
           localStorage.setItem("arcticHistWindow", String(w));
-          await loadHistory(0.5); render();
+          await histGoto(histTargetEnd());
         }
-      }
-      if (action === "history-power") {
-        state.histShowPower = !state.histShowPower;
-        localStorage.setItem("arcticHistPower", state.histShowPower ? "1" : "0");
-        render();
       }
       if (action === "energy-latest") await energyGoto(null);
       if (action === "energy-range") { state.energy.range = Number(el.dataset.range); await loadEnergy(); render(); }
       if (action === "energy-prev") { const d = state.energy.data; if (d) await energyGoto(dayAdd(d.from, -1)); }
       if (action === "energy-next") { const d = state.energy.data; if (d) await energyGoto(dayAdd(d.to, state.energy.range)); }
       if (action === "energy-close") { state.energy.selected = null; render(); }
-      if (action === "energy-day") {
-        const en = state.energy, date = el.dataset.date;
-        en.selected = en.selected === date ? null : date;
-        render();
-        if (!en.selected) return;
-        $(".en-detail")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        // Today's runs keep growing; older days are fixed once loaded.
-        const cached = en.runs[date], today = en.data?.days?.find(d => d.date === date)?.final === false;
-        if (!cached || cached.error || (today && Date.now() - cached.loadedAt > 60000)) {
-          await loadEnergyRuns(date);
-          if (state.route === "energy" && en.selected === date) render();
-        }
-      }
       if (action === "energy-view") { state.tempHistory.end = Number(el.dataset.t); await navigate("history"); }
       if (action === "fault-view") { state.tempHistory.end = Number(el.dataset.end); await navigate("history"); }
       if (action === "load-more-events") { await loadEvents(false); render(); }
@@ -4978,30 +4466,6 @@
       document.addEventListener(name, event => {
         if (event.target.closest?.('[data-action="power-hold"]')) cancelPowerHold();
       }));
-    document.addEventListener("pointermove", histHover);
-    document.addEventListener("pointerleave", histHover);
-    document.addEventListener("pointermove", energyHover);
-    document.addEventListener("dblclick", histDoubleClick);
-    document.addEventListener("pointerdown", histDragStart);
-    document.addEventListener("pointermove", histDragMove);
-    document.addEventListener("pointerup", histDragEnd);
-    document.addEventListener("pointercancel", histDragEnd);
-    document.addEventListener("pointerdown", energyDragStart);
-    document.addEventListener("pointermove", energyDragMove);
-    document.addEventListener("pointerup", energyDragEnd);
-    document.addEventListener("pointercancel", energyDragEnd);
-    // The click that ends a drag doesn't open a day.
-    document.addEventListener("click", event => {
-      if (!enSuppressClick) return;
-      enSuppressClick = false;
-      if (event.target.closest?.(".en-chart")) { event.stopImmediatePropagation(); event.preventDefault(); }
-    }, true);
-    // Holding a finger on the chart scrubs; don't pop the long-press menu.
-    document.addEventListener("contextmenu", event => {
-      if (histDrag?.touch && event.target.closest?.(".hist-chart")) event.preventDefault();
-    });
-    document.addEventListener("pointermove", homeHover);
-    document.addEventListener("pointerdown", homeHover);
     document.addEventListener("input", event => {
       if (event.target.id === "event-search") {
         state.eventFilters.search = event.target.value;

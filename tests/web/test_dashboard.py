@@ -85,19 +85,21 @@ class TestHome:
         expect(strip).to_be_visible()
         assert re.search(r"Running|Last run", strip.inner_text())
 
+    BODY = "[data-home-chart] .tschart-body"
+
     def test_chart_renders(self, dashboard_page: Page):
-        chart = dashboard_page.locator("[data-home-chart] .hc-area")
-        expect(chart).to_be_visible(timeout=15000)
-        labels = dashboard_page.locator(".hc-y").all_inner_texts()
-        assert len(labels) == 5 and all(label.endswith("°") for label in labels), labels
-        expect(dashboard_page.locator(".hc-x").last).to_have_text("now")
+        expect(dashboard_page.locator(self.BODY)).to_be_visible(timeout=15000)
+        labels = dashboard_page.locator("[data-home-chart] .tschart-axis-out text")
+        expect(labels).to_have_count(5)
+        assert all(label.endswith("°") for label in labels.all_text_contents())
+        expect(dashboard_page.locator("[data-home-chart] .tschart-time").last).to_have_text("now")
 
     def test_chart_hover_tooltip(self, dashboard_page: Page):
-        area = dashboard_page.locator("[data-home-chart] .hc-area")
+        area = dashboard_page.locator(self.BODY)
         expect(area).to_be_visible(timeout=15000)
         box = area.bounding_box()
         dashboard_page.mouse.move(box["x"] + box["width"] * 0.95, box["y"] + box["height"] / 2)
-        tip = dashboard_page.locator("[data-home-chart] .hist-tip")
+        tip = dashboard_page.locator("[data-home-chart] .tschart-card")
         expect(tip).to_be_visible()
         expect(tip).to_contain_text("Tank")
 
@@ -118,15 +120,20 @@ class TestHome:
 
         dashboard_page.route("**/api/heatpump/home-history", patch)
         dashboard_page.reload(wait_until="domcontentloaded")
-        area = dashboard_page.locator("[data-home-chart] .hc-area")
+        area = dashboard_page.locator(self.BODY)
         expect(area).to_be_visible(timeout=15000)
-        expect(dashboard_page.locator(".hc-defrost")).to_have_count(1)
-        tip = dashboard_page.locator("[data-home-chart] .hist-tip")
+        expect(dashboard_page.locator("[data-home-chart] .tschart-span[data-key='defrost']")).to_have_count(1)
+        tip = dashboard_page.locator("[data-home-chart] .tschart-card")
+        plot = dashboard_page.locator("[data-home-chart] .tschart-time")
+        # Plot edges: the "4 h" label starts at the left edge, "now" ends at the right.
+        x0 = plot.first.bounding_box()["x"]
+        last = plot.last.bounding_box()
+        x1 = last["x"] + last["width"]
         box = area.bounding_box()
 
         def hover_at(t):
             frac = (t - span["start"]) / (span["end"] - span["start"])
-            dashboard_page.mouse.move(box["x"] + box["width"] * frac, box["y"] + box["height"] / 2)
+            dashboard_page.mouse.move(x0 + (x1 - x0) * frac, box["y"] + box["height"] / 2)
 
         hover_at(span["end"] - 1500)
         expect(tip).to_contain_text("Defrosting")
@@ -155,7 +162,7 @@ class TestHome:
 
     def test_mobile_stacks_hero_chart_tiles(self, dashboard_page: Page):
         dashboard_page.set_viewport_size({"width": 390, "height": 844})
-        expect(dashboard_page.locator("[data-home-chart] .hc-area")).to_be_visible(timeout=15000)
+        expect(dashboard_page.locator(self.BODY)).to_be_visible(timeout=15000)
         tops = [dashboard_page.locator(sel).bounding_box()["y"] for sel in (".home-hero", ".home-chart", ".tiles", ".home-strip")]
         assert tops == sorted(tops), tops
         width = dashboard_page.evaluate("() => document.documentElement.scrollWidth")

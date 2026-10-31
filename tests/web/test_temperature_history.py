@@ -1,4 +1,9 @@
-"""Web dashboard tests for the temperature history view."""
+"""Web dashboard tests for the temperature history view.
+
+The cycle chart is the shared tschart widget (components/tschart/web). Tests
+reach it through its DOM hooks (data-tschart-*, .tschart-*) and the page's
+`histChart.chart` instance for geometry.
+"""
 
 import re
 
@@ -9,6 +14,8 @@ from playwright.sync_api import Page, expect
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+CHART = ".hist-chart"
 
 
 def _seed_history(base_url: str) -> dict:
@@ -25,54 +32,75 @@ def _seed_history(base_url: str) -> dict:
 def _open_history(page: Page) -> None:
     page.locator(".rail .nav-link", has_text="Status").click()
     page.get_by_role("button", name="View cycle history").click()
-    page.wait_for_selector(".hist-chart", timeout=10000)
+    page.wait_for_selector(f"{CHART} .tschart-line", timeout=10000)
+
+
+def _settled(page: Page) -> None:
+    """Wait until no window is loading and the chart isn't moving."""
+    page.wait_for_function(
+        "histChart && !histChart.chart.pending && !histChart.chart.spring"
+        " && !histChart.chart.gesture && histChart.chart.dx === 0"
+        " && !state.tempHistory.loading"
+    )
 
 
 class TestTemperatureHistoryWeb:
     def test_history_view_renders_chart(self, dashboard_page: Page, base_url: str):
         _seed_history(base_url)
         _open_history(dashboard_page)
+        page = dashboard_page
 
-        expect(
-            dashboard_page.get_by_role("heading", name="History", exact=True)
-        ).to_be_visible()
-
-        # Inlet, outlet, and setpoint each draw a path.
-        assert dashboard_page.locator(".hist-chart path").count() >= 3
-        expect(
-            dashboard_page.locator(".hist-legend", has_text="Inlet")
-        ).to_be_visible()
-        expect(
-            dashboard_page.locator(".hist-legend", has_text="Setpoint")
-        ).to_be_visible()
+        expect(page.get_by_role("heading", name="History", exact=True)).to_be_visible()
+        for layer in ("outlet", "inlet", "setpoint"):
+            expect(page.locator(f'{CHART} [data-layer="{layer}"] .tschart-line')).to_have_count(1)
+        # Chips double as the legend; the key names the bands.
+        expect(page.locator(f'{CHART} [data-tschart-chip="temps"]')).to_have_text("Temps")
+        expect(page.locator(f'{CHART} [data-tschart-chip="power"]')).to_have_text("Power")
+        for key, text in (("heating", "Heating"), ("hot_water", "Hot water"),
+                          ("defrost", "Defrost"), ("fault", "Fault")):
+            expect(page.locator(f'{CHART} [data-tschart-key="{key}"]')).to_have_text(text)
+        # Latest values are tagged at the right edge.
+        expect(page.locator(f'{CHART} [data-tschart-tag="outlet"]')).to_contain_text("out")
 
     def test_axis_labels_are_whole_hours(self, dashboard_page: Page, base_url: str):
         _seed_history(base_url)
         _open_history(dashboard_page)
 
-        # SVG <text> nodes support textContent (not innerText), so use
-        # all_text_contents() which reads textContent.
-        labels = dashboard_page.locator(".hist-chart text.hist-axis").all_text_contents()
+        # SVG <text> nodes support textContent (not innerText).
+        labels = dashboard_page.locator(f"{CHART} text.tschart-time").all_text_contents()
+        assert labels, "expected time labels on the x-axis"
         # 24 h ticks read "14:00"; 12 h ticks read "2 PM".
-        clock_labels = [t for t in labels if t and (":" in t or t.endswith("M"))]
-        assert clock_labels, "expected time labels on the x-axis"
-        # Every x-axis time label is rounded to a whole hour.
-        assert all(re.fullmatch(r"\d{1,2}:00|\d{1,2} [AP]M", t) for t in clock_labels)
+        assert all(re.fullmatch(r"\d{1,2}:00|\d{1,2} [AP]M", t) for t in labels), labels
 
-    def test_temperature_labels_are_round_degrees(
+    def test_temperature_axis_opens_with_round_degrees(
         self, dashboard_page: Page, base_url: str
     ):
         _seed_history(base_url)
         _open_history(dashboard_page)
+        page = dashboard_page
+        pill = page.locator(f'{CHART} [data-tschart-pill="temps"]')
+        axis = page.locator(f"{CHART} text.tschart-axis")
+        expect(axis).to_have_count(0)
+        try:
+            pill.click()
+            expect(axis.first).to_be_visible()
+            temps = [t for t in axis.all_text_contents() if t.endswith("°")]
+            assert len(temps) >= 2, temps
+            # Whole degrees (not 4.6°, 14.4°...) at a round, even step.
+            assert all(re.fullmatch(r"-?\d+°", t) for t in temps), temps
+            values = [int(t[:-1]) for t in temps]
+            steps = {b - a for a, b in zip(values, values[1:])}
+            assert len(steps) == 1 and steps.pop() in {1, 2, 5, 10, 20, 50, 100}, values
 
-        labels = dashboard_page.locator(".hist-chart text.hist-axis").all_text_contents()
-        temps = [t for t in labels if t.endswith("°")]
-        assert len(temps) >= 2, f"expected y-axis temperature labels, got {labels}"
-        # Whole degrees (not 4.6°, 14.4°...) at a round, even step.
-        assert all(re.fullmatch(r"-?\d+°", t) for t in temps), temps
-        values = [int(t[:-1]) for t in temps]
-        steps = {b - a for a, b in zip(values, values[1:])}
-        assert len(steps) == 1 and steps.pop() in {1, 2, 5, 10, 20, 50, 100}, values
+            # Open/closed is remembered.
+            page.reload()
+            page.wait_for_selector(".rail", timeout=15000)
+            _open_history(page)
+            expect(axis.first).to_be_visible()
+            pill.click()
+            expect(axis).to_have_count(0)
+        finally:
+            page.evaluate("localStorage.removeItem('arcticHistChart')")
 
     def test_history_navigation_shifts_window(
         self, dashboard_page: Page, base_url: str
@@ -99,34 +127,31 @@ class TestTemperatureHistoryWeb:
     ):
         _seed_history(base_url)
         _open_history(dashboard_page)
+        page = dashboard_page
 
         def next_request_end(action):
-            with dashboard_page.expect_request(
+            with page.expect_request(
                 lambda r: "/api/heatpump/temperature-history" in r.url, timeout=10000
             ) as req:
                 action()
             m = re.search(r"end=(\d+)", req.value.url)
             return int(m.group(1)) if m else None
 
-        latest_end = dashboard_page.evaluate("state.tempHistory.data.latest_end")
+        latest_end = page.evaluate("state.tempHistory.data.latest_end")
         back = next_request_end(
-            lambda: dashboard_page.locator('[data-action="history-back-hour"]').click()
+            lambda: page.locator('[data-action="history-back-hour"]').click()
         )
         assert back == latest_end - 3600
-        dashboard_page.wait_for_function(
-            f"state.tempHistory.data && state.tempHistory.data.end === {back}"
-        )
+        page.wait_for_function(f"state.tempHistory.data?.end === {back}")
+        _settled(page)
 
         # Double-clicking a moment centres the 8 h window on it (15 min snap).
-        chart = dashboard_page.locator(".hist-chart")
-        box = chart.bounding_box()
-        t = dashboard_page.evaluate(
-            "([x]) => histTimeAt(document.querySelector('.hist-chart'), x)",
-            [box["x"] + box["width"] * 0.3],
+        x, y = _plot_point(page, 0.3)
+        t = page.evaluate(
+            "x => histChart.chart.timeAtX(x - histChart.chart.body.getBoundingClientRect().left)",
+            x,
         )
-        centred = next_request_end(
-            lambda: chart.dblclick(position={"x": box["width"] * 0.3, "y": box["height"] / 2})
-        )
+        centred = next_request_end(lambda: page.mouse.dblclick(x, y))
         assert centred is not None
         assert abs(centred - (t + 4 * 3600)) <= 450
         assert centred % 900 == 0
@@ -154,8 +179,12 @@ class TestTemperatureHistoryWeb:
             page.wait_for_function(
                 "state.tempHistory.data && state.tempHistory.data.window_seconds === 3600"
             )
+            _settled(page)
             data = page.evaluate("state.tempHistory.data")
             assert data["end"] - data["start"] == 3600
+            assert page.evaluate("histChart.chart.getWindow()") == {
+                "start": data["start"], "end": data["end"]
+            }
             expect(page.locator('.hist-zoom [data-window="3600"]')).to_have_attribute(
                 "aria-pressed", "true"
             )
@@ -163,9 +192,8 @@ class TestTemperatureHistoryWeb:
             expect(page.locator('[data-action="history-prev"]')).to_have_text("‹ 1 h")
             expect(page.locator('[data-action="history-back-hour"]')).to_have_text("‹ 15 min")
             # Gridlines every 15 minutes, on the quarter hour.
-            labels = page.locator(".hist-chart text.hist-axis").all_text_contents()
-            clock = [t for t in labels if t and (":" in t or t.endswith("M"))]
-            assert len(clock) >= 4, labels
+            clock = page.locator(f"{CHART} text.tschart-time").all_text_contents()
+            assert len(clock) >= 4, clock
             assert all(
                 re.fullmatch(r"\d{1,2}:(00|15|30|45)( [AP]M)?|\d{1,2} [AP]M", t)
                 for t in clock
@@ -200,9 +228,9 @@ class TestTemperatureHistoryWeb:
         width = dashboard_page.evaluate("() => document.documentElement.scrollWidth")
         assert width <= 390, width
 
-    def test_tooltip_names_the_operating_state(self, dashboard_page: Page, base_url: str):
-        """The history tooltip says what the unit was doing, like the home
-        chart's: a defrost (outside every run) reads Defrosting, not Idle."""
+    def test_card_names_the_operating_state(self, dashboard_page: Page, base_url: str):
+        """The hover card says what the unit was doing, like the home chart's:
+        a defrost (outside every run) reads Defrosting, not Idle."""
         _seed_history(base_url)
 
         def patch(route):
@@ -220,23 +248,26 @@ class TestTemperatureHistoryWeb:
 
         dashboard_page.route("**/api/heatpump/temperature-history*", patch)
         _open_history(dashboard_page)
-        tip = dashboard_page.locator(".hist-chart-wrap .hist-tip")
+        _settled(dashboard_page)
+        card = dashboard_page.locator(f"{CHART} [data-tschart-card]")
         end = dashboard_page.evaluate("state.tempHistory.data.end")
-
-        def hover_at(t):
-            x = dashboard_page.evaluate(
-                """t => { const svg = document.querySelector('.hist-chart'),
-                    r = svg.getBoundingClientRect();
-                  return r.left + histGeom.mapX(t) / histGeom.W * r.width; }""",
-                t,
-            )
-            box = dashboard_page.locator(".hist-chart").bounding_box()
-            dashboard_page.mouse.move(x, box["y"] + box["height"] / 2)
+        _, y = _plot_point(dashboard_page, 0.5)
 
         for age, text in ((2700, "Heating"), (1500, "Defrosting"), (900, "Hot water"),
                           (300, "Idle")):
-            hover_at(end - age)
-            expect(tip.locator(".hist-tip-state")).to_have_text(text)
+            x = dashboard_page.evaluate(
+                "t => histChart.chart.body.getBoundingClientRect().left + histChart.chart.xAt(t)",
+                end - age,
+            )
+            dashboard_page.mouse.move(x, y)
+            expect(card.locator(".tschart-row.block .l")).to_have_text(text)
+            # The series values follow.
+            expect(card.locator(".tschart-row.value", has_text="Outlet")).to_be_visible()
+
+        # Leaving the chart puts the end tags back.
+        dashboard_page.mouse.move(0, 0)
+        expect(card).to_have_count(0)
+        expect(dashboard_page.locator(f'{CHART} [data-tschart-tag="outlet"]')).to_be_visible()
 
     def test_latest_window_refreshes_live(self, dashboard_page: Page, base_url: str):
         _seed_history(base_url)
@@ -260,7 +291,7 @@ class TestTemperatureHistoryWeb:
         with dashboard_page.expect_request(is_history, timeout=10000) as reload:
             dashboard_page.clock.fast_forward(40_000)
         assert "end=" not in reload.value.url
-        expect(dashboard_page.locator(".hist-chart")).to_be_visible()
+        expect(dashboard_page.locator(CHART)).to_be_visible()
 
         # Paged back to an older window: it stays put.
         dashboard_page.locator('[data-action="history-prev"]').click()
@@ -275,34 +306,37 @@ class TestTemperatureHistoryWeb:
         dashboard_page.reload()
         dashboard_page.wait_for_selector(".rail", timeout=15000)
         _open_history(dashboard_page)
+        page = dashboard_page
 
         def touch(kind: str, frac: float) -> None:
-            dashboard_page.evaluate(
+            page.evaluate(
                 """([kind, frac]) => {
-                  const svg = document.querySelector('.hist-chart'), r = svg.getBoundingClientRect();
-                  svg.dispatchEvent(new PointerEvent(kind, { bubbles: true, isPrimary: true,
-                    pointerType: 'touch', clientX: r.left + frac * r.width,
-                    clientY: r.top + r.height / 2 }));
+                  const c = histChart.chart, p = c.getPlotArea(), r = c.body.getBoundingClientRect();
+                  c.body.dispatchEvent(new PointerEvent(kind, { bubbles: true, isPrimary: true,
+                    pointerId: 7, pointerType: 'touch',
+                    clientX: r.left + p.x1 + frac * (p.x2 - p.x1),
+                    clientY: r.top + (p.y1 + p.y2) / 2 }));
                 }""",
                 [kind, frac],
             )
 
         # Hold past the long-press time, then drag: the readout follows.
         touch("pointerdown", 0.3)
-        dashboard_page.clock.fast_forward(600)
+        page.clock.fast_forward(600)
         touch("pointermove", 0.45)
         touch("pointermove", 0.7)
-        expect(dashboard_page.locator(".hist-chart-wrap .hist-tip")).to_be_visible()
+        expect(page.locator(f"{CHART} [data-tschart-card]")).to_be_visible()
         touch("pointerup", 0.7)
-        assert dashboard_page.evaluate("state.tempHistory.end") is None
+        assert page.evaluate("state.tempHistory.end") is None
+        assert page.evaluate("histChart.chart.pending") is None
 
         # Quick drag right: pans back in time.
         touch("pointerdown", 0.3)
         touch("pointermove", 0.45)
         touch("pointermove", 0.7)
         touch("pointerup", 0.7)
-        assert dashboard_page.evaluate("state.tempHistory.end") is not None
-        expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
+        assert page.evaluate("state.tempHistory.end") is not None
+        expect(page.locator('[data-action="history-latest"]')).to_be_enabled()
 
     def test_drag_past_now_rubber_bands_and_springs_back(
         self, dashboard_page: Page, base_url: str
@@ -312,6 +346,7 @@ class TestTemperatureHistoryWeb:
         without loading anything."""
         _seed_history(base_url)
         _open_history(dashboard_page)
+        _settled(dashboard_page)
         loads = []
         dashboard_page.on(
             "request",
@@ -322,15 +357,12 @@ class TestTemperatureHistoryWeb:
         dashboard_page.mouse.move(x, y)
         dashboard_page.mouse.down()
         dashboard_page.mouse.move(x - 240, y, steps=6)
-        shift = _pan_shift_px(dashboard_page)
+        shift = dashboard_page.evaluate("histChart.chart.dx")
         assert -120 < shift < -60, shift
-        expect(dashboard_page.locator(".hist-chart .hist-edge", has_text="Now")).to_be_visible()
+        expect(dashboard_page.locator(f'{CHART} [data-tschart-edge="after"]')).to_have_text("Now")
         dashboard_page.mouse.up()
 
-        dashboard_page.wait_for_function(
-            "!document.querySelector('.hist-chart .hist-pan[transform]')"
-            " && !document.querySelector('.hist-chart.dragging')"
-        )
+        _settled(dashboard_page)
         assert not loads, loads
         assert dashboard_page.evaluate("state.tempHistory.end") is None
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_disabled()
@@ -350,6 +382,7 @@ class TestTemperatureHistoryWeb:
 
         dashboard_page.route("**/api/heatpump/temperature-history*", patch)
         _open_history(dashboard_page)
+        _settled(dashboard_page)
         expect(dashboard_page.locator('[data-action="history-prev"]')).to_be_disabled()
         end = dashboard_page.evaluate("state.tempHistory.data.end")
 
@@ -357,16 +390,14 @@ class TestTemperatureHistoryWeb:
         dashboard_page.mouse.move(x, y)
         dashboard_page.mouse.down()
         dashboard_page.mouse.move(x + 240, y, steps=6)
-        shift = _pan_shift_px(dashboard_page)
+        shift = dashboard_page.evaluate("histChart.chart.dx")
         assert 60 < shift < 120, shift
         expect(
-            dashboard_page.locator(".hist-chart .hist-edge", has_text="Start of history")
-        ).to_be_visible()
+            dashboard_page.locator(f'{CHART} [data-tschart-edge="before"]')
+        ).to_have_text("Start of history")
         dashboard_page.mouse.up()
 
-        dashboard_page.wait_for_function(
-            "!document.querySelector('.hist-chart .hist-pan[transform]')"
-        )
+        _settled(dashboard_page)
         assert dashboard_page.evaluate("state.tempHistory.data.end") == end
         expect(dashboard_page.locator('[data-action="history-prev"]')).to_be_disabled()
 
@@ -384,10 +415,13 @@ class TestTemperatureHistoryWeb:
             route.fulfill(response=resp, json=body)
 
         dashboard_page.route("**/api/heatpump/temperature-history*", empty)
-        _open_history(dashboard_page)
+        dashboard_page.locator(".rail .nav-link", has_text="Status").click()
+        dashboard_page.get_by_role("button", name="View cycle history").click()
         page = dashboard_page.locator(".page")
-        expect(page.locator(".hist-chart")).to_be_visible()
-        expect(page.locator(".hist-empty")).to_have_text("No samples in this window")
+        expect(page.locator(CHART)).to_be_visible()
+        expect(page.locator(f'{CHART} [data-tschart-status="empty"]')).to_have_text(
+            "No samples in this window"
+        )
         expect(page).not_to_contain_text("No cycle history recorded yet")
         expect(page.locator('[data-action="history-prev"]')).to_be_enabled()
 
@@ -396,6 +430,7 @@ class TestTemperatureHistoryWeb:
         page.locator('[data-action="history-prev"]').click()
         dashboard_page.wait_for_function(f"state.tempHistory.data.end < {end}")
         expect(page.locator('[data-action="history-latest"]')).to_be_visible()
+        expect(page.locator(f"{CHART} [data-tschart-status]")).to_have_count(0)
 
     def test_empty_history_shows_the_no_history_message(
         self, dashboard_page: Page, base_url: str
@@ -414,7 +449,7 @@ class TestTemperatureHistoryWeb:
         dashboard_page.locator(".rail .nav-link", has_text="Status").click()
         dashboard_page.get_by_role("button", name="View cycle history").click()
         expect(dashboard_page.locator(".page")).to_contain_text("No cycle history recorded yet")
-        expect(dashboard_page.locator(".hist-chart")).to_have_count(0)
+        expect(dashboard_page.locator(CHART)).to_have_count(0)
 
     def test_spinner_marks_the_revealed_strip(self, dashboard_page: Page, base_url: str):
         """A slow load after a drag shows a spinner centred on the strip of
@@ -425,22 +460,28 @@ class TestTemperatureHistoryWeb:
         _gate_history_loads(dashboard_page)
 
         x, y = _plot_point(dashboard_page, 0.3)
-        plot = dashboard_page.evaluate(
-            """() => { const r = document.querySelector('.hist-chart').getBoundingClientRect(),
-                k = r.width / histGeom.W;
-              return { left: r.left + histGeom.plotL * k, width: (histGeom.plotR - histGeom.plotL) * k }; }"""
+        plot_w = dashboard_page.evaluate(
+            "(() => { const p = histChart.chart.getPlotArea(); return p.x2 - p.x1; })()"
         )
-        drag = plot["width"] / 4
+        drag = plot_w / 4
         dashboard_page.mouse.move(x, y)
         dashboard_page.mouse.down()
         dashboard_page.mouse.move(x + drag, y, steps=6)
         dashboard_page.mouse.up()
 
-        spin = dashboard_page.locator(".hist-chart-wrap .hist-spin")
+        # The release snaps to 5 min, so the strip is about the dragged width.
+        strip = dashboard_page.evaluate(
+            """() => { const c = histChart.chart, p = c.getPlotArea(), w = c.getWindow(),
+                q = c.pending, r = c.body.getBoundingClientRect();
+              const px = (w.start - q.start) * (p.x2 - p.x1) / (w.end - w.start);
+              return { left: r.left + p.x1, width: px }; }"""
+        )
+        assert abs(strip["width"] - drag) <= plot_w / 24 + 1, (strip, drag)
+        spin = dashboard_page.locator(f"{CHART} .tschart-spin")
         expect(spin).to_be_visible()
         box = spin.bounding_box()
         centre = box["x"] + box["width"] / 2
-        assert abs(centre - (plot["left"] + drag / 2)) < 4, (centre, plot, drag)
+        assert abs(centre - (strip["left"] + strip["width"] / 2)) < 4, (centre, strip)
 
         dashboard_page.evaluate("window.__openHistGate()")
         expect(spin).to_have_count(0)
@@ -463,37 +504,27 @@ class TestTemperatureHistoryWeb:
         dashboard_page.wait_for_function(
             f"state.tempHistory.data.end === {target} && !state.tempHistory.loading"
         )
+        _settled(dashboard_page)
+        assert dashboard_page.evaluate("histChart.chart.getWindow().end") == target
 
 
 def _plot_point(page: Page, frac: float) -> tuple[float, float]:
     """Client x/y at `frac` across the plot, half way down."""
     return tuple(
         page.evaluate(
-            """frac => { const r = document.querySelector('.hist-chart').getBoundingClientRect(),
-                k = r.width / histGeom.W;
-              return [r.left + (histGeom.plotL + frac * (histGeom.plotR - histGeom.plotL)) * k,
-                      r.top + (histGeom.plotT + histGeom.bottom) / 2 * k]; }""",
+            """frac => { const c = histChart.chart, p = c.getPlotArea(),
+                r = c.body.getBoundingClientRect();
+              return [r.left + p.x1 + frac * (p.x2 - p.x1), r.top + (p.y1 + p.y2) / 2]; }""",
             frac,
         )
-    )
-
-
-def _pan_shift_px(page: Page) -> float:
-    """How far (client px) the time content is currently dragged."""
-    return page.evaluate(
-        """() => { const svg = document.querySelector('.hist-chart'),
-            g = svg.querySelector('.hist-pan[transform]');
-          const m = g && /translate\\(([-\\d.]+)/.exec(g.getAttribute('transform'));
-          return m ? parseFloat(m[1]) * svg.getBoundingClientRect().width / histGeom.W : 0; }"""
     )
 
 
 def _zoom_1h(page: Page) -> None:
     """Zoom to 1 h (not remembered) so the 8 h fixture has room to page back."""
     page.locator('.hist-zoom [data-window="3600"]').click()
-    page.wait_for_function(
-        "state.tempHistory.data?.window_seconds === 3600 && !state.tempHistory.loading"
-    )
+    page.wait_for_function("state.tempHistory.data?.window_seconds === 3600")
+    _settled(page)
     page.evaluate("localStorage.removeItem('arcticHistWindow')")
 
 
@@ -536,25 +567,24 @@ class TestHistoryFaultMarkers:
             _post(base_url, "/api/test/clear-faults")
 
         _open_history(dashboard_page)
+        chart = dashboard_page.locator(CHART)
 
-        # A full-height red line at the fault onset, labelled with the code.
-        assert dashboard_page.locator(".hist-chart line.hist-fault").count() >= 1
-        labels = dashboard_page.locator(".hist-chart .hist-fault-label").all_text_contents()
-        assert any("P02" in t for t in labels)
+        # A hatched span from the fault onset, flagged by a coded note.
+        assert chart.locator('.tschart-spans[data-set="2"] .tschart-span.hatch').count() >= 1
+        labels = chart.locator(".tschart-note-label").all_text_contents()
+        assert any("P02" in t for t in labels), labels
         # The code sits in the strip above the plot, clear of the lines.
-        label_bottom = dashboard_page.locator(".hist-chart .hist-fault-label").first.evaluate(
+        label_bottom = chart.locator(".tschart-note-label").first.evaluate(
             "e => { const b = e.getBBox(); return b.y + b.height; }"
         )
-        plot_top = dashboard_page.locator(".hist-chart .hist-hover-line").evaluate(
-            "e => e.y1.baseVal.value"
-        )
+        plot_top = dashboard_page.evaluate("histChart.chart.getPlotArea().y1")
         assert label_bottom <= plot_top, (label_bottom, plot_top)
-        # No fault line runs through a label in the strip.
-        crossings = dashboard_page.locator(".hist-chart").evaluate(
+        # No note line runs through a label in the strip.
+        crossings = chart.locator("svg.tschart-svg").evaluate(
             """svg => {
-              const labels = [...svg.querySelectorAll('.hist-fault-label')].map(e => e.getBBox());
+              const labels = [...svg.querySelectorAll('.tschart-note-label')].map(e => e.getBBox());
               const out = [];
-              for (const l of svg.querySelectorAll('line.hist-fault')) {
+              for (const l of svg.querySelectorAll('.tschart-note line')) {
                 const x = l.x1.baseVal.value, top = l.y1.baseVal.value;
                 for (const b of labels)
                   if (x >= b.x && x <= b.x + b.width && top < b.y + b.height) out.push([x, b.x, b.width]);
@@ -563,4 +593,4 @@ class TestHistoryFaultMarkers:
             }"""
         )
         assert crossings == [], crossings
-        expect(dashboard_page.locator(".hist-legend", has_text="Fault")).to_be_visible()
+        expect(chart.locator('[data-tschart-key="fault"]')).to_be_visible()

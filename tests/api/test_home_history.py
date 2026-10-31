@@ -44,7 +44,7 @@ def test_openapi_documents_home_history():
 
 def test_web_home_mirrors_device_home():
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
-    for name in ("homePage", "homeHeroState", "loadHomeHistory", "homeChart", "homeChartLayout", "homeHover"):
+    for name in ("homePage", "homeHeroState", "loadHomeHistory", "homeChart", "homeCreate", "homeMount", "homeSync"):
         assert f"function {name}(" in web, name
     assert '"/api/heatpump/home-history"' in web
     assert "home: homePage" in web or "home: () => homePage" in web

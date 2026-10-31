@@ -115,12 +115,15 @@ def test_energy_run_opens_cycles_and_power_view(device: DeviceClient):
         device.click(tag="history_seg_cycles")
         device.wait_for_widget(tag="temperature_history_screen")
 
-    device.click(tag="history_view_power")
+    # The power pane is on by default; its chip hides it and the window total.
+    chip = "temperature_history_chart_chip_power"
     device.wait_for_widget(tag="history_power_total")
-    device.click(tag="history_view_temps")
-    device.wait_until("power total hidden on the temperatures view",
+    device.click(tag=chip)
+    device.wait_until("power total hidden with the power pane",
                       lambda: not device.has_widget(tag="history_power_total"),
                       timeout=5.0)
+    device.click(tag=chip)
+    device.wait_for_widget(tag="history_power_total")
 
     device.click(tag="nav_home")
     assert device.wait_for_screen("main", timeout=5.0)
