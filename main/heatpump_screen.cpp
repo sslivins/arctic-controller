@@ -6,7 +6,6 @@
 
 #include "heatpump_screen.h"
 #include "app_preferences.h"
-#include "chart_fault_zone.h"
 #include "event_log_screen.h"
 #include "fault_history.h"
 #include "fonts/fonts.h"
@@ -23,9 +22,11 @@
 #include "nav_bar.h"
 #include "tab_shell.h"
 #include "time_manager.h"
+#include "tschart.h"
 #include "ui_common.h"
 #include <bsp/m5stack_tab5.h>
 #include <cassert>
+#include <esp_attr.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
@@ -88,8 +89,6 @@ static constexpr size_t CHART_MAX_DEFROSTS = 16;
 static constexpr size_t CHART_SAMPLE_CAP = 3600;  // 24 h at 30 s is 2880
 static constexpr uint32_t CHART_REFRESH_MS = 2 * 60 * 1000;
 static constexpr int32_t CHART_HEIGHT = 250;
-static constexpr int32_t CHART_TOP_H = 40;        // fault markers above the plot
-static constexpr int32_t CHART_AXIS_H = 30;       // time labels below the plot
 static constexpr int16_t AT_SETPOINT_MARGIN_C = 2;
 static constexpr uint16_t STARTS_WARN_PER_HOUR = 6;
 static constexpr int16_t DT_WARN_C = 3;
@@ -498,232 +497,194 @@ static void update_timer_cb(lv_timer_t*) {
 // Chart
 // ============================================================================
 
-static void fill_rect(lv_layer_t* layer, int32_t x1, int32_t y1, int32_t x2,
-                      int32_t y2, lv_color_t color, lv_opa_t opa,
-                      int32_t radius = 0) {
-    lv_draw_rect_dsc_t dsc;
-    lv_draw_rect_dsc_init(&dsc);
-    dsc.bg_color = color;
-    dsc.bg_opa = opa;
-    dsc.radius = radius;
-    dsc.border_width = 0;
-    lv_area_t area = {x1, y1, x2, y2};
-    lv_draw_rect(layer, &dsc, &area);
+// The 4-hour chart is a tschart with a fixed window: tank line, run,
+// defrost and fault bands, fault markers and the setpoint line. It takes no
+// input, so a tap still opens the cycle history.
+struct ChartSample {
+    uint32_t t;
+    int16_t tank;
+    uint8_t ok;
+};
+EXT_RAM_BSS_ATTR static ChartSample s_chart_samples[CHART_BUCKETS];
+static tschart_pane_t* s_chart_pane = nullptr;
+static tschart_source_t* s_chart_source = nullptr;
+// Setpoint line last handed to the chart.
+static struct {
+    bool valid;
+    int32_t deci;
+    bool fahrenheit;
+} s_chart_sp;
+
+static bool chart_fahrenheit(void) {
+    return app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT;
 }
 
-static lv_color_t run_color(uint8_t mode) {
-    // Matches the cycle-history legend.
+static int32_t chart_display_deci(int32_t deci_c, void*) {
+    return chart_fahrenheit() ? (deci_c * 9) / 5 + 320 : deci_c;
+}
+
+// "40°" on the axis.
+static size_t chart_fmt_temp(int32_t v, tschart_fmt_ctx_t, char* buf, size_t cap, void*) {
+    int n = v == TSCHART_NONE
+                ? snprintf(buf, cap, "--")
+                : snprintf(buf, cap, "%ld" DEGREE,
+                           (long)(v >= 0 ? (v + 5) / 10 : -((-v + 5) / 10)));
+    return n < 0 ? 0 : LV_MIN((size_t)n, cap - 1);
+}
+
+static const char* chart_run_key(uint8_t mode) {
     switch (mode) {
-        case HISTORY_TELEMETRY_MODE_COOLING: return lv_color_hex(0x3b82f6);
-        case HISTORY_TELEMETRY_MODE_HOT_WATER: return lv_color_hex(0xfbbf24);
-        default: return lv_color_hex(0xf97316);
+        case HISTORY_TELEMETRY_MODE_COOLING: return "cooling";
+        case HISTORY_TELEMETRY_MODE_HOT_WATER: return "hot_water";
+        default: return "heating";
     }
 }
 
-static void draw_line(lv_layer_t* layer, int32_t x1, int32_t y1, int32_t x2,
-                      int32_t y2, lv_color_t color, int32_t width,
-                      int32_t dash = 0) {
-    lv_draw_line_dsc_t dsc;
-    lv_draw_line_dsc_init(&dsc);
-    dsc.color = color;
-    dsc.width = width;
-    dsc.round_start = dash == 0;
-    dsc.round_end = dash == 0;
-    dsc.dash_width = dash;
-    dsc.dash_gap = dash;
-    dsc.p1.x = x1;
-    dsc.p1.y = y1;
-    dsc.p2.x = x2;
-    dsc.p2.y = y2;
-    lv_draw_line(layer, &dsc);
-}
-
-static void draw_text(lv_layer_t* layer, int32_t x1, int32_t y1, int32_t x2,
-                      int32_t y2, const char* text, lv_color_t color,
-                      lv_text_align_t align, const lv_font_t* font) {
-    lv_draw_label_dsc_t dsc;
-    lv_draw_label_dsc_init(&dsc);
-    dsc.color = color;
-    dsc.font = font;
-    dsc.text = text;
-    dsc.text_local = true;
-    dsc.align = align;
-    lv_area_t area = {x1, y1, x2, y2};
-    lv_draw_label(layer, &dsc, &area);
-}
-
-static int32_t chart_x(const HomeHistory& h, uint32_t t, const lv_area_t& plot) {
-    if (t <= h.start) return plot.x1;
-    if (t >= h.end) return plot.x2;
-    return plot.x1 + (int32_t)(((uint64_t)(t - h.start) *
-                                (uint32_t)lv_area_get_width(&plot)) /
-                               (h.end - h.start));
-}
-
-static int32_t chart_y(int32_t deci_c, int32_t lo, int32_t hi, const lv_area_t& plot) {
-    if (deci_c < lo) deci_c = lo;
-    if (deci_c > hi) deci_c = hi;
-    return plot.y2 - (int32_t)(((int64_t)(deci_c - lo) *
-                                (lv_area_get_height(&plot) - 1)) /
-                               (hi - lo));
-}
-
-static void chart_draw_cb(lv_event_t* e) {
-    lv_layer_t* layer = lv_event_get_layer(e);
-    auto* obj = static_cast<lv_obj_t*>(lv_event_get_current_target(e));
-    const HomeHistory& h = history_store();
-    if (layer == nullptr || obj == nullptr || !h.loaded || h.end <= h.start) return;
-
-    lv_area_t area;
-    lv_obj_get_coords(obj, &area);
-    lv_area_t plot = {area.x1, area.y1 + CHART_TOP_H, area.x2,
-                      area.y2 - CHART_AXIS_H};
-
-    // Same look as the cycle-history chart: opaque panel, grid, and flat
-    // mode-coloured run bands at 20%.
-    {
-        lv_draw_rect_dsc_t dsc;
-        lv_draw_rect_dsc_init(&dsc);
-        dsc.bg_color = COLOR_CARD_BG;
-        dsc.bg_opa = LV_OPA_COVER;
-        dsc.radius = 12;
-        dsc.border_color = COLOR_GRID;
-        dsc.border_width = 1;
-        lv_draw_rect(layer, &dsc, &plot);
-    }
-    lv_area_t inner = {plot.x1 + 1, plot.y1 + 1, plot.x2 - 1, plot.y2 - 1};
-
-    for (size_t i = 0; i < h.run_count; i++) {
-        const home_run_t& run = h.runs[i];
-        int32_t x1 = chart_x(h, run.start, plot);
-        int32_t x2 = chart_x(h, run.end != 0 ? run.end : h.end, plot);
-        if (x2 - x1 < 3) x2 = x1 + 3;
-        if (x1 < inner.x1) x1 = inner.x1;
-        if (x2 > inner.x2) x2 = inner.x2;
-        fill_rect(layer, x1, inner.y1, x2, inner.y2, run_color(run.mode),
-                  LV_OPA_20);
-    }
-
-    // Defrost: an icy block over the run it interrupts.
-    for (size_t i = 0; i < h.defrost_count; i++) {
-        const fault_interval_t& d = h.defrosts[i];
-        int32_t x1 = chart_x(h, d.start, plot);
-        int32_t x2 = chart_x(h, d.end != 0 ? d.end : h.end, plot);
-        if (x2 - x1 < 3) x2 = x1 + 3;
-        x1 = LV_MAX(x1, inner.x1);
-        x2 = LV_MIN(x2, inner.x2);
-        if (x2 <= x1) continue;
-        fill_rect(layer, x1, inner.y1, x2, inner.y2, COLOR_DEFROST_BORDER,
-                  LV_OPA_40);
-    }
-
-    for (size_t i = 0; i < h.fault_count; i++) {
-        const fault_interval_t& f = h.faults[i];
-        int32_t x1 = LV_MAX(chart_x(h, f.start, plot), inner.x1);
-        int32_t x2 = LV_MIN(chart_x(h, f.end != 0 ? f.end : h.end, plot), inner.x2);
-        chart_draw_fault_zone(layer, x1, x2, inner.y1, inner.y2, COLOR_ERROR);
-    }
-
-    // Left gutter for the axis labels: horizontal lines start after it.
-    constexpr int32_t kAxisGutter = 46;
-    for (int g = 1; g < 4; g++) {
-        int32_t y = plot.y2 - (lv_area_get_height(&plot) * g) / 4;
-        draw_line(layer, inner.x1 + kAxisGutter, y, inner.x2, y, COLOR_GRID, 1);
-        int32_t x = plot.x1 + (lv_area_get_width(&plot) * g) / 4;
-        draw_line(layer, x, inner.y1, x, inner.y2, COLOR_GRID, 1);
-    }
-
-    // Fixed scale per mode, one round value per gridline: hot water/heating
-    // 20-60 °C (60-140 °F), cooling 5-25 °C (40-80 °F). Readings outside it
-    // pin to the edge; the cycle-history screen has the detail.
-    bool fahrenheit = app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT;
-    int32_t axis_lo, axis_step;  // In the display unit
+// Fixed scale per mode, one round value per gridline: hot water/heating
+// 20-60 °C (60-140 °F), cooling 5-25 °C (40-80 °F). Readings outside it pin
+// to the edge; the cycle-history screen has the detail.
+static void chart_apply_range(void) {
+    if (s_chart_pane == nullptr) return;
+    const bool f = chart_fahrenheit();
+    int32_t lo, step;
     if (state.chart_cooling) {
-        axis_lo = fahrenheit ? 40 : 5;
-        axis_step = fahrenheit ? 10 : 5;
+        lo = f ? 40 : 5;
+        step = f ? 10 : 5;
     } else {
-        axis_lo = fahrenheit ? 60 : 20;
-        axis_step = fahrenheit ? 20 : 10;
+        lo = f ? 60 : 20;
+        step = f ? 20 : 10;
     }
-    auto to_deci_c = [fahrenheit](int32_t v) {
-        return fahrenheit ? (v - 32) * 50 / 9 : v * 10;
-    };
-    int32_t lo = to_deci_c(axis_lo);
-    int32_t hi = to_deci_c(axis_lo + 4 * axis_step);
-    for (int g = 0; g <= 4; g++) {
-        int32_t y = plot.y2 - (lv_area_get_height(&plot) * g) / 4;
-        // Inner labels centre on their line; the edge ones tuck inside.
-        int32_t y1 = g == 0 ? y - 20 : g == 4 ? y + 2 : y - 9;
-        char tick[12];
-        snprintf(tick, sizeof(tick), "%d" DEGREE, (int)(axis_lo + g * axis_step));
-        draw_text(layer, plot.x1 + 8, y1, plot.x1 + 80, y1 + 18, tick,
-                  COLOR_VALUE_DIM, LV_TEXT_ALIGN_LEFT, &montserrat_16_latin);
-    }
+    tschart_pane_set_range(s_chart_pane, lo * 10, (lo + 4 * step) * 10, step * 10);
+}
 
-    bool sp_valid = state.chart_setpoint_valid;
-    int32_t sp_deci = (int32_t)state.chart_setpoint_c * 10;
-    if (!sp_valid && h.summary.setpoint_valid) {
-        sp_valid = true;
-        sp_deci = h.summary.setpoint_deci_c;
+static void chart_apply_setpoint(void) {
+    if (state.chart == nullptr) return;
+    const HomeHistory& h = history_store();
+    bool valid = state.chart_setpoint_valid;
+    int32_t deci = (int32_t)state.chart_setpoint_c * 10;
+    if (!valid && h.summary.setpoint_valid) {
+        valid = true;
+        deci = h.summary.setpoint_deci_c;
     }
-
-    if (sp_valid) {
-        int32_t y = chart_y(sp_deci, lo, hi, plot);
-        draw_line(layer, plot.x1 + kAxisGutter, y, plot.x2, y, COLOR_SETPOINT, 2, 8);
-        char sp_text[16];
-        format_temp(sp_text, sizeof(sp_text), (int16_t)(sp_deci / 10));
-        draw_text(layer, plot.x2 - 120, y - 26, plot.x2, y - 4, sp_text,
-                  COLOR_VALUE_DIM, LV_TEXT_ALIGN_RIGHT, &montserrat_20_latin);
+    const bool f = chart_fahrenheit();
+    if (valid == s_chart_sp.valid && deci == s_chart_sp.deci && f == s_chart_sp.fahrenheit) return;
+    s_chart_sp = {valid, deci, f};
+    if (!valid) {
+        tschart_set_ref_lines(state.chart, nullptr, 0);
+        return;
     }
+    char text[16];
+    format_temp(text, sizeof(text), (int16_t)(deci / 10));
+    const tschart_ref_line_t line = {s_chart_pane, chart_display_deci(deci, nullptr),
+                                     COLOR_SETPOINT, text};
+    tschart_set_ref_lines(state.chart, &line, 1);
+}
 
-    // Tank trend, broken where there is no reading.
-    int32_t width = lv_area_get_width(&plot);
-    bool have_prev = false;
-    int32_t px = 0;
-    int32_t py = 0;
+// Hands a freshly loaded history to the chart.
+static void chart_set_history(void) {
+    if (state.chart == nullptr) return;
+    const HomeHistory& h = history_store();
+    if (!h.loaded || h.end <= h.start) return;
+    const uint32_t span = h.end - h.start;
     for (size_t i = 0; i < CHART_BUCKETS; i++) {
-        if (!h.tank_ok[i]) {
-            have_prev = false;
-            continue;
-        }
-        int32_t x = plot.x1 + (int32_t)(((2 * i + 1) * (size_t)width) / (2 * CHART_BUCKETS));
-        int32_t y = chart_y(h.tank[i], lo, hi, plot);
-        if (have_prev) draw_line(layer, px, py, x, y, COLOR_TEXT, 3);
-        px = x;
-        py = y;
-        have_prev = true;
+        s_chart_samples[i] = {h.start + (uint32_t)(((2 * i + 1) * (uint64_t)span) /
+                                                   (2 * CHART_BUCKETS)),
+                              h.tank[i], (uint8_t)(h.tank_ok[i] ? 1 : 0)};
     }
+    tschart_dataset_t ds = {};
+    ds.start = h.start;
+    ds.end = h.end;
+    ds.sources[0].src = s_chart_source;
+    ds.sources[0].data = {s_chart_samples, CHART_BUCKETS, sizeof(ChartSample),
+                          offsetof(ChartSample, t),
+                          (uint32_t)(span / CHART_BUCKETS) * 5 / 2};
+    ds.source_count = 1;
+    tschart_set_dataset(state.chart, &ds);
 
-    // Faults: hatched zones in the plot, labelled above it where there's room.
-    int32_t label_right = INT32_MIN;
+    // The chart copies spans; up to 160 runs is too big for the LVGL stack.
+    auto* runs = static_cast<tschart_span_t*>(heap_caps_malloc(
+        sizeof(tschart_span_t) * CHART_MAX_RUNS, MALLOC_CAP_SPIRAM));
+    size_t nruns = 0;
+    for (size_t i = 0; runs != nullptr && i < h.run_count; i++) {
+        runs[nruns++] = {h.runs[i].start, h.runs[i].end, {}, 0, TSCHART_SPAN_FILL, 3,
+                         chart_run_key(h.runs[i].mode)};
+    }
+    tschart_set_spans(state.chart, 0, runs, nruns);
+    heap_caps_free(runs);
+    tschart_span_t defrosts[CHART_MAX_DEFROSTS];
+    for (size_t i = 0; i < h.defrost_count; i++) {
+        defrosts[i] = {h.defrosts[i].start, h.defrosts[i].end, {}, 0, TSCHART_SPAN_FILL, 3,
+                       "defrost"};
+    }
+    tschart_set_spans(state.chart, 1, defrosts, h.defrost_count);
+    tschart_span_t faults[CHART_MAX_FAULTS];
+    tschart_note_t notes[CHART_MAX_FAULTS];
     for (size_t i = 0; i < h.fault_count; i++) {
         const fault_interval_t& f = h.faults[i];
-        int32_t x1 = chart_x(h, f.start, plot);
-        if (x1 < label_right + 8) continue;
+        faults[i] = {f.start, f.end, {}, 0, TSCHART_SPAN_HATCH, 3, "fault"};
         const arctic::MaconFaultBit* bit = fault_bit(f);
-        char text[24];
-        snprintf(text, sizeof(text), WARNING_ICON " %s", bit ? bit->code : "?");
-        lv_point_t size;
-        lv_txt_get_size(&size, text, &montserrat_20_latin, 0, 0, LV_COORD_MAX,
-                        LV_TEXT_FLAG_NONE);
-        int32_t lx = x1;
-        if (lx + size.x > plot.x2) lx = plot.x2 - size.x;
-        // Pulling a label in from the right edge can land it on the previous one.
-        if (lx < label_right + 8) continue;
-        draw_text(layer, lx, area.y1, lx + size.x, plot.y1 - 6, text,
-                  COLOR_ERROR_TEXT, LV_TEXT_ALIGN_LEFT, &montserrat_20_latin);
-        label_right = lx + size.x;
+        notes[i] = {f.start, bit ? bit->code : "?", COLOR_ERROR_TEXT};
     }
+    tschart_set_spans(state.chart, 2, faults, h.fault_count);
+    tschart_set_notes(state.chart, notes, h.fault_count, WARNING_ICON " ");
+    chart_apply_setpoint();
+}
 
-    int32_t ay1 = plot.y2 + 6;
-    int32_t ay2 = area.y2;
-    draw_text(layer, plot.x1, ay1, plot.x1 + 120, ay2, "4 h", COLOR_VALUE_DIM,
-              LV_TEXT_ALIGN_LEFT, &montserrat_20_latin);
-    int32_t mid = (plot.x1 + plot.x2) / 2;
-    draw_text(layer, mid - 60, ay1, mid + 60, ay2, "2 h", COLOR_VALUE_DIM,
-              LV_TEXT_ALIGN_CENTER, &montserrat_20_latin);
-    draw_text(layer, plot.x2 - 120, ay1, plot.x2, ay2, i18n_get(STR_HOME_NOW),
-              COLOR_VALUE_DIM, LV_TEXT_ALIGN_RIGHT, &montserrat_20_latin);
+static lv_obj_t* create_chart(lv_obj_t* parent) {
+    lv_obj_t* c = tschart_create(parent);
+    lv_obj_set_size(c, LV_PCT(100), CHART_HEIGHT);
+    lv_obj_set_style_margin_top(c, 6, LV_PART_MAIN);
+    // Transparent over the card; the card colour is what the bands mix with
+    // and the border colour is the grid.
+    lv_obj_set_style_bg_color(c, COLOR_CARD_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(c, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_color(c, COLOR_GRID, LV_PART_MAIN);
+    lv_obj_set_style_border_width(c, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(c, 0, LV_PART_MAIN);
+    lv_obj_set_style_text_color(c, COLOR_VALUE_DIM, LV_PART_MAIN);
+    lv_obj_set_style_text_font(c, &montserrat_20_latin, LV_PART_MAIN);
+    tschart_set_small_font(c, &montserrat_16_latin);
+    tschart_set_header(c, 0);
+    tschart_set_end_tags(c, false);
+    tschart_set_input(c, 0);
+    tschart_set_axis_outside(c, true);
+    tschart_set_relative_time(c, i18n_get(STR_HOME_NOW));
+
+    s_chart_sp = {};
+    s_chart_source = tschart_add_source(c, "tank");
+    tschart_pane_cfg_t pane = {};
+    pane.id = "tank";
+    pane.color = COLOR_VALUE_DIM;
+    pane.max_ticks = 5;
+    pane.fmt = chart_fmt_temp;
+    s_chart_pane = tschart_add_pane(c, &pane);
+    chart_apply_range();
+
+    tschart_layer_cfg_t l = {};
+    l.id = "tank";
+    l.name = i18n_get(STR_HOME_TANK);
+    l.field.offset = offsetof(ChartSample, tank);
+    l.field.type = TSCHART_I16;
+    l.field.flags_offset = offsetof(ChartSample, ok);
+    l.field.flags_mask = 1;
+    l.field.xform = chart_display_deci;
+    l.geom = TSCHART_GEOM_LINE;
+    l.color = COLOR_TEXT;
+    l.width = 3;
+    tschart_add_layer(s_chart_pane, &l);
+
+    // Same colours as the cycle-history legend, as opaque tints of the card.
+    tschart_add_key(c, "heating", nullptr, lv_color_hex(0xf97316), TSCHART_SPAN_FILL);
+    tschart_add_key(c, "cooling", nullptr, lv_color_hex(0x3b82f6), TSCHART_SPAN_FILL);
+    tschart_add_key(c, "hot_water", nullptr, lv_color_hex(0xfbbf24), TSCHART_SPAN_FILL);
+    tschart_add_key(c, "defrost", nullptr, COLOR_DEFROST_BORDER, TSCHART_SPAN_FILL);
+    tschart_add_key(c, "fault", nullptr, COLOR_ERROR, TSCHART_SPAN_HATCH);
+    static const char* const RUN_KEYS[] = {"heating", "cooling", "hot_water"};
+    for (const char* k : RUN_KEYS) tschart_key_set_fill_strength(c, k, LV_OPA_30);
+    tschart_key_set_fill_strength(c, "defrost", LV_OPA_50);
+    // Set last: tags every child created above.
+    tschart_set_id(c, "home_chart");
+    return c;
 }
 
 static bool history_has_data(const HomeHistory& h) {
@@ -779,7 +740,7 @@ static void home_query_done(void* arg) {
     s_query_running = false;
     if (q->generation == s_generation && state.created) {
         history_store() = q->data;
-        if (state.chart) lv_obj_invalidate(state.chart);
+        chart_set_history();
         heatpump_screen_update();
     }
     delete q;
@@ -1145,19 +1106,10 @@ void heatpump_screen_create(lv_obj_t* parent, int y_offset) {
     state.hero_sub_value = create_label(sub_row, UI_FONT_BODY, COLOR_TEXT);
     lv_obj_set_user_data(state.hero_sub_value, (void*)"hero_sub_value");
 
-    state.chart = lv_obj_create(state.hero_card);
-    lv_obj_remove_style_all(state.chart);
-    lv_obj_set_size(state.chart, LV_PCT(100), CHART_HEIGHT);
-    lv_obj_set_style_margin_top(state.chart, 6, LV_PART_MAIN);
-    lv_obj_set_style_radius(state.chart, 12, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(state.chart, COLOR_PRESSED, LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(state.chart, LV_OPA_60, LV_STATE_PRESSED);
+    state.chart = create_chart(state.hero_card);
     // Tapping the chart opens the full cycle history.
     lv_obj_add_flag(state.chart, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(state.chart, strip_cb, LV_EVENT_CLICKED, nullptr);
-    lv_obj_clear_flag(state.chart, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(state.chart, chart_draw_cb, LV_EVENT_DRAW_MAIN, nullptr);
-    lv_obj_set_user_data(state.chart, (void*)"home_chart");
     lv_obj_add_flag(state.chart, LV_OBJ_FLAG_HIDDEN);
 
     state.fault_caption = create_card(state.hero_card, COLOR_STRIP_BG, COLOR_TRACK, 10);
@@ -1344,8 +1296,9 @@ void heatpump_screen_update(void) {
     state.chart_setpoint_c = snap.active_setpoint_c;
     if (state.chart_cooling != (hp.working_mode == arctic::WorkingMode::COOLING)) {
         state.chart_cooling = !state.chart_cooling;
-        if (state.chart) lv_obj_invalidate(state.chart);
     }
+    chart_apply_range();
+    chart_apply_setpoint();
 
     // Fault banner
     if (!hp.connected) {
@@ -1569,6 +1522,8 @@ void heatpump_screen_delete(void) {
     s_generation++;
     s_query_pending = false;
     state = {};
+    s_chart_pane = nullptr;
+    s_chart_source = nullptr;
 }
 
 bool heatpump_screen_is_created(void) {
