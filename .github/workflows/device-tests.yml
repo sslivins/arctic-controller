@@ -302,6 +302,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          # Hostside source checks in tests/api read components/tschart.
+          submodules: 'recursive'
 
       - name: Download firmware
         uses: actions/download-artifact@v8

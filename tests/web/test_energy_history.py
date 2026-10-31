@@ -252,7 +252,9 @@ class TestEnergyPage:
     def test_drag_past_today_springs_back(self, mocked_energy: Page, page_errors):
         page = mocked_energy
         _open_energy(page)
-        box = page.locator(f'.en-chart .tsbars-hit[data-key="{(TODAY - dt.timedelta(days=15)).isoformat()}"]').bounding_box()
+        hit = page.locator(f'.en-chart .tsbars-hit[data-key="{(TODAY - dt.timedelta(days=15)).isoformat()}"]')
+        expect(hit).to_have_count(1)  # neighbour bars render after their fetch
+        box = hit.bounding_box()
         _drag(page, box["x"], box["y"] + box["height"] / 2, -box["width"] * 6)
         chart = page.locator(".en-chart")
         expect(chart).not_to_have_class(re.compile("panning"))

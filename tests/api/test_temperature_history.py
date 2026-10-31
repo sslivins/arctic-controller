@@ -141,4 +141,4 @@ def test_history_api_and_web_mark_defrosts_from_the_event_log():
     web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
     assert "data.defrosts" in web
     assert "chart.setSpans(1, (d.defrosts" in web
-    assert "hc-defrost" in web
+    assert "chart.setSpans(1, (data.defrosts" in web  # home chart
