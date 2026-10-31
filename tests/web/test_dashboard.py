@@ -91,7 +91,7 @@ class TestHome:
         expect(dashboard_page.locator(self.BODY)).to_be_visible(timeout=15000)
         labels = dashboard_page.locator("[data-home-chart] .tschart-axis-out text")
         expect(labels).to_have_count(5)
-        assert all(label.endswith("°") for label in labels.all_inner_texts())
+        assert all(label.endswith("°") for label in labels.all_text_contents())
         expect(dashboard_page.locator("[data-home-chart] .tschart-time").last).to_have_text("now")
 
     def test_chart_hover_tooltip(self, dashboard_page: Page):
