@@ -256,6 +256,7 @@ class TestEnergyPage:
         _open_energy(page)
         hit = page.locator(f'.en-chart .tsbars-hit[data-key="{(TODAY - dt.timedelta(days=15)).isoformat()}"]')
         expect(hit).to_have_count(1)  # neighbour bars render after their fetch
+        expect(hit).to_be_visible()  # laid out, so bounding_box() isn't None
         box = hit.bounding_box()
         _drag(page, box["x"], box["y"] + box["height"] / 2, -box["width"] * 6)
         chart = page.locator(".en-chart")
