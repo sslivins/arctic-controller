@@ -680,6 +680,50 @@ class TestSettingsWorkspace:
         expect(dashboard_page.locator("#log-container")).to_be_visible()
         expect(dashboard_page.locator('a[href="/api/heatpump/diagnostic"]')).to_be_visible()
         expect(dashboard_page.locator('a[href="/api/screenshot?format=jpeg"]')).to_be_visible()
+        expect(dashboard_page.locator('[data-action="download-report"]')).to_be_enabled()
+
+    def test_log_level_survives_log_polls(self, dashboard_page: Page):
+        """The verbosity select lists full names and keeps its choice while
+        the log poll refreshes the list (it used to re-render and reset)."""
+        open_settings(dashboard_page, "Diagnostics")
+        select = dashboard_page.locator("#log-level")
+        assert select.locator("option").all_inner_texts() == ["Verbose", "Debug", "Info", "Warning", "Error"]
+        with dashboard_page.expect_response(lambda r: "/api/logs" in r.url and "level=W" in r.url):
+            select.select_option("W")
+        dashboard_page.wait_for_event("response", lambda r: "/api/logs" in r.url, timeout=15000)
+        expect(select).to_have_value("W")
+        expect(select.locator("option:checked")).to_have_text("Warning")
+
+    def test_activity_report_downloads_and_renders_offline(self, dashboard_page: Page, tmp_path):
+        open_settings(dashboard_page, "Diagnostics")
+        button = dashboard_page.locator('[data-action="download-report"]')
+        with dashboard_page.expect_download(timeout=180000) as download:
+            button.click()
+        saved = tmp_path / download.value.suggested_filename
+        assert re.fullmatch(r"[\w.-]+-report-\d{4}-\d\d-\d\d\.html", saved.name)
+        download.value.save_as(saved)
+        expect(button).to_have_text("Download report")
+        expect(button).to_be_enabled()
+
+        # The saved file is standalone: no request may leave the page.
+        context = dashboard_page.context.browser.new_context()
+        requests, errors = [], []
+        context.route("**/*", lambda route: (requests.append(route.request.url), route.abort())
+                      if not route.request.url.startswith("file:") else route.continue_())
+        page = context.new_page()
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        try:
+            page.goto(saved.as_uri())
+            for heading in ["Heat pump findings", "At a glance", "Activity", "By day", "Unit snapshot"]:
+                expect(page.get_by_role("heading", name=re.compile(f"^{heading}"))).to_be_visible()
+            expect(page.locator("#ov svg").first).to_be_visible()
+            page.locator('.units [data-u="F"]').click()
+            expect(page.locator('.units [data-u="F"]')).to_have_class("on")
+            assert page.url.endswith("#F")
+            assert not errors, errors
+            assert not requests, requests
+        finally:
+            context.close()
 
     def test_system_and_factory_reset(self, dashboard_page: Page):
         open_settings(dashboard_page, "System")

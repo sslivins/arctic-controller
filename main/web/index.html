@@ -884,7 +884,8 @@
 <body>
   <div id="app"></div>
   <div id="toasts" class="toast-stack"></div>
-  <script>/*@inline ../../components/tschart/web/tschart.js@*/</script>
+  <script id="tschart-src">/*@inline ../../components/tschart/web/tschart.js@*/</script>
+  <script type="text/plain" id="report-src">/*@inline report.js@*/</script>
   <script>
     const $ = (selector, root = document) => root.querySelector(selector);
     const esc = value => String(value ?? "")
@@ -2302,12 +2303,19 @@
       <p class="metric-sub">Choose where each temperature comes from. If an external sensor stops answering, the estimate falls back to the heat pump's own sensors.</p>
       <div class="grid grid-2">${perfSlots.map(([slot, title]) => perfSensorCard(slot, title)).join("")}</div>`;
     }
+    /*@inline report_data.js@*/
+    const logLevels = [["V", "Verbose"], ["D", "Debug"], ["I", "Info"], ["W", "Warning"], ["E", "Error"]];
+    const logLines = () => state.logs.map(l => `<div class="log ${esc(l.level)}">[${esc(l.level)}] ${esc(l.tag)}: ${esc(l.message)}</div>`).join("") || "No logs loaded.";
     function diagnosticsSettings() {
-      return `<section class="card"><div class="card-head"><div><h2>Diagnostics</h2><div class="metric-sub">Logs poll only while this page is open.</div></div>
-        <select id="log-level" style="width:120px"><option>V</option><option>D</option><option>I</option><option>W</option><option>E</option></select></div>
-        <div id="log-container" class="logs">${state.logs.map(l => `<div class="log ${esc(l.level)}">[${esc(l.level)}] ${esc(l.tag)}: ${esc(l.message)}</div>`).join("") || "No logs loaded."}</div>
+      return `<div class="grid"><section class="card"><div class="card-head"><div><h2>Diagnostics</h2><div class="metric-sub">Logs poll only while this page is open.</div></div>
+        <select id="log-level" style="width:130px" aria-label="Log verbosity">${logLevels.map(([v, label]) => `<option value="${v}"${v === state.logLevel ? " selected" : ""}>${label}</option>`).join("")}</select></div>
+        <div id="log-container" class="logs">${logLines()}</div>
         <div class="btn-row" style="margin-top:14px"><button class="btn" data-action="refresh-logs">Refresh</button><button class="btn danger" data-action="clear-logs">Clear logs</button>
-          <a class="btn" href="/api/heatpump/diagnostic" download>Download report</a><a class="btn" href="/api/screenshot?format=jpeg" target="_blank">Device screenshot</a></div></section>`;
+          <a class="btn" href="/api/screenshot?format=jpeg" target="_blank">Device screenshot</a></div></section>
+        <section class="card"><h2>Activity report</h2>
+          <div class="metric-sub">The last ${REPORT_DAYS} days as one HTML file for a technician: findings, charts, every compressor call, faults with context and the unit's parameters. It opens offline and prints.</div>
+          <div class="btn-row" style="margin-top:14px"><button class="btn primary" data-action="download-report" ${state.reportProgress ? "disabled" : ""}>${esc(state.reportProgress || "Download report")}</button>
+            <a class="btn" href="/api/heatpump/diagnostic" download>Register snapshot (CSV)</a></div></section></div>`;
     }
     function systemSettings() {
       return `<section class="card"><h2>Controller</h2>
@@ -3286,7 +3294,14 @@
       const since = full ? 0 : state.logSeq;
       const data = await api(`/api/logs?since=${since}&level=${state.logLevel}&limit=256`);
       state.logs = full ? (data.entries || []) : state.logs.concat(data.entries || []).slice(-1000);
-      state.logSeq = data.latest_seq || 0; render();
+      state.logSeq = data.latest_seq || 0;
+      // Only the log list changes; re-rendering the whole page every poll
+      // would reset the verbosity menu while it is open.
+      const box = $("#log-container");
+      if (!box) return;
+      const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 4;
+      box.innerHTML = logLines();
+      if (atEnd) box.scrollTop = box.scrollHeight;
     }
     function startLogPolling() {
       stopLogPolling(); loadLogs(true).catch(e => toast(e.message, "bad"));
@@ -4436,6 +4451,7 @@
         stopHaPolling(); state.ha = { ...state.ha, paired: false, code: "", pairing_active: false, remaining_seconds: 0 }; render();
       }
       if (action === "refresh-logs") await loadLogs(true);
+      if (action === "download-report") await downloadReport();
       if (action === "clear-logs" && await askConfirm({ title: "Clear controller logs?", confirmLabel: "Clear logs", danger: true })) {
         await mutate("/api/logs", { method: "DELETE" }, "Logs cleared"); state.logs = []; state.logSeq = 0; render();
       }
