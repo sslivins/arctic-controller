@@ -45,6 +45,9 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 #define COLOR_FAULT     UI_COLOR_ERROR
 // Icy teal, as on the home screen's defrost tile.
 #define COLOR_DEFROST   lv_color_hex(0x4fb3c9)
+// Pale sky blue, as on the home screen's freeze-protection hero. Hatched like
+// faults, so a 30 s run still shows as a solid line at wide zoom.
+#define COLOR_FREEZE    lv_color_hex(0xbae6fd)
 #define COLOR_POWER     lv_color_hex(0x60a5fa)
 #define COLOR_COP       lv_color_hex(0xa78bfa)
 #define COLOR_COIL      lv_color_hex(0x22d3ee)
@@ -52,11 +55,12 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 
 static constexpr size_t MAX_FAULTS = 16;
 static constexpr size_t MAX_DEFROSTS = 24;
+static constexpr size_t MAX_FREEZES = 24;
 static constexpr size_t ZOOM_COUNT =
     sizeof(HISTORY_WINDOW_PRESETS) / sizeof(HISTORY_WINDOW_PRESETS[0]);
 
 // Span sets, drawn in this order.
-enum : uint8_t { SPANS_RUNS = 0, SPANS_DEFROST = 1, SPANS_FAULTS = 2 };
+enum : uint8_t { SPANS_RUNS = 0, SPANS_DEFROST = 1, SPANS_FREEZE = 2, SPANS_FAULTS = 3 };
 
 // One loaded window. The chart borrows `samples` until it releases the
 // dataset (window replaced or chart deleted).
@@ -71,7 +75,9 @@ struct WindowData {
     size_t fault_count;
     fault_interval_t faults[MAX_FAULTS];
     size_t defrost_count;
-    fault_interval_t* defrosts;  // PSRAM, MAX_DEFROSTS
+    fault_interval_t* defrosts;  // PSRAM, MAX_DEFROSTS + MAX_FREEZES
+    size_t freeze_count;
+    fault_interval_t* freezes;   // inside the defrosts allocation
     uint32_t wh;
 };
 
@@ -189,8 +195,9 @@ static const char* fault_code(const fault_interval_t& f) {
     return fb != nullptr ? fb->code : "?";
 }
 
-// A still-active fault runs to "now", which is the window's end at most.
-static uint32_t fault_end(const fault_interval_t& f, const WindowData& w) {
+// A still-active fault or freeze-protection run lasts until "now", the
+// window's end at most.
+static uint32_t span_end(const fault_interval_t& f, const WindowData& w) {
     if (f.end != 0) return f.end;
     time_t now;
     time(&now);
@@ -258,6 +265,17 @@ static const fault_interval_t* defrost_at(const WindowData& w, uint32_t t) {
     return nullptr;
 }
 
+// A freeze-protection run (~30 s) touching this sample's interval.
+static bool freeze_at(const WindowData& w, uint32_t t) {
+    for (size_t i = 0; i < w.freeze_count; i++) {
+        const auto& f = w.freezes[i];
+        if (f.start < t + HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC && t <= span_end(f, w)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // What the unit was doing at a sample, as the home screen names it. Defrost
 // is checked first: it pauses the run, so its samples aren't "running".
 static const char* sample_state_name(const WindowData& w,
@@ -266,6 +284,10 @@ static const char* sample_state_name(const WindowData& w,
     if (defrost_at(w, s.timestamp) != nullptr) {
         *color = COLOR_DEFROST;
         return i18n_get(STR_HOME_DEFROSTING);
+    }
+    if (!running_sample(s) && freeze_at(w, s.timestamp)) {
+        *color = COLOR_FREEZE;
+        return i18n_get(STR_HOME_FREEZE_PROTECTION);
     }
     if (!running_sample(s)) {
         *color = UI_COLOR_TEXT_DIM;
@@ -363,7 +385,7 @@ static void card_cb(lv_obj_t*, const tschart_cursor_info_t* info, tschart_card_t
     // Faults active at the touched moment, by code (the notes name them).
     int rows = 0;
     for (size_t f = 0; f < w->fault_count && rows < 2; f++) {
-        if (w->faults[f].start <= s.timestamp && s.timestamp <= fault_end(w->faults[f], *w)) {
+        if (w->faults[f].start <= s.timestamp && s.timestamp <= span_end(w->faults[f], *w)) {
             char text[24];
             snprintf(text, sizeof(text), LV_SYMBOL_WARNING " %s", fault_code(w->faults[f]));
             tschart_card_add(card, TSCHART_ROW_WARNING, text, nullptr, COLOR_FAULT);
@@ -494,11 +516,18 @@ static void set_overlays(lv_obj_t* c, const WindowData& w) {
     }
     tschart_set_spans(c, SPANS_DEFROST, defrosts, w.defrost_count);
 
+    tschart_span_t freezes[MAX_FREEZES];
+    for (size_t i = 0; i < w.freeze_count; i++) {
+        freezes[i] = {w.freezes[i].start, span_end(w.freezes[i], w), COLOR_FREEZE,
+                      LV_OPA_COVER, TSCHART_SPAN_HATCH, 0, "freeze"};
+    }
+    tschart_set_spans(c, SPANS_FREEZE, freezes, w.freeze_count);
+
     tschart_span_t faults[MAX_FAULTS];
     tschart_note_t notes[MAX_FAULTS];
     for (size_t i = 0; i < w.fault_count; i++) {
         const auto& f = w.faults[i];
-        faults[i] = {f.start, fault_end(f, w), COLOR_FAULT, LV_OPA_COVER,
+        faults[i] = {f.start, span_end(f, w), COLOR_FAULT, LV_OPA_COVER,
                      TSCHART_SPAN_HATCH, 0, "fault"};
         notes[i] = {f.start, fault_code(f), COLOR_FAULT};
     }
@@ -580,11 +609,15 @@ static void query_task(void* data) {
                                                    &w->count);
     }
     w->defrosts = static_cast<fault_interval_t*>(heap_caps_malloc(
-        sizeof(fault_interval_t) * MAX_DEFROSTS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        sizeof(fault_interval_t) * (MAX_DEFROSTS + MAX_FREEZES),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    w->freezes = w->defrosts ? w->defrosts + MAX_DEFROSTS : nullptr;
     w->defrost_count = 0;
+    w->freeze_count = 0;
     w->fault_count = chart_spans_query(w->start, w->end, w->faults, MAX_FAULTS, nullptr,
                                        w->defrosts, w->defrosts ? MAX_DEFROSTS : 0,
-                                       &w->defrost_count);
+                                       &w->defrost_count, w->freezes,
+                                       w->freezes ? MAX_FREEZES : 0, &w->freeze_count);
     // Worker task: lv_async_call() must hold the LVGL lock.
     bsp_display_lock(0);
     lv_async_call(query_complete, w);
@@ -949,12 +982,14 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
 
     tschart_add_key(c, "heating", i18n_get(STR_HISTORY_LEGEND_HEATING), COLOR_HEATING,
                     TSCHART_SPAN_FILL);
-    tschart_add_key(c, "cooling", i18n_get(STR_HISTORY_LEGEND_COOLING), COLOR_COOLING,
+    tschart_add_key(c, "cooling", i18n_get(STR_HISTORY_KEY_COOLING), COLOR_COOLING,
                     TSCHART_SPAN_FILL);
     tschart_add_key(c, "hot_water", i18n_get(STR_HISTORY_LEGEND_HOT_WATER),
                     COLOR_HOT_WATER, TSCHART_SPAN_FILL);
     tschart_add_key(c, "defrost", i18n_get(STR_HISTORY_LEGEND_DEFROST), COLOR_DEFROST,
                     TSCHART_SPAN_FILL);
+    tschart_add_key(c, "freeze", i18n_get(STR_HISTORY_LEGEND_FREEZE), COLOR_FREEZE,
+                    TSCHART_SPAN_HATCH);
     tschart_add_key(c, "fault", i18n_get(STR_HISTORY_LEGEND_FAULT), COLOR_FAULT,
                     TSCHART_SPAN_HATCH);
     // Opaque tints of the legend colours: a translucent band over the navy

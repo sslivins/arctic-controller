@@ -6733,12 +6733,16 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
     {
         fault_interval_t spans[32];
         constexpr size_t kMaxDefrosts = 32;
+        constexpr size_t kMaxFreezes = 32;
         auto* defrosts = static_cast<fault_interval_t*>(heap_caps_malloc(
-            sizeof(fault_interval_t) * kMaxDefrosts, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-        size_t ndefrosts = 0;
+            sizeof(fault_interval_t) * (kMaxDefrosts + kMaxFreezes),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        fault_interval_t* freezes = defrosts ? defrosts + kMaxDefrosts : nullptr;
+        size_t ndefrosts = 0, nfreezes = 0;
         const size_t nspans = chart_spans_query(start, end, spans, 32, nullptr,
                                                 defrosts, defrosts ? kMaxDefrosts : 0,
-                                                &ndefrosts);
+                                                &ndefrosts, freezes,
+                                                freezes ? kMaxFreezes : 0, &nfreezes);
         cJSON* faults = cJSON_CreateArray();
         for (size_t i = 0; faults && i < nspans; i++) {
             cJSON* f = cJSON_CreateObject();
@@ -6766,22 +6770,28 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
         if (fj) cJSON_free(fj);
         if (faults) cJSON_Delete(faults);
 
-        // Defrost spans (end null = still defrosting).
-        static constexpr char kDefrostsOpen[] = ",\"defrosts\":[";
-        emit(kDefrostsOpen, sizeof(kDefrostsOpen) - 1);
-        for (size_t i = 0; defrosts && i < ndefrosts; i++) {
-            char d[64];
-            int dn;
-            if (defrosts[i].end) {
-                dn = snprintf(d, sizeof(d), "%s{\"start\":%u,\"end\":%u}", i ? "," : "",
-                              (unsigned)defrosts[i].start, (unsigned)defrosts[i].end);
-            } else {
-                dn = snprintf(d, sizeof(d), "%s{\"start\":%u,\"end\":null}", i ? "," : "",
-                              (unsigned)defrosts[i].start);
+        // Defrost and freeze-protection spans (end null = still running).
+        auto emit_spans = [&](const char* open, size_t open_len,
+                              const fault_interval_t* list, size_t count) {
+            emit(open, open_len);
+            for (size_t i = 0; list && i < count; i++) {
+                char d[64];
+                int dn;
+                if (list[i].end) {
+                    dn = snprintf(d, sizeof(d), "%s{\"start\":%u,\"end\":%u}", i ? "," : "",
+                                  (unsigned)list[i].start, (unsigned)list[i].end);
+                } else {
+                    dn = snprintf(d, sizeof(d), "%s{\"start\":%u,\"end\":null}", i ? "," : "",
+                                  (unsigned)list[i].start);
+                }
+                if (dn > 0) emit(d, (size_t)dn);
             }
-            if (dn > 0) emit(d, (size_t)dn);
-        }
-        emit("]", 1);
+            emit("]", 1);
+        };
+        static constexpr char kDefrostsOpen[] = ",\"defrosts\":[";
+        emit_spans(kDefrostsOpen, sizeof(kDefrostsOpen) - 1, defrosts, ndefrosts);
+        static constexpr char kFreezesOpen[] = ",\"freeze_protection\":[";
+        emit_spans(kFreezesOpen, sizeof(kFreezesOpen) - 1, freezes, nfreezes);
         heap_caps_free(defrosts);
     }
 

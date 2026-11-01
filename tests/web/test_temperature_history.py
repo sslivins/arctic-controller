@@ -230,7 +230,8 @@ class TestTemperatureHistoryWeb:
 
     def test_card_names_the_operating_state(self, dashboard_page: Page, base_url: str):
         """The hover card says what the unit was doing, like the home chart's:
-        a defrost (outside every run) reads Defrosting, not Idle."""
+        a defrost (outside every run) reads Defrosting, not Idle, and an idle
+        anti-freeze pump run reads Freeze protection."""
         _seed_history(base_url)
 
         def patch(route):
@@ -244,6 +245,7 @@ class TestTemperatureHistoryWeb:
                 if 600 <= age < 1200:
                     s["mode"] = 3
             body["defrosts"] = [{"start": end - 1800, "end": end - 1200}]
+            body["freeze_protection"] = [{"start": end - 420, "end": end - 360}]
             route.fulfill(response=resp, json=body)
 
         dashboard_page.route("**/api/heatpump/temperature-history*", patch)
@@ -253,8 +255,11 @@ class TestTemperatureHistoryWeb:
         end = dashboard_page.evaluate("state.tempHistory.data.end")
         _, y = _plot_point(dashboard_page, 0.5)
 
+        # Freeze protection is hatched like a fault, in its own colour.
+        expect(dashboard_page.locator(f'{CHART} .tschart-span.hatch[data-key="freeze"]')).to_have_count(1)
+
         for age, text in ((2700, "Heating"), (1500, "Defrosting"), (900, "Hot water"),
-                          (300, "Idle")):
+                          (390, "Freeze protection"), (200, "Idle")):
             x = dashboard_page.evaluate(
                 "t => histChart.chart.body.getBoundingClientRect().left + histChart.chart.xAt(t)",
                 end - age,
@@ -570,7 +575,7 @@ class TestHistoryFaultMarkers:
         chart = dashboard_page.locator(CHART)
 
         # A hatched span from the fault onset, flagged by a coded note.
-        assert chart.locator('.tschart-spans[data-set="2"] .tschart-span.hatch').count() >= 1
+        assert chart.locator('.tschart-spans[data-set="3"] .tschart-span.hatch').count() >= 1
         labels = chart.locator(".tschart-note-label").all_text_contents()
         assert any("P02" in t for t in labels), labels
         # The code sits in the strip above the plot, clear of the lines.

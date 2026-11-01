@@ -213,9 +213,37 @@ static void defrost_open_at_reboot_closes_at_that_boot() {
     if (n == 1) CHECK_EQ_U(out[0].end, T0 + 200);
 }
 
+static uint32_t mode_change(uint32_t from, uint32_t to) { return (from << 8) | to; }
+
+static void freeze_protection_spans_follow_mode_changes() {
+    // hot_water_cooling (6) -> freeze_protection (2) -> back, as logged by HP1.
+    std::vector<event_entry_t> e = {
+        ev(T0 + 100, BOOT_A, EVENT_MODE_CHANGED, mode_change(6, 2)),
+        ev(T0 + 100, BOOT_A, EVENT_PUMP_ON),
+        ev(T0 + 134, BOOT_A, EVENT_MODE_CHANGED, mode_change(2, 6)),
+        ev(T0 + 500, BOOT_A, EVENT_MODE_CHANGED, mode_change(6, 5)),
+        ev(T0 + 900, BOOT_A, EVENT_MODE_CHANGED, mode_change(5, 2))};
+    fault_interval_t out[4];
+    size_t n = freeze_protection_intervals_from_events(e.data(), e.size(), T0,
+                                                       T0 + 9000, BOOT_A, out, 4);
+    CHECK_EQ_U(n, 2);
+    if (n == 2) {
+        CHECK_EQ_U(out[0].start, T0 + 100);
+        CHECK_EQ_U(out[0].end, T0 + 134);
+        CHECK_EQ_U(out[0].site, 0);
+        CHECK_EQ_U(out[1].start, T0 + 900);
+        CHECK_EQ_U(out[1].end, 0);
+    }
+    // Other mode changes never become defrost spans.
+    n = defrost_intervals_from_events(e.data(), e.size(), T0, T0 + 9000, BOOT_A,
+                                      out, 4);
+    CHECK_EQ_U(n, 0);
+}
+
 int main() {
     defrost_spans_pair_start_with_end();
     defrost_open_at_reboot_closes_at_that_boot();
+    freeze_protection_spans_follow_mode_changes();
     pairs_appeared_with_cleared();
     active_fault_in_this_boot_is_open();
     reboot_closes_the_span_at_the_last_event_of_that_boot();

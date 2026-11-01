@@ -2792,6 +2792,23 @@ paths:
                           type: integer
                           nullable: true
                           description: When it ended, or null if still defrosting
+                  freeze_protection:
+                    type: array
+                    description: >-
+                      Freeze-protection runs (the unit's idle anti-freeze pump
+                      runs, working mode freeze_protection) overlapping the
+                      window, oldest first (newest 32), paired from the event
+                      log's mode_changed events into and out of that mode.
+                    items:
+                      type: object
+                      properties:
+                        start:
+                          type: integer
+                          description: When the run started (Unix epoch seconds)
+                        end:
+                          type: integer
+                          nullable: true
+                          description: When it ended, or null if still running
         '401':
           description: API key required
           content:

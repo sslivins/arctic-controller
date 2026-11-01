@@ -39,16 +39,40 @@ struct Builder {
     }
 };
 
-enum class SpanKind { Fault, Defrost };
+enum class SpanKind { Fault, Defrost, FreezeProtection };
+
+// Working mode 2 (arctic::WorkingMode::FREEZE_PROTECTION). mode_changed
+// payloads are (from << 8) | to.
+constexpr uint32_t kFreezeProtectionMode = 2;
+
+bool opens(SpanKind kind, const event_entry_t& e) {
+    switch (kind) {
+        case SpanKind::Fault: return e.type == EVENT_ERROR_APPEARED;
+        case SpanKind::Defrost: return e.type == EVENT_DEFROST_START;
+        case SpanKind::FreezeProtection:
+            return e.type == EVENT_MODE_CHANGED &&
+                   (e.payload & 0xFF) == kFreezeProtectionMode &&
+                   ((e.payload >> 8) & 0xFF) != kFreezeProtectionMode;
+    }
+    return false;
+}
+
+bool closes(SpanKind kind, const event_entry_t& e) {
+    switch (kind) {
+        case SpanKind::Fault: return e.type == EVENT_ERROR_CLEARED;
+        case SpanKind::Defrost: return e.type == EVENT_DEFROST_END;
+        case SpanKind::FreezeProtection:
+            return e.type == EVENT_MODE_CHANGED &&
+                   ((e.payload >> 8) & 0xFF) == kFreezeProtectionMode &&
+                   (e.payload & 0xFF) != kFreezeProtectionMode;
+    }
+    return false;
+}
 
 size_t pair_spans(SpanKind kind, const event_entry_t* events, size_t n,
                   uint32_t window_start, uint32_t window_end,
                   uint32_t current_boot_id, fault_interval_t* out, size_t cap,
                   size_t* total) {
-    const event_type_t open_type =
-        kind == SpanKind::Fault ? EVENT_ERROR_APPEARED : EVENT_DEFROST_START;
-    const event_type_t close_type =
-        kind == SpanKind::Fault ? EVENT_ERROR_CLEARED : EVENT_DEFROST_END;
     if (total) *total = 0;
     if (!out || cap == 0) return 0;
     Builder b{window_start, window_end, out, cap};
@@ -75,13 +99,13 @@ size_t pair_spans(SpanKind kind, const event_entry_t* events, size_t n,
         last_ts = e.timestamp;
 
         const uint16_t site = kind == SpanKind::Fault ? (uint16_t)e.payload : 0;
-        if (e.type == open_type) {
+        if (opens(kind, e)) {
             bool already = false;
             for (size_t j = 0; j < open_n; ++j) {
                 if (open[j].site == site) { already = true; break; }
             }
             if (!already && open_n < kMaxOpen) open[open_n++] = {site, e.timestamp};
-        } else if (e.type == close_type) {
+        } else if (closes(kind, e)) {
             for (size_t j = 0; j < open_n; ++j) {
                 if (open[j].site != site) continue;
                 b.emit(site, open[j].start, e.timestamp);
@@ -128,6 +152,14 @@ size_t defrost_intervals_from_events(const event_entry_t* events, size_t n,
                       current_boot_id, out, cap, nullptr);
 }
 
+size_t freeze_protection_intervals_from_events(const event_entry_t* events, size_t n,
+                                               uint32_t window_start, uint32_t window_end,
+                                               uint32_t current_boot_id,
+                                               fault_interval_t* out, size_t cap) {
+    return pair_spans(SpanKind::FreezeProtection, events, n, window_start, window_end,
+                      current_boot_id, out, cap, nullptr);
+}
+
 size_t fault_history_query(uint32_t window_start, uint32_t window_end,
                            fault_interval_t* out, size_t cap, size_t* total) {
     return chart_spans_query(window_start, window_end, out, cap, total, nullptr,
@@ -137,9 +169,12 @@ size_t fault_history_query(uint32_t window_start, uint32_t window_end,
 size_t chart_spans_query(uint32_t window_start, uint32_t window_end,
                          fault_interval_t* faults, size_t fault_cap,
                          size_t* fault_total, fault_interval_t* defrosts,
-                         size_t defrost_cap, size_t* defrost_count) {
+                         size_t defrost_cap, size_t* defrost_count,
+                         fault_interval_t* freezes, size_t freeze_cap,
+                         size_t* freeze_count) {
     if (fault_total) *fault_total = 0;
     if (defrost_count) *defrost_count = 0;
+    if (freeze_count) *freeze_count = 0;
     const size_t bytes = sizeof(event_entry_t) * EVENT_LOG_MAX_ENTRIES;
 #ifdef ESP_PLATFORM
     event_entry_t* events = (event_entry_t*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
@@ -163,6 +198,10 @@ size_t chart_spans_query(uint32_t window_start, uint32_t window_end,
     if (defrosts && defrost_count) {
         *defrost_count = defrost_intervals_from_events(
             events, n, window_start, window_end, boot, defrosts, defrost_cap);
+    }
+    if (freezes && freeze_count) {
+        *freeze_count = freeze_protection_intervals_from_events(
+            events, n, window_start, window_end, boot, freezes, freeze_cap);
     }
     free(events);
     return count;

@@ -142,3 +142,13 @@ def test_history_api_and_web_mark_defrosts_from_the_event_log():
     assert "data.defrosts" in web
     assert "chart.setSpans(1, (d.defrosts" in web
     assert "chart.setSpans(1, (data.defrosts" in web  # home chart
+
+def test_history_api_and_web_mark_freeze_protection_from_the_event_log():
+    api = (MAIN / "api_server.cpp").read_text(encoding="utf-8")
+    assert '\\"freeze_protection\\"' in api
+    web = (MAIN / "web" / "index.html").read_text(encoding="utf-8")
+    assert "chart.setSpans(2, (d.freeze_protection" in web
+    screen = (MAIN / "heatpump_history_screen.cpp").read_text(encoding="utf-8")
+    assert "STR_HISTORY_LEGEND_FREEZE" in screen
+    i18n = (MAIN / "i18n" / "i18n.cpp").read_text(encoding="utf-8")
+    assert len(re.findall(r"\[STR_HISTORY_LEGEND_FREEZE\]\s*=", i18n)) == 3
