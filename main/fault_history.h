@@ -44,6 +44,17 @@ size_t defrost_intervals_from_events(const event_entry_t* oldest_first, size_t n
                                      fault_interval_t* out, size_t cap);
 
 /**
+ * Freeze-protection spans (the unit's idle anti-freeze pump runs) from
+ * mode_changed events into and out of working mode 2, with the same window,
+ * reboot and cap rules as fault_intervals_from_events(). site is always 0.
+ */
+size_t freeze_protection_intervals_from_events(const event_entry_t* oldest_first,
+                                               size_t n, uint32_t window_start,
+                                               uint32_t window_end,
+                                               uint32_t current_boot_id,
+                                               fault_interval_t* out, size_t cap);
+
+/**
  * fault_intervals_from_events() over the live event log.
  */
 size_t fault_history_query(uint32_t window_start, uint32_t window_end,
@@ -51,10 +62,12 @@ size_t fault_history_query(uint32_t window_start, uint32_t window_end,
                            size_t* total = nullptr);
 
 /**
- * Fault and defrost spans from one read of the live event log. Returns the
- * fault count; defrosts may be null to skip them.
+ * Fault, defrost and freeze-protection spans from one read of the live event
+ * log. Returns the fault count; defrosts and freezes may be null to skip them.
  */
 size_t chart_spans_query(uint32_t window_start, uint32_t window_end,
                          fault_interval_t* faults, size_t fault_cap,
                          size_t* fault_total, fault_interval_t* defrosts,
-                         size_t defrost_cap, size_t* defrost_count);
+                         size_t defrost_cap, size_t* defrost_count,
+                         fault_interval_t* freezes = nullptr, size_t freeze_cap = 0,
+                         size_t* freeze_count = nullptr);

@@ -2528,6 +2528,7 @@
       chart.addKey("cooling", "Cooling", "var(--band-cool)", band);
       chart.addKey("hot_water", "Hot water", "var(--band-dhw)", band);
       chart.addKey("defrost", "Defrost", "var(--home-defrost)", { fillStrength: "var(--hist-defrost-strength)" });
+      chart.addKey("freeze", "Antifreeze", "var(--home-freeze-text)", "hatch");
       chart.addKey("fault", "Fault", "var(--cp-danger)", "hatch");
       chart.setCard(histCard);
       state.histShowPower = chart.getGroupVisible("power");
@@ -2561,10 +2562,14 @@
       card.add("title", fmtHistClock(s.t, true));
       // A defrost pauses the run, so check it first or it reads "Idle".
       const df = defrosts.find(x => x.start <= s.t && s.t <= (x.end ?? end));
+      // A ~30 s freeze-protection run touching this sample's interval.
+      const interval = d.sample_interval_sec || 30;
+      const fp = !df && !s.run && (d.freeze_protection || []).some(x => x.start < s.t + interval && s.t <= (x.end ?? end));
       const [runText, runColor] = df ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
+        : fp ? [HOME_STATE_LABEL.freeze_protection, "var(--home-freeze-text)"]
         : (s.run && HIST_RUN_STATE[s.mode]) || ["Idle", ""];
       const live = d.end >= d.latest_end;
-      let run = runColor ? histRuns(d).find(r => r.start <= s.t && s.t < r.end) : null;
+      let run = runColor && !fp ? histRuns(d).find(r => r.start <= s.t && s.t < r.end) : null;
       if (!run && df) run = { start: df.start, end: df.end ?? end, clipStart: df.start < d.start, open: df.end == null };
       card.add("block", runText, run ? fmtRunLength(run, live) : "", runColor || "var(--cp-text-muted)");
       if (run) card.add("text", fmtRunSpan(run, live));
@@ -2589,7 +2594,8 @@
       chart.setSpans(0, bands);
       chart.setSpans(1, (d.defrosts || []).map(x => ({ start: x.start, end: x.end ?? null,
         key: "defrost", minWidth: 3 })));
-      chart.setSpans(2, (d.faults || []).map(x => ({ start: x.start, end: x.end ?? null,
+      chart.setSpans(2, (d.freeze_protection || []).map(x => ({ start: x.start, end: x.end ?? null, key: "freeze" })));
+      chart.setSpans(3, (d.faults || []).map(x => ({ start: x.start, end: x.end ?? null,
         color: "var(--cp-danger)", style: "hatch" })));
       chart.setNotes((d.faults || []).map(x => ({ time: x.start, text: x.fault_code || "?", color: "var(--cp-danger)" })), "⚠ ");
       chart.setStatus(samples.length ? "ok" : "empty", samples.length ? "" : "No samples in this window");
