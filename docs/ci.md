@@ -81,6 +81,13 @@ repository, rather than being allowed to pass unvalidated.
 enabling a merge queue later cannot deadlock on a context that only pull
 requests produce.
 
+**Feature PRs get a version-bump hint.** `version-hint.yml` comments on a
+`feat:` (or `!` breaking) PR whose `PROJECT_VER` doesn't raise the minor version
+past the latest release, and deletes the comment once it does. The release
+ships the binary CI built for the merged commit, so the bump must be in the PR
+before CI runs. It lives outside `ci.yml` because it is advisory and must never
+gate a merge.
+
 ## HTTP, then HTTPS, on the bench
 
 A controller with no administrator TLS certificate serves the web UI and API

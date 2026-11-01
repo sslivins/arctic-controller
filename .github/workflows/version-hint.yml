@@ -1,0 +1,36 @@
+name: Version Hint
+
+# Advisory, never required: on a feat: (or breaking) PR that doesn't raise the
+# minor version, keeps a comment on the PR recommending the bump, and removes it
+# once the bump is pushed. create-release.yml releases the binary CI built for
+# the merged commit, so the bump has to be in the PR before CI runs.
+#
+# Kept out of ci.yml on purpose: every ci.yml job feeds ci-gate and waits on
+# pr-metadata (tests/test_ci_policy.py), and a hint must not gate anything.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: version-hint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  version-hint:
+    if: github.event.action != 'edited' || github.event.changes.title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+      - name: Recommend a minor version bump for features
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/check_version_bump.py --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
