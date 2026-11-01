@@ -575,7 +575,7 @@ class TestHistoryFaultMarkers:
         chart = dashboard_page.locator(CHART)
 
         # A hatched span from the fault onset, flagged by a coded note.
-        assert chart.locator('.tschart-spans[data-set="2"] .tschart-span.hatch').count() >= 1
+        assert chart.locator('.tschart-spans[data-set="3"] .tschart-span.hatch').count() >= 1
         labels = chart.locator(".tschart-note-label").all_text_contents()
         assert any("P02" in t for t in labels), labels
         # The code sits in the strip above the plot, clear of the lines.
