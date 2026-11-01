@@ -46,6 +46,9 @@ static constexpr uint32_t CONTIGUOUS_SECONDS =
 // Icy teal, as on the home screen's defrost tile.
 #define COLOR_DEFROST   lv_color_hex(0x4fb3c9)
 #define COLOR_POWER     lv_color_hex(0x60a5fa)
+#define COLOR_COP       lv_color_hex(0xa78bfa)
+#define COLOR_COIL      lv_color_hex(0x22d3ee)
+#define COLOR_AIR       lv_color_hex(0x94a3b8)
 
 static constexpr size_t MAX_FAULTS = 16;
 static constexpr size_t MAX_DEFROSTS = 24;
@@ -90,6 +93,8 @@ static struct {
     tschart_source_t* source = nullptr;
     tschart_group_t* temps_group = nullptr;
     tschart_group_t* power_group = nullptr;
+    tschart_group_t* cop_group = nullptr;
+    tschart_group_t* outdoor_group = nullptr;
     // The dataset the chart is showing.
     WindowData* cur = nullptr;
     bool query_running = false;
@@ -103,6 +108,8 @@ static struct {
     uint32_t window_seconds = HISTORY_WINDOW_DEFAULT_SECONDS;
     bool temps_on = true;
     bool power_on = true;
+    bool cop_on = false;
+    bool outdoor_on = false;
     bool view_saved = false;  // axis/tags below hold the user's choice
     bool axis_open = false;
     bool tags_on = true;
@@ -214,6 +221,15 @@ static size_t format_power(int32_t v, tschart_fmt_ctx_t ctx, char* buf, size_t c
     format_tenths(kw, sizeof(kw), tenths, ctx != TSCHART_FMT_AXIS);
     if (ctx == TSCHART_FMT_AXIS) return clamp_len(snprintf(buf, cap, "%s", kw), cap);
     return clamp_len(snprintf(buf, cap, "%s kW", kw), cap);
+}
+
+// COP x100 in: "3" on the axis, "3.4" on tags and in the card.
+static size_t format_cop(int32_t v, tschart_fmt_ctx_t ctx, char* buf, size_t cap, void*) {
+    if (v == TSCHART_NONE) return clamp_len(snprintf(buf, cap, "--"), cap);
+    const uint32_t tenths = (uint32_t)(v < 0 ? 0 : v + 5) / 10;
+    char text[16];
+    format_tenths(text, sizeof(text), tenths, ctx != TSCHART_FMT_AXIS);
+    return clamp_len(snprintf(buf, cap, "%s", text), cap);
 }
 
 // Gridline labels sit on round local times, so the minutes only matter off
@@ -729,6 +745,10 @@ static void chart_event_cb(lv_event_t* e) {
             update_power_label();
         } else if (p->group == state.temps_group) {
             state.temps_on = p->visible;
+        } else if (p->group == state.cop_group) {
+            state.cop_on = p->visible;
+        } else if (p->group == state.outdoor_group) {
+            state.outdoor_on = p->visible;
         }
     } else if (code == TSCHART_EVENT_AXIS_TOGGLED) {
         state.axis_open = static_cast<const tschart_toggled_t*>(param)->on;
@@ -741,13 +761,24 @@ static void chart_event_cb(lv_event_t* e) {
 
 // ---- Chart setup ----------------------------------------------------------------
 
-static tschart_field_t temp_field(size_t offset, uint8_t valid) {
+static tschart_field_t temp_field(size_t offset, uint8_t valid,
+                                  size_t flags_offset = offsetof(history_telemetry_sample_t,
+                                                                 flags)) {
     tschart_field_t f = {};
     f.offset = offset;
     f.type = TSCHART_I16;
-    f.flags_offset = offsetof(history_telemetry_sample_t, flags);
+    f.flags_offset = flags_offset;
     f.flags_mask = valid;
     f.xform = display_deci_c;
+    return f;
+}
+
+static tschart_field_t u16_field(size_t offset, size_t flags_offset, uint8_t valid) {
+    tschart_field_t f = {};
+    f.offset = offset;
+    f.type = TSCHART_U16;
+    f.flags_offset = flags_offset;
+    f.flags_mask = valid;
     return f;
 }
 
@@ -796,6 +827,26 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
     power.min_step = 100;
     power.fmt = format_power;
     tschart_pane_t* power_pane = tschart_add_pane(c, &power);
+
+    tschart_pane_cfg_t cop = {};
+    cop.id = "cop";
+    cop.weight = 30;
+    cop.unit_tag = "COP";
+    cop.color = COLOR_COP;
+    cop.auto_range = true;
+    cop.include_zero = true;
+    cop.has_max = true;
+    cop.max = 300;  // at least 0-3 tall
+    cop.pad_permille = 50;
+    cop.min_step = 100;
+    cop.fmt = format_cop;
+    tschart_pane_t* cop_pane = tschart_add_pane(c, &cop);
+
+    tschart_pane_cfg_t outdoor = temps;
+    outdoor.id = "outdoor";
+    outdoor.weight = 35;
+    outdoor.color = COLOR_COIL;
+    tschart_pane_t* outdoor_pane = tschart_add_pane(c, &outdoor);
 
     tschart_layer_cfg_t l = {};
     l.width = 3;
@@ -847,14 +898,54 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
     l.color = COLOR_POWER;
     tschart_add_layer(power_pane, &l);
 
+    l.id = "cop";
+    l.name = i18n_get(STR_HISTORY_VIEW_COP);
+    l.tag_name = "";
+    l.field = u16_field(offsetof(history_telemetry_sample_t, average_cop_x100),
+                        offsetof(history_telemetry_sample_t, flags2),
+                        HISTORY_TELEMETRY_COP_VALID);
+    l.geom = TSCHART_GEOM_LINE;
+    l.interp = TSCHART_INTERP_NONE;
+    l.fill = false;
+    l.color = COLOR_COP;
+    tschart_add_layer(cop_pane, &l);
+
+    l.id = "outdoor_coil";
+    l.name = i18n_get(STR_HISTORY_COIL);
+    l.tag_name = "coil";
+    l.field = temp_field(offsetof(history_telemetry_sample_t, outdoor_coil_deci_c),
+                         HISTORY_TELEMETRY_OUTDOOR_COIL_VALID,
+                         offsetof(history_telemetry_sample_t, flags2));
+    l.geom = TSCHART_GEOM_LINE;
+    l.interp = TSCHART_INTERP_PLATEAU;
+    l.color = COLOR_COIL;
+    tschart_add_layer(outdoor_pane, &l);
+
+    l.id = "outdoor_air";
+    l.name = i18n_get(STR_HISTORY_AIR);
+    l.tag_name = "air";
+    l.field = temp_field(offsetof(history_telemetry_sample_t, outdoor_air_deci_c),
+                         HISTORY_TELEMETRY_OUTDOOR_AIR_VALID,
+                         offsetof(history_telemetry_sample_t, flags2));
+    l.color = COLOR_AIR;
+    tschart_add_layer(outdoor_pane, &l);
+
     state.temps_group = tschart_add_group(c, "temps", i18n_get(STR_HISTORY_VIEW_TEMPS),
                                           COLOR_OUTLET, TSCHART_SWATCH_LINE);
     tschart_group_add_pane(state.temps_group, temps_pane);
     state.power_group = tschart_add_group(c, "power", i18n_get(STR_HISTORY_VIEW_POWER),
                                           COLOR_POWER, TSCHART_SWATCH_FILL);
     tschart_group_add_pane(state.power_group, power_pane);
+    state.cop_group = tschart_add_group(c, "cop", i18n_get(STR_HISTORY_VIEW_COP), COLOR_COP,
+                                        TSCHART_SWATCH_LINE);
+    tschart_group_add_pane(state.cop_group, cop_pane);
+    state.outdoor_group = tschart_add_group(c, "outdoor", i18n_get(STR_HISTORY_VIEW_OUTDOOR),
+                                            COLOR_COIL, TSCHART_SWATCH_LINE);
+    tschart_group_add_pane(state.outdoor_group, outdoor_pane);
     tschart_group_set_visible(state.temps_group, state.temps_on);
     tschart_group_set_visible(state.power_group, state.power_on);
+    tschart_group_set_visible(state.cop_group, state.cop_on);
+    tschart_group_set_visible(state.outdoor_group, state.outdoor_on);
 
     tschart_add_key(c, "heating", i18n_get(STR_HISTORY_LEGEND_HEATING), COLOR_HEATING,
                     TSCHART_SPAN_FILL);
@@ -1055,6 +1146,8 @@ void heatpump_history_hide(void) {
     state.source = nullptr;
     state.temps_group = nullptr;
     state.power_group = nullptr;
+    state.cop_group = nullptr;
+    state.outdoor_group = nullptr;
     state.range_label = nullptr;
     state.power_label = nullptr;
     state.previous_button = nullptr;

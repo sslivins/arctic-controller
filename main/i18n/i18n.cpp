@@ -646,9 +646,13 @@ static const char* const strings_en[STR_COUNT] = {
     [STR_ENERGY_LOADING] = "Loading...",
     [STR_ENERGY_DAY_UNIT] = "d",
     [STR_ENERGY_LOAD_ERROR] = "Unable to read energy history",
-    [STR_HISTORY_VIEW_TEMPS] = "Temperatures",
+    [STR_HISTORY_VIEW_TEMPS] = "Temps",
     [STR_HISTORY_VIEW_POWER] = "Power",
     [STR_HISTORY_POWER_WINDOW_FMT] = "%s kWh in this window",
+    [STR_HISTORY_VIEW_COP] = "COP",
+    [STR_HISTORY_VIEW_OUTDOOR] = "Outdoor",
+    [STR_HISTORY_COIL] = "Coil",
+    [STR_HISTORY_AIR] = "Air",
 };
 
 // French strings
@@ -1276,9 +1280,13 @@ static const char* const strings_fr[STR_COUNT] = {
     [STR_ENERGY_LOADING] = "Chargement...",
     [STR_ENERGY_DAY_UNIT] = "j",
     [STR_ENERGY_LOAD_ERROR] = "Impossible de lire l'historique d'" "\xc3\xa9" "nergie",
-    [STR_HISTORY_VIEW_TEMPS] = "Temp" "\xc3\xa9" "ratures",
+    [STR_HISTORY_VIEW_TEMPS] = "Temp.",
     [STR_HISTORY_VIEW_POWER] = "Puissance",
     [STR_HISTORY_POWER_WINDOW_FMT] = "%s kWh sur la p" "\xc3\xa9" "riode",
+    [STR_HISTORY_VIEW_COP] = "COP",
+    [STR_HISTORY_VIEW_OUTDOOR] = "Ext" "\xc3\xa9" "rieur",
+    [STR_HISTORY_COIL] = "Échangeur",
+    [STR_HISTORY_AIR] = "Air",
 };
 
 // Spanish strings
@@ -1906,9 +1914,13 @@ static const char* const strings_es[STR_COUNT] = {
     [STR_ENERGY_LOADING] = "Cargando...",
     [STR_ENERGY_DAY_UNIT] = "d",
     [STR_ENERGY_LOAD_ERROR] = "No se puede leer el historial de energ" "\xc3\xad" "a",
-    [STR_HISTORY_VIEW_TEMPS] = "Temperaturas",
+    [STR_HISTORY_VIEW_TEMPS] = "Temp.",
     [STR_HISTORY_VIEW_POWER] = "Potencia",
     [STR_HISTORY_POWER_WINDOW_FMT] = "%s kWh en este periodo",
+    [STR_HISTORY_VIEW_COP] = "COP",
+    [STR_HISTORY_VIEW_OUTDOOR] = "Exterior",
+    [STR_HISTORY_COIL] = "Intercambiador",
+    [STR_HISTORY_AIR] = "Aire",
 };
 
 // Language names in their own language (native names)

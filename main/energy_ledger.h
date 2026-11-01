@@ -459,4 +459,63 @@ private:
     uint64_t ms_ = 0;
 };
 
+// Time-weighted heat output and COP between take() calls. Only time when the
+// performance estimate was valid counts, and COP is heat energy over the
+// electrical energy of that same time, so a sample that straddles a start or
+// a defrost reports the COP of the part where the unit was really working.
+class PerfAverager {
+public:
+    void add(uint32_t now_ms, bool valid, uint32_t heat_w, uint32_t power_w) {
+        if (has_last_ && last_valid_) {
+            const uint32_t dt = now_ms - last_ms_;
+            if (dt > 0 && dt <= kMaxStepMs) {
+                heat_sum_ += (uint64_t)last_heat_w_ * dt;
+                power_sum_ += (uint64_t)last_power_w_ * dt;
+                ms_ += dt;
+            }
+        }
+        has_last_ = true;
+        last_ms_ = now_ms;
+        last_valid_ = valid && power_w > 0;
+        last_heat_w_ = heat_w;
+        last_power_w_ = power_w;
+    }
+
+    // False when the estimate was never valid since the last take().
+    bool take(uint32_t now_ms, uint16_t* heat_w, uint16_t* cop_x100) {
+        add(now_ms, last_valid_, last_heat_w_, last_power_w_);
+        uint64_t heat = 0, power = 0;
+        bool ok = false;
+        if (ms_ > 0) {
+            heat = heat_sum_ / ms_;
+            power = power_sum_ / ms_;
+            ok = power > 0;
+        } else if (has_last_ && last_valid_) {
+            heat = last_heat_w_;
+            power = last_power_w_;
+            ok = true;
+        }
+        if (ok) {
+            *heat_w = (uint16_t)(heat > 0xFFFE ? 0xFFFE : heat);
+            const uint64_t cop = (heat * 100 + power / 2) / power;
+            *cop_x100 = (uint16_t)(cop > 0xFFFE ? 0xFFFE : cop);
+        }
+        heat_sum_ = 0;
+        power_sum_ = 0;
+        ms_ = 0;
+        return ok;
+    }
+
+private:
+    static constexpr uint32_t kMaxStepMs = 120000;
+    bool has_last_ = false;
+    bool last_valid_ = false;
+    uint32_t last_ms_ = 0;
+    uint32_t last_heat_w_ = 0;
+    uint32_t last_power_w_ = 0;
+    uint64_t heat_sum_ = 0;
+    uint64_t power_sum_ = 0;
+    uint64_t ms_ = 0;
+};
+
 }  // namespace energy

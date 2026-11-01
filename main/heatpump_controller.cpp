@@ -50,6 +50,8 @@ static uint32_t s_telemetry_window_ms = 0;
 static bool s_inlet_valid = false;
 static bool s_outlet_valid = false;
 static bool s_tank_valid = false;
+static bool s_outdoor_coil_valid = false;
+static bool s_outdoor_air_valid = false;
 // Energy ledger, under s_state_mutex.
 static energy::EnergyLedger s_ledger;
 static bool s_ledger_loaded = false;
@@ -63,6 +65,7 @@ static uint64_t s_migrate_ws = 0;
 static SemaphoreHandle_t s_persist_mutex = nullptr;
 static energy::Day s_ledger_day = {};
 static energy::PowerAverager s_power_avg;
+static energy::PerfAverager s_perf_avg;
 // Per-run summaries, under s_state_mutex. Finished runs wait here for
 // persistEnergyLedger() to store them.
 static energy::RunTracker s_runs;
@@ -396,7 +399,8 @@ void initDemoState() {
     s_image.set_value(MaconField::FanLevel, 400);      // RPM
     s_image.set_value(MaconField::PrimaryEev, 200);     // EEV steps
     s_image.set_value(MaconField::CompressorFreq, 60);  // Hz
-    s_image.set_value(MaconField::RealtimePower, 1200); // W
+    // ~19 kW heat out (7 K at loop flow) / 5.5 kW in: COP ~3.5.
+    s_image.set_value(MaconField::RealtimePower, 5500); // W
 
     // Mark all five fault registers present (so faults decode as valid) with
     // no fault active, and keep the unit running. Faults are injected on
@@ -709,6 +713,8 @@ static void applyMaconMapping() {
     s_inlet_valid = ms.inlet_valid;
     s_outlet_valid = ms.outlet_valid;
     s_tank_valid = ms.water_tank_valid;
+    s_outdoor_coil_valid = ms.outdoor_coil_valid;
+    s_outdoor_air_valid = ms.outdoor_ambient_valid;
     s_cooling_setpoint_valid = ms.cooling_setpoint_valid;
     s_heating_setpoint_valid = ms.heating_setpoint_valid;
     s_heating_setpoint_decoded = ms.heating_setpoint_valid;
@@ -747,6 +753,9 @@ static void applyMaconMapping() {
     // library normalises ac_current to whole amps.
     s_state.realtime_power_w    = ms.realtime_power_w;
     s_power_avg.add(getTimeMs(), ms.realtime_power_valid, ms.realtime_power_w);
+    s_perf_avg.add(getTimeMs(), perf.valid && ms.realtime_power_valid,
+                   (uint32_t)(perf.thermal_w < 0 ? -perf.thermal_w : perf.thermal_w),
+                   ms.realtime_power_w);
     bookEnergy(ms, perf_cfg, sel, external, perf_in, perf);
     s_state.thermal_w = perf.valid ? perf.thermal_w : 0;
     s_state.cop_x100  = perf.valid ? perf.cop_x100 : 0;
@@ -889,6 +898,10 @@ TelemetrySnapshot getTelemetrySnapshot() {
             snapshot.outlet_c = s_state.outlet_water_temp;
             snapshot.tank_valid = snapshot.connected;
             snapshot.tank_c = s_state.water_tank_temp;
+            snapshot.outdoor_coil_valid = snapshot.connected;
+            snapshot.outdoor_coil_c = s_state.outdoor_coil_temp;
+            snapshot.outdoor_air_valid = snapshot.connected;
+            snapshot.outdoor_air_c = s_state.outdoor_ambient_temp;
             if (s_state.operation == HeatPumpOperation::COOLING) {
                 snapshot.operation = TelemetryOperation::COOLING;
             } else if (s_state.operation == HeatPumpOperation::HEATING) {
@@ -936,6 +949,12 @@ TelemetrySnapshot getTelemetrySnapshot() {
         snapshot.tank_valid = telemetry_fresh && s_tank_valid &&
             s_state.water_tank_temp >= -50 && s_state.water_tank_temp <= 150;
         snapshot.tank_c = s_state.water_tank_temp;
+        snapshot.outdoor_coil_valid = telemetry_fresh && s_outdoor_coil_valid &&
+            s_state.outdoor_coil_temp >= -50 && s_state.outdoor_coil_temp <= 100;
+        snapshot.outdoor_coil_c = s_state.outdoor_coil_temp;
+        snapshot.outdoor_air_valid = telemetry_fresh && s_outdoor_air_valid &&
+            s_state.outdoor_ambient_temp >= -50 && s_state.outdoor_ambient_temp <= 70;
+        snapshot.outdoor_air_c = s_state.outdoor_ambient_temp;
 
         if (telemetry_fresh) {
             if (s_state.operation == HeatPumpOperation::COOLING) {
@@ -1232,6 +1251,14 @@ bool takeAveragePower(uint16_t* watts) {
     if (s_state_mutex == nullptr) return false;
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     const bool ok = s_power_avg.take(getTimeMs(), watts);
+    xSemaphoreGive(s_state_mutex);
+    return ok;
+}
+
+bool takeAveragePerformance(uint16_t* heat_w, uint16_t* cop_x100) {
+    if (s_state_mutex == nullptr) return false;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const bool ok = s_perf_avg.take(getTimeMs(), heat_w, cop_x100);
     xSemaphoreGive(s_state_mutex);
     return ok;
 }

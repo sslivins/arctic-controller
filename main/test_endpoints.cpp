@@ -2342,6 +2342,7 @@ static esp_err_t history_cursor_get_handler(httpd_req_t* req)
 static struct {
     lv_indev_t* indev = nullptr;
     bool active = false;
+    bool started = false;
     volatile bool done = true;
     uint32_t t0 = 0;
     int32_t x1 = 0, y1 = 0, x2 = 0, y2 = 0;
@@ -2355,6 +2356,13 @@ static void test_drag_read_cb(lv_indev_t*, lv_indev_data_t* data)
     data->point = d.last;
     data->state = LV_INDEV_STATE_RELEASED;
     if (!d.active) return;
+    // Time the gesture from LVGL's first read, not from the request: if LVGL
+    // is busy redrawing when the drag is posted, the press must still land at
+    // (x1,y1) rather than partway along the path.
+    if (!d.started) {
+        d.started = true;
+        d.t0 = lv_tick_get();
+    }
     const uint32_t el = lv_tick_elaps(d.t0);
     lv_point_t p = {d.x2, d.y2};
     if (el < d.hold_ms) {
@@ -2444,7 +2452,7 @@ static esp_err_t drag_post_handler(httpd_req_t* req)
     d.hold_ms = hold_ms;
     d.duration_ms = duration_ms;
     d.last = {d.x1, d.y1};
-    d.t0 = lv_tick_get();
+    d.started = false;
     d.done = false;
     d.active = true;
     bsp_display_unlock();
@@ -2510,9 +2518,28 @@ static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
                        HISTORY_TELEMETRY_TANK_VALID |
                        HISTORY_TELEMETRY_POWER_VALID;
         sample.average_power_w = 15;
+        // Outdoor air drifts a few degrees around -5 C; the coil sits a
+        // few K under it while idle.
+        int32_t air_wave = (int32_t)(i % 480);
+        if (air_wave > 240) air_wave = 480 - air_wave;
+        sample.outdoor_air_deci_c = (int16_t)(-80 + air_wave / 4);
+        sample.outdoor_coil_deci_c = (int16_t)(sample.outdoor_air_deci_c - 10);
+        sample.flags2 = HISTORY_TELEMETRY_OUTDOOR_AIR_VALID |
+                        HISTORY_TELEMETRY_OUTDOOR_COIL_VALID;
         if ((i % 240) < 160) {
             sample.flags |= HISTORY_TELEMETRY_COMPRESSOR_RUNNING;
             sample.average_power_w = (uint16_t)(1200 + (i % 160) * 5);
+            // Frost builds for 40 min (coil falls, COP with it), then a
+            // defrost clears it and both recover.
+            const int32_t frost = (int32_t)((i % 160) % 80);
+            sample.outdoor_coil_deci_c =
+                (int16_t)(sample.outdoor_air_deci_c - 50 - frost * 2);
+            const uint32_t cop_x100 = (uint32_t)(340 - frost * 3 / 2);
+            sample.average_cop_x100 = (uint16_t)cop_x100;
+            sample.average_heat_w =
+                (uint16_t)(sample.average_power_w * cop_x100 / 100);
+            sample.flags2 |= HISTORY_TELEMETRY_HEAT_VALID |
+                             HISTORY_TELEMETRY_COP_VALID;
         }
 
         int16_t wave = (int16_t)(i % 160);

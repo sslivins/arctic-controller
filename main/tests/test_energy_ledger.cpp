@@ -446,6 +446,22 @@ static void power_averager() {
     CHECK_EQ_L(w, 0xFFFE);
 }
 
+// COP is heat energy over power energy across the valid part of the window,
+// not an average of instantaneous ratios.
+static void perf_averager() {
+    energy::PerfAverager a;
+    uint16_t heat = 0, cop = 0;
+    CHECK_EQ_L(a.take(0, &heat, &cop), false);
+    a.add(0, true, 6000, 2000);       // COP 3 for 10 s
+    a.add(10000, true, 4000, 2000);   // COP 2 for 10 s
+    a.add(20000, false, 0, 0);        // invalid for 10 s: ignored
+    CHECK_EQ_L(a.take(30000, &heat, &cop), true);
+    CHECK_EQ_L(heat, 5000);
+    CHECK_EQ_L(cop, 250);
+    // Never valid in the next window.
+    CHECK_EQ_L(a.take(60000, &heat, &cop), false);
+}
+
 int main() {
     integrates_per_bucket();
     gaps_and_disconnects_are_not_booked();
@@ -460,6 +476,7 @@ int main() {
     outdoor_and_settings();
     outdoor_while_running();
     power_averager();
+    perf_averager();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
         return 1;

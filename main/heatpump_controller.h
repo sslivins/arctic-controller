@@ -158,9 +158,13 @@ struct TelemetrySnapshot {
     bool compressor_valid = false;
     bool compressor_running = false;
     bool tank_valid = false;
+    bool outdoor_coil_valid = false;
+    bool outdoor_air_valid = false;
     int16_t inlet_c = 0;
     int16_t outlet_c = 0;
     int16_t tank_c = 0;
+    int16_t outdoor_coil_c = 0;
+    int16_t outdoor_air_c = 0;
     int16_t active_setpoint_c = 0;
     TelemetryOperation operation = TelemetryOperation::UNKNOWN;
     // UNKNOWN whenever the matching reading is invalid or stale.
@@ -240,6 +244,9 @@ bool getEnergyTotals(EnergyTotals* out);
 // Time-weighted average power since the previous call, for the telemetry
 // recorder. False when there was no valid power reading.
 bool takeAveragePower(uint16_t* watts);
+// Heat output (W, magnitude) and COP x100 averaged since the last call, over
+// the time the performance estimate was valid. False if it never was.
+bool takeAveragePerformance(uint16_t* heat_w, uint16_t* cop_x100);
 
 // ============================================================================
 // Control Functions (write to heat pump)

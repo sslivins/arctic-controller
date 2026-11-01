@@ -24,7 +24,7 @@ def test_telemetry_region_retains_at_least_fourteen_days():
     partition_bytes = 2 * 1024 * 1024
     telemetry_bytes = partition_bytes - 256 * 1024
     sectors = telemetry_bytes // 4096
-    records_per_sector = (4096 - 32) // 32
+    records_per_sector = (4096 - 32) // 40  # format 2 records
     required_samples = 14 * 24 * 60 * 60 // 30
 
     assert sectors * records_per_sector >= required_samples

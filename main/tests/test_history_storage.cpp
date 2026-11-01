@@ -26,6 +26,7 @@
 //
 // Refs #217 (T10, T14).
 
+#include "esp_crc.h"
 #include "esp_partition_fake.h"
 #include "heap_fake.h"
 #include "history_storage.h"
@@ -451,6 +452,195 @@ void telemetry_power_round_trips() {
     CHECK(out[2].average_power_w == 0);
 }
 
+// Heat out, COP and the outdoor temperatures are format 2 fields with their
+// own validity bits; the erased marker never reads back as a reading.
+void telemetry_performance_fields_round_trip() {
+    fresh_device();
+    history_telemetry_sample_t a = make_sample(1000, 1, 200);
+    a.average_heat_w = 9876;
+    a.average_cop_x100 = 342;
+    a.outdoor_coil_deci_c = -123;
+    a.outdoor_air_deci_c = -45;
+    a.flags2 = HISTORY_TELEMETRY_HEAT_VALID | HISTORY_TELEMETRY_COP_VALID |
+               HISTORY_TELEMETRY_OUTDOOR_COIL_VALID | HISTORY_TELEMETRY_OUTDOOR_AIR_VALID;
+    CHECK_ERR(history_storage_append_telemetry(&a), ESP_OK);
+    history_telemetry_sample_t b = make_sample(1030, 2, 201);
+    b.average_heat_w = 0xFFFF;
+    b.average_cop_x100 = 0xFFFF;
+    b.outdoor_coil_deci_c = 77;  // no flag: not a reading
+    b.flags2 = HISTORY_TELEMETRY_HEAT_VALID | HISTORY_TELEMETRY_COP_VALID;
+    CHECK_ERR(history_storage_append_telemetry(&b), ESP_OK);
+
+    boot();
+    std::vector<history_telemetry_sample_t> out(8);
+    size_t count = 0;
+    CHECK_ERR(history_storage_query_telemetry(0, 0xffffffff, out.data(), out.size(),
+                                              &count),
+              ESP_OK);
+    CHECK(count == 2);
+    CHECK(out[0].flags2 == a.flags2);
+    CHECK(out[0].average_heat_w == 9876);
+    CHECK(out[0].average_cop_x100 == 342);
+    CHECK(out[0].outdoor_coil_deci_c == -123);
+    CHECK(out[0].outdoor_air_deci_c == -45);
+    CHECK(out[1].flags2 == 0);
+    CHECK(out[1].average_heat_w == 0);
+    CHECK(out[1].average_cop_x100 == 0);
+    CHECK(out[1].outdoor_coil_deci_c == 0);
+}
+
+// ---- Format 1 sectors, as firmware up to 3.4 wrote them -------------------
+
+struct V1Header {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t header_size;
+    uint32_t generation;
+    uint32_t first_sequence;
+    uint16_t record_size;
+    uint16_t records_per_sector;
+    uint32_t reserved;
+    uint32_t crc32;
+    uint32_t committed;
+};
+struct V1Record {
+    uint32_t magic;
+    uint32_t sequence;
+    uint32_t timestamp;
+    uint32_t sample_sequence;
+    int16_t inlet_deci_c;
+    int16_t outlet_deci_c;
+    int16_t setpoint_deci_c;
+    uint8_t mode;
+    uint8_t flags;
+    int16_t tank_deci_c;
+    uint16_t average_power_w;
+    uint32_t crc32;
+};
+static_assert(sizeof(V1Header) == 32 && sizeof(V1Record) == 32, "format 1 layout");
+
+constexpr size_t V1_SLOTS = (4096 - 32) / 32;
+
+// Writes a committed format 1 sector holding n samples 30 s apart.
+void poke_v1_sector(size_t sector, uint32_t generation, uint32_t first_seq, uint32_t ts,
+                    size_t n) {
+    std::vector<uint8_t> img(4096, 0xFF);
+    V1Header h;
+    std::memset(&h, 0xFF, sizeof(h));
+    h.magic = 0x48545331;
+    h.version = 1;
+    h.header_size = 32;
+    h.generation = generation;
+    h.first_sequence = first_seq;
+    h.record_size = 32;
+    h.records_per_sector = (uint16_t)V1_SLOTS;
+    h.reserved = 0xFFFFFFFF;
+    h.crc32 = esp_crc32_le(0, reinterpret_cast<const uint8_t*>(&h), offsetof(V1Header, crc32));
+    h.committed = 0;
+    std::memcpy(img.data(), &h, sizeof(h));
+    for (size_t i = 0; i < n; ++i) {
+        V1Record r;
+        std::memset(&r, 0xFF, sizeof(r));
+        r.magic = 0x48545231;
+        r.sequence = r.sample_sequence = first_seq + (uint32_t)i;
+        r.timestamp = ts + (uint32_t)i * 30;
+        r.inlet_deci_c = (int16_t)(100 + i);
+        r.outlet_deci_c = 150;
+        r.setpoint_deci_c = 450;
+        r.mode = HISTORY_TELEMETRY_MODE_HEATING;
+        r.flags = HISTORY_TELEMETRY_CONNECTED | HISTORY_TELEMETRY_INLET_VALID |
+                  HISTORY_TELEMETRY_POWER_VALID;
+        r.average_power_w = 1500;
+        r.crc32 = esp_crc32_le(0, reinterpret_cast<const uint8_t*>(&r), offsetof(V1Record, crc32));
+        std::memcpy(img.data() + 32 + i * 32, &r, sizeof(r));
+    }
+    flash_fake::poke("history", EVENT_REGION + sector * 4096, img.data(), img.size());
+}
+
+std::vector<history_telemetry_sample_t> all_telemetry() {
+    std::vector<history_telemetry_sample_t> out(4096);
+    size_t count = 0;
+    CHECK_ERR(history_storage_query_telemetry(0, 0xffffffff, out.data(), out.size(),
+                                              &count),
+              ESP_OK);
+    out.resize(count);
+    return out;
+}
+
+// A device upgraded from format 1 firmware keeps its history and appends
+// new samples in format 2 after it.
+void upgrade_keeps_format_1_history() {
+    flash_fake::install_history_partition();
+    poke_v1_sector(0, 4, 1, 1000, V1_SLOTS);  // full
+    poke_v1_sector(1, 5, 1 + V1_SLOTS, 1000 + V1_SLOTS * 30, 3);
+    CHECK_ERR(history_storage_init(), ESP_OK);
+    auto before = all_telemetry();
+    CHECK(before.size() == V1_SLOTS + 3);
+    if (!before.empty()) {
+        CHECK(before[0].timestamp == 1000);
+        CHECK(before[0].average_power_w == 1500);
+        CHECK(before[0].flags2 == 0);
+    }
+    uint32_t latest = 0;
+    CHECK_ERR(history_storage_latest_telemetry_timestamp(&latest), ESP_OK);
+    CHECK(latest == 1000 + (V1_SLOTS + 2) * 30);
+
+    history_telemetry_sample_t s = make_sample(latest + 30, 0, 500);
+    s.average_cop_x100 = 300;
+    s.flags2 = HISTORY_TELEMETRY_COP_VALID;
+    CHECK_ERR(history_storage_append_telemetry(&s), ESP_OK);
+}
+
+void after_upgrade_both_formats_read_back() {
+    boot();
+    auto all = all_telemetry();
+    CHECK(all.size() == V1_SLOTS + 4);
+    for (size_t i = 0; i + 1 < all.size(); ++i) {
+        CHECK(all[i].timestamp < all[i + 1].timestamp);
+        CHECK(all[i].sequence < all[i + 1].sequence);
+    }
+    if (!all.empty()) {
+        CHECK(all.back().inlet_deci_c == 500);
+        CHECK(all.back().average_cop_x100 == 300);
+        CHECK(all.back().sequence == V1_SLOTS + 4);
+    }
+}
+
+// Upgrade, roll back, upgrade again: the rolled-back firmware only sees its
+// own format and keeps numbering from a lower generation, so the newest data
+// sits in a format 1 sector with a lower generation than a stale format 2 one.
+void reupgrade_after_rollback_continues_after_the_newest_data() {
+    fresh_device();
+    for (uint32_t i = 0; i < 5; ++i) {
+        history_telemetry_sample_t s = make_sample(1000 + i * 30, 0, 200);
+        CHECK_ERR(history_storage_append_telemetry(&s), ESP_OK);
+    }
+    // What the older firmware then wrote in the next sector. Treating the
+    // stale format 2 sector as active would wrap into this one and erase it.
+    poke_v1_sector(1, 1, 50, 5000, 4);
+}
+
+void reupgraded_device_appends_after_the_rolled_back_samples() {
+    boot();
+    uint32_t latest = 0;
+    CHECK_ERR(history_storage_latest_telemetry_timestamp(&latest), ESP_OK);
+    CHECK(latest == 5000 + 3 * 30);
+    const uint32_t n = 150;  // more than a format 2 sector holds
+    for (uint32_t i = 0; i < n; ++i) {
+        history_telemetry_sample_t s = make_sample(6000 + i * 30, 0, 600);
+        CHECK_ERR(history_storage_append_telemetry(&s), ESP_OK);
+    }
+    auto all = all_telemetry();
+    CHECK(all.size() == 5 + 4 + n);
+    size_t rolled_back = 0;
+    for (const auto& s : all) rolled_back += (s.timestamp >= 5000 && s.timestamp < 6000);
+    CHECK(rolled_back == 4);
+    if (!all.empty()) {
+        CHECK(all.back().timestamp == 6000 + (n - 1) * 30);
+        CHECK(all[9].sequence > 53);
+    }
+}
+
 void write_five_telemetry_samples() {
     fresh_device();
     for (uint32_t i = 0; i < 5; ++i) {
@@ -671,6 +861,13 @@ int main() {
     SCENARIO("telemetry round trips", telemetry_round_trips);
 SCENARIO("telemetry tank reading round trips", telemetry_tank_reading_round_trips);
     SCENARIO("the average power reading round-trips", telemetry_power_round_trips);
+    SCENARIO("performance and outdoor fields round-trip",
+             telemetry_performance_fields_round_trip);
+    SCENARIO("upgrading keeps format 1 telemetry", upgrade_keeps_format_1_history,
+             after_upgrade_both_formats_read_back);
+    SCENARIO("re-upgrading after a rollback appends after the newest data",
+             reupgrade_after_rollback_continues_after_the_newest_data,
+             reupgraded_device_appends_after_the_rolled_back_samples);
     SCENARIO("telemetry survives a reboot", write_five_telemetry_samples,
              expect_five_telemetry_samples_after_reboot);
     SCENARIO("telemetry query filters by time window",

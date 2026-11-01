@@ -6694,12 +6694,32 @@ static esp_err_t heatpump_temperature_history_get_handler(httpd_req_t* req)
             snprintf(p_buf, sizeof(p_buf), "%u", (unsigned)s.average_power_w);
         else
             strcpy(p_buf, "null");
+        char q_buf[8], cop_buf[12], coil_buf[12], air_buf[12];
+        if (s.flags2 & HISTORY_TELEMETRY_HEAT_VALID)
+            snprintf(q_buf, sizeof(q_buf), "%u", (unsigned)s.average_heat_w);
+        else
+            strcpy(q_buf, "null");
+        if (s.flags2 & HISTORY_TELEMETRY_COP_VALID)
+            snprintf(cop_buf, sizeof(cop_buf), "%u.%02u",
+                     (unsigned)(s.average_cop_x100 / 100),
+                     (unsigned)(s.average_cop_x100 % 100));
+        else
+            strcpy(cop_buf, "null");
+        if (s.flags2 & HISTORY_TELEMETRY_OUTDOOR_COIL_VALID)
+            snprintf(coil_buf, sizeof(coil_buf), "%d", (int)s.outdoor_coil_deci_c);
+        else
+            strcpy(coil_buf, "null");
+        if (s.flags2 & HISTORY_TELEMETRY_OUTDOOR_AIR_VALID)
+            snprintf(air_buf, sizeof(air_buf), "%d", (int)s.outdoor_air_deci_c);
+        else
+            strcpy(air_buf, "null");
         n = snprintf(line, sizeof(line),
                  "%s{\"t\":%u,\"in\":%s,\"out\":%s,\"set\":%s,\"tank\":%s,"
-                 "\"mode\":%u,\"run\":%s,\"conn\":%s,\"p\":%s}",
+                 "\"mode\":%u,\"run\":%s,\"conn\":%s,\"p\":%s,\"q\":%s,"
+                 "\"cop\":%s,\"coil\":%s,\"air\":%s}",
                  i == 0 ? "" : ",", (unsigned)s.timestamp, in_buf, out_buf,
                  set_buf, tank_buf, (unsigned)s.mode, running ? "true" : "false",
-                 conn ? "true" : "false", p_buf);
+                 conn ? "true" : "false", p_buf, q_buf, cop_buf, coil_buf, air_buf);
         if (n < 0) n = 0;
         if (n > (int)sizeof(line) - 1) n = (int)sizeof(line) - 1;
         emit(line, (size_t)n);
