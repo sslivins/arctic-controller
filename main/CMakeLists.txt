@@ -10,7 +10,8 @@ set(WEB_SRC "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html")
 set(WEB_GZ "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html.gz")
 set(GZIP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/web/gzip_html.py")
 # Files pulled into index.html by /*@inline <path>@*/ markers.
-set(WEB_INLINES "${CMAKE_CURRENT_SOURCE_DIR}/../components/tschart/web/tschart.js")
+set(WEB_INLINES "${CMAKE_CURRENT_SOURCE_DIR}/../components/tschart/web/tschart.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/web/report.js" "${CMAKE_CURRENT_SOURCE_DIR}/web/report_data.js")
 
 # Find Python once - prefer IDF's Python, then system Python.
 if(Python3_EXECUTABLE)
