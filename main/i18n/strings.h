@@ -287,6 +287,7 @@ typedef enum {
     STR_HISTORY_LEGEND_FAULT,
     STR_HISTORY_LEGEND_DEFROST,
     STR_HISTORY_LEGEND_FREEZE,
+    STR_HISTORY_KEY_COOLING,   // short legend label so the key row fits one line
     STR_HISTORY_START,
     STR_HISTORY_NOW,
     STR_HISTORY_NO_DATA,

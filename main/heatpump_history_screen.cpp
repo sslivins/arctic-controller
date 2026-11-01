@@ -982,7 +982,7 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
 
     tschart_add_key(c, "heating", i18n_get(STR_HISTORY_LEGEND_HEATING), COLOR_HEATING,
                     TSCHART_SPAN_FILL);
-    tschart_add_key(c, "cooling", i18n_get(STR_HISTORY_LEGEND_COOLING), COLOR_COOLING,
+    tschart_add_key(c, "cooling", i18n_get(STR_HISTORY_KEY_COOLING), COLOR_COOLING,
                     TSCHART_SPAN_FILL);
     tschart_add_key(c, "hot_water", i18n_get(STR_HISTORY_LEGEND_HOT_WATER),
                     COLOR_HOT_WATER, TSCHART_SPAN_FILL);
