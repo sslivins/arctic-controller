@@ -141,11 +141,13 @@ const ZoneCase kZones[] = {
     {"America/Toronto", -300, -240, -240, -240},
     {"America/Montreal", -300, -240, -240, -240},
     {"America/Nipigon", -300, -240, -240, -240},
-    {"America/Winnipeg", -360, -300, -300, -300},
+    {"America/Winnipeg", -300, -300, -300, -300},  // permanent from 2026-11-01
     {"America/Regina", -360, -360, -360, -360},
     {"America/Swift_Current", -360, -360, -360, -360},
-    {"America/Edmonton", -420, -360, -360, -360},
-    {"America/Vancouver", -480, -420, -420, -420},
+    {"America/Edmonton", -360, -360, -360, -360},  // permanent from 2026-11-01
+    {"America/Yellowknife", -360, -360, -360, -360},
+    {"America/Inuvik", -360, -360, -360, -360},
+    {"America/Vancouver", -420, -420, -420, -420},  // permanent from 2026-11-01
     {"America/Dawson_Creek", -420, -420, -420, -420},
     {"America/Fort_Nelson", -420, -420, -420, -420},
     {"America/Whitehorse", -420, -420, -420, -420},
@@ -259,7 +261,7 @@ void the_dst_changeover_windows_match_the_right_region() {
         bool dst_in_late_october;
     } cases[] = {
         {"America/New_York", true, true},   // 2nd Sun Mar .. 1st Sun Nov
-        {"America/Vancouver", true, true},
+        {"America/Los_Angeles", true, true},
         {"America/Tijuana", true, true},    // follows the US, not Mexico
         {"Europe/London", false, false},    // last Sun Mar .. last Sun Oct
         {"Europe/Berlin", false, false},
@@ -307,12 +309,15 @@ void no_mapped_zone_silently_degrades_to_utc() {
 void a_zone_that_should_not_observe_dst_does_not() {
     // Stated separately from the offset table so that the intent survives even
     // if someone "fixes" an offset. Arizona, Saskatchewan, the BC Peace River,
-    // Yukon, Queensland and post-2022 Mexico are the entries whose whole
-    // reason for existing is that the obvious rule would be wrong.
+    // Yukon, Queensland, post-2022 Mexico and (from 2026-11-01) BC, Alberta,
+    // the NWT and Manitoba are the entries whose whole reason for existing is
+    // that the obvious rule would be wrong.
     const char* no_dst[] = {
         "America/Phoenix",      "America/Regina",  "America/Swift_Current",
         "America/Dawson_Creek", "America/Whitehorse", "America/Fort_Nelson",
         "America/Dawson",       "America/Mexico_City", "America/Monterrey",
+        "America/Vancouver",    "America/Edmonton", "America/Yellowknife",
+        "America/Inuvik",       "America/Winnipeg",
         "Australia/Brisbane",   "Australia/Perth", "Pacific/Honolulu",
     };
     for (const char* iana : no_dst) {
@@ -362,7 +367,7 @@ void the_table_returns_stable_static_storage() {
     const char* b = iana_to_posix("America/Vancouver");
     CHECK(a == b);
     (void)iana_to_posix("Asia/Tokyo");
-    CHECK_EQ_STR(a, "PST8PDT,M3.2.0,M11.1.0");
+    CHECK_EQ_STR(a, "MST7");
 }
 
 void aliases_agree_with_their_canonical_zone() {
@@ -400,8 +405,8 @@ void auto_timezone_is_on_by_default_and_applied_at_boot() {
     CHECK(location_mgr_get_tz_auto() == true);
     // The point of the default location is that the clock is right before the
     // user has configured anything.
-    CHECK_EQ_STR(time_mgr_get_timezone(), "PST8PDT,M3.2.0,M11.1.0");
-    CHECK_EQ_STR(getenv("TZ"), "PST8PDT,M3.2.0,M11.1.0");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
+    CHECK_EQ_STR(getenv("TZ"), "MST7");
 }
 
 void a_saved_location_is_restored() {
@@ -494,7 +499,7 @@ void an_unreadable_nvs_leaves_the_defaults_intact() {
     CHECK(loc->valid == false);
     CHECK_EQ_STR(loc->name, DEFAULT_NAME);
     // And the default zone is still derived, so the clock is not left in UTC.
-    CHECK_EQ_STR(time_mgr_get_timezone(), "PST8PDT,M3.2.0,M11.1.0");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
 }
 
 // ------------------------------------------------------------------------
@@ -518,7 +523,7 @@ void setting_a_location_persists_every_field() {
 void setting_a_location_applies_its_timezone_immediately() {
     reset_all();
     location_mgr_init();
-    CHECK_EQ_STR(time_mgr_get_timezone(), "PST8PDT,M3.2.0,M11.1.0");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
 
     location_mgr_set(-33.8688, 151.2093, "Sydney, AU", "Australia/Sydney");
     CHECK_EQ_STR(time_mgr_get_timezone(), "AEST-10AEDT,M10.1.0,M4.1.0/3");
@@ -647,9 +652,9 @@ void re_enabling_auto_mode_re_derives_the_zone() {
 void disabling_auto_mode_does_not_itself_change_the_zone() {
     reset_all();
     location_mgr_init();
-    CHECK_EQ_STR(time_mgr_get_timezone(), "PST8PDT,M3.2.0,M11.1.0");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
     location_mgr_set_tz_auto(false);
-    CHECK_EQ_STR(time_mgr_get_timezone(), "PST8PDT,M3.2.0,M11.1.0");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
 }
 
 void the_auto_mode_preference_is_persisted() {
@@ -685,7 +690,7 @@ void derived_posix_is_null_when_no_zone_is_known() {
 void derived_posix_tracks_the_current_location() {
     reset_all();
     location_mgr_init();
-    CHECK_EQ_STR(location_mgr_derived_posix(), "PST8PDT,M3.2.0,M11.1.0");
+    CHECK_EQ_STR(location_mgr_derived_posix(), "MST7");
     location_mgr_set(51.5074, -0.1278, "London, UK", "Europe/London");
     CHECK_EQ_STR(location_mgr_derived_posix(), "GMT0BST,M3.5.0/1,M10.5.0");
 }
