@@ -310,6 +310,24 @@ class TestFaultsPage:
         expect(recent.locator(".f-lasted")).to_be_visible()
         expect(recent.locator(".f-dur")).to_be_hidden()
 
+    def test_columns_line_up_under_headers(self, dashboard_page: Page):
+        """Started/Duration headers sit over their columns, with or without a chart link."""
+        import json
+        data, _ = _fake_fault_history()
+        dashboard_page.route("**/api/heatpump/errors", lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(data)))
+        dashboard_page.set_viewport_size({"width": 1600, "height": 900})
+        dashboard_page.evaluate("location.hash = '#/faults'")
+        dashboard_page.reload()
+        head = dashboard_page.locator(".fault-head span")
+        expect(head).to_have_count(3)
+        start_x = head.nth(1).bounding_box()["x"]
+        dur_x = head.nth(2).bounding_box()["x"]
+        for code in ("P06", "E19"):  # E19 is too old for a chart link
+            row = dashboard_page.locator(f'.fault-row[data-fault="{code}"]')
+            assert abs(row.locator(".f-start").bounding_box()["x"] - start_x) < 1, code
+            assert abs(row.locator(".f-dur").bounding_box()["x"] - dur_x) < 1, code
+
 
 def _fake_events():
     """A fixed event log covering every detail format, dated relative to now."""
