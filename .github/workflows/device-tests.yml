@@ -1167,6 +1167,52 @@ jobs:
         id: tls_transition
         run: python .github/scripts/tls_mode.py to-https --cert-dir "$RUNNER_TEMP/ci-admin-cert"
 
+      - name: Run PR-impacted tests first
+        # The full suites take about an hour and their results are only
+        # published at the end, so a PR that breaks one test looked green until
+        # then. Run the test files this PR most likely affects first: the test
+        # files it changes, then tests that mention strings from its source
+        # changes (.github/scripts/impacted_tests.py). Stops at the first
+        # failure and publishes "PR-Impacted Test Results" straight away, so
+        # the check goes red within minutes. The full suites below still run
+        # every test and still decide the job; this stage never fails it.
+        id: impacted_tests
+        if: github.event_name == 'pull_request' && steps.tls_transition.outcome == 'success'
+        continue-on-error: true
+        env:
+          HYPOTHESIS_PROFILE: ci
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -uo pipefail
+          # The PR checkout is the merge commit; its first parent is the base.
+          git fetch --no-tags --quiet --depth=2 origin "$GITHUB_SHA" || true
+          if ! git rev-parse -q --verify HEAD^1 >/dev/null; then
+            echo "No base commit to compare against; skipping."
+            exit 0
+          fi
+          python .github/scripts/impacted_tests.py --base HEAD^1 > impacted.txt
+          echo "PR-impacted test files:"
+          sed 's/^/  /' impacted.txt
+          for suite in device api web; do
+            mapfile -t files < <(grep "^tests/$suite/" impacted.txt || true)
+            [ "${#files[@]}" -eq 0 ] && continue
+            if [ "$suite" = web ]; then
+              pip install --quiet -r tests/web/requirements.txt && playwright install chromium
+            fi
+            python -m pytest "${files[@]}" -x -v -rs --tb=short -p no:cacheprovider \
+              --junitxml="impacted-$suite-results.xml" || exit 1
+          done
+
+      - name: Publish PR-impacted test results
+        uses: dorny/test-reporter@v2
+        if: always() && steps.impacted_tests.outcome != 'skipped' && hashFiles('impacted-*-results.xml') != ''
+        continue-on-error: true
+        with:
+          name: PR-Impacted Test Results
+          path: impacted-*-results.xml
+          reporter: java-junit
+          use-actions-summary: 'false'
+
       - name: Run device UI tests
         id: ui_tests
         continue-on-error: true
