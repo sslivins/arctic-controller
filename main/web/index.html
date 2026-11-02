@@ -606,7 +606,7 @@
     .fault-links a { color: var(--cp-link); font-size: 14px; font-weight: 600; text-decoration: none; }
     .fault-links a:hover { text-decoration: underline; }
     .fault-head, .fault-row {
-      display: grid; grid-template-columns: 56px minmax(0, 1fr) 110px 130px auto; gap: 4px 12px; align-items: baseline;
+      display: grid; grid-template-columns: 56px minmax(0, 1fr) 110px 130px 130px; gap: 4px 12px; align-items: baseline;
       grid-template-areas: "code name start dur view" ". help . . .";
     }
     .fault-head { padding: 0 0 6px; border-bottom: 1px solid var(--cp-border); color: var(--cp-text-muted); font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; }
@@ -1882,9 +1882,9 @@
       }
       return `<div class="page">${pageHead("History", "Heat pump faults: what's active now and what happened before.")}
         ${historySegs("faults")}
-        <section class="card"><h2>Active</h2>${activeBody}</section>
+        <div class="grid"><section class="card"><h2>Active</h2>${activeBody}</section>
         <section class="card"><div class="card-head"><h2>History</h2>${past.length ? `<button class="btn danger" data-action="clear-error-history">Clear history</button>` : ""}</div>
-          ${past.length ? `<div class="fault-head" aria-hidden="true"><span>Fault</span><span>Started</span><span>Lasted</span></div>${rows}` : `<div class="empty">No past faults.</div>`}</section></div>`;
+          ${past.length ? `<div class="fault-head" aria-hidden="true"><span>Fault</span><span>Started</span><span>Duration</span></div>${rows}` : `<div class="empty">No past faults.</div>`}</section></div></div>`;
     }
     function settingsValue(key) {
       const p = state.preferences || {};

@@ -257,3 +257,8 @@ add_test(NAME wifi_roam_policy COMMAND test_wifi_roam_policy)
 add_executable(test_dhcp_hostname test_dhcp_hostname.cpp)
 target_link_libraries(test_dhcp_hostname PRIVATE arctic_main_host)
 add_test(NAME dhcp_hostname COMMAND test_dhcp_hostname)
+
+# How much of a response the web server's self-probe reads before closing.
+add_executable(test_http_response test_http_response.cpp)
+target_link_libraries(test_http_response PRIVATE arctic_main_host)
+add_test(NAME http_response COMMAND test_http_response)
