@@ -368,7 +368,7 @@ $('p3').innerHTML = `
 <div class="two" style="margin-top:6px"><div>
 <h2>Call length</h2>${calls.length ? `<div class="hist">${counts.map((c, i) => `<div class="${i < 2 ? 'short' : ''}" style="height:${100 * c / mx}%"><span>${c}</span></div>`).join('')}</div>
 <div class="histx">${bins.map(([a, b]) => `<span>${b > 1e8 ? `${a}+` : `${a}–${b}`}</span>`).join('')}</div><div class="note">minutes, defrost included · orange = shorter than 10 min</div>` : '<div class="empty">No compressor runs.</div>'}</div>
-<div><h2>Faults</h2>${FL.length ? `<table><thead><tr><th>Started</th><th>Code</th><th class="n">Lasted</th></tr></thead><tbody>
+<div><h2>Faults</h2>${FL.length ? `<table><thead><tr><th>Started</th><th>Code</th><th class="n">Duration</th></tr></thead><tbody>
 ${FL.slice().reverse().map(f => `<tr><td>${when(f.start)}</td><td><span class="tag bad">${esc(f.fault_code || '?')}</span> ${esc(f.fault_label || '')}${f.help_url ? ` · <a href="${esc(f.help_url)}">Arctic article</a>` : ''}</td><td class="n">${f.end ? dur(f.end - f.start) : 'active'}</td></tr>`).join('')}</tbody></table>
 ${ctxFaults.map(f => `<h3 style="font-size:12px;margin:12px 0 4px">${esc(f.fault_code || 'Fault')} at ${when(f.start)} <span class="sub" style="font-weight:400">— 10 min either side, from the event log</span></h3>
 <table>${ctxRows(f) || '<tr><td class="sub">No events logged around this fault.</td></tr>'}</table>`).join('')}` : '<div class="empty">No faults in the period.</div>'}</div></div>

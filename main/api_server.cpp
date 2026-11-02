@@ -7,6 +7,7 @@
 #include "api_server.h"
 #include "settings/settings_display_screen.h"
 #include "app_preferences.h"
+#include "http_response.h"
 #include "device_name.h"
 #include "i18n/i18n.h"
 #include "wifi_manager.h"
@@ -2074,19 +2075,23 @@ bool api_server_probe(void)
             sent += (size_t)n;
         }
         if (sent == sizeof(request) - 1) {
+            // Read the whole response, not just the status line: closing with
+            // unread bytes makes lwIP send a RST, which the server logs as a
+            // send/recv error 104 on every probe. /api/health is ~150 bytes.
             static const char expected[] = "HTTP/1.1 200";
-            char status[sizeof(expected)] = {0};
+            char resp[384];
             size_t got = 0;
-            while (got < sizeof(expected) - 1) {
-                const ssize_t n = esp_tls_conn_read(conn, status + got,
-                                                    sizeof(expected) - 1 - got);
+            size_t total = 0;
+            while (got < sizeof(resp) && (total == 0 || got < total)) {
+                const ssize_t n = esp_tls_conn_read(conn, resp + got, sizeof(resp) - got);
                 if (n <= 0) {
                     break;
                 }
                 got += (size_t)n;
+                total = http_response_length(resp, got);
             }
-            ok = got == sizeof(expected) - 1 &&
-                 memcmp(status, expected, sizeof(expected) - 1) == 0;
+            ok = total != 0 && got >= total && got >= sizeof(expected) - 1 &&
+                 memcmp(resp, expected, sizeof(expected) - 1) == 0;
         }
     }
     esp_tls_conn_destroy(conn);
