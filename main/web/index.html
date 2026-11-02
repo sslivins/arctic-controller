@@ -3615,6 +3615,12 @@
       catch (error) { toast(error.message, "bad"); error.toastShown = true; throw error; }
       finally { state.busy = false; }
     }
+    async function checkForUpdate(success) {
+      if (state.checkingUpdate) return;
+      state.checkingUpdate = true; render();
+      try { state.release = await mutate("/api/ota/releases", { timeout: 60000 }, success); }
+      finally { state.checkingUpdate = false; render(); }
+    }
     // mutate() already toasted its own failure; only toast errors it didn't see.
     function toastUnlessShown(error) {
       if (!error.toastShown) toast(error.message, "bad");
@@ -4102,6 +4108,11 @@
         const meta = n && (NOTIF_META[n.key] || NOTIF_META.unknown);
         if (meta && meta.route) await navigate(meta.route[0], meta.route[1]);
         else render();
+        // The bell already knows an update exists, so fetch it rather than
+        // showing whatever the page last checked (or nothing at all).
+        if (n && n.key === "firmware_update" && !state.otaInstall?.active) {
+          await checkForUpdate().catch(() => {});
+        }
         return;
       }
       if (action === "toggle-code-help") {
@@ -4214,12 +4225,7 @@
         }, 4000);
         render();
       }
-      if (action === "check-update") {
-        if (state.checkingUpdate) return;
-        state.checkingUpdate = true; render();
-        try { state.release = await mutate("/api/ota/releases", { timeout: 60000 }, "Update check complete"); }
-        finally { state.checkingUpdate = false; render(); }
-      }
+      if (action === "check-update") await checkForUpdate("Update check complete");
       if (action === "install-update" && state.release && !state.otaInstall?.active && await confirmUpdate(state.release)) {
         const before = await probe("/api/health");
         await mutate("/api/ota/github", { method: "POST" });

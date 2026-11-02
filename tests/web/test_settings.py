@@ -187,6 +187,18 @@ class TestSettingsWorkspace:
         expect(dashboard_page.get_by_role("button", name="Check for updates")).to_be_visible()
         expect(dashboard_page.locator('input[type="file"]')).to_have_attribute("accept", ".bin,application/octet-stream")
 
+    def test_firmware_from_settings_does_not_auto_check(self, dashboard_page: Page):
+        """Only the update bell checks on arrival; a plain visit leaves it to the button."""
+        checks = []
+        dashboard_page.route("**/api/ota/releases", lambda r: (checks.append(1), r.abort()))
+        try:
+            open_settings(dashboard_page, "Firmware")
+            expect(dashboard_page.get_by_role("button", name="Check for updates")).to_be_enabled()
+            dashboard_page.wait_for_load_state("networkidle")
+            assert checks == []
+        finally:
+            dashboard_page.unroute("**/api/ota/releases")
+
     def test_check_for_updates_shows_progress(self, dashboard_page: Page):
         """The update check takes a couple of seconds; the button must show
         that it's working instead of doing nothing until the result lands."""

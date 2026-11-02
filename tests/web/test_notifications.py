@@ -1,5 +1,7 @@
 """Web dashboard tests for the notification bell (mirrors the on-device bell)."""
 
+import json
+
 import requests
 import urllib3
 from playwright.sync_api import Page, expect
@@ -65,19 +67,31 @@ class TestNotificationBellWeb:
 
     def test_firmware_notification_navigates_to_firmware(self, dashboard_page: Page, base_url: str):
         _reset_notifications(base_url)
+        checks = []
+
+        def releases(route):
+            checks.append(route.request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "update_available": True, "current_version": "3.0.0", "latest_version": "v99.0.0",
+                "published_at": "2026-11-02T17:00:00Z", "download_ready": True,
+                "release_notes": "## v99.0.0"}))
+
         try:
             _add_notification(base_url)
             dashboard_page.reload(wait_until="domcontentloaded")
             dashboard_page.wait_for_selector(".rail", timeout=10000)
+            dashboard_page.route("**/api/ota/releases", releases)
 
             dashboard_page.locator(".notif-btn").click()
             dashboard_page.locator(".notif-item", has_text="Firmware").click()
 
-            # Firmware settings page renders its unique "Check for updates" control.
-            expect(
-                dashboard_page.get_by_role("button", name="Check for updates")
-            ).to_be_visible()
+            # The bell knows an update exists, so the page checks on arrival and
+            # offers it without another click.
+            expect(dashboard_page.get_by_role("button", name="Update to 99.0.0")).to_be_visible(timeout=15000)
+            expect(dashboard_page.get_by_role("button", name="Check for updates")).to_be_visible()
+            assert len(checks) == 1
         finally:
+            dashboard_page.unroute("**/api/ota/releases")
             _reset_notifications(base_url)
 
     def test_brownout_notification_reported_and_acknowledged(self, dashboard_page: Page, base_url: str):
