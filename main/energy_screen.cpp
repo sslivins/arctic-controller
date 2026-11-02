@@ -1133,6 +1133,8 @@ static void build_main_view() {
     lv_obj_t* tiles = make_row(s.main_view, 150);
     static const char* const tile_tags[3] = {
         "energy_tile_today", "energy_tile_yesterday", "energy_tile_window"};
+    static const char* const tile_value_tags[3] = {
+        "energy_tile_today_value", "energy_tile_yesterday_value", "energy_tile_window_value"};
     for (int i = 0; i < 3; i++) {
         lv_obj_t* tile = make_panel(tiles);
         lv_obj_set_height(tile, LV_PCT(100));
@@ -1156,6 +1158,7 @@ static void build_main_view() {
         }
         s.tile_title[i] = make_label(tile, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, title);
         s.tile_value[i] = make_label(tile, &montserrat_32_latin, UI_COLOR_TEXT, "--");
+        lv_obj_set_user_data(s.tile_value[i], (void*)tile_value_tags[i]);
         s.tile_cop[i] = make_label(tile, UI_FONT_SMALL, COLOR_COP, " ");
         for (lv_obj_t* l : {s.tile_title[i], s.tile_value[i], s.tile_cop[i]}) {
             lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
