@@ -5150,7 +5150,7 @@ components:
           description: |
             POSIX TZ string derived from the location's IANA zone, or empty if
             there is no location or the zone is unmapped.
-          example: PST8PDT,M3.2.0,M11.1.0
+          example: "<PCT>7"
     Error:
       type: object
       properties:

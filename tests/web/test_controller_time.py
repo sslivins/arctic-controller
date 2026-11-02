@@ -62,6 +62,18 @@ def test_clock_popover_shows_both_times_when_zones_differ(controller_zone):
     expect(panel).to_have_count(0)
 
 
+@pytest.mark.parametrize("posix, zone", [
+    ("<PCT>7", "PCT, UTC−7"),   # BC's official name since going permanent
+    ("<-07>7", "UTC−7"),        # no settled name (Yukon): just the offset
+])
+def test_clock_popover_names_quoted_zones(controller_zone, posix, zone):
+    page = controller_zone(posix)
+    page.locator(".clock-btn").click()
+    sub = page.locator("[data-clock-panel] .cp-sub").first
+    expect(sub).to_contain_text(zone)
+    expect(sub).not_to_contain_text("-07,")
+
+
 def test_clock_in_the_same_zone_is_plain(controller_zone):
     page = controller_zone(PACIFIC)
     button = page.locator(".clock-btn")

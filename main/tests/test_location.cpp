@@ -335,6 +335,35 @@ void a_zone_that_should_not_observe_dst_does_not() {
     }
 }
 
+void canadian_permanent_zones_carry_their_official_names() {
+    // tzdata kept MST/CST/EST for the zones that went permanent in 2026, which
+    // reads wrong locally ("MST" in Vancouver). The names are what the clock
+    // popover shows, so check what the C library reports, not the string.
+    struct { const char* iana; const char* abbr; } cases[] = {
+        {"America/Vancouver", "PCT"}, {"America/Edmonton", "ABT"},
+        {"America/Winnipeg", "MBT"},
+        // No settled name: the bare offset, which the web shows as "UTC-6".
+        {"America/Inuvik", "-06"}, {"America/Yellowknife", "-06"},
+        {"America/Whitehorse", "-07"}, {"America/Dawson", "-07"},
+        // These keep mountain time.
+        {"America/Fort_Nelson", "MST"}, {"America/Dawson_Creek", "MST"},
+    };
+    for (const auto& c : cases) {
+        const char* posix = iana_to_posix(c.iana);
+        CHECK(posix != nullptr);
+        if (!posix) continue;
+        setenv("TZ", posix, 1);
+        tzset();
+        struct tm lt {};
+        localtime_r(&JAN, &lt);
+        if (!lt.tm_zone || std::strcmp(lt.tm_zone, c.abbr) != 0) {
+            std::fprintf(stderr, "  FAIL %s is called \"%s\", want \"%s\"\n", c.iana,
+                         lt.tm_zone ? lt.tm_zone : "(null)", c.abbr);
+            ++g_failures;
+        }
+    }
+}
+
 void an_unmapped_zone_returns_null() {
     // The caller's contract: NULL means "fall back to manual selection", so it
     // must be distinguishable from a mapped zone rather than guessed at.
@@ -367,7 +396,7 @@ void the_table_returns_stable_static_storage() {
     const char* b = iana_to_posix("America/Vancouver");
     CHECK(a == b);
     (void)iana_to_posix("Asia/Tokyo");
-    CHECK_EQ_STR(a, "MST7");
+    CHECK_EQ_STR(a, "<PCT>7");
 }
 
 void aliases_agree_with_their_canonical_zone() {
@@ -405,8 +434,8 @@ void auto_timezone_is_on_by_default_and_applied_at_boot() {
     CHECK(location_mgr_get_tz_auto() == true);
     // The point of the default location is that the clock is right before the
     // user has configured anything.
-    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
-    CHECK_EQ_STR(getenv("TZ"), "MST7");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "<PCT>7");
+    CHECK_EQ_STR(getenv("TZ"), "<PCT>7");
 }
 
 void a_saved_location_is_restored() {
@@ -499,7 +528,7 @@ void an_unreadable_nvs_leaves_the_defaults_intact() {
     CHECK(loc->valid == false);
     CHECK_EQ_STR(loc->name, DEFAULT_NAME);
     // And the default zone is still derived, so the clock is not left in UTC.
-    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "<PCT>7");
 }
 
 // ------------------------------------------------------------------------
@@ -523,7 +552,7 @@ void setting_a_location_persists_every_field() {
 void setting_a_location_applies_its_timezone_immediately() {
     reset_all();
     location_mgr_init();
-    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "<PCT>7");
 
     location_mgr_set(-33.8688, 151.2093, "Sydney, AU", "Australia/Sydney");
     CHECK_EQ_STR(time_mgr_get_timezone(), "AEST-10AEDT,M10.1.0,M4.1.0/3");
@@ -652,9 +681,9 @@ void re_enabling_auto_mode_re_derives_the_zone() {
 void disabling_auto_mode_does_not_itself_change_the_zone() {
     reset_all();
     location_mgr_init();
-    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "<PCT>7");
     location_mgr_set_tz_auto(false);
-    CHECK_EQ_STR(time_mgr_get_timezone(), "MST7");
+    CHECK_EQ_STR(time_mgr_get_timezone(), "<PCT>7");
 }
 
 void the_auto_mode_preference_is_persisted() {
@@ -690,7 +719,7 @@ void derived_posix_is_null_when_no_zone_is_known() {
 void derived_posix_tracks_the_current_location() {
     reset_all();
     location_mgr_init();
-    CHECK_EQ_STR(location_mgr_derived_posix(), "MST7");
+    CHECK_EQ_STR(location_mgr_derived_posix(), "<PCT>7");
     location_mgr_set(51.5074, -0.1278, "London, UK", "Europe/London");
     CHECK_EQ_STR(location_mgr_derived_posix(), "GMT0BST,M3.5.0/1,M10.5.0");
 }
@@ -767,6 +796,8 @@ int main() {
              no_mapped_zone_silently_degrades_to_utc);
     SCENARIO("a zone that should not observe dst does not",
              a_zone_that_should_not_observe_dst_does_not);
+    SCENARIO("canadian permanent zones carry their official names",
+             canadian_permanent_zones_carry_their_official_names);
     SCENARIO("the dst changeover windows match the right region",
              the_dst_changeover_windows_match_the_right_region);
     SCENARIO("an unmapped zone returns null", an_unmapped_zone_returns_null);

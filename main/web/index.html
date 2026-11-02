@@ -932,13 +932,20 @@
       const minutes = Math.floor(seconds / 60);
       return `${days ? `${days}d ` : ""}${hours}h ${minutes}m`;
     };
+    // Mirrors the device's roller (settings_time_screen.cpp).
     const timezones = [
-      ["US Eastern", "EST5EDT,M3.2.0,M11.1.0"], ["US Central", "CST6CDT,M3.2.0,M11.1.0"],
-      ["US Mountain", "MST7MDT,M3.2.0,M11.1.0"], ["US Pacific", "PST8PDT,M3.2.0,M11.1.0"],
-      ["Canada Atlantic", "AST4ADT,M3.2.0,M11.1.0"], ["UK / London", "GMT0BST,M3.5.0/1,M10.5.0"],
-      ["Central Europe", "CET-1CEST,M3.5.0,M10.5.0/3"], ["Japan", "JST-9"],
-      ["China", "CST-8"], ["India", "IST-5:30"], ["Australia Eastern", "AEST-10AEDT,M10.1.0,M4.1.0/3"],
-      ["UTC", "UTC0"]
+      ["US Eastern (EST/EDT)", "EST5EDT,M3.2.0,M11.1.0"], ["US Central (CST/CDT)", "CST6CDT,M3.2.0,M11.1.0"],
+      ["US Mountain (MST/MDT)", "MST7MDT,M3.2.0,M11.1.0"], ["US Pacific (PST/PDT)", "PST8PDT,M3.2.0,M11.1.0"],
+      ["US Alaska", "AKST9AKDT,M3.2.0,M11.1.0"], ["US Hawaii", "HST10"], ["US Arizona (no DST)", "MST7"],
+      ["Canada BC (PCT)", "<PCT>7"], ["Canada Alberta (ABT)", "<ABT>6"], ["Canada Saskatchewan (CST)", "CST6"],
+      ["Canada Manitoba (MBT)", "<MBT>5"], ["Canada Atlantic", "AST4ADT,M3.2.0,M11.1.0"],
+      ["Canada Newfoundland", "NST3:30NDT,M3.2.0,M11.1.0"],
+      ["UK / London (GMT/BST)", "GMT0BST,M3.5.0/1,M10.5.0"], ["Central Europe (CET/CEST)", "CET-1CEST,M3.5.0,M10.5.0/3"],
+      ["Eastern Europe (EET/EEST)", "EET-2EEST,M3.5.0/3,M10.5.0/4"],
+      ["Japan (JST)", "JST-9"], ["China (CST)", "CST-8"], ["India (IST)", "IST-5:30"], ["Korea (KST)", "KST-9"],
+      ["Singapore/HK", "SGT-8"], ["Australia Eastern (AEST)", "AEST-10AEDT,M10.1.0,M4.1.0/3"],
+      ["Australia Central", "ACST-9:30ACDT,M10.1.0,M4.1.0/3"], ["Australia Western", "AWST-8"],
+      ["UTC (No offset)", "UTC0"]
     ];
     const nav = [
       ["home", "⌂", "Home"], ["status", "▥", "Status"], ["control", "◉", "Control"],

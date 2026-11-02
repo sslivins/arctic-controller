@@ -45,7 +45,12 @@ static const timezone_entry_t timezones[] = {
     {"US Hawaii",                  "HST10"},
     {"US Arizona (no DST)",        "MST7"},
     
-    // Canada
+    // Canada (BC, Alberta and Manitoba: permanent time from 2026-11-01;
+    // strings match iana_tz.cpp so a derived zone shows its name here)
+    {"Canada BC (PCT)",            "<PCT>7"},
+    {"Canada Alberta (ABT)",       "<ABT>6"},
+    {"Canada Saskatchewan (CST)",  "CST6"},
+    {"Canada Manitoba (MBT)",      "<MBT>5"},
     {"Canada Atlantic",            "AST4ADT,M3.2.0,M11.1.0"},
     {"Canada Newfoundland",        "NST3:30NDT,M3.2.0,M11.1.0"},
     
