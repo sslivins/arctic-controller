@@ -55,6 +55,9 @@
 #include "status_bar.h"
 #include "display_idle.h"
 #include <esp_timer.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>
+#include <atomic>
 #include "png_encoder.h"
 #include "geocoding.h"
 #include "weather.h"
@@ -3195,6 +3198,112 @@ static int s_test_uri_reg_failures = 0;
 
 // Checked wrapper around httpd_register_uri_handler so that a table overflow is
 // logged loudly (and counted) instead of being silently ignored.
+// ---------------------------------------------------------------------------
+// EXPERIMENT: IDF v6.1 flash mmap-lock lost-wakeup reproducer.
+// GET /api/test/mmap-stress?seconds=N[&readers=R]  -> start
+// GET /api/test/mmap-stress                        -> progress
+// Readers hammer esp_ota_get_state_partition() (mmaps otadata) while a
+// higher-priority writer erases/writes the last sector of the inactive OTA
+// slot, so several readers queue on the mmap lock during every erase.
+// ---------------------------------------------------------------------------
+namespace mmap_stress {
+constexpr int kMaxReaders = 6;
+static std::atomic<uint32_t> s_reads[kMaxReaders];
+static std::atomic<int64_t> s_last_us[kMaxReaders + 1];
+static std::atomic<uint32_t> s_writes{0};
+static std::atomic<int> s_active{0};
+static std::atomic<int64_t> s_end_us{0};
+static std::atomic<int64_t> s_start_us{0};
+static int s_readers = 0;
+static const esp_partition_t* s_scratch = nullptr;
+
+static void reader_task(void* arg)
+{
+    const int idx = (int)(intptr_t)arg;
+    const esp_partition_t* run = esp_ota_get_running_partition();
+    while (esp_timer_get_time() < s_end_us.load()) {
+        esp_ota_img_states_t st;
+        esp_ota_get_state_partition(run, &st);
+        s_reads[idx]++;
+        s_last_us[idx] = esp_timer_get_time();
+        vTaskDelay(1);
+    }
+    s_active--;
+    vTaskDelete(nullptr);
+}
+
+static void writer_task(void*)
+{
+    static uint8_t buf[256];
+    const size_t off = s_scratch->size - 4096;
+    while (esp_timer_get_time() < s_end_us.load()) {
+        esp_partition_erase_range(s_scratch, off, 4096);
+        memset(buf, (int)(s_writes.load() & 0xFF), sizeof(buf));
+        esp_partition_write(s_scratch, off, buf, sizeof(buf));
+        s_writes++;
+        s_last_us[kMaxReaders] = esp_timer_get_time();
+        vTaskDelay(2);
+    }
+    s_active--;
+    vTaskDelete(nullptr);
+}
+}  // namespace mmap_stress
+
+static esp_err_t mmap_stress_get_handler(httpd_req_t* req)
+{
+    using namespace mmap_stress;
+    set_json_content_type(req);
+    char query[64] = {0};
+    char val[16];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "seconds", val, sizeof(val)) == ESP_OK) {
+        if (s_active.load() > 0) {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_sendstr(req, "{\"error\":\"already running\"}");
+            return ESP_OK;
+        }
+        int secs = atoi(val);
+        int readers = 4;
+        if (httpd_query_key_value(query, "readers", val, sizeof(val)) == ESP_OK) readers = atoi(val);
+        if (secs < 1 || readers < 1 || readers > kMaxReaders) {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_sendstr(req, "{\"error\":\"bad args\"}");
+            return ESP_OK;
+        }
+        s_scratch = esp_ota_get_next_update_partition(nullptr);
+        if (!s_scratch) {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_sendstr(req, "{\"error\":\"no inactive slot\"}");
+            return ESP_OK;
+        }
+        const int64_t now = esp_timer_get_time();
+        for (int i = 0; i <= kMaxReaders; i++) s_last_us[i] = now;
+        for (int i = 0; i < kMaxReaders; i++) s_reads[i] = 0;
+        s_writes = 0;
+        s_readers = readers;
+        s_start_us = now;
+        s_end_us = now + (int64_t)secs * 1000000;
+        s_active = readers + 1;
+        for (int i = 0; i < readers; i++) {
+            xTaskCreatePinnedToCore(reader_task, "mmrd", 4096, (void*)(intptr_t)i, 3, nullptr, i & 1);
+        }
+        xTaskCreatePinnedToCore(writer_task, "mmwr", 4096, nullptr, 5, nullptr, 0);
+        ESP_LOGW(TAG, "mmap stress: %d readers, %d s, scratch %s", readers, secs, s_scratch->label);
+    }
+    const int64_t now = esp_timer_get_time();
+    char out[384];
+    int n = snprintf(out, sizeof(out), "{\"active\":%d,\"elapsed_s\":%lld,\"writes\":%lu,\"writer_stall_ms\":%lld,\"reads\":[",
+                     s_active.load(), (long long)((now - s_start_us.load()) / 1000000),
+                     (unsigned long)s_writes.load(), (long long)((now - s_last_us[kMaxReaders].load()) / 1000));
+    for (int i = 0; i < s_readers && n < (int)sizeof(out) - 40; i++) {
+        n += snprintf(out + n, sizeof(out) - n, "%s{\"n\":%lu,\"stall_ms\":%lld}", i ? "," : "",
+                      (unsigned long)s_reads[i].load(), (long long)((now - s_last_us[i].load()) / 1000));
+    }
+    snprintf(out + n, sizeof(out) - n, "]}");
+    httpd_resp_sendstr(req, out);
+    return ESP_OK;
+}
+
 static void reg_test_uri(httpd_handle_t server, const httpd_uri_t* uri)
 {
     esp_err_t err = httpd_register_uri_handler(server, uri);
@@ -3786,6 +3895,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &ext_sensor_outage_timing_uri);
+
+    httpd_uri_t mmap_stress_uri = {
+        .uri = "/api/test/mmap-stress",
+        .method = HTTP_GET,
+        .handler = mmap_stress_get_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &mmap_stress_uri);
 
     if (s_test_uri_reg_failures > 0) {
         ESP_LOGE(TAG,
