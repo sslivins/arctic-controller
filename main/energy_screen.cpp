@@ -448,13 +448,35 @@ static void main_task(void* arg) {
         heap_caps_free(read);
     }
     if (data->today_date != 0) {
-        data->have_today = arctic::getEnergyToday(&data->today) &&
-                           data->today.date == data->today_date;
-        const int i = data->have_today ? day_diff(from, data->today_date) : -1;
-        if (i >= 0 && i < BUF_DAYS) data->days[i] = data->today;
+        // Place the open day and a closed day not yet in flash by their own
+        // dates, like /api/energy/days. The open day is usually today, but
+        // stays open past midnight when the unit is disconnected over it or
+        // the timezone moved east, and is then yesterday or older.
+        energy::DayRecord open = {}, pending = {};
+        const bool have_open = arctic::getEnergyToday(&open) && open.date != 0 &&
+                               open.date <= data->today_date;
+        const bool have_pending = arctic::getEnergyPendingDay(&pending) &&
+                                  pending.date != 0 && pending.date <= data->today_date &&
+                                  (!have_open || pending.date != open.date);
+        for (const energy::DayRecord* r : {have_pending ? &pending : nullptr,
+                                           have_open ? &open : nullptr}) {
+            if (r == nullptr) continue;
+            const int i = day_diff(from, r->date);
+            if (i >= 0 && i < BUF_DAYS) data->days[i] = *r;
+        }
+        data->have_today = have_open && open.date == data->today_date;
+        if (data->have_today) data->today = open;
         const uint32_t yday = date_add(data->today_date, -1);
-        data->have_yesterday =
-            energy::store_read_days(yday, yday, &data->yesterday, 1) == 1;
+        if (have_open && open.date == yday) {
+            data->yesterday = open;
+            data->have_yesterday = true;
+        } else if (have_pending && pending.date == yday) {
+            data->yesterday = pending;
+            data->have_yesterday = true;
+        } else {
+            data->have_yesterday =
+                energy::store_read_days(yday, yday, &data->yesterday, 1) == 1;
+        }
     }
     bsp_display_lock(0);
     lv_async_call(main_complete, data);
