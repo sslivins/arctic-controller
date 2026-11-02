@@ -89,3 +89,26 @@ def test_types_match_the_release_changelog():
     release = (ROOT / ".github" / "workflows" / "create-release.yml").read_text(encoding="utf-8")
     categories = set(re.findall(r'--grep="\^([a-z]+)"', release))
     assert set(meta.TYPES) - {"chore"} == categories
+
+_bspec = importlib.util.spec_from_file_location(
+    "check_version_bump", ROOT / ".github" / "scripts" / "check_version_bump.py")
+bump = importlib.util.module_from_spec(_bspec)
+_bspec.loader.exec_module(bump)
+
+
+@pytest.mark.parametrize("title,version,released,expected", [
+    ("feat: add the freeze protection chart", "3.5.1", "v3.5.0", "3.6.0"),
+    ("feat(web): add the freeze protection chart", "3.5.0", "v3.5.0", "3.6.0"),
+    ("fix!: drop the legacy mode_2 API name", "3.5.1", "v3.5.0", "3.6.0"),
+    ("feat: add the freeze protection chart", "3.6.0", "v3.5.0", None),
+    ("feat: add the freeze protection chart", "4.0.0", "v3.5.0", None),
+    ("fix: keep BC on permanent time", "3.5.1", "v3.5.0", None),
+    ("feat: add the freeze protection chart", "3.5.1", None, None),
+])
+def test_version_bump_recommendation(title, version, released, expected):
+    assert bump.recommendation(title, version, released) == expected
+
+
+def test_version_bump_reads_project_ver_format():
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert bump.VERSION_RE.search(cmake), "check_version_bump.py can't find PROJECT_VER"
