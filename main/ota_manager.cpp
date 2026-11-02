@@ -18,6 +18,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_task_wdt.h>
+#include <atomic>
 #include <string.h>
 #include <cJSON.h>
 
@@ -95,6 +96,29 @@ static char update_url[256] = "";
 // Mutex for status access
 static SemaphoreHandle_t status_mutex = NULL;
 
+// The running slot's OTA state only changes when we mark it valid (a rollback
+// reboots), so it is read from otadata once and cached. Each read maps flash
+// under IDF's mmap lock; polling it from /api/ota/status and the commit timer
+// kept that lock busy and exposed the IDF lost-wakeup deadlock.
+enum { PENDING_UNKNOWN = -1, PENDING_NO = 0, PENDING_YES = 1 };
+static std::atomic<int> s_pending_verify{PENDING_UNKNOWN};
+
+static bool read_pending_verify(void)
+{
+    const int cached = s_pending_verify.load();
+    if (cached != PENDING_UNKNOWN) {
+        return cached == PENDING_YES;
+    }
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    esp_ota_img_states_t ota_state;
+    if (running == NULL || esp_ota_get_state_partition(running, &ota_state) != ESP_OK) {
+        return false;  // left uncached so a transient failure is retried
+    }
+    const bool pending = ota_state == ESP_OTA_IMG_PENDING_VERIFY;
+    s_pending_verify.store(pending ? PENDING_YES : PENDING_NO);
+    return pending;
+}
+
 // Forward declarations
 static void ota_task(void* pvParameter);
 
@@ -145,12 +169,8 @@ bool ota_mgr_init(void)
         ESP_LOGI(TAG, "Running from partition: %s @ 0x%lx", running->label, running->address);
     }
     
-    // Check if this is first boot after OTA
-    esp_ota_img_states_t ota_state;
-    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
-        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-            ESP_LOGW(TAG, "First boot after OTA - firmware pending verification");
-        }
+    if (read_pending_verify()) {
+        ESP_LOGW(TAG, "First boot after OTA - firmware pending verification");
     }
     
     return true;
@@ -292,28 +312,22 @@ void ota_mgr_reboot(void)
 
 void ota_mgr_mark_valid(void)
 {
-    const esp_partition_t* running = esp_ota_get_running_partition();
-    esp_ota_img_states_t ota_state;
-    
-    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
-        if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
-            ESP_LOGI(TAG, "Marking current firmware as valid — rollback cancelled");
-            esp_ota_mark_app_valid_cancel_rollback();
-        } else {
-            ESP_LOGI(TAG, "Firmware already validated (state=%d)", ota_state);
-        }
+    if (!read_pending_verify()) {
+        ESP_LOGI(TAG, "Firmware already validated");
+        return;
+    }
+    ESP_LOGI(TAG, "Marking current firmware as valid — rollback cancelled");
+    const esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+    if (err == ESP_OK) {
+        s_pending_verify.store(PENDING_NO);
+    } else {
+        ESP_LOGE(TAG, "Failed to mark firmware valid: %s", esp_err_to_name(err));
     }
 }
 
 bool ota_mgr_is_pending_verify(void)
 {
-    const esp_partition_t* running = esp_ota_get_running_partition();
-    esp_ota_img_states_t ota_state;
-    
-    if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
-        return ota_state == ESP_OTA_IMG_PENDING_VERIFY;
-    }
-    return false;
+    return read_pending_verify();
 }
 
 void ota_mgr_get_partition_info(char* label, uint32_t* address, uint32_t* size)

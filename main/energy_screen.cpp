@@ -448,13 +448,35 @@ static void main_task(void* arg) {
         heap_caps_free(read);
     }
     if (data->today_date != 0) {
-        data->have_today = arctic::getEnergyToday(&data->today) &&
-                           data->today.date == data->today_date;
-        const int i = data->have_today ? day_diff(from, data->today_date) : -1;
-        if (i >= 0 && i < BUF_DAYS) data->days[i] = data->today;
+        // Place the open day and a closed day not yet in flash by their own
+        // dates, like /api/energy/days. The open day is usually today, but
+        // stays open past midnight when the unit is disconnected over it or
+        // the timezone moved east, and is then yesterday or older.
+        energy::DayRecord open = {}, pending = {};
+        const bool have_open = arctic::getEnergyToday(&open) && open.date != 0 &&
+                               open.date <= data->today_date;
+        const bool have_pending = arctic::getEnergyPendingDay(&pending) &&
+                                  pending.date != 0 && pending.date <= data->today_date &&
+                                  (!have_open || pending.date != open.date);
+        for (const energy::DayRecord* r : {have_pending ? &pending : nullptr,
+                                           have_open ? &open : nullptr}) {
+            if (r == nullptr) continue;
+            const int i = day_diff(from, r->date);
+            if (i >= 0 && i < BUF_DAYS) data->days[i] = *r;
+        }
+        data->have_today = have_open && open.date == data->today_date;
+        if (data->have_today) data->today = open;
         const uint32_t yday = date_add(data->today_date, -1);
-        data->have_yesterday =
-            energy::store_read_days(yday, yday, &data->yesterday, 1) == 1;
+        if (have_open && open.date == yday) {
+            data->yesterday = open;
+            data->have_yesterday = true;
+        } else if (have_pending && pending.date == yday) {
+            data->yesterday = pending;
+            data->have_yesterday = true;
+        } else {
+            data->have_yesterday =
+                energy::store_read_days(yday, yday, &data->yesterday, 1) == 1;
+        }
     }
     bsp_display_lock(0);
     lv_async_call(main_complete, data);
@@ -1133,6 +1155,8 @@ static void build_main_view() {
     lv_obj_t* tiles = make_row(s.main_view, 150);
     static const char* const tile_tags[3] = {
         "energy_tile_today", "energy_tile_yesterday", "energy_tile_window"};
+    static const char* const tile_value_tags[3] = {
+        "energy_tile_today_value", "energy_tile_yesterday_value", "energy_tile_window_value"};
     for (int i = 0; i < 3; i++) {
         lv_obj_t* tile = make_panel(tiles);
         lv_obj_set_height(tile, LV_PCT(100));
@@ -1156,6 +1180,7 @@ static void build_main_view() {
         }
         s.tile_title[i] = make_label(tile, UI_FONT_SMALL, UI_COLOR_TEXT_DIM, title);
         s.tile_value[i] = make_label(tile, &montserrat_32_latin, UI_COLOR_TEXT, "--");
+        lv_obj_set_user_data(s.tile_value[i], (void*)tile_value_tags[i]);
         s.tile_cop[i] = make_label(tile, UI_FONT_SMALL, COLOR_COP, " ");
         for (lv_obj_t* l : {s.tile_title[i], s.tile_value[i], s.tile_cop[i]}) {
             lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);

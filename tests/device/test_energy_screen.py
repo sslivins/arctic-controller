@@ -13,6 +13,24 @@ def _enabled(device: DeviceClient, tag: str) -> bool:
     return w is not None and not w.disabled
 
 
+def _tile_loaded(device: DeviceClient, tile: str) -> bool:
+    w = device.find_widget(tag=f"{tile}_value")
+    return w is not None and bool(w.text) and w.text != "--"
+
+
+def _open_a_day(device: DeviceClient) -> None:
+    """Tap Today, or Yesterday when today has no record yet (just after
+    midnight). The tiles ignore taps until the day data has loaded."""
+    tile = "energy_tile_today"
+    if not device.wait_until("today tile loaded", lambda: _tile_loaded(device, tile),
+                             timeout=5.0, raise_on_timeout=False):
+        tile = "energy_tile_yesterday"
+        device.wait_until("yesterday tile loaded",
+                          lambda: _tile_loaded(device, tile), timeout=5.0)
+    device.click(tag=tile)
+    device.wait_for_widget(tag="energy_day_view")
+
+
 def _open_energy(device: DeviceClient) -> None:
     device.click(tag="nav_history")
     device.wait_for_widget(tag="history_seg_energy")
@@ -40,9 +58,9 @@ def test_energy_segment_pages_and_opens_a_day(device: DeviceClient):
     device.wait_until("Latest jumps back and hides itself",
                       lambda: not device.has_widget(tag="energy_latest"), timeout=5.0)
 
-    # Today's tile opens the day view; Back returns to the chart.
-    device.click(tag="energy_tile_today")
-    device.wait_for_widget(tag="energy_day_view")
+    # Today's tile (or yesterday's, just after midnight) opens the day view;
+    # Back returns to the chart.
+    _open_a_day(device)
     for tag in ("energy_day_title", "energy_day_elec", "energy_day_heat",
                 "energy_day_cop", "energy_day_outdoor", "energy_day_facts",
                 "energy_runs_title"):
@@ -92,10 +110,9 @@ def test_energy_chart_drag_pans_by_days(device: DeviceClient):
 def test_energy_run_opens_cycles_and_power_view(device: DeviceClient):
     device.populate_temperature_history()
     _open_energy(device)
-    device.click(tag="energy_tile_today")
-    device.wait_for_widget(tag="energy_day_view")
+    _open_a_day(device)
     # The populated history has a run every two hours over the last eight, so
-    # today has one unless the test runs just after midnight.
+    # the day opened has one unless the test runs just after midnight.
     device.wait_until(
         "runs list loaded",
         lambda: device.has_widget(tag="energy_run")
