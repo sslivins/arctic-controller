@@ -4224,9 +4224,9 @@
       if (action === "notif-toggle") { state.notifOpen = !state.notifOpen; render(); return; }
       if (action === "clock-toggle") {
         state.clockOpen = !state.clockOpen; refreshTopbar();
-        if (state.clockOpen && !state.location) {
+        if (state.clockOpen && !state.location?.valid) {
           // The popover names the site; it is otherwise only loaded with Settings.
-          state.location = await api("/api/location").catch(() => null);
+          state.location = await api("/api/location").catch(() => state.location);
           if (state.clockOpen) refreshTopbar();
         }
         return;

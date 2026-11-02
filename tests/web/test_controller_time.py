@@ -44,12 +44,16 @@ def test_event_times_use_the_controller_clock(controller_zone):
 
 def test_clock_popover_shows_both_times_when_zones_differ(controller_zone):
     page = controller_zone(JST)
+    page.route("**/api/location", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"valid": True, "name": "Testville", "latitude": 35.7, "longitude": 139.7,
+                         "iana_tz": "Asia/Tokyo", "tz_auto": False, "derived_posix": JST})))
     button = page.locator(".clock-btn")
     expect(button).to_have_class(re.compile(r"\bdiffers\b"))
     button.click()
     panel = page.locator("[data-clock-panel]")
     expect(panel).to_contain_text("Controller time")
-    expect(panel).to_contain_text("JST, UTC+9")
+    expect(panel).to_contain_text("Testville · JST, UTC+9")
     expect(panel).to_contain_text("Your time")
     expect(panel).to_contain_text("Los Angeles")
     expect(panel).to_contain_text("use controller time")
