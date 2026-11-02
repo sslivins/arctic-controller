@@ -72,6 +72,16 @@ class TestTemperatureHistoryWeb:
         # 24 h ticks read "14:00"; 12 h ticks read "2 PM".
         assert all(re.fullmatch(r"\d{1,2}:00|\d{1,2} [AP]M", t) for t in labels), labels
 
+    def test_axis_ticks_follow_the_controller_clock(self, controller_zone, base_url: str):
+        # A half-hour zone: ticks aligned to the browser's (whole-hour) zone
+        # would read "14:30".
+        _seed_history(base_url)
+        page = controller_zone("IST-5:30")
+        _open_history(page)
+        labels = page.locator(f"{CHART} text.tschart-time").all_text_contents()
+        assert labels, "expected time labels on the x-axis"
+        assert all(re.fullmatch(r"\d{1,2}:00|\d{1,2} [AP]M", t) for t in labels), labels
+
     def test_temperature_axis_opens_with_round_degrees(
         self, dashboard_page: Page, base_url: str
     ):
