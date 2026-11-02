@@ -2146,13 +2146,27 @@
           <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit" ${installing ? "disabled" : ""}>Upload and install</button></form></details>
       </section>`;
     }
+    function otherZoneLabel(spec, tzAuto) {
+      const now = Date.now() / 1000;
+      if (!tzCache.has(spec)) tzCache.set(spec, parsePosixTz(spec));
+      const z = tzCache.get(spec);
+      const offset = z ? fmtUtcOffset(tzIsDst(z, now) ? z.dst : z.std) : spec;
+      const iana = tzAuto && state.location?.iana_tz;
+      const city = iana ? iana.split("/").pop().replace(/_/g, " ") : "";
+      return city ? `${city} (${offset})` : offset;
+    }
     function timeSettings() {
       // The device derives the zone from the location when auto-mode is on, so
       // the manual roller is inert there; mirror that here rather than letting
       // a save silently get overwritten.
       const tzAuto = !!(state.location && state.location.tz_auto);
+      // A zone outside the presets (e.g. one derived from the location) still
+      // needs its own option, or the select falls back to showing the first.
+      const cur = state.timeConfig.timezone;
+      const options = cur && !timezones.some(([, value]) => value === cur)
+        ? [[otherZoneLabel(cur, tzAuto), cur], ...timezones] : timezones;
       return `<section class="card"><div class="card-head"><h2>Time</h2><span class="badge ${state.timeConfig.synced ? "good" : "warn"}">${state.timeConfig.synced ? "Synced" : "Not synced"}</span></div>
-        <form data-form="time" data-gate><div class="field"><label>Timezone</label><select name="timezone" ${tzAuto ? "disabled" : ""}>${timezones.map(([name,value]) =>
+        <form data-form="time" data-gate><div class="field"><label>Timezone</label><select name="timezone" ${tzAuto ? "disabled" : ""}>${options.map(([name,value]) =>
           `<option value="${esc(value)}" ${state.timeConfig.timezone===value?"selected":""}>${esc(name)}</option>`).join("")}</select>
           ${tzAuto ? `<p class="metric-sub">The timezone follows the location below. Turn off automatic timezone to choose one manually.</p>` : ""}</div>
           <div class="field"><label>Clock format</label><select name="format"><option value="24" ${state.timeConfig.format_24h?"selected":""}>24 hour</option>
