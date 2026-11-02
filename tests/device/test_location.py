@@ -44,7 +44,7 @@ TOKYO = {
 }
 
 # IANA → POSIX rules the firmware derives (must match main/iana_tz.cpp).
-POSIX_VANCOUVER = "PST8PDT,M3.2.0,M11.1.0"
+POSIX_VANCOUVER = "MST7"
 POSIX_TORONTO = "EST5EDT,M3.2.0,M11.1.0"
 POSIX_TOKYO = "JST-9"
 

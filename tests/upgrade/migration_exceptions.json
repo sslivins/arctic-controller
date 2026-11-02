@@ -1,4 +1,9 @@
 {
   "_comment": "Intentional changes to how a release reports data written by the previous release. Each entry silences the upgrade migration check for one path (a settings endpoint key such as '/api/preferences.language', an event key such as '/api/events.details.from', or a history field such as '/api/heatpump/temperature-history.samples.mode'). Every entry needs a reason. Remove entries once the release they describe has shipped.",
-  "ignore": []
+  "ignore": [
+    {
+      "path": "/api/location.derived_posix",
+      "reason": "BC, Alberta, NWT and Manitoba moved to permanent time on 2026-11-01, so the bench's America/Vancouver zone now derives MST7 instead of PST8PDT,M3.2.0,M11.1.0."
+    }
+  ]
 }

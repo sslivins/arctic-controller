@@ -32,11 +32,17 @@ static const iana_posix_entry_t k_map[] = {
     {"America/Toronto",      "EST5EDT,M3.2.0,M11.1.0"},
     {"America/Montreal",     "EST5EDT,M3.2.0,M11.1.0"},
     {"America/Nipigon",      "EST5EDT,M3.2.0,M11.1.0"},
-    {"America/Winnipeg",     "CST6CDT,M3.2.0,M11.1.0"},
+    // BC, Alberta, the NWT and Manitoba stopped changing clocks in 2026 and
+    // stay on their summer offset from 2026-11-01 (tzdata 2026b-2026e), using
+    // tzdata's abbreviations. A POSIX string carries one rule, so these hold
+    // the current rule only.
+    {"America/Winnipeg",     "EST5"},
     {"America/Regina",       "CST6"},              // Saskatchewan: no DST
     {"America/Swift_Current", "CST6"},
-    {"America/Edmonton",     "MST7MDT,M3.2.0,M11.1.0"},
-    {"America/Vancouver",    "PST8PDT,M3.2.0,M11.1.0"},
+    {"America/Edmonton",     "CST6"},
+    {"America/Yellowknife",  "CST6"},              // links to Edmonton
+    {"America/Inuvik",       "CST6"},
+    {"America/Vancouver",    "MST7"},
     {"America/Dawson_Creek", "MST7"},              // BC Peace River: no DST
     {"America/Fort_Nelson",  "MST7"},              // permanent MST
     {"America/Whitehorse",   "MST7"},              // Yukon: permanent MST
