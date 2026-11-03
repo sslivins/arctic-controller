@@ -9,7 +9,10 @@ Demo-mode values come from the seeded shadow register image
 (initDemoState() in main/heatpump_controller.cpp), the same source the home
 screen renders from. They are asserted here so the two screens cannot drift
 apart again -- this screen used to carry its own hardcoded literals, which
-had diverged (850 vs 400 RPM, 350 vs 200 EEV steps, 20 vs 18 C cooling).
+had diverged (850 vs 400 RPM, 350 vs 200 EEV, 20 vs 18 C cooling).
+
+Readings carry their OEM display code ("A13 - AC Voltage"), taken from the
+arctic-macon field catalog, so they match the OEM controller and Arctic's manual.
 """
 
 import pytest
@@ -20,14 +23,15 @@ from device_client import DeviceClient
 # stopped rendering from getState().
 DEMO_READINGS = {
     # Compressor section
-    "Frequency": "60 Hz",
-    "Fan Speed": "400 RPM",
+    "A14 - Frequency": "60 Hz",
+    "A10 - Fan Speed": "400 RPM",
     # Electrical section
-    "AC Voltage": "230 V",
-    "AC Current": "5 A",
-    "DC Voltage": "380 V",
-    # Expansion valves section
-    "Primary EEV": "200 steps",
+    "A13 - AC Voltage": "230 V",
+    "A4 - AC Current": "5 A",
+    "A7 - DC Voltage": "380 V",
+    # Expansion valves, in steps (unit unconfirmed)
+    "A5 - Primary EEV": "37 steps",
+    "o6 - Aux EEV": "29 steps",
 }
 
 DEMO_SETPOINTS = {
@@ -57,7 +61,8 @@ DEMO_FIELD_SEEDS = {
     "ac_voltage": 230,
     "ac_current": 5,
     "dc_voltage": 380,
-    "primary_eev_opening": 200,
+    "primary_eev_opening": 37,
+    "aux_eev": 29,
     "cooling_setpoint": 18,
     "heating_setpoint": 45,
     "hot_water_setpoint": 50,

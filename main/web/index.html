@@ -1679,15 +1679,15 @@
           ${metricCard("Actual operation", titleCase(h.operation || "unknown"), "Live operating status from the mainboard")}
         </div>
         <h2>Temperatures</h2><div class="grid grid-3">
-          ${metricCard("Water tank", temp(t.tank))}${metricCard("Outlet water", temp(t.outlet))}${metricCard("Inlet water", temp(t.inlet))}
-          ${metricCard("Outdoor ambient", temp(t.outdoor))}${metricCard("Outdoor coil", temp(t.outdoor_coil))}${metricCard("Indoor coil", temp(t.indoor_coil))}
-          ${metricCard("Discharge", temp(t.discharge))}${metricCard("Suction", temp(t.suction))}${metricCard("IPM module", temp(t.ipm))}
+          ${metricCard("o1 - Water tank", temp(t.tank))}${metricCard("o3 - Outlet water", temp(t.outlet))}${metricCard("o2 - Inlet water", temp(t.inlet))}
+          ${metricCard("o4 - Outdoor ambient", temp(t.outdoor))}${metricCard("A2 - Outdoor coil", temp(t.outdoor_coil))}${metricCard("A6 - Indoor coil", temp(t.indoor_coil))}
+          ${metricCard("A1 - Discharge", temp(t.discharge))}${metricCard("A3 - Suction", temp(t.suction))}${metricCard("A8 - IPM module", temp(t.ipm))}
         </div>
         <h2 style="margin-top:28px">Electrical & mechanical</h2><div class="grid grid-4">
-          ${metricCard("Compressor", `${r.compressor_freq ?? "--"} Hz`)}${metricCard("Fan speed", `${r.fan_rpm ?? "--"} RPM`)}
-          ${metricCard("AC voltage", `${r.ac_voltage ?? "--"} V`)}${metricCard("AC current", `${r.ac_current ?? "--"} A`)}
-          ${metricCard("DC voltage", `${r.dc_voltage ?? "--"} V`)}${metricCard("Main EEV", `${r.primary_eev ?? "--"} steps`)}
-          ${metricCard("Input power", `${r.power_consumption ?? "--"} W`)}${metricCard(perfOutput(r.heat_out).label, perfOutput(r.heat_out).value, r.flow_lpm == null ? "" : `At an assumed ${r.flow_lpm} L/min`)}
+          ${metricCard("A14 - Compressor", `${r.compressor_freq ?? "--"} Hz`)}${metricCard("A10 - Fan speed", `${r.fan_rpm ?? "--"} RPM`)}
+          ${metricCard("A13 - AC voltage", `${r.ac_voltage ?? "--"} V`)}${metricCard("A4 - AC current", `${r.ac_current ?? "--"} A`)}
+          ${metricCard("A7 - DC voltage", `${r.dc_voltage ?? "--"} V`)}          ${metricCard("A5 - Main EEV", `${r.primary_eev ?? "--"} steps`)}
+                    ${metricCard("o6 - Aux EEV", `${r.aux_eev ?? "--"} steps`)}${metricCard("A9 - Input power", `${r.power_consumption ?? "--"} W`)}${metricCard(perfOutput(r.heat_out).label, perfOutput(r.heat_out).value, r.flow_lpm == null ? "" : `At an assumed ${r.flow_lpm} L/min`)}
           ${metricCard("Estimated COP", r.cop == null ? "--" : Number(r.cop).toFixed(2), perfSource(r.perf_source, r.perf_fallback, r.perf_settling, r.perf_pending).caption)}${metricCard("Controller uptime", fmtUptime(state.status.uptime_ms))}
         </div>
       </div>`;

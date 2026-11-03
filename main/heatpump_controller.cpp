@@ -364,7 +364,7 @@ void initDemoState() {
 
     // Seed a realistic RUNNING image entirely through the opaque semantic API:
     // no register address, bit, or scaling factor appears here. The arctic-macon
-    // library applies the wire encoding (e.g. AcVoltage 230 V -> raw 23).
+    // library applies the wire encoding (e.g. DcVoltage 380 V -> raw 38).
     imageLock();
     s_image.clear();
 
@@ -397,7 +397,8 @@ void initDemoState() {
     s_image.set_value(MaconField::AcVoltage, 230);      // V
     s_image.set_value(MaconField::DcVoltage, 380);      // V
     s_image.set_value(MaconField::FanLevel, 400);      // RPM
-    s_image.set_value(MaconField::PrimaryEev, 200);     // EEV steps
+    s_image.set_value(MaconField::PrimaryEev, 18);      // steps, as OEM A5 shows it
+    s_image.set_value(MaconField::AuxEev, 0);           // steps, OEM o6
     s_image.set_value(MaconField::CompressorFreq, 60);  // Hz
     // ~19 kW heat out (7 K at loop flow) / 5.5 kW in: COP ~3.5.
     s_image.set_value(MaconField::RealtimePower, 5500); // W
@@ -747,6 +748,8 @@ static void applyMaconMapping() {
     s_state.dc_voltage_valid    = ms.dc_voltage_valid;
     s_state.primary_eev_opening = ms.primary_eev;
     s_state.primary_eev_valid   = ms.primary_eev_valid;
+    s_state.aux_eev_opening     = ms.aux_eev;
+    s_state.aux_eev_valid       = ms.aux_eev_valid;
     s_state.compressor_freq     = ms.compressor_freq;
     // Real-time power in watts, decoded by the macon library.
     // Preferred over the old V*I/10 estimate, which is now 10x low because the

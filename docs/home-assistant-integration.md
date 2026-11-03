@@ -84,12 +84,12 @@ The initial exposed snapshot includes:
 - Temperatures.
 - Setpoints and setpoint limits.
 - Compressor frequency, power, thermal output, and COP when valid.
-- Primary EEV opening in raw steps, and AC/DC electrical readings. Each is
+- Primary EEV opening (OEM A5) in steps, and AC/DC electrical readings. Each is
   `null` when the underlying register has not been read, because 0 is a
-  legitimate measured value for all of them (0 EEV steps means the valve is
-  fully closed, not unknown). The mainboard publishes no full-scale EEV step
-  count, so the opening is raw steps only and is never expressed as a
-  percentage.
+  legitimate measured value for all of them (an EEV opening of 0 means the
+  valve is fully closed, not unknown). The opening is the value the OEM
+  display shows. Steps is the likely unit but isn't confirmed (the display may
+  be steps / 10), and the opening is never expressed as a percentage.
 - Current error state. When a fault is active this includes `help_url`, a link
   to Arctic's troubleshooting article for that fault code (or to Arctic's
   support site when there is no article for it).

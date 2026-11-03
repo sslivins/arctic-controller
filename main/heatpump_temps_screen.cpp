@@ -12,6 +12,7 @@
 #include "fonts/fonts.h"
 #include "app_preferences.h"
 #include "i18n/i18n.h"
+#include "macon_fields.h"
 #include <esp_log.h>
 #include <stdio.h>
 
@@ -62,6 +63,7 @@ static struct {
     lv_obj_t* dc_voltage = nullptr;
     // System - expansion valve readings
     lv_obj_t* primary_eev = nullptr;
+    lv_obj_t* aux_eev = nullptr;
     // System - setpoints
     lv_obj_t* cooling_setpoint = nullptr;
     lv_obj_t* heating_setpoint = nullptr;
@@ -73,6 +75,21 @@ static struct {
 // ============================================================================
 
 static void update_readings();
+
+// "<OEM code> - <name>" (e.g. "A13 - AC Voltage") so readings match the codes
+// on the OEM controller and in Arctic's manual. The code comes from the macon
+// field catalog; fields without one keep the plain name. The returned buffer
+// is reused, so pass it straight to a row constructor (LVGL copies the text).
+static const char* oem_label(const char* field, const char* name) {
+    static char buf[64];
+    const MaconFieldDesc* d = macon_field_find(field);
+    if (d != nullptr && d->oem_code != nullptr) {
+        snprintf(buf, sizeof(buf), "%s - %s", d->oem_code, name);
+    } else {
+        snprintf(buf, sizeof(buf), "%s", name);
+    }
+    return buf;
+}
 
 static lv_obj_t* create_temp_row(lv_obj_t* parent, const char* label, lv_obj_t** value_label_out) {
     lv_obj_t* row = lv_obj_create(parent);
@@ -188,6 +205,7 @@ static void update_readings() {
         lv_label_set_text(state.ac_current, na);
         lv_label_set_text(state.dc_voltage, na);
         lv_label_set_text(state.primary_eev, na);
+        lv_label_set_text(state.aux_eev, na);
         lv_label_set_text(state.cooling_setpoint, na);
         lv_label_set_text(state.heating_setpoint, na);
         lv_label_set_text(state.hotwater_setpoint, na);
@@ -252,9 +270,20 @@ static void update_readings() {
     snprintf(buf, sizeof(buf), "%.0f V", hp.getDcVoltageV());
     lv_label_set_text(state.dc_voltage, buf);
 
-    snprintf(buf, sizeof(buf), "%d %s", hp.primary_eev_opening,
-             i18n_get(STR_HP_UNIT_STEPS));
-    lv_label_set_text(state.primary_eev, buf);
+    // EEV openings in steps, as the OEM display shows them (unit unconfirmed;
+    // see arctic-macon docs/REGISTERS.md "EEV opening unit").
+    if (hp.primary_eev_valid) {
+        snprintf(buf, sizeof(buf), "%d %s", hp.primary_eev_opening, i18n_get(STR_HP_UNIT_STEPS));
+        lv_label_set_text(state.primary_eev, buf);
+    } else {
+        lv_label_set_text(state.primary_eev, "--");
+    }
+    if (hp.aux_eev_valid) {
+        snprintf(buf, sizeof(buf), "%d %s", hp.aux_eev_opening, i18n_get(STR_HP_UNIT_STEPS));
+        lv_label_set_text(state.aux_eev, buf);
+    } else {
+        lv_label_set_text(state.aux_eev, "--");
+    }
 
     snprintf(buf, sizeof(buf), "%d %s", app_prefs_convert_temp(hp.cooling_setpoint), app_prefs_temp_unit_str());
     lv_label_set_text(state.cooling_setpoint, buf);
@@ -325,30 +354,33 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
     create_section_header(content, i18n_get(STR_HP_TEMPERATURES));
 
     // Temperature rows - Water temperatures first
-    create_temp_row(content, i18n_get(STR_HP_WATER_TANK), &state.tank_temp);
-    create_temp_row(content, i18n_get(STR_HP_WATER_OUTLET), &state.outlet_temp);
-    create_temp_row(content, i18n_get(STR_HP_WATER_INLET), &state.inlet_temp);
+    create_temp_row(content, oem_label("water_tank_temp", i18n_get(STR_HP_WATER_TANK)), &state.tank_temp);
+    create_temp_row(content, oem_label("outlet_water_temp", i18n_get(STR_HP_WATER_OUTLET)), &state.outlet_temp);
+    create_temp_row(content, oem_label("inlet_water_temp", i18n_get(STR_HP_WATER_INLET)), &state.inlet_temp);
     
     // Ambient and refrigerant temps
-    create_temp_row(content, i18n_get(STR_HP_OUTDOOR_AMBIENT), &state.outdoor_temp);
-    create_temp_row(content, i18n_get(STR_HP_DISCHARGE), &state.discharge_temp);
-    create_temp_row(content, i18n_get(STR_HP_SUCTION), &state.suction_temp);
+    create_temp_row(content, oem_label("outdoor_ambient_temp", i18n_get(STR_HP_OUTDOOR_AMBIENT)), &state.outdoor_temp);
+    create_temp_row(content, oem_label("discharge_temp", i18n_get(STR_HP_DISCHARGE)), &state.discharge_temp);
+    create_temp_row(content, oem_label("suction_temp", i18n_get(STR_HP_SUCTION)), &state.suction_temp);
     
     // Coil temps
-    create_temp_row(content, i18n_get(STR_HP_OUTDOOR_COIL), &state.outdoor_coil_temp);
-    create_temp_row(content, i18n_get(STR_HP_INDOOR_COIL), &state.indoor_coil_temp);
+    create_temp_row(content, oem_label("outdoor_coil_temp", i18n_get(STR_HP_OUTDOOR_COIL)), &state.outdoor_coil_temp);
+    create_temp_row(content, oem_label("indoor_coil_temp", i18n_get(STR_HP_INDOOR_COIL)), &state.indoor_coil_temp);
     
     // Module temp
-    create_temp_row(content, i18n_get(STR_HP_IPM_MODULE), &state.ipm_temp);
+    create_temp_row(content, oem_label("ipm_temp", i18n_get(STR_HP_IPM_MODULE)), &state.ipm_temp);
 
     // ===== System section =====
+    // The A11/A12 pressure readings are deliberately not shown: units without
+    // transducers (all known installs) report a meaningless constant.
     create_section_header(content, i18n_get(STR_HP_SYSTEM_SECTION));
-    create_reading_row(content, i18n_get(STR_HP_FREQUENCY), &state.compressor_freq);
-    create_reading_row(content, i18n_get(STR_HP_FAN_SPEED), &state.fan_speed);
-    create_reading_row(content, i18n_get(STR_HP_AC_VOLTAGE), &state.ac_voltage);
-    create_reading_row(content, i18n_get(STR_HP_AC_CURRENT), &state.ac_current);
-    create_reading_row(content, i18n_get(STR_HP_DC_VOLTAGE), &state.dc_voltage);
-    create_reading_row(content, i18n_get(STR_HP_PRIMARY_EEV), &state.primary_eev);
+    create_reading_row(content, oem_label("compressor_freq", i18n_get(STR_HP_FREQUENCY)), &state.compressor_freq);
+    create_reading_row(content, oem_label("fan_speed", i18n_get(STR_HP_FAN_SPEED)), &state.fan_speed);
+    create_reading_row(content, oem_label("ac_voltage", i18n_get(STR_HP_AC_VOLTAGE)), &state.ac_voltage);
+    create_reading_row(content, oem_label("ac_current", i18n_get(STR_HP_AC_CURRENT)), &state.ac_current);
+    create_reading_row(content, oem_label("dc_voltage", i18n_get(STR_HP_DC_VOLTAGE)), &state.dc_voltage);
+    create_reading_row(content, oem_label("primary_eev", i18n_get(STR_HP_PRIMARY_EEV)), &state.primary_eev);
+    create_reading_row(content, oem_label("aux_eev", i18n_get(STR_HP_AUX_EEV)), &state.aux_eev);
     create_reading_row(content, i18n_get(STR_HP_COOLING), &state.cooling_setpoint);
     create_reading_row(content, i18n_get(STR_HP_HEATING), &state.heating_setpoint);
     create_reading_row(content, i18n_get(STR_HP_HOT_WATER), &state.hotwater_setpoint);
@@ -411,6 +443,7 @@ void heatpump_temps_hide(void) {
     state.ac_current = nullptr;
     state.dc_voltage = nullptr;
     state.primary_eev = nullptr;
+    state.aux_eev = nullptr;
     state.cooling_setpoint = nullptr;
     state.heating_setpoint = nullptr;
     state.hotwater_setpoint = nullptr;

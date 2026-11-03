@@ -168,6 +168,12 @@ cJSON* createStateObject(const HeatPumpState& hp)
     } else {
         cJSON_AddNullToObject(readings, "primary_eev");
     }
+    // Auxiliary (EVI/economizer) EEV opening, same steps unit and null rule.
+    if (hp.aux_eev_valid) {
+        cJSON_AddNumberToObject(readings, "aux_eev", hp.aux_eev_opening);
+    } else {
+        cJSON_AddNullToObject(readings, "aux_eev");
+    }
     // Electrical readings follow the same null-when-invalid rule: 0 V / 0 A are
     // all legitimate measured values, so they must not double as "unknown".
     if (hp.ac_voltage_valid) {

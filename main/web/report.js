@@ -398,7 +398,7 @@ ${notable.length ? `<table><thead><tr><th style="width:170px">When</th><th style
   const tempRows = [['Tank', T.tank], ['Leaving water', T.outlet], ['Entering water', T.inlet], ['Outdoor air', T.outdoor], ['Outdoor coil', T.outdoor_coil],
     ['Indoor coil (OEM name)', T.indoor_coil], ['Discharge', run(T.discharge)], ['Suction', run(T.suction)], ['IPM module', run(T.ipm)]].map(([k, v]) => [k, v == null ? null : Math.round(tc(v)), U]);
   const readRows = [['Compressor', run(R.compressor_freq), 'Hz'], ['Fan', run(R.fan_rpm), 'RPM'], ['AC voltage', R.ac_voltage, 'V'], ['AC current', run(R.ac_current), 'A'],
-    ['DC bus', R.dc_voltage, 'V'], ['Main EEV', R.primary_eev, 'steps'], ['Power', run(R.power_consumption), 'W'],
+    ['DC bus', R.dc_voltage, 'V'], ['Main EEV', R.primary_eev, 'steps'], ['Aux EEV', R.aux_eev, 'steps'], ['Power', run(R.power_consumption), 'W'],
     ['Flow (configured)', R.flow_lpm != null ? `${flow(R.flow_lpm)} (${flow2(R.flow_lpm)})` : null], ['Fluid', fluid]];
   const ex = PS.sensors || {};
   const stateRows = [['Unit enabled', S.unit_on == null ? null : S.unit_on ? 'Yes' : 'No'], ['Mode', modeName(S.mode)], ['Operation', S.operation], ['Compressor', onoff(S.compressor)],
