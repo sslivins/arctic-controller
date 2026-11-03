@@ -129,7 +129,7 @@ const AdvancedParam* find_enum_writable() {
 // greater than one. Without one of these, "the display conversion is skipped"
 // and "the display value is written instead of the encoded raw" are both
 // invisible, because raw == display for every identity-scaled parameter.
-const AdvancedParam* find_scaled_writable(bool nonzero_default = false) {
+const AdvancedParam* find_scaled_writable() {
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
         if (!p) continue;
@@ -138,7 +138,6 @@ const AdvancedParam* find_scaled_writable(bool nonzero_default = false) {
         if (p->enum_vals != nullptr) continue;
         if (p->display_multiplier <= 1) continue;
         if (p->min_val >= p->max_val) continue;
-        if (nonzero_default && p->default_val == 0) continue;
         return p;
     }
     return nullptr;
@@ -332,21 +331,23 @@ void a_scaled_parameter_is_read_in_display_units() {
 
 void a_scaled_demo_read_reports_display_units() {
     demo_device();
-    // A zero default reads the same in both unit systems, so it can't show
-    // whether the multiplier was applied.
-    const AdvancedParam* p = find_scaled_writable(/*nonzero_default=*/true);
-    REQUIRE_PARAM(p, "a scaled parameter with a non-zero default");
+    const AdvancedParam* p = find_scaled_writable();
+    REQUIRE_PARAM(p, "a parameter with a display multiplier above one");
 
-    // Demo mode answers from the vendor-doc default, which is stored in wire
-    // units like everything else in the table. Reporting it unconverted makes
-    // demo mode disagree with a live device by exactly the multiplier -- a
-    // difference nobody would question, because both numbers look plausible.
-    const long expected = (long)p->default_val * (long)p->display_multiplier;
+    // Demo mode keeps values (written ones and the vendor-doc defaults) in
+    // wire units like everything else in the table. Reporting them unconverted
+    // makes demo mode disagree with a live device by exactly the multiplier --
+    // a difference nobody would question, because both numbers look plausible.
+    // A written value is used because a zero default reads the same either way.
+    const int16_t wire = 3;
+    const int16_t display = (int16_t)(wire * p->display_multiplier);
+    bool bus_ok = false;
+    CHECK(advanced_param_write(p->ap, display, &bus_ok) == AdvWriteResult::OK);
 
     int16_t value = 0;
     CHECK(advanced_param_read(p->ap, &value) == true);
-    CHECK_EQ_INT(value, expected);
-    CHECK(value != p->default_val);
+    CHECK_EQ_INT(value, display);
+    CHECK(value != wire);
 }
 
 void a_scaled_write_encodes_back_to_wire_units() {
