@@ -1,4 +1,9 @@
 {
   "_comment": "Intentional changes to how a release reports data written by the previous release. Each entry silences the upgrade migration check for one path (a settings endpoint key such as '/api/preferences.language', an event key such as '/api/events.details.from', or a history field such as '/api/heatpump/temperature-history.samples.mode'). Every entry needs a reason. Remove entries once the release they describe has shipped.",
-  "ignore": []
+  "ignore": [
+    {
+      "path": "/api/location.derived_posix",
+      "reason": "Canada's permanent zones now use their official abbreviations, so the bench's America/Vancouver zone derives <PCT>7 instead of 3.5.2's MST7 (same UTC-7 offset)."
+    }
+  ]
 }
