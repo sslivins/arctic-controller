@@ -118,6 +118,23 @@ run stopped. Workflows that reach it outside that sequence (the OTA rollback
 and resilience workflows, the release baseline, core dump collection) resolve
 it with `.github/scripts/device_url.sh`, which prefers HTTPS when 443 answers.
 
+## PR-impacted tests run first
+
+The bench suites take about an hour and publish their results only at the end,
+so a PR that breaks one test used to look green until then. On pull requests,
+`Run PR-impacted tests first` runs right after the switch to HTTPS:
+
+* `.github/scripts/impacted_tests.py` picks up to 8 test files from
+  `tests/device`, `tests/api` and `tests/web`: those the PR changes, then
+  those that mention strings from its source changes (literals on and around
+  the changed lines, and widget tags, JSON keys, API paths and element ids
+  from small source files). Strings that appear in more than a few test files
+  are ignored, and each changed source file takes turns adding tests.
+* They run with `-x`, and `PR-Impacted Test Results` is published straight
+  away, so that check goes red within minutes of the bench starting.
+* The stage never fails the job. The full suites still run every test,
+  including these, and the device gate judges them as before.
+
 ## Changing the policy
 
 `tests/test_ci_policy.py` extracts the gate scripts from the workflow YAML and
