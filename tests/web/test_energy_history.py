@@ -88,6 +88,13 @@ def page_errors(dashboard_page: Page):
 
 @pytest.fixture
 def mocked_energy(dashboard_page: Page):
+    # The page counts days on the controller's clock, which in the evening
+    # Pacific is a day behind the runner's (UTC on ghr-mi).
+    global TODAY
+    dashboard_page.wait_for_function("() => !!state.status.time?.timezone")
+    TODAY = dt.date.fromisoformat(dashboard_page.evaluate(
+        "(() => { const p = ctlParts(nowEpoch());"
+        " return new Date(Date.UTC(p.y, p.mo, p.d)).toISOString().slice(0, 10); })()"))
     dashboard_page.route("**/api/energy/daily*", _fulfil_daily)
     dashboard_page.route("**/api/energy/totals", _fulfil_totals)
     return dashboard_page
