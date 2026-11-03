@@ -82,7 +82,7 @@ static void update_readings();
 // is reused, so pass it straight to a row constructor (LVGL copies the text).
 static const char* oem_label(const char* field, const char* name) {
     static char buf[64];
-    const MaconFieldDesc* d = macon_field_find(field);
+    const arctic::MaconFieldDesc* d = arctic::macon_field_find(field);
     if (d != nullptr && d->oem_code != nullptr) {
         snprintf(buf, sizeof(buf), "%s - %s", d->oem_code, name);
     } else {

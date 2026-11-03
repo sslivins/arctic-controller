@@ -129,7 +129,7 @@ const AdvancedParam* find_enum_writable() {
 // greater than one. Without one of these, "the display conversion is skipped"
 // and "the display value is written instead of the encoded raw" are both
 // invisible, because raw == display for every identity-scaled parameter.
-const AdvancedParam* find_scaled_writable() {
+const AdvancedParam* find_scaled_writable(bool nonzero_default = false) {
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
         if (!p) continue;
@@ -138,6 +138,7 @@ const AdvancedParam* find_scaled_writable() {
         if (p->enum_vals != nullptr) continue;
         if (p->display_multiplier <= 1) continue;
         if (p->min_val >= p->max_val) continue;
+        if (nonzero_default && p->default_val == 0) continue;
         return p;
     }
     return nullptr;
@@ -331,8 +332,10 @@ void a_scaled_parameter_is_read_in_display_units() {
 
 void a_scaled_demo_read_reports_display_units() {
     demo_device();
-    const AdvancedParam* p = find_scaled_writable();
-    REQUIRE_PARAM(p, "a parameter with a display multiplier above one");
+    // A zero default reads the same in both unit systems, so it can't show
+    // whether the multiplier was applied.
+    const AdvancedParam* p = find_scaled_writable(/*nonzero_default=*/true);
+    REQUIRE_PARAM(p, "a scaled parameter with a non-zero default");
 
     // Demo mode answers from the vendor-doc default, which is stored in wire
     // units like everything else in the table. Reporting it unconverted makes
