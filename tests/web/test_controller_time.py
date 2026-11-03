@@ -85,6 +85,16 @@ def test_clock_in_the_same_zone_is_plain(controller_zone):
     expect(panel).not_to_contain_text("Your time")
 
 
+def _box(page: Page, selector: str) -> dict:
+    """An element's box, measured in one go: the status poll re-renders the
+    topbar, so a locator can lose its element between two calls."""
+    return page.wait_for_function(
+        """s => { const e = document.querySelector(s); if (!e) return null;
+                  const r = e.getBoundingClientRect();
+                  return r.width ? {x: r.x, width: r.width, height: r.height} : null; }""",
+        arg=selector).json_value()
+
+
 def test_phone_clock_sits_by_the_logo_and_opens_full_width(controller_zone):
     page = controller_zone(JST)
     page.set_viewport_size({"width": 390, "height": 844})
@@ -93,13 +103,13 @@ def test_phone_clock_sits_by_the_logo_and_opens_full_width(controller_zone):
     expect(page.locator(".clock-btn .clk-long")).to_be_hidden()
     assert not re.search(r"\d:\d\d:\d\d", short.inner_text()), "no seconds on a phone"
 
-    button = page.locator(".clock-btn").bounding_box()
+    button = _box(page, ".clock-btn")
     assert button["height"] >= 44, button
-    assert button["x"] < page.locator(".hp-status").bounding_box()["x"], "clock sits left of the status icons"
+    assert button["x"] < _box(page, ".hp-status")["x"], "clock sits left of the status icons"
 
     page.locator(".clock-btn").click()
     panel = page.locator("[data-clock-panel]")
     expect(panel).to_be_visible()
-    box = panel.bounding_box()
+    box = _box(page, "[data-clock-panel]")
     assert box["x"] >= 0 and box["x"] + box["width"] <= 390, box
     assert box["width"] > 300, box
