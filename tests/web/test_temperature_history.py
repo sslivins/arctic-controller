@@ -313,9 +313,9 @@ class TestTemperatureHistoryWeb:
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
         assert_no_reload(130_000)
 
-    def test_touch_drag_pans_and_hold_scrubs(self, dashboard_page: Page, base_url: str):
-        """On touch, a quick sideways drag pans back in time; press-and-hold
-        first, then drag, moves the readout and leaves the window alone."""
+    def test_touch_drag_scrubs_and_never_pans(self, dashboard_page: Page, base_url: str):
+        """On touch, a sideways drag (quick or after a hold) moves the readout
+        and leaves the window alone; the buttons move the window."""
         _seed_history(base_url)
         dashboard_page.clock.install()
         dashboard_page.reload()
@@ -345,13 +345,15 @@ class TestTemperatureHistoryWeb:
         assert page.evaluate("state.tempHistory.end") is None
         assert page.evaluate("histChart.chart.pending") is None
 
-        # Quick drag right: pans back in time.
+        # Quick drag right: scrubs too, no pan.
         touch("pointerdown", 0.3)
         touch("pointermove", 0.45)
+        expect(page.locator(f"{CHART} [data-tschart-card]")).to_be_visible()
         touch("pointermove", 0.7)
         touch("pointerup", 0.7)
-        assert page.evaluate("state.tempHistory.end") is not None
-        expect(page.locator('[data-action="history-latest"]')).to_be_enabled()
+        assert page.evaluate("state.tempHistory.end") is None
+        assert page.evaluate("histChart.chart.pending") is None
+        expect(page.locator('[data-action="history-latest"]')).to_be_hidden()
 
     def test_drag_past_now_rubber_bands_and_springs_back(
         self, dashboard_page: Page, base_url: str
