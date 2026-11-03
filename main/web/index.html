@@ -200,6 +200,25 @@
     .icon-svg { width: 22px; height: 22px; display: block; fill: currentColor; }
     .signout-btn { color: var(--cp-text); }
     .notif-wrap { position: relative; }
+    .clock-wrap { position: relative; }
+    .clock-btn { background: none; border: 0; color: inherit; font: inherit; padding: 4px 2px; cursor: pointer; }
+    .clock-btn.differs .clock { text-decoration: underline dotted; text-underline-offset: 4px;
+      text-decoration-color: color-mix(in srgb, currentColor 55%, transparent); }
+    .clock-btn .clk-short { display: none; }
+    .clock-panel {
+      position: absolute; right: 0; top: calc(100% + 8px); width: 280px; z-index: 50;
+      background: var(--cp-surface); border: 1px solid var(--cp-border); border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(0,0,0,.35); padding: 14px 16px; white-space: normal;
+      color: var(--cp-text); font-size: 13px; cursor: default;
+    }
+    .clock-panel .cp-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 4px 0; }
+    .clock-panel .cp-row b { font-size: 15px; }
+    .clock-panel .cp-gap { margin-top: 8px; }
+    .clock-panel .cp-lbl { font-weight: 600; }
+    .clock-panel .cp-sub { color: var(--cp-text-muted); }
+    .clock-panel .cp-sub { font-size: 12px; }
+    .clock-panel .cp-note { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--cp-border);
+      color: var(--cp-text-muted); font-size: 12px; line-height: 1.4; }
     .notif-btn { position: relative; cursor: pointer; font-size: 17px; }
     .notif-badge {
       position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px;
@@ -808,7 +827,13 @@
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       .top-status { gap: 8px; }
-      .top-status .status-item.wifi, .top-status .status-item.clock { display: none; }
+      .top-status .status-item.wifi, .top-status > .status-item.clock { display: none; }
+      /* The clock moves next to the logo, without seconds, as a full tap target. */
+      .clock-wrap { order: -1; margin-right: auto; margin-left: 4px; }
+      .clock-btn { font-size: 14px; padding: 0 4px; min-height: 44px; }
+      .clock-btn .clk-long { display: none; }
+      .clock-btn .clk-short { display: inline; }
+      .clock-panel { position: fixed; top: 58px; left: 12px; right: 12px; width: auto; }
       .hp-status { width: 18px; height: 44px; justify-content: center; flex: none; }
       .hp-status .status-label { display: none; }
       .hp-status .dot { width: 10px; height: 10px; }
@@ -908,13 +933,20 @@
       const minutes = Math.floor(seconds / 60);
       return `${days ? `${days}d ` : ""}${hours}h ${minutes}m`;
     };
+    // Mirrors the device's roller (settings_time_screen.cpp).
     const timezones = [
-      ["US Eastern", "EST5EDT,M3.2.0,M11.1.0"], ["US Central", "CST6CDT,M3.2.0,M11.1.0"],
-      ["US Mountain", "MST7MDT,M3.2.0,M11.1.0"], ["US Pacific", "PST8PDT,M3.2.0,M11.1.0"],
-      ["Canada Atlantic", "AST4ADT,M3.2.0,M11.1.0"], ["UK / London", "GMT0BST,M3.5.0/1,M10.5.0"],
-      ["Central Europe", "CET-1CEST,M3.5.0,M10.5.0/3"], ["Japan", "JST-9"],
-      ["China", "CST-8"], ["India", "IST-5:30"], ["Australia Eastern", "AEST-10AEDT,M10.1.0,M4.1.0/3"],
-      ["UTC", "UTC0"]
+      ["US Eastern (EST/EDT)", "EST5EDT,M3.2.0,M11.1.0"], ["US Central (CST/CDT)", "CST6CDT,M3.2.0,M11.1.0"],
+      ["US Mountain (MST/MDT)", "MST7MDT,M3.2.0,M11.1.0"], ["US Pacific (PST/PDT)", "PST8PDT,M3.2.0,M11.1.0"],
+      ["US Alaska", "AKST9AKDT,M3.2.0,M11.1.0"], ["US Hawaii", "HST10"], ["US Arizona (no DST)", "MST7"],
+      ["Canada BC (PCT)", "<PCT>7"], ["Canada Alberta (ABT)", "<ABT>6"], ["Canada Saskatchewan (CST)", "CST6"],
+      ["Canada Manitoba (MBT)", "<MBT>5"], ["Canada Atlantic", "AST4ADT,M3.2.0,M11.1.0"],
+      ["Canada Newfoundland", "NST3:30NDT,M3.2.0,M11.1.0"],
+      ["UK / London (GMT/BST)", "GMT0BST,M3.5.0/1,M10.5.0"], ["Central Europe (CET/CEST)", "CET-1CEST,M3.5.0,M10.5.0/3"],
+      ["Eastern Europe (EET/EEST)", "EET-2EEST,M3.5.0/3,M10.5.0/4"],
+      ["Japan (JST)", "JST-9"], ["China (CST)", "CST-8"], ["India (IST)", "IST-5:30"], ["Korea (KST)", "KST-9"],
+      ["Singapore/HK", "SGT-8"], ["Australia Eastern (AEST)", "AEST-10AEDT,M10.1.0,M4.1.0/3"],
+      ["Australia Central", "ACST-9:30ACDT,M10.1.0,M4.1.0/3"], ["Australia Western", "AWST-8"],
+      ["UTC (No offset)", "UTC0"]
     ];
     const nav = [
       ["home", "⌂", "Home"], ["status", "▥", "Status"], ["control", "◉", "Control"],
@@ -971,7 +1003,7 @@
       ota: {}, release: null, timeConfig: {}, security: {}, tls: {}, networks: [],
       weather: {}, location: {},
       locationSearch: { query: "", busy: false, error: "", results: null },
-      notifications: [], notifOpen: false,
+      notifications: [], notifOpen: false, clockOpen: false,
       ha: {}, haTimer: null,
       perf: null, perfTimer: null, perfTests: {}, perfBrowses: {}, perfDiscovers: {}, perfModes: {}, perfDrafts: {},
       settingsLoaded: false, settingsPromise: null,
@@ -1166,6 +1198,43 @@
         <button class="icon-btn notif-btn" data-action="notif-toggle" aria-label="Notifications">🔔${badge}</button>
         ${panel}</div>`;
     }
+    // The top-bar clock is the controller's. Tapping it explains that and,
+    // when the browser is in another zone, shows the viewer's time beside it.
+    function clockZone(sec, t) {
+      const z = ctlZone();
+      if (!z) return fmtUtcOffset(sec);
+      const abbr = tzIsDst(z, t) ? z.dstName : z.stdName;
+      return /^[A-Za-z]+$/.test(abbr) && !/^UTC?$/.test(abbr) ? `${abbr}, ${fmtUtcOffset(sec)}` : fmtUtcOffset(sec);
+    }
+    function clockStatus() {
+      const local = state.status.time?.local;
+      const m = /^(\d{1,2}):(\d{2})/.exec(local || "");
+      const full = fmtStatusClock(local), short = m ? fmtClock(+m[1], +m[2]) : full;
+      if (!m) return `<span class="status-item clock">${esc(full)}</span>`;
+      const now = nowEpoch(), off = ctlOffset(now), mine = -new Date().getTimezoneOffset() * 60;
+      const differs = off !== mine, p = ctlParts(now);
+      let panel = "";
+      if (state.clockOpen) {
+        const site = state.location?.valid && state.location.name ? `${state.location.name} · ` : "";
+        const ctlRow = `<div class="cp-row"><span class="cp-lbl">Controller time</span><b>${esc(short)}</b></div>
+          <div class="cp-sub">${esc(site + clockZone(off, now))} · ${WEEKDAYS[p.wd]}</div>`;
+        if (differs) {
+          const d = new Date(), zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+          const city = zone.includes("/") ? `${zone.split("/").pop().replace(/_/g, " ")} · ` : "";
+          panel = `${ctlRow}
+            <div class="cp-row cp-gap"><span class="cp-lbl">Your time</span><b>${esc(fmtClock(d.getHours(), d.getMinutes()))}</b></div>
+            <div class="cp-sub">${esc(city + fmtUtcOffset(mine))} · ${WEEKDAYS[d.getDay()]}</div>
+            <div class="cp-note">Charts, runs and events on this page use controller time.</div>`;
+        } else {
+          panel = `${ctlRow}<div class="cp-sub">${state.status.time?.synced ? "Synced with internet time" : "Not synced with internet time"}</div>`;
+        }
+        panel = `<div class="clock-panel" role="dialog" aria-label="Controller time" data-clock-panel>${panel}</div>`;
+      }
+      return `<span class="status-item clock-wrap">
+        <button class="clock-btn${differs ? " differs" : ""}" data-action="clock-toggle" aria-haspopup="dialog"
+          aria-expanded="${state.clockOpen ? "true" : "false"}" title="Controller time"><span class="clock clk-long">${esc(full)}</span><span class="clock clk-short">${esc(short)}</span></button>
+        ${panel}</span>`;
+    }
     function topbar() {
       const connected = !!state.hp.connected, loading = !state.coreLoaded;
       const restarting = state.otaInstall?.active && ["installing", "restarting"].includes(state.otaInstall.phase);
@@ -1182,7 +1251,7 @@
             ${hpStatus}
             ${loading ? "" : `<span class="status-item wifi">${esc(state.wifi.ssid || "WiFi disconnected")}</span>`}
             ${weatherStatus()}
-            <span class="status-item clock">${esc(fmtStatusClock(state.status.time?.local))}</span>
+            ${clockStatus()}
             ${notifBell()}
             <button class="icon-btn" data-route="settings" aria-label="Settings">⚙</button>
             ${state.auth.required ? `<button class="icon-btn signout-btn" data-action="logout" aria-label="Sign out" title="Sign out"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><title>Sign out</title><path d="M5 21q-.825 0-1.412-.587T3 19V5q0-.825.588-1.412T5 3h7v2H5v14h7v2H5Zm11-4-1.375-1.45 2.55-2.55H9v-2h8.175l-2.55-2.55L16 7l5 5-5 5Z"/></svg></button>` : ""}
@@ -1246,6 +1315,77 @@
       return min < 100 ? `${min} min` : `${Math.round(min / 60)} h`;
     }
     function nowEpoch() { return Math.floor(Date.now() / 1000); }
+    // ---- Controller time ----
+    // Clock times and calendar days on this page are the controller's, worked
+    // out from its POSIX TZ string (the rules the device itself runs), not the
+    // browser's zone: a run at 9:40 at the site reads 9:40 from anywhere.
+    function parsePosixTz(spec) {
+      const off = "([+-]?\\d{1,2}(?::\\d{2}){0,2})", name = "(<[^>]+>|[A-Za-z]{3,})";
+      const m = new RegExp(`^${name}${off}(?:${name}${off}?(?:,([^,]+),([^,]+))?)?$`).exec(spec || "");
+      if (!m) return null;
+      const secs = s => {
+        const [h, mi = 0, se = 0] = s.replace(/^[+-]/, "").split(":").map(Number);
+        return (s[0] === "-" ? -1 : 1) * (h * 3600 + mi * 60 + se);
+      };
+      const label = s => s.replace(/^<|>$/g, "");
+      // POSIX offsets count west of UTC; these are east.
+      const z = { stdName: label(m[1]), std: -secs(m[2]) };
+      if (!m[3]) return z;
+      const rule = r => { const [d, t] = r.split("/"); return { d, t: t ? secs(t) : 7200 }; };
+      Object.assign(z, { dstName: label(m[3]), dst: m[4] ? -secs(m[4]) : z.std + 3600,
+        start: rule(m[5] || "M3.2.0"), end: rule(m[6] || "M11.1.0") });
+      return z;
+    }
+    // Day number (days since 1970) of a POSIX rule date in `year`.
+    function tzRuleDay(d, year) {
+      let m = /^M(\d+)\.(\d)\.(\d)$/.exec(d);
+      if (m) {
+        const mo = +m[1] - 1, first = new Date(Date.UTC(year, mo, 1)).getUTCDay();
+        const len = new Date(Date.UTC(year, mo + 1, 0)).getUTCDate();
+        let day = 1 + (+m[3] - first + 7) % 7 + (+m[2] - 1) * 7;
+        while (day > len) day -= 7;
+        return Date.UTC(year, mo, day) / 86400000;
+      }
+      const jan1 = Date.UTC(year, 0, 1) / 86400000;
+      if ((m = /^J(\d+)$/.exec(d))) {
+        const leap = new Date(Date.UTC(year, 1, 29)).getUTCMonth() === 1;
+        return jan1 + +m[1] - 1 + (leap && +m[1] >= 60 ? 1 : 0);
+      }
+      return jan1 + (+d || 0);
+    }
+    function tzIsDst(z, t) {
+      if (z.dst === undefined) return false;
+      const year = new Date((t + z.std) * 1000).getUTCFullYear();
+      const on = tzRuleDay(z.start.d, year) * 86400 + z.start.t - z.std;
+      const off = tzRuleDay(z.end.d, year) * 86400 + z.end.t - z.dst;
+      return on < off ? t >= on && t < off : t >= on || t < off;
+    }
+    const tzCache = new Map();
+    function ctlZone() {
+      const spec = state.status.time?.timezone;
+      if (!spec) return null;
+      if (!tzCache.has(spec)) tzCache.set(spec, parsePosixTz(spec));
+      return tzCache.get(spec);
+    }
+    // Seconds east of UTC on the controller's clock at unix time t (the
+    // browser's zone until the controller has reported its own).
+    function ctlOffset(t) {
+      const z = ctlZone();
+      if (!z) return -new Date(t * 1000).getTimezoneOffset() * 60;
+      return tzIsDst(z, t) ? z.dst : z.std;
+    }
+    // Calendar parts of unix time t on the controller's clock.
+    function ctlParts(t) {
+      const d = new Date((t + ctlOffset(t)) * 1000);
+      return { y: d.getUTCFullYear(), mo: d.getUTCMonth(), d: d.getUTCDate(), h: d.getUTCHours(),
+        mi: d.getUTCMinutes(), s: d.getUTCSeconds(), wd: d.getUTCDay() };
+    }
+    function fmtUtcOffset(sec) {
+      const a = Math.abs(sec), h = Math.floor(a / 3600), m = Math.round(a % 3600 / 60);
+      if (!a) return "UTC";
+      return `UTC${sec < 0 ? "−" : "+"}${h}${m ? `:${String(m).padStart(2, "0")}` : ""}`;
+    }
+    const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     function fmtPower(watts) {
       if (watts == null) return "--";
       const w = Number(watts);
@@ -1726,31 +1866,35 @@
       return /^https:\/\/arcticheatpumps\.freshdesk\.com\//.test(url || "")
         ? `<a class="${cls}" href="${esc(url)}" target="_blank" rel="noopener noreferrer" data-help-url>Troubleshooting guide ↗</a>` : "";
     }
-    const localDayKey = date => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    const dayKey = p => `${p.y}-${p.mo}-${p.d}`;
+    // The controller-clock day key `n` days from today.
+    function ctlDayKey(n = 0) {
+      const p = ctlParts(nowEpoch()), d = new Date(Date.UTC(p.y, p.mo, p.d + n));
+      return dayKey({ y: d.getUTCFullYear(), mo: d.getUTCMonth(), d: d.getUTCDate() });
+    }
     function eventDay(event) {
       if (!event.timestamp) return "Before the clock was set";
-      const d = new Date(event.timestamp * 1000), now = new Date();
-      if (localDayKey(d) === localDayKey(now)) return "Today";
-      const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-      if (localDayKey(d) === localDayKey(yesterday)) return "Yesterday";
-      return `${monthNames[d.getMonth()]} ${d.getDate()}${d.getFullYear() === now.getFullYear() ? "" : `, ${d.getFullYear()}`}`;
+      const p = ctlParts(event.timestamp);
+      if (dayKey(p) === ctlDayKey()) return "Today";
+      if (dayKey(p) === ctlDayKey(-1)) return "Yesterday";
+      return `${monthNames[p.mo]} ${p.d}${p.y === ctlParts(nowEpoch()).y ? "" : `, ${p.y}`}`;
     }
     // The home "Last run": the clock time for today, otherwise just the date (matches the device).
     function fmtDayClock(epoch) {
-      const d = new Date(epoch * 1000);
-      if (localDayKey(d) === localDayKey(new Date())) return fmtClock(d.getHours(), d.getMinutes());
-      return `${monthNames[d.getMonth()]} ${d.getDate()}`;
+      const p = ctlParts(epoch);
+      if (dayKey(p) === ctlDayKey()) return fmtClock(p.h, p.mi);
+      return `${monthNames[p.mo]} ${p.d}`;
     }
     function eventTime(event) {
       if (!event.timestamp) return `${fmtUptime(event.uptime_ms)} after start`;
-      const d = new Date(event.timestamp * 1000);
-      return fmtClock(d.getHours(), d.getMinutes(), d.getSeconds());
+      const p = ctlParts(event.timestamp);
+      return fmtClock(p.h, p.mi, p.s);
     }
     function filteredEvents() {
-      const now = Date.now() / 1000, f = state.eventFilters, today = localDayKey(new Date());
+      const now = Date.now() / 1000, f = state.eventFilters, today = ctlDayKey();
       return state.events.filter(e => {
         if (f.category !== "all" && e.category !== f.category) return false;
-        if (f.time === "today" && (!e.timestamp || localDayKey(new Date(e.timestamp * 1000)) !== today)) return false;
+        if (f.time === "today" && (!e.timestamp || dayKey(ctlParts(e.timestamp)) !== today)) return false;
         if (f.time === "boot" && e.boot_id !== state.currentBootId) return false;
         if (f.time === "24h" && (!e.timestamp || e.timestamp < now - 86400)) return false;
         if (f.time === "7d" && (!e.timestamp || e.timestamp < now - 604800)) return false;
@@ -1841,8 +1985,8 @@
       return end === null ? "" : `<button class="link-btn" data-action="fault-view" data-end="${end}">View on chart ›</button>`;
     }
     function faultClock(epoch) {
-      const d = new Date(epoch * 1000);
-      return fmtClock(d.getHours(), d.getMinutes());
+      const p = ctlParts(epoch);
+      return fmtClock(p.h, p.mi);
     }
     function activeFaultItem(f) {
       const since = f.occurred ? ` <span class="hist-muted">· since ${esc(fmtDayClock(f.occurred))} (${esc(faultDuration(nowEpoch() - f.occurred))})</span>` : "";
@@ -2010,13 +2154,27 @@
           <input type="file" name="firmware" accept=".bin,application/octet-stream"></div><button class="btn" type="submit" ${installing ? "disabled" : ""}>Upload and install</button></form></details>
       </section>`;
     }
+    function otherZoneLabel(spec, tzAuto) {
+      const now = Date.now() / 1000;
+      if (!tzCache.has(spec)) tzCache.set(spec, parsePosixTz(spec));
+      const z = tzCache.get(spec);
+      const offset = z ? fmtUtcOffset(tzIsDst(z, now) ? z.dst : z.std) : spec;
+      const iana = tzAuto && state.location?.iana_tz;
+      const city = iana ? iana.split("/").pop().replace(/_/g, " ") : "";
+      return city ? `${city} (${offset})` : offset;
+    }
     function timeSettings() {
       // The device derives the zone from the location when auto-mode is on, so
       // the manual roller is inert there; mirror that here rather than letting
       // a save silently get overwritten.
       const tzAuto = !!(state.location && state.location.tz_auto);
+      // A zone outside the presets (e.g. one derived from the location) still
+      // needs its own option, or the select falls back to showing the first.
+      const cur = state.timeConfig.timezone;
+      const options = cur && !timezones.some(([, value]) => value === cur)
+        ? [[otherZoneLabel(cur, tzAuto), cur], ...timezones] : timezones;
       return `<section class="card"><div class="card-head"><h2>Time</h2><span class="badge ${state.timeConfig.synced ? "good" : "warn"}">${state.timeConfig.synced ? "Synced" : "Not synced"}</span></div>
-        <form data-form="time" data-gate><div class="field"><label>Timezone</label><select name="timezone" ${tzAuto ? "disabled" : ""}>${timezones.map(([name,value]) =>
+        <form data-form="time" data-gate><div class="field"><label>Timezone</label><select name="timezone" ${tzAuto ? "disabled" : ""}>${options.map(([name,value]) =>
           `<option value="${esc(value)}" ${state.timeConfig.timezone===value?"selected":""}>${esc(name)}</option>`).join("")}</select>
           ${tzAuto ? `<p class="metric-sub">The timezone follows the location below. Turn off automatic timezone to choose one manually.</p>` : ""}</div>
           <div class="field"><label>Clock format</label><select name="format"><option value="24" ${state.timeConfig.format_24h?"selected":""}>24 hour</option>
@@ -2429,14 +2587,13 @@
       return m ? fmtClock(+m[1], +m[2], m[3]) : (local || "--:--");
     }
     function fmtHistClock(epoch, withDate) {
-      const d = new Date(epoch * 1000);
+      const p = ctlParts(epoch);
       if (!withDate) {
         // Axis ticks land on the hour, so "6 AM" reads cleaner than "6:00 AM".
-        if (!use24h() && d.getMinutes() === 0) return `${d.getHours() % 12 || 12} ${d.getHours() < 12 ? "AM" : "PM"}`;
-        return fmtClock(d.getHours(), d.getMinutes());
+        if (!use24h() && p.mi === 0) return `${p.h % 12 || 12} ${p.h < 12 ? "AM" : "PM"}`;
+        return fmtClock(p.h, p.mi);
       }
-      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      return `${months[d.getMonth()]} ${d.getDate()}, ${fmtClock(d.getHours(), d.getMinutes())}`;
+      return `${monthNames[p.mo]} ${p.d}, ${fmtClock(p.h, p.mi)}`;
     }
     // Convert raw deci-Celsius to tenths of the user's preferred unit.
     function histDeciToDisplay(deciC) {
@@ -2497,6 +2654,7 @@
       const chart = new TsChart(el, {
         id: "temperature_history_chart",
         timeFormat: t => fmtHistClock(t, false),
+        utcOffset: ctlOffset,
         edgeText: { before: "Start of history", after: "Now" },
         panSnap: histSnap,
         storageKey: "arcticHistChart",
@@ -2771,8 +2929,8 @@
     const dayAdd = (date, n) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
     const dayDiff = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
     function localToday() {
-      const d = new Date();
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const p = ctlParts(nowEpoch());
+      return `${p.y}-${String(p.mo + 1).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
     }
     function fmtDay(date, long = false) {
       const d = new Date(`${date}T00:00:00Z`);
@@ -3615,6 +3773,12 @@
       catch (error) { toast(error.message, "bad"); error.toastShown = true; throw error; }
       finally { state.busy = false; }
     }
+    async function checkForUpdate(success) {
+      if (state.checkingUpdate) return;
+      state.checkingUpdate = true; render();
+      try { state.release = await mutate("/api/ota/releases", { timeout: 60000 }, success); }
+      finally { state.checkingUpdate = false; render(); }
+    }
     // mutate() already toasted its own failure; only toast errors it didn't see.
     function toastUnlessShown(error) {
       if (!error.toastShown) toast(error.message, "bad");
@@ -4080,6 +4244,15 @@
         return;
       }
       if (action === "notif-toggle") { state.notifOpen = !state.notifOpen; render(); return; }
+      if (action === "clock-toggle") {
+        state.clockOpen = !state.clockOpen; refreshTopbar();
+        if (state.clockOpen && !state.location?.valid) {
+          // The popover names the site; it is otherwise only loaded with Settings.
+          state.location = await api("/api/location").catch(() => state.location);
+          if (state.clockOpen) refreshTopbar();
+        }
+        return;
+      }
       if (action === "notif-open") {
         const n = state.notifications[parseInt(el.dataset.index, 10)];
         state.notifOpen = false;
@@ -4102,6 +4275,11 @@
         const meta = n && (NOTIF_META[n.key] || NOTIF_META.unknown);
         if (meta && meta.route) await navigate(meta.route[0], meta.route[1]);
         else render();
+        // The bell already knows an update exists, so fetch it rather than
+        // showing whatever the page last checked (or nothing at all).
+        if (n && n.key === "firmware_update" && !state.otaInstall?.active) {
+          await checkForUpdate().catch(() => {});
+        }
         return;
       }
       if (action === "toggle-code-help") {
@@ -4214,12 +4392,7 @@
         }, 4000);
         render();
       }
-      if (action === "check-update") {
-        if (state.checkingUpdate) return;
-        state.checkingUpdate = true; render();
-        try { state.release = await mutate("/api/ota/releases", { timeout: 60000 }, "Update check complete"); }
-        finally { state.checkingUpdate = false; render(); }
-      }
+      if (action === "check-update") await checkForUpdate("Update check complete");
       if (action === "install-update" && state.release && !state.otaInstall?.active && await confirmUpdate(state.release)) {
         const before = await probe("/api/health");
         await mutate("/api/ota/github", { method: "POST" });
@@ -4484,6 +4657,9 @@
       // click perform its normal action below).
       if (state.notifOpen && !event.target.closest(".notif-wrap")) {
         state.notifOpen = false; render();
+      }
+      if (state.clockOpen && !event.target.closest(".clock-wrap")) {
+        state.clockOpen = false; refreshTopbar();
       }
       const route = event.target.closest("[data-route]");
       if (route) { event.preventDefault(); await navigate(route.dataset.route); return; }

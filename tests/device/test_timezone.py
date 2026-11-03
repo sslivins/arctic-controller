@@ -22,9 +22,9 @@ from conftest import _return_to_main
 TIMEZONES = [
     {"index": 0,  "name": "US Eastern (EST/EDT)",      "tz": "EST5EDT,M3.2.0,M11.1.0"},
     {"index": 3,  "name": "US Pacific (PST/PDT)",      "tz": "PST8PDT,M3.2.0,M11.1.0"},
-    {"index": 9,  "name": "UK / London (GMT/BST)",      "tz": "GMT0BST,M3.5.0/1,M10.5.0"},
-    {"index": 12, "name": "Japan (JST)",                "tz": "JST-9"},
-    {"index": 20, "name": "UTC (No offset)",            "tz": "UTC0"},
+    {"index": 13, "name": "UK / London (GMT/BST)",      "tz": "GMT0BST,M3.5.0/1,M10.5.0"},
+    {"index": 16, "name": "Japan (JST)",                "tz": "JST-9"},
+    {"index": 24, "name": "UTC (No offset)",            "tz": "UTC0"},
 ]
 
 
@@ -124,8 +124,8 @@ def test_change_timezone_updates_roller(device: DeviceClient, timezone_restore):
     # Pick a timezone different from the current one
     current_index = _roller_index(device)
 
-    # Choose UTC (index 20) unless already there, then choose Eastern (0)
-    target = TIMEZONES[-1] if current_index != 20 else TIMEZONES[0]
+    # Choose UTC unless already there, then choose Eastern (0)
+    target = TIMEZONES[-1] if current_index != TIMEZONES[-1]["index"] else TIMEZONES[0]
 
     result = device.set_roller("timezone_roller", target["index"])
     assert result["success"] is True
@@ -156,7 +156,7 @@ def test_change_timezone_updates_preview(device: DeviceClient, timezone_restore)
     current_index = _roller_index(device)
 
     # Pick Japan (UTC+9) or US Pacific (UTC-8) — whichever is different
-    target = TIMEZONES[3] if current_index != 12 else TIMEZONES[1]
+    target = TIMEZONES[3] if current_index != TIMEZONES[3]["index"] else TIMEZONES[1]
 
     device.set_roller("timezone_roller", target["index"])
 

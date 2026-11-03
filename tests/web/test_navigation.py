@@ -329,16 +329,23 @@ class TestFaultsPage:
             assert abs(row.locator(".f-dur").bounding_box()["x"] - dur_x) < 1, code
 
 
-def _fake_events():
-    """A fixed event log covering every detail format, dated relative to now."""
+def _fake_events(ctl_offset: int):
+    """A fixed event log covering every detail format, dated relative to now.
+
+    Days are the controller's (ctl_offset seconds east of UTC), as the page
+    groups and filters them, not the runner's: in the evening Pacific the two
+    disagree on what "yesterday" is.
+    """
     import datetime as dt
     import time
 
     now = int(time.time())
+    zone = dt.timezone(dt.timedelta(seconds=ctl_offset))
+    today = dt.datetime.fromtimestamp(now, zone).date()
     yesterday_noon = int(dt.datetime.combine(
-        dt.date.today() - dt.timedelta(days=1), dt.time(12, 0)).timestamp())
-    last_year = dt.date.today().year - 1
-    old = int(dt.datetime(last_year, 3, 4, 12, 0).timestamp())
+        today - dt.timedelta(days=1), dt.time(12, 0), zone).timestamp())
+    last_year = today.year - 1
+    old = int(dt.datetime(last_year, 3, 4, 12, 0, tzinfo=zone).timestamp())
     cur, prev = 111, 222
 
     def ev(type_, category, ts, boot, **extra):
@@ -368,7 +375,8 @@ class TestEventsPage:
 
     def _open(self, page: Page):
         import json
-        body, old_day = _fake_events()
+        page.wait_for_function("() => !!state.status.time?.timezone")
+        body, old_day = _fake_events(page.evaluate("ctlOffset(nowEpoch())"))
         page.route("**/api/events?*", lambda route: route.fulfill(
             status=200, content_type="application/json", body=json.dumps(body)))
         open_events(page)

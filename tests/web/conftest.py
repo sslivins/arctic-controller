@@ -371,6 +371,23 @@ def login_page(page: Page, base_url: str) -> Page:
     _ensure_auth_disabled(base_url)
 
 
+@pytest.fixture
+def controller_zone(dashboard_page: Page):
+    """Returns apply(posix): reload the dashboard with /api/status reporting
+    that POSIX TZ string as the controller's zone."""
+    def apply(posix: str) -> Page:
+        def handle(route):
+            response = route.fetch()
+            body = response.json()
+            body.setdefault("time", {})["timezone"] = posix
+            route.fulfill(response=response, json=body)
+        dashboard_page.route("**/api/status", handle)
+        dashboard_page.reload(wait_until="domcontentloaded")
+        dashboard_page.wait_for_selector(".hp-status:not(.loading)", timeout=15000)
+        return dashboard_page
+    return apply
+
+
 # ---------- Failure screenshot ----------
 
 

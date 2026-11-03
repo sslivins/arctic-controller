@@ -33,20 +33,24 @@ static const iana_posix_entry_t k_map[] = {
     {"America/Montreal",     "EST5EDT,M3.2.0,M11.1.0"},
     {"America/Nipigon",      "EST5EDT,M3.2.0,M11.1.0"},
     // BC, Alberta, the NWT and Manitoba stopped changing clocks in 2026 and
-    // stay on their summer offset from 2026-11-01 (tzdata 2026b-2026e), using
-    // tzdata's abbreviations. A POSIX string carries one rule, so these hold
-    // the current rule only.
-    {"America/Winnipeg",     "EST5"},
+    // stay on their summer offset from 2026-11-01 (tzdata 2026b-2026e). tzdata
+    // kept the old abbreviations (MST/CST/EST), which read wrong locally, so
+    // these use each province's official name: Pacific time (PCT), Alberta
+    // Time (ABT), Manitoba Time (MBT). Where no settled name exists (the NWT,
+    // and Yukon since 2020) the name is the bare offset, as tzdata does for
+    // unnamed zones. A POSIX string carries one rule, so these hold the
+    // current rule only.
+    {"America/Winnipeg",     "<MBT>5"},
     {"America/Regina",       "CST6"},              // Saskatchewan: no DST
     {"America/Swift_Current", "CST6"},
-    {"America/Edmonton",     "CST6"},
-    {"America/Yellowknife",  "CST6"},              // links to Edmonton
-    {"America/Inuvik",       "CST6"},
-    {"America/Vancouver",    "MST7"},
-    {"America/Dawson_Creek", "MST7"},              // BC Peace River: no DST
-    {"America/Fort_Nelson",  "MST7"},              // permanent MST
-    {"America/Whitehorse",   "MST7"},              // Yukon: permanent MST
-    {"America/Dawson",       "MST7"},
+    {"America/Edmonton",     "<ABT>6"},
+    {"America/Yellowknife",  "<-06>6"},            // NWT (tzdata links it to Edmonton)
+    {"America/Inuvik",       "<-06>6"},
+    {"America/Vancouver",    "<PCT>7"},
+    {"America/Dawson_Creek", "MST7"},              // BC Peace River: stays on mountain time
+    {"America/Fort_Nelson",  "MST7"},
+    {"America/Whitehorse",   "<-07>7"},            // Yukon: permanent UTC-7 since 2020
+    {"America/Dawson",       "<-07>7"},
     {"America/Halifax",      "AST4ADT,M3.2.0,M11.1.0"},
     {"America/Moncton",      "AST4ADT,M3.2.0,M11.1.0"},
     {"America/Glace_Bay",    "AST4ADT,M3.2.0,M11.1.0"},

@@ -208,6 +208,35 @@ class TestLocationCard:
         finally:
             _restore_location(dashboard_page, original)
 
+    def test_a_derived_zone_is_named_in_the_selector(self, dashboard_page: Page):
+        original = _read_location(dashboard_page)
+        original_tz = dashboard_page.evaluate("fetch('/api/time/config').then(r => r.json())")["timezone"]
+        select = dashboard_page.locator('select[name="timezone"]')
+        try:
+            # Kamloops derives BC's permanent Pacific time, which has a preset.
+            _write_location(dashboard_page, {
+                "latitude": KAMLOOPS["latitude"], "longitude": KAMLOOPS["longitude"],
+                "name": "Kamloops", "iana_tz": "America/Vancouver", "tz_auto": True})
+            open_time_settings(dashboard_page)
+            expect(select).to_have_value("<PCT>7")
+            expect(select.locator("option:checked")).to_have_text("Canada BC (PCT)")
+
+            # Whitehorse derives a zone outside the presets; the selector must
+            # name it rather than fall back to showing the first preset.
+            _write_location(dashboard_page, {
+                "latitude": 60.7212, "longitude": -135.0568,
+                "name": "Whitehorse", "iana_tz": "America/Whitehorse", "tz_auto": True})
+            dashboard_page.reload()
+            open_time_settings(dashboard_page)
+            expect(select).to_have_value("<-07>7")
+            expect(select.locator("option:checked")).to_have_text("Whitehorse (UTC−7)")
+        finally:
+            _restore_location(dashboard_page, original)
+            dashboard_page.evaluate(
+                """(tz) => fetch('/api/time/config', { method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({ timezone: tz }) })""", original_tz)
+
 
 class TestStatusBarWeather:
     """Temperature and weather icon in the top bar."""

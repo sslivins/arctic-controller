@@ -3,7 +3,7 @@
   "ignore": [
     {
       "path": "/api/location.derived_posix",
-      "reason": "BC, Alberta, NWT and Manitoba moved to permanent time on 2026-11-01, so the bench's America/Vancouver zone now derives MST7 instead of PST8PDT,M3.2.0,M11.1.0."
+      "reason": "Canada's permanent zones now use their official abbreviations, so the bench's America/Vancouver zone derives <PCT>7 instead of 3.5.2's MST7 (same UTC-7 offset)."
     }
   ]
 }
