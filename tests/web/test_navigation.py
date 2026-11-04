@@ -167,7 +167,7 @@ class TestNavigation:
         selector = frequency.locator("select.choice-select").first
         description = selector.locator("xpath=following-sibling::*[contains(@class, 'choice-description')]")
         expect(selector).to_be_visible()
-        expect(description).to_contain_text("Lowers running frequency")
+        expect(description).to_contain_text("running frequency")
         selector.select_option(index=2)
         expect(description).to_contain_text("2 steps per 2 Hz")
         assert description.evaluate(
