@@ -63,7 +63,7 @@ HERO_STATES = {
                  "COOLING": "Refroidissement", "DISCONNECTED": "Déconnecté",
                  "FREEZE": "Protection antigel"},
     "Español":  {"IDLE": "En espera",     "FAULT": "Fallo",   "STANDBY": "En reposo",
-                 "DEFROST": "Descongelando", "HEATING": "Calefacción",
+                 "DEFROST": "En deshielo", "HEATING": "Calefacción",
                  "COOLING": "Enfriamiento", "DISCONNECTED": "Desconectado",
                  "FREEZE": "Protección antihielo"},
 }
@@ -95,7 +95,7 @@ HOME_STRIP_LABELS = {
 TANK_DESCRIPTION = {
     "English":  "Tank",
     "Français": "Ballon",
-    "Español":  "Tanque",
+    "Español":  "Depósito",
 }
 
 FOOTER_NAV = {
