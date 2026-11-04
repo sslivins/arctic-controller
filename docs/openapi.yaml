@@ -2359,7 +2359,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'  /api/heatpump/raw:
+                $ref: '#/components/schemas/Error'
+  /api/heatpump/raw:
     get:
       tags:
       - HeatPump
