@@ -417,6 +417,7 @@ static void create_summary(lv_obj_t* parent) {
     lv_obj_set_flex_align(op, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
     lv_obj_set_style_pad_column(op, 10, LV_PART_MAIN);
     state.now = styled_label(op, &s_value, "--");
+    lv_obj_set_style_text_font(state.now, &montserrat_40_latin, LV_PART_MAIN);
     set_tag(state.now, "st_now");
     state.now_detail = styled_label(op, &s_name, "");
     lv_obj_set_style_text_color(state.now_detail, COLOR_TEXT_DIM, LV_PART_MAIN);
@@ -599,12 +600,16 @@ static void update_fault(const arctic::HeatPumpState& hp) {
     const arctic::ActiveError& e = errors[0];
     set_text(state.fault_code, e.code ? e.code : "");
     set_text(state.fault_title, i18n_get_key(e.name_msg_id, e.name ? e.name : ""));
-    char sub[160] = "";
+    char sub[320] = "";
     size_t n = 0;
     if (e.first_seen > 0 && time_mgr_is_synced()) {
         char clock[16];
         fmt_clock(clock, sizeof(clock), e.first_seen);
         n += snprintf(sub + n, sizeof(sub) - n, i18n_get(STR_ST_SINCE_FMT), clock);
+    }
+    const char* fix = e.resolution ? i18n_get_key(e.resolution_msg_id, e.resolution) : nullptr;
+    if (fix && fix[0] && n < sizeof(sub)) {
+        n += snprintf(sub + n, sizeof(sub) - n, "%s%s", n ? " \xC2\xB7 " : "", fix);
     }
     if (count > 1 && n < sizeof(sub)) {
         char more[24];
