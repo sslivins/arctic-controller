@@ -34,6 +34,7 @@ NUMERIC_FIELDS = {
     "ac_current":           ("readings", "ac_current"),
     "dc_voltage":           ("readings", "dc_voltage"),
     "primary_eev":          ("readings", "primary_eev"),
+    "aux_eev":              ("readings", "aux_eev"),
     "realtime_power":       ("readings", "power_consumption"),
     "cooling_setpoint":     ("setpoints", "cooling"),
     "hot_water_setpoint":   ("setpoints", "hot_water"),

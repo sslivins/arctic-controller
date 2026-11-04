@@ -2209,7 +2209,7 @@ paths:
                         example: 850
                       ac_voltage:
                         type: integer
-                        description: AC input voltage
+                        description: AC input voltage in volts (OEM A13)
                         example: 230
                       ac_current:
                         type: integer
@@ -2221,8 +2221,13 @@ paths:
                         example: 380.0
                       primary_eev:
                         type: integer
-                        description: Primary EEV opening in steps
-                        example: 350
+                        description: Main EEV opening (OEM A5) in steps, as the OEM display shows it. The unit is unconfirmed (the display may be steps / 10).
+                        example: 18
+                      aux_eev:
+                        type: integer
+                        nullable: true
+                        description: Auxiliary (EVI) EEV opening (OEM o6) in steps (unit unconfirmed, as for primary_eev); null until read
+                        example: 0
                       power_consumption:
                         type: integer
                         description: Calculated power consumption in watts (AC voltage × AC current)

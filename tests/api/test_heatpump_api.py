@@ -250,7 +250,7 @@ class TestHeatpumpStatus:
         readings = data["readings"]
         for key in ["compressor_freq", "fan_rpm", "ac_voltage", "ac_current",
                      "dc_voltage",
-                     "primary_eev", "power_consumption"]:
+                     "primary_eev", "aux_eev", "power_consumption"]:
             assert key in readings, f"Missing reading: {key}"
 
     def test_status_boolean_fields_are_bools(self):

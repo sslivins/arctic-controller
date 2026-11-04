@@ -291,6 +291,7 @@ static const char* const strings_en[STR_COUNT] = {
     [STR_HP_DC_VOLTAGE] = "DC Voltage",
     [STR_HP_EXPANSION_VALVES] = "Expansion Valves",
     [STR_HP_PRIMARY_EEV] = "Primary EEV",
+    [STR_HP_AUX_EEV] = "Aux EEV",
     [STR_HP_SETPOINTS] = "Setpoints",
     
     // Heat Pump - Errors Screen
@@ -926,6 +927,7 @@ static const char* const strings_fr[STR_COUNT] = {
     [STR_HP_DC_VOLTAGE] = "Tension CC",
     [STR_HP_EXPANSION_VALVES] = "Détendeurs",
     [STR_HP_PRIMARY_EEV] = "Détendeur primaire",
+    [STR_HP_AUX_EEV] = "Détendeur auxiliaire",
     [STR_HP_SETPOINTS] = "Consignes",
     
     // Heat Pump - Errors Screen
@@ -1562,6 +1564,7 @@ static const char* const strings_es[STR_COUNT] = {
     [STR_HP_DC_VOLTAGE] = "Tensión CC",
     [STR_HP_EXPANSION_VALVES] = "Válvulas de expansión",
     [STR_HP_PRIMARY_EEV] = "Válvula principal",
+    [STR_HP_AUX_EEV] = "Válvula auxiliar",
     [STR_HP_SETPOINTS] = "Consignas",
     
     // Heat Pump - Errors Screen

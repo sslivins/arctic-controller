@@ -4685,6 +4685,11 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
     cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
     cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
+    if (hp.aux_eev_valid) {
+        cJSON_AddNumberToObject(readings, "aux_eev", hp.aux_eev_opening);
+    } else {
+        cJSON_AddNullToObject(readings, "aux_eev");
+    }
     cJSON_AddNumberToObject(readings, "power_consumption", hp.realtime_power_w);
     if (hp.energy_today_valid) {
         cJSON_AddNumberToObject(readings, "energy_today_wh", hp.energy_today_wh);
@@ -6194,7 +6199,9 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "Reading,DC Voltage,,%s,%.1f,V\r\n", DIAG_ADDR(DcVoltage), hp.getDcVoltageV());
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Primary EEV Opening,,%s,%u,steps\r\n", DIAG_ADDR(PrimaryEev), hp.primary_eev_opening);
+    snprintf(line, sizeof(line),     "Reading,Primary EEV Opening,,%s,%u,steps\r\n", DIAG_ADDR(PrimaryEev), hp.primary_eev_opening);
+    httpd_resp_sendstr_chunk(req, line);
+        snprintf(line, sizeof(line), "Reading,Aux EEV Opening,,%s,%u,steps\r\n", DIAG_ADDR(AuxEev), hp.aux_eev_opening);
     httpd_resp_sendstr_chunk(req, line);
     snprintf(line, sizeof(line), "Reading,Power Consumption,,%s,%lu,W\r\n", DIAG_ADDR(RealtimePower), (unsigned long)hp.realtime_power_w);
     httpd_resp_sendstr_chunk(req, line);

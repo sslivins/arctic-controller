@@ -334,16 +334,20 @@ void a_scaled_demo_read_reports_display_units() {
     const AdvancedParam* p = find_scaled_writable();
     REQUIRE_PARAM(p, "a parameter with a display multiplier above one");
 
-    // Demo mode answers from the vendor-doc default, which is stored in wire
-    // units like everything else in the table. Reporting it unconverted makes
-    // demo mode disagree with a live device by exactly the multiplier -- a
-    // difference nobody would question, because both numbers look plausible.
-    const long expected = (long)p->default_val * (long)p->display_multiplier;
+    // Demo mode keeps values (written ones and the vendor-doc defaults) in
+    // wire units like everything else in the table. Reporting them unconverted
+    // makes demo mode disagree with a live device by exactly the multiplier --
+    // a difference nobody would question, because both numbers look plausible.
+    // A written value is used because a zero default reads the same either way.
+    const int16_t wire = 3;
+    const int16_t display = (int16_t)(wire * p->display_multiplier);
+    bool bus_ok = false;
+    CHECK(advanced_param_write(p->ap, display, &bus_ok) == AdvWriteResult::OK);
 
     int16_t value = 0;
     CHECK(advanced_param_read(p->ap, &value) == true);
-    CHECK_EQ_INT(value, expected);
-    CHECK(value != p->default_val);
+    CHECK_EQ_INT(value, display);
+    CHECK(value != wire);
 }
 
 void a_scaled_write_encodes_back_to_wire_units() {

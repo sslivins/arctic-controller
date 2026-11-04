@@ -67,14 +67,16 @@ struct HeatPumpState {
     bool     ac_current_valid = false;
     uint16_t dc_voltage = 0;         // V (volts; unit conversion owned by macon lib)
     bool     dc_voltage_valid = false;
-    // Primary electronic expansion valve opening, in raw steps. 0 steps is a
-    // REAL and alarming state (valve fully closed), so "unknown" must never be
-    // reported as 0 - consult primary_eev_valid and surface null/unavailable
-    // instead. Note the mainboard exposes no full-scale step count (there is
-    // no max-steps register and no EEV advanced parameter for it), so this
-    // value cannot be converted to a percentage on the device.
+    // Main electronic expansion valve opening (OEM A5) in steps, as the OEM
+    // display shows it. The unit is unconfirmed (the display may be steps/10).
+    // 0 is a REAL state (valve closed), so "unknown"
+    // must never be reported as 0 - consult primary_eev_valid and surface
+    // null/unavailable instead.
     uint16_t primary_eev_opening = 0;   // steps
     bool     primary_eev_valid = false;
+    // Auxiliary (EVI) expansion valve opening (OEM o6), steps. Usually 0.
+    uint16_t aux_eev_opening = 0;       // steps
+    bool     aux_eev_valid = false;
     uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
     // Electrical energy used today (local day), from the energy ledger.
     uint32_t energy_today_wh = 0;

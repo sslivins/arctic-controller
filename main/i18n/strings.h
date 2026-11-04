@@ -315,6 +315,7 @@ typedef enum {
     STR_HP_DC_VOLTAGE,
     STR_HP_EXPANSION_VALVES,
     STR_HP_PRIMARY_EEV,
+    STR_HP_AUX_EEV,
     STR_HP_SETPOINTS,
     
     // ========================================================================
