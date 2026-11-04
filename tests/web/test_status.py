@@ -130,9 +130,12 @@ class TestStatusPage:
             else:
                 expect(details).to_have_attribute("open", "")
         if folded:
-            # The user's choice survives the 5 s poll re-render.
+            # The user's choice survives the 5 s poll re-render (the second poll
+            # starts only after the first one has re-rendered).
             page.locator("[data-group='refrig'] > summary").click()
-            page.wait_for_timeout(5500)
+            for _ in range(2):
+                with page.expect_response("**/api/heatpump/status", timeout=15000):
+                    pass
             expect(page.locator("[data-group='refrig']")).to_have_attribute("open", "")
 
 
