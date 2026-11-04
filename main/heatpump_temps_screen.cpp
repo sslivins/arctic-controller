@@ -253,7 +253,7 @@ static lv_obj_t* flat_box(lv_obj_t* parent, lv_flex_flow_t flow) {
     lv_obj_add_style(o, &s_flat, LV_PART_MAIN);
     lv_obj_set_size(o, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(o, flow);
-    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(o, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
     return o;
 }
 
@@ -296,7 +296,7 @@ static void create_header(lv_obj_t* parent, Group g) {
     lv_obj_remove_style_all(h);
     lv_obj_add_style(h, &s_hdr, LV_PART_MAIN);
     lv_obj_set_width(h, LV_PCT(100));
-    lv_obj_clear_flag(h, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(h, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
     lv_obj_set_style_margin_top(h, 6, LV_PART_MAIN);
     lv_obj_t* l = lv_label_create(h);
     lv_label_set_text(l, i18n_get(GROUPS[(int)g].title));
@@ -314,7 +314,7 @@ static void create_row(lv_obj_t* parent, RowId id) {
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(row, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
 
     const char* code = nullptr;
     if (def.field) {
@@ -354,7 +354,7 @@ static lv_obj_t* create_card(lv_obj_t* parent, lv_color_t bg, lv_opa_t opa, lv_c
     lv_obj_set_style_radius(c, 14, LV_PART_MAIN);
     lv_obj_set_style_border_width(c, border_w, LV_PART_MAIN);
     lv_obj_set_style_border_color(c, border, LV_PART_MAIN);
-    lv_obj_clear_flag(c, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(c, (lv_obj_flag_t)(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
     return c;
 }
 
