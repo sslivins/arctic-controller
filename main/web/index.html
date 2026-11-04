@@ -1780,7 +1780,7 @@
       if (connected && h.has_error) {
         const faults = state.errors.active || [];
         const f = faults[0] || { code: "", name: h.error || "Fault" };
-        const sub = [f.occurred ? `Since ${fmtDayClock(f.occurred)}` : "", f.resolution || "",
+        const sub = [f.occurred ? `Since ${fmtDayClock(f.occurred)}` : "",
           faults.length > 1 ? `+${faults.length - 1} more` : ""].filter(Boolean).join(" · ");
         alert = `<div class="st-alert" data-status="fault">${codePill(f.code)}<div><b>${esc(f.name || f.description || f.code)}</b>${
           sub ? `<span class="s">${esc(sub)}</span>` : ""}</div></div>`;

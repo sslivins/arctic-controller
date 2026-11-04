@@ -593,23 +593,19 @@ static const char* now_text(const arctic::HeatPumpState& hp) {
 // ============================================================================
 
 static void update_fault(const arctic::HeatPumpState& hp) {
-    arctic::ActiveError errors[8];
+    static arctic::ActiveError errors[8];
     const int count = hp.connected && hp.hasAnyError() ? arctic::getActiveErrors(errors, 8) : 0;
     set_visible(state.fault, count > 0);
     if (count <= 0) return;
     const arctic::ActiveError& e = errors[0];
     set_text(state.fault_code, e.code ? e.code : "");
     set_text(state.fault_title, i18n_get_key(e.name_msg_id, e.name ? e.name : ""));
-    char sub[320] = "";
+    char sub[96] = "";
     size_t n = 0;
     if (e.first_seen > 0 && time_mgr_is_synced()) {
         char clock[16];
         fmt_clock(clock, sizeof(clock), e.first_seen);
         n += snprintf(sub + n, sizeof(sub) - n, i18n_get(STR_ST_SINCE_FMT), clock);
-    }
-    const char* fix = e.resolution ? i18n_get_key(e.resolution_msg_id, e.resolution) : nullptr;
-    if (fix && fix[0] && n < sizeof(sub)) {
-        n += snprintf(sub + n, sizeof(sub) - n, "%s%s", n ? " \xC2\xB7 " : "", fix);
     }
     if (count > 1 && n < sizeof(sub)) {
         char more[24];
