@@ -45,7 +45,7 @@ def _open_status(page: Page, status: dict | None = None, errors: list | None = N
     if fahrenheit:
         page.route("**/api/preferences", patch_prefs)
     page.reload(wait_until="domcontentloaded")
-    page.locator(".rail .nav-link", has_text="Status").click()
+    page.locator(".rail .nav-link:visible, .mobile-nav .nav-link:visible", has_text="Status").first.click()
     expect(page.locator("[data-status='summary'] [data-fresh='live']")).to_be_visible(timeout=15000)
     return page
 
