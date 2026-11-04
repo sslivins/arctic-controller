@@ -138,8 +138,12 @@ class TestHome:
         hover_at(span["end"] - 1500)
         expect(tip).to_contain_text("Defrosting")
         expect(tip).not_to_contain_text("Idle")
+        # Like the history card: the span's length and its clock range.
+        expect(tip).to_contain_text("10 min")
+        expect(tip).to_contain_text(re.compile(r"\d:\d\d.* – .*\d:\d\d"))
         hover_at(span["end"] - 2700)
         expect(tip).to_contain_text("Heating")
+        expect(tip).to_contain_text("30 min")
 
     def _expect_history_cycles(self, page: Page):
         expect(page.get_by_role("heading", name="History", exact=True)).to_be_visible()

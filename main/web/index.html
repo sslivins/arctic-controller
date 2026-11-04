@@ -1526,12 +1526,21 @@
       const b0 = s.b0, b1 = s.b0 + s.bs;
       card.add("title", fmtHistClock(Math.round(s.t), true));
       card.addLayers();
-      const run = (data.runs || []).find(r => r.start < b1 && (r.end ?? data.end) > b0);
+      // The span in this bucket, preferring the one under the cursor.
+      const inBucket = list => {
+        const hits = (list || []).filter(x => x.start < b1 && (x.end ?? data.end) > b0);
+        return hits.find(x => x.start <= s.t && s.t < (x.end ?? data.end)) || hits[0];
+      };
+      const run = inBucket(data.runs);
       // A defrost isn't part of a run span, so check it first or it reads "Idle".
-      const defrost = (data.defrosts || []).some(df => df.start < b1 && (df.end ?? data.end) > b0);
+      const defrost = inBucket(data.defrosts);
       const [runText, runColor] = defrost ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
         : run ? HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating : ["Idle", ""];
-      card.add("block", runText, "", runColor || "var(--cp-text-muted)");
+      // The window always ends now, so an open span is still running.
+      const sp = defrost || run;
+      const span = sp && { start: sp.start, end: sp.end ?? data.end, clipStart: sp.start < data.start, open: sp.end == null };
+      card.add("block", runText, span ? fmtRunLength(span, true) : "", runColor || "var(--cp-text-muted)");
+      if (span) card.add("text", fmtRunSpan(span, true));
       (data.faults || []).filter(x => x.start < b1 && (x.end ?? data.end) > b0).slice(0, 2)
         .forEach(x => card.add("warning", `⚠ ${x.fault_code || "?"} ${x.fault_label || ""}`.trim()));
     }
