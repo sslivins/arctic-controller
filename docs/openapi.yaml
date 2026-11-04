@@ -2110,7 +2110,8 @@ paths:
                     type: integer
                     nullable: true
                     description: Seconds the water pump has been running; null while it is off
-                    example: 600                  compressor:
+                    example: 600
+                  compressor:
                     type: boolean
                     description: Compressor running state
                     example: true
