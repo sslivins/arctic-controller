@@ -313,9 +313,9 @@ class TestTemperatureHistoryWeb:
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_enabled()
         assert_no_reload(130_000)
 
-    def test_touch_drag_scrubs_and_never_pans(self, dashboard_page: Page, base_url: str):
-        """On touch, a sideways drag (quick or after a hold) moves the readout
-        and leaves the window alone; the buttons move the window."""
+    def test_touch_drag_scrubs_and_hold_pans(self, dashboard_page: Page, base_url: str):
+        """On touch, a quick sideways drag moves the readout and leaves the
+        window alone; holding still first, then dragging, pans back in time."""
         _seed_history(base_url)
         dashboard_page.clock.install()
         dashboard_page.reload()
@@ -335,17 +335,7 @@ class TestTemperatureHistoryWeb:
                 [kind, frac],
             )
 
-        # Hold past the long-press time, then drag: the readout follows.
-        touch("pointerdown", 0.3)
-        page.clock.fast_forward(600)
-        touch("pointermove", 0.45)
-        touch("pointermove", 0.7)
-        expect(page.locator(f"{CHART} [data-tschart-card]")).to_be_visible()
-        touch("pointerup", 0.7)
-        assert page.evaluate("state.tempHistory.end") is None
-        assert page.evaluate("histChart.chart.pending") is None
-
-        # Quick drag right: scrubs too, no pan.
+        # Quick drag right: the readout follows, no pan.
         touch("pointerdown", 0.3)
         touch("pointermove", 0.45)
         expect(page.locator(f"{CHART} [data-tschart-card]")).to_be_visible()
@@ -355,6 +345,15 @@ class TestTemperatureHistoryWeb:
         assert page.evaluate("histChart.chart.pending") is None
         expect(page.locator('[data-action="history-latest"]')).to_be_hidden()
 
+        # Held still past the pan delay: the readout makes way and the drag
+        # pans back in time.
+        touch("pointerdown", 0.3)
+        page.clock.fast_forward(600)
+        expect(page.locator(f"{CHART} [data-tschart-card]")).to_be_hidden()
+        touch("pointermove", 0.45)
+        touch("pointermove", 0.7)
+        touch("pointerup", 0.7)
+        expect(page.locator('[data-action="history-latest"]')).to_be_visible()
     def test_drag_past_now_rubber_bands_and_springs_back(
         self, dashboard_page: Page, base_url: str
     ):

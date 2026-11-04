@@ -141,9 +141,9 @@ def test_history_zoom_presets(device: DeviceClient):
         device.wait_for_screen("main", timeout=5.0)
 
 
-def test_history_chart_drag_pans_and_hold_scrubs(device: DeviceClient):
-    """A quick sideways drag pans the window back in time; press-and-hold
-    first, then drag, only moves the cursor."""
+def test_history_chart_drag_scrubs_and_hold_pans(device: DeviceClient):
+    """A quick sideways drag only moves the cursor; holding still first,
+    then dragging, pans the window back in time."""
     device.populate_temperature_history()
     _open_cycles(device)
     device.wait_for_widget(tag="temperature_history_screen")
@@ -156,19 +156,20 @@ def test_history_chart_drag_pans_and_hold_scrubs(device: DeviceClient):
     try:
         device.wait_until("chart opens on the latest window",
                           lambda: not next_enabled(), timeout=5.0)
-        # Hold past the long-press time, then drag: a scrub, not a pan.
-        device.drag(150, 200, 450, 200, tag="temperature_history_chart",
-                    hold_ms=700, duration_ms=300)
-        assert not next_enabled(), "hold-then-drag panned the chart"
+        # A quick drag scrubs the cursor, not a pan.
+        device.drag(150, 200, 450, 200, tag="temperature_history_chart")
+        assert not next_enabled(), "a quick drag panned the chart"
         assert not device.has_widget(tag="temperature_history_latest")
 
-        # Quick drag right reaches back in time.
-        device.drag(150, 200, 450, 200, tag="temperature_history_chart")
+        # Held still past the pan delay, a drag right reaches back in time.
+        device.drag(150, 200, 450, 200, tag="temperature_history_chart",
+                    hold_ms=600, duration_ms=300)
         device.wait_until("drag panned back in time", next_enabled, timeout=5.0)
         device.wait_for_widget(tag="temperature_history_latest")
 
         # Dragging left returns to the live window and no further.
-        device.drag(500, 200, 50, 200, tag="temperature_history_chart")
+        device.drag(500, 200, 50, 200, tag="temperature_history_chart",
+                    hold_ms=600, duration_ms=300)
         device.wait_until("drag panned back to latest",
                           lambda: not next_enabled(), timeout=5.0)
     finally:
