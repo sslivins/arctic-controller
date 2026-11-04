@@ -67,6 +67,8 @@ DEMO_FIELD_SEEDS = {
 @pytest.fixture(autouse=True)
 def _seed_demo_readings(device: DeviceClient):
     """Seed the asserted demo values before each test, and restore after."""
+    # The summary assertions assume no active fault; earlier modules may leave one.
+    device.clear_all_faults()
     device.set_demo_fields(**DEMO_FIELD_SEEDS)
     yield
     device.set_demo_fields(**DEMO_FIELD_SEEDS)

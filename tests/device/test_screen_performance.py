@@ -133,6 +133,7 @@ class TestNavScreenPerformance:
         _assert_under_budget(result, "errors")
         device.wait_for_screen("faults", timeout=5.0)
         device.click(tag="nav_home")
+        device.clear_all_faults()
 
     def test_settings_screen_render(self, device: DeviceClient):
         """Settings screen opens within budget."""
@@ -202,10 +203,9 @@ class TestHeavyStatePerformance:
             except Exception:
                 pass
             device.clear_all_faults()
-            device.inject_fault("P02", True)
             device.wait_until(
-                "faults restored to P02 only",
-                lambda: _active_error_codes(device) == {"P02"},
+                "faults cleared",
+                lambda: not _active_error_codes(device),
                 timeout=10.0,
                 raise_on_timeout=False,
             )
@@ -245,11 +245,10 @@ class TestHeavyStatePerformance:
             except Exception:
                 pass
             device.clear_all_faults()
-            device.inject_fault("P02", True)
             device.clear_error_history()
             device.wait_until(
-                "faults restored to P02 only",
-                lambda: _active_error_codes(device) == {"P02"},
+                "faults cleared",
+                lambda: not _active_error_codes(device),
                 timeout=10.0,
                 raise_on_timeout=False,
             )

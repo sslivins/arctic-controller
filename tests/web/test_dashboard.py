@@ -3,6 +3,7 @@
 import re
 
 from playwright.sync_api import Page, expect
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 HERO_STATES = ("Disconnected", "Fault", "Standby", "Defrosting", "Heating", "Cooling", "Idle",
                "Freeze protection")
@@ -133,7 +134,16 @@ class TestHome:
 
         def hover_at(t):
             frac = (t - span["start"]) / (span["end"] - span["start"])
-            dashboard_page.mouse.move(x0 + (x1 - x0) * frac, box["y"] + box["height"] / 2)
+            x, y = x0 + (x1 - x0) * frac, box["y"] + box["height"] / 2
+            # A live-poll redraw can drop the card; hover again until it shows.
+            for _ in range(5):
+                dashboard_page.mouse.move(x - 1, y)
+                dashboard_page.mouse.move(x, y)
+                try:
+                    tip.wait_for(state="visible", timeout=1500)
+                    return
+                except PlaywrightTimeoutError:
+                    pass
 
         hover_at(span["end"] - 1500)
         expect(tip).to_contain_text("Defrosting")
