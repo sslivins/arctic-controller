@@ -1792,7 +1792,7 @@
         age == null ? "" : `Last update ${age < 60 ? `${age} s` : fmtDuration(age)} ago`}</span></div>`;
       else top = `<div class="st-top" data-fresh="live"><span class="live"><i></i>Connected</span><span>Updated ${age} s ago</span></div>`;
 
-      const hero = homeHeroState(h);
+      const hero = defrost ? "defrost" : homeHeroState(h);
       const sp = connected ? h.active_setpoint : null;
       const stat = (k, v, s = "") => `<div class="st-stat" data-stat="${k.toLowerCase()}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${
         s ? `<div class="s">${esc(s)}</div>` : ""}</div>`;

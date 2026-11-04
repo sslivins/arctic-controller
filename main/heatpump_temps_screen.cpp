@@ -574,6 +574,8 @@ static const char* mode_name(arctic::WorkingMode m) {
 // Same states as the home screen hero.
 static const char* now_text(const arctic::HeatPumpState& hp) {
     if (!hp.connected) return i18n_get(STR_HOME_DISCONNECTED);
+    // The fault banner already covers faults; show what the unit is doing.
+    if (hp.isDefrosting()) return i18n_get(STR_HOME_DEFROSTING);
     switch (hp.operation) {
         case arctic::HeatPumpOperation::FAULT:   return i18n_get(STR_HOME_FAULT);
         case arctic::HeatPumpOperation::DEFROST: return i18n_get(STR_HOME_DEFROSTING);

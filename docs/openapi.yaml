@@ -2657,7 +2657,13 @@ paths:
         active errors, and advanced (AP) parameters with current values.
         Useful for remote troubleshooting with Arctic support.
 
-        CSV columns: Category, Name, P-Code, Register Address, Value, Unit
+        CSV columns: Category, Name, Code, Register Address, Value, Unit
+
+        `Code` is the OEM display code: o1-o6 / A1-A14 for readings (from the
+        arctic-macon field catalog, as in /api/heatpump/catalog), APnn for
+        technician parameters and the fault code for errors. It is blank for
+        rows the OEM display has no code for (setpoints, estimates, state).
+        Reading names match the Status page; EEV openings are in motor steps.
 
         Sections:
         - System State (power, mode, connection)

@@ -34,6 +34,8 @@ thead { display:table-header-group } tr { break-inside:avoid }
 th { text-align:left; font-weight:600; color:var(--dim); border-bottom:1px solid var(--text); padding:5px 6px }
 td { border-bottom:1px solid var(--line); padding:4px 6px } td.n, th.n { text-align:right }
 tr.flag td { background:#fff7ed } tr.gap td { color:var(--dim) }
+.code { display:inline-block; min-width:30px; padding:0 4px; border:1px solid var(--line); border-radius:4px; background:var(--soft); font:600 10.5px/16px ui-monospace,Consolas,monospace; color:var(--dim); text-align:center }
+td.cd { width:40px; padding-right:0 } .kv table td.cd { color:var(--dim) }
 .tag { display:inline-block; padding:0 6px; border-radius:9px; font-size:11px; background:var(--soft); border:1px solid var(--line) }
 .tag.bad { color:var(--danger); border-color:#fecaca; background:#fef2f2 } .tag.warn { color:var(--warn); border-color:#fde68a; background:#fffbeb }
 .hist { display:flex; align-items:flex-end; gap:6px; height:110px; margin-top:22px; padding:0 4px; border-bottom:1px solid var(--text) }
@@ -84,6 +86,7 @@ const when = t => `${day(t)} ${clock(t)}`;
 const dur = s => s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : s >= 60 ? `${Math.round(s / 60)} min` : `${Math.round(s)} s`;
 const kwh = wh => `${(wh / 1000).toFixed(1)} kWh`;
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const codePill = c => `<span class="code">${esc(c)}</span>`;
 const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 const sum = (xs, f) => xs.reduce((a, x) => a + (f(x) || 0), 0);
 const median = xs => { const s = xs.slice().sort((a, b) => a - b); return s.length ? s[s.length >> 1] : null; };
@@ -298,7 +301,7 @@ ${ctrl.join('')}
   ${tile('Defrosts', DF.length, DF.length && heatH ? `${(DF.length / heatH).toFixed(1)} per heating hour · longest ${dur(dfMax)}` : DF.length ? `longest ${dur(dfMax)}` : 'none')}
 </div>
 <h2>Settings that differ from factory default <span class="sub">— ${changed.length} of ${params.length}; full list at the end</span></h2>
-${changed.length ? `<table>${changed.map(p => `<tr><td style="width:46px">AP${p.ap}</td><td>${esc(p.name)}</td><td class="n"><b>${esc(pv(p, p.value))}</b></td><td class="n sub">default ${esc(pv(p, p.default))}</td></tr>`).join('')}</table>`
+${changed.length ? `<table>${changed.map(p => `<tr><td class="cd">${codePill(`AP${p.ap}`)}</td><td>${esc(p.name)}</td><td class="n"><b>${esc(pv(p, p.value))}</b></td><td class="n sub">default ${esc(pv(p, p.default))}</td></tr>`).join('')}</table>`
   : `<div class="empty">${params.length ? 'All parameters are at the factory default.' : 'Parameters could not be read.'}</div>`}`;
 
 // ---- page 2: charts ----
@@ -393,12 +396,26 @@ ${notable.length ? `<table><thead><tr><th style="width:170px">When</th><th style
 {
   const S = M.status || {}, R = S.readings || {}, T = S.temperatures || {}, SP = S.setpoints || {};
   const onoff = v => v == null ? null : v ? 'On' : 'Off';
-  const kvt = (title, rows) => `<div><h2>${title}</h2><table>${rows.map(([k, v, u]) => `<tr><td>${esc(k)}</td><td class="n">${v == null || v === '' ? (v === '' ? '' : '--') : esc(v) + (u ? ` ${u}` : '')}</td></tr>`).join('')}</table></div>`;
+  // Rows are [name, value, unit, code]; a table with any code gets a code-pill
+  // column (blank for code-less rows, so names line up).
+  const kvt = (title, rows) => {
+    const coded = rows.some(r => r[3]);
+    return `<div><h2>${title}</h2><table>${rows.map(([k, v, u, c]) => `<tr>${coded ? `<td class="cd">${c ? codePill(c) : ''}</td>` : ''}<td>${esc(k)}</td><td class="n">${v == null || v === '' ? (v === '' ? '' : '--') : esc(v) + (u ? ` ${u}` : '')}</td></tr>`).join('')}</table></div>`;
+  };
+  // OEM codes, units and EEV travel come from the firmware's catalog.
+  const CAT = M.catalog || {}, code = key => CAT[key]?.code || '';
+  const eev = key => {
+    const v = R[key], max = CAT[`readings.${key}`]?.max;
+    return v == null ? null : max ? `${Math.round(v / max * 100)} % (${v} of ${max} steps)` : `${v} steps`;
+  };
   const idle = !S.compressor, run = v => idle ? null : v;
-  const tempRows = [['Tank', T.tank], ['Leaving water', T.outlet], ['Entering water', T.inlet], ['Outdoor air', T.outdoor], ['Outdoor coil', T.outdoor_coil],
-    ['Indoor coil (OEM name)', T.indoor_coil], ['Discharge', run(T.discharge)], ['Suction', run(T.suction)], ['IPM module', run(T.ipm)]].map(([k, v]) => [k, v == null ? null : Math.round(tc(v)), U]);
-  const readRows = [['Compressor', run(R.compressor_freq), 'Hz'], ['Fan', run(R.fan_rpm), 'RPM'], ['AC voltage', R.ac_voltage, 'V'], ['AC current', run(R.ac_current), 'A'],
-    ['DC bus', R.dc_voltage, 'V'], ['Main EEV', R.primary_eev, 'steps'], ['Aux EEV', R.aux_eev, 'steps'], ['Power', run(R.power_consumption), 'W'],
+  const tempRows = [['Tank', T.tank, 'tank'], ['Outlet', T.outlet, 'outlet'], ['Inlet', T.inlet, 'inlet'], ['Outdoor air', T.outdoor, 'outdoor'],
+    ['Outdoor coil', T.outdoor_coil, 'outdoor_coil'], ['Water HX', T.indoor_coil, 'indoor_coil'], ['Discharge', run(T.discharge), 'discharge'],
+    ['Suction', run(T.suction), 'suction'], ['IPM module', run(T.ipm), 'ipm']].map(([k, v, key]) => [k, v == null ? null : Math.round(tc(v)), U, code(`temperatures.${key}`)]);
+  const rd = (k, v, u, key) => [k, v, u, code(`readings.${key}`)];
+  const readRows = [rd('Compressor', run(R.compressor_freq), 'Hz', 'compressor_freq'), rd('Fan', run(R.fan_rpm), 'RPM', 'fan_rpm'),
+    rd('AC voltage', R.ac_voltage, 'V', 'ac_voltage'), rd('AC current', run(R.ac_current), 'A', 'ac_current'), rd('DC bus', R.dc_voltage, 'V', 'dc_voltage'),
+    rd('Main EEV', eev('primary_eev'), '', 'primary_eev'), rd('Aux EEV', eev('aux_eev'), '', 'aux_eev'), rd('Input power', run(R.power_consumption), 'W', 'power_consumption'),
     ['Flow (configured)', R.flow_lpm != null ? `${flow(R.flow_lpm)} (${flow2(R.flow_lpm)})` : null], ['Fluid', fluid]];
   const ex = PS.sensors || {};
   const stateRows = [['Unit enabled', S.unit_on == null ? null : S.unit_on ? 'Yes' : 'No'], ['Mode', modeName(S.mode)], ['Operation', S.operation], ['Compressor', onoff(S.compressor)],
@@ -412,14 +429,14 @@ ${notable.length ? `<table><thead><tr><th style="width:170px">When</th><th style
   const range = p => p.options ? '' : p.min != null && p.max != null ? `${pnum(p, p.min)} – ${pnum(p, p.max)}` : '';
   const rows = cats.map(c => `<tr class="cat"><td colspan="6">${esc(c)}</td></tr>` + params.filter(p => (p.category || 'Other') === c).sort((a, b) => a.ap - b.ap).map(p => {
     const chg = p.default != null && p.value !== p.default;
-    return `<tr class="${chg ? 'chg' : ''}"><td>AP${p.ap}</td><td>${esc(p.name)}${p.detail ? `<div class="det">${fmtDetail(p.detail)}</div>` : ''}</td>
+    return `<tr class="${chg ? 'chg' : ''}"><td>${codePill(`AP${p.ap}`)}</td><td>${esc(p.name)}${p.detail ? `<div class="det">${fmtDetail(p.detail)}</div>` : ''}</td>
       <td class="n v">${esc(pv(p, p.value))}</td><td class="n sub">${p.default != null ? esc(pv(p, p.default)) : ''}</td><td class="n sub">${esc(range(p))}</td>
       <td>${chg ? '<span class="tag warn">changed</span>' : ''}${p.read_only ? ' <span class="tag">read-only</span>' : ''}</td></tr>`;
   }).join('')).join('');
   $('p5').innerHTML = `
   <h2 style="margin-top:0">Unit snapshot <span class="sub">— read at ${when(M.generated)}; ${idle ? 'the unit was idle, so compressor readings show --' : 'the unit was running'}</span></h2>
   <div class="kv">${kvt('State', stateRows)}${kvt('Temperatures', tempRows)}${kvt('Readings', readRows)}</div>
-  <div class="kv">${kvt('Setpoints and COP sensors', spRows)}${kvt('Active faults', S.has_error && S.error ? [[S.error.code, S.error.description || '']] : [['None', '']])}
+  <div class="kv">${kvt('Setpoints and COP sensors', spRows)}${kvt('Active faults', (M.activeFaults || []).length ? M.activeFaults.map(f => [f.name || f.description || '', '', '', f.code]) : S.has_error && S.error ? [[S.error, '']] : [['None', '']])}
     ${kvt('Parameter changes in period', pchg.length ? pchg.slice(-8).map(e => [`${e.param} ${when(e.timestamp)}`, `${evVal(e, e.from, e.from_label)} → ${evVal(e, e.to, e.to_label)}`]) : [['None logged', '']])}</div>
   ${params.length ? `<h2 class="brk">Technician parameters <span class="sub">— ${params.length} AP parameters; ${changed.length} differ from the factory default (highlighted)</span></h2>
   <table><thead><tr><th style="width:52px">Code</th><th>Parameter</th><th class="n" style="width:80px">Value</th><th class="n" style="width:72px">Default</th><th class="n" style="width:96px">Range</th><th style="width:120px"></th></tr></thead><tbody>${rows}</tbody></table>` : ''}
