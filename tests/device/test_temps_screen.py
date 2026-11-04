@@ -1,135 +1,61 @@
 """
-Test: Temperatures Screen
+Test: Status tab temperature rows
 
-Navigates to the temperatures sub-screen and verifies that all 9 temperature
-sensor readings are displayed with correct labels and demo-mode values.
-
-Demo mode uses hardcoded temperature values (not set_demo_fields registers).
+Every temperature reading on the Status tab renders its translated name, the
+OEM code pill and the demo value, with the unit in a separate muted label.
+The rest of the tab (summary, chips, derived rows, defrost, faults) is
+covered by test_system_screen.py; °F conversion by test_fahrenheit.py.
 """
 
 import pytest
 from device_client import DeviceClient
 
-# Demo mode hardcoded temps (from heatpump_temps_screen.cpp update_readings)
+# tag -> (name, OEM code, demo °C)
 DEMO_TEMPS = {
-    "Water Tank": 42,
-    "Water Outlet": 45,
-    "Water Inlet": 38,
-    "Outdoor Ambient": 22,
-    "Discharge": 85,
-    "Suction": 12,
-    "Outdoor Coil": 35,
-    "Indoor Coil": 40,
-    "IPM Module": 55,
+    "st_tank": ("Tank", "o1", 42),
+    "st_outlet": ("Outlet", "o3", 45),
+    "st_inlet": ("Inlet", "o2", 38),
+    "st_outdoor": ("Outdoor air", "o4", 22),
+    "st_discharge": ("Discharge", "A1", 85),
+    "st_suction": ("Suction", "A3", 12),
+    "st_outdoor_coil": ("Outdoor coil", "A2", 35),
+    "st_water_hx": ("Water HX", "A6", 40),
+    "st_ipm": ("IPM module", "A8", 55),
 }
 
 
-def _open_temps(device: DeviceClient):
-    """Navigate from main to the temperatures screen."""
-    device.click(tag="nav_status")
-    assert device.wait_for_screen("status", timeout=5.0), \
-        f"Expected 'status' screen, got '{device.screen}'"
-
-
-def _close_temps(device: DeviceClient):
-    """Return to the Home (main) tab via the persistent nav bar."""
-    device.click(tag="nav_home")
-    assert device.wait_for_screen("main", timeout=5.0), \
-        f"Expected 'main' screen after close, got '{device.screen}'"
-
-
-def _has_text_containing(device: DeviceClient, substring: str) -> bool:
-    """Check if any widget's text contains the given substring."""
-    sub_lower = substring.lower()
-    for w in device.widgets:
-        t = w.text_en or w.text
-        if t and sub_lower in t.lower():
-            return True
-    return False
-
-
-def _wait_for_text(device: DeviceClient, substring: str, timeout: float = 5.0):
-    """Wait until some widget's text contains ``substring``."""
-    device.wait_until(
-        f"text containing '{substring}' visible",
-        lambda: _has_text_containing(device, substring),
-        timeout=timeout,
+@pytest.fixture(autouse=True)
+def _seed_temps(device: DeviceClient):
+    device.set_demo_fields(
+        water_tank_temp=42, outlet_water_temp=45, inlet_water_temp=38,
+        outdoor_ambient_temp=22, discharge_temp=85, suction_temp=12,
+        outdoor_coil_temp=35, indoor_coil_temp=40, ipm_temp=55,
     )
 
 
-# =========================================================================
-# Navigation
-# =========================================================================
+def test_all_temperature_rows(device: DeviceClient):
+    device.click(tag="nav_status")
+    assert device.wait_for_screen("status", timeout=5.0)
 
-class TestTempsNavigation:
-    """Open/close temperatures screen from the main screen footer."""
+    def _rendered():
+        return all(
+            (w := device.find_widget(tag=tag)) is not None and w.text == str(c)
+            for tag, (_, _, c) in DEMO_TEMPS.items()
+        )
+    device.wait_until("all temperature rows rendered", _rendered, timeout=5.0)
 
-    def test_open_temps_screen(self, device: DeviceClient):
-        """Clicking the Temps nav button opens the temperatures screen."""
-        _open_temps(device)
-
-    def test_close_temps_screen(self, device: DeviceClient):
-        """Clicking close returns to the main screen."""
-        _open_temps(device)
-        _close_temps(device)
-
-
-# =========================================================================
-# Title
-# =========================================================================
-
-class TestTempsTitle:
-    """The Status tab has no standalone title in the persistent-nav shell;
-    the nav bar labels the tab. Content is verified by the section-header and
-    reading tests below."""
-
-
-# =========================================================================
-# Temperature Readings
-# =========================================================================
-
-class TestTempsReadings:
-    """Verify all 9 temperature labels and values are present in demo mode."""
-
-    @pytest.mark.parametrize("label,expected_value", list(DEMO_TEMPS.items()),
-                             ids=[k.replace(" ", "_") for k in DEMO_TEMPS])
-    def test_temp_label_present(self, device: DeviceClient, label, expected_value):
-        """Each temperature sensor label should be visible on screen."""
-        _open_temps(device)
-        _wait_for_text(device, label)
-
-        assert _has_text_containing(device, label), \
-            f"Temperature label '{label}' not found on screen"
-
-    @pytest.mark.parametrize("label,expected_value", list(DEMO_TEMPS.items()),
-                             ids=[k.replace(" ", "_") for k in DEMO_TEMPS])
-    def test_temp_value_present(self, device: DeviceClient, label, expected_value):
-        """Each demo temperature value should be displayed (e.g. '42 °C')."""
-        _open_temps(device)
-        value_str = f"{expected_value} °C"
-        _wait_for_text(device, value_str)
-
-        assert _has_text_containing(device, value_str), \
-            f"Temperature value '{value_str}' not found on screen"
-
-    def test_all_nine_temps_present(self, device: DeviceClient):
-        """All 9 temperature rows should be visible."""
-        _open_temps(device)
-        # Wait until the tree reports all nine demo temperature labels.
-        def _all_present() -> bool:
-            texts = [(w.text_en or w.text or "").lower() for w in device.widgets]
-            return all(any(label.lower() in t for t in texts) for label in DEMO_TEMPS)
-
-        device.wait_until("all nine temperature labels visible", _all_present, timeout=5.0)
-
-        # Fetch widget tree once instead of 9 separate HTTP calls
-        widgets = device.widgets
-        texts = [
-            (w.text_en or w.text or "").lower() for w in widgets
-        ]
-        missing = []
-        for label in DEMO_TEMPS:
-            if not any(label.lower() in t for t in texts):
-                missing.append(label)
-        assert not missing, \
-            f"Missing temperature labels: {missing}"
+    widgets = device.widgets
+    by_tag = {w.tag: w for w in widgets if w.tag}
+    problems = []
+    for tag, (name, code, celsius) in DEMO_TEMPS.items():
+        val = by_tag[tag]
+        pill = by_tag.get(f"{tag}_code")
+        if pill is None or pill.text != code:
+            problems.append(f"{tag}: pill {pill and pill.text!r} != {code!r}")
+        # Name and unit sit on the value's row.
+        row = [w for w in widgets if abs((w.y + w.h / 2) - (val.y + val.h / 2)) < 20]
+        if not any((w.text_en or w.text) == name for w in row):
+            problems.append(f"{tag}: name {name!r} not on its row")
+        if not any(w.text == "°C" for w in row):
+            problems.append(f"{tag}: °C unit not on its row")
+    assert not problems, problems

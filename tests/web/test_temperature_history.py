@@ -30,8 +30,7 @@ def _seed_history(base_url: str) -> dict:
 
 
 def _open_history(page: Page) -> None:
-    page.locator(".rail .nav-link", has_text="Status").click()
-    page.get_by_role("button", name="View cycle history").click()
+    page.locator(".rail .nav-link", has_text="History").click()
     page.wait_for_selector(f"{CHART} .tschart-line", timeout=10000)
 
 
@@ -431,8 +430,7 @@ class TestTemperatureHistoryWeb:
             route.fulfill(response=resp, json=body)
 
         dashboard_page.route("**/api/heatpump/temperature-history*", empty)
-        dashboard_page.locator(".rail .nav-link", has_text="Status").click()
-        dashboard_page.get_by_role("button", name="View cycle history").click()
+        dashboard_page.locator(".rail .nav-link", has_text="History").click()
         page = dashboard_page.locator(".page")
         expect(page.locator(CHART)).to_be_visible()
         expect(page.locator(f'{CHART} [data-tschart-status="empty"]')).to_have_text(
@@ -462,8 +460,7 @@ class TestTemperatureHistoryWeb:
             route.fulfill(response=resp, json=body)
 
         dashboard_page.route("**/api/heatpump/temperature-history*", empty)
-        dashboard_page.locator(".rail .nav-link", has_text="Status").click()
-        dashboard_page.get_by_role("button", name="View cycle history").click()
+        dashboard_page.locator(".rail .nav-link", has_text="History").click()
         expect(dashboard_page.locator(".page")).to_contain_text("No cycle history recorded yet")
         expect(dashboard_page.locator(CHART)).to_have_count(0)
 

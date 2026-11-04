@@ -151,7 +151,7 @@ cJSON* createStateObject(const HeatPumpState& hp)
     cJSON_AddNumberToObject(
         readings, "compressor_frequency_hz", hp.compressor_freq);
     cJSON_AddNumberToObject(readings, "fan_rpm", hp.fan_speed);
-    // Primary EEV opening, in raw steps.
+    // Primary EEV opening, in motor steps.
     //
     // Emitted as null rather than 0 when the reading is invalid. 0 steps means
     // the valve is fully CLOSED, which is a real and alarming state, so
@@ -159,10 +159,10 @@ cJSON* createStateObject(const HeatPumpState& hp)
     // fault that is not occurring.
     //
     // The key name matches the device's own /api/heatpump/status payload so the
-    // two representations stay consistent. Note this is raw steps only: the
-    // mainboard exposes no full-scale step count (no max-steps register, and no
-    // EEV advanced parameter carries one), so the device cannot convert this to
-    // a percentage and deliberately does not guess at one.
+    // two representations stay consistent. The value is motor steps (the macon
+    // library scales the wire byte x10). The 500-step full travel is a library
+    // assumption (arctic-macon REGISTERS.md), so this stays raw steps and HA
+    // is not sent a percentage.
     if (hp.primary_eev_valid) {
         cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
     } else {

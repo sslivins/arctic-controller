@@ -101,8 +101,7 @@ def mocked_energy(dashboard_page: Page):
 
 
 def _open_cycles(page: Page) -> None:
-    page.locator(".rail .nav-link", has_text="Status").click()
-    page.get_by_role("button", name="View cycle history").click()
+    page.locator(".rail .nav-link", has_text="History").click()
     page.wait_for_selector(".hist-chart", timeout=10000)
 
 

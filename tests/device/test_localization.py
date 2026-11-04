@@ -111,8 +111,8 @@ DEMO_BANNER = {
 }
 
 STATUS_TAB_LABELS = {
-    "Français": ["Températures", "Fréquence"],
-    "Español":  ["Temperaturas", "Frecuencia"],
+    "Français": ["Circuit d'eau", "Circuit frigorifique"],
+    "Español":  ["Circuito de agua", "Circuito refrigerante"],
 }
 
 CONTROL_TAB_LABELS = {

@@ -1,207 +1,202 @@
 """
-Test: System Readings Screen
+Test: Status tab (device)
 
-Navigates to the system readings sub-screen and verifies that all sensor
-categories (compressor, electrical, pressures, expansion valves, setpoints)
-are displayed with correct labels and demo-mode values.
+The Status tab groups every reading like the web Status page: a summary card
+(state, freshness, uptime, component chips, defrost panel), an optional fault
+banner, then Water loop / Performance / Refrigerant circuit / Outdoor /
+Electrical sections. Each row leads with its OEM display code as a pill (from
+the arctic-macon field catalog) and the value is split into a number and a
+muted unit label. Widgets carry stable tags: "st_<key>" (value),
+"st_<key>_code" (pill), "st_<key>_sub" (sub-line).
 
-Demo-mode values come from the seeded shadow register image
-(initDemoState() in main/heatpump_controller.cpp), the same source the home
-screen renders from. They are asserted here so the two screens cannot drift
-apart again -- this screen used to carry its own hardcoded literals, which
-had diverged (850 vs 400 RPM, 350 vs 200 EEV, 20 vs 18 C cooling).
-
-Readings carry their OEM display code ("A13 - AC Voltage"), taken from the
-arctic-macon field catalog, so they match the OEM controller and Arctic's manual.
+Demo-mode values come from the seeded shadow register image (initDemoState()
+in main/heatpump_controller.cpp), the same source the home screen renders
+from, so the two screens cannot drift apart. Other modules write to the shared
+demo image, so this module seeds what it asserts.
 """
 
 import pytest
 from device_client import DeviceClient
 
-# Demo system readings, derived from the initDemoState() seeds. Keep in step
-# with main/heatpump_controller.cpp; a mismatch here means the screen has
-# stopped rendering from getState().
-DEMO_READINGS = {
-    # Compressor section
-    "A14 - Frequency": "60 Hz",
-    "A10 - Fan Speed": "400 RPM",
-    # Electrical section
-    "A13 - AC Voltage": "230 V",
-    "A4 - AC Current": "5 A",
-    "A7 - DC Voltage": "380 V",
-    # Expansion valves, in steps (unit unconfirmed)
-    "A5 - Primary EEV": "37 steps",
-    "o6 - Aux EEV": "29 steps",
+# tag -> (OEM code, value, unit) for the seeded demo state below. Temperature
+# rows are covered by test_temps_screen.py.
+DEMO_ROWS = {
+    "compressor_freq": ("A14", "60", "Hz"),
+    "fan_rpm": ("A10", "400", "RPM"),
+    "ac_voltage": ("A13", "230", "V"),
+    "ac_current": ("A4", "5", "A"),
+    "dc_voltage": ("A7", "380", "V"),
+    # EEV openings are shown as a percentage of the library's 500-step travel.
+    "primary_eev": ("A5", "74", "%"),
+    "aux_eev": ("o6", "58", "%"),
 }
 
-DEMO_SETPOINTS = {
-    "Cooling": "18 °C",
-    "Heating": "45 °C",
-    "Hot Water": "50 °C",
+SECTION_HEADERS = {
+    "st_hdr_water": "Water loop",
+    "st_hdr_perf": "Performance",
+    "st_hdr_refrig": "Refrigerant circuit",
+    "st_hdr_outdoor": "Outdoor",
+    "st_hdr_elec": "Electrical",
 }
 
-# Section headers present on the merged Status screen (i18n English labels).
-# The old sub-section headers (Compressor / Electrical / Expansion Valves /
-# Setpoints) were removed when the System screen was merged into Status;
-# readings now live under a single "System" section header.
-SECTION_HEADERS = [
-    "System",
-]
-
-# The demo shadow image is shared process-wide, and other modules write to it
-# (test_main_screen leaves fan_speed=450 and ac_current=52 behind). The old
-# hardcoded literals made this screen immune to that; now that it renders from
-# getState() it honestly reflects those writes, so this module must establish
-# the state it asserts instead of assuming the pristine initDemoState() seeds.
-# Values must match DEMO_READINGS/DEMO_SETPOINTS above.
 DEMO_FIELD_SEEDS = {
+    "unit_on": 1,
     "compressor_freq": 60,
     "fan_on": 1,
+    "pump_on": 1,
+    "defrost_on": 0,
     "fan_speed": 400,
     "ac_voltage": 230,
     "ac_current": 5,
     "dc_voltage": 380,
-    "primary_eev_opening": 37,
-    "aux_eev": 29,
-    "cooling_setpoint": 18,
+    "primary_eev_opening": 370,
+    "aux_eev": 290,
+    "water_tank_temp": 42,
+    "outlet_water_temp": 45,
+    "inlet_water_temp": 38,
+    "outdoor_ambient_temp": 22,
+    "outdoor_coil_temp": 35,
+    "indoor_coil_temp": 40,
+    "suction_temp": 12,
+    "discharge_temp": 85,
+    "ipm_temp": 55,
     "heating_setpoint": 45,
-    "hot_water_setpoint": 50,
 }
 
 
 @pytest.fixture(autouse=True)
 def _seed_demo_readings(device: DeviceClient):
-    """Seed the asserted demo values before each test, and restore after.
-
-    Restoring on teardown keeps any value a test changes from leaking into
-    modules that run later.
-    """
+    """Seed the asserted demo values before each test, and restore after."""
     device.set_demo_fields(**DEMO_FIELD_SEEDS)
     yield
     device.set_demo_fields(**DEMO_FIELD_SEEDS)
 
 
-def _open_system(device: DeviceClient):
-    """Navigate from main to the Status screen (System section)."""
+def _open_status(device: DeviceClient):
     device.click(tag="nav_status")
     assert device.wait_for_screen("status", timeout=5.0), \
         f"Expected 'status' screen, got '{device.screen}'"
 
 
-def _close_system(device: DeviceClient):
-    """Return to the Home (main) tab via the persistent nav bar."""
-    device.click(tag="nav_home")
-    assert device.wait_for_screen("main", timeout=5.0), \
-        f"Expected 'main' screen after close, got '{device.screen}'"
+def _text(device: DeviceClient, tag: str):
+    w = device.find_widget(tag=tag)
+    return None if w is None else (w.text_en or w.text)
 
 
-def _has_text_containing(device: DeviceClient, substring: str) -> bool:
-    """Check if any widget's text contains the given substring."""
-    sub_lower = substring.lower()
-    for w in device.widgets:
-        t = w.text_en or w.text
-        if t and sub_lower in t.lower():
-            return True
-    return False
-
-
-def _wait_for_text(device: DeviceClient, substring: str, timeout: float = 5.0):
-    """Wait until some widget's text contains ``substring``."""
+def _wait_text(device: DeviceClient, tag: str, predicate, timeout: float = 5.0):
     device.wait_until(
-        f"text containing '{substring}' visible",
-        lambda: _has_text_containing(device, substring),
+        f"widget {tag!r} text matches",
+        lambda: predicate(_text(device, tag)),
         timeout=timeout,
     )
+    return _text(device, tag)
 
 
-# =========================================================================
-# Navigation
-# =========================================================================
-
-class TestSystemNavigation:
-    """Open/close system readings screen from the main screen footer."""
-
-    def test_open_system_screen(self, device: DeviceClient):
-        """Clicking the System nav button opens the system screen."""
-        _open_system(device)
-
-    def test_close_system_screen(self, device: DeviceClient):
-        """Clicking close returns to the main screen."""
-        _open_system(device)
-        _close_system(device)
+class TestStatusNavigation:
+    def test_open_and_close(self, device: DeviceClient):
+        _open_status(device)
+        device.click(tag="nav_home")
+        assert device.wait_for_screen("main", timeout=5.0)
 
 
-# =========================================================================
-# Title
-# =========================================================================
-
-class TestSystemTitle:
-    """The Status tab has no standalone title in the persistent-nav shell;
-    the nav bar labels the tab. Content is verified by the section-header and
-    reading tests below."""
+class TestStatusSections:
+    @pytest.mark.parametrize("tag,title", list(SECTION_HEADERS.items()))
+    def test_section_header(self, device: DeviceClient, tag, title):
+        _open_status(device)
+        assert _wait_text(device, tag, lambda t: t == title) == title
 
 
-# =========================================================================
-# Section Headers
-# =========================================================================
+class TestStatusRows:
+    @pytest.mark.parametrize("key", list(DEMO_ROWS))
+    def test_row_code_value_unit(self, device: DeviceClient, key):
+        code, value, unit = DEMO_ROWS[key]
+        _open_status(device)
+        _wait_text(device, f"st_{key}", lambda t: t == value)
+        assert _text(device, f"st_{key}_code") == code
+        assert _text(device, f"st_{key}") == value
+        # The unit is the label right of the value: same row, to its right.
+        val = device.find_widget(tag=f"st_{key}")
+        units = [w for w in device.widgets
+                 if (w.text_en or w.text) == unit and abs(w.y + w.h - (val.y + val.h)) < 12
+                 and 0 <= w.x - (val.x + val.w) < 30]
+        assert units, f"unit {unit!r} not rendered next to st_{key}"
 
-class TestSystemSections:
-    """Verify section headers are present."""
+    def test_eev_sub_line_shows_steps(self, device: DeviceClient):
+        _open_status(device)
+        sub = _wait_text(device, "st_primary_eev_sub", lambda t: t and "370" in t)
+        assert sub == "370 of 500 steps"
 
-    @pytest.mark.parametrize("header", SECTION_HEADERS)
-    def test_section_header_present(self, device: DeviceClient, header):
-        """Each section header should be visible on the system screen."""
-        _open_system(device)
-        _wait_for_text(device, header)
+    def test_no_setpoint_rows_and_target_in_summary(self, device: DeviceClient):
+        """Only the active target is shown, inside the summary line."""
+        _open_status(device)
+        detail = _wait_text(device, "st_now_detail", lambda t: t and "target" in t)
+        assert "Heating mode" in detail and "target 45 °C" in detail
+        assert _text(device, "st_now") == "Heating"
+        texts = [(w.text_en or w.text or "") for w in device.widgets]
+        assert not any(t.startswith("Hot Water") for t in texts)
 
-        assert _has_text_containing(device, header), \
-            f"Section header '{header}' not found on screen"
-
-
-# =========================================================================
-# Readings
-# =========================================================================
-
-class TestSystemReadings:
-    """Verify all reading labels and demo values are present."""
-
-    @pytest.mark.parametrize("label,expected_value",
-                             list(DEMO_READINGS.items()),
-                             ids=[k.replace(" ", "_") for k in DEMO_READINGS])
-    def test_reading_label_present(self, device: DeviceClient, label, expected_value):
-        """Each reading label should be visible."""
-        _open_system(device)
-        _wait_for_text(device, label)
-
-        assert _has_text_containing(device, label), \
-            f"Reading label '{label}' not found on screen"
-
-    @pytest.mark.parametrize("label,expected_value",
-                             list(DEMO_READINGS.items()),
-                             ids=[k.replace(" ", "_") for k in DEMO_READINGS])
-    def test_reading_value_present(self, device: DeviceClient, label, expected_value):
-        """Each demo reading value should be displayed."""
-        _open_system(device)
-        _wait_for_text(device, expected_value)
-
-        assert _has_text_containing(device, expected_value), \
-            f"Reading value '{expected_value}' for '{label}' not found on screen"
+    def test_all_status_text_renders(self, device: DeviceClient):
+        """Every label on the tab (incl. Δ and ·) has glyphs in its font."""
+        _open_status(device)
+        _wait_text(device, "st_water_dt", lambda t: t and t != "--")
+        bad = [(w.tag, w.text) for w in device.widgets
+               if getattr(w, "missing_glyphs", 0)]
+        assert not bad, f"labels with missing glyphs: {bad}"
 
 
-# =========================================================================
-# Setpoints
-# =========================================================================
+class TestStatusDerived:
+    def test_water_dt_signed_when_pump_running(self, device: DeviceClient):
+        _open_status(device)
+        assert _wait_text(device, "st_water_dt", lambda t: t == "+7") == "+7"
 
-class TestSystemSetpoints:
-    """Verify setpoint values are displayed in the system screen."""
+    def test_water_dt_hidden_when_pump_off(self, device: DeviceClient):
+        device.set_demo_fields(pump_on=0)
+        _open_status(device)
+        assert _wait_text(device, "st_water_dt", lambda t: t == "--") == "--"
+        chip = device.find_widget(tag="st_chip_pump")
+        assert chip is not None and chip.bg_color == "#555555"
 
-    @pytest.mark.parametrize("label,expected_value",
-                             list(DEMO_SETPOINTS.items()),
-                             ids=[k.replace(" ", "_") for k in DEMO_SETPOINTS])
-    def test_setpoint_present(self, device: DeviceClient, label, expected_value):
-        """Each setpoint label should be visible."""
-        _open_system(device)
-        _wait_for_text(device, label)
+    def test_discharge_warns_near_limit(self, device: DeviceClient):
+        device.set_demo_fields(discharge_temp=104)
+        _open_status(device)
+        sub = _wait_text(device, "st_discharge_sub", lambda t: t == "Near limit")
+        assert sub == "Near limit"
 
-        assert _has_text_containing(device, label), \
-            f"Setpoint label '{label}' not found on screen"
+
+class TestStatusDefrost:
+    def test_defrost_panel_and_paused_performance(self, device: DeviceClient):
+        device.set_demo_fields(defrost_on=1, outlet_water_temp=33, inlet_water_temp=38)
+        _open_status(device)
+        assert _wait_text(device, "st_now", lambda t: t == "Defrosting") == "Defrosting"
+        assert device.find_widget(tag="st_defrost") is not None
+        assert _text(device, "st_defrost_water") == "33 / 38 °C"
+        assert _wait_text(device, "st_defrost_elapsed", lambda t: bool(t))
+        assert _text(device, "st_cop") == "--"
+        assert _text(device, "st_cop_sub") == "Paused during defrost"
+        assert _text(device, "st_superheat") == "--"
+        assert _text(device, "st_water_dt") == "-5"
+        assert _text(device, "st_water_dt_sub") == "Reversed during defrost"
+        chip = device.find_widget(tag="st_chip_defrost")
+        assert chip is not None and chip.bg_color == "#3b82f6"
+
+    def test_no_defrost_panel_normally(self, device: DeviceClient):
+        _open_status(device)
+        _wait_text(device, "st_now", lambda t: t == "Heating")
+        assert device.find_widget(tag="st_defrost") is None
+
+
+class TestStatusFault:
+    def test_fault_banner(self, device: DeviceClient):
+        device.inject_fault("P02", True)
+        try:
+            _open_status(device)
+            code = _wait_text(device, "st_fault_code", lambda t: t == "P02")
+            assert code == "P02"
+            assert _text(device, "st_fault_title")
+        finally:
+            device.inject_fault("P02", False)
+
+    def test_no_fault_banner_without_faults(self, device: DeviceClient):
+        _open_status(device)
+        _wait_text(device, "st_now", lambda t: t == "Heating")
+        assert device.find_widget(tag="st_fault") is None

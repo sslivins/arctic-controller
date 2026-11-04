@@ -276,6 +276,7 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_get_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req);
 static esp_err_t heatpump_status_handler(httpd_req_t* req);
+static esp_err_t heatpump_catalog_handler(httpd_req_t* req);
 #ifdef CONFIG_TEST_ENDPOINTS
 // Protocol-debug endpoints (raw register cache / observed Tuya windows). They
 // surface raw register addresses, so they are compiled only into debug/test
@@ -1411,6 +1412,15 @@ static bool api_server_start_locked(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_uri);
+
+    // GET /api/heatpump/catalog - OEM codes / units / ranges for readings
+    httpd_uri_t heatpump_catalog_uri = {
+        .uri = "/api/heatpump/catalog",
+        .method = HTTP_GET,
+        .handler = heatpump_catalog_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_catalog_uri);
     
 #ifdef CONFIG_TEST_ENDPOINTS
     // GET /api/heatpump/raw - debug raw register cache dump (debug/test only)
@@ -4612,7 +4622,33 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddStringToObject(root, "mode", arctic::workingModeToString(hp.working_mode));
     cJSON_AddStringToObject(root, "operation", arctic::heatPumpOperationToString(hp.operation));
     cJSON_AddBoolToObject(root, "defrosting", hp.isDefrosting());
-    
+
+    // Freshness and controller-tracked timers for the Status page. All are
+    // seconds measured on the controller's monotonic clock.
+    {
+        const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        if (hp.connected && hp.last_successful_read_ms != 0) {
+            cJSON_AddNumberToObject(root, "data_age_s", (uint32_t)(now_ms - hp.last_successful_read_ms) / 1000);
+        } else {
+            cJSON_AddNullToObject(root, "data_age_s");
+        }
+        if (hp.isDefrosting() && hp.defrost_start_ms != 0) {
+            cJSON* df = cJSON_AddObjectToObject(root, "defrost");
+            cJSON_AddNumberToObject(df, "elapsed_s", (uint32_t)(now_ms - hp.defrost_start_ms) / 1000);
+            if (hp.defrost_start_coil_valid) {
+                cJSON_AddNumberToObject(df, "start_coil", hp.defrost_start_coil_c);
+            } else {
+                cJSON_AddNullToObject(df, "start_coil");
+            }
+        } else {
+            cJSON_AddNullToObject(root, "defrost");
+        }
+        if (hp.isWaterPumpRunning() && hp.pump_on_since_ms != 0) {
+            cJSON_AddNumberToObject(root, "pump_on_s", (uint32_t)(now_ms - hp.pump_on_since_ms) / 1000);
+        } else {
+            cJSON_AddNullToObject(root, "pump_on_s");
+        }
+    }
     // Components
     cJSON_AddBoolToObject(root, "compressor", hp.isCompressorRunning());
     cJSON_AddBoolToObject(root, "fans", hp.isFanRunning());
@@ -4684,7 +4720,11 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(readings, "ac_voltage", hp.ac_voltage);
     cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
     cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
-    cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
+    if (hp.primary_eev_valid) {
+        cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
+    } else {
+        cJSON_AddNullToObject(readings, "primary_eev");
+    }
     if (hp.aux_eev_valid) {
         cJSON_AddNumberToObject(readings, "aux_eev", hp.aux_eev_opening);
     } else {
@@ -4725,6 +4765,59 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     free(json_str);
     cJSON_Delete(root);
     
+    return ESP_OK;
+}
+
+// GET /api/heatpump/catalog - static description of the status readings:
+// for each /api/heatpump/status key, the OEM display code, unit and range from
+// the arctic-macon field catalog. Fetched once by clients (never part of the
+// 5 s status poll); clients own the localized labels.
+static esp_err_t heatpump_catalog_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+
+    static const struct { const char* key; const char* field; } kMap[] = {
+        {"temperatures.tank",          "water_tank_temp"},
+        {"temperatures.outlet",        "outlet_water_temp"},
+        {"temperatures.inlet",         "inlet_water_temp"},
+        {"temperatures.outdoor",       "outdoor_ambient_temp"},
+        {"temperatures.discharge",     "discharge_temp"},
+        {"temperatures.suction",       "suction_temp"},
+        {"temperatures.outdoor_coil",  "outdoor_coil_temp"},
+        {"temperatures.indoor_coil",   "indoor_coil_temp"},
+        {"temperatures.ipm",           "ipm_temp"},
+        {"readings.compressor_freq",   "compressor_freq"},
+        {"readings.fan_rpm",           "fan_speed"},
+        {"readings.ac_voltage",        "ac_voltage"},
+        {"readings.ac_current",        "ac_current"},
+        {"readings.dc_voltage",        "dc_voltage"},
+        {"readings.primary_eev",       "primary_eev"},
+        {"readings.aux_eev",           "aux_eev"},
+        {"readings.power_consumption", "realtime_power"},
+    };
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON* fields = cJSON_AddObjectToObject(root, "fields");
+    for (const auto& m : kMap) {
+        const arctic::MaconFieldDesc* d = arctic::macon_field_find(m.field);
+        if (d == nullptr) continue;
+        cJSON* o = cJSON_AddObjectToObject(fields, m.key);
+        if (d->oem_code) cJSON_AddStringToObject(o, "code", d->oem_code);
+        else cJSON_AddNullToObject(o, "code");
+        if (d->unit) cJSON_AddStringToObject(o, "unit", d->unit);
+        else cJSON_AddNullToObject(o, "unit");
+        cJSON_AddNumberToObject(o, "min", d->min);
+        cJSON_AddNumberToObject(o, "max", d->max);
+    }
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 

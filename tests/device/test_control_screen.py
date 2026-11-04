@@ -1,3 +1,4 @@
+import re
 """
 Test: Control (Advanced) Screen
 
@@ -228,7 +229,7 @@ class TestSetpoints:
     def test_wide_numeric_parameter_uses_full_range_slider(self, device: DeviceClient):
         """AP29 compressor runtime exposes its complete 0-90 minute range."""
         _open_control(device)
-        device.click(label_contains="(AP29)")
+        device.click(label="AP29")
 
         try:
             slider = device.find_widget(tag="edit_slider")
@@ -244,7 +245,7 @@ class TestSetpoints:
     def test_ap28_uses_metadata_driven_ten_minute_steps(self, device: DeviceClient):
         """AP28 shows minutes and snaps to Macon's declared display increment."""
         _open_control(device)
-        device.click(label_contains="(AP28)")
+        device.click(label="AP28")
 
         try:
             slider = device.find_widget(tag="edit_slider")
@@ -261,14 +262,14 @@ class TestSetpoints:
 
     @pytest.mark.parametrize(
         "label_fragment,option_count",
-        [("(AP14)", 8), ("(AP44)", 3)],
+        [("AP14", 8), ("AP44", 3)],
     )
     def test_discrete_parameter_uses_roller(
         self, device: DeviceClient, label_fragment: str, option_count: int
     ):
         """Discrete AP choices use a named roller rather than a numeric slider."""
         _open_control(device)
-        device.click(label_contains=label_fragment)
+        device.click(label=label_fragment)
 
         try:
             roller = device.find_widget(tag="edit_roller")
@@ -299,19 +300,13 @@ class TestAdvancedParameters:
     def test_advanced_parameter_visible(self, device: DeviceClient):
         """At least one Advanced Parameter row should be visible (e.g. AP13)."""
         _open_control(device)
-        # Look for any Advanced Parameter label containing "(AP"
+        # Rows lead with an "AP##" code pill; the name no longer carries it.
         device.wait_until(
             "an Advanced Parameter (AP##) row is visible",
             lambda: any(
-                "(AP" in (w.text_en or w.text or "") for w in device.widgets
+                re.fullmatch(r"AP\d+", (w.text or "").strip()) for w in device.widgets
             ),
             timeout=5.0,
         )
-
-        found = False
-        for w in device.widgets:
-            t = w.text_en or w.text
-            if t and "(AP" in t:
-                found = True
-                break
-        assert found, "No Advanced Parameter rows found on control screen"
+        assert not any("(AP" in (w.text_en or w.text or "") for w in device.widgets), \
+            "AP names should not repeat the code in parentheses"

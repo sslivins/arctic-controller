@@ -527,6 +527,66 @@
     .ap-value { display: grid; gap: 10px; align-content: center; }
     .ap-default { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--cp-text-muted); }
     .ap-default .btn { min-height: 30px; padding: 4px 10px; font-size: 12px; }
+    /* OEM display code pill (status readouts and advanced parameters) */
+    .code { display: inline-flex; justify-content: center; min-width: 40px; padding: 2px 6px; border: 1px solid var(--cp-border);
+      border-radius: 6px; background: var(--cp-surface-soft); color: var(--cp-text-muted);
+      font: 600 12px/1.4 ui-monospace, Consolas, monospace; letter-spacing: .02em; flex: none; }
+    .code.blank { visibility: hidden; }
+    .ap-title { display: flex; align-items: center; gap: 10px; }
+    .ap-group > summary .cnt { margin-left: 8px; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--cp-surface-soft);
+      color: var(--cp-text-muted); border: 1px solid var(--cp-border); font-weight: 600; }
+    /* Status page */
+    .st-alert { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 14px; margin-bottom: 16px;
+      background: color-mix(in srgb, var(--cp-danger) 10%, var(--cp-surface)); border: 1px solid color-mix(in srgb, var(--cp-danger) 45%, transparent); }
+    .st-alert .code { border-color: var(--cp-danger); color: var(--cp-danger); background: transparent; }
+    .st-alert b { display: block; font-size: 15px; } .st-alert .s { font-size: 12px; color: var(--cp-text-muted); }
+    .st-sum { display: grid; gap: 14px; }
+    .st-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--cp-text-muted); }
+    .st-top .live i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--cp-success); margin-right: 6px; }
+    .st-top.stale .live i, .st-top.down .live i { background: var(--cp-danger); }
+    .st-top.stale, .st-top.down { color: var(--cp-danger); font-size: 14px; font-weight: 650; }
+    .st-stats { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+    .st-stat .k { color: var(--cp-text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+    .st-stat .v { font-size: 22px; font-weight: 650; margin-top: 2px; }
+    .st-stat .s { font-size: 12px; color: var(--cp-text-muted); }
+    .st-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .st-chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--cp-border);
+      font-size: 13px; font-weight: 600; color: var(--cp-text-muted); background: var(--cp-surface-soft); }
+    .st-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--cp-border-strong); }
+    .st-chip.on { color: var(--cp-text); border-color: color-mix(in srgb, var(--cp-success) 45%, var(--cp-border)); }
+    .st-chip.on i { background: var(--cp-success); }
+    .st-chip.defrost.on { border-color: #3b82f6; } .st-chip.defrost.on i { background: #3b82f6; }
+    .st-chip b { font-weight: 500; color: var(--cp-text-muted); }
+    .st-def { border-radius: 12px; padding: 12px 14px; background: color-mix(in srgb, #3b82f6 10%, var(--cp-surface)); border: 1px solid color-mix(in srgb, #3b82f6 35%, transparent); }
+    .st-def .h { font-weight: 700; display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .st-def .g { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 13px; }
+    .st-def .g span { color: var(--cp-text-muted); }
+    .st-grid { display: grid; gap: 16px; margin-top: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+    .st-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card.st-card { padding: 0; overflow: hidden; }
+    .st-card > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; font-weight: 700; font-size: 16px; }
+    .st-card > summary::-webkit-details-marker { display: none; }
+    .st-card > summary .cnt { font-size: 12px; color: var(--cp-text-muted); font-weight: 600; }
+    .st-card > summary .chev { display: inline-block; color: var(--cp-text-muted); transition: transform .15s; margin-left: 8px; }
+    .st-card[open] > summary .chev { transform: rotate(90deg); }
+    .st-card[open] > summary { border-bottom: 1px solid var(--cp-border); }
+    .rd { display: flex; align-items: center; gap: 12px; min-height: 38px; padding: 8px 18px; border-top: 1px solid var(--cp-border); }
+    .st-card > summary + .rd { border-top: 0; }
+    .rd .nm { flex: 1; min-width: 0; }
+    .rd .nm div:first-child { font-size: 15px; }
+    .rd .sub { font-size: 12px; color: var(--cp-text-muted); margin-top: 1px; }
+    .rd .val { font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .rd .val small { font-size: 13px; font-weight: 500; color: var(--cp-text-muted); margin-left: 3px; }
+    .rd .trend { font-size: 12px; font-weight: 600; color: var(--cp-text-muted); }
+    .rd.warn .val, .rd.warn .sub { color: var(--cp-warning); }
+    .rd.muted .val { color: var(--cp-text-muted); }
+    @media (max-width: 900px) { .st-grid, .st-grid.three { grid-template-columns: 1fr; } }
+    @media (max-width: 520px) {
+      .rd { padding: 8px 14px; } .st-card > summary { padding: 13px 14px; }
+      .card.st-sum { gap: 10px; padding: 14px 16px; } .st-stats { gap: 8px; } .st-stat .v { font-size: 18px; } .st-stat .k { font-size: 11px; }
+      .st-chips { gap: 6px; } .st-chip { padding: 4px 10px; font-size: 12px; gap: 6px; }
+    }
     .event-toolbar { display: grid; grid-template-columns: 1fr 170px 170px; gap: 10px; margin-bottom: 16px; }
     .search-field { position: relative; }
     .search-field input { padding-right: 44px; }
@@ -1675,30 +1735,164 @@
         </div>
       </div>`;
     }
-    function metricCard(label, value, sub = "") {
-      return `<div class="card metric"><div class="metric-label">${esc(label)}</div><div class="metric-value">${esc(value)}</div>${sub ? `<div class="metric-sub">${esc(sub)}</div>` : ""}</div>`;
+    // ---- Status: every reading, grouped like the device's Status tab ----
+    // OEM codes and ranges come once from /api/heatpump/catalog; labels are ours.
+    const ST_DISCHARGE_WARN_C = 100, ST_IPM_WARN_C = 80, ST_STALE_S = 30, ST_DT_SETTLE_S = 120, ST_MIN_POWER_W = 100;
+    function codePill(code) {
+      return `<span class="code${code ? "" : " blank"}"${code ? ` data-code="${esc(code)}"` : ""}>${esc(code || "--")}</span>`;
+    }
+    const stCode = key => state.catalog?.[key]?.code || "";
+    // [number, unit] of a temperature, or of a temperature difference (kind
+    // "differential": x1.8 in Fahrenheit, no offset).
+    function tempParts(value, kind = "absolute", signed = false) {
+      if (value == null || Number.isNaN(value)) return ["--", ""];
+      const s = temp(value, kind), i = s.indexOf("°");
+      if (i < 0) return [s, ""];
+      const n = s.slice(0, i);
+      return [signed ? (Number(n) > 0 ? `+${n}` : n.replace("-", "−")) : n, s.slice(i)];
+    }
+    const numParts = (value, unitText, digits = 0) => value == null ? ["--", ""] : [Number(value).toFixed(digits), unitText];
+    const fmtElapsed = s => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+    function stRow(key, code, name, [value, unitText], { sub = "", trend = "", tone = "" } = {}) {
+      return `<div class="rd${tone ? ` ${tone}` : ""}" data-reading="${key}">${codePill(code)}<div class="nm"><div>${esc(name)}</div>${
+        sub ? `<div class="sub">${esc(sub)}</div>` : ""}</div>${trend ? `<span class="trend">${esc(trend)}</span>` : ""}<div class="val">${
+        esc(value)}${unitText ? `<small>${esc(unitText)}</small>` : ""}</div></div>`;
+    }
+    // Folds keep the user's choice across re-renders; by default every group is
+    // open except, on a phone, all but the two essential ones.
+    function stGroup(id, title, essential, rows) {
+      const key = `st-${id}`;
+      const open = key in state.folds ? state.folds[key] : essential || !matchMedia("(max-width: 520px)").matches;
+      return `<details class="card st-card" data-fold="${key}" data-group="${id}"${open ? " open" : ""}><summary><span>${esc(title)}</span><span><span class="cnt">${
+        rows.length}</span><span class="chev" aria-hidden="true">›</span></span></summary>${rows.join("")}</details>`;
     }
     function statusPage() {
-      const h = state.hp, r = h.readings, t = h.temperatures;
-      return `<div class="page">${pageHead("Status", "Complete temperature, electrical, and mechanical telemetry.")}
-        <section class="card"><div class="card-head"><h2>Cycle history</h2><button class="btn" data-route="history">View cycle history</button></div>
-          <p class="hist-muted">Compressor run cycles with inlet, outlet, and setpoint temperatures over recent hours.</p></section>
-        <h2>Operating state</h2><div class="grid grid-2">
-          ${metricCard("Selected mode", modeLabel(h.mode), "Configured mode policy from the mainboard")}
-          ${metricCard("Actual operation", titleCase(h.operation || "unknown"), "Live operating status from the mainboard")}
-        </div>
-        <h2>Temperatures</h2><div class="grid grid-3">
-          ${metricCard("o1 - Water tank", temp(t.tank))}${metricCard("o3 - Outlet water", temp(t.outlet))}${metricCard("o2 - Inlet water", temp(t.inlet))}
-          ${metricCard("o4 - Outdoor ambient", temp(t.outdoor))}${metricCard("A2 - Outdoor coil", temp(t.outdoor_coil))}${metricCard("A6 - Indoor coil", temp(t.indoor_coil))}
-          ${metricCard("A1 - Discharge", temp(t.discharge))}${metricCard("A3 - Suction", temp(t.suction))}${metricCard("A8 - IPM module", temp(t.ipm))}
-        </div>
-        <h2 style="margin-top:28px">Electrical & mechanical</h2><div class="grid grid-4">
-          ${metricCard("A14 - Compressor", `${r.compressor_freq ?? "--"} Hz`)}${metricCard("A10 - Fan speed", `${r.fan_rpm ?? "--"} RPM`)}
-          ${metricCard("A13 - AC voltage", `${r.ac_voltage ?? "--"} V`)}${metricCard("A4 - AC current", `${r.ac_current ?? "--"} A`)}
-          ${metricCard("A7 - DC voltage", `${r.dc_voltage ?? "--"} V`)}          ${metricCard("A5 - Main EEV", `${r.primary_eev ?? "--"} steps`)}
-                    ${metricCard("o6 - Aux EEV", `${r.aux_eev ?? "--"} steps`)}${metricCard("A9 - Input power", `${r.power_consumption ?? "--"} W`)}${metricCard(perfOutput(r.heat_out).label, perfOutput(r.heat_out).value, r.flow_lpm == null ? "" : `At an assumed ${r.flow_lpm} L/min`)}
-          ${metricCard("Estimated COP", r.cop == null ? "--" : Number(r.cop).toFixed(2), perfSource(r.perf_source, r.perf_fallback, r.perf_settling, r.perf_pending).caption)}${metricCard("Controller uptime", fmtUptime(state.status.uptime_ms))}
-        </div>
+      const h = state.hp, r = h.readings || {}, t = h.temperatures || {};
+      const connected = !!h.connected, age = h.data_age_s;
+      const fresh = connected && age != null && age <= ST_STALE_S;
+      const defrost = connected && !!h.defrosting;
+      const comp = connected && !!h.compressor, pump = connected && !!h.pump;
+      const heating = connected && h.operation === "heating", cooling = connected && h.operation === "cooling";
+      const T = k => connected ? t[k] ?? null : null, R = k => connected ? r[k] ?? null : null;
+      const tj = v => tempParts(v).join(" ").trim();
+
+      let alert = "";
+      if (connected && h.has_error) {
+        const faults = state.errors.active || [];
+        const f = faults[0] || { code: "", name: h.error || "Fault" };
+        const sub = [f.occurred ? `Since ${fmtDayClock(f.occurred)}` : "", f.resolution || "",
+          faults.length > 1 ? `+${faults.length - 1} more` : ""].filter(Boolean).join(" · ");
+        alert = `<div class="st-alert" data-status="fault">${codePill(f.code)}<div><b>${esc(f.name || f.description || f.code)}</b>${
+          sub ? `<span class="s">${esc(sub)}</span>` : ""}</div></div>`;
+      }
+
+      let top;
+      if (!connected) top = `<div class="st-top down" data-fresh="down"><span class="live"><i></i>Heat pump not connected</span></div>`;
+      else if (!fresh) top = `<div class="st-top stale" data-fresh="stale"><span class="live"><i></i>No new data from the heat pump</span><span>${
+        age == null ? "" : `Last update ${age < 60 ? `${age} s` : fmtDuration(age)} ago`}</span></div>`;
+      else top = `<div class="st-top" data-fresh="live"><span class="live"><i></i>Connected</span><span>Updated ${age} s ago</span></div>`;
+
+      const hero = homeHeroState(h);
+      const sp = connected ? h.active_setpoint : null;
+      const stat = (k, v, s = "") => `<div class="st-stat" data-stat="${k.toLowerCase()}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div>${
+        s ? `<div class="s">${esc(s)}</div>` : ""}</div>`;
+      const stats = stat("Now", HOME_STATE_LABEL[hero] || titleCase(h.operation || "unknown"), connected ? `${modeLabel(h.mode)} mode` : "") +
+        stat("Target", sp == null ? "--" : tj(sp)) + stat("Uptime", fmtUptime(state.status.uptime_ms));
+      const chips = [["compressor", "Compressor", h.compressor], ["fan", "Fan", h.fans], ["pump", "Pump", h.pump],
+        ["aux_heater", "Aux heater", h.aux_heater], ["defrost", "Defrost", h.defrosting]].map(([id, name, on]) => {
+        on = connected && !!on;
+        return `<span class="st-chip${id === "defrost" ? " defrost" : ""}${on ? " on" : ""}" data-chip="${id}" data-on="${on}"><i></i>${esc(name)} <b>${on ? "On" : "Off"}</b></span>`;
+      }).join("");
+
+      let def = "";
+      if (defrost) {
+        const d = h.defrost || {};
+        const cells = [["Outdoor coil", tj(t.outdoor_coil)], ["Outdoor air", tj(t.outdoor)], ["Outlet / inlet", `${tempParts(t.outlet)[0]} / ${tj(t.inlet)}`]];
+        if (d.start_coil != null) cells.push(["Coil at start", tj(d.start_coil)]);
+        def = `<div class="st-def" data-status="defrost"><div class="h"><span>Defrosting</span><span data-defrost-elapsed>${
+          d.elapsed_s == null ? "" : fmtElapsed(d.elapsed_s)}</span></div><div class="g">${
+          cells.map(([k, v]) => `<div><span>${esc(k)}</span> ${esc(v)}</div>`).join("")}</div></div>`;
+      }
+
+      // Water loop
+      let dt = ["--", ""], dtOpt = { sub: "Outlet − inlet" };
+      if (pump && fresh && T("outlet") != null && T("inlet") != null) {
+        const d = t.outlet - t.inlet;
+        dt = tempParts(d, "differential", true);
+        const settled = (h.pump_on_s ?? 0) >= ST_DT_SETTLE_S;
+        if (defrost && d < 0) dtOpt = { sub: "Reversed during defrost", tone: "warn" };
+        else if (!defrost && settled && comp && ((heating && d <= 0) || (cooling && d >= 0)))
+          dtOpt = { sub: d === 0 ? "No temperature change across the unit" : "Reversed", tone: "warn" };
+      }
+      const tankTrend = connected ? { rising: "Warming", falling: "Cooling" }[h.trends?.tank] || "" : "";
+      const water = [
+        stRow("outlet", stCode("temperatures.outlet"), "Outlet", tempParts(T("outlet"))),
+        stRow("inlet", stCode("temperatures.inlet"), "Inlet", tempParts(T("inlet"))),
+        stRow("water_dt", "", "Water ΔT", dt, dtOpt),
+        stRow("flow", "", "Flow", numParts(R("flow_lpm"), "L/min"), { sub: "Assumed" }),
+        stRow("tank", stCode("temperatures.tank"), "Tank", tempParts(T("tank")), { trend: tankTrend }),
+      ];
+
+      // Performance: the estimate is meaningless while the loop is reversed,
+      // still, or the compressor is barely drawing anything.
+      const power = R("power_consumption");
+      const paused = !connected ? "" : defrost ? "Paused during defrost" : !comp ? "Compressor off" : !pump ? "No water flow"
+        : (power ?? 0) < ST_MIN_POWER_W ? "Input power too low" : r.cop == null || r.heat_out == null ? "Waiting for a stable reading" : "";
+      const perfOk = connected && !paused;
+      const caption = perfSource(r.perf_source, r.perf_fallback, r.perf_settling, r.perf_pending).caption;
+      const perf = [
+        stRow("heat_out", "", r.heat_out < 0 ? "Cooling output" : "Heat output",
+          perfOk ? [(Math.abs(r.heat_out) / 1000).toFixed(1), "kW"] : ["--", ""], perfOk ? { sub: caption } : { sub: paused, tone: "muted" }),
+        stRow("cop", "", "COP", perfOk ? [Number(r.cop).toFixed(1), ""] : ["--", ""], perfOk ? { sub: "Estimate" } : { sub: paused, tone: "muted" }),
+        stRow("power", stCode("readings.power_consumption"), "Input power", power == null ? ["--", ""] : [(power / 1000).toFixed(2), "kW"]),
+        stRow("energy_today", "", "Energy today", R("energy_today_wh") == null ? ["--", ""] : [(r.energy_today_wh / 1000).toFixed(1), "kWh"]),
+      ];
+
+      // Refrigerant circuit. Estimates are only meaningful in a steady run.
+      const steadyRun = comp && !defrost && fresh;
+      const hidden = defrost ? "Hidden during defrost" : "";
+      const est = (show, value, sub) => show && value != null && !Number.isNaN(value)
+        ? [tempParts(value, "differential"), { sub }] : [["--", ""], { sub: hidden || sub, tone: "muted" }];
+      const eev = (key, name) => {
+        const steps = R(key), max = state.catalog?.[`readings.${key}`]?.max;
+        if (steps == null) return stRow(key, stCode(`readings.${key}`), name, ["--", ""]);
+        if (!max) return stRow(key, stCode(`readings.${key}`), name, [String(steps), "steps"]);
+        return stRow(key, stCode(`readings.${key}`), name, [String(Math.round(steps * 100 / max)), "%"], { sub: `${steps} of ${max} steps` });
+      };
+      const diff = (a, b) => a == null || b == null ? null : a - b;
+      const discharge = T("discharge"), ipm = T("ipm");
+      const hxSub = cooling ? "Estimate · outlet − water HX" : "Estimate · water HX − outlet";
+      const refrig = [
+        stRow("compressor_freq", stCode("readings.compressor_freq"), "Compressor", numParts(R("compressor_freq"), "Hz")),
+        stRow("discharge", stCode("temperatures.discharge"), "Discharge", tempParts(discharge),
+          discharge != null && discharge >= ST_DISCHARGE_WARN_C ? { sub: "Near limit", tone: "warn" } : {}),
+        stRow("suction", stCode("temperatures.suction"), "Suction", tempParts(T("suction"))),
+        stRow("superheat", "", "Superheat", ...est(steadyRun && heating, diff(T("suction"), T("outdoor_coil")), "Estimate · suction − outdoor coil")),
+        stRow("water_hx", stCode("temperatures.indoor_coil"), "Water HX", tempParts(T("indoor_coil")), { sub: "Water heat exchanger (refrigerant side)" }),
+        stRow("water_hx_approach", "", "Water HX approach", ...est(steadyRun && (heating || cooling),
+          heating ? diff(T("indoor_coil"), T("outlet")) : diff(T("outlet"), T("indoor_coil")), hxSub)),
+        eev("primary_eev", "Main EEV"),
+        eev("aux_eev", "Aux EEV"),
+      ];
+      const outdoor = [
+        stRow("outdoor", stCode("temperatures.outdoor"), "Outdoor air", tempParts(T("outdoor"))),
+        stRow("outdoor_coil", stCode("temperatures.outdoor_coil"), "Outdoor coil", tempParts(T("outdoor_coil"))),
+        stRow("coil_approach", "", "Coil approach", ...est(steadyRun && heating, diff(T("outdoor"), T("outdoor_coil")), "Estimate · air − coil")),
+        stRow("fan_rpm", stCode("readings.fan_rpm"), "Fan", numParts(R("fan_rpm"), "RPM")),
+      ];
+      const elec = [
+        stRow("ac_voltage", stCode("readings.ac_voltage"), "AC voltage", numParts(R("ac_voltage"), "V")),
+        stRow("ac_current", stCode("readings.ac_current"), "AC current", numParts(R("ac_current"), "A", 1)),
+        stRow("dc_voltage", stCode("readings.dc_voltage"), "DC bus", numParts(R("dc_voltage"), "V")),
+        stRow("ipm", stCode("temperatures.ipm"), "IPM module", tempParts(ipm),
+          ipm != null && ipm >= ST_IPM_WARN_C ? { sub: "Running hot", tone: "warn" } : {}),
+      ];
+
+      return `<div class="page">${pageHead("Status", "Live readings from the heat pump.")}${alert}
+        <section class="card st-sum" data-status="summary">${top}<div class="st-stats">${stats}</div>${def}<div class="st-chips">${chips}</div></section>
+        <div class="st-grid">${stGroup("water", "Water loop", true, water)}${stGroup("perf", "Performance", true, perf)}</div>
+        <div class="st-grid three">${stGroup("refrig", "Refrigerant circuit", false, refrig)}${stGroup("outdoor", "Outdoor", false, outdoor)}${
+          stGroup("elec", "Electrical", false, elec)}</div>
       </div>`;
     }
     function setpointCard(key, label) {
@@ -1746,7 +1940,7 @@
           p.writable ? `<button class="btn" type="button" data-action="ap-default" data-default="${esc(def)}">Use default</button>` : ""}</div>`;
       }
       return `<form class="ap-row" data-form="ap" data-key="${esc(key)}" data-kind="${kind}" data-gate>
-        <div><strong>${esc(key)} · ${esc(p.name)}</strong><p>${esc((p.detail || "").replace(/\{T:(-?\d+)\}/g, (_, c) => temp(c)))}</p>${fallback}</div>
+        <div><div class="ap-title">${codePill(key)}<strong>${esc(p.name)}</strong></div><p>${esc((p.detail || "").replace(/\{T:(-?\d+)\}/g, (_, c) => temp(c)))}</p>${fallback}</div>
         <div class="ap-value">${input}${p.writable ? `<div class="btn-row"><button class="btn primary" type="submit">Save</button>
           <button class="btn" type="button" data-action="form-revert">Revert</button></div>` : ""}</div></form>`;
     }
@@ -1769,7 +1963,7 @@
         <section class="card" style="margin-top:20px"><div class="card-head"><div><h2>Advanced parameters</h2><div class="metric-sub">Changes apply directly to heat-pump controls.</div></div>
           <button class="btn" data-action="reload-params">Refresh</button></div>
           ${Object.keys(groups).length ? Object.entries(groups).map(([category, rows]) =>
-            `<details class="ap-group" data-fold="ap-${esc(category)}" ${foldOpen(`ap-${category}`)}><summary>${esc(category)} · ${rows.length}</summary>${rows.map(([k,p]) => apControl(k,p)).join("")}</details>`).join("") :
+            `<details class="ap-group" data-fold="ap-${esc(category)}" ${foldOpen(`ap-${category}`)}><summary>${esc(category)}<span class="cnt">${rows.length}</span></summary>${rows.map(([k,p]) => apControl(k,p)).join("")}</details>`).join("") :
             `<div class="empty">No advanced parameters available.</div>`}
         </section>
       </div>`;
@@ -3396,12 +3590,14 @@
       const results = await Promise.allSettled([
         api("/api/info"), api("/api/status"), api("/api/wifi"), api("/api/heatpump/status"),
         api("/api/preferences"), api("/api/heatpump/errors"), api("/api/ota/status"), api("/api/notifications"),
-        api("/api/weather")
+        api("/api/weather"), state.catalog ? Promise.resolve(null) : api("/api/heatpump/catalog")
       ]);
       const values = results.map(r => r.status === "fulfilled" ? r.value : {});
       [state.info, state.status, state.wifi, state.hp, state.preferences, state.errors, state.ota] = values;
       state.notifications = values[7].notifications || [];
       state.weather = values[8];
+      // The code catalog is static for a firmware build: fetch it once.
+      if (values[9]?.fields) state.catalog = values[9].fields;
       state.coreLoaded = true;
       resolveInstallOutcome();
       updateDocumentTitle();
