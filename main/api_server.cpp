@@ -28,13 +28,13 @@
 #include "heatpump_types.h"
 #include "macon_master_iface.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
+#include "macon_fields.h"  // arctic::macon_field_find (OEM codes for catalog / diagnostics)
 #ifdef CONFIG_TEST_ENDPOINTS
 // Register-map headers are pulled in for the debug/test diagnostic export only
 // (the register-address column + raw fault-register rows). A production image
 // never includes them, so it carries no Macon register map at all.
 #include "macon_image.h"   // arctic::MaconField / macon_field_address
 #include "macon_faults.h"  // arctic::MACON_FAULT_REGS (fault-register addresses)
-#include "macon_fields.h"  // arctic::macon_*_fingerprint (bus-library compatibility)
 #endif
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "ext_temp_sensors.h"  // heat output & COP settings, external sensors
