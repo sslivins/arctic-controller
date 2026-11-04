@@ -406,7 +406,7 @@ ${notable.length ? `<table><thead><tr><th style="width:170px">When</th><th style
   const CAT = M.catalog || {}, code = key => CAT[key]?.code || '';
   const eev = key => {
     const v = R[key], max = CAT[`readings.${key}`]?.max;
-    return v == null ? null : max ? `${Math.round(v / max * 100)} % (${v} of ${max} steps)` : `${v} steps`;
+    return v == null ? null : max ? `${Math.min(100, Math.round(v / max * 100))} % (${v} of ${max} steps)` : `${v} steps`;
   };
   const idle = !S.compressor, run = v => idle ? null : v;
   const tempRows = [['Tank', T.tank, 'tank'], ['Outlet', T.outlet, 'outlet'], ['Inlet', T.inlet, 'inlet'], ['Outdoor air', T.outdoor, 'outdoor'],

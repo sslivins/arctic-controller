@@ -1851,13 +1851,17 @@
       // Refrigerant circuit. Estimates are only meaningful in a steady run.
       const steadyRun = comp && !defrost && fresh;
       const hidden = defrost ? "Hidden during defrost" : "";
-      const est = (show, value, sub) => show && value != null && !Number.isNaN(value)
-        ? [tempParts(value, "differential"), { sub }] : [["--", ""], { sub: hidden || sub, tone: "muted" }];
+      // Each estimate is positive by construction in a steady run; below zero
+      // means the sensors don't fit the assumption, so don't show a number.
+      const est = (show, value, sub) => !show || value == null || Number.isNaN(value)
+        ? [["--", ""], { sub: hidden || sub, tone: "muted" }]
+        : value < 0 ? [["--", ""], { sub: "Below zero: sensors disagree", tone: "muted" }]
+        : [tempParts(value, "differential"), { sub }];
       const eev = (key, name) => {
         const steps = R(key), max = state.catalog?.[`readings.${key}`]?.max;
         if (steps == null) return stRow(key, stCode(`readings.${key}`), name, ["--", ""]);
         if (!max) return stRow(key, stCode(`readings.${key}`), name, [String(steps), "steps"]);
-        return stRow(key, stCode(`readings.${key}`), name, [String(Math.round(steps * 100 / max)), "%"], { sub: `${steps} of ${max} steps` });
+        return stRow(key, stCode(`readings.${key}`), name, [String(Math.min(100, Math.round(steps * 100 / max))), "%"], { sub: `${steps} of ${max} steps` });
       };
       const diff = (a, b) => a == null || b == null ? null : a - b;
       const discharge = T("discharge"), ipm = T("ipm");

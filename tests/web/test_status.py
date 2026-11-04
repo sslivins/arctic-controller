@@ -76,6 +76,12 @@ class TestStatusPage:
         expect(row.locator(".val")).to_have_text("36%")
         expect(row.locator(".sub")).to_have_text("180 of 500 steps")
 
+    def test_negative_estimate_is_not_shown(self, dashboard_page: Page):
+        page = _open_status(dashboard_page, {"temperatures": {"suction": -4}})
+        expect(_row(page, "superheat").locator(".val")).to_have_text("--")
+        expect(_row(page, "superheat").locator(".sub")).to_have_text("Below zero: sensors disagree")
+        expect(_row(page, "coil_approach").locator(".val")).to_have_text("5°C")
+
     def test_water_dt_blank_when_pump_off(self, dashboard_page: Page):
         page = _open_status(dashboard_page, {"pump": False, "pump_on_s": None})
         expect(_row(page, "water_dt").locator(".val")).to_have_text("--")

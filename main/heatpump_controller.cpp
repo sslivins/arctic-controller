@@ -385,10 +385,12 @@ void initDemoState() {
     s_image.set_temp(MaconField::WaterTankTemp, 42);
     s_image.set_temp(MaconField::OutletWaterTemp, 45);
     s_image.set_temp(MaconField::InletWaterTemp, 38);
-    s_image.set_temp(MaconField::OutdoorAmbientTemp, 22);
-    s_image.set_temp(MaconField::IndoorCoilTemp, 40);
-    s_image.set_temp(MaconField::OutdoorCoilTemp, 35);
-    s_image.set_temp(MaconField::SuctionTemp, 12);
+    // A plausible heating run at 7 °C outdoors: coil 5 below air, suction a few
+    // degrees above the coil, water HX a few degrees above the outlet.
+    s_image.set_temp(MaconField::OutdoorAmbientTemp, 7);
+    s_image.set_temp(MaconField::IndoorCoilTemp, 48);
+    s_image.set_temp(MaconField::OutdoorCoilTemp, 2);
+    s_image.set_temp(MaconField::SuctionTemp, 6);
     s_image.set_temp(MaconField::DischargeTemp, 85);
     s_image.set_temp(MaconField::IpmTemp, 55);
 
@@ -730,14 +732,20 @@ static void applyMaconMapping() {
     s_state.fan_running             = ms.fan_on;
     s_state.defrosting              = ms.defrost_on;
     {
+        // "Coil at start" is the last reading before defrost began: by the
+        // first poll that sees the defrost flag the coil is already warming.
+        static int16_t s_pre_defrost_coil_c = 0;
+        static bool s_pre_defrost_coil_valid = false;
         const uint32_t now = getTimeMs();
         if (ms.defrost_on && s_state.defrost_start_ms == 0) {
             s_state.defrost_start_ms = now ? now : 1;
-            s_state.defrost_start_coil_c = ms.outdoor_coil_c;
-            s_state.defrost_start_coil_valid = ms.outdoor_coil_valid;
+            s_state.defrost_start_coil_c = s_pre_defrost_coil_valid ? s_pre_defrost_coil_c : ms.outdoor_coil_c;
+            s_state.defrost_start_coil_valid = s_pre_defrost_coil_valid || ms.outdoor_coil_valid;
         } else if (!ms.defrost_on) {
             s_state.defrost_start_ms = 0;
             s_state.defrost_start_coil_valid = false;
+            s_pre_defrost_coil_c = ms.outdoor_coil_c;
+            s_pre_defrost_coil_valid = ms.outdoor_coil_valid;
         }
         if (ms.pump_on && s_state.pump_on_since_ms == 0) {
             s_state.pump_on_since_ms = now ? now : 1;

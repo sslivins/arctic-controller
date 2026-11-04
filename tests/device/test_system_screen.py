@@ -162,6 +162,15 @@ class TestStatusDerived:
         sub = _wait_text(device, "st_discharge_sub", lambda t: t == "Near limit")
         assert sub == "Near limit"
 
+    def test_negative_estimate_is_not_shown(self, device: DeviceClient):
+        # Seeds put the suction (12) below the outdoor coil (35).
+        _open_status(device)
+        sub = _wait_text(device, "st_superheat_sub", lambda t: t == "Below zero: sensors disagree")
+        assert sub == "Below zero: sensors disagree"
+        assert _text(device, "st_superheat") == "--"
+        device.set_demo_fields(suction_temp=38)
+        assert _wait_text(device, "st_superheat", lambda t: t == "3") == "3"
+
 
 class TestStatusDefrost:
     def test_defrost_panel_and_paused_performance(self, device: DeviceClient):

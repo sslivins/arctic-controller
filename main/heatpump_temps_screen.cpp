@@ -791,7 +791,11 @@ static void update_readings() {
     cell_temp(c[R_SUCTION], hp.suction_temp);
     const char* hidden = defrost ? i18n_get(STR_ST_SUB_HIDDEN_DEFROST) : nullptr;
     auto estimate = [&](RowId id, bool show, int16_t diff, string_id_t sub) {
-        if (show) {
+        // All three estimates are positive by construction in a steady run; a
+        // reading below zero means the sensors don't fit the assumption.
+        if (show && diff < 0) {
+            cell_hidden(c[id], i18n_get(STR_ST_SUB_IMPLAUSIBLE));
+        } else if (show) {
             cell_delta(c[id], diff, false);
             c[id].sub = i18n_get(sub);
         } else {
@@ -811,7 +815,8 @@ static void update_readings() {
             c[id].unit = i18n_get(STR_HP_UNIT_STEPS);
             return;
         }
-        fmt_int(c[id].value, sizeof(c[id].value), (steps * 100 + hp.eev_max_steps / 2) / hp.eev_max_steps);
+        const unsigned pct = (steps * 100u + hp.eev_max_steps / 2) / hp.eev_max_steps;
+        fmt_int(c[id].value, sizeof(c[id].value), pct > 100 ? 100 : pct);
         c[id].unit = "%";
         snprintf(c[id].sub_buf, sizeof(c[id].sub_buf), i18n_get(STR_ST_EEV_STEPS_FMT),
                  (unsigned)steps, (unsigned)hp.eev_max_steps);
