@@ -71,10 +71,10 @@ class TestStatusPage:
         expect(page.locator("[data-status='defrost']")).to_have_count(0)
         expect(page.locator("[data-status='fault']")).to_have_count(0)
 
-    def test_eev_shows_percent_of_full_travel(self, dashboard_page: Page):
+    def test_eev_shows_steps_and_percent_open(self, dashboard_page: Page):
         row = _row(_open_status(dashboard_page), "primary_eev")
-        expect(row.locator(".val")).to_have_text("36%")
-        expect(row.locator(".sub")).to_have_text("180 of 500 steps")
+        expect(row.locator(".val")).to_have_text("180steps")
+        expect(row.locator(".sub")).to_have_text("36% open")
 
     def test_negative_estimate_is_not_shown(self, dashboard_page: Page):
         page = _open_status(dashboard_page, {"temperatures": {"suction": -4}})

@@ -1861,7 +1861,7 @@
         const steps = R(key), max = state.catalog?.[`readings.${key}`]?.max;
         if (steps == null) return stRow(key, stCode(`readings.${key}`), name, ["--", ""]);
         if (!max) return stRow(key, stCode(`readings.${key}`), name, [String(steps), "steps"]);
-        return stRow(key, stCode(`readings.${key}`), name, [String(Math.min(100, Math.round(steps * 100 / max))), "%"], { sub: `${steps} of ${max} steps` });
+        return stRow(key, stCode(`readings.${key}`), name, [String(steps), "steps"], { sub: `${Math.min(100, Math.round(steps * 100 / max))}% open` });
       };
       const diff = (a, b) => a == null || b == null ? null : a - b;
       const discharge = T("discharge"), ipm = T("ipm");

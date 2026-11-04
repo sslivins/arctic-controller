@@ -26,9 +26,9 @@ DEMO_ROWS = {
     "ac_voltage": ("A13", "230", "V"),
     "ac_current": ("A4", "5", "A"),
     "dc_voltage": ("A7", "380", "V"),
-    # EEV openings are shown as a percentage of the library's 500-step travel.
-    "primary_eev": ("A5", "74", "%"),
-    "aux_eev": ("o6", "58", "%"),
+    # EEV openings lead with steps; the sub-line is % of the 500-step travel.
+    "primary_eev": ("A5", "370", "steps"),
+    "aux_eev": ("o6", "290", "steps"),
 }
 
 SECTION_HEADERS = {
@@ -121,10 +121,10 @@ class TestStatusRows:
                  and 0 <= w.x - (val.x + val.w) < 30]
         assert units, f"unit {unit!r} not rendered next to st_{key}"
 
-    def test_eev_sub_line_shows_steps(self, device: DeviceClient):
+    def test_eev_sub_line_shows_percent_open(self, device: DeviceClient):
         _open_status(device)
-        sub = _wait_text(device, "st_primary_eev_sub", lambda t: t and "370" in t)
-        assert sub == "370 of 500 steps"
+        sub = _wait_text(device, "st_primary_eev_sub", lambda t: t and "74" in t)
+        assert sub == "74% open"
 
     def test_no_setpoint_rows_and_target_in_summary(self, device: DeviceClient):
         """Only the active target is shown, inside the summary line."""

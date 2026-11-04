@@ -150,7 +150,7 @@ Home Assistant is unaffected either way: it always uses the dedicated, pinned TL
   fault, and a defrost panel while defrosting. Each reading leads with the code the
   OEM controller shows for it (e.g. A14, o3); estimated readings (water ΔT, COP,
   superheat, approach temperatures) are hidden when they would be meaningless, such as
-  during defrost. EEV openings show as a percentage of full travel.
+  during defrost. EEV openings show in motor steps, with the percentage of full travel below.
 - **Cycle history** - Compressor run cycles and faults with inlet, outlet, and setpoint
   temperatures over the last 8 hours
 - **Control** - Working mode and setpoints

@@ -810,16 +810,12 @@ static void update_readings() {
              cooling ? STR_ST_SUB_HX_COOL : STR_ST_SUB_HX_HEAT);
     auto eev = [&](RowId id, bool valid, uint16_t steps) {
         if (!valid) return;
-        if (hp.eev_max_steps == 0) {
-            fmt_int(c[id].value, sizeof(c[id].value), steps);
-            c[id].unit = i18n_get(STR_HP_UNIT_STEPS);
-            return;
-        }
+        fmt_int(c[id].value, sizeof(c[id].value), steps);
+        c[id].unit = i18n_get(STR_HP_UNIT_STEPS);
+        if (hp.eev_max_steps == 0) return;
         const unsigned pct = (steps * 100u + hp.eev_max_steps / 2) / hp.eev_max_steps;
-        fmt_int(c[id].value, sizeof(c[id].value), pct > 100 ? 100 : pct);
-        c[id].unit = "%";
-        snprintf(c[id].sub_buf, sizeof(c[id].sub_buf), i18n_get(STR_ST_EEV_STEPS_FMT),
-                 (unsigned)steps, (unsigned)hp.eev_max_steps);
+        snprintf(c[id].sub_buf, sizeof(c[id].sub_buf), i18n_get(STR_ST_EEV_PCT_FMT),
+                 pct > 100 ? 100u : pct);
     };
     eev(R_MAIN_EEV, hp.primary_eev_valid, hp.primary_eev_opening);
     eev(R_AUX_EEV, hp.aux_eev_valid, hp.aux_eev_opening);
