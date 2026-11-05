@@ -361,8 +361,14 @@ private:
             cur_.thermal_s += dt;
             note_settings(p);
         }
-        if (p.outdoor_valid) {
+        // Skip defrost and its tail: the coil runs hot with the fan stopped,
+        // so the air sensor beside it reads 30-47 °C until shortly after.
+        const int64_t out_from = a > defrost_end_s_ + kPostDefrostSeconds
+                                     ? a
+                                     : defrost_end_s_ + kPostDefrostSeconds;
+        if (p.outdoor_valid && !p.defrost && b > out_from) {
             const int16_t deci = (int16_t)(p.outdoor_c * 10);
+            const uint32_t out_dt = (uint32_t)(b - out_from);
             if (!(cur_.flags & DAY_OUTDOOR_SET)) {
                 cur_.outdoor_min_deci = deci;
                 cur_.outdoor_max_deci = deci;
@@ -370,19 +376,11 @@ private:
             }
             if (deci < cur_.outdoor_min_deci) cur_.outdoor_min_deci = deci;
             if (deci > cur_.outdoor_max_deci) cur_.outdoor_max_deci = deci;
-            cur_.outdoor_sum_deci_s += (int64_t)deci * dt;
-            cur_.outdoor_s += dt;
-            if (p.running && mode && !p.defrost) {
-                // Skip the tail of a defrost: the stopped fan leaves the
-                // sensor reading warm for about a minute after it ends.
-                const int64_t from = a > defrost_end_s_ + kPostDefrostSeconds
-                                         ? a
-                                         : defrost_end_s_ + kPostDefrostSeconds;
-                if (b > from) {
-                    const uint32_t run_dt = (uint32_t)(b - from);
-                    cur_.run_outdoor_sum_deci_s += (int32_t)deci * (int32_t)run_dt;
-                    cur_.run_outdoor_s += run_dt;
-                }
+            cur_.outdoor_sum_deci_s += (int64_t)deci * out_dt;
+            cur_.outdoor_s += out_dt;
+            if (p.running && mode) {
+                cur_.run_outdoor_sum_deci_s += (int32_t)deci * (int32_t)out_dt;
+                cur_.run_outdoor_s += out_dt;
             }
         }
     }

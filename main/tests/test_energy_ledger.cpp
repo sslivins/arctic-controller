@@ -408,7 +408,9 @@ static void outdoor_while_running() {
     const DayRecord r = l.today();
     CHECK_EQ_L(r.flags & DAY_RUN_OUTDOOR_SET, DAY_RUN_OUTDOOR_SET);
     CHECK_EQ_L(r.outdoor_run_avg_deci, (0 * 3600 - 20 * 3480) / (3600 + 3480));
-    CHECK_EQ_L(r.outdoor_max_deci, 300);
+    // The day's figures leave out the defrost and its tail too.
+    CHECK_EQ_L(r.outdoor_max_deci, 200);
+    CHECK_EQ_L(r.outdoor_avg_deci, (200 * 3600 + 0 * 3600 - 20 * 3480) / (3600 + 3600 + 3480));
 
     // Never ran (or a day booked before this existed): no running average.
     EnergyLedger never;
