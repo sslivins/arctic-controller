@@ -1582,13 +1582,13 @@
       chart.setCard(homeCard);
       homeTs = { el, chart, sig: "", data: null, unit: state.preferences.temp_unit };
     }
-    // Card: time, tank, what the unit was doing in that bucket, active faults.
+    // Card, in the cycles chart's order: time, what the unit was doing in that
+    // bucket, tank and setpoint, then active faults.
     function homeCard(info, card) {
       const data = homeTs?.data, s = info.sample;
       if (!data || !s) return;
       const b0 = s.b0, b1 = s.b0 + s.bs;
       card.add("title", fmtHistClock(Math.round(s.t), true));
-      card.addLayers();
       // The span in this bucket, preferring the one under the cursor.
       const inBucket = list => {
         const hits = (list || []).filter(x => x.start < b1 && (x.end ?? data.end) > b0);
@@ -1604,6 +1604,10 @@
       const span = sp && { start: sp.start, end: sp.end ?? data.end, clipStart: sp.start < data.start, open: sp.end == null };
       card.add("block", runText, span ? fmtRunLength(span, true) : "", runColor || "var(--cp-text-muted)");
       if (span) card.add("text", fmtRunSpan(span, true));
+      card.addLayers();
+      // The setpoint is the current one, as drawn by the reference line.
+      const setp = homeSetpoint();
+      if (setp != null) card.add("value", "Setpoint", temp(setp), "var(--cp-text-muted)");
       (data.faults || []).filter(x => x.start < b1 && (x.end ?? data.end) > b0).slice(0, 2)
         .forEach(x => card.add("warning", `⚠ ${x.fault_code || "?"} ${x.fault_label || ""}`.trim()));
     }
