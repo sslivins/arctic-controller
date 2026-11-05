@@ -102,7 +102,10 @@ class TestHome:
         dashboard_page.mouse.move(box["x"] + box["width"] * 0.95, box["y"] + box["height"] / 2)
         tip = dashboard_page.locator("[data-home-chart] .tschart-card")
         expect(tip).to_be_visible()
-        expect(tip).to_contain_text("Tank")
+        expect(tip).to_contain_text("Setpoint")
+        # Same order as the cycles chart: time, what the unit was doing, then readings.
+        lines = [x.strip() for x in tip.inner_text().splitlines() if x.strip()]
+        assert lines.index("Tank") > 1 and lines.index("Setpoint") > lines.index("Tank"), lines
 
     def test_chart_tooltip_names_a_defrost(self, dashboard_page: Page):
         """A defrost splits the run it interrupts, so it sits outside every run
