@@ -1578,6 +1578,7 @@
       chart.addKey("cooling", "Cooling", "var(--band-cool)", band);
       chart.addKey("hot_water", "Hot water", "var(--band-dhw)", band);
       chart.addKey("defrost", "Defrost", "var(--home-defrost)", { fillStrength: "var(--hist-defrost-strength)" });
+      chart.addKey("freeze", "Freeze Protection", "var(--home-freeze-text)", "hatch");
       chart.addKey("fault", "Fault", "var(--cp-danger)", "hatch");
       chart.setCard(homeCard);
       homeTs = { el, chart, sig: "", data: null, unit: state.preferences.temp_unit };
@@ -1597,8 +1598,11 @@
       const run = inBucket(data.runs);
       // A defrost isn't part of a run span, so check it first or it reads "Idle".
       const defrost = inBucket(data.defrosts);
+      // A ~30 s freeze-protection pump run, only while idle (as on the cycles chart).
+      const fp = !defrost && !run && inBucket(data.freeze_protection);
       const [runText, runColor] = defrost ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
-        : run ? HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating : ["Idle", ""];
+        : run ? HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating
+        : fp ? [HOME_STATE_LABEL.freeze_protection, "var(--home-freeze-text)"] : ["Idle", ""];
       // The window always ends now, so an open span is still running.
       const sp = defrost || run;
       const span = sp && { start: sp.start, end: sp.end ?? data.end, clipStart: sp.start < data.start, open: sp.end == null };
@@ -1644,7 +1648,8 @@
           chart.setSpans(0, (data.runs || []).map(r => ({ start: r.start, end: r.end ?? null, minWidth: 2,
             key: HOME_RUN_BAND[r.mode] ? r.mode : "heating" })));
           chart.setSpans(1, (data.defrosts || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "defrost" })));
-          chart.setSpans(2, (data.faults || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "fault" })));
+          chart.setSpans(2, (data.freeze_protection || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "freeze" })));
+          chart.setSpans(3, (data.faults || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "fault" })));
           chart.setNotes((data.faults || []).map(x => ({ time: x.start, text: x.fault_code || "?", color: "var(--cp-danger)" })), "⚠ ");
           chart.setRefLines(sp == null ? [] : [{ pane: "tank", value: tempNumber(sp) * 10,
             color: "color-mix(in srgb, var(--cp-text-muted) 75%, transparent)", label: temp(sp) }]);
