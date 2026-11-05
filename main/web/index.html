@@ -923,6 +923,8 @@
       .page-head { gap: 14px; }
       .page-actions { gap: 8px; }
       .card { padding: 18px 16px; }
+      /* Charts bleed into the card's side padding; their axis labels need the width. */
+      .home-chart-host, .hist-chart, .en-chart { margin-inline: -10px; }
       .kv { grid-template-columns: 1fr; gap: 3px; }
       .kv strong { overflow-wrap: anywhere; }
       .field label input[type="checkbox"] { width: 40px !important; min-width: 40px; height: 40px; min-height: 40px; }
