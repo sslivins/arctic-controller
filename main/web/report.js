@@ -121,10 +121,13 @@ const lastDay = days[nDays - 1], todayPartial = M.to < lastDay.t1;
 const short = calls.filter(r => len(r) < 600 && !r.clipStart && !r.open);
 const medLen = calls.length ? Math.round(median(calls.map(len)) / 60) : null;
 
-// Outdoor: daily max far above the day's average is a sensor spike, not weather.
-const spikes = full.filter(d => d.outdoor_c && d.outdoor_c.max != null && d.outdoor_c.max - d.outdoor_c.avg > 20);
+// Outdoor: daily max far above the day's average isn't weather. On a day with
+// defrosts it is the coil heating the air sensor (the firmware now leaves
+// defrost out of the day's figures); without one it's a suspect sensor.
+const jumped = d => d.outdoor_c && d.outdoor_c.max != null && d.outdoor_c.max - d.outdoor_c.avg > 20;
+const spikes = full.filter(d => jumped(d) && !d.defrost?.count);
 const outDays = full.filter(d => d.outdoor_c && d.outdoor_c.min != null);
-const outMin = min(outDays.map(d => d.outdoor_c.min)), outMax = max(outDays.filter(d => !spikes.includes(d)).map(d => d.outdoor_c.max));
+const outMin = min(outDays.map(d => d.outdoor_c.min)), outMax = max(outDays.filter(d => !jumped(d)).map(d => d.outdoor_c.max));
 const callAir = r => r.air ?? dayOf(r.start)?.outdoor_c?.run_avg ?? null;
 // Average while running, weighted by call length (calls with an outdoor reading only).
 const airCalls = calls.filter(r => callAir(r) != null), airS = sum(airCalls, len);
@@ -222,7 +225,7 @@ if (spikes.length) {
   const sm = spikes.map(d => d.outdoor_c.max), sa = spikes.map(d => d.outdoor_c.avg);
   unit.push(finding('warn', `Outdoor reading jumped to ${n1(min(sm))}–${T0(max(sm))} on ${plural(spikes.length, 'day')}`,
     `On those days the average was ${n1(min(sa))} to ${T0(max(sa))}${outMax != null ? `, and the other days never went above ${T0(outMax)}` : ''}. Brief spikes like this aren't real air temperature.`,
-    'Outdoor air sensor placement (sun, defrost discharge) or wiring. The unit uses this sensor for defrost control.'));
+    'Outdoor air sensor placement (direct sun, a nearby heat source) or wiring. The unit uses this sensor for defrost control.'));
   verdict.push(['warn', 'a suspect outdoor sensor']);
 }
 if (calls.length) {
