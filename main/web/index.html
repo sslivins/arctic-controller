@@ -3073,9 +3073,21 @@
     }
     const histNoHistory = data => !(data.samples && data.samples.length) &&
       data.start <= data.earliest && data.end >= data.latest_end;
+    // The heading rounds to 5 min (1-2 h windows) or 15 min (longer); the
+    // live window ends "now", and a same-day end drops the repeated date.
+    function histRangeText(data) {
+      const grain = data.window_seconds <= 7200 ? 300 : 900;
+      const round = t => Math.round(t / grain) * grain;
+      const start = round(data.start);
+      if (data.end >= data.latest_end) return [fmtHistClock(start, true), "now"];
+      const end = round(data.end), a = ctlParts(start), b = ctlParts(end);
+      const sameDay = a.y === b.y && a.mo === b.mo && a.d === b.d;
+      return [fmtHistClock(start, true), sameDay ? fmtClock(b.h, b.mi) : fmtHistClock(end, true)];
+    }
     function histTop(data) {
       const atLatest = data.end >= data.latest_end, win = data.window_seconds;
-      return `<div class="hist-range-row"><span class="hist-range"><span>${esc(fmtHistClock(data.start, true))} —</span> <span>${esc(fmtHistClock(data.end, true))}</span></span>
+      const [from, to] = histRangeText(data);
+      return `<div class="hist-range-row"><span class="hist-range"><span>${esc(from)} —</span> <span>${esc(to)}</span></span>
           <div class="hist-range-actions">
             <div class="en-ranges hist-zoom" role="group" aria-label="Window">${HIST_WINDOWS.map(w =>
               `<button class="${win === w ? "active" : ""}" data-action="history-window" data-window="${w}" aria-pressed="${win === w}">${fmtHistSpan(w)}</button>`).join("")}</div>

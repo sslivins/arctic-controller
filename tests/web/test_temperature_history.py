@@ -121,6 +121,9 @@ class TestTemperatureHistoryWeb:
         expect(dashboard_page.locator('[data-action="history-latest"]')).to_be_disabled()
 
         range_before = dashboard_page.locator(".hist-range").inner_text()
+        # The live window ends "now" and starts on a 5- or 15-minute mark.
+        assert range_before.endswith("now"), range_before
+        assert int(re.search(r":(\d\d)", range_before).group(1)) % 5 == 0, range_before
         dashboard_page.locator('[data-action="history-prev"]').click()
         dashboard_page.wait_for_function(
             "prev => document.querySelector('.hist-range')?.innerText !== prev",
