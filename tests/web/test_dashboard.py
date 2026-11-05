@@ -109,7 +109,8 @@ class TestHome:
 
     def test_chart_tooltip_names_a_defrost(self, dashboard_page: Page):
         """A defrost splits the run it interrupts, so it sits outside every run
-        span; the tooltip must still call it a defrost, not "Idle"."""
+        span; the tooltip must still call it a defrost, not "Idle". A
+        freeze-protection run while idle is named as well."""
         span = {}
 
         def patch(route):
@@ -120,6 +121,7 @@ class TestHome:
             body["runs"] = [{"start": end - 3600, "end": end - 1800, "mode": "heating"},
                             {"start": end - 1200, "end": end - 600, "mode": "heating"}]
             body["defrosts"] = [{"start": end - 1800, "end": end - 1200}]
+            body["freeze_protection"] = [{"start": end - 400, "end": end - 370}]
             route.fulfill(response=resp, json=body)
 
         dashboard_page.route("**/api/heatpump/home-history", patch)
@@ -157,6 +159,10 @@ class TestHome:
         hover_at(span["end"] - 2700)
         expect(tip).to_contain_text("Heating")
         expect(tip).to_contain_text("30 min")
+        # An idle anti-freeze pump run is drawn and named too.
+        expect(dashboard_page.locator("[data-home-chart] .tschart-span[data-key='freeze']")).to_have_count(1)
+        hover_at(span["end"] - 385)
+        expect(tip).to_contain_text("Freeze protection")
 
     def _expect_history_cycles(self, page: Page):
         expect(page.get_by_role("heading", name="History", exact=True)).to_be_visible()
