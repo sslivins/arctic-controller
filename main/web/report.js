@@ -521,13 +521,13 @@ function activityChart(el, getDays) {
   };
   return ch;
 }
-const rng = { days: Math.min(14, nDays), end: maxEnd };
+const rng = { days: 1, end: maxEnd };
 const ov = activityChart($('ov'), () => rng.days);
 function showRange() {
   // Today is partial, so the newest full-length range would start before the report does.
   const start = Math.max(minStart, rng.end - rng.days * 86400);
   ov.show(start, rng.end);
-  $('rngLbl').textContent = rng.days === 1 ? day(start + 1) : `${day(start + 1)} – ${day(rng.end - 1)}`;
+  $('rngLbl').textContent = day(start + 1) === day(rng.end - 1) ? day(start + 1) : `${day(start + 1)} – ${day(rng.end - 1)}`;
   document.querySelectorAll('.rng [data-days]').forEach(b => b.classList.toggle('on', +b.dataset.days === rng.days));
   document.querySelector('.rng [data-step="-1"]').disabled = start <= minStart;
   document.querySelector('.rng [data-step="1"]').disabled = rng.end >= maxEnd;
@@ -552,8 +552,10 @@ document.querySelector('.units').addEventListener('click', e => {
   try { localStorage.setItem('reportUnit', u); } catch { /* file:// storage can be off */ }
   location.hash = u; location.reload();
 });
-// The printout always shows the whole period.
-window.addEventListener('beforeprint', () => { rng.days = Math.min(14, nDays); rng.end = maxEnd; showRange(); });
+// The printout always shows the whole period; the screen goes back afterwards.
+let onScreen = null;
+window.addEventListener('beforeprint', () => { onScreen = { ...rng }; rng.days = Math.min(14, nDays); rng.end = maxEnd; showRange(); });
+window.addEventListener('afterprint', () => { if (onScreen) { Object.assign(rng, onScreen); onScreen = null; showRange(); } });
 showRange();
 
 // Busiest day: most calls, then most defrosts.
