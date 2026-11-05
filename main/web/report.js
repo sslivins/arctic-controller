@@ -195,8 +195,16 @@ function faultStory(f) {
 }
 
 // Controller restarts.
-const restarts = ev('system_start'), fw = ev('firmware_updated'), wd = ev('watchdog_reset'), crashes = ev('application_crash'), brown = ev('brownout_reset');
-const unexplained = Math.max(0, restarts.length - fw.length - wd.length - crashes.length - brown.length);
+// Each restart takes the cause logged with the same boot. A main-watchdog
+// reset without a crash dump (watchdog "other") says nothing about why, and
+// an abrupt power loss can look like one, so it stays unknown.
+const restarts = ev('system_start');
+const sameBoot = (a, b) => a.boot_id != null && b.boot_id != null ? a.boot_id === b.boot_id : Math.abs(a.timestamp - b.timestamp) <= 5;
+const bootHas = (r, t, f = () => true) => E.some(e => e.type === t && sameBoot(e, r) && f(e));
+const restartCause = r => bootHas(r, 'firmware_updated') ? 'fw' : bootHas(r, 'application_crash') ? 'crash' : bootHas(r, 'brownout_reset') ? 'brown'
+  : bootHas(r, 'watchdog_reset', e => e.watchdog === 'task' || e.watchdog === 'interrupt') ? 'hang' : 'unknown';
+const byCause = k => restarts.filter(r => restartCause(r) === k);
+const fw = byCause('fw'), crashes = byCause('crash'), brown = byCause('brown'), hangs = byCause('hang'), unknown = byCause('unknown');
 const sensorLost = ev('ext_sensor_lost');
 
 // Freeze protection.
@@ -269,14 +277,19 @@ if (FZ.length) {
 }
 if (sensorLost.length) ctrl.push(finding('warn', `COP sensors dropped out ${plural(sensorLost.length, 'time')}`, `External supply/return sensors stopped answering; COP falls back to the unit's sensors while they are out.`, 'Network path to the sensor gateway.'));
 if (restarts.length) {
-  const wdT = wd.slice(0, 3).map(e => when(e.timestamp)).join(', ') + (wd.length > 3 ? ', …' : '');
-  const why = [fw.length ? `${fw.length} ${fw.length === 1 ? 'was a firmware update' : 'were firmware updates'}` : '',
-    wd.length ? `${wd.length} ${wd.length === 1 ? 'was a watchdog reset' : 'were watchdog resets'} (${wdT})` : '',
-    crashes.length ? `${plural(crashes.length, 'crash', 'crashes')}` : '', brown.length ? `${plural(brown.length, 'brownout')}` : ''].filter(Boolean);
-  const sev = wd.length || crashes.length || brown.length || unexplained ? 'warn' : 'ok';
+  const at = l => ` (${l.slice(0, 3).map(e => when(e.timestamp)).join(', ')}${l.length > 3 ? ', …' : ''})`;
+  const was = (l, one, many) => l.length ? `${l.length} ${l.length === 1 ? `was ${one}` : `were ${many}`}` : '';
+  const why = [was(fw, 'a firmware update', 'firmware updates'),
+    crashes.length ? `${was(crashes, 'a crash', 'crashes')}${at(crashes)}` : '',
+    brown.length ? `${was(brown, 'a brownout', 'brownouts')}${at(brown)}` : '',
+    hangs.length ? `${was(hangs, 'a firmware watchdog reset', 'firmware watchdog resets')}${at(hangs)}` : '',
+    unknown.length ? `${unknown.length} had an unknown cause${at(unknown)}` : ''].filter(Boolean);
+  const sev = fw.length === restarts.length ? 'ok' : 'warn';
+  const hint = [crashes.length ? 'The controller saved a crash dump for each crash.' : '',
+    brown.length ? "A brownout means the controller's supply voltage dropped below its threshold." : '',
+    hangs.length ? 'In a firmware watchdog reset the controller stopped responding and restarted itself.' : ''].filter(Boolean).join(' ');
   ctrl.push(finding(sev, `Controller restarted ${plural(restarts.length, 'time')}`,
-    `${why.length ? why.join(', ').replace(/^./, c => c.toUpperCase()) + '.' : ''}${unexplained ? ` ${unexplained === restarts.length ? 'None have' : `The other ${unexplained} ${unexplained === 1 ? 'has' : 'have'}`} no recorded cause (power loss or a manual restart).` : ''}`,
-    sev === 'warn' ? 'Unexplained restarts point at power quality or controller firmware. Not a heat pump fault.' : ''));
+    why.join(', ').replace(/^./, c => c.toUpperCase()) + '.', hint));
 } else ctrl.push(finding('ok', 'No controller restarts', ''));
 const vSev = verdict.some(v => v[0] === 'bad') ? 'bad' : verdict.some(v => v[0] === 'warn') ? 'warn' : '';
 const vFirst = activeNow ? verdict.shift()[1] : 'Running normally with no active fault.';
