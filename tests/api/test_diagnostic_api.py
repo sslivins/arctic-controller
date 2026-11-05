@@ -60,7 +60,7 @@ EXPECTED_CATEGORIES = [
     "Parameter",
 ]
 
-CSV_HEADER = ["Category", "Name", "P-Code", "Register Address", "Value", "Unit"]
+CSV_HEADER = ["Category", "Name", "Code", "Register Address", "Value", "Unit"]
 
 # UTF-8 BOM bytes
 UTF8_BOM = b"\xef\xbb\xbf"
@@ -392,9 +392,22 @@ class TestDiagnosticContent:
         param_rows = self._rows_by_category("Parameter")
         assert len(param_rows) >= 10, "Expected at least 10 parameters"
         for row in param_rows:
-            assert row["P-Code"].startswith("AP"), (
-                f"Parameter '{row['Name']}' missing AP-code: {row['P-Code']}"
+            assert row["Code"].startswith("AP"), (
+                f"Parameter '{row['Name']}' missing AP-code: {row['Code']}"
             )
+
+    def test_oem_codes_from_field_catalog(self):
+        """Telemetry rows carry the OEM display code; code-less rows stay blank."""
+        all_rows = self._get_rows()
+        rows = {(r["Category"], r["Name"]): r for r in all_rows}
+        assert rows[("Temperature", "Tank")]["Code"] == "o1"
+        assert rows[("Temperature", "Water HX")]["Code"] == "A6"
+        assert rows[("Reading", "DC bus")]["Code"] == "A7"
+        eev = rows[("Reading", "Main EEV")]
+        assert (eev["Code"], eev["Unit"]) == ("A5", "steps")
+        assert rows[("Setpoint", "Heating")]["Code"] == ""
+        assert rows[("Reading", "Assumed Flow")]["Code"] == ""
+        assert any(r["Code"] == "AP14" for r in all_rows if r["Category"] == "Parameter")
 
     def test_parameters_have_register_addresses(self):
         param_rows = self._rows_by_category("Parameter")
@@ -427,39 +440,39 @@ class TestDiagnosticValues:
         # Raw temp registers decode 1:1 to whole degrees C.
         _inject_demo({"water_tank_temp": 42, "inlet_water_temp": 38})
         rows = _wait_diag_rows(
-            lambda rows: _row_value_from(rows, "Temperature", "Water Tank") == "42"
-            and _row_value_from(rows, "Temperature", "Inlet Water") == "38",
+            lambda rows: _row_value_from(rows, "Temperature", "Tank") == "42"
+            and _row_value_from(rows, "Temperature", "Inlet") == "38",
             "diagnostic temps to reflect injected values",
         )
-        assert _row_value_from(rows, "Temperature", "Water Tank") == "42"
-        assert _row_value_from(rows, "Temperature", "Inlet Water") == "38"
+        assert _row_value_from(rows, "Temperature", "Tank") == "42"
+        assert _row_value_from(rows, "Temperature", "Inlet") == "38"
 
     def test_ac_current_is_whole_amps(self):
         # AC current decodes 1:1 to whole amps (not tenths).
         _inject_demo({"ac_current": 5})
         rows = _wait_diag_rows(
-            lambda rows: _row_value_from(rows, "Reading", "AC Current") == "5",
+            lambda rows: _row_value_from(rows, "Reading", "AC current") == "5",
             "diagnostic AC current to reflect injected value",
         )
-        assert _row_value_from(rows, "Reading", "AC Current") == "5"
+        assert _row_value_from(rows, "Reading", "AC current") == "5"
 
     def test_ac_voltage_natural_units(self):
         # Demo AC voltage is expressed in natural volts; it round-trips through
         # the diagnostic CSV unchanged (the library handles any wire scaling).
         _inject_demo({"ac_voltage": 230})
         rows = _wait_diag_rows(
-            lambda rows: _row_value_from(rows, "Reading", "AC Voltage") == "230",
+            lambda rows: _row_value_from(rows, "Reading", "AC voltage") == "230",
             "diagnostic AC voltage to reflect injected value",
         )
-        assert _row_value_from(rows, "Reading", "AC Voltage") == "230"
+        assert _row_value_from(rows, "Reading", "AC voltage") == "230"
 
     def test_compressor_frequency_value(self):
         _inject_demo({"compressor_freq": 60})
         rows = _wait_diag_rows(
-            lambda rows: _row_value_from(rows, "Reading", "Compressor Frequency") == "60",
+            lambda rows: _row_value_from(rows, "Reading", "Compressor") == "60",
             "diagnostic compressor frequency to reflect injected value",
         )
-        assert _row_value_from(rows, "Reading", "Compressor Frequency") == "60"
+        assert _row_value_from(rows, "Reading", "Compressor") == "60"
 
 
 # ── Error Injection ───────────────────────────────────────────────────────
@@ -482,7 +495,7 @@ class TestDiagnosticErrors:
             assert len(error_rows) >= 1, "Expected at least 1 error row after injection"
 
             # The error row should have an Arctic error code in P-Code column
-            codes = [r["P-Code"] for r in error_rows if r["P-Code"]]
+            codes = [r["Code"] for r in error_rows if r["Code"]]
             assert len(codes) >= 1, "Error rows should have Arctic error codes"
         finally:
             _clear_faults()

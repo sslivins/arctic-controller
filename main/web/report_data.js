@@ -41,10 +41,10 @@
       const step = text => progress && progress(text);
       step("Reading settings");
       const opt = p => p.catch(() => null);
-      const [info, prefs, status, advanced, perf, timeConfig, location, latest] = await Promise.all([
+      const [info, prefs, status, advanced, perf, timeConfig, location, latest, catalog, errors] = await Promise.all([
         api("/api/info"), api("/api/preferences"), api("/api/heatpump/status"), opt(api("/api/heatpump/advanced")),
         opt(api("/api/performance/config")), opt(api("/api/time/config")), opt(api("/api/location")),
-        api(`/api/heatpump/temperature-history?window=${REPORT_WINDOW}`)]);
+        api(`/api/heatpump/temperature-history?window=${REPORT_WINDOW}`), opt(api("/api/heatpump/catalog")), opt(api("/api/heatpump/errors"))]);
       const tz = reportZone(timeConfig, location);
       const interval = latest.sample_interval_sec || 30;
 
@@ -181,7 +181,7 @@
         "to_version", "watchdog", "setpoint", "from", "to", "param", "param_name", "unit", "temperature_kind", "from_label", "to_label"];
       const slim = e => Object.fromEntries(keep.filter(k => e[k] != null).map(k => [k, e[k]]));
       return {
-        meta: { info: { hostname: info.hostname, version: info.version }, prefs, status, advanced: advanced || { params: {} }, perf,
+        meta: { info: { hostname: info.hostname, version: info.version }, prefs, status, advanced: advanced || { params: {} }, perf, catalog: catalog?.fields || {}, activeFaults: errors?.active || [],
           tz, from, to, generated, interval, telemetryFrom: first ? first.t : null, earliest: latest.earliest,
           coverage: { expected: Math.round((to - Math.max(from, latest.earliest || from)) / interval), got: samples.length,
             connected: samples.filter(s => s.conn).length, maxGap },

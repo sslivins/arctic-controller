@@ -729,6 +729,13 @@ class TestSettingsWorkspace:
             for heading in ["Heat pump findings", "At a glance", "Activity", "By day", "Unit snapshot"]:
                 expect(page.get_by_role("heading", name=re.compile(f"^{heading}"))).to_be_visible()
             expect(page.locator("#ov svg").first).to_be_visible()
+            # Snapshot rows lead with the OEM code from the firmware catalog;
+            # code-less rows keep a blank pill cell.
+            tank = page.locator("#p5 tr", has_text="Tank").first
+            expect(tank.locator(".code")).to_have_text("o1")
+            expect(page.locator("#p5 tr", has_text="DC bus").locator(".code")).to_have_text("A7")
+            expect(page.locator("#p5 tr", has_text="Flow (configured)").locator(".code")).to_have_count(0)
+            expect(page.locator("#p5 .code", has_text=re.compile(r"^AP14$")).first).to_be_visible()
             page.locator('.units [data-u="F"]').click()
             expect(page.locator('.units [data-u="F"]')).to_have_class("on")
             assert page.url.endswith("#F")

@@ -385,10 +385,12 @@ void initDemoState() {
     s_image.set_temp(MaconField::WaterTankTemp, 42);
     s_image.set_temp(MaconField::OutletWaterTemp, 45);
     s_image.set_temp(MaconField::InletWaterTemp, 38);
-    s_image.set_temp(MaconField::OutdoorAmbientTemp, 22);
-    s_image.set_temp(MaconField::IndoorCoilTemp, 40);
-    s_image.set_temp(MaconField::OutdoorCoilTemp, 35);
-    s_image.set_temp(MaconField::SuctionTemp, 12);
+    // A plausible heating run at 7 °C outdoors: coil 5 below air, suction a few
+    // degrees above the coil, water HX a few degrees above the outlet.
+    s_image.set_temp(MaconField::OutdoorAmbientTemp, 7);
+    s_image.set_temp(MaconField::IndoorCoilTemp, 48);
+    s_image.set_temp(MaconField::OutdoorCoilTemp, 2);
+    s_image.set_temp(MaconField::SuctionTemp, 6);
     s_image.set_temp(MaconField::DischargeTemp, 85);
     s_image.set_temp(MaconField::IpmTemp, 55);
 
@@ -397,7 +399,7 @@ void initDemoState() {
     s_image.set_value(MaconField::AcVoltage, 230);      // V
     s_image.set_value(MaconField::DcVoltage, 380);      // V
     s_image.set_value(MaconField::FanLevel, 400);      // RPM
-    s_image.set_value(MaconField::PrimaryEev, 18);      // steps, as OEM A5 shows it
+    s_image.set_value(MaconField::PrimaryEev, 180);     // steps (OEM A5)
     s_image.set_value(MaconField::AuxEev, 0);           // steps, OEM o6
     s_image.set_value(MaconField::CompressorFreq, 60);  // Hz
     // ~19 kW heat out (7 K at loop flow) / 5.5 kW in: COP ~3.5.
@@ -729,6 +731,28 @@ static void applyMaconMapping() {
     s_state.pump_running            = ms.pump_on;
     s_state.fan_running             = ms.fan_on;
     s_state.defrosting              = ms.defrost_on;
+    {
+        // "Coil at start" is the last reading before defrost began: by the
+        // first poll that sees the defrost flag the coil is already warming.
+        static int16_t s_pre_defrost_coil_c = 0;
+        static bool s_pre_defrost_coil_valid = false;
+        const uint32_t now = getTimeMs();
+        if (ms.defrost_on && s_state.defrost_start_ms == 0) {
+            s_state.defrost_start_ms = now ? now : 1;
+            s_state.defrost_start_coil_c = s_pre_defrost_coil_valid ? s_pre_defrost_coil_c : ms.outdoor_coil_c;
+            s_state.defrost_start_coil_valid = s_pre_defrost_coil_valid || ms.outdoor_coil_valid;
+        } else if (!ms.defrost_on) {
+            s_state.defrost_start_ms = 0;
+            s_state.defrost_start_coil_valid = false;
+            s_pre_defrost_coil_c = ms.outdoor_coil_c;
+            s_pre_defrost_coil_valid = ms.outdoor_coil_valid;
+        }
+        if (ms.pump_on && s_state.pump_on_since_ms == 0) {
+            s_state.pump_on_since_ms = now ? now : 1;
+        } else if (!ms.pump_on) {
+            s_state.pump_on_since_ms = 0;
+        }
+    }
     s_state.backup_heater           = false;  // no confirmed Macon register
     s_state.reversing_valve_cooling = ms.cooling_on;
     s_state.unit_on         = ms.running;
@@ -750,6 +774,7 @@ static void applyMaconMapping() {
     s_state.primary_eev_valid   = ms.primary_eev_valid;
     s_state.aux_eev_opening     = ms.aux_eev;
     s_state.aux_eev_valid       = ms.aux_eev_valid;
+    s_state.eev_max_steps       = MACON_EEV_MAX_STEPS;
     s_state.compressor_freq     = ms.compressor_freq;
     // Real-time power in watts, decoded by the macon library.
     // Preferred over the old V*I/10 estimate, which is now 10x low because the

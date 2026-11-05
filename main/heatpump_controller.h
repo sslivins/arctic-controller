@@ -67,8 +67,8 @@ struct HeatPumpState {
     bool     ac_current_valid = false;
     uint16_t dc_voltage = 0;         // V (volts; unit conversion owned by macon lib)
     bool     dc_voltage_valid = false;
-    // Main electronic expansion valve opening (OEM A5) in steps, as the OEM
-    // display shows it. The unit is unconfirmed (the display may be steps/10).
+    // Main electronic expansion valve opening (OEM A5) in steps (the macon
+    // library scales the wire byte; see arctic-macon REGISTERS.md).
     // 0 is a REAL state (valve closed), so "unknown"
     // must never be reported as 0 - consult primary_eev_valid and surface
     // null/unavailable instead.
@@ -77,6 +77,18 @@ struct HeatPumpState {
     // Auxiliary (EVI) expansion valve opening (OEM o6), steps. Usually 0.
     uint16_t aux_eev_opening = 0;       // steps
     bool     aux_eev_valid = false;
+    // Full EEV travel in steps (library-owned MACON_EEV_MAX_STEPS); UIs show
+    // opening as a percentage of this.
+    uint16_t eev_max_steps = 0;
+
+    // Defrost bookkeeping (controller-side): when the current defrost began
+    // (getTimeMs) and the outdoor coil temperature at that moment. Both are
+    // meaningful only while defrosting.
+    uint32_t defrost_start_ms = 0;
+    int16_t  defrost_start_coil_c = 0;
+    bool     defrost_start_coil_valid = false;
+    // When the water pump last switched on (getTimeMs); 0 while it is off.
+    uint32_t pump_on_since_ms = 0;
     uint32_t realtime_power_w = 0;   // W (real-time power; conversion owned by macon lib)
     // Electrical energy used today (local day), from the energy ledger.
     uint32_t energy_today_wh = 0;

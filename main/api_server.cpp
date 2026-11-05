@@ -28,13 +28,13 @@
 #include "heatpump_types.h"
 #include "macon_master_iface.h"
 #include "macon_state.h"  // arctic::setpoint_limits / SetpointKind
+#include "macon_fields.h"  // arctic::macon_field_find (OEM codes for catalog / diagnostics)
 #ifdef CONFIG_TEST_ENDPOINTS
 // Register-map headers are pulled in for the debug/test diagnostic export only
 // (the register-address column + raw fault-register rows). A production image
 // never includes them, so it carries no Macon register map at all.
 #include "macon_image.h"   // arctic::MaconField / macon_field_address
 #include "macon_faults.h"  // arctic::MACON_FAULT_REGS (fault-register addresses)
-#include "macon_fields.h"  // arctic::macon_*_fingerprint (bus-library compatibility)
 #endif
 #include "advanced_params.h"  // advanced_param_write() AP guardrail
 #include "ext_temp_sensors.h"  // heat output & COP settings, external sensors
@@ -276,6 +276,7 @@ static esp_err_t auth_credentials_post_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_get_handler(httpd_req_t* req);
 static esp_err_t auth_apikey_regenerate_handler(httpd_req_t* req);
 static esp_err_t heatpump_status_handler(httpd_req_t* req);
+static esp_err_t heatpump_catalog_handler(httpd_req_t* req);
 #ifdef CONFIG_TEST_ENDPOINTS
 // Protocol-debug endpoints (raw register cache / observed Tuya windows). They
 // surface raw register addresses, so they are compiled only into debug/test
@@ -1411,6 +1412,15 @@ static bool api_server_start_locked(void)
         .user_ctx = NULL
     };
     REGISTER_URI(heatpump_uri);
+
+    // GET /api/heatpump/catalog - OEM codes / units / ranges for readings
+    httpd_uri_t heatpump_catalog_uri = {
+        .uri = "/api/heatpump/catalog",
+        .method = HTTP_GET,
+        .handler = heatpump_catalog_handler,
+        .user_ctx = NULL
+    };
+    REGISTER_URI(heatpump_catalog_uri);
     
 #ifdef CONFIG_TEST_ENDPOINTS
     // GET /api/heatpump/raw - debug raw register cache dump (debug/test only)
@@ -4612,7 +4622,33 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddStringToObject(root, "mode", arctic::workingModeToString(hp.working_mode));
     cJSON_AddStringToObject(root, "operation", arctic::heatPumpOperationToString(hp.operation));
     cJSON_AddBoolToObject(root, "defrosting", hp.isDefrosting());
-    
+
+    // Freshness and controller-tracked timers for the Status page. All are
+    // seconds measured on the controller's monotonic clock.
+    {
+        const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        if (hp.connected && hp.last_successful_read_ms != 0) {
+            cJSON_AddNumberToObject(root, "data_age_s", (uint32_t)(now_ms - hp.last_successful_read_ms) / 1000);
+        } else {
+            cJSON_AddNullToObject(root, "data_age_s");
+        }
+        if (hp.isDefrosting() && hp.defrost_start_ms != 0) {
+            cJSON* df = cJSON_AddObjectToObject(root, "defrost");
+            cJSON_AddNumberToObject(df, "elapsed_s", (uint32_t)(now_ms - hp.defrost_start_ms) / 1000);
+            if (hp.defrost_start_coil_valid) {
+                cJSON_AddNumberToObject(df, "start_coil", hp.defrost_start_coil_c);
+            } else {
+                cJSON_AddNullToObject(df, "start_coil");
+            }
+        } else {
+            cJSON_AddNullToObject(root, "defrost");
+        }
+        if (hp.isWaterPumpRunning() && hp.pump_on_since_ms != 0) {
+            cJSON_AddNumberToObject(root, "pump_on_s", (uint32_t)(now_ms - hp.pump_on_since_ms) / 1000);
+        } else {
+            cJSON_AddNullToObject(root, "pump_on_s");
+        }
+    }
     // Components
     cJSON_AddBoolToObject(root, "compressor", hp.isCompressorRunning());
     cJSON_AddBoolToObject(root, "fans", hp.isFanRunning());
@@ -4684,7 +4720,11 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(readings, "ac_voltage", hp.ac_voltage);
     cJSON_AddNumberToObject(readings, "ac_current", hp.ac_current);
     cJSON_AddNumberToObject(readings, "dc_voltage", hp.getDcVoltageV());
-    cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
+    if (hp.primary_eev_valid) {
+        cJSON_AddNumberToObject(readings, "primary_eev", hp.primary_eev_opening);
+    } else {
+        cJSON_AddNullToObject(readings, "primary_eev");
+    }
     if (hp.aux_eev_valid) {
         cJSON_AddNumberToObject(readings, "aux_eev", hp.aux_eev_opening);
     } else {
@@ -4725,6 +4765,59 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     free(json_str);
     cJSON_Delete(root);
     
+    return ESP_OK;
+}
+
+// GET /api/heatpump/catalog - static description of the status readings:
+// for each /api/heatpump/status key, the OEM display code, unit and range from
+// the arctic-macon field catalog. Fetched once by clients (never part of the
+// 5 s status poll); clients own the localized labels.
+static esp_err_t heatpump_catalog_handler(httpd_req_t* req)
+{
+    if (!check_api_auth(req)) {
+        send_json_error(req, "401 Unauthorized", "API key required");
+        return ESP_OK;
+    }
+    set_json_content_type(req);
+
+    static const struct { const char* key; const char* field; } kMap[] = {
+        {"temperatures.tank",          "water_tank_temp"},
+        {"temperatures.outlet",        "outlet_water_temp"},
+        {"temperatures.inlet",         "inlet_water_temp"},
+        {"temperatures.outdoor",       "outdoor_ambient_temp"},
+        {"temperatures.discharge",     "discharge_temp"},
+        {"temperatures.suction",       "suction_temp"},
+        {"temperatures.outdoor_coil",  "outdoor_coil_temp"},
+        {"temperatures.indoor_coil",   "indoor_coil_temp"},
+        {"temperatures.ipm",           "ipm_temp"},
+        {"readings.compressor_freq",   "compressor_freq"},
+        {"readings.fan_rpm",           "fan_speed"},
+        {"readings.ac_voltage",        "ac_voltage"},
+        {"readings.ac_current",        "ac_current"},
+        {"readings.dc_voltage",        "dc_voltage"},
+        {"readings.primary_eev",       "primary_eev"},
+        {"readings.aux_eev",           "aux_eev"},
+        {"readings.power_consumption", "realtime_power"},
+    };
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON* fields = cJSON_AddObjectToObject(root, "fields");
+    for (const auto& m : kMap) {
+        const arctic::MaconFieldDesc* d = arctic::macon_field_find(m.field);
+        if (d == nullptr) continue;
+        cJSON* o = cJSON_AddObjectToObject(fields, m.key);
+        if (d->oem_code) cJSON_AddStringToObject(o, "code", d->oem_code);
+        else cJSON_AddNullToObject(o, "code");
+        if (d->unit) cJSON_AddStringToObject(o, "unit", d->unit);
+        else cJSON_AddNullToObject(o, "unit");
+        cJSON_AddNumberToObject(o, "min", d->min);
+        cJSON_AddNumberToObject(o, "max", d->max);
+    }
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_sendstr(req, json_str);
+    free(json_str);
+    cJSON_Delete(root);
     return ESP_OK;
 }
 
@@ -6143,8 +6236,15 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     // UTF-8 BOM so Excel interprets the file correctly (degree signs, accents, etc.)
     httpd_resp_send_chunk(req, "\xEF\xBB\xBF", 3);  // glyphs: not-ui
 
-    // CSV header
-    httpd_resp_sendstr_chunk(req, "Category,Name,P-Code,Register Address,Value,Unit\r\n");
+    // CSV header. "Code" is the OEM display code (o1..o6, A1..A14 from the
+    // macon field catalog, APnn for technician parameters, the fault code for
+    // errors); blank for rows the OEM display has no code for.
+    httpd_resp_sendstr_chunk(req, "Category,Name,Code,Register Address,Value,Unit\r\n");
+
+    auto code_of = [](const char* field) -> const char* {
+        const arctic::MaconFieldDesc* d = arctic::macon_field_find(field);
+        return d && d->oem_code ? d->oem_code : "";
+    };
 
     arctic::HeatPumpState hp = arctic::getState();
     bool demo = arctic::isDemoMode();
@@ -6164,46 +6264,48 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     // --- Temperatures (whole °C, already decoded by the macon library) ---
     // The address column is populated only in debug/test builds; in production
     // the field name never appears (DIAG_ADDR expands to "").
-    #define DIAG_TEMP(name_str, field, macon_field) \
-        snprintf(line, sizeof(line), "Temperature,%s,,%s,%d,°C\r\n", name_str, \
-                 DIAG_ADDR(macon_field), (int)(field)); \
+    // Names match the Status page.
+    #define DIAG_TEMP(name_str, field, cat_name, macon_field) \
+        snprintf(line, sizeof(line), "Temperature,%s,%s,%s,%d,°C\r\n", name_str, \
+                 code_of(cat_name), DIAG_ADDR(macon_field), (int)(field)); \
         httpd_resp_sendstr_chunk(req, line);
 
-    DIAG_TEMP("Water Tank",       hp.water_tank_temp,       WaterTankTemp)
-    DIAG_TEMP("Outlet Water",     hp.outlet_water_temp,     OutletWaterTemp)
-    DIAG_TEMP("Inlet Water",      hp.inlet_water_temp,      InletWaterTemp)
-    DIAG_TEMP("Discharge",        hp.discharge_temp,        DischargeTemp)
-    DIAG_TEMP("Suction",          hp.suction_temp,          SuctionTemp)
-    DIAG_TEMP("Outdoor Coil",     hp.outdoor_coil_temp,     OutdoorCoilTemp)
-    DIAG_TEMP("Indoor Coil",      hp.indoor_coil_temp,      IndoorCoilTemp)
-    DIAG_TEMP("Outdoor Ambient",  hp.outdoor_ambient_temp,  OutdoorAmbientTemp)
-    DIAG_TEMP("IPM Module",       hp.ipm_temp,              IpmTemp)
+    DIAG_TEMP("Tank",          hp.water_tank_temp,      "water_tank_temp",      WaterTankTemp)
+    DIAG_TEMP("Inlet",         hp.inlet_water_temp,     "inlet_water_temp",     InletWaterTemp)
+    DIAG_TEMP("Outlet",        hp.outlet_water_temp,    "outlet_water_temp",    OutletWaterTemp)
+    DIAG_TEMP("Outdoor air",   hp.outdoor_ambient_temp, "outdoor_ambient_temp", OutdoorAmbientTemp)
+    DIAG_TEMP("Discharge",     hp.discharge_temp,       "discharge_temp",       DischargeTemp)
+    DIAG_TEMP("Outdoor coil",  hp.outdoor_coil_temp,    "outdoor_coil_temp",    OutdoorCoilTemp)
+    DIAG_TEMP("Suction",       hp.suction_temp,         "suction_temp",         SuctionTemp)
+    DIAG_TEMP("Water HX",      hp.indoor_coil_temp,     "indoor_coil_temp",     IndoorCoilTemp)
+    DIAG_TEMP("IPM module",    hp.ipm_temp,             "ipm_temp",             IpmTemp)
     #undef DIAG_TEMP
 
     // --- Setpoints (whole °C) ---
-    snprintf(line, sizeof(line), "Setpoint,Cooling,,%s,%d,°C\r\n", DIAG_ADDR(CoolingSetpoint), hp.cooling_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Cooling,%s,%s,%d,°C\r\n", code_of("cooling_setpoint"), DIAG_ADDR(CoolingSetpoint), hp.cooling_setpoint);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Setpoint,Heating,,%s,%d,°C\r\n", DIAG_ADDR(HeatingSetpoint), hp.heating_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Heating,%s,%s,%d,°C\r\n", code_of("heating_setpoint"), DIAG_ADDR(HeatingSetpoint), hp.heating_setpoint);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Setpoint,Hot Water,,%s,%d,°C\r\n", DIAG_ADDR(HotWaterSetpoint), hp.hot_water_setpoint);
+    snprintf(line, sizeof(line), "Setpoint,Hot Water,%s,%s,%d,°C\r\n", code_of("hot_water_setpoint"), DIAG_ADDR(HotWaterSetpoint), hp.hot_water_setpoint);
     httpd_resp_sendstr_chunk(req, line);
 
     // --- System Readings (already decoded to whole units by the macon library) ---
-    snprintf(line, sizeof(line), "Reading,Compressor Frequency,,%s,%u,Hz\r\n", DIAG_ADDR(CompressorFreq), hp.compressor_freq);
+    snprintf(line, sizeof(line), "Reading,Compressor,%s,%s,%u,Hz\r\n", code_of("compressor_freq"), DIAG_ADDR(CompressorFreq), hp.compressor_freq);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Fan Speed,,%s,%u,RPM\r\n", DIAG_ADDR(FanLevel), hp.fan_speed);
+    snprintf(line, sizeof(line), "Reading,Fan,%s,%s,%u,RPM\r\n", code_of("fan_speed"), DIAG_ADDR(FanLevel), hp.fan_speed);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,AC Voltage,,%s,%u,V\r\n", DIAG_ADDR(AcVoltage), hp.ac_voltage);
+    snprintf(line, sizeof(line), "Reading,AC voltage,%s,%s,%u,V\r\n", code_of("ac_voltage"), DIAG_ADDR(AcVoltage), hp.ac_voltage);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,AC Current,,%s,%u,A\r\n", DIAG_ADDR(AcCurrent), hp.ac_current);
+    snprintf(line, sizeof(line), "Reading,AC current,%s,%s,%u,A\r\n", code_of("ac_current"), DIAG_ADDR(AcCurrent), hp.ac_current);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,DC Voltage,,%s,%.1f,V\r\n", DIAG_ADDR(DcVoltage), hp.getDcVoltageV());
+    snprintf(line, sizeof(line), "Reading,DC bus,%s,%s,%.1f,V\r\n", code_of("dc_voltage"), DIAG_ADDR(DcVoltage), hp.getDcVoltageV());
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line),     "Reading,Primary EEV Opening,,%s,%u,steps\r\n", DIAG_ADDR(PrimaryEev), hp.primary_eev_opening);
+    // EEV openings are motor steps (0..the catalog max).
+    snprintf(line, sizeof(line), "Reading,Main EEV,%s,%s,%u,steps\r\n", code_of("primary_eev"), DIAG_ADDR(PrimaryEev), hp.primary_eev_opening);
     httpd_resp_sendstr_chunk(req, line);
-        snprintf(line, sizeof(line), "Reading,Aux EEV Opening,,%s,%u,steps\r\n", DIAG_ADDR(AuxEev), hp.aux_eev_opening);
+    snprintf(line, sizeof(line), "Reading,Aux EEV,%s,%s,%u,steps\r\n", code_of("aux_eev"), DIAG_ADDR(AuxEev), hp.aux_eev_opening);
     httpd_resp_sendstr_chunk(req, line);
-    snprintf(line, sizeof(line), "Reading,Power Consumption,,%s,%lu,W\r\n", DIAG_ADDR(RealtimePower), (unsigned long)hp.realtime_power_w);
+    snprintf(line, sizeof(line), "Reading,Input power,%s,%s,%lu,W\r\n", code_of("realtime_power"), DIAG_ADDR(RealtimePower), (unsigned long)hp.realtime_power_w);
     httpd_resp_sendstr_chunk(req, line);
     #undef DIAG_ADDR
     if (hp.cop_valid) {

@@ -84,12 +84,14 @@ The initial exposed snapshot includes:
 - Temperatures.
 - Setpoints and setpoint limits.
 - Compressor frequency, power, thermal output, and COP when valid.
-- Primary EEV opening (OEM A5) in steps, and AC/DC electrical readings. Each is
-  `null` when the underlying register has not been read, because 0 is a
-  legitimate measured value for all of them (an EEV opening of 0 means the
-  valve is fully closed, not unknown). The opening is the value the OEM
-  display shows. Steps is the likely unit but isn't confirmed (the display may
-  be steps / 10), and the opening is never expressed as a percentage.
+- Primary and auxiliary EEV openings (OEM A5 / o6) in motor steps, and AC/DC
+  electrical readings. Each is `null` when the underlying register has not
+  been read, because 0 is a legitimate measured value for all of them (an EEV
+  opening of 0 means the valve is fully closed, not unknown). From firmware
+  3.8.0 the openings are real steps: the mainboard reports steps / 10, so the
+  values are 10× what earlier firmware sent (and 10× what the OEM display
+  shows). Full travel is assumed to be 500 steps; HA receives steps, never a
+  percentage.
 - Current error state. When a fault is active this includes `help_url`, a link
   to Arctic's troubleshooting article for that fault code (or to Arctic's
   support site when there is no article for it).

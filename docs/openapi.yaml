@@ -2087,6 +2087,30 @@ paths:
                     type: boolean
                     description: Whether the unit is in defrost cycle
                     example: false
+                  data_age_s:
+                    type: integer
+                    nullable: true
+                    description: Seconds since the last successful read from the mainboard; null while disconnected
+                    example: 2
+                  defrost:
+                    type: object
+                    nullable: true
+                    description: The defrost in progress (tracked by the controller); null when not defrosting
+                    properties:
+                      elapsed_s:
+                        type: integer
+                        description: Seconds since the defrost began
+                        example: 95
+                      start_coil:
+                        type: integer
+                        nullable: true
+                        description: Outdoor coil temperature (°C) when the defrost began; null if it was not read
+                        example: -6
+                  pump_on_s:
+                    type: integer
+                    nullable: true
+                    description: Seconds the water pump has been running; null while it is off
+                    example: 600
                   compressor:
                     type: boolean
                     description: Compressor running state
@@ -2221,12 +2245,13 @@ paths:
                         example: 380.0
                       primary_eev:
                         type: integer
-                        description: Main EEV opening (OEM A5) in steps, as the OEM display shows it. The unit is unconfirmed (the display may be steps / 10).
-                        example: 18
+                        nullable: true
+                        description: Main EEV opening (OEM A5) in motor steps (0 to the max in /api/heatpump/catalog); null until read
+                        example: 180
                       aux_eev:
                         type: integer
                         nullable: true
-                        description: Auxiliary (EVI) EEV opening (OEM o6) in steps (unit unconfirmed, as for primary_eev); null until read
+                        description: Auxiliary (EVI) EEV opening (OEM o6) in motor steps, as for primary_eev; null until read
                         example: 0
                       power_consumption:
                         type: integer
@@ -2282,6 +2307,59 @@ paths:
 
         '400':
           $ref: '#/components/responses/BadRequest'
+  /api/heatpump/catalog:
+    get:
+      tags:
+      - HeatPump
+      summary: Status reading catalog
+      description: |
+        Static description of the /api/heatpump/status readings, from the
+        arctic-macon field catalog: for each status key (dotted path such as
+        `temperatures.outlet` or `readings.primary_eev`) the OEM display code
+        (o1..o6, A1..A14), the unit, and the reading's range. Clients fetch it
+        once (it never changes while the firmware runs) and keep localized
+        labels themselves. The EEV `max` is the full valve travel in steps,
+        used to show openings as a percentage.
+      operationId: getHeatpumpCatalog
+      security:
+      - apiKey: []
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Reading catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [fields]
+                properties:
+                  fields:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                          nullable: true
+                          description: OEM display code, or null if the reading has none
+                          example: A5
+                        unit:
+                          type: string
+                          nullable: true
+                          description: Unit (C, Hz, V, A, W, RPM, steps); null if raw
+                          example: steps
+                        min:
+                          type: integer
+                          example: 0
+                        max:
+                          type: integer
+                          example: 500
+        '401':
+          description: API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/heatpump/raw:
     get:
       tags:
@@ -2579,7 +2657,13 @@ paths:
         active errors, and advanced (AP) parameters with current values.
         Useful for remote troubleshooting with Arctic support.
 
-        CSV columns: Category, Name, P-Code, Register Address, Value, Unit
+        CSV columns: Category, Name, Code, Register Address, Value, Unit
+
+        `Code` is the OEM display code: o1-o6 / A1-A14 for readings (from the
+        arctic-macon field catalog, as in /api/heatpump/catalog), APnn for
+        technician parameters and the fault code for errors. It is blank for
+        rows the OEM display has no code for (setpoints, estimates, state).
+        Reading names match the Status page; EEV openings are in motor steps.
 
         Sections:
         - System State (power, mode, connection)

@@ -45,6 +45,20 @@ DEMO_TEMPS_C = {
 }
 
 
+# Status tab value tags for the same readings.
+STATUS_TEMP_TAGS = {
+    "st_tank": 42,
+    "st_outlet": 45,
+    "st_inlet": 38,
+    "st_outdoor": 22,
+    "st_discharge": 85,
+    "st_suction": 12,
+    "st_outdoor_coil": 35,
+    "st_water_hx": 40,
+    "st_ipm": 55,
+}
+
+
 def _c_to_f(celsius: int) -> int:
     """Convert Celsius to Fahrenheit using the same formula as the firmware."""
     return round(celsius * 9 / 5 + 32)
@@ -230,25 +244,37 @@ class TestHeroTankFahrenheit:
 class TestTempsScreenFahrenheit:
     """Temperatures sub-screen displays all values in Fahrenheit.
 
-    The temps sub-screen hardcodes its own demo values (same numbers as
-    the demo register defaults). Each test opens the screen fresh — the
+    Each reading's number lives in its "st_<key>" value label, with the unit
+    in a separate muted label. Each test opens the screen fresh — the
     conftest ensure_main_screen + _restore_celsius handle cleanup.
     """
 
-    @pytest.mark.parametrize("label,celsius", list(DEMO_TEMPS_C.items()),
-                             ids=[k.replace(" ", "_") for k in DEMO_TEMPS_C])
-    def test_temp_value_in_fahrenheit(self, device: DeviceClient, label, celsius):
-        """Each temperature should display the correct °F value."""
+    @pytest.mark.parametrize("tag,celsius", list(STATUS_TEMP_TAGS.items()))
+    def test_temp_value_in_fahrenheit(self, device: DeviceClient, tag, celsius):
+        """Each temperature row should display the correct °F value."""
+        _reset_demo_temps(device)
         _switch_to_fahrenheit(device)
         device.wait_for_widget(tag="nav_status", timeout=3.0)
         device.click(tag="nav_status")
         assert device.wait_for_screen("status", timeout=5.0)
 
-        expected_f = _c_to_f(celsius)
-        _wait_screen_text(device, f"{expected_f} °F")
-        # Temps screen uses "value °F" format (with space)
-        assert _has_text_containing(device, f"{expected_f} °F"), \
-            f"Expected '{expected_f} °F' for {label}, not found on screen"
+        expected_f = str(_c_to_f(celsius))
+        _wait_widget_contains(device, tag, expected_f)
+        w = device.find_widget(tag=tag)
+        assert w is not None and w.text == expected_f, \
+            f"Expected {expected_f} for {tag}, got {w and w.text!r}"
+
+    def test_water_delta_converts_without_offset(self, device: DeviceClient):
+        """A temperature difference is x1.8 in °F with no +32 offset."""
+        _reset_demo_temps(device)
+        device.set_demo_fields(pump_on=1)
+        _switch_to_fahrenheit(device)
+        device.click(tag="nav_status")
+        assert device.wait_for_screen("status", timeout=5.0)
+        # outlet 45 - inlet 38 = 7 °C -> 12.6 -> 13 °F
+        _wait_widget_contains(device, "st_water_dt", "+13")
+        w = device.find_widget(tag="st_water_dt")
+        assert w is not None and w.text == "+13"
 
     def test_no_celsius_symbol_in_f_mode(self, device: DeviceClient):
         """When in °F mode, no widget should contain '°C'."""

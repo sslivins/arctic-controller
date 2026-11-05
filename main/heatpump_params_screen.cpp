@@ -106,6 +106,7 @@ static struct {
     // Edit dialog
     lv_obj_t* edit_dialog = nullptr;
     lv_obj_t* edit_title = nullptr;
+    lv_obj_t* edit_code = nullptr;
     lv_obj_t* edit_detail = nullptr;
     lv_obj_t* edit_description = nullptr;
     lv_obj_t* edit_value_label = nullptr;
@@ -564,6 +565,29 @@ static void load_timer_cb(lv_timer_t* timer) {
     state.load_index++;
 }
 
+// OEM code pill ("AP14") leading AP rows and the edit dialog title, styled
+// like the Status tab's pills.
+static constexpr int AP_PILL_W = 66;
+
+static void set_ap_code_text(lv_obj_t* pill, uint8_t ap) {
+    lv_label_set_text_fmt(pill, "AP%u", (unsigned)ap);
+}
+
+static lv_obj_t* create_ap_code_pill(lv_obj_t* parent, uint8_t ap) {
+    lv_obj_t* pill = lv_label_create(parent);
+    set_ap_code_text(pill, ap);
+    lv_obj_set_size(pill, AP_PILL_W, 34);
+    lv_obj_set_style_radius(pill, 8, LV_PART_MAIN);
+    lv_obj_set_style_border_width(pill, 2, LV_PART_MAIN);
+    lv_obj_set_style_border_color(pill, lv_color_hex(0x3a4a72), LV_PART_MAIN);
+    lv_obj_set_style_text_color(pill, lv_color_hex(0x9fb0d6), LV_PART_MAIN);
+    lv_obj_set_style_text_font(pill, &montserrat_20_latin, LV_PART_MAIN);
+    lv_obj_set_style_text_align(pill, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+    lv_obj_set_style_pad_top(pill, 4, LV_PART_MAIN);
+    lv_obj_add_flag(pill, LV_OBJ_FLAG_EVENT_BUBBLE);
+    return pill;
+}
+
 static lv_obj_t* create_section_header(lv_obj_t* parent, const char* title) {
     lv_obj_t* header = lv_obj_create(parent);
     lv_obj_set_size(header, LV_PCT(100), 50);
@@ -663,7 +687,10 @@ static void create_edit_dialog(void) {
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     
-    // (1) Title — the clean parameter name, e.g. "Frequency Ratio K1 (AP14)".
+    // (1) Title: OEM code pill (AP params only), then the clean parameter
+    // name, e.g. [AP14] "Frequency Ratio K1".
+    state.edit_code = create_ap_code_pill(content, 0);
+    lv_obj_add_flag(state.edit_code, LV_OBJ_FLAG_HIDDEN);
     state.edit_title = lv_label_create(content);
     lv_label_set_text(state.edit_title, i18n_get(STR_HP_EDIT_PARAMETER));
     lv_obj_set_style_text_font(state.edit_title, UI_FONT_DIALOG_TITLE, LV_PART_MAIN);
@@ -1093,6 +1120,7 @@ static void show_setpoint_edit(int setpoint_type) {
     
     // Update dialog content
     lv_label_set_text(state.edit_title, i18n_get(sp.name_id));
+    lv_obj_add_flag(state.edit_code, LV_OBJ_FLAG_HIDDEN);
     edit_label_set_or_hide(state.edit_detail, "");  // setpoints have no detail paragraph
     edit_label_set_or_hide(state.edit_description, sp.description);
 
@@ -1326,13 +1354,13 @@ static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
         lv_obj_add_event_cb(row, ap_row_cb, LV_EVENT_CLICKED, nullptr);
     }
 
-    // Name with AP number (left)
-    char name_buf[80];
-    snprintf(name_buf, sizeof(name_buf), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)p->ap);
-    // Name, and under it the default when the value differs from it.
+    // OEM code pill (left), then the name, and under it the default when the
+    // value differs from it.
+    lv_obj_t* code = create_ap_code_pill(row, p->ap);
+    lv_obj_align(code, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_t* text_col = lv_obj_create(row);
-    lv_obj_set_size(text_col, 430, LV_SIZE_CONTENT);
-    lv_obj_align(text_col, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_size(text_col, 400, LV_SIZE_CONTENT);
+    lv_obj_align(text_col, LV_ALIGN_LEFT_MID, AP_PILL_W + 14, 0);
     lv_obj_set_style_bg_opa(text_col, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(text_col, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(text_col, 0, LV_PART_MAIN);
@@ -1343,7 +1371,7 @@ static void create_ap_row(lv_obj_t* parent, const arctic::AdvancedParam* p) {
     lv_obj_add_flag(text_col, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t* name_lbl = lv_label_create(text_col);
-    lv_label_set_text(name_lbl, name_buf);
+    lv_label_set_text(name_lbl, i18n_get_key(p->name_msg_id, p->name));
     lv_obj_set_style_text_font(name_lbl, UI_FONT_SMALL, LV_PART_MAIN);
     lv_obj_set_style_text_color(name_lbl, active_col ? COLOR_TEXT : COLOR_TEXT_DIM, LV_PART_MAIN);
     lv_obj_set_width(name_lbl, LV_PCT(100));
@@ -1467,9 +1495,9 @@ static void show_ap_edit_dialog(uint8_t ap) {
     state.edit_value_celsius = v;
     state.edit_value_unknown = !read_ok;
 
-    char title_buf[80];
-    snprintf(title_buf, sizeof(title_buf), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)ap);
-    lv_label_set_text(state.edit_title, title_buf);
+    lv_label_set_text(state.edit_title, i18n_get_key(p->name_msg_id, p->name));
+    set_ap_code_text(state.edit_code, ap);
+    lv_obj_remove_flag(state.edit_code, LV_OBJ_FLAG_HIDDEN);
 
     // Full plain-language explanation of the parameter (library-sourced English,
     // localized via detail_msg_id where a translation exists). {T:<c>} tokens are
@@ -1535,9 +1563,8 @@ static void show_ap_trigger_confirm(uint8_t ap) {
     if (!p || !p->is_trigger || !arctic::advanced_param_reg_known(ap)) return;
     s_trigger_ap = ap;
 
-    char title[80];
-    snprintf(title, sizeof(title), "%s (AP%u)", i18n_get_key(p->name_msg_id, p->name), (unsigned)ap);
-    lv_obj_t* dialog = ui_dialog_create(title, i18n_get(STR_HP_AP_TRIGGER_PROMPT));
+    lv_obj_t* dialog = ui_dialog_create(i18n_get_key(p->name_msg_id, p->name),
+                                        i18n_get(STR_HP_AP_TRIGGER_PROMPT));
     ui_dialog_add_action(dialog, i18n_get(STR_CANCEL), "ap_trigger_cancel",
                          UI_DIALOG_ACTION_SECONDARY, ui_dialog_dismiss_cb);
     ui_dialog_add_action(dialog, i18n_get(STR_HP_AP_TRIGGER_RUN), "ap_trigger_run",
@@ -1882,6 +1909,7 @@ void heatpump_control_hide(void) {
     state.load_index = 0;
     state.edit_dialog = nullptr;
     state.edit_title = nullptr;
+    state.edit_code = nullptr;
     state.edit_detail = nullptr;
     state.edit_description = nullptr;
     state.edit_value_label = nullptr;
