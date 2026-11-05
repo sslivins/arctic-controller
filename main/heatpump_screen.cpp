@@ -86,6 +86,7 @@ static constexpr size_t CHART_BUCKETS = 150;      // 4 px each across the plot
 static constexpr size_t CHART_MAX_RUNS = 160;
 static constexpr size_t CHART_MAX_FAULTS = 16;
 static constexpr size_t CHART_MAX_DEFROSTS = 16;
+static constexpr size_t CHART_MAX_FREEZES = 16;
 static constexpr size_t CHART_SAMPLE_CAP = 3600;  // 24 h at 30 s is 2880
 static constexpr uint32_t CHART_REFRESH_MS = 2 * 60 * 1000;
 static constexpr int32_t CHART_HEIGHT = 250;
@@ -183,6 +184,8 @@ struct HomeHistory {
     size_t fault_total;  // In the window, including any beyond the cap
     fault_interval_t defrosts[CHART_MAX_DEFROSTS];
     size_t defrost_count;
+    fault_interval_t freezes[CHART_MAX_FREEZES];
+    size_t freeze_count;
     home_run_summary_t summary;
 };
 
@@ -498,7 +501,7 @@ static void update_timer_cb(lv_timer_t*) {
 // ============================================================================
 
 // The 4-hour chart is a tschart with a fixed window: tank line, run,
-// defrost and fault bands, fault markers and the setpoint line. It takes no
+// defrost, freeze-protection and fault bands, fault markers and the setpoint line. It takes no
 // input, so a tap still opens the cycle history.
 struct ChartSample {
     uint32_t t;
@@ -617,6 +620,14 @@ static void chart_set_history(void) {
                        "defrost"};
     }
     tschart_set_spans(state.chart, 1, defrosts, h.defrost_count);
+    // Freeze-protection pump runs (~30 s), hatched as on the cycle history.
+    // The chart copies spans, so the defrost buffer is reused.
+    static_assert(CHART_MAX_FREEZES <= CHART_MAX_DEFROSTS, "freeze spans reuse the defrost buffer");
+    for (size_t i = 0; i < h.freeze_count; i++) {
+        defrosts[i] = {h.freezes[i].start, h.freezes[i].end, {}, 0, TSCHART_SPAN_HATCH, 3,
+                       "freeze"};
+    }
+    tschart_set_spans(state.chart, 2, defrosts, h.freeze_count);
     tschart_span_t faults[CHART_MAX_FAULTS];
     tschart_note_t notes[CHART_MAX_FAULTS];
     for (size_t i = 0; i < h.fault_count; i++) {
@@ -625,7 +636,7 @@ static void chart_set_history(void) {
         const arctic::MaconFaultBit* bit = fault_bit(f);
         notes[i] = {f.start, bit ? bit->code : "?", COLOR_ERROR_TEXT};
     }
-    tschart_set_spans(state.chart, 2, faults, h.fault_count);
+    tschart_set_spans(state.chart, 3, faults, h.fault_count);
     tschart_set_notes(state.chart, notes, h.fault_count, WARNING_ICON " ");
     chart_apply_setpoint();
 }
@@ -678,6 +689,7 @@ static lv_obj_t* create_chart(lv_obj_t* parent) {
     tschart_add_key(c, "cooling", nullptr, lv_color_hex(0x3b82f6), TSCHART_SPAN_FILL);
     tschart_add_key(c, "hot_water", nullptr, lv_color_hex(0xfbbf24), TSCHART_SPAN_FILL);
     tschart_add_key(c, "defrost", nullptr, COLOR_DEFROST_BORDER, TSCHART_SPAN_FILL);
+    tschart_add_key(c, "freeze", nullptr, COLOR_FREEZE_TEXT, TSCHART_SPAN_HATCH);
     tschart_add_key(c, "fault", nullptr, COLOR_ERROR, TSCHART_SPAN_HATCH);
     static const char* const RUN_KEYS[] = {"heating", "cooling", "hot_water"};
     for (const char* k : RUN_KEYS) tschart_key_set_fill_strength(c, k, LV_OPA_30);
@@ -771,7 +783,8 @@ static void home_query_task(void* arg) {
     heap_caps_free(samples);
     h.fault_count = chart_spans_query(h.start, h.end, h.faults, CHART_MAX_FAULTS,
                                       &h.fault_total, h.defrosts,
-                                      CHART_MAX_DEFROSTS, &h.defrost_count);
+                                      CHART_MAX_DEFROSTS, &h.defrost_count, h.freezes,
+                                      CHART_MAX_FREEZES, &h.freeze_count);
 
     // Worker task: lv_async_call() must hold the LVGL lock.
     bsp_display_lock(0);
