@@ -119,6 +119,15 @@ const runBy = MODE_KEYS.map(m => [m, sum(full, d => d.run_seconds?.[m])]).filter
 const nDays = days.length, nFull = full.length;
 const lastDay = days[nDays - 1], todayPartial = M.to < lastDay.t1;
 const short = calls.filter(r => len(r) < 600 && !r.clipStart && !r.open);
+// Why a short call stopped, from an event logged during it or within 90 s of
+// its last running sample (30 s samples, plus logging lag). Unexplained calls
+// are thermostat stops.
+const STOP = [['error_appeared', e => `ended by ${e.fault_code || 'a fault'}${e.fault_label ? ` ${e.fault_label}` : ''}`],
+  ['power_off', () => 'unit switched off'], ['mode_changed', e => /freeze/.test(e.from_mode + e.to_mode) ? null : 'mode changed'],
+  ['setpoint_changed', () => 'setpoint changed'], ['disconnected', () => 'unit stopped answering'],
+  ['system_start', () => 'controller restarted']];
+const stopCause = r => { for (const [t, f] of STOP) for (const e of E) if (e.type === t && e.timestamp >= r.start && e.timestamp <= r.end + 90) { const c = f(e); if (c) return c; } return null; };
+short.forEach(r => { r.cause = stopCause(r); });
 const medLen = calls.length ? Math.round(median(calls.map(len)) / 60) : null;
 
 // Outdoor: daily max far above the day's average isn't weather. On a day with
@@ -234,9 +243,13 @@ if (calls.length) {
   const pre = ev('compressor_on').filter(e => M.telemetryFrom != null && e.timestamp < M.telemetryFrom).length;
   const brief = Math.max(0, starts - calls.length - dfRestarts - pre);
   const recon = starts ? ` The controller counted ${plural(starts, 'compressor start')}${dfRestarts ? `: ${dfRestarts} are the stop and restart around each defrost` : ''}${pre ? `, ${pre} came before telemetry begins` : ''}${brief ? `, and ${brief} ${brief > 1 ? 'were' : 'was'} too brief to show in ${M.interval} s samples` : ''}.` : '';
+  const why = short.filter(r => r.cause), thermo = short.length - why.length;
+  const whyText = why.length ? ` ${why.slice(0, 4).map(r => `${day(r.start)} ${clock(r.start)} (${dur(len(r))}): ${esc(r.cause)}`).join('; ')}${why.length > 4 ? `; ${why.length - 4} more` : ''}.` : '';
+  const shortHint = !short.length ? '' : (why.some(r => r.cause.startsWith('ended by')) ? 'A run cut short by a fault: see Faults below. ' : '')
+    + (thermo ? `${why.length ? `The other ${thermo === 1 ? 'one' : thermo} stopped on the thermostat: check t` : 'T'}ank differential / hysteresis, buffer-tank sensor position.` : '');
   unit.push(finding(short.length ? 'warn' : 'ok', short.length ? `${short.length} of ${calls.length} ${callsWord} were shorter than 10 minutes` : 'No short cycling',
-    `${plural(calls.length, callWord, callsWord)}, median ${medLen} min${shortest != null ? `, shortest ${dur(shortest)}` : ''}.${recon}`,
-    short.length ? 'Tank differential / hysteresis, buffer-tank sensor position.' : ''));
+    `${plural(calls.length, callWord, callsWord)}, median ${medLen} min${shortest != null ? `, shortest ${dur(shortest)}` : ''}.${whyText}${recon}`,
+    shortHint.trim()));
   verdict.push(short.length ? ['warn', plural(short.length, `short ${callWord}`, `short ${callsWord}`)] : ['ok', 'no short cycling']);
 } else unit.push(finding('info', 'The compressor did not run', `No compressor runs in the ${nDays} days.`));
 if (externalDemand) unit.push(finding('info', 'Tank heating calls end well below the unit setpoint',
@@ -385,7 +398,7 @@ ${notable.length ? `<table><thead><tr><th style="width:170px">When</th><th style
 {
   const multi = present.length > 1;
   const rows = calls.slice().reverse().map(r => { const a = callAir(r);
-    return `<tr class="${short.includes(r) ? 'flag' : ''}"><td>${day(r.start)}</td><td>${r.clipStart ? '…' : ''}${clock(r.start)} – ${r.open ? 'now' : clock(r.end)}</td>${multi ? `<td>${MODE[r.mode]?.[0] || esc(r.mode)}</td>` : ''}<td class="n">${Math.round(len(r) / 60)} min</td>
+    return `<tr class="${short.includes(r) ? 'flag' : ''}"><td>${day(r.start)}</td><td>${r.clipStart ? '…' : ''}${clock(r.start)} – ${r.open ? 'now' : clock(r.end)}${r.cause ? `<div class="sub">${esc(r.cause.replace(/^(ended by \S+).*/, '$1'))}</div>` : ''}</td>${multi ? `<td>${MODE[r.mode]?.[0] || esc(r.mode)}</td>` : ''}<td class="n">${Math.round(len(r) / 60)} min</td>
     <td class="n">${r.starts}</td><td class="n">${r.defrosts || ''}</td><td class="n">${a == null ? '--' : `${tc(a).toFixed(1)}${r.air == null ? '‡' : ''}`}</td>
     <td class="n">${C1(r.in)}</td><td class="n">${C1(r.out)}</td><td class="n">${dC(r.dt)}</td><td class="n">${C(r.tank0)} → ${C(r.tank1)}</td>
     <td class="n">${((r.e ?? r.wh) / 1000).toFixed(1)}</td><td class="n">${r.q != null ? (r.q / 1000).toFixed(1) : '--'}</td><td class="n">${r.cop != null ? r.cop.toFixed(1) : '--'}</td></tr>`; }).join('');
