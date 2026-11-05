@@ -1607,7 +1607,7 @@
       card.addLayers();
       // The setpoint is the current one, as drawn by the reference line.
       const setp = homeSetpoint();
-      if (setp != null) card.add("value", "Setpoint", temp(setp), "var(--cp-text-muted)");
+      if (setp != null) card.add("value", "Setpoint", `${tempNumber(setp).toFixed(1)} °${f ? "F" : "C"}`, "var(--cp-text-muted)");
       (data.faults || []).filter(x => x.start < b1 && (x.end ?? data.end) > b0).slice(0, 2)
         .forEach(x => card.add("warning", `⚠ ${x.fault_code || "?"} ${x.fault_label || ""}`.trim()));
     }
