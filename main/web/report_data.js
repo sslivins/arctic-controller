@@ -216,8 +216,9 @@
       const json = JSON.stringify(data).replace(/<\//g, "<\\/").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
       const close = "<" + "/script>";
       const title = `${data.meta.prefs.device_name || data.meta.info.hostname || "Heat pump"} activity report`;
+      const icon = document.querySelector('link[rel="icon"]')?.getAttribute("href");
       return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`
-        + `<title>${esc(title)}</title></head><body><script>${lib}\nconst DATA = ${json};\n${renderer}${close}</body></html>`;
+        + `<title>${esc(title)}</title>${icon ? `<link rel="icon" href="${esc(icon)}">` : ""}</head><body><script>${lib}\nconst DATA = ${json};\n${renderer}${close}</body></html>`;
     }
     // Progress lives in state so a re-render mid-way keeps the button busy.
     function reportProgress(text) {

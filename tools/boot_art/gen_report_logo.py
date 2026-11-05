@@ -9,8 +9,12 @@ main/web/report.js.
 Requires: fonttools.
 
     python tools/boot_art/gen_report_logo.py
+    python tools/boot_art/gen_report_logo.py --icon  # the icon alone, as the favicon data URI
+                                                     # for <link rel="icon"> in main/web/index.html
 """
 import os
+import sys
+import urllib.parse
 
 from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
@@ -58,10 +62,14 @@ def main():
     under = pts([(-0.42, 0), (0.42, 0), (0.34, 0.16), (0.22, 0.24), (0.14, 0.40), (0.02, 0.31),
                  (-0.12, 0.42), (-0.22, 0.26), (-0.33, 0.14)])
     r = n(S * 18 / 260)
-    print(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {n(tx + w)} {S}" role="img" aria-label="Arctic Heat Pumps">'
-          f'<clipPath id="arcticIcon"><rect width="{S}" height="{S}" rx="{r}"/></clipPath>'
-          f'<g clip-path="url(#arcticIcon)"><rect width="{S}" height="{S}" fill="{ORANGE}"/><rect y="{WL}" width="{S}" height="{S - WL}" fill="{BLUE}"/>'
-          f'<polygon points="{berg}" fill="#fff"/><polygon points="{under}" fill="{CYAN}"/></g>'
+    icon = (f'<clipPath id="arcticIcon"><rect width="{S}" height="{S}" rx="{r}"/></clipPath>'
+            f'<g clip-path="url(#arcticIcon)"><rect width="{S}" height="{S}" fill="{ORANGE}"/><rect y="{WL}" width="{S}" height="{S - WL}" fill="{BLUE}"/>'
+            f'<polygon points="{berg}" fill="#fff"/><polygon points="{under}" fill="{CYAN}"/></g>')
+    if "--icon" in sys.argv:
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {S} {S}">{icon}</svg>'
+        print("data:image/svg+xml," + urllib.parse.quote(svg, safe=" =:/,.'()"))
+        return
+    print(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {n(tx + w)} {S}" role="img" aria-label="Arctic Heat Pumps">{icon}'
           f'<path d="{arctic}" fill="{BLUE}"/><path d="{pumps}" fill="{ORANGE}"/></svg>')
 
 
