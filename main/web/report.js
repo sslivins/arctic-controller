@@ -2,6 +2,8 @@
 // buildReportData in index.html) and the tschart library come before it.
 (() => {
 const M = DATA.meta, TZ = M.tz || 'UTC';
+// Arctic Heat Pumps lockup, from tools/boot_art/gen_report_logo.py.
+const LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 298.7 100" role="img" aria-label="Arctic Heat Pumps"><clipPath id="arcticIcon"><rect width="100" height="100" rx="6.9"/></clipPath><g clip-path="url(#arcticIcon)"><rect width="100" height="100" fill="#f7941e"/><rect y="52" width="100" height="48" fill="#0f75bc"/><polygon points="8,52 24,35 35,28 47,12 54,19 63,25 74,37 92,52" fill="#fff"/><polygon points="8,52 92,52 84,68 72,76 64,92 52,83 38,94 28,78 17,66" fill="#01aff0"/></g><path d="M117.1 66 123 4H144.1L150 66H138.2L137.3 56H129.9L129.1 66ZM130.8 46.1H136.4L133.7 14.6H133.1ZM153.8 66V4H172.8Q177.5 4 180 6.2Q182.4 8.3 183.2 12.2Q184.1 16.1 184.1 21.4Q184.1 26.4 182.8 29.5Q181.5 32.5 177.9 33.7Q180.9 34.3 182 36.6Q183.2 38.9 183.2 42.5V66H171V41.7Q171 39 169.9 38.4Q168.8 37.7 166.3 37.7V66ZM166.4 27H169.4Q171.9 27 171.9 21.4Q171.9 17.7 171.4 16.6Q170.8 15.5 169.3 15.5H166.4ZM202.6 66.6Q195.9 66.6 191.8 62.4Q187.7 58.2 187.7 50.6V22Q187.7 13 191.2 8.2Q194.8 3.4 202.9 3.4Q207.3 3.4 210.7 5.1Q214.1 6.7 216.1 9.9Q218.1 13.1 218.1 18V28.7H205.8V19.6Q205.8 16.8 205.1 15.8Q204.3 14.9 202.9 14.9Q201.1 14.9 200.5 16.1Q199.9 17.4 199.9 19.4V50.5Q199.9 53 200.7 54.1Q201.5 55.1 202.9 55.1Q204.5 55.1 205.1 53.8Q205.8 52.5 205.8 50.5V39.3H218.2V51Q218.2 59.2 214.1 62.9Q210 66.6 202.6 66.6ZM227.7 66V15.9H220.3V4H247.4V15.9H240.1V66ZM250.3 66V4H262.3V66ZM281.7 66.6Q274.9 66.6 270.8 62.4Q266.7 58.2 266.7 50.6V22Q266.7 13 270.3 8.2Q273.9 3.4 282 3.4Q286.4 3.4 289.8 5.1Q293.2 6.7 295.2 9.9Q297.2 13.1 297.2 18V28.7H284.8V19.6Q284.8 16.8 284.1 15.8Q283.4 14.9 282 14.9Q280.2 14.9 279.6 16.1Q279 17.4 279 19.4V50.5Q279 53 279.8 54.1Q280.5 55.1 282 55.1Q283.5 55.1 284.2 53.8Q284.8 52.5 284.8 50.5V39.3H297.3V51Q297.3 59.2 293.2 62.9Q289.1 66.6 281.7 66.6Z" fill="#0f75bc"/><path d="M116.9 98V78H120.9V85.1H122.8V78H126.7V98H122.8V88.9H120.9V98ZM136.8 98V78H144.8V81.9H140.8V85.8H144.6V89.5H140.8V94.1H145V98ZM154.1 98 156 78H162.8L164.7 98H160.9L160.6 94.8H158.2L158 98ZM158.5 91.6H160.3L159.4 81.4H159.3ZM175.9 98V81.8H173.5V78H182.3V81.8H179.9V98ZM205.4 98V78H210.7Q212.3 78 213.3 78.7Q214.3 79.5 214.7 80.8Q215.1 82.2 215.1 84.1Q215.1 85.9 214.8 87.3Q214.4 88.6 213.5 89.3Q212.6 90.1 210.9 90.1H209.3V98ZM209.3 86.5H209.5Q210.7 86.5 210.9 85.9Q211.2 85.2 211.2 84Q211.2 82.9 210.9 82.3Q210.7 81.6 209.8 81.6H209.3ZM229.3 98.2Q226.8 98.2 225.6 96.8Q224.4 95.4 224.4 92.6V78H228.3V92.5Q228.3 93 228.4 93.4Q228.4 93.9 228.6 94.2Q228.8 94.5 229.3 94.5Q229.7 94.5 229.9 94.2Q230.1 93.9 230.2 93.5Q230.3 93 230.3 92.5V78H234.1V92.6Q234.1 95.4 233 96.8Q231.8 98.2 229.3 98.2ZM243.9 98V78H250L251.7 90.2L253.4 78H259.5V98H255.9V83.6L253.6 98H250L247.6 83.6V98ZM269.6 98V78H274.9Q276.5 78 277.5 78.7Q278.5 79.5 278.9 80.8Q279.3 82.2 279.3 84.1Q279.3 85.9 279 87.3Q278.6 88.6 277.7 89.3Q276.8 90.1 275.1 90.1H273.5V98ZM273.5 86.5H273.7Q274.8 86.5 275.1 85.9Q275.3 85.2 275.3 84Q275.3 82.9 275.1 82.3Q274.9 81.6 274 81.6H273.5ZM293.6 98.2Q290.8 98.2 289.6 96.8Q288.4 95.5 288.4 92.5V90.5H292.4V93Q292.4 93.7 292.6 94.1Q292.8 94.5 293.3 94.5Q293.9 94.5 294.1 94.2Q294.3 93.9 294.3 93.1Q294.3 92.2 294.1 91.6Q293.9 91 293.5 90.4Q293 89.9 292.2 89.1L290.4 87.4Q288.4 85.5 288.4 83.1Q288.4 80.5 289.6 79.2Q290.8 77.8 293.1 77.8Q295.8 77.8 297 79.3Q298.1 80.8 298.1 83.7H294V82.4Q294 82 293.8 81.7Q293.6 81.5 293.2 81.5Q292.7 81.5 292.5 81.8Q292.3 82 292.3 82.5Q292.3 82.9 292.5 83.4Q292.7 83.9 293.4 84.5L295.7 86.7Q296.4 87.4 297 88.1Q297.5 88.8 297.9 89.8Q298.2 90.8 298.2 92.2Q298.2 95 297.2 96.6Q296.2 98.2 293.6 98.2Z" fill="#f7941e"/></svg>';
 document.head.insertAdjacentHTML('beforeend', `<style>
 :root { --text:#1f2937; --dim:#6b7280; --line:#e5e7eb; --paper:#fff; --soft:#f8fafc;
   --heat:#f97316; --cool:#3b82f6; --dhw:#f59e0b; --defrost:#06b6d4; --freeze:#0369a1; --danger:#dc2626; --warn:#d97706; --ok:#16a34a; --set:#16a34a;
@@ -14,7 +16,7 @@ h2 .sub { font-weight:400; font-size:12px }
 .sub { color:var(--dim) } .note { color:var(--dim); font-size:11px; margin-top:4px }
 .head { display:flex; justify-content:space-between; align-items:flex-start; gap:24px }
 .head .meta { display:grid; grid-template-columns:auto auto; gap:2px 14px; font-size:12px }
-.head .meta > span:nth-child(odd) { color:var(--dim) }
+.head .meta > span:nth-child(odd) { color:var(--dim) } .head .meta > span { white-space:nowrap }
 .cov { margin-top:14px; display:flex; flex-wrap:wrap; gap:4px 18px; font-size:12px; padding:8px 12px; background:var(--soft); border:1px solid var(--line); border-radius:6px }
 .cov b { font-weight:600 }
 .find { display:grid; grid-template-columns:22px 1fr; gap:4px 10px; padding:10px 12px; border:1px solid var(--line); border-left:4px solid var(--c); border-radius:6px; margin-bottom:8px; break-inside:avoid }
@@ -55,6 +57,7 @@ tr.cat td { font-weight:600; background:var(--soft); border-bottom:1px solid var
 .two { display:grid; grid-template-columns:1fr 1fr; gap:28px }
 .foot { margin-top:28px; color:var(--dim); font-size:11px; border-top:1px solid var(--line); padding-top:8px }
 .empty { color:var(--dim); padding:8px 0 }
+.logo { padding-bottom:14px; margin-bottom:18px; border-bottom:1px solid var(--line) } .logo svg { height:40px; display:block }
 @media print {
   body { background:#fff } .page { box-shadow:none; margin:0; width:auto; padding:0 } h2 { break-after:avoid }
   .brk { break-before:page } .rng, .rnghint { display:none }
@@ -301,9 +304,16 @@ const year = fmtD(M.to, { year: 'numeric' });
 const runSub = runBy.length === 1 ? `all ${MODE[runBy[0][0]][0].toLowerCase()}` : runBy.map(([m, s]) => `${(s / 3600).toFixed(1)} h ${MODE[m][0].toLowerCase()}`).join(' · ');
 const dts = heatCalls.map(r => r.dt).filter(v => v != null);
 const tile = (l, v, s) => `<div class="tile"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+// Printed page footer. Margin boxes take only literal strings, so the values are baked into a style.
+const cssStr = s => `"${String(s).replace(/[\\"]/g, '\\$&').replace(/\s+/g, ' ')}"`;
+const unitName = M.prefs.device_name || M.info.hostname || 'Heat pump';
+document.head.insertAdjacentHTML('beforeend', `<style>@page { margin:14mm 12mm 16mm;
+  @bottom-left { content:${cssStr(`${unitName} · Arctic Controller ${M.info.version || ''} · generated ${fmtD(M.generated, { dateStyle: 'medium', timeStyle: 'short', hour12: h12 })}`)}; font:9px system-ui,sans-serif; color:#6b7280 }
+  @bottom-right { content:"Page " counter(page) " of " counter(pages); font:9px system-ui,sans-serif; color:#6b7280 } }</style>`);
 $('p1').innerHTML = `
+<div class="logo">${LOGO}</div>
 <div class="head"><div><h1>Heat pump activity report</h1>
-  <div class="sub" style="font-size:15px;margin-top:2px">${esc(M.prefs.device_name || M.info.hostname || 'Heat pump')}</div>
+  <div class="sub" style="font-size:15px;margin-top:2px">${esc(unitName)}</div>
   <div class="sub" style="margin-top:6px">${day(M.from)} – ${day(M.to - 1)}, ${year} · ${nDays} days${todayPartial ? ' (today so far)' : ''} · times are controller local (${esc(TZ.replace(/_/g, ' '))})</div></div>
   <div class="meta"><span>Controller</span><span>${esc(M.info.hostname)}</span><span>Firmware</span><span>${esc(M.info.version)}</span>
   <span>Mode now</span><span>${esc(modeName(M.status?.mode))}${M.status?.unit_on === false ? ' (unit off)' : ''}</span><span>Generated</span><span>${fmtD(M.generated, { dateStyle: 'medium', timeStyle: 'short', hour12: h12 })}</span>
