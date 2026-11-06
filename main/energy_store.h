@@ -57,6 +57,11 @@ bool store_load_lifetime(uint32_t date, Lifetime* out);
 // Closed days in [from_date, to_date] (YYYYMMDD), oldest first.
 size_t store_read_days(uint32_t from_date, uint32_t to_date, DayRecord* out, size_t capacity);
 
+// Test firmware only (CONFIG_TEST_ENDPOINTS): erase every month blob within
+// five years before (and a year after) `date`, lifetime totals included. The
+// open day's checkpoint is kept.
+void store_clear_days_for_test(uint32_t date);
+
 // Previous calendar month of a YYYYMM value.
 inline uint32_t prev_month(uint32_t yyyymm) {
     return (yyyymm % 100) <= 1 ? (yyyymm / 100 - 1) * 100 + 12 : yyyymm - 1;

@@ -5,6 +5,7 @@
 
 #include "energy_store.h"
 
+#include "sdkconfig.h"
 #include <esp_crc.h>
 #include <esp_log.h>
 #include <esp_random.h>
@@ -242,5 +243,21 @@ size_t store_read_days(uint32_t from_date, uint32_t to_date, DayRecord* out, siz
     free(m);
     return n;
 }
+
+#ifdef CONFIG_TEST_ENDPOINTS
+void store_clear_days_for_test(uint32_t date) {
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) return;
+    uint32_t ym = date / 100;
+    for (int i = 0; i < 12; i++) ym = next_month(ym);
+    char key[16];
+    for (int i = 0; i < 72; i++, ym = prev_month(ym)) {
+        month_key(ym, key);
+        nvs_erase_key(nvs, key);
+    }
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+#endif
 
 }  // namespace energy
