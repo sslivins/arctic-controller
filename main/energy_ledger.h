@@ -299,6 +299,16 @@ public:
 
     bool valid() const { return open_; }
     const DayAccum& accum() const { return cur_; }
+    // Replace the open day's totals, keeping its date and span (test seeding).
+    bool replace_totals(const DayAccum& a) {
+        if (!open_) return false;
+        const uint32_t date = cur_.date;
+        const int16_t offset = cur_.utc_offset_min;
+        cur_ = a;
+        cur_.date = date;
+        cur_.utc_offset_min = offset;
+        return true;
+    }
     DayRecord today() const { return to_record(cur_); }
     // total_elec_wh(today()) without building a record on the caller's stack.
     uint32_t today_elec_wh() const {

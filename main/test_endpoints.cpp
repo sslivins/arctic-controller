@@ -2607,7 +2607,7 @@ static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
-// POST /api/test/seed-history?kind=telemetry|events|days|runs
+// POST /api/test/seed-history?kind=telemetry|events|days|today|runs
 // Replace one kind of stored history with the records in the body, so a dev
 // unit can show real data copied from another controller
 // (tools/copy_history.py). The body is the raw little-endian records, oldest
@@ -2615,6 +2615,7 @@ static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
 //   telemetry  history_telemetry_sample_t (32 bytes; sequence ignored)
 //   events     {u32 timestamp, u32 boot_id, u32 type, u32 payload}
 //   days       energy::DayRecord (112 bytes), closed days only
+//   today      one energy::DayRecord: the open day's totals (date kept)
 //   runs       energy::RunRecord (32 bytes; date recomputed from start_s)
 // Lifetime energy totals in memory refresh on the next restart.
 // ============================================================================
@@ -2656,11 +2657,14 @@ static esp_err_t seed_history_post_handler(httpd_req_t* req)
     } else if (strcmp(kind, "days") == 0) {
         rec = sizeof(energy::DayRecord);
         max_n = 400;
+    } else if (strcmp(kind, "today") == 0) {
+        rec = sizeof(energy::DayRecord);
+        max_n = 1;
     } else if (strcmp(kind, "runs") == 0) {
         rec = sizeof(energy::RunRecord);
         max_n = 400 * energy::kMaxRunsPerDay;
     } else {
-        send_json_error(req, "400 Bad Request", "kind must be telemetry, events, days or runs");
+        send_json_error(req, "400 Bad Request", "kind must be telemetry, events, days, today or runs");
         return ESP_OK;
     }
     const size_t len = req->content_len;
@@ -2720,6 +2724,10 @@ static esp_err_t seed_history_post_handler(httpd_req_t* req)
             for (size_t i = 0; i < n && !error; i++) {
                 if (!energy::store_commit_day(d[i], nullptr)) error = "Day write failed";
             }
+        }
+    } else if (strcmp(kind, "today") == 0) {
+        if (!arctic::seedEnergyTodayForTest(*reinterpret_cast<const energy::DayRecord*>(body))) {
+            error = "No open day yet";
         }
     } else {
         auto* runs = reinterpret_cast<energy::RunRecord*>(body);

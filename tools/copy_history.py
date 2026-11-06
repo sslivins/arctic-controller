@@ -7,7 +7,8 @@ summaries over its normal API and writes them to a test-firmware unit through
 POST /api/test/seed-history (CONFIG_TEST_ENDPOINTS builds only). Each kind
 replaces what the target had. Timestamps are shifted so the newest source
 sample lands on the target's "now" (whole days for the daily energy), so copy
-from a unit in the same time zone.
+from a unit in the same time zone. "days" also replaces the target's open
+day with the source's totals so far today.
 
 Usage:
     python tools/copy_history.py --source http://192.168.10.19 --source-key KEY \\
@@ -133,37 +134,45 @@ def ymd(d: dt.date) -> int:
     return d.year * 10000 + d.month * 100 + d.day
 
 
-def copy_days(src: Unit, days: int, day_shift: int) -> bytes:
+def tenths(v) -> int:
+    return 0 if v is None else round(v * 10)
+
+
+def pack_day(d: dict, date: dt.date) -> bytes:
+    e, o, st = d["electrical_wh"], d.get("outdoor_c"), d.get("settings")
+    flags = 0
+    if o:
+        flags |= DAY_OUTDOOR | (DAY_RUN_OUTDOOR if o.get("run_avg") is not None else 0)
+    if st:
+        flags |= DAY_SETTINGS | (DAY_MIXED if st.get("mixed") else 0)
+    src_s = d["source_seconds"]
+    return DAY.pack(
+        ymd(date), d["utc_offset_min"], flags, st["glycol_pct"] if st else 0,
+        round(st["flow_lpm"] * 10) if st else 0, d["starts"],
+        e["heating"], e["cooling"], e["hot_water"], e["standby"], e["unattributed"],
+        *(d["thermal_wh"][m] for m in MODES), *(d["covered_electrical_wh"][m] for m in MODES),
+        d["defrost"]["thermal_wh"], d["defrost"]["count"], 0, d["defrost"]["seconds"],
+        d["coverage_seconds"]["power"], d["coverage_seconds"]["thermal"],
+        src_s["unit"], src_s["external"], src_s["fallback"], src_s["settling"],
+        *(d["run_seconds"][m] for m in MODES),
+        tenths(o and o["min"]), tenths(o and o["max"]), tenths(o and o["avg"]),
+        tenths(o and o.get("run_avg")))
+
+
+def copy_days(src: Unit, days: int, day_shift: int) -> tuple[bytes, bytes]:
+    """Closed days, and the open day (today's totals so far)."""
     today = dt.datetime.now().astimezone().date()
     reply = src.get("/api/energy/daily", **{"from": (today - dt.timedelta(days=days)).isoformat(),
                                             "to": today.isoformat()})
-    out = bytearray()
+    closed, open_day = bytearray(), b""
     for d in reply["days"]:
-        if not d["final"]:
-            continue
         date = dt.date.fromisoformat(d["date"]) + dt.timedelta(days=day_shift)
-        if date >= today:
-            continue
-        e, o, st = d["electrical_wh"], d.get("outdoor_c"), d.get("settings")
-        flags = 0
-        if o:
-            flags |= DAY_OUTDOOR | (DAY_RUN_OUTDOOR if o.get("run_avg") is not None else 0)
-        if st:
-            flags |= DAY_SETTINGS | (DAY_MIXED if st.get("mixed") else 0)
-        tenths = lambda v: 0 if v is None else round(v * 10)
-        src_s = d["source_seconds"]
-        out += DAY.pack(
-            ymd(date), d["utc_offset_min"], flags, st["glycol_pct"] if st else 0,
-            round(st["flow_lpm"] * 10) if st else 0, d["starts"],
-            e["heating"], e["cooling"], e["hot_water"], e["standby"], e["unattributed"],
-            *(d["thermal_wh"][m] for m in MODES), *(d["covered_electrical_wh"][m] for m in MODES),
-            d["defrost"]["thermal_wh"], d["defrost"]["count"], 0, d["defrost"]["seconds"],
-            d["coverage_seconds"]["power"], d["coverage_seconds"]["thermal"],
-            src_s["unit"], src_s["external"], src_s["fallback"], src_s["settling"],
-            *(d["run_seconds"][m] for m in MODES),
-            tenths(o and o["min"]), tenths(o and o["max"]), tenths(o and o["avg"]),
-            tenths(o and o.get("run_avg")))
-    return bytes(out)
+        if not d["final"]:
+            if date == today:
+                open_day = pack_day(d, date)
+        elif date < today:
+            closed += pack_day(d, date)
+    return bytes(closed), open_day
 
 
 def copy_runs(src: Unit, days: int, shift: int, latest: int) -> bytes:
@@ -213,7 +222,9 @@ def main() -> None:
     if "events" in kinds:
         dst.seed("events", copy_events(src, since, shift))
     if "days" in kinds:
-        dst.seed("days", copy_days(src, args.days, day_shift))
+        closed, open_day = copy_days(src, args.days, day_shift)
+        dst.seed("days", closed)
+        dst.seed("today", open_day)
     if "runs" in kinds:
         dst.seed("runs", copy_runs(src, args.days, shift, latest))
 

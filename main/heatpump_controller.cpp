@@ -1200,6 +1200,47 @@ bool getEnergyToday(energy::DayRecord* out) {
     return ok;
 }
 
+#ifdef CONFIG_TEST_ENDPOINTS
+bool seedEnergyTodayForTest(const energy::DayRecord& d) {
+    if (s_state_mutex == nullptr) return false;
+    static energy::DayAccum a;  // too big for the httpd stack alongside the rest
+    memset(&a, 0, sizeof(a));
+    a.flags = d.flags & (uint8_t)~energy::DAY_RUN_OUTDOOR_SET;
+    a.glycol_pct = d.glycol_pct;
+    a.flow_lpm_x10 = d.flow_lpm_x10;
+    a.starts = d.starts;
+    a.defrosts = d.defrosts;
+    for (int b = 0; b < energy::kBuckets; b++) a.elec_ws[b] = (uint64_t)d.elec_wh[b] * 3600;
+    a.elec_unattributed_ws = (uint64_t)d.elec_unattributed_wh * 3600;
+    for (int m = 0; m < energy::kModes; m++) {
+        a.thermal_ws[m] = (uint64_t)d.thermal_wh[m] * 3600;
+        a.covered_elec_ws[m] = (uint64_t)d.covered_elec_wh[m] * 3600;
+        a.run_s[m] = d.run_s[m];
+    }
+    a.defrost_thermal_ws = (int64_t)d.defrost_thermal_wh * 3600;
+    a.defrost_s = d.defrost_s;
+    a.power_s = d.power_s;
+    a.thermal_s = d.thermal_s;
+    for (int s = 0; s < energy::kSources; s++) a.source_s[s] = d.source_s[s];
+    if (d.flags & energy::DAY_OUTDOOR_SET) {
+        a.outdoor_min_deci = d.outdoor_min_deci;
+        a.outdoor_max_deci = d.outdoor_max_deci;
+        a.outdoor_s = d.power_s > 0 ? d.power_s : 1;
+        a.outdoor_sum_deci_s = (int64_t)d.outdoor_avg_deci * a.outdoor_s;
+    }
+    if (d.flags & energy::DAY_RUN_OUTDOOR_SET) {
+        uint32_t run_s = 0;
+        for (int m = 0; m < energy::kModes; m++) run_s += d.run_s[m];
+        a.run_outdoor_s = run_s > 0 ? run_s : 1;
+        a.run_outdoor_sum_deci_s = (int32_t)d.outdoor_run_avg_deci * (int32_t)a.run_outdoor_s;
+    }
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    const bool ok = s_ledger.replace_totals(a);
+    xSemaphoreGive(s_state_mutex);
+    return ok;
+}
+#endif
+
 bool getEnergyPendingDay(energy::DayRecord* out) {
     if (s_state_mutex == nullptr) return false;
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);

@@ -1099,13 +1099,15 @@ paths:
           refresh on the next restart). Today's open day is left alone.
         - `runs`: `energy::RunRecord`, 32 bytes; the date is recomputed from the
           start in local time.
+        - `today`: one `energy::DayRecord` whose totals replace the open day's
+          (today's date is kept).
       parameters:
         - in: query
           name: kind
           required: true
           schema:
             type: string
-            enum: [telemetry, events, days, runs]
+            enum: [telemetry, events, days, today, runs]
         - in: header
           name: X-Session-Id
           schema:
