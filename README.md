@@ -18,7 +18,8 @@ Everything runs locally: no cloud account is needed, and the controller keeps wo
 
 <p>
   <img src="docs/images/device-home.jpg" alt="Device home screen while idle: tank temperature with the last 4 hours of tank temperature and a heating run" height="420">
-  <img src="docs/images/device-cycle-history.jpg" alt="Device cycle history graph with the touch readout open" height="420">
+  <img src="docs/images/device-cycle-history.jpg" alt="Device cycle history: 8 hours of water temperatures and power with heating runs shaded" height="420">
+  <img src="docs/images/device-energy.jpg" alt="Device energy screen: daily kWh by mode over 14 days with estimated COP" height="420">
   <img src="docs/images/device-events.jpg" alt="Device event log with search and category filters" height="420">
 </p>
 
