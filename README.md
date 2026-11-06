@@ -17,7 +17,7 @@ Everything runs locally: no cloud account is needed, and the controller keeps wo
 ### Touch screen
 
 <p>
-  <img src="docs/images/device-home-heating.jpg" alt="Device home screen while heating: COP 4.50, 3.1 kW, temperatures and compressor detail" height="420">
+  <img src="docs/images/device-home.jpg" alt="Device home screen while idle: tank temperature with the last 4 hours of tank temperature and a heating run" height="420">
   <img src="docs/images/device-cycle-history.jpg" alt="Device cycle history graph with the touch readout open" height="420">
   <img src="docs/images/device-events.jpg" alt="Device event log with search and category filters" height="420">
 </p>
@@ -26,21 +26,42 @@ Everything runs locally: no cloud account is needed, and the controller keeps wo
 
 | Home | Cycle history |
 |---|---|
-| ![Web dashboard home page while heating](docs/images/web-home-heating.jpg) | ![Cycle history chart of compressor runs](docs/images/web-cycle-history.jpg) |
-| **Status** | **Control** |
-| ![Full telemetry status page](docs/images/web-status.jpg) | ![Mode selection and setpoints](docs/images/web-control.jpg) |
+| ![Web dashboard home page with the last 4 hours of tank temperature and runs](docs/images/web-home.jpg) | ![Cycle history chart of heating runs with temperatures, power and the hover card](docs/images/web-cycle-history.jpg) |
+| **Energy** | **Status** |
+| ![Daily electricity by mode with estimated COP over 30 days](docs/images/web-energy.jpg) | ![Full telemetry status page](docs/images/web-status.jpg) |
+| **Control** | **Heat output & COP settings** |
+| ![Mode selection, setpoints and advanced parameters](docs/images/web-control.jpg) | ![External BACnet supply and return sensors for COP](docs/images/web-performance.jpg) |
+| **Activity report** | **Phone** |
+| ![14-day heat pump activity report with findings](docs/images/web-report.jpg) | <img src="docs/images/web-mobile-home.jpg" alt="Home page on a phone" height="420"> |
 
 ## Features
 
 - **Touch UI on the device** - Home dashboard (state, tank temperature, compressor/fan/pump
-  indicators, supply/return/power, and a 24-hour tank temperature, run and fault chart while idle),
-  full status readout, temperature detail, compressor cycle history graph, mode and
-  setpoint control, event log, error codes with descriptions, and technician
-  P-parameters. Shows the local weather in the status bar. English, French, or Spanish,
+  indicators, supply/return/power, and, while idle, a 4-hour tank temperature chart with
+  heating, cooling, hot-water, defrost, freeze-protection and fault bands), full status
+  readout, mode and setpoint control, and a History tab with cycles, energy, events and
+  faults. Charts can be scrubbed and panned by touch. Technician P-parameters, error codes
+  with descriptions, and the local weather in the status bar. English, French, or Spanish,
   with Celsius or Fahrenheit.
-- **Web dashboard** - The same data and controls from any browser on your network, plus
-  settings, firmware updates, diagnostics (live logs, downloadable report, device
-  screenshot), and configuration of WiFi, time, location, and display.
+- **Web dashboard** - The same data and controls from any browser on your network, laid
+  out for desktop or phone, plus settings, firmware updates, diagnostics (live logs,
+  activity report, device screenshot), and configuration of WiFi, time, location, and
+  display.
+- **Cycle history** - 1 to 8 hours of inlet, outlet and setpoint temperatures with run,
+  defrost, freeze-protection and fault bands, a power pane, and optional COP and outdoor
+  temperature lines. Drag or step back through about 14 days of 30-second telemetry;
+  hover (or touch) for a card with the run, its duration and every reading at that moment.
+- **Energy history** - Electricity used each day by operating mode, estimated heat and
+  COP, and the average outdoor temperature while running, over 14 days to a year.
+- **Heat output and COP** - Estimated from the water temperature rise, the configured flow
+  rate and the loop fluid (water or glycol mix). Supply and return temperatures can come
+  from the unit's own sensors or from external Modbus TCP / BACnet/IP sensors, with a
+  notification and automatic fallback if an external sensor stops answering.
+- **Activity report** - A downloadable 14-day report (a self-contained HTML page) that
+  summarises faults, short cycling, defrost, COP, restarts and data gaps, with what to
+  check for each finding. Useful to send to an installer.
+- **Advanced parameters** - Read and edit the unit's technician P-parameters with
+  save/revert and a change log.
 - **Home Assistant** - Local-push integration ([`hass-macon`](https://github.com/sslivins/hass-macon)):
   state updates arrive over a secure WebSocket the moment they change, with no MQTT
   broker or cloud relay. Pair from the device screen with a one-time code.
@@ -142,8 +163,9 @@ Home Assistant is unaffected either way: it always uses the dedicated, pinned TL
 8443.
 
 ### Pages
-- **Home** - Current operation, tank temperature, equipment, COP and power, errors,
-  and the latest cycle
+- **Home** - Current operation, tank temperature, equipment, supply/return/power, the
+  last 4 hours of tank temperature with run, defrost, freeze-protection and fault bands,
+  and the last run and today's energy
 - **Status** - Every live reading from the heat pump, grouped into Water loop,
   Performance, Refrigerant circuit, Outdoor, and Electrical. A summary shows what the
   unit is doing, how fresh the data is, which components are running, any active
@@ -151,12 +173,17 @@ Home Assistant is unaffected either way: it always uses the dedicated, pinned TL
   OEM controller shows for it (e.g. A14, o3); estimated readings (water ΔT, COP,
   superheat, approach temperatures) are hidden when they would be meaningless, such as
   during defrost. EEV openings show in motor steps, with the percentage of full travel below.
-- **Cycle history** - Compressor run cycles and faults with inlet, outlet, and setpoint
-  temperatures over the last 8 hours
-- **Control** - Working mode and setpoints
-- **Events** - Equipment starts/stops, mode and setpoint changes, reboots, and errors
-- **Settings** - WiFi, firmware, time and location, display, preferences (units,
-  device language, demo mode), security, Home Assistant, diagnostics, and system
+- **Control** - Power, working mode, setpoints, and advanced (technician) parameters
+- **History**
+  - **Cycles** - Compressor runs with inlet, outlet, setpoint, power, COP and outdoor
+    temperature over 1 to 8 hours, and a list of the runs with per-run COP and outdoor
+    temperature
+  - **Energy** - Daily electricity by mode, estimated heat and COP, over 14 days to a year
+  - **Events** - Equipment starts/stops, mode and setpoint changes, reboots, and errors
+  - **Faults** - Active faults and the fault history
+- **Settings** - Heat output & COP (flow, loop fluid, external sensors), WiFi, Home
+  Assistant, preferences (units, device language, demo mode), time and location,
+  display, security, firmware, diagnostics (logs, activity report), and system
   (reboot, factory reset)
 
 ## Home Assistant
@@ -199,7 +226,8 @@ a logged-in web session.
 | Area | Endpoints |
 |------|-----------|
 | System | `/api/status`, `/api/info`, `/api/time`, `/api/time/config`, `/api/time/sync`, `/api/location`, `/api/weather`, `/api/preferences`, `/api/display/brightness` |
-| Heat pump | `/api/heatpump/status`, `/api/heatpump/setpoints`, `/api/heatpump/mode`, `/api/heatpump/errors`, `/api/heatpump/errors/history`, `/api/heatpump/advanced`, `/api/heatpump/windows`, `/api/heatpump/temperature-history`, `/api/heatpump/demo` |
+| Heat pump | `/api/heatpump/status`, `/api/heatpump/setpoints`, `/api/heatpump/mode`, `/api/heatpump/errors`, `/api/heatpump/errors/history`, `/api/heatpump/advanced`, `/api/heatpump/windows`, `/api/heatpump/temperature-history`, `/api/heatpump/home-history`, `/api/heatpump/demo` |
+| Energy and performance | `/api/energy/daily`, `/api/energy/runs`, `/api/energy/totals`, `/api/performance/config`, `/api/performance/test`, `/api/performance/bacnet/discover`, `/api/performance/bacnet/browse` |
 | History and diagnostics | `/api/events`, `/api/logs`, `/api/logs/persisted`, `/api/logs/coredump`, `/api/notifications`, `/api/heatpump/diagnostic`, `/api/screenshot` |
 | Firmware | `/api/ota/status`, `/api/ota/releases`, `/api/ota/github`, `/api/ota/upload`, `/api/ota/reboot` |
 | WiFi | `/api/wifi`, `/api/wifi/scan`, `/api/wifi/networks`, `/api/wifi/connect`, `/api/wifi/disconnect` |
@@ -265,7 +293,7 @@ Tests that drive the device's touch UI through the test API (requires a firmware
 with `CONFIG_TEST_ENDPOINTS=y`). See [tests/device/README.md](tests/device/README.md).
 
 ```bash
-ARCTIC_URL=https://arctic-xxxx.local pytest tests/device/ -v
+ARCTIC_URL=http://arctic-xxxx.local pytest tests/device/ -v
 ```
 
 ### Web Dashboard Tests (Playwright)
@@ -274,14 +302,14 @@ Browser-based tests for the web dashboard. See [tests/web/README.md](tests/web/R
 ```bash
 pip install -r tests/web/requirements.txt
 playwright install chromium
-ARCTIC_URL=https://arctic-xxxx.local pytest tests/web/ -v
+ARCTIC_URL=http://arctic-xxxx.local pytest tests/web/ -v
 ```
 
 ### API Contract Tests (Schemathesis)
 Fuzz testing of the REST API against the OpenAPI spec. See [tests/api/](tests/api/).
 
 ```bash
-ARCTIC_URL=https://arctic-xxxx.local pytest tests/api/ -v
+ARCTIC_URL=http://arctic-xxxx.local pytest tests/api/ -v
 ```
 
 ### RS-485 End-to-End Tests (arctic-simulator)
@@ -294,7 +322,7 @@ report different arctic-macon fingerprints. It takes the controller out of demo 
 leases the simulator for the run, and puts both back afterwards.
 
 ```bash
-ARCTIC_URL=https://arctic-xxxx.local ARCTIC_API_KEY=... ARCTIC_SIM_URL=http://192.168.1.177 \
+ARCTIC_URL=http://arctic-xxxx.local ARCTIC_API_KEY=... ARCTIC_SIM_URL=http://192.168.1.177 \
   pytest tests/rs485/ -v
 ```
 
@@ -309,7 +337,7 @@ hass-macon checkout, so CI runs it only in the nightly run.
 ```bash
 git clone https://github.com/sslivins/hass-macon ../hass-macon
 python3.13 -m venv .ha-venv && .ha-venv/bin/pip install -e "../hass-macon[tests]"
-ARCTIC_URL=https://arctic-xxxx.local ARCTIC_API_KEY=... ARCTIC_SIM_URL=http://192.168.1.177 \
+ARCTIC_URL=http://arctic-xxxx.local ARCTIC_API_KEY=... ARCTIC_SIM_URL=http://192.168.1.177 \
   PYTHONPATH=../hass-macon .ha-venv/bin/python -m pytest tests/home_assistant/ -v
 ```
 
@@ -385,7 +413,7 @@ esptool.py --chip esp32p4 write_flash \
 ### 4. Connect to WiFi
 
 Pick your network on the device under **Settings → WiFi**, then open
-`https://arctic-xxxx.local` and set your password (see [Security](#security)).
+`http://arctic-xxxx.local` and set your password (see [Security](#security)).
 
 ## Configuration
 
