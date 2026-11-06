@@ -1081,6 +1081,65 @@ paths:
         "423":
           $ref: "#/components/responses/Locked"
 
+  /api/test/seed-history:
+    post:
+      tags: [Mocking]
+      summary: Replace one kind of stored history with raw records
+      description: |
+        Lets a dev unit show real history copied from another controller
+        (`tools/copy_history.py`). The body is little-endian records, oldest
+        first, in the firmware's own layout:
+
+        - `telemetry`: `history_telemetry_sample_t`, 32 bytes (sequence ignored),
+          strictly increasing timestamps, at most 14 days.
+        - `events`: `{u32 timestamp, u32 boot_id, u32 type, u32 payload}`, at most
+          1000; `type` is the `event_type_t` value.
+        - `days`: `energy::DayRecord`, 112 bytes, closed days in date order.
+          Replaces every stored day and the lifetime totals (in memory they
+          refresh on the next restart). Today's open day is left alone.
+        - `runs`: `energy::RunRecord`, 32 bytes; the date is recomputed from the
+          start in local time.
+        - `today`: one `energy::DayRecord` whose totals replace the open day's
+          (today's date is kept).
+      parameters:
+        - in: query
+          name: kind
+          required: true
+          schema:
+            type: string
+            enum: [telemetry, events, days, today, runs]
+        - in: header
+          name: X-Session-Id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: History replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  kind:
+                    type: string
+                  count:
+                    type: integer
+                required: [success, kind, count]
+        "400":
+          description: Unknown kind, a partial or oversized body, or records out of order
+        "423":
+          $ref: "#/components/responses/Locked"
+
   /api/test/lock:
     get:
       tags: [Session Lock]

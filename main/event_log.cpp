@@ -3,6 +3,7 @@
  * Event Log Implementation - RAM ring backed by a raw-flash journal
  */
 
+#include "sdkconfig.h"
 #include "event_log.h"
 #include "boot_stats.h"
 #include "history_storage.h"
@@ -358,6 +359,31 @@ void event_log_clear(void) {
     xSemaphoreGive(s_mutex);
     ESP_LOGI(TAG, "Event log cleared");
 }
+
+#ifdef CONFIG_TEST_ENDPOINTS
+void event_log_seed_for_test(const event_entry_t* entries, int count) {
+    if (s_mutex == nullptr || entries == nullptr || count < 0) return;
+    // Oldest first; only the newest EVENT_LOG_MAX_ENTRIES fit.
+    if (count > EVENT_LOG_MAX_ENTRIES) {
+        entries += count - EVENT_LOG_MAX_ENTRIES;
+        count = EVENT_LOG_MAX_ENTRIES;
+    }
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    memset(s_buffer, 0, sizeof(s_buffer));
+    memset(s_event_ids, 0, sizeof(s_event_ids));
+    for (int i = 0; i < count; i++) {
+        s_buffer[i] = entries[i];
+        s_event_ids[i] = s_next_event_id++;
+        if (s_next_event_id == 0) s_next_event_id = 1;
+    }
+    s_count = count;
+    s_head = count % EVENT_LOG_MAX_ENTRIES;
+    s_revision++;
+    compact_locked();
+    xSemaphoreGive(s_mutex);
+    ESP_LOGI(TAG, "Event log seeded with %d entries", count);
+}
+#endif
 
 void event_log_prepare_factory_reset(void) {
     if (s_mutex == nullptr) return;

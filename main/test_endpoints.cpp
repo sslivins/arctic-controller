@@ -49,6 +49,8 @@
 #include "event_log_screen.h"
 #include "history_storage.h"
 #include "run_store.h"
+#include "energy_store.h"
+#include <cstddef>
 #include "tab_shell.h"
 #include "history_tab.h"
 #include "heatpump_history_screen.h"
@@ -2605,6 +2607,151 @@ static esp_err_t populate_temperature_history_post_handler(httpd_req_t* req)
 }
 
 // ============================================================================
+// POST /api/test/seed-history?kind=telemetry|events|days|today|runs
+// Replace one kind of stored history with the records in the body, so a dev
+// unit can show real data copied from another controller
+// (tools/copy_history.py). The body is the raw little-endian records, oldest
+// first:
+//   telemetry  history_telemetry_sample_t (32 bytes; sequence ignored)
+//   events     {u32 timestamp, u32 boot_id, u32 type, u32 payload}
+//   days       energy::DayRecord (112 bytes), closed days only
+//   today      one energy::DayRecord: the open day's totals (date kept)
+//   runs       energy::RunRecord (32 bytes; date recomputed from start_s)
+// Lifetime energy totals in memory refresh on the next restart.
+// ============================================================================
+
+struct SeedEventRecord {
+    uint32_t timestamp;
+    uint32_t boot_id;
+    uint32_t type;
+    uint32_t payload;
+};
+static_assert(sizeof(SeedEventRecord) == 16, "seed-history events wire format");
+static_assert(sizeof(history_telemetry_sample_t) == 32 &&
+                  offsetof(history_telemetry_sample_t, flags2) == 28,
+              "seed-history telemetry wire format");
+
+static uint32_t seed_local_date(uint32_t epoch)
+{
+    struct tm local;
+    const time_t t = epoch;
+    localtime_r(&t, &local);
+    return (uint32_t)(local.tm_year + 1900) * 10000 + (uint32_t)(local.tm_mon + 1) * 100 +
+           (uint32_t)local.tm_mday;
+}
+
+static esp_err_t seed_history_post_handler(httpd_req_t* req)
+{
+    CHECK_SESSION_LOCK(req);
+    char query[48], kind[16] = "";
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        httpd_query_key_value(query, "kind", kind, sizeof(kind));
+    }
+    size_t rec = 0, max_n = 0;
+    if (strcmp(kind, "telemetry") == 0) {
+        rec = sizeof(history_telemetry_sample_t);
+        max_n = HISTORY_TELEMETRY_RETENTION_DAYS * 86400 / HISTORY_TELEMETRY_SAMPLE_INTERVAL_SEC;
+    } else if (strcmp(kind, "events") == 0) {
+        rec = sizeof(SeedEventRecord);
+        max_n = EVENT_LOG_MAX_ENTRIES;
+    } else if (strcmp(kind, "days") == 0) {
+        rec = sizeof(energy::DayRecord);
+        max_n = 400;
+    } else if (strcmp(kind, "today") == 0) {
+        rec = sizeof(energy::DayRecord);
+        max_n = 1;
+    } else if (strcmp(kind, "runs") == 0) {
+        rec = sizeof(energy::RunRecord);
+        max_n = 400 * energy::kMaxRunsPerDay;
+    } else {
+        send_json_error(req, "400 Bad Request", "kind must be telemetry, events, days, today or runs");
+        return ESP_OK;
+    }
+    const size_t len = req->content_len;
+    if (len == 0 || len % rec != 0 || len / rec > max_n) {
+        send_json_error(req, "400 Bad Request", "Body must be 1..max whole records");
+        return ESP_OK;
+    }
+    auto* body = static_cast<uint8_t*>(heap_caps_malloc(len, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (body == nullptr) {
+        send_json_error(req, "500 Internal Server Error", "Out of memory");
+        return ESP_OK;
+    }
+    size_t got = 0;
+    while (got < len) {
+        const int r = httpd_req_recv(req, reinterpret_cast<char*>(body + got), len - got);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+        if (r <= 0) break;
+        got += (size_t)r;
+    }
+    if (got != len) {
+        heap_caps_free(body);
+        send_json_error(req, "400 Bad Request", "Short body");
+        return ESP_OK;
+    }
+    const size_t n = len / rec;
+    const char* error = nullptr;
+
+    if (strcmp(kind, "telemetry") == 0) {
+        const auto* s = reinterpret_cast<const history_telemetry_sample_t*>(body);
+        for (size_t i = 1; i < n && !error; i++) {
+            if (s[i].timestamp <= s[i - 1].timestamp) error = "Samples must be in time order";
+        }
+        if (!error && history_storage_seed_telemetry_for_test(s, n) != ESP_OK) {
+            error = "Telemetry write failed";
+        }
+    } else if (strcmp(kind, "events") == 0) {
+        auto* entries = static_cast<event_entry_t*>(
+            heap_caps_calloc(n, sizeof(event_entry_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        const auto* in = reinterpret_cast<const SeedEventRecord*>(body);
+        for (size_t i = 0; entries && i < n && !error; i++) {
+            if (in[i].type >= EVENT_TYPE_COUNT) error = "Unknown event type";
+            entries[i].timestamp = in[i].timestamp;
+            entries[i].boot_id = in[i].boot_id;
+            entries[i].type = (event_type_t)in[i].type;
+            entries[i].payload = in[i].payload;
+        }
+        if (!entries) error = "Out of memory";
+        if (!error) event_log_seed_for_test(entries, (int)n);
+        heap_caps_free(entries);
+    } else if (strcmp(kind, "days") == 0) {
+        const auto* d = reinterpret_cast<const energy::DayRecord*>(body);
+        for (size_t i = 1; i < n && !error; i++) {
+            if (d[i].date <= d[i - 1].date) error = "Days must be in date order";
+        }
+        if (!error) {
+            energy::store_clear_days_for_test(d[n - 1].date);
+            for (size_t i = 0; i < n && !error; i++) {
+                if (!energy::store_commit_day(d[i], nullptr)) error = "Day write failed";
+            }
+        }
+    } else if (strcmp(kind, "today") == 0) {
+        if (!arctic::seedEnergyTodayForTest(*reinterpret_cast<const energy::DayRecord*>(body))) {
+            error = "No open day yet";
+        }
+    } else {
+        auto* runs = reinterpret_cast<energy::RunRecord*>(body);
+        energy::store_clear_runs();
+        for (size_t i = 0; i < n && !error; i++) {
+            runs[i].date = seed_local_date(runs[i].start_s);
+            runs[i].flags = 0;
+            if (!energy::store_append_run(runs[i])) error = "Run write failed";
+        }
+    }
+    heap_caps_free(body);
+    if (error) {
+        send_json_error(req, "400 Bad Request", error);
+        return ESP_OK;
+    }
+    char resp[64];
+    snprintf(resp, sizeof(resp), "{\"success\":true,\"kind\":\"%s\",\"count\":%u}", kind,
+             (unsigned)n);
+    set_json_content_type(req);
+    httpd_resp_sendstr(req, resp);
+    return ESP_OK;
+}
+
+// ============================================================================
 // POST /api/test/lock — acquire session lock
 // Body: {"session_id": "uuid-here", "ttl_seconds": 900}
 // ============================================================================
@@ -3671,6 +3818,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &populate_temperature_history_options_uri);
+
+    httpd_uri_t seed_history_uri = {
+        .uri = "/api/test/seed-history",
+        .method = HTTP_POST,
+        .handler = seed_history_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &seed_history_uri);
 
     httpd_uri_t notification_mock_uri = {
         .uri = "/api/test/notification-mock",

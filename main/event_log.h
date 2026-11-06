@@ -205,6 +205,12 @@ void event_log_time_synced(const struct timeval* synced_time);
 void event_log_clear(void);
 
 /**
+ * @brief Test firmware only (CONFIG_TEST_ENDPOINTS): replace the log with
+ *        `entries`, oldest first, keeping their timestamps.
+ */
+void event_log_seed_for_test(const event_entry_t* entries, int count);
+
+/**
  * @brief Stop persistent writes before the history partition is erased.
  *        Intended only for the factory-reset path immediately before reboot.
  */

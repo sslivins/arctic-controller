@@ -227,6 +227,9 @@ void flushEnergyLedger();
 
 // Today's energy so far (see energy_ledger.h). False until the clock is set.
 bool getEnergyToday(energy::DayRecord* out);
+// Test firmware only (CONFIG_TEST_ENDPOINTS): replace the open day's totals
+// with `day`'s, keeping today's date.
+bool seedEnergyTodayForTest(const energy::DayRecord& day);
 
 // Energy totals over every closed day since install or factory reset. False
 // until the first day has closed.
