@@ -3000,6 +3000,20 @@ paths:
                           type: integer
                           nullable: true
                           description: When defrost ended, or null if still defrosting
+                  freeze_protection:
+                    type: array
+                    description: >-
+                      Freeze-protection runs (idle anti-freeze pump runs)
+                      overlapping the window, oldest first (newest 16)
+                    items:
+                      type: object
+                      properties:
+                        start:
+                          type: integer
+                        end:
+                          type: integer
+                          nullable: true
+                          description: When the run ended, or null if still running
                   summary:
                     type: object
                     properties:

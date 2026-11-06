@@ -7312,6 +7312,7 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
     constexpr size_t kMaxRuns = 160;
     constexpr size_t kMaxFaults = 16;
     constexpr size_t kMaxDefrosts = 16;
+    constexpr size_t kMaxFreezes = 16;
 
     uint32_t end = 0;
     time_t now = 0;
@@ -7333,6 +7334,7 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
         bool tank_ok[kBuckets];
         fault_interval_t faults[kMaxFaults];
         fault_interval_t defrosts[kMaxDefrosts];
+        fault_interval_t freezes[kMaxFreezes];
     };
     auto* w = static_cast<Work*>(heap_caps_calloc(1, sizeof(Work),
                                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -7356,10 +7358,11 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
     run_count = home_stats_drop_runs_before(w->runs, run_count, start);
     home_stats_tank_series(w->samples, count, start, end, w->tank, w->tank_ok, kBuckets);
     size_t fault_total = 0;
-    size_t defrost_count = 0;
+    size_t defrost_count = 0, freeze_count = 0;
     const size_t fault_count =
         chart_spans_query(start, end, w->faults, kMaxFaults, &fault_total,
-                          w->defrosts, kMaxDefrosts, &defrost_count);
+                          w->defrosts, kMaxDefrosts, &defrost_count,
+                          w->freezes, kMaxFreezes, &freeze_count);
 
     set_json_content_type(req);
 
@@ -7435,16 +7438,22 @@ static esp_err_t heatpump_home_history_get_handler(httpd_req_t* req)
                   i ? "," : "", (unsigned)f.start, end_buf);
         }
     }
-    emitf("],\"fault_total\":%u,\"defrosts\":[", (unsigned)fault_total);
-    for (size_t i = 0; i < defrost_count; i++) {
-        const fault_interval_t& d = w->defrosts[i];
-        if (d.end) {
-            emitf("%s{\"start\":%u,\"end\":%u}", i ? "," : "", (unsigned)d.start,
-                  (unsigned)d.end);
-        } else {
-            emitf("%s{\"start\":%u,\"end\":null}", i ? "," : "", (unsigned)d.start);
+    // Defrost and freeze-protection spans (end null = still running).
+    auto emit_spans = [&](const fault_interval_t* list, size_t n) {
+        for (size_t i = 0; i < n; i++) {
+            const fault_interval_t& d = list[i];
+            if (d.end) {
+                emitf("%s{\"start\":%u,\"end\":%u}", i ? "," : "", (unsigned)d.start,
+                      (unsigned)d.end);
+            } else {
+                emitf("%s{\"start\":%u,\"end\":null}", i ? "," : "", (unsigned)d.start);
+            }
         }
-    }
+    };
+    emitf("],\"fault_total\":%u,\"defrosts\":[", (unsigned)fault_total);
+    emit_spans(w->defrosts, defrost_count);
+    emitf("],\"freeze_protection\":[");
+    emit_spans(w->freezes, freeze_count);
     static constexpr char kSummaryOpen[] = "],\"summary\":{\"current_start\":";
     emit(kSummaryOpen, sizeof(kSummaryOpen) - 1);
     if (summary.current.start) emitf("%u", (unsigned)summary.current.start);

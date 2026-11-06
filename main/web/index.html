@@ -1533,6 +1533,7 @@
               <span><i style="${sw("var(--band-cool)")}"></i>Cooling</span>
               <span><i style="${sw("var(--band-dhw)")}"></i>Hot water</span>
               <span><i style="background:color-mix(in srgb, var(--home-defrost) var(--hist-defrost-strength), var(--cp-surface));border:1px solid var(--home-defrost)"></i>Defrost</span>
+              <span><i style="background:repeating-linear-gradient(135deg, var(--home-freeze-text) 0 2px, transparent 2px 5px)"></i>Freeze Protection</span>
               <span><i style="background:repeating-linear-gradient(135deg, var(--cp-danger) 0 2px, transparent 2px 5px)"></i>Fault</span>
             </div>`;
       if (!data) {
@@ -1578,17 +1579,18 @@
       chart.addKey("cooling", "Cooling", "var(--band-cool)", band);
       chart.addKey("hot_water", "Hot water", "var(--band-dhw)", band);
       chart.addKey("defrost", "Defrost", "var(--home-defrost)", { fillStrength: "var(--hist-defrost-strength)" });
+      chart.addKey("freeze", "Freeze Protection", "var(--home-freeze-text)", "hatch");
       chart.addKey("fault", "Fault", "var(--cp-danger)", "hatch");
       chart.setCard(homeCard);
       homeTs = { el, chart, sig: "", data: null, unit: state.preferences.temp_unit };
     }
-    // Card: time, tank, what the unit was doing in that bucket, active faults.
+    // Card, in the cycles chart's order: time, what the unit was doing in that
+    // bucket, tank and setpoint, then active faults.
     function homeCard(info, card) {
       const data = homeTs?.data, s = info.sample;
       if (!data || !s) return;
       const b0 = s.b0, b1 = s.b0 + s.bs;
       card.add("title", fmtHistClock(Math.round(s.t), true));
-      card.addLayers();
       // The span in this bucket, preferring the one under the cursor.
       const inBucket = list => {
         const hits = (list || []).filter(x => x.start < b1 && (x.end ?? data.end) > b0);
@@ -1597,13 +1599,20 @@
       const run = inBucket(data.runs);
       // A defrost isn't part of a run span, so check it first or it reads "Idle".
       const defrost = inBucket(data.defrosts);
+      // A ~30 s freeze-protection pump run, only while idle (as on the cycles chart).
+      const fp = !defrost && !run && inBucket(data.freeze_protection);
       const [runText, runColor] = defrost ? [HOME_STATE_LABEL.defrost, "var(--home-defrost)"]
-        : run ? HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating : ["Idle", ""];
+        : run ? HOME_RUN_MODE[run.mode] || HOME_RUN_MODE.heating
+        : fp ? [HOME_STATE_LABEL.freeze_protection, "var(--home-freeze-text)"] : ["Idle", ""];
       // The window always ends now, so an open span is still running.
       const sp = defrost || run;
       const span = sp && { start: sp.start, end: sp.end ?? data.end, clipStart: sp.start < data.start, open: sp.end == null };
       card.add("block", runText, span ? fmtRunLength(span, true) : "", runColor || "var(--cp-text-muted)");
       if (span) card.add("text", fmtRunSpan(span, true));
+      card.addLayers();
+      // The setpoint is the current one, as drawn by the reference line.
+      const setp = homeSetpoint();
+      if (setp != null) card.add("value", "Setpoint", `${tempNumber(setp).toFixed(1)} °${state.preferences.temp_unit === "fahrenheit" ? "F" : "C"}`, "var(--cp-text-muted)");
       (data.faults || []).filter(x => x.start < b1 && (x.end ?? data.end) > b0).slice(0, 2)
         .forEach(x => card.add("warning", `⚠ ${x.fault_code || "?"} ${x.fault_label || ""}`.trim()));
     }
@@ -1640,7 +1649,8 @@
           chart.setSpans(0, (data.runs || []).map(r => ({ start: r.start, end: r.end ?? null, minWidth: 2,
             key: HOME_RUN_BAND[r.mode] ? r.mode : "heating" })));
           chart.setSpans(1, (data.defrosts || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "defrost" })));
-          chart.setSpans(2, (data.faults || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "fault" })));
+          chart.setSpans(2, (data.freeze_protection || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "freeze" })));
+          chart.setSpans(3, (data.faults || []).map(x => ({ start: x.start, end: x.end ?? null, minWidth: 3, key: "fault" })));
           chart.setNotes((data.faults || []).map(x => ({ time: x.start, text: x.fault_code || "?", color: "var(--cp-danger)" })), "⚠ ");
           chart.setRefLines(sp == null ? [] : [{ pane: "tank", value: tempNumber(sp) * 10,
             color: "color-mix(in srgb, var(--cp-text-muted) 75%, transparent)", label: temp(sp) }]);
