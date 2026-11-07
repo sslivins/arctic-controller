@@ -144,3 +144,14 @@ def test_failed_retry_raises_without_reporting(stalling_server):
 def test_other_timeouts_are_not_retried():
     assert not tls_handshake_retry.is_tls_handshake_timeout(
         requests.exceptions.ReadTimeout("Read timed out. (read timeout=10)"))
+
+
+def test_opt_out_lets_the_stall_fail(stalling_server):
+    # A probe waiting for the device to drop off WiFi must see the failure;
+    # a rescued retry hid the drop (PR #408 CI).
+    url, accepted = stalling_server(stall=1)
+    with tls_handshake_retry.no_handshake_retry():
+        with pytest.raises(requests.exceptions.RequestException):
+            requests.get(url, timeout=0.3, verify=False)
+    assert len(accepted) == 1
+    assert requests.get(url, timeout=2, verify=False).text == "ok"

@@ -15,10 +15,14 @@ connect failure it really is:
 
 Each retry that rescues a request is reported as a pytest warning and, in CI,
 a GitHub annotation, so stalls stay visible instead of being silently absorbed.
+
+Probes that wait for the controller to become unreachable (WiFi bounce,
+server stop) must not be rescued: wrap them in ``no_handshake_retry()``.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import threading
@@ -33,6 +37,22 @@ except ImportError:  # pragma: no cover - suites that do not use requests
 
 HANDSHAKE_RETRIES: list[str] = []
 _MARK = "_arctic_tls_handshake_timeout"
+_local = threading.local()
+
+
+@contextlib.contextmanager
+def no_handshake_retry():
+    """Let handshake timeouts in this thread fail as they normally would."""
+    prev = getattr(_local, "disabled", False)
+    _local.disabled = True
+    try:
+        yield
+    finally:
+        _local.disabled = prev
+
+
+def _enabled() -> bool:
+    return not getattr(_local, "disabled", False)
 
 
 def _chain(exc: BaseException | None):
@@ -75,8 +95,6 @@ if requests is not None:
     # Retries made during the current send(). They are reported only if the
     # request then succeeds: a failure surfaces as an exception anyway, and
     # code waiting for a reboot expects handshakes to fail.
-    _local = threading.local()
-
     def _pending() -> list[str]:
         if not hasattr(_local, "pending"):
             _local.pending = []
@@ -84,7 +102,8 @@ if requests is not None:
 
     def _increment(self, method=None, url=None, response=None, error=None,
                    _pool=None, _stacktrace=None):
-        if isinstance(error, ReadTimeoutError) and is_tls_handshake_timeout(error):
+        if (_enabled() and isinstance(error, ReadTimeoutError)
+                and is_tls_handshake_timeout(error)):
             converted = ConnectTimeoutError(f"TLS handshake timed out: {error}")
             setattr(converted, _MARK, True)
             # Raises when no connect retries are left.
@@ -101,7 +120,8 @@ if requests is not None:
             try:
                 response = _orig_send(self, request, *args, **kwargs)
             except requests.exceptions.RequestException as exc:
-                if not is_tls_handshake_timeout(exc) or _has_connect_retries(self.max_retries):
+                if (not _enabled() or not is_tls_handshake_timeout(exc)
+                        or _has_connect_retries(self.max_retries)):
                     raise
                 # Nothing was sent, so even a non-idempotent request is safe
                 # to repeat. Only once: a second stall is a real failure.
