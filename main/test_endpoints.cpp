@@ -58,6 +58,7 @@
 #include "display_idle.h"
 #include <esp_timer.h>
 #include "png_encoder.h"
+#include "slow_request.h"
 #include "geocoding.h"
 #include "weather.h"
 #include "api_server.h"
@@ -2886,11 +2887,18 @@ static esp_err_t lock_get_handler(httpd_req_t* req)
 
 static esp_err_t screenshot_get_handler(httpd_req_t* req)
 {
+    // Rendering and encoding take seconds: run on the slow-request worker so
+    // the server thread keeps answering (see slow_request.h).
+    if (!slow_request_on_worker()) {
+        return slow_request_defer(req, screenshot_get_handler);
+    }
     // Screenshot is read-only, no session lock needed
     ESP_LOGI(TAG, "Screenshot requested");
 
     // Get screen dimensions under LVGL lock
-    bsp_display_lock(0);
+    if (!slow_request_display_lock()) {
+        return ESP_FAIL;
+    }
     lv_obj_t* screen = lv_screen_active();
     lv_obj_update_layout(screen);
     int32_t w = lv_obj_get_width(screen);
@@ -2916,7 +2924,10 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     lv_draw_buf_init(&snapshot, w, h, LV_COLOR_FORMAT_RGB888, stride, pixel_buf, buf_size);
 
     // Take snapshot under LVGL lock
-    bsp_display_lock(0);
+    if (!slow_request_display_lock()) {
+        heap_caps_free(pixel_buf);
+        return ESP_FAIL;
+    }
     screen = lv_screen_active();
     const int64_t render_t0 = esp_timer_get_time();
     lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
@@ -2990,6 +3001,10 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     while (sent < png_size) {
         size_t to_send = png_size - sent;
         if (to_send > chunk_size) to_send = chunk_size;
+        if (slow_request_aborting()) {
+            ret = ESP_ERR_INVALID_STATE;
+            break;
+        }
         ret = httpd_resp_send_chunk(req, (const char*)(png_data + sent), to_send);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to send PNG chunk at offset %u", (unsigned)sent);
@@ -3003,7 +3018,8 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     }
 
     heap_caps_free(png_data);
-    return ESP_OK;
+    // A partial chunked response cannot be recovered; drop the connection.
+    return ret;
 }
 
 // ============================================================================
