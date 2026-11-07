@@ -58,6 +58,7 @@
 #include "display_idle.h"
 #include <esp_timer.h>
 #include "png_encoder.h"
+#include "slow_request.h"
 #include "geocoding.h"
 #include "weather.h"
 #include "api_server.h"
@@ -2886,11 +2887,18 @@ static esp_err_t lock_get_handler(httpd_req_t* req)
 
 static esp_err_t screenshot_get_handler(httpd_req_t* req)
 {
+    // Rendering and encoding take seconds: run on the slow-request worker so
+    // the server thread keeps answering (see slow_request.h).
+    if (!slow_request_on_worker()) {
+        return slow_request_defer(req, screenshot_get_handler);
+    }
     // Screenshot is read-only, no session lock needed
     ESP_LOGI(TAG, "Screenshot requested");
 
     // Get screen dimensions under LVGL lock
-    bsp_display_lock(0);
+    if (!slow_request_display_lock()) {
+        return ESP_FAIL;
+    }
     lv_obj_t* screen = lv_screen_active();
     lv_obj_update_layout(screen);
     int32_t w = lv_obj_get_width(screen);
@@ -2916,7 +2924,10 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     lv_draw_buf_init(&snapshot, w, h, LV_COLOR_FORMAT_RGB888, stride, pixel_buf, buf_size);
 
     // Take snapshot under LVGL lock
-    bsp_display_lock(0);
+    if (!slow_request_display_lock()) {
+        heap_caps_free(pixel_buf);
+        return ESP_FAIL;
+    }
     screen = lv_screen_active();
     const int64_t render_t0 = esp_timer_get_time();
     lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
@@ -2990,6 +3001,10 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     while (sent < png_size) {
         size_t to_send = png_size - sent;
         if (to_send > chunk_size) to_send = chunk_size;
+        if (slow_request_aborting()) {
+            ret = ESP_ERR_INVALID_STATE;
+            break;
+        }
         ret = httpd_resp_send_chunk(req, (const char*)(png_data + sent), to_send);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to send PNG chunk at offset %u", (unsigned)sent);
@@ -3003,7 +3018,8 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     }
 
     heap_caps_free(png_data);
-    return ESP_OK;
+    // A partial chunked response cannot be recovered; drop the connection.
+    return ret;
 }
 
 // ============================================================================
@@ -3184,6 +3200,29 @@ static esp_err_t send_accepted(httpd_req_t* req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Connection", "close");
     httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// POST /api/test/httpd-stall?ms=N - hold the web server thread for N ms
+// (default 5000, max 15000) so tests can check the stall detector
+// (httpd_watch.cpp) reports it.
+static esp_err_t httpd_stall_post_handler(httpd_req_t* req)
+{
+    int ms = 5000;
+    char query[24] = {0};
+    char val[8] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "ms", val, sizeof(val)) == ESP_OK) {
+        ms = atoi(val);
+    }
+    if (ms < 0) ms = 0;
+    if (ms > 15000) ms = 15000;
+    ESP_LOGW(TAG, "test: holding the web server thread for %d ms", ms);
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    httpd_resp_set_type(req, "application/json");
+    char body[32];
+    snprintf(body, sizeof(body), "{\"held_ms\":%d}", ms);
+    httpd_resp_sendstr(req, body);
     return ESP_OK;
 }
 
@@ -3578,6 +3617,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &api_server_kill_uri);
+
+    httpd_uri_t httpd_stall_uri = {
+        .uri = "/api/test/httpd-stall",
+        .method = HTTP_POST,
+        .handler = httpd_stall_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &httpd_stall_uri);
 
     httpd_uri_t type_text_uri = {
         .uri = "/api/test/type-text",

@@ -62,6 +62,8 @@
 #include "tls_manager.h"
 #include "png_uncompressed.h"
 #include "jpeg_screenshot.h"
+#include "slow_request.h"
+#include "httpd_watch.h"
 #include <esp_http_server.h>
 #include <esp_https_server.h>
 #include <esp_tls.h>
@@ -603,6 +605,7 @@ bool api_server_start(void)
         return false;
     }
     s_started = true;
+    httpd_watch_attach(s_https_mode ? server_ssl : server);
     if (!api_server_is_healthy()) {
         // Degraded: keep the cause the failed secondary start recorded.
         ESP_LOGW(TAG, "Started without %s%s",
@@ -1939,6 +1942,9 @@ void api_server_stop(void)
 {
     LifecycleLock lock;
     s_started = false;
+    httpd_watch_detach();
+    // Requests handed to the worker point into the servers' session tables.
+    slow_request_drain();
 #ifdef CONFIG_TEST_ENDPOINTS
     if (websocket_test_server != NULL) {
         ESP_LOGI(TAG, "Stopping WebSocket feasibility server...");
@@ -1958,6 +1964,7 @@ void api_server_stop(void)
         httpd_stop(server);
         server = NULL;
     }
+    slow_request_resume();
 }
 
 bool api_server_is_running(void)
@@ -4100,7 +4107,18 @@ static esp_err_t ota_update_post_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+static esp_err_t ota_upload_receive(httpd_req_t* req);
+
 static esp_err_t ota_upload_post_handler(httpd_req_t* req)
+{
+    // Receiving and flashing an image holds the server thread on purpose.
+    httpd_watch_busy_begin();
+    const esp_err_t ret = ota_upload_receive(req);
+    httpd_watch_busy_end();
+    return ret;
+}
+
+static esp_err_t ota_upload_receive(httpd_req_t* req)
 {
     if (!check_api_auth(req)) {
         send_json_error(req, "401 Unauthorized", "API key required");
@@ -8036,6 +8054,9 @@ static esp_err_t logs_coredump_delete_handler(httpd_req_t* req)
  */
 static esp_err_t png_http_write(void *ctx, const void *buf, size_t len)
 {
+    if (slow_request_aborting()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     return httpd_resp_send_chunk((httpd_req_t *)ctx, (const char *)buf, len);
 }
 
@@ -8081,7 +8102,10 @@ static esp_err_t screenshot_send_jpeg(httpd_req_t* req, int32_t w, int32_t h,
     lv_draw_buf_init(&snapshot, w, h, LV_COLOR_FORMAT_RGB888, stride,
                      ctx.in_buf, ctx.in_capacity);
 
-    bsp_display_lock(0);
+    if (!slow_request_display_lock()) {
+        jpeg_screenshot_end(&ctx);
+        return ESP_FAIL;
+    }
     lv_obj_t* screen = lv_screen_active();
     lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
     bsp_display_unlock();
@@ -8136,9 +8160,15 @@ static bool query_value_ieq(const char* a, const char* b)
 
 static esp_err_t screenshot_get_handler(httpd_req_t* req)
 {
-    if (!check_api_auth(req)) {
-        send_json_error(req, "401 Unauthorized", "API key required");
-        return ESP_OK;
+    // Capturing and streaming takes ~10 s; doing it on the server thread
+    // stalled every other client (and the self-probe, which then restarted
+    // the servers). Authenticate here, then hand the request to the worker.
+    if (!slow_request_on_worker()) {
+        if (!check_api_auth(req)) {
+            send_json_error(req, "401 Unauthorized", "API key required");
+            return ESP_OK;
+        }
+        return slow_request_defer(req, screenshot_get_handler);
     }
 
     // ?format=png|jpeg (default png for backward compatibility), ?quality=1-100
@@ -8170,7 +8200,9 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     ESP_LOGI(TAG, "Screenshot requested (%s)", want_jpeg ? "jpeg" : "png");
 
     // Get screen dimensions under LVGL lock
-    bsp_display_lock(0);
+    if (!slow_request_display_lock()) {
+        return ESP_FAIL;
+    }
     lv_obj_t* screen = lv_screen_active();
     lv_obj_update_layout(screen);
     int32_t w = lv_obj_get_width(screen);
@@ -8197,7 +8229,10 @@ static esp_err_t screenshot_get_handler(httpd_req_t* req)
     lv_draw_buf_init(&snapshot, w, h, LV_COLOR_FORMAT_RGB888, stride, pixel_buf, buf_size);
 
     // Capture screen under LVGL lock
-    bsp_display_lock(0);
+    if (!slow_request_display_lock()) {
+        heap_caps_free(pixel_buf);
+        return ESP_FAIL;
+    }
     screen = lv_screen_active();
     lv_result_t snap_res = lv_snapshot_take_to_draw_buf(screen, LV_COLOR_FORMAT_RGB888, &snapshot);
     bsp_display_unlock();

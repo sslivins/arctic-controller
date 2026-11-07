@@ -54,6 +54,8 @@ idf_component_register(
         "weather.cpp"
         "status_bar.cpp"
         "api_server.cpp"
+        "slow_request.cpp"
+        "httpd_watch.cpp"
         "ota_manager.cpp"
         "ota_commit.cpp"
         "auth_manager.cpp"

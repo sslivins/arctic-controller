@@ -15,12 +15,16 @@ These tests drive the real recovery paths through test-firmware hooks:
     (a server that is running but not answering) or make only the Home
     Assistant server (8443) fail to start, which must be repaired without
     touching the working web UI.
+  - A screenshot streams off the server thread, and POST
+    /api/test/httpd-stall holds the thread so the stall detector's report
+    can be checked.
 
 They are destructive (the device is offline for up to a few minutes); the
 reboot case is last in this module.
 """
 
 import os
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -29,6 +33,8 @@ import requests
 import urllib3
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from tls_handshake_retry import no_handshake_retry
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -74,6 +80,12 @@ def _events(paced: bool = True, limit: int = 50):
         return r.json()
     except (requests.RequestException, ValueError):
         return None
+
+
+def _unreachable() -> bool:
+    """One unpaced probe fails. A handshake retry would hide the outage."""
+    with no_handshake_retry():
+        return _events(paced=False) is None
 
 
 def _post(path: str, json=None) -> requests.Response:
@@ -142,7 +154,7 @@ def test_servers_survive_a_wifi_bounce():
     assert r.status_code == 202, r.text
 
     # The link really dropped: unpaced probes start timing out.
-    _wait_for(lambda: _events(paced=False) is None, "WiFi to drop", 20)
+    _wait_for(_unreachable, "WiFi to drop", 20)
     data = _wait_for(_events, "the API to answer after the bounce", 60)
 
     assert data["current_boot_id"] == boot_id, "the bounce must not reboot"
@@ -152,13 +164,66 @@ def test_servers_survive_a_wifi_bounce():
     assert not downs, f"servers went down across a WiFi bounce: {downs}"
 
 
+def test_screenshot_does_not_block_the_web_server():
+    """Screenshots stream for seconds; they run off the server thread
+    (main/slow_request.cpp), so other requests -- and the supervisor's
+    self-probe -- keep being answered meanwhile."""
+    done = threading.Event()
+    result = {}
+
+    def shoot():
+        with _session(paced=False) as s:
+            r = s.get(f"{BASE_URL}/api/screenshot", timeout=60)
+        result["status"], result["size"] = r.status_code, len(r.content)
+        done.set()
+
+    shooter = threading.Thread(target=shoot, daemon=True)
+    shooter.start()
+    latencies = []
+    with _session(paced=False) as s:
+        while not done.is_set():
+            start = time.monotonic()
+            s.get(f"{BASE_URL}/api/health", timeout=10).raise_for_status()
+            latencies.append(time.monotonic() - start)
+    shooter.join()
+    assert result["status"] == 200 and result["size"] > 100_000, result
+    assert len(latencies) >= 3, "the screenshot finished too fast to overlap"
+    assert max(latencies) < 2, f"/api/health stalled behind a screenshot: {latencies}"
+
+
+def _log_entries_after(seq: int) -> list:
+    with _session(paced=True) as s:
+        r = s.get(f"{BASE_URL}/api/logs", timeout=10)
+    r.raise_for_status()
+    return [e for e in r.json()["entries"] if e["seq"] > seq]
+
+
+def test_stall_detector_reports_a_stuck_server():
+    """main/httpd_watch.cpp logs what was running when the server thread
+    stops answering, and when it answers again."""
+    since = max((e["seq"] for e in _log_entries_after(0)), default=0)
+
+    r = _post("/api/test/httpd-stall?ms=6000")
+    assert r.status_code == 200, r.text
+
+    def reported():
+        msgs = [e["message"] for e in _log_entries_after(since)
+                if e["tag"] == "httpd_watch"]
+        return msgs if any("answering again" in m for m in msgs) else None
+
+    msgs = _wait_for(reported, "the stall detector's report", 20)
+    stuck = [m for m in msgs if m.startswith("Web server thread stuck for")]
+    assert stuck, msgs
+    assert any("<- web server" in m for m in msgs), msgs
+
+
 def test_killed_servers_are_restarted_in_place():
     boot_id, since = _snapshot()
 
     # The first restart attempt fails (injected); the next one succeeds.
     r = _post("/api/test/api-server-kill", json={"fail_starts": 1})
     assert r.status_code == 202, r.text
-    _wait_for(lambda: _events(paced=False) is None, "the servers to stop", 15)
+    _wait_for(_unreachable, "the servers to stop", 15)
 
     def recovered():
         data = _events()
@@ -220,7 +285,7 @@ def test_ha_server_failure_does_not_disturb_the_web_ui():
     # so does the first separate repair of 8443.
     r = _post("/api/test/api-server-kill", json={"fail_integration_starts": 2})
     assert r.status_code == 202, r.text
-    _wait_for(lambda: _events(paced=False) is None, "the servers to stop", 15)
+    _wait_for(_unreachable, "the servers to stop", 15)
     _wait_for_recovered(boot_id, since, RESTART_TIMEOUT_S)
 
     assert _wait_for(_ha_reachable, "the HA server (8443) to be repaired",

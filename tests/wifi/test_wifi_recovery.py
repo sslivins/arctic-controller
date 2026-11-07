@@ -10,6 +10,7 @@ kick test pins both fixes; the block test walks the long-outage path (wifi_lost
 import time
 
 from conftest import events_since, status, wait_until
+from tls_handshake_retry import no_handshake_retry
 
 # Fast reconnect fires 2 s after an unplanned drop; association, DHCP and the
 # HTTPS server coming back take a few more. The old 60 s grace cannot pass.
@@ -34,7 +35,8 @@ def _kick(dev, unifi, mac, drops0: int, attempts: int = 3) -> float:
     actually knocked off: unreachable, not connected, or drop count up."""
     def dropped():
         try:
-            wifi = status(dev).get("wifi") or {}
+            with no_handshake_retry():
+                wifi = status(dev).get("wifi") or {}
         except Exception:
             return True
         return wifi.get("state") != "connected" or \
@@ -146,7 +148,8 @@ def test_long_outage_recovers_without_reboot(device, unifi, device_mac):
 
 def _unreachable(dev) -> bool:
     try:
-        status(dev, timeout=2.0)
+        with no_handshake_retry():
+            status(dev, timeout=2.0)
         return False
     except Exception:
         return True

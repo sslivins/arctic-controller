@@ -1526,6 +1526,22 @@ jobs:
           set -euo pipefail
           bash .github/scripts/scan_heap_floor.sh controller-serial.log "$HEAP_FLOOR_BYTES"
 
+      - name: Report web server stalls
+        if: always()
+        # main/httpd_watch.cpp logs "Web server thread stuck" with a task
+        # snapshot when the active web server stops answering for 3 s or more
+        # (outside OTA uploads). Not a failure on its own -- the tests decide
+        # that -- but it names what held the thread when a request or TLS
+        # handshake timed out.
+        run: |
+          [ -f controller-serial.log ] || exit 0
+          COUNT=$(grep -c 'Web server thread stuck' controller-serial.log || true)
+          if [ "${COUNT:-0}" -gt 0 ]; then
+            echo "::warning title=Web server stalled (${COUNT}x)::The controller's web server thread stopped answering ${COUNT} time(s). The task snapshots are in controller-serial.log (httpd_watch)."
+            grep -nE -A 12 'Web server thread stuck' controller-serial.log | head -120
+            grep -nE 'Web server thread answering again' controller-serial.log | head -20 || true
+          fi
+
       - name: Detect firmware crashes on device
         if: always()
         # Distinguish a *crash* reboot from an *intentional* reboot (OTA /
