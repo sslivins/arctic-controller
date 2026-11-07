@@ -78,9 +78,11 @@ char state_char(eTaskState state)
 
 void log_task(const TaskStatus_t& t, uint64_t delta, int64_t window_us, bool server)
 {
-    ESP_LOGW(TAG, "  %-16s %c prio %2u core %2d cpu %3u%%%s",
+    char core[12] = "any";
+    if (t.xCoreID != tskNO_AFFINITY) snprintf(core, sizeof(core), "%d", (int)t.xCoreID);
+    ESP_LOGW(TAG, "  %-16s %c prio %2u core %-3s cpu %3u%%%s",
              t.pcTaskName ? t.pcTaskName : "?", state_char(t.eCurrentState),
-             (unsigned)t.uxCurrentPriority, (int)t.xCoreID,
+             (unsigned)t.uxCurrentPriority, core,
              (unsigned)(window_us > 0 ? delta * 100 / (uint64_t)window_us : 0),
              server ? "  <- web server" : "");
 }
@@ -118,7 +120,7 @@ void report(int64_t stuck_us)
     }
 
     ESP_LOGW(TAG, "Web server thread stuck for %" PRId64 " ms; tasks over the next %" PRId64
-                  " ms (X running, R ready, B blocked):",
+                  " ms (X running, R ready, B blocked, S suspended):",
              (stuck_us + window_us) / 1000, window_us / 1000);
     bool server_logged = false;
     if (delta != nullptr) {

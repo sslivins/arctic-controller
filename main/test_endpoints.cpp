@@ -3203,6 +3203,29 @@ static esp_err_t send_accepted(httpd_req_t* req)
     return ESP_OK;
 }
 
+// POST /api/test/httpd-stall?ms=N - hold the web server thread for N ms
+// (default 5000, max 15000) so tests can check the stall detector
+// (httpd_watch.cpp) reports it.
+static esp_err_t httpd_stall_post_handler(httpd_req_t* req)
+{
+    int ms = 5000;
+    char query[24] = {0};
+    char val[8] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "ms", val, sizeof(val)) == ESP_OK) {
+        ms = atoi(val);
+    }
+    if (ms < 0) ms = 0;
+    if (ms > 15000) ms = 15000;
+    ESP_LOGW(TAG, "test: holding the web server thread for %d ms", ms);
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    httpd_resp_set_type(req, "application/json");
+    char body[32];
+    snprintf(body, sizeof(body), "{\"held_ms\":%d}", ms);
+    httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
 static esp_err_t wifi_bounce_post_handler(httpd_req_t* req)
 {
     if (!wifi_mgr_has_saved_credentials()) {
@@ -3594,6 +3617,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &api_server_kill_uri);
+
+    httpd_uri_t httpd_stall_uri = {
+        .uri = "/api/test/httpd-stall",
+        .method = HTTP_POST,
+        .handler = httpd_stall_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &httpd_stall_uri);
 
     httpd_uri_t type_text_uri = {
         .uri = "/api/test/type-text",
