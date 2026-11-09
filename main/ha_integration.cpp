@@ -202,6 +202,20 @@ cJSON* createStateObject(const HeatPumpState& hp)
     cJSON_AddNumberToObject(readings, "flow_lpm", hp.flow_lpm_x10 / 10.0);
     cJSON_AddStringToObject(readings, "perf_source", hp.perf_external ? "external" : "heat_pump");
     cJSON_AddBoolToObject(readings, "perf_fallback", hp.perf_fallback);
+    // Loop water from the same source as the estimate. Nullable: pymacon
+    // treats a missing or null key as unknown.
+    if (hp.supply_return_valid) {
+        cJSON_AddNumberToObject(readings, "supply_c", hp.supply_x10 / 10.0);
+        cJSON_AddNumberToObject(readings, "return_c", hp.return_x10 / 10.0);
+    } else {
+        cJSON_AddNullToObject(readings, "supply_c");
+        cJSON_AddNullToObject(readings, "return_c");
+    }
+    if (hp.water_delta_valid) {
+        cJSON_AddNumberToObject(readings, "delta_t", (hp.supply_x10 - hp.return_x10) / 10.0);
+    } else {
+        cJSON_AddNullToObject(readings, "delta_t");
+    }
 
     addEnergyTotals(state);
 

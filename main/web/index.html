@@ -1765,6 +1765,15 @@
       return [signed ? (Number(n) > 0 ? `+${n}` : n.replace("-", "−")) : n, s.slice(i)];
     }
     const numParts = (value, unitText, digits = 0) => value == null ? ["--", ""] : [Number(value).toFixed(digits), unitText];
+    // As tempParts, but to one decimal (external sensors read in tenths).
+    function tempTenths(value, kind = "absolute", signed = false) {
+      if (value == null || Number.isNaN(value)) return ["--", ""];
+      const f = state.preferences.temp_unit === "fahrenheit";
+      const v = f ? Number(value) * 9 / 5 + (kind === "differential" ? 0 : 32) : Number(value);
+      let n = v.toFixed(1);
+      if (Number(n) === 0) n = "0.0";
+      return [signed ? (Number(n) > 0 ? `+${n}` : n.replace("-", "−")) : n, f ? "°F" : "°C"];
+    }
     const fmtElapsed = s => `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
     function stRow(key, code, name, [value, unitText], { sub = "", trend = "", tone = "" } = {}) {
       return `<div class="rd${tone ? ` ${tone}` : ""}" data-reading="${key}">${codePill(code)}<div class="nm"><div>${esc(name)}</div>${
@@ -1827,11 +1836,13 @@
           cells.map(([k, v]) => `<div><span>${esc(k)}</span> ${esc(v)}</div>`).join("")}</div></div>`;
       }
 
-      // Water loop
-      let dt = ["--", ""], dtOpt = { sub: "Outlet − inlet" };
-      if (pump && fresh && T("outlet") != null && T("inlet") != null) {
-        const d = t.outlet - t.inlet;
-        dt = tempParts(d, "differential", true);
+      // Water loop. Supply/return/ΔT are the estimate's own temperatures:
+      // external sensors (tenths) when in use, else the unit's outlet/inlet.
+      const ext = r.perf_source === "external";
+      let dt = ["--", ""], dtOpt = { sub: ext ? "Supply − return · external sensors" : "Outlet − inlet" };
+      const d = R("delta_t");
+      if (pump && fresh && d != null) {
+        dt = ext ? tempTenths(d, "differential", true) : tempParts(d, "differential", true);
         const settled = (h.pump_on_s ?? 0) >= ST_DT_SETTLE_S;
         if (defrost && d < 0) dtOpt = { sub: "Reversed during defrost", tone: "warn" };
         else if (!defrost && settled && comp && ((heating && d <= 0) || (cooling && d >= 0)))
@@ -1841,6 +1852,9 @@
       const water = [
         stRow("outlet", stCode("temperatures.outlet"), "Outlet", tempParts(T("outlet"))),
         stRow("inlet", stCode("temperatures.inlet"), "Inlet", tempParts(T("inlet"))),
+        ...(ext && R("supply_c") != null ? [
+          stRow("supply", "", "Supply", tempTenths(R("supply_c")), { sub: "External sensor" }),
+          stRow("return", "", "Return", tempTenths(R("return_c")), { sub: "External sensor" })] : []),
         stRow("water_dt", "", "Water ΔT", dt, dtOpt),
         stRow("flow", "", "Flow", numParts(R("flow_lpm"), "L/min"), { sub: "Assumed" }),
         stRow("tank", stCode("temperatures.tank"), "Tank", tempParts(T("tank")), { trend: tankTrend }),

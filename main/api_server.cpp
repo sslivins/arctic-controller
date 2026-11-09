@@ -4767,6 +4767,19 @@ static esp_err_t heatpump_status_handler(httpd_req_t* req)
     cJSON_AddBoolToObject(readings, "perf_fallback", hp.perf_fallback);
     cJSON_AddBoolToObject(readings, "perf_pending", hp.perf_pending);
     cJSON_AddBoolToObject(readings, "perf_settling", hp.perf_settling);
+    // Loop water as the estimate sees it (same source as heat_out/cop).
+    if (hp.supply_return_valid) {
+        cJSON_AddNumberToObject(readings, "supply_c", hp.supply_x10 / 10.0);
+        cJSON_AddNumberToObject(readings, "return_c", hp.return_x10 / 10.0);
+    } else {
+        cJSON_AddNullToObject(readings, "supply_c");
+        cJSON_AddNullToObject(readings, "return_c");
+    }
+    if (hp.water_delta_valid) {
+        cJSON_AddNumberToObject(readings, "delta_t", (hp.supply_x10 - hp.return_x10) / 10.0);
+    } else {
+        cJSON_AddNullToObject(readings, "delta_t");
+    }
     
     // Errors
     cJSON_AddBoolToObject(root, "has_error", hp.hasAnyError());
@@ -6335,6 +6348,16 @@ static esp_err_t heatpump_diagnostic_get_handler(httpd_req_t* req)
     snprintf(line, sizeof(line), "Reading,Assumed Flow,,,%u.%u,L/min\r\n",
              hp.flow_lpm_x10 / 10, hp.flow_lpm_x10 % 10);
     httpd_resp_sendstr_chunk(req, line);
+    if (hp.supply_return_valid) {
+        snprintf(line, sizeof(line), "Reading,Supply Water,,,%.1f,°C\r\n", hp.supply_x10 / 10.0);
+        httpd_resp_sendstr_chunk(req, line);
+        snprintf(line, sizeof(line), "Reading,Return Water,,,%.1f,°C\r\n", hp.return_x10 / 10.0);
+        httpd_resp_sendstr_chunk(req, line);
+    }
+    if (hp.water_delta_valid) {
+        snprintf(line, sizeof(line), "Reading,Water Delta T,,,%.1f,K\r\n", (hp.supply_x10 - hp.return_x10) / 10.0);
+        httpd_resp_sendstr_chunk(req, line);
+    }
     snprintf(line, sizeof(line), "Reading,Estimate Temperatures,,,%s%s,\r\n",
              hp.perf_external ? "external" : "heat_pump",
              hp.perf_fallback ? " (fallback)" : hp.perf_pending ? " (pending)" : (hp.perf_settling ? " (settling)" : ""));
