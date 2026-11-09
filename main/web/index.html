@@ -1702,12 +1702,16 @@
 
       const dim = !running;
       const tiles = [];
-      tiles.push(homeTile("supply", "Supply", connected ? temp(t.outlet) : "--", { dim, trend: connected ? trends.outlet : "" }));
-      tiles.push(homeTile("return", "Return", connected ? temp(t.inlet) : "--", { dim, trend: connected ? trends.inlet : "" }));
+      // Same loop temperatures as the estimate (external sensors when in use).
+      const sup = r.supply_c ?? t.outlet, ret = r.return_c ?? t.inlet;
+      tiles.push(homeTile("supply", "Supply", connected ? temp(sup) : "--", { dim, trend: connected ? trends.outlet : "" }));
+      tiles.push(homeTile("return", "Return", connected ? temp(ret) : "--", { dim, trend: connected ? trends.inlet : "" }));
       if (running) {
-        const dt = t.outlet != null && t.inlet != null ? t.outlet - t.inlet : null;
-        tiles.push(homeTile("dt", "ΔT", dt == null ? "--" : `${Math.round(tempNumber(dt, "differential"))}°`,
-          { warn: hero === "heating" && dt != null && dt < HOME_DT_WARN_C }));
+        const dt = r.delta_t ?? null;
+        const dtText = dt == null ? "—" : r.perf_source === "external"
+          ? `${tempTenths(dt, "differential")[0].replace("-", "−")}°` : `${Math.round(tempNumber(dt, "differential"))}°`;
+        tiles.push(homeTile("dt", "ΔT", dtText,
+          { dim: dt == null, warn: hero === "heating" && dt != null && dt < HOME_DT_WARN_C }));
       }
       tiles.push(homeTile("power", "Power", connected ? fmtPower(r.power_consumption) : "--", { dim }));
       if (running) {
