@@ -173,8 +173,12 @@ class TestNavigation:
             expect(save).to_be_disabled()
             assert dashboard_page.request.get(url).json()["value"] < 0
 
-            row.locator('[data-action="ap-default"]').click()
+            use_default = row.locator('[data-action="ap-default"]')
+            use_default.click()
             expect(flag).not_to_be_checked()
+            expect(row.locator('input[type="range"]')).to_have_value(use_default.get_attribute("data-default"))
+            expect(use_default).to_be_disabled()
+            expect(save).to_be_enabled()
         finally:
             dashboard_page.request.put(url, data=str(original), headers=headers)
 
