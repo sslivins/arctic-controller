@@ -1406,15 +1406,16 @@ static void ap_update_display(int slot) {
                 snprintf(line, sizeof(line), i18n_get(STR_HP_AP_DEFAULT_FMT), def_val);
             }
             bool flag = false;
+            char with_flag[160];
+            const char* text = line;
             if (sf && arctic::advanced_sign_split(ap, val, &flag, nullptr)) {
-                char with_flag[96];
                 snprintf(with_flag, sizeof(with_flag), "%s%s%s",
                          flag ? i18n_get_key(sf->on_msg_id, sf->on_label)
                               : i18n_get_key(sf->off_msg_id, sf->off_label),
                          line[0] ? " · " : "", line);
-                snprintf(line, sizeof(line), "%s", with_flag);
+                text = with_flag;
             }
-            lv_label_set_text(state.ap_default_labels[slot], line);
+            lv_label_set_text(state.ap_default_labels[slot], text);
             lv_obj_set_style_text_color(state.ap_default_labels[slot],
                                         modified ? COLOR_WARNING : COLOR_TEXT_DIM, LV_PART_MAIN);
         }
@@ -1733,6 +1734,7 @@ void heatpump_control_create_in(lv_obj_t* parent) {
     lv_obj_set_flex_flow(state.scroll_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(state.scroll_container, 10, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(state.scroll_container, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_user_data(state.scroll_container, (void*)"control_scroll");
     
     // =========================================================================
     // DISCONNECTED BANNER — a single screen-level notice (first child) shown
