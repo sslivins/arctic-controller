@@ -4028,7 +4028,19 @@
     async function checkForUpdate(success) {
       if (state.checkingUpdate) return;
       state.checkingUpdate = true; render();
-      try { state.release = await mutate("/api/ota/releases", { timeout: 60000 }, success); }
+      try {
+        state.release = await mutate("/api/ota/releases", { timeout: 60000 }, success);
+        // A finished install's result hides the update offer, so a newer release replaces it.
+        const inst = state.otaInstall;
+        if (inst && !inst.active && state.release?.update_available
+            && plainVersion(state.release.latest_version) !== plainVersion(inst.newVersion || inst.target)) {
+          state.otaInstall = null; saveInstall();
+        }
+      } catch (error) {
+        // Don't keep showing an earlier answer as if it were this one.
+        state.release = null;
+        throw error;
+      }
       finally { state.checkingUpdate = false; render(); }
     }
     // mutate() already toasted its own failure; only toast errors it didn't see.
@@ -4360,6 +4372,7 @@
     // firmware brings a new dashboard), so the result can be shown afterwards.
     const OTA_KEY = "arcticOtaInstall";
     const OTA_GIVE_UP_MS = 10 * 60 * 1000;
+    const OTA_KEEP_MS = 60 * 60 * 1000;
     let installTimer = null;
     function saveInstall() {
       if (state.otaInstall) sessionStorage.setItem(OTA_KEY, JSON.stringify(state.otaInstall));
@@ -4368,10 +4381,17 @@
     function restoreInstall() {
       let inst = null;
       try { inst = JSON.parse(sessionStorage.getItem(OTA_KEY) || "null"); } catch (_) { inst = null; }
-      if (!inst || Date.now() - (inst.started || 0) > 60 * 60 * 1000) { sessionStorage.removeItem(OTA_KEY); return null; }
+      if (!inst || Date.now() - (inst.started || 0) > OTA_KEEP_MS) { sessionStorage.removeItem(OTA_KEY); return null; }
       // A reload kills an upload in flight.
       if (inst.active && inst.phase === "uploading") Object.assign(inst, { active: false, phase: "failed", error: "The upload was interrupted" });
       return inst;
+    }
+    // A tab left open after an install would otherwise show its result (and hide newer updates) for days.
+    function expireInstall() {
+      const inst = state.otaInstall;
+      if (!inst || inst.active || Date.now() - (inst.started || 0) <= OTA_KEEP_MS) return false;
+      state.otaInstall = null; saveInstall();
+      return true;
     }
     function beginInstall(fields) {
       const now = Date.now();
@@ -5127,6 +5147,7 @@
           const wasVerifying = state.otaInstall?.phase === "verify";
           resolveInstallOutcome();
           if (wasVerifying) render();
+          if (expireInstall() && state.route === "settings" && state.settingsPage === "firmware") render();
           const hpEdge = homeTrackTransitions();
           if (state.route === "home" && (hpEdge || homeHistoryStale())) await loadHomeHistory();
           const prevNotifCount = (state.notifications || []).length;

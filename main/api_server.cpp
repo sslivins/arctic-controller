@@ -4275,6 +4275,7 @@ static esp_err_t ota_releases_get_handler(httpd_req_t* req)
     }
     
     set_json_content_type(req);
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     
     ota_release_info_t info;
     if (!ota_mgr_check_github_releases(&info)) {

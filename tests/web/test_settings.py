@@ -846,6 +846,17 @@ def offer_update(page: Page):
     expect(page.get_by_role("button", name="Update to 9.9.9")).to_be_visible(timeout=15000)
 
 
+def _finished_install(page: Page, version: str, age_ms: int = 0):
+    """Put the page in the state an install it ran leaves behind."""
+    page.evaluate("""([version, age]) => {
+      const started = Date.now() - age;
+      state.otaInstall = { active: false, phase: "done", source: "github", error: "",
+        startVersion: "0.0.1", target: "v" + version, newVersion: version, progress: 100,
+        started, phaseStarted: started };
+      saveInstall(); render();
+    }""", [version, age_ms])
+
+
 class TestFirmwareInstall:
     def test_confirmation_lists_whats_new(self, dashboard_page: Page):
         page = dashboard_page
@@ -897,6 +908,48 @@ class TestFirmwareInstall:
         page.get_by_role("button", name="Dismiss").click()
         expect(page.locator(".notice.good")).to_have_count(0)
         fake.close()
+
+    def test_newer_release_replaces_finished_install(self, dashboard_page: Page):
+        """A tab that installed an update kept "Updated to X ✓" and hid the
+        next release even after a check found it."""
+        page = dashboard_page
+        fake = FakeOta(page)
+        _finished_install(page, fake.version)
+        open_settings(page, "Firmware")
+        expect(page.locator(".notice.good")).to_have_text(f"Updated to {fake.version} ✓")
+        page.get_by_role("button", name="Check for updates").click()
+        expect(page.get_by_role("button", name="Update to 9.9.9")).to_be_visible(timeout=15000)
+        expect(page.locator(".notice.good")).to_have_count(0)
+        assert page.evaluate("() => sessionStorage.getItem('arcticOtaInstall')") is None
+        fake.close()
+
+    def test_finished_install_expires_in_an_open_tab(self, dashboard_page: Page):
+        page = dashboard_page
+        version = page.evaluate("() => state.ota.current_version || state.info.version || ''")
+        _finished_install(page, version, age_ms=2 * 60 * 60 * 1000)
+        open_settings(page, "Firmware")
+        expect(page.locator(".notice.good")).to_have_count(0, timeout=15000)
+        expect(page.get_by_role("button", name="Dismiss")).to_have_count(0)
+
+    def test_failed_check_drops_earlier_answer(self, dashboard_page: Page):
+        page = dashboard_page
+        version = page.evaluate("() => state.ota.current_version || state.info.version || ''")
+        open_settings(page, "Firmware")
+        page.route("**/api/ota/releases", lambda r: _fulfil_json(r, {
+            "update_available": False, "current_version": version, "latest_version": "v" + version,
+            "published_at": "2026-10-29T17:00:00Z", "download_ready": True, "release_notes": ""}))
+        try:
+            page.get_by_role("button", name="Check for updates").click()
+            uptodate = page.locator(".notice", has_text="The controller is up to date.")
+            expect(uptodate).to_be_visible(timeout=15000)
+            page.unroute("**/api/ota/releases")
+            page.route("**/api/ota/releases", lambda r: _fulfil_json(
+                r, {"error": "Failed to check GitHub for updates"}, status=502))
+            page.get_by_role("button", name="Check for updates").click()
+            expect(page.get_by_role("button", name="Check for updates")).to_be_enabled(timeout=15000)
+            expect(uptodate).to_have_count(0)
+        finally:
+            page.unroute("**/api/ota/releases")
 
     def test_update_that_rolls_back_is_reported(self, dashboard_page: Page):
         page = dashboard_page
