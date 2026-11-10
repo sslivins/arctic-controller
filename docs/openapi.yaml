@@ -6303,6 +6303,8 @@ components:
         magnitude_max:
           type: integer
           example: 45
+
+    Preferences:
       type: object
       properties:
         demo_mode:

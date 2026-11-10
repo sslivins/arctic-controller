@@ -33,7 +33,9 @@ typedef struct {
     bool active;
     uint8_t token_hash[32];
     time_t created_at;
-    time_t last_used;
+    // Recency for LRU eviction. A counter, not time(NULL): logins and requests
+    // within one second would otherwise tie and evict an arbitrary slot.
+    uint32_t last_used_seq;
 } session_t;
 
 // Sessions are saved so a reboot (an OTA update, a power cut) does not sign
@@ -62,6 +64,7 @@ static struct {
     bool integration_token_set;
     uint32_t integration_generation;
     session_t sessions[AUTH_MAX_SESSIONS];
+    uint32_t session_use_seq;
 } state = {};
 static portMUX_TYPE integration_token_lock = portMUX_INITIALIZER_UNLOCKED;
 static StaticSemaphore_t integration_token_mutex_buffer;
@@ -281,7 +284,7 @@ static void load_sessions(void)
         s.active = true;
         memcpy(s.token_hash, blob.sessions[i].token_hash, sizeof(s.token_hash));
         s.created_at = (time_t)blob.sessions[i].created_at;
-        s.last_used = s.created_at;
+        s.last_used_seq = ++state.session_use_seq;
     }
     ESP_LOGI(TAG, "Restored %d saved session(s)", blob.count);
 }
@@ -307,16 +310,14 @@ static session_t* find_session(const char* token)
 static session_t* find_free_session(void)
 {
     session_t* oldest = NULL;
-    time_t oldest_time = 0;
     
     for (int i = 0; i < AUTH_MAX_SESSIONS; i++) {
         if (!state.sessions[i].active) {
             return &state.sessions[i];
         }
-        // Track oldest for eviction if needed
-        if (oldest == NULL || state.sessions[i].last_used < oldest_time) {
+        // Track least recently used for eviction if needed
+        if (oldest == NULL || state.sessions[i].last_used_seq < oldest->last_used_seq) {
             oldest = &state.sessions[i];
-            oldest_time = state.sessions[i].last_used;
         }
     }
     
@@ -548,7 +549,7 @@ bool auth_mgr_login(const char* username, const char* password, char* session_to
         session->active = true;
         memcpy(session->token_hash, token_hash, sizeof(token_hash));
         session->created_at = time(NULL);
-        session->last_used = session->created_at;
+        session->last_used_seq = ++state.session_use_seq;
         save_sessions();
     }
     
@@ -576,8 +577,8 @@ bool auth_mgr_validate_session(const char* token)
         return false;
     }
     
-    // Update last used time (RAM only; it only orders evictions)
-    session->last_used = time(NULL);
+    // Update recency (RAM only; it only orders evictions)
+    session->last_used_seq = ++state.session_use_seq;
     return true;
 }
 

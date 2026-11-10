@@ -1555,8 +1555,9 @@ bool setDemoField(const char* field, int32_t value) {
 
     if (!matched) return false;
 
-    // Re-decode the image into HeatPumpState so the change is reflected live.
-    applyMaconMapping();
+    // Re-decode the image and log the transition synchronously, so two writes
+    // inside one demo-sync tick still record the intermediate state.
+    applyDemoMutationAndLog();
 
     ESP_LOGI(TAG, "[DEMO] Field '%s' set to %ld", field, (long)value);
     return true;
