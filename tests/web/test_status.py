@@ -16,7 +16,8 @@ def _open_status(page: Page, status: dict | None = None, errors: list | None = N
                     compressor=True, pump=True, fans=True, operation="heating", pump_on_s=600)
         body["temperatures"].update(outlet=45, inlet=40, outdoor=5, outdoor_coil=0, suction=3,
                                     discharge=78, indoor_coil=47, ipm=50)
-        body["readings"].update(primary_eev=180, power_consumption=3000, heat_out=10400, cop=3.4)
+        body["readings"].update(primary_eev=180, power_consumption=3000, heat_out=10400, cop=3.4,
+                                perf_source="heat_pump", supply_c=45, return_c=40, delta_t=5)
         for key, value in (status or {}).items():
             if isinstance(value, dict) and isinstance(body.get(key), dict):
                 body[key].update(value)
@@ -83,9 +84,25 @@ class TestStatusPage:
         expect(_row(page, "coil_approach").locator(".val")).to_have_text("5°C")
 
     def test_water_dt_blank_when_pump_off(self, dashboard_page: Page):
-        page = _open_status(dashboard_page, {"pump": False, "pump_on_s": None})
+        page = _open_status(dashboard_page, {"pump": False, "pump_on_s": None,
+                                             "readings": {"delta_t": None}})
         expect(_row(page, "water_dt").locator(".val")).to_have_text("--")
         expect(_row(page, "cop").locator(".val")).to_have_text("--")
+
+    def test_unit_source_has_no_supply_return_rows(self, dashboard_page: Page):
+        page = _open_status(dashboard_page)
+        expect(_row(page, "water_dt").locator(".val")).to_have_text("+5°C")
+        expect(_row(page, "water_dt").locator(".sub")).to_have_text("Outlet − inlet")
+        expect(_row(page, "supply")).to_have_count(0)
+
+    def test_external_source_shows_tenths(self, dashboard_page: Page):
+        page = _open_status(dashboard_page, {"readings": {
+            "perf_source": "external", "supply_c": 38.6, "return_c": 34.1, "delta_t": 4.5}})
+        expect(_row(page, "supply").locator(".val")).to_have_text("38.6°C")
+        expect(_row(page, "return").locator(".val")).to_have_text("34.1°C")
+        dt = _row(page, "water_dt")
+        expect(dt.locator(".val")).to_have_text("+4.5°C")
+        expect(dt.locator(".sub")).to_have_text("Supply − return · external sensors")
 
     def test_deltas_convert_without_offset_in_fahrenheit(self, dashboard_page: Page):
         page = _open_status(dashboard_page, fahrenheit=True)
@@ -103,7 +120,7 @@ class TestStatusPage:
     def test_defrost_panel_and_paused_estimates(self, dashboard_page: Page):
         page = _open_status(dashboard_page, {
             "defrosting": True, "operation": "defrost", "defrost": {"elapsed_s": 125, "start_coil": -3},
-            "temperatures": {"outlet": 33, "inlet": 38}})
+            "temperatures": {"outlet": 33, "inlet": 38}, "readings": {"delta_t": -5}})
         panel = page.locator("[data-status='defrost']")
         expect(panel.locator("[data-defrost-elapsed]")).to_have_text("2m 05s")
         expect(panel).to_contain_text("Coil at start")

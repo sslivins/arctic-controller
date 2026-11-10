@@ -68,7 +68,7 @@ static constexpr int16_t IPM_WARN_C = 80;
 enum class Group : uint8_t { WATER, PERF, REFRIG, OUTDOOR, ELEC, COUNT };
 
 enum RowId : uint8_t {
-    R_OUTLET, R_INLET, R_WATER_DT, R_FLOW, R_TANK,
+    R_OUTLET, R_INLET, R_SUPPLY, R_RETURN, R_WATER_DT, R_FLOW, R_TANK,
     R_HEAT_OUT, R_COP, R_POWER, R_ENERGY,
     R_COMP, R_DISCHARGE, R_SUCTION, R_SUPERHEAT, R_WATER_HX, R_HX_APPROACH, R_MAIN_EEV, R_AUX_EEV,
     R_OUTDOOR_AIR, R_OUTDOOR_COIL, R_COIL_APPROACH, R_FAN,
@@ -89,6 +89,8 @@ struct RowDef {
 static const RowDef ROWS[R_COUNT] = {
     ROW(WATER,   "outlet_water_temp",    STR_HISTORY_OUTLET,       "outlet"),
     ROW(WATER,   "inlet_water_temp",     STR_HISTORY_INLET,        "inlet"),
+    ROW(WATER,   nullptr,                STR_ST_SUPPLY,            "supply"),
+    ROW(WATER,   nullptr,                STR_ST_RETURN,            "return"),
     ROW(WATER,   nullptr,                STR_ST_WATER_DT,          "water_dt"),
     ROW(WATER,   nullptr,                STR_ST_FLOW,              "flow"),
     ROW(WATER,   "water_tank_temp",      STR_ST_TANK,              "tank"),
@@ -138,6 +140,7 @@ enum DefCell : uint8_t { D_COIL, D_AIR, D_WATER, D_START, D_COUNT };
 // State
 // ============================================================================
 struct RowWidgets {
+    lv_obj_t* row;
     lv_obj_t* name;
     lv_obj_t* sub;
     lv_obj_t* trend;   // tank only
@@ -309,6 +312,7 @@ static void create_row(lv_obj_t* parent, RowId id) {
     RowWidgets& w = state.rows[id];
 
     lv_obj_t* row = lv_obj_create(parent);
+    w.row = row;
     lv_obj_remove_style_all(row);
     lv_obj_add_style(row, &s_row, LV_PART_MAIN);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -540,6 +544,18 @@ static void cell_delta(Cell& c, int16_t celsius_diff, bool signed_) {
     c.unit = app_prefs_temp_unit_str();
 }
 
+// One decimal from a 0.1 °C value; diff: a difference (no Fahrenheit offset).
+static void cell_tenths(Cell& c, int16_t x10, bool diff, bool signed_) {
+    int32_t v = x10;
+    if (app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT) {
+        v = (v * 9 + (v >= 0 ? 2 : -2)) / 5 + (diff ? 0 : 320);
+    }
+    const int32_t a = v < 0 ? -v : v;
+    snprintf(c.value, sizeof(c.value), "%s%ld.%ld", v < 0 ? "-" : (signed_ && v > 0 ? "+" : ""),
+             (long)(a / 10), (long)(a % 10));
+    c.unit = app_prefs_temp_unit_str();
+}
+
 static void cell_hidden(Cell& c, const char* why) {
     strcpy(c.value, "--");
     c.unit = "";
@@ -724,13 +740,25 @@ static void update_readings() {
     const bool cooling = hp.operation == arctic::HeatPumpOperation::COOLING;
     const bool steady_run = comp && !defrost && fresh;
 
-    // Water loop
+    // Water loop. Supply/return/ΔT are the estimate's own temperatures:
+    // external sensors (tenths) when in use, else the unit's outlet/inlet.
     cell_temp(c[R_OUTLET], hp.outlet_water_temp);
     cell_temp(c[R_INLET], hp.inlet_water_temp);
-    c[R_WATER_DT].sub = i18n_get(STR_ST_SUB_OUTLET_INLET);
-    if (pump && fresh) {
-        const int16_t d = hp.outlet_water_temp - hp.inlet_water_temp;
-        cell_delta(c[R_WATER_DT], d, true);
+    const bool ext_rows = hp.perf_external && hp.supply_return_valid;
+    lv_obj_t* const ext_row_objs[] = {state.rows[R_SUPPLY].row, state.rows[R_RETURN].row};
+    for (lv_obj_t* o : ext_row_objs) {
+        if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN) == ext_rows) set_visible(o, ext_rows);
+    }
+    if (ext_rows) {
+        cell_tenths(c[R_SUPPLY], hp.supply_x10, false, false);
+        cell_tenths(c[R_RETURN], hp.return_x10, false, false);
+        c[R_SUPPLY].sub = c[R_RETURN].sub = i18n_get(STR_ST_SUB_EXTERNAL_SENSOR);
+    }
+    c[R_WATER_DT].sub = i18n_get(hp.perf_external ? STR_ST_SUB_SUPPLY_RETURN_EXT : STR_ST_SUB_OUTLET_INLET);
+    if (hp.water_delta_valid && fresh) {
+        const int16_t d = hp.supply_x10 - hp.return_x10;
+        if (hp.perf_external) cell_tenths(c[R_WATER_DT], d, true, true);
+        else cell_delta(c[R_WATER_DT], d / 10, true);
         const bool settled = hp.pump_on_since_ms != 0 && (now_ms - hp.pump_on_since_ms) / 1000 >= DT_SETTLE_S;
         if (defrost && d < 0) {
             c[R_WATER_DT].sub = i18n_get(STR_ST_SUB_REVERSED_DEFROST);
@@ -898,6 +926,9 @@ void heatpump_temps_create_in(lv_obj_t* parent) {
         }
         create_row(content, (RowId)i);
     }
+    // Only shown while external sensors supply the loop temperatures.
+    lv_obj_add_flag(state.rows[R_SUPPLY].row, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(state.rows[R_RETURN].row, LV_OBJ_FLAG_HIDDEN);
 
     state.shown = true;
     state.active = false;

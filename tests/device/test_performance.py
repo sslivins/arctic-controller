@@ -721,6 +721,17 @@ class TestPolling:
         assert s["return"]["celsius"] == pytest.approx(20.0, abs=0.05)
         st = _wait_source(device, "external", "BACnet estimate to switch to external sensors")
         assert st["fallback"] is False, st
+        # The status and HA readings publish the estimate's own temperatures.
+        seen = {}
+
+        def readings_external():
+            r = device.session.get(_url(device, "/api/heatpump/status"), timeout=10)
+            seen["r"] = r.json()["readings"]
+            return seen["r"]["perf_source"] == "external"
+        device.wait_until("status readings from external sensors", readings_external,
+                          timeout=30, poll=1.0)
+        assert seen["r"]["supply_c"] == pytest.approx(21.4, abs=0.05), seen["r"]
+        assert seen["r"]["return_c"] == pytest.approx(20.0, abs=0.05), seen["r"]
 
     def test_bacnet_browse_does_not_starve_configured_polling(self, device: DeviceClient,
                                                               bacnet_fake):

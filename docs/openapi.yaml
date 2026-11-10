@@ -2289,6 +2289,21 @@ paths:
                       perf_settling:
                         type: boolean
                         description: External sensors are in use but still settling after a start, defrost or mode change
+                      supply_c:
+                        type: number
+                        nullable: true
+                        description: Loop supply water temperature in °C from the same source as the estimate (median-filtered external sensor when in use, otherwise the unit's whole-degree outlet). Reported with the pump on or off; null when unknown
+                        example: 38.6
+                      return_c:
+                        type: number
+                        nullable: true
+                        description: Loop return water temperature in °C, same source rules as supply_c
+                        example: 34.1
+                      delta_t:
+                        type: number
+                        nullable: true
+                        description: Supply minus return in kelvin (negative when cooling or during defrost); null unless the water pump is running
+                        example: 4.5
                   has_error:
                     type: boolean
                     description: Whether the unit has any active errors

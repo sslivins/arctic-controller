@@ -111,6 +111,14 @@ struct HeatPumpState {
     bool     perf_pending = false;
     bool     perf_settling = false;
     uint16_t flow_lpm_x10 = 400;     // assumed loop flow, L/min x10
+    // Loop supply/return water as used by the estimate (median-filtered
+    // external sensors when in use, else the unit's whole-degree outlet/inlet),
+    // 0.1 °C. Valid whenever the readings are, pump on or off. The water
+    // delta (supply - return) is only meaningful while the pump circulates.
+    int16_t  supply_x10 = 0;
+    int16_t  return_x10 = 0;
+    bool     supply_return_valid = false;
+    bool     water_delta_valid = false;
     
     // Component run-state, derived by the macon library from the native
     // MaconState (icon bits / compressor frequency / reversing-valve mode).

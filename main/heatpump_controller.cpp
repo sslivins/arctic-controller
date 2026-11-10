@@ -25,6 +25,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include <math.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
@@ -660,15 +661,19 @@ static void applyMaconMapping() {
     const perf::Selection sel = ext_temp::choose_source(hp_ctx);
     float supply_c = static_cast<float>(ms.outlet_c);
     float return_c = static_cast<float>(ms.inlet_c);
+    bool supply_ok = ms.outlet_valid;
+    bool return_ok = ms.inlet_valid;
     const bool external = sel.source == perf::PerfSource::External;
     if (external) {
         if (perf_cfg.sensors[0].source == perf::SensorSource::ModbusTcp ||
             perf_cfg.sensors[0].source == perf::SensorSource::BacnetIp) {
             supply_c = sel.supply_c;
+            supply_ok = true;
         }
         if (perf_cfg.sensors[1].source == perf::SensorSource::ModbusTcp ||
             perf_cfg.sensors[1].source == perf::SensorSource::BacnetIp) {
             return_c = sel.return_c;
+            return_ok = true;
         }
     }
     const arctic::PerformanceInputs perf_in = arctic::loop_performance_inputs(
@@ -793,6 +798,10 @@ static void applyMaconMapping() {
     s_state.perf_pending  = sel.pending;
     s_state.perf_settling = external && sel.settling;
     s_state.flow_lpm_x10  = perf_cfg.flow_lpm_x10;
+    s_state.supply_x10 = static_cast<int16_t>(lroundf(supply_c * 10.0f));
+    s_state.return_x10 = static_cast<int16_t>(lroundf(return_c * 10.0f));
+    s_state.supply_return_valid = supply_ok && return_ok;
+    s_state.water_delta_valid = supply_ok && return_ok && ms.pump_on;
 
 
     // Raw Macon fault-register bytes, stored exactly as the mainboard reports

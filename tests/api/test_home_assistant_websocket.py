@@ -152,6 +152,9 @@ async def test_websocket_starts_with_hello_and_coherent_snapshot():
             readings = snapshot["state"]["readings"]
             assert readings["perf_source"] in {"external", "heat_pump"}
             assert readings["flow_lpm"] > 0
+            for key in ("supply_c", "return_c", "delta_t"):
+                assert key in readings
+                assert readings[key] is None or isinstance(readings[key], (int, float))
         finally:
             await websocket.close()
 

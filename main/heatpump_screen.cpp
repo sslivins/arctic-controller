@@ -1427,13 +1427,26 @@ void heatpump_screen_update(void) {
     // Tiles
     lv_color_t value_color = running ? COLOR_TEXT : COLOR_VALUE_DIM;
     if (hp.connected) {
-        format_temp(buf, sizeof(buf), hp.outlet_water_temp);
+        // Same loop temperatures as the estimate (external sensors when in use).
+        auto whole = [](int16_t x10) { return (int16_t)((x10 + (x10 >= 0 ? 5 : -5)) / 10); };
+        format_temp(buf, sizeof(buf), hp.supply_return_valid ? whole(hp.supply_x10) : hp.outlet_water_temp);
         set_tile(state.supply, buf, value_color, false);
-        format_temp(buf, sizeof(buf), hp.inlet_water_temp);
+        format_temp(buf, sizeof(buf), hp.supply_return_valid ? whole(hp.return_x10) : hp.inlet_water_temp);
         set_tile(state.ret, buf, value_color, false);
-        int16_t dt = hp.outlet_water_temp - hp.inlet_water_temp;
-        snprintf(buf, sizeof(buf), "%d" DEGREE, app_prefs_convert_temp_diff(dt));
-        set_tile(state.dt, buf, value_color, hero == HeroState::HEATING && dt < DT_WARN_C);
+        if (hp.water_delta_valid) {
+            const int16_t dt_x10 = hp.supply_x10 - hp.return_x10;
+            if (hp.perf_external) {
+                int32_t v = dt_x10;
+                if (app_prefs_get_temp_unit() == TEMP_UNIT_FAHRENHEIT) v = (v * 9 + (v >= 0 ? 2 : -2)) / 5;
+                const int32_t a = v < 0 ? -v : v;
+                snprintf(buf, sizeof(buf), "%s%ld.%ld" DEGREE, v < 0 ? "-" : "", (long)(a / 10), (long)(a % 10));
+            } else {
+                snprintf(buf, sizeof(buf), "%d" DEGREE, app_prefs_convert_temp_diff(dt_x10 / 10));
+            }
+            set_tile(state.dt, buf, value_color, hero == HeroState::HEATING && dt_x10 < DT_WARN_C * 10);
+        } else {
+            set_tile(state.dt, "\xE2\x80\x94", COLOR_VALUE_DIM, false);
+        }
         format_power(buf, sizeof(buf), hp.realtime_power_w);
         set_tile(state.power, buf, value_color, false);
         if (hp.cop_valid && !defrost) {
