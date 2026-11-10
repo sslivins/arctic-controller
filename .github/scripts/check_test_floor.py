@@ -94,6 +94,7 @@ BENIGN_SKIP_PATTERNS = [
     r"another ota operation in progress",
     r"download failed too quickly",
     r"live weather reading",
+    r"web ui is plain http",
     # Self-invalidating by design: the call under test destroys the credential
     # the rest of the run depends on, so it can only be exercised in isolation.
     r"invalidates arctic_api_key",
