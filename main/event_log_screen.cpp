@@ -266,6 +266,15 @@ static void format_param_value(char* buf, size_t n, uint8_t ap, int value) {
     }
     const char* unit = arctic::advanced_display_unit(ap);
     if (unit && strcmp(unit, "steps") == 0) unit = i18n_get(STR_HP_UNIT_STEPS);
+    const arctic::AdvSignFlag* sf = arctic::advanced_sign_flag(ap);
+    bool flag = false;
+    int16_t mag = 0;
+    if (sf && arctic::advanced_sign_split(ap, (int16_t)value, &flag, &mag)) {
+        const char* fl = flag ? i18n_get_key(sf->on_msg_id, sf->on_label)
+                              : i18n_get_key(sf->off_msg_id, sf->off_label);
+        snprintf(buf, n, "%d %s · %s", mag, unit ? unit : "", fl);
+        return;
+    }
     if (unit && unit[0]) snprintf(buf, n, "%d %s", value, unit);
     else snprintf(buf, n, "%d", value);
 }

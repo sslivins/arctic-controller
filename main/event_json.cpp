@@ -124,15 +124,25 @@ void add_event_details(cJSON* evt, const event_entry_t& e)
             }
             cJSON_AddStringToObject(evt, "temperature_kind", kind);
             const bool choice = arctic::advanced_enum_option_count(ap) > 0;
+            const arctic::AdvSignFlag* sf = arctic::advanced_sign_flag(ap);
             const int values[2] = {event_param_from(p), event_param_to(p)};
             const char* names[2] = {"from", "to"};
             const char* labels[2] = {"from_label", "to_label"};
+            const char* mags[2] = {"from_magnitude", "to_magnitude"};
+            const char* flags[2] = {"from_flag_label", "to_flag_label"};
             for (int i = 0; i < 2; i++) {
                 if (values[i] == EVENT_PARAM_UNKNOWN) {
                     cJSON_AddNullToObject(evt, names[i]);
                     continue;
                 }
                 cJSON_AddNumberToObject(evt, names[i], values[i]);
+                bool flag = false;
+                int16_t mag = 0;
+                if (sf && arctic::advanced_sign_split(ap, (int16_t)values[i], &flag, &mag)) {
+                    cJSON_AddNumberToObject(evt, mags[i], mag);
+                    const char* fl = flag ? sf->on_label : sf->off_label;
+                    cJSON_AddStringToObject(evt, flags[i], fl ? fl : "");
+                }
                 if (!choice) continue;
                 const arctic::AdvEnumOption* o = arctic::advanced_enum_option_at(ap, (size_t)values[i]);
                 if (o && o->label) cJSON_AddStringToObject(evt, labels[i], o->label);

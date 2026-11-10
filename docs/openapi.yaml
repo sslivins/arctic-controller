@@ -3561,7 +3561,11 @@ paths:
       - HeatPump
       summary: Set advanced (AP) parameter value
       description: |
-        Sets an advanced parameter value. The request body is a plain integer (not JSON).
+        Sets an advanced parameter value. The request body is a plain integer (not JSON),
+        except that a sign-flag parameter (one with `sign_flag`, e.g. AP40) also accepts
+        JSON `{"flag": true, "magnitude": 1}`, which the controller turns into the signed
+        value (flag on = negative). The magnitude must be within
+        `sign_flag.magnitude_min`..`magnitude_max`.
         The write passes through the arctic-macon guardrail (range/enum validation,
         confirmed-register check, and write-lock), so read-only, trigger, and
         unverified parameters are refused. Works in demo mode (updates in-memory values).
@@ -3578,12 +3582,22 @@ paths:
           type: string
       requestBody:
         required: true
-        description: Plain integer value (not JSON)
+        description: Plain integer value, or a flag + magnitude for sign-flag parameters
         content:
           text/plain:
             schema:
               type: integer
             example: 45
+          application/json:
+            schema:
+              type: object
+              required: [flag, magnitude]
+              properties:
+                flag:
+                  type: boolean
+                magnitude:
+                  type: integer
+            example: {"flag": true, "magnitude": 1}
       responses:
         '200':
           description: Value set successfully
@@ -6048,6 +6062,22 @@ components:
           type: string
           description: "`param_changed` on a choice parameter only: label of the new option."
           example: Continuous
+        from_magnitude:
+          type: integer
+          description: "`param_changed` on a sign-flag parameter (AP40) only: magnitude of the old value."
+          example: 15
+        to_magnitude:
+          type: integer
+          description: "`param_changed` on a sign-flag parameter only: magnitude of the new value."
+          example: 1
+        from_flag_label:
+          type: string
+          description: "`param_changed` on a sign-flag parameter only: flag state of the old value."
+          example: Water
+        to_flag_label:
+          type: string
+          description: "`param_changed` on a sign-flag parameter only: flag state of the new value."
+          example: Glycol
         fault_code:
           type: string
           nullable: true
@@ -6216,10 +6246,63 @@ components:
         value:
           type: integer
           nullable: true
-          description: Current value (null if disconnected and not in demo mode)
+          description: >-
+            Current value (null if disconnected and not in demo mode). For a
+            sign-flag parameter this is the raw signed value (AP40: -1 = glycol
+            loop, 1 °C).
           example: 45
+        sign_flag:
+          $ref: '#/components/schemas/AdvancedParamSignFlag'
 
-    Preferences:
+    AdvancedParamSignFlag:
+      type: object
+      description: >-
+        Present only on parameters whose sign is a separate setting (AP40:
+        negative = glycol loop). UIs show a toggle plus the magnitude and PUT
+        `{"flag": bool, "magnitude": n}`; the controller joins them.
+      properties:
+        name:
+          type: string
+          description: English toggle label
+          example: Glycol loop
+        name_msg_id:
+          type: string
+          example: ap.glycol_loop.name
+        on_label:
+          type: string
+          description: State label when the flag is on
+          example: Glycol
+        on_msg_id:
+          type: string
+          example: ap.glycol_loop.on
+        off_label:
+          type: string
+          description: State label when the flag is off
+          example: Water
+        off_msg_id:
+          type: string
+          example: ap.glycol_loop.off
+        value:
+          type: boolean
+          nullable: true
+          description: Current flag (true when the raw value is negative); null if unread
+        magnitude:
+          type: integer
+          nullable: true
+          description: Current magnitude (absolute value); null if unread
+          example: 1
+        default:
+          type: boolean
+          description: Factory-default flag
+        default_magnitude:
+          type: integer
+          example: 15
+        magnitude_min:
+          type: integer
+          example: 1
+        magnitude_max:
+          type: integer
+          example: 45
       type: object
       properties:
         demo_mode:

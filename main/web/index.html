@@ -1950,13 +1950,18 @@
     function apControl(key, p) {
       const kind = p.temperature_kind || "none";
       const isTemp = kind !== "none";
-      const value = isTemp ? tempNumber(p.value, kind) : p.value;
-      const min = isTemp ? tempNumber(p.min, kind) : p.min;
-      const max = isTemp ? tempNumber(p.max, kind) : p.max;
+      const sf = p.sign_flag;
+      // Sign-flag params (AP40) edit a toggle + magnitude; the controller joins them.
+      const flagLabel = on => sf ? (on ? sf.on_label : sf.off_label) : "";
+      const value = sf ? (isTemp ? tempNumber(sf.magnitude ?? sf.default_magnitude, kind) : (sf.magnitude ?? sf.default_magnitude))
+        : isTemp ? tempNumber(p.value, kind) : p.value;
+      const min = sf ? (isTemp ? tempNumber(sf.magnitude_min, kind) : sf.magnitude_min) : isTemp ? tempNumber(p.min, kind) : p.min;
+      const max = sf ? (isTemp ? tempNumber(sf.magnitude_max, kind) : sf.magnitude_max) : isTemp ? tempNumber(p.max, kind) : p.max;
       const displayUnit = isTemp ? unit(kind) : p.unit;
       const hasChoices = p.writable && p.options?.length;
       let input;
-      if (!p.writable) input = `<span class="badge">${p.value == null ? "--" : `${esc(value)} ${esc(displayUnit || "")}`}</span>`;
+      if (!p.writable) input = `<span class="badge">${p.value == null ? "--" : `${esc(value)} ${esc(displayUnit || "")}${
+        sf ? ` · ${esc(flagLabel(sf.value))}` : ""}`}</span>`;
       else if (hasChoices) {
         const selected = p.options.find(o => o.id === p.value) || p.options[0];
         input = `<div class="choice-editor"><select name="value" class="choice-select"
@@ -1964,15 +1969,18 @@
           `<option value="${o.id}" data-description="${esc(o.en || "")}" ${o.id === p.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
           <div class="choice-description" aria-live="polite">${esc(selected.en || "")}</div></div>`;
       }
-      else input = rangeEditor(value ?? min, min, max, isTemp ? 1 : (p.step || 1), displayUnit);
+      else input = (sf ? `<div class="field"><label><input type="checkbox" name="flag" ${sf.value ? "checked" : ""}> ${esc(sf.name)}</label></div>` : "") +
+        rangeEditor(value ?? min, min, max, isTemp ? 1 : (p.step || 1), displayUnit);
       let fallback = "";
       if (p.default != null && !p.is_trigger) {
-        const def = hasChoices ? p.default : (isTemp ? tempNumber(p.default, kind) : p.default);
+        const def = sf ? (isTemp ? tempNumber(sf.default_magnitude, kind) : sf.default_magnitude)
+          : hasChoices ? p.default : (isTemp ? tempNumber(p.default, kind) : p.default);
         const defText = hasChoices ? (p.options.find(o => o.id === p.default)?.label ?? p.default)
-          : `${def}${displayUnit ? ` ${displayUnit}` : ""}`;
+          : `${def}${displayUnit ? ` ${displayUnit}` : ""}${sf ? ` · ${flagLabel(sf.default)}` : ""}`;
         const modified = p.value != null && p.value !== p.default;
         fallback = `<div class="ap-default"><span>Default: ${esc(defText)}</span>${modified ? `<span class="badge warn">Modified</span>` : ""}${
-          p.writable ? `<button class="btn" type="button" data-action="ap-default" data-default="${esc(def)}">Use default</button>` : ""}</div>`;
+          p.writable ? `<button class="btn" type="button" data-action="ap-default" data-default="${esc(def)}"${
+            sf ? ` data-default-flag="${sf.default ? "true" : "false"}"` : ""}>Use default</button>` : ""}</div>`;
       }
       return `<form class="ap-row" data-form="ap" data-key="${esc(key)}" data-kind="${kind}" data-gate>
         <div><div class="ap-title">${codePill(key)}<strong>${esc(p.name)}</strong></div><p>${esc((p.detail || "").replace(/\{T:(-?\d+)\}/g, (_, c) => temp(c)))}</p>${fallback}</div>
@@ -2095,7 +2103,9 @@
           const kind = event.temperature_kind || "none";
           const show = (v, label) => v == null ? "?" : label ? label
             : kind !== "none" ? temp(v, kind) : `${v}${event.unit ? ` ${event.unit}` : ""}`;
-          return `${event.param_name || "?"} (${event.param}): ${show(event.from, event.from_label)} → ${show(event.to, event.to_label)}`;
+          const side = (v, label, mag, flag) => mag != null ? `${show(mag)} · ${flag}` : show(v, label);
+          return `${event.param_name || "?"} (${event.param}): ${side(event.from, event.from_label, event.from_magnitude, event.from_flag_label)} → ${
+            side(event.to, event.to_label, event.to_magnitude, event.to_flag_label)}`;
         }
         default: return "";
       }
@@ -3929,7 +3939,8 @@
       const revert = form.querySelector('[data-action="form-revert"]');
       if (revert) revert.disabled = clean;
       const useDefault = form.querySelector('[data-action="ap-default"]');
-      if (useDefault) useDefault.disabled = String(form.elements.value?.value) === useDefault.dataset.default;
+      if (useDefault) useDefault.disabled = String(form.elements.value?.value) === useDefault.dataset.default &&
+        (!form.elements.flag || String(form.elements.flag.checked) === useDefault.dataset.defaultFlag);
     }
     // Put a form's value control back to v and let the usual input/change
     // listeners refresh the readout, description and buttons.
@@ -3939,6 +3950,10 @@
       field.value = v;
       field.dispatchEvent(new Event("input", { bubbles: true }));
       field.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    function setFormFlag(form, on) {
+      form.elements.flag.checked = on;
+      form.elements.flag.dispatchEvent(new Event("change", { bubbles: true }));
     }
     function gateInit() {
       document.querySelectorAll("form[data-gate]").forEach(form => {
@@ -4125,8 +4140,16 @@
       if (type === "ap") {
         let value = Number(data.get("value"));
         if (form.dataset.kind !== "none") value = toCelsius(value, form.dataset.kind);
+        const p = state.params[form.dataset.key];
+        if (form.elements.flag) {
+          const flag = form.elements.flag.checked;
+          await mutate(`/api/heatpump/advanced/${form.dataset.key}`, jsonOptions("PUT", { flag, magnitude: value }), "Parameter saved");
+          Object.assign(p.sign_flag, { value: flag, magnitude: value });
+          p.value = flag ? -value : value; render();
+          return;
+        }
         await mutate(`/api/heatpump/advanced/${form.dataset.key}`, { method: "PUT", headers: { "Content-Type": "text/plain" }, body: String(value) }, "Parameter saved");
-        state.params[form.dataset.key].value = value; render();
+        p.value = value; render();
       }
       if (type === "wifi") await mutate("/api/wifi/connect", jsonOptions("POST", { ssid: data.get("ssid"), password: data.get("password") }), "Connection started");
       if (type === "time") {
@@ -4510,9 +4533,15 @@
       if (action === "form-revert" || action === "ap-default") {
         const form = el.closest("form");
         if (!form) return;
-        if (action === "ap-default") { setFormValue(form, el.dataset.default); return; }
-        const saved = JSON.parse(form.dataset.saved || "[]").find(([name]) => name === "value");
-        if (saved) setFormValue(form, saved[1]);
+        if (action === "ap-default") {
+          if (form.elements.flag && el.dataset.defaultFlag) setFormFlag(form, el.dataset.defaultFlag === "true");
+          setFormValue(form, el.dataset.default); return;
+        }
+        const saved = JSON.parse(form.dataset.saved || "[]");
+        const savedFlag = saved.find(([name]) => name === "flag");
+        if (savedFlag && form.elements.flag) setFormFlag(form, savedFlag[1]);
+        const savedValue = saved.find(([name]) => name === "value");
+        if (savedValue) setFormValue(form, savedValue[1]);
         return;
       }
       if (action === "notif-toggle") { state.notifOpen = !state.notifOpen; render(); return; }

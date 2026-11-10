@@ -141,6 +141,43 @@ class TestNavigation:
         expect(save).to_be_disabled()
         expect(revert).to_be_disabled()
 
+    def test_glycol_loop_toggle_saves_signed_value(self, dashboard_page: Page):
+        """AP40 shows a Glycol loop checkbox + magnitude slider and PUTs both parts."""
+        primary(dashboard_page, "Control").click()
+        url = dashboard_page.url.split("#")[0].rstrip("/") + "/api/heatpump/advanced/AP40"
+        headers = {"Content-Type": "text/plain"}
+        original = dashboard_page.request.get(url).json()["value"]
+        assert dashboard_page.request.put(url, data="15", headers=headers).ok
+        try:
+            row = dashboard_page.locator('form[data-key="AP40"]')
+            group = dashboard_page.locator("details.ap-group", has=row)
+            group.locator(":scope > summary").click()
+            flag = row.locator('input[name="flag"]')
+            save = row.locator('button[type="submit"]')
+            revert = row.locator('[data-action="form-revert"]')
+            expect(flag).not_to_be_checked(timeout=15000)  # next status poll
+            expect(row).to_contain_text("Glycol loop")
+            expect(row.locator(".ap-default")).to_contain_text("· Water")
+            assert row.locator('input[type="range"]').get_attribute("min") in ("1", "34")  # °C / °F
+
+            flag.check()
+            expect(save).to_be_enabled()
+            revert.click()
+            expect(flag).not_to_be_checked()
+            expect(save).to_be_disabled()
+
+            flag.check()
+            with dashboard_page.expect_request(lambda r: r.url.endswith("/api/heatpump/advanced/AP40") and r.method == "PUT") as req:
+                save.click()
+            assert req.value.post_data_json["flag"] is True
+            expect(save).to_be_disabled()
+            assert dashboard_page.request.get(url).json()["value"] < 0
+
+            row.locator('[data-action="ap-default"]').click()
+            expect(flag).not_to_be_checked()
+        finally:
+            dashboard_page.request.put(url, data=str(original), headers=headers)
+
     def test_advanced_change_elsewhere_refreshes_open_page(self, dashboard_page: Page):
         """A change made on the device (here: via the API) shows without a reload."""
         primary(dashboard_page, "Control").click()
