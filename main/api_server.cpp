@@ -634,6 +634,34 @@ static constexpr int API_STACK_SIZE   = 16384;  // Default task stack
 static constexpr int API_MAX_HEADERS  = 16;
 static constexpr int API_RECV_TIMEOUT = 10;     // seconds
 
+// The TLS servers do each handshake on their single server thread, waiting in
+// a blocking recv bounded by the socket's receive timeout, retried until the
+// handshake timeout. A client that connects and then sends nothing (a browser
+// preconnect, a half-open socket) therefore froze every other client of the
+// server for 10-20 s at the default 10 s/10 s. A real client sends its hello
+// at once and answers each flight within a round trip, so accepted sockets
+// start with a 2 s receive timeout and a 1.5 s handshake budget, and get the
+// normal API_RECV_TIMEOUT back once the session is up (tls_session_opened).
+static constexpr int TLS_HANDSHAKE_RECV_TIMEOUT = 2;        // seconds
+static constexpr uint32_t TLS_HANDSHAKE_TIMEOUT_MS = 1500;
+
+static esp_err_t tls_session_opened(httpd_handle_t, int sockfd)
+{
+    struct timeval tv = { .tv_sec = API_RECV_TIMEOUT, .tv_usec = 0 };
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        ESP_LOGW(TAG, "Could not restore the receive timeout on socket %d (errno %d)",
+                 sockfd, errno);
+    }
+    return ESP_OK;
+}
+
+static void bound_tls_handshake(httpd_ssl_config_t& config)
+{
+    config.httpd.recv_wait_timeout = TLS_HANDSHAKE_RECV_TIMEOUT;
+    config.tls_handshake_timeout_ms = TLS_HANDSHAKE_TIMEOUT_MS;
+    config.httpd.open_fn = tls_session_opened;
+}
+
 static void log_internal_heap(int needed_stack)
 {
     // ESP_ERR_HTTPD_TASK means the server task stack allocation failed. That
@@ -785,8 +813,9 @@ static bool start_integration_locked(void)
     // clients. Three WSS slots leave capacity for REST reconciliation
     // while another TLS connection is still closing or handshaking.
     integration_config.httpd.lru_purge_enable = false;
-    integration_config.httpd.recv_wait_timeout = 10;
-    // Match recv_wait_timeout. A very short send timeout truncates HA REST
+    // Short handshake waits; sessions get API_RECV_TIMEOUT once up.
+    bound_tls_handshake(integration_config);
+    // Match API_RECV_TIMEOUT. A very short send timeout truncates HA REST
     // and WSS responses (empty/partial body) whenever the single-threaded
     // server is briefly busy, and tears down the TLS connection — do not
     // shorten it.
@@ -989,7 +1018,7 @@ static bool api_server_start_locked(void)
         ssl_config.httpd.max_uri_handlers   = API_URI_HANDLERS;
         ssl_config.httpd.stack_size         = API_STACK_SIZE;
         ssl_config.httpd.max_resp_headers   = API_MAX_HEADERS;
-        ssl_config.httpd.recv_wait_timeout  = API_RECV_TIMEOUT;
+        bound_tls_handshake(ssl_config);
         // TCP keepalive: reap dead TLS sockets abandoned mid-handshake/session
         // so they can't accumulate and wedge the stack (see port 80 note).
         ssl_config.httpd.keep_alive_enable   = true;
