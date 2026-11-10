@@ -13,6 +13,10 @@ connect failure it really is:
 * a session with no connect retries (the requests default) gets one more
   attempt.
 
+The controller also bounds handshakes (main/api_server.cpp) and closes a
+client that falls silent mid-handshake, so a handshake the server *dropped* is
+retried the same way.
+
 Each retry that rescues a request is reported as a pytest warning and, in CI,
 a GitHub annotation, so stalls stay visible instead of being silently absorbed.
 
@@ -24,13 +28,15 @@ from __future__ import annotations
 
 import contextlib
 import os
+import ssl
 import sys
 import threading
 import warnings
 
 try:
     import requests.adapters
-    from urllib3.exceptions import ConnectTimeoutError, ReadTimeoutError
+    from urllib3.exceptions import (ConnectTimeoutError, ProtocolError,
+                                    ReadTimeoutError, SSLError)
     from urllib3.util import retry as _urllib3_retry
 except ImportError:  # pragma: no cover - suites that do not use requests
     requests = None
@@ -61,7 +67,8 @@ def _chain(exc: BaseException | None):
     stack = [exc]
     while stack:
         cur = stack.pop()
-        if cur is None or id(cur) in seen:
+        # urllib3's SSLError.reason can be a plain string.
+        if not isinstance(cur, BaseException) or id(cur) in seen:
             continue
         seen.add(id(cur))
         yield cur
@@ -79,8 +86,34 @@ def is_tls_handshake_timeout(exc: BaseException | None) -> bool:
     return False
 
 
+_HANDSHAKE_FRAMES = {"do_handshake", "wrap_socket", "ssl_wrap_socket"}
+
+
+def _dropped_in_handshake(exc: BaseException) -> bool:
+    """The server closed the connection before the handshake finished."""
+    if not isinstance(exc, (ssl.SSLEOFError, ssl.SSLZeroReturnError, ConnectionResetError)):
+        return False
+    tb = exc.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_name in _HANDSHAKE_FRAMES:
+            return True
+        tb = tb.tb_next
+    return False
+
+
+def is_tls_handshake_failure(exc: BaseException | None) -> bool:
+    """True if exc is (or wraps) a handshake that timed out or that the
+    controller dropped. It bounds handshakes (main/api_server.cpp), so a client
+    held up on the WiFi gets closed rather than waited for. Either way the
+    request was never sent."""
+    if is_tls_handshake_timeout(exc):
+        return True
+    return any(_dropped_in_handshake(e) for e in _chain(exc))
+
+
 def report_handshake_retry(what: str) -> None:
-    msg = f"TLS handshake timed out; the retry on a new connection succeeded: {what}"
+    msg = (f"TLS handshake timed out or was dropped; the retry on a new "
+           f"connection succeeded: {what}")
     HANDSHAKE_RETRIES.append(what)
     warnings.warn(msg)
     if os.environ.get("GITHUB_ACTIONS"):
@@ -102,9 +135,9 @@ if requests is not None:
 
     def _increment(self, method=None, url=None, response=None, error=None,
                    _pool=None, _stacktrace=None):
-        if (_enabled() and isinstance(error, ReadTimeoutError)
-                and is_tls_handshake_timeout(error)):
-            converted = ConnectTimeoutError(f"TLS handshake timed out: {error}")
+        if (_enabled() and isinstance(error, (ReadTimeoutError, SSLError, ProtocolError))
+                and is_tls_handshake_failure(error)):
+            converted = ConnectTimeoutError(f"TLS handshake failed: {error}")
             setattr(converted, _MARK, True)
             # Raises when no connect retries are left.
             new_retry = _orig_increment(self, method, url, response, converted,
@@ -120,7 +153,7 @@ if requests is not None:
             try:
                 response = _orig_send(self, request, *args, **kwargs)
             except requests.exceptions.RequestException as exc:
-                if (not _enabled() or not is_tls_handshake_timeout(exc)
+                if (not _enabled() or not is_tls_handshake_failure(exc)
                         or _has_connect_retries(self.max_retries)):
                     raise
                 # Nothing was sent, so even a non-idempotent request is safe

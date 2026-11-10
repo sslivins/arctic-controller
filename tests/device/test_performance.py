@@ -1255,9 +1255,12 @@ class TestScreen:
             assert _screen_text_contains(device, "Back to search")
 
             device.click(tag="perf_bacnet_search_again")
+            # Back on the search: it is either still searching or listing what
+            # it found (names can still be loading: "BACnet device · <ip>").
             assert device.wait_until("BACnet discovery restarted from manual address",
-                                     lambda: _screen_text_contains(device, "Searching") or
-                                     _screen_text_contains(device, "Thermux Test"),
+                                     lambda: not device.has_widget(tag="perf_host") and (
+                                         _screen_text_contains(device, "Searching") or
+                                         device.has_widget(tag="perf_bacnet_device_0")),
                                      timeout=5.0, poll=0.5)
         finally:
             r = _put_config(device, original)
