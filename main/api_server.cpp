@@ -634,6 +634,34 @@ static constexpr int API_STACK_SIZE   = 16384;  // Default task stack
 static constexpr int API_MAX_HEADERS  = 16;
 static constexpr int API_RECV_TIMEOUT = 10;     // seconds
 
+// The TLS servers do each handshake on their single server thread, waiting in
+// a blocking recv bounded by the socket's receive timeout, retried until the
+// handshake timeout. A client that connects and then sends nothing (a browser
+// preconnect, a half-open socket) therefore froze every other client of the
+// server for 10-20 s at the default 10 s/10 s. A real client sends its hello
+// at once and answers each flight within a round trip, so accepted sockets
+// start with a 2 s receive timeout and a 1.5 s handshake budget, and get the
+// normal API_RECV_TIMEOUT back once the session is up (tls_session_opened).
+static constexpr int TLS_HANDSHAKE_RECV_TIMEOUT = 2;        // seconds
+static constexpr uint32_t TLS_HANDSHAKE_TIMEOUT_MS = 1500;
+
+static esp_err_t tls_session_opened(httpd_handle_t, int sockfd)
+{
+    struct timeval tv = { .tv_sec = API_RECV_TIMEOUT, .tv_usec = 0 };
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        ESP_LOGW(TAG, "Could not restore the receive timeout on socket %d (errno %d)",
+                 sockfd, errno);
+    }
+    return ESP_OK;
+}
+
+static void bound_tls_handshake(httpd_ssl_config_t& config)
+{
+    config.httpd.recv_wait_timeout = TLS_HANDSHAKE_RECV_TIMEOUT;
+    config.tls_handshake_timeout_ms = TLS_HANDSHAKE_TIMEOUT_MS;
+    config.httpd.open_fn = tls_session_opened;
+}
+
 static void log_internal_heap(int needed_stack)
 {
     // ESP_ERR_HTTPD_TASK means the server task stack allocation failed. That
@@ -785,8 +813,9 @@ static bool start_integration_locked(void)
     // clients. Three WSS slots leave capacity for REST reconciliation
     // while another TLS connection is still closing or handshaking.
     integration_config.httpd.lru_purge_enable = false;
-    integration_config.httpd.recv_wait_timeout = 10;
-    // Match recv_wait_timeout. A very short send timeout truncates HA REST
+    // Short handshake waits; sessions get API_RECV_TIMEOUT once up.
+    bound_tls_handshake(integration_config);
+    // Match API_RECV_TIMEOUT. A very short send timeout truncates HA REST
     // and WSS responses (empty/partial body) whenever the single-threaded
     // server is briefly busy, and tears down the TLS connection — do not
     // shorten it.
@@ -989,7 +1018,7 @@ static bool api_server_start_locked(void)
         ssl_config.httpd.max_uri_handlers   = API_URI_HANDLERS;
         ssl_config.httpd.stack_size         = API_STACK_SIZE;
         ssl_config.httpd.max_resp_headers   = API_MAX_HEADERS;
-        ssl_config.httpd.recv_wait_timeout  = API_RECV_TIMEOUT;
+        bound_tls_handshake(ssl_config);
         // TCP keepalive: reap dead TLS sockets abandoned mid-handshake/session
         // so they can't accumulate and wedge the stack (see port 80 note).
         ssl_config.httpd.keep_alive_enable   = true;
@@ -4989,6 +5018,39 @@ static void add_ap_default(cJSON* obj, const arctic::AdvancedParam* p) {
                             ap_value_to_client(p->ap, arctic::advanced_display_value(p->ap, p->default_val)));
 }
 
+// Sign-flag params (AP40: negative = glycol loop) get a "sign_flag" object so
+// clients can show a toggle plus a magnitude; "value" stays the raw signed
+// number. PUT accepts {"flag":bool,"magnitude":n} for these params.
+static void add_ap_sign_flag(cJSON* obj, const arctic::AdvancedParam* p, bool read_ok,
+                             int16_t value) {
+    const arctic::AdvSignFlag* f = arctic::advanced_sign_flag(p->ap);
+    if (!f) return;
+    cJSON* sf = cJSON_AddObjectToObject(obj, "sign_flag");
+    cJSON_AddStringToObject(sf, "name", f->name ? f->name : "");
+    cJSON_AddStringToObject(sf, "name_msg_id", f->name_msg_id ? f->name_msg_id : "");
+    cJSON_AddStringToObject(sf, "on_label", f->on_label ? f->on_label : "");
+    cJSON_AddStringToObject(sf, "on_msg_id", f->on_msg_id ? f->on_msg_id : "");
+    cJSON_AddStringToObject(sf, "off_label", f->off_label ? f->off_label : "");
+    cJSON_AddStringToObject(sf, "off_msg_id", f->off_msg_id ? f->off_msg_id : "");
+    bool flag = false;
+    int16_t mag = 0;
+    if (read_ok && arctic::advanced_sign_split(p->ap, value, &flag, &mag)) {
+        cJSON_AddBoolToObject(sf, "value", flag);
+        cJSON_AddNumberToObject(sf, "magnitude", mag);
+    } else {
+        cJSON_AddNullToObject(sf, "value");
+        cJSON_AddNullToObject(sf, "magnitude");
+    }
+    bool def_flag = false;
+    int16_t def_mag = 0;
+    arctic::advanced_sign_split(p->ap, arctic::advanced_display_value(p->ap, p->default_val),
+                                &def_flag, &def_mag);
+    cJSON_AddBoolToObject(sf, "default", def_flag);
+    cJSON_AddNumberToObject(sf, "default_magnitude", def_mag);
+    cJSON_AddNumberToObject(sf, "magnitude_min", f->magnitude_min);
+    cJSON_AddNumberToObject(sf, "magnitude_max", arctic::advanced_sign_magnitude_max(p->ap));
+}
+
 // Helper to add a single AP (advanced) parameter to a cJSON object, keyed "AP<n>".
 // Sends one response chunk. Returns false once the connection has gone away so
 // that callers streaming a long response stop building the remainder of it.
@@ -5031,6 +5093,7 @@ static cJSON* build_ap_json(const arctic::AdvancedParam* p, bool read_ok, int16_
     cJSON_AddBoolToObject(obj, "is_trigger", p->is_trigger);
     cJSON_AddBoolToObject(obj, "writable", writable);
     add_ap_enum_options(obj, p);
+    add_ap_sign_flag(obj, p, read_ok, value);
     return obj;
 }
 
@@ -5151,6 +5214,7 @@ static esp_err_t heatpump_advanced_single_get_handler(httpd_req_t* req)
     cJSON_AddBoolToObject(root, "is_trigger", p->is_trigger);
     cJSON_AddBoolToObject(root, "writable", writable);
     add_ap_enum_options(root, p);
+    add_ap_sign_flag(root, p, read_ok, value);
     if (read_ok) {
         cJSON_AddNumberToObject(root, "value", ap_value_to_client(p->ap, value));
     } else {
@@ -5207,22 +5271,54 @@ static esp_err_t heatpump_advanced_put_handler(httpd_req_t* req)
         return ESP_OK;
     }
     
-    // Read request body - expect plain integer
-    char body[32];
+    // Read request body - plain integer, or {"flag":bool,"magnitude":n} for
+    // sign-flag params.
+    char body[96];
     int received = httpd_req_recv(req, body, sizeof(body) - 1);
     if (received <= 0) {
         send_json_error(req, "400 Bad Request", "Empty request body");
         return ESP_OK;
     }
     body[received] = '\0';
-    
-    // Parse integer value (trim whitespace)
-    char* endptr;
-    long val_long = strtol(body, &endptr, 10);
-    while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') endptr++;
-    if (endptr == body || *endptr != '\0') {
-        send_json_error(req, "400 Bad Request", "Invalid integer value");
-        return ESP_OK;
+
+    const char* b = body;
+    while (*b == ' ' || *b == '\t' || *b == '\n' || *b == '\r') b++;
+    long val_long = 0;
+    if (*b == '{') {
+        if (!arctic::advanced_sign_flag(ap)) {
+            send_json_error(req, "400 Bad Request", "Invalid integer value");
+            return ESP_OK;
+        }
+        cJSON* j = cJSON_Parse(b);
+        const cJSON* jf = j ? cJSON_GetObjectItem(j, "flag") : nullptr;
+        const cJSON* jm = j ? cJSON_GetObjectItem(j, "magnitude") : nullptr;
+        if (!cJSON_IsBool(jf) || !cJSON_IsNumber(jm) ||
+            jm->valuedouble != (double)(long)jm->valuedouble) {
+            cJSON_Delete(j);
+            send_json_error(req, "400 Bad Request", "Expected {\"flag\":bool,\"magnitude\":integer}");
+            return ESP_OK;
+        }
+        const bool flag = cJSON_IsTrue(jf);
+        const double mag_d = jm->valuedouble;
+        cJSON_Delete(j);
+        int16_t joined = 0;
+        arctic::AdvWriteResult jr = arctic::AdvWriteResult::OUT_OF_RANGE;
+        if (mag_d >= -32768 && mag_d <= 32767) {
+            jr = arctic::advanced_sign_join(ap, flag, (int16_t)mag_d, &joined);
+        }
+        if (jr != arctic::AdvWriteResult::OK) {
+            send_json_error(req, "400 Bad Request", arctic::adv_write_result_name(jr));
+            return ESP_OK;
+        }
+        val_long = joined;
+    } else {
+        char* endptr;
+        val_long = strtol(b, &endptr, 10);
+        while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r') endptr++;
+        if (endptr == b || *endptr != '\0') {
+            send_json_error(req, "400 Bad Request", "Invalid integer value");
+            return ESP_OK;
+        }
     }
     
     int16_t value = (int16_t)val_long;

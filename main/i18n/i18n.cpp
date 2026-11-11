@@ -2311,8 +2311,11 @@ static const keyed_translation_t s_keyed_translations[] = {
 
     { "ap.cooling_comp_stop_ambient.name", "Arrêt compresseur (refroidissement)", "Parada del compresor (refrigeración)" },
     { "ap.cooling_comp_stop_ambient.detail",
-      "Mode refroidissement : le compresseur s'arrête lorsque la température ambiante extérieure descend à cette valeur. Utilisez une valeur négative pour les systèmes au glycol et positive pour les systèmes à eau ; la magnitude est le seuil ambiant.",
-      "Modo refrigeración: el compresor se detiene cuando la temperatura ambiente exterior baja a este valor. Use un valor negativo para sistemas con glicol y positivo para sistemas de agua; la magnitud es el umbral ambiente." },
+      "Mode refroidissement : le compresseur s'arrête lorsque la température ambiante extérieure descend à cette valeur. Activez Boucle glycolée si le circuit d'eau contient de l'antigel glycolé.",
+      "Modo refrigeración: el compresor se detiene cuando la temperatura ambiente exterior baja a este valor. Active Circuito con glicol si el circuito de agua contiene anticongelante de glicol." },
+    { "ap.glycol_loop.name", "Boucle glycolée", "Circuito con glicol" },
+    { "ap.glycol_loop.on", "Glycol", "Glicol" },
+    { "ap.glycol_loop.off", "Eau", "Agua" },
 
     { "ap.main_eev_superheat_method.name", "Méthode de surchauffe détendeur principal", "Método de sobrecalentamiento válvula principal" },
     { "ap.main_eev_superheat_method.detail",

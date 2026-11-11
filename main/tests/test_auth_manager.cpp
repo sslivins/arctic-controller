@@ -353,6 +353,23 @@ void a_fifth_login_evicts_the_oldest_session() {
     }
 }
 
+// Logins and requests land within the same second (time() has 1 s resolution),
+// so recency must not tie: using the first session makes the second the LRU.
+void a_recently_used_session_survives_eviction_within_one_second() {
+    boot_with_credentials();
+    std::vector<std::string> tokens;
+    for (int i = 0; i < AUTH_MAX_SESSIONS; ++i) {
+        tokens.push_back(login_or_empty(GOOD_PASS));
+    }
+    CHECK(auth_mgr_validate_session(tokens[0].c_str()));
+
+    CHECK(!login_or_empty(GOOD_PASS).empty());
+    CHECK(auth_mgr_validate_session(tokens[0].c_str()));
+    CHECK(!auth_mgr_validate_session(tokens[1].c_str()));
+    CHECK(auth_mgr_validate_session(tokens[2].c_str()));
+    CHECK(auth_mgr_validate_session(tokens[3].c_str()));
+}
+
 void a_logged_out_slot_is_reused_before_anything_is_evicted() {
     boot_with_credentials();
     std::vector<std::string> tokens;
@@ -907,6 +924,8 @@ int main() {
     TEST("a wrong password creates no session", a_wrong_password_creates_no_session);
     TEST("a fifth login evicts the oldest session",
          a_fifth_login_evicts_the_oldest_session);
+    TEST("a recently used session survives eviction within one second",
+         a_recently_used_session_survives_eviction_within_one_second);
     TEST("a logged out slot is reused before anything is evicted",
          a_logged_out_slot_is_reused_before_anything_is_evicted);
     TEST("changing credentials invalidates live sessions",

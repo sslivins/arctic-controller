@@ -123,6 +123,14 @@ static struct {
     bool edit_uses_enum = false;
     int edit_slider_min = 0;
     int edit_slider_step = 1;
+    // Sign-flag params (AP40): the slider edits the magnitude and this switch
+    // the sign (e.g. "Glycol loop"); the library joins them on save.
+    lv_obj_t* edit_flag_row = nullptr;
+    lv_obj_t* edit_flag_label = nullptr;
+    lv_obj_t* edit_flag_switch = nullptr;
+    bool edit_uses_sign_flag = false;
+    bool edit_flag = false;
+    bool edit_flag_initial = false;
     
     // Setpoint editing (uses same dialog, different handling)
     // -1 = editing P-parameter, 0/1/2 = editing cooling/heating/hotwater
@@ -166,6 +174,9 @@ static void edit_default_cb(lv_event_t* e);
 static void edit_save_cb(lv_event_t* e);
 static void edit_slider_cb(lv_event_t* e);
 static void edit_roller_cb(lv_event_t* e);
+static void edit_flag_cb(lv_event_t* e);
+static void ap_sign_default(const arctic::AdvancedParam* p, bool* flag, int16_t* mag);
+static void set_edit_flag(bool on);
 static void hide_edit_dialog(void);
 static void update_edit_value_display(void);
 static void load_timer_cb(lv_timer_t* timer);
@@ -710,7 +721,30 @@ static void create_edit_dialog(void) {
     lv_obj_set_width(state.edit_detail, LV_PCT(100));
     lv_label_set_long_mode(state.edit_detail, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(state.edit_detail, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    
+
+    // (2b) Sign-flag toggle (e.g. "Glycol loop"), shown only for params whose
+    // sign encodes a separate setting.
+    state.edit_flag_row = lv_obj_create(content);
+    lv_obj_set_size(state.edit_flag_row, 560, 80);
+    lv_obj_set_style_bg_opa(state.edit_flag_row, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(state.edit_flag_row, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(state.edit_flag_row, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(state.edit_flag_row, LV_OBJ_FLAG_SCROLLABLE);
+    state.edit_flag_label = lv_label_create(state.edit_flag_row);
+    lv_label_set_text(state.edit_flag_label, "");
+    lv_obj_set_style_text_font(state.edit_flag_label, UI_FONT_BODY, LV_PART_MAIN);
+    lv_obj_set_style_text_color(state.edit_flag_label, COLOR_TEXT, LV_PART_MAIN);
+    lv_obj_align(state.edit_flag_label, LV_ALIGN_LEFT_MID, 0, 0);
+    state.edit_flag_switch = lv_switch_create(state.edit_flag_row);
+    lv_obj_set_size(state.edit_flag_switch, 80, 40);
+    lv_obj_align(state.edit_flag_switch, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(state.edit_flag_switch, lv_color_hex(0x555555), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(state.edit_flag_switch, COLOR_ACCENT,
+                              (lv_style_selector_t)LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_user_data(state.edit_flag_switch, (void*)"edit_sign_flag_switch");
+    lv_obj_add_event_cb(state.edit_flag_switch, edit_flag_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_flag(state.edit_flag_row, LV_OBJ_FLAG_HIDDEN);
+
     // (3) Value editor. Numeric spans use a slider; discrete enums use a roller.
     lv_obj_t* value_row = lv_obj_create(content);
     state.edit_value_row = value_row;
@@ -862,11 +896,13 @@ static void set_edit_dialog_readonly(bool readonly) {
     if (readonly) {
         lv_obj_add_state(state.edit_slider, LV_STATE_DISABLED);
         lv_obj_add_state(state.edit_roller, LV_STATE_DISABLED);
+        lv_obj_add_state(state.edit_flag_switch, LV_STATE_DISABLED);
         lv_obj_add_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(state.edit_default_btn, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_remove_state(state.edit_slider, LV_STATE_DISABLED);
         lv_obj_remove_state(state.edit_roller, LV_STATE_DISABLED);
+        lv_obj_remove_state(state.edit_flag_switch, LV_STATE_DISABLED);
         lv_obj_remove_flag(state.edit_save_btn, LV_OBJ_FLAG_HIDDEN);
         if (state.current_ap >= 0) lv_obj_remove_flag(state.edit_default_btn, LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(state.edit_default_btn, LV_OBJ_FLAG_HIDDEN);
@@ -909,6 +945,16 @@ static void edit_default_cb(lv_event_t* e) {
     if (state.current_ap < 0) return;
     const arctic::AdvancedParam* p = arctic::advanced_param_lookup((uint8_t)state.current_ap);
     if (!p) return;
+    if (state.edit_uses_sign_flag) {
+        bool def_flag;
+        int16_t def_mag;
+        ap_sign_default(p, &def_flag, &def_mag);
+        set_edit_flag(def_flag);
+        lv_slider_set_value(state.edit_slider, def_mag, LV_ANIM_OFF);
+        state.edit_value = (float)def_mag;
+        update_edit_value_display();
+        return;
+    }
     const int v = ap_default_editor_value(p);
     if (state.edit_uses_enum) lv_roller_set_selected(state.edit_roller, (uint32_t)v, LV_ANIM_OFF);
     else lv_slider_set_value(state.edit_slider, v, LV_ANIM_OFF);
@@ -930,6 +976,13 @@ static void edit_save_cb(lv_event_t* e) {
         arctic::AdvWriteResult r;
         if (arctic::advanced_enum_option_count(ap) > 0) {
             r = advanced_param_write_option(ap, (size_t)save_val, &bus_ok);
+        } else if (state.edit_uses_sign_flag) {
+            int16_t joined = 0;
+            r = arctic::advanced_sign_join(ap, state.edit_flag, save_val, &joined);
+            if (r == arctic::AdvWriteResult::OK) {
+                save_val = joined;
+                r = advanced_param_write(ap, save_val, &bus_ok);
+            }
         } else {
             r = advanced_param_write(ap, save_val, &bus_ok);
         }
@@ -1033,6 +1086,26 @@ static void edit_roller_cb(lv_event_t* e) {
     update_edit_value_display();
 }
 
+static void edit_flag_cb(lv_event_t* e) {
+    (void)e;
+    state.edit_flag = lv_obj_has_state(state.edit_flag_switch, LV_STATE_CHECKED);
+    update_edit_value_display();
+}
+
+// Factory default of a sign-flag param, split into toggle + magnitude.
+static void ap_sign_default(const arctic::AdvancedParam* p, bool* flag, int16_t* mag) {
+    *flag = false;
+    *mag = 0;
+    arctic::advanced_sign_split(p->ap, arctic::advanced_display_value(p->ap, p->default_val),
+                                flag, mag);
+}
+
+static void set_edit_flag(bool on) {
+    state.edit_flag = on;
+    if (on) lv_obj_add_state(state.edit_flag_switch, LV_STATE_CHECKED);
+    else lv_obj_remove_state(state.edit_flag_switch, LV_STATE_CHECKED);
+}
+
 // Set a flex-child label's text, hiding it entirely when the text is empty so
 // the flex column doesn't reserve a blank row (keeps the card tight/centred).
 static void edit_label_set_or_hide(lv_obj_t* lbl, const char* text) {
@@ -1123,6 +1196,8 @@ static void show_setpoint_edit(int setpoint_type) {
     lv_obj_add_flag(state.edit_code, LV_OBJ_FLAG_HIDDEN);
     edit_label_set_or_hide(state.edit_detail, "");  // setpoints have no detail paragraph
     edit_label_set_or_hide(state.edit_description, sp.description);
+    state.edit_uses_sign_flag = false;
+    lv_obj_add_flag(state.edit_flag_row, LV_OBJ_FLAG_HIDDEN);
 
     int display_min = app_prefs_convert_temp(sp.min_val);
     int display_max = app_prefs_convert_temp(sp.max_val);
@@ -1153,7 +1228,8 @@ static void update_edit_value_display(void) {
 
     // Nothing to save until the value differs from the one the dialog opened with.
     if (state.edit_save_btn) {
-        const bool same = display_val == state.edit_initial;
+        const bool same = display_val == state.edit_initial &&
+                          (!state.edit_uses_sign_flag || state.edit_flag == state.edit_flag_initial);
         // The label takes the state too so its disabled text colour applies.
         for (lv_obj_t* o : {state.edit_save_btn, lv_obj_get_child(state.edit_save_btn, 0)}) {
             if (same) lv_obj_add_state(o, LV_STATE_DISABLED);
@@ -1197,7 +1273,16 @@ static void update_edit_value_display(void) {
         }
         lv_label_set_text(state.edit_value_label, val_buf);
         if (p && state.edit_default_btn) {
-            if ((int)roundf(state.edit_value) == ap_default_editor_value(p))
+            bool at_default;
+            if (state.edit_uses_sign_flag) {
+                bool def_flag;
+                int16_t def_mag;
+                ap_sign_default(p, &def_flag, &def_mag);
+                at_default = display_val == def_mag && state.edit_flag == def_flag;
+            } else {
+                at_default = display_val == ap_default_editor_value(p);
+            }
+            if (at_default)
                 lv_obj_add_state(state.edit_default_btn, LV_STATE_DISABLED);
             else
                 lv_obj_remove_state(state.edit_default_btn, LV_STATE_DISABLED);
@@ -1254,9 +1339,24 @@ static void enum_option_desc(uint8_t ap, int index, char* buf, size_t n) {
     }
 }
 
-// Format a AP parameter's raw register value into a display string.
+// Format a AP parameter's raw register value into a display string. Sign-flag
+// params render as "<magnitude> <unit> · <flag label>" unless `magnitude_only`.
 static void format_ap_value(const arctic::AdvancedParam* p, int16_t raw,
-                            char* buf, size_t n) {
+                            char* buf, size_t n, bool magnitude_only = false) {
+    const arctic::AdvSignFlag* sf = arctic::advanced_sign_flag(p->ap);
+    bool flag = false;
+    int16_t mag = 0;
+    if (sf && arctic::advanced_sign_split(p->ap, raw, &flag, &mag)) {
+        const char* unit = display_unit_i18n(arctic::advanced_display_unit(p->ap));
+        if (magnitude_only) {
+            snprintf(buf, n, "%d %s", mag, unit);
+        } else {
+            snprintf(buf, n, "%d %s · %s", mag, unit,
+                     flag ? i18n_get_key(sf->on_msg_id, sf->on_label)
+                          : i18n_get_key(sf->off_msg_id, sf->off_label));
+        }
+        return;
+    }
     if (arctic::advanced_enum_option_count(p->ap) > 0) {
         int idx = arctic::advanced_enum_option_index_for_wire(p->ap, raw);
         const char* s = enum_option_label(p->ap, idx);
@@ -1287,17 +1387,37 @@ static void ap_update_display(int slot) {
 
     int16_t val = 0;
     bool modified = false;
+    bool show_line = false;
+    const arctic::AdvSignFlag* sf = arctic::advanced_sign_flag(ap);
     if (advanced_param_read(ap, &val)) {
         char buf[32];
-        format_ap_value(p, val, buf, sizeof(buf));
+        // Sign-flag rows keep the right-hand value short (the magnitude) and
+        // show the flag state on the second line.
+        format_ap_value(p, val, buf, sizeof(buf), sf != nullptr);
         lv_label_set_text(state.ap_value_labels[slot], buf);
         const int16_t def = arctic::advanced_display_value(ap, p->default_val);
         modified = val != def;
-        if (modified && state.ap_default_labels[slot]) {
-            char def_val[32], line[64];
-            format_ap_value(p, def, def_val, sizeof(def_val));
-            snprintf(line, sizeof(line), i18n_get(STR_HP_AP_DEFAULT_FMT), def_val);
-            lv_label_set_text(state.ap_default_labels[slot], line);
+        show_line = modified || sf;
+        if (show_line && state.ap_default_labels[slot]) {
+            char def_val[40], line[96];
+            line[0] = '\0';
+            if (modified) {
+                format_ap_value(p, def, def_val, sizeof(def_val));
+                snprintf(line, sizeof(line), i18n_get(STR_HP_AP_DEFAULT_FMT), def_val);
+            }
+            bool flag = false;
+            char with_flag[160];
+            const char* text = line;
+            if (sf && arctic::advanced_sign_split(ap, val, &flag, nullptr)) {
+                snprintf(with_flag, sizeof(with_flag), "%s%s%s",
+                         flag ? i18n_get_key(sf->on_msg_id, sf->on_label)
+                              : i18n_get_key(sf->off_msg_id, sf->off_label),
+                         line[0] ? " · " : "", line);
+                text = with_flag;
+            }
+            lv_label_set_text(state.ap_default_labels[slot], text);
+            lv_obj_set_style_text_color(state.ap_default_labels[slot],
+                                        modified ? COLOR_WARNING : COLOR_TEXT_DIM, LV_PART_MAIN);
         }
     } else {
         lv_label_set_text(state.ap_value_labels[slot], "--");
@@ -1305,7 +1425,7 @@ static void ap_update_display(int slot) {
 
     // A changed parameter gets a second line under its name with the default.
     if (lv_obj_t* def_lbl = state.ap_default_labels[slot]) {
-        if (modified) lv_obj_remove_flag(def_lbl, LV_OBJ_FLAG_HIDDEN);
+        if (show_line) lv_obj_remove_flag(def_lbl, LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(def_lbl, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -1514,10 +1634,26 @@ static void show_ap_edit_dialog(uint8_t ap) {
     edit_label_set_or_hide(state.edit_detail, detail_buf);
 
     // Enum choices have a live meaning line; numeric sliders do not.
-    if (arctic::advanced_enum_option_count(ap) > 0) {
+    const arctic::AdvSignFlag* sf = arctic::advanced_sign_flag(ap);
+    state.edit_uses_sign_flag = sf != nullptr;
+    if (sf) {
+        bool flag = false;
+        int16_t mag = 0;
+        arctic::advanced_sign_split(ap, v, &flag, &mag);
+        if (mag < sf->magnitude_min) mag = sf->magnitude_min;  // raw 0 can't carry a sign
+        state.edit_flag_initial = flag;
+        set_edit_flag(flag);
+        lv_label_set_text(state.edit_flag_label, i18n_get_key(sf->name_msg_id, sf->name));
+        lv_obj_remove_flag(state.edit_flag_row, LV_OBJ_FLAG_HIDDEN);
+        edit_label_set_or_hide(state.edit_description, "");
+        state.edit_value = (float)mag;
+        configure_slider_editor(sf->magnitude_min, arctic::advanced_sign_magnitude_max(ap), mag);
+    } else if (arctic::advanced_enum_option_count(ap) > 0) {
+        lv_obj_add_flag(state.edit_flag_row, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(state.edit_description, LV_OBJ_FLAG_HIDDEN);
         configure_enum_editor(p, v);
     } else {
+        lv_obj_add_flag(state.edit_flag_row, LV_OBJ_FLAG_HIDDEN);
         edit_label_set_or_hide(state.edit_description, "");
         configure_slider_editor(
             arctic::advanced_display_value(ap, p->min_val),
@@ -1598,6 +1734,7 @@ void heatpump_control_create_in(lv_obj_t* parent) {
     lv_obj_set_flex_flow(state.scroll_container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(state.scroll_container, 10, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(state.scroll_container, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_user_data(state.scroll_container, (void*)"control_scroll");
     
     // =========================================================================
     // DISCONNECTED BANNER — a single screen-level notice (first child) shown

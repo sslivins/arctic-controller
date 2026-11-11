@@ -82,7 +82,9 @@ def stalling_server(tmp_path):
     stop = threading.Event()
     threads: list[threading.Thread] = []
 
-    def make(stall: int):
+    def make(stall: int, drop: bool = False):
+        """drop: close each stalled connection once its ClientHello arrives,
+        as the controller does when the client then goes quiet."""
         def serve():
             while not stop.is_set():
                 try:
@@ -92,6 +94,13 @@ def stalling_server(tmp_path):
                 accepted.append(conn)
                 if len(accepted) > stall:
                     threading.Thread(target=_serve_one, args=(ctx, conn), daemon=True).start()
+                elif drop:
+                    conn.settimeout(2)
+                    try:
+                        conn.recv(4096)
+                    except OSError:
+                        pass
+                    conn.close()
 
         threads.append(threading.Thread(target=serve, daemon=True))
         threads[0].start()
@@ -144,6 +153,32 @@ def test_failed_retry_raises_without_reporting(stalling_server):
 def test_other_timeouts_are_not_retried():
     assert not tls_handshake_retry.is_tls_handshake_timeout(
         requests.exceptions.ReadTimeout("Read timed out. (read timeout=10)"))
+
+
+def test_dropped_handshake_gets_one_more_attempt(stalling_server):
+    # The controller closes a handshake that goes quiet (PR #411 CI).
+    url, accepted = stalling_server(stall=1, drop=True)
+    with pytest.warns(UserWarning, match="was dropped"):
+        response = requests.post(url, json={}, timeout=5, verify=False)
+    assert response.text == "ok"
+    assert len(accepted) == 2
+
+
+def test_dropped_handshake_uses_the_sessions_connect_retries(stalling_server):
+    url, accepted = stalling_server(stall=2, drop=True)
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=Retry(total=2, backoff_factor=0)))
+    with pytest.warns(UserWarning, match="was dropped"):
+        response = session.post(url, json={}, timeout=5, verify=False)
+    assert response.text == "ok"
+    assert len(accepted) == 3
+
+
+def test_reset_after_the_handshake_is_not_retried():
+    try:
+        raise ConnectionResetError(104, "Connection reset by peer")
+    except ConnectionResetError as exc:
+        assert not tls_handshake_retry.is_tls_handshake_failure(exc)
 
 
 def test_opt_out_lets_the_stall_fail(stalling_server):

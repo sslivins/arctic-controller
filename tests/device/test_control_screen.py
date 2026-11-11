@@ -281,6 +281,70 @@ class TestSetpoints:
         finally:
             device.click(tag="edit_cancel")
 
+    def test_ap40_glycol_loop_toggle(self, device: DeviceClient):
+        """AP40 edits the sign as a Glycol loop switch and the slider as a magnitude."""
+        url = f"{device.base_url}/api/heatpump/advanced/AP40"
+        headers = {"Content-Type": "text/plain"}
+        original = device.session.get(url, timeout=device.timeout).json()["value"]
+        device.session.put(url, data="15", headers=headers, timeout=device.timeout).raise_for_status()
+        try:
+            _open_control(device)
+            _wait_for_text(device, "Water")
+            device.click(label="AP40")
+            slider = device.find_widget(tag="edit_slider")
+            assert slider is not None and (slider.min, slider.max) == (1, 45)
+            switch = device.find_widget(tag="edit_sign_flag_switch")
+            assert switch is not None and switch.checked is False
+            assert _has_text_containing(device, "Glycol loop")
+            save = device.find_widget(tag="edit_save")
+            assert save is not None and save.disabled
+
+            assert device.toggle("edit_sign_flag_switch")["checked"] is True
+            device.click(tag="edit_save")
+            device.wait_until(
+                "AP40 written as glycol",
+                lambda: device.session.get(url, timeout=device.timeout).json()["value"] == -15,
+                timeout=10.0,
+            )
+            _wait_for_text(device, "Glycol")
+        finally:
+            if device.find_widget(tag="edit_cancel") is not None:
+                device.click(tag="edit_cancel")
+            device.session.put(url, data=str(original), headers=headers, timeout=device.timeout)
+
+    def test_ap40_use_default_clears_glycol(self, device: DeviceClient):
+        """Use default restores Water + 15 °C in the editor; Cancel discards it."""
+        url = f"{device.base_url}/api/heatpump/advanced/AP40"
+        headers = {"Content-Type": "text/plain"}
+        original = device.session.get(url, timeout=device.timeout).json()["value"]
+        device.session.put(url, data="-1", headers=headers, timeout=device.timeout).raise_for_status()
+        try:
+            _open_control(device)
+            _wait_for_text(device, "Glycol")
+            device.click(label="AP40")
+            switch = device.find_widget(tag="edit_sign_flag_switch")
+            slider = device.find_widget(tag="edit_slider")
+            assert switch is not None and switch.checked is True
+            assert slider is not None and slider.value == 1
+
+            device.click(tag="edit_use_default")
+            device.wait_until(
+                "editor shows the default",
+                lambda: (device.find_widget(tag="edit_sign_flag_switch").checked is False
+                         and device.find_widget(tag="edit_slider").value == 15),
+                timeout=5.0,
+            )
+            assert device.find_widget(tag="edit_value").text == "15 °C"
+            assert device.find_widget(tag="edit_use_default").disabled
+            assert not device.find_widget(tag="edit_save").disabled
+
+            device.click(tag="edit_cancel")
+            assert device.session.get(url, timeout=device.timeout).json()["value"] == -1
+        finally:
+            if device.find_widget(tag="edit_cancel") is not None:
+                device.click(tag="edit_cancel")
+            device.session.put(url, data=str(original), headers=headers, timeout=device.timeout)
+
 
 # =========================================================================
 # Advanced Parameters Section

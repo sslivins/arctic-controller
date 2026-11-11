@@ -842,3 +842,40 @@ class TestHeatpumpParams:
 
         r = _put(f"/api/heatpump/advanced/{key}", data=str(bad_val))
         assert r.status_code == 400
+
+    def test_glycol_loop_sign_flag(self):
+        """AP40's sign is exposed as a "Glycol loop" toggle plus a magnitude."""
+        p = _get("/api/heatpump/advanced/AP40").json()
+        sf = p["sign_flag"]
+        assert sf["name"] == "Glycol loop"
+        assert (sf["on_label"], sf["off_label"]) == ("Glycol", "Water")
+        assert (sf["magnitude_min"], sf["magnitude_max"]) == (1, 45)
+        assert (sf["default"], sf["default_magnitude"]) == (False, 15)
+        if p["value"] is not None:
+            assert sf["value"] == (p["value"] < 0)
+            assert sf["magnitude"] == abs(p["value"])
+        assert "sign_flag" not in _get("/api/heatpump/advanced/AP29").json()
+
+    def test_set_glycol_loop_by_flag_and_magnitude(self):
+        """PUT {"flag","magnitude"} writes the signed value and logs both parts."""
+        original = _get("/api/heatpump/advanced/AP40").json()["value"]
+        assert original is not None, "AP40 unread (unit disconnected and not in demo mode)"
+        try:
+            r = _put("/api/heatpump/advanced/AP40", json={"flag": True, "magnitude": 3})
+            assert r.status_code == 200, r.text
+            assert r.json()["value"] == -3
+            p = _get("/api/heatpump/advanced/AP40").json()
+            assert p["value"] == -3
+            assert (p["sign_flag"]["value"], p["sign_flag"]["magnitude"]) == (True, 3)
+            events = _get("/api/events?limit=5").json()["events"]
+            logged = [e for e in events if e["type"] == "param_changed" and e.get("param") == "AP40"]
+            assert logged, events
+            assert (logged[0]["to"], logged[0]["to_magnitude"], logged[0]["to_flag_label"]) == (-3, 3, "Glycol")
+
+            # A magnitude of 0 can't carry the sign; JSON is only for sign-flag params.
+            assert _put("/api/heatpump/advanced/AP40", json={"flag": True, "magnitude": 0}).status_code == 400
+            assert _put("/api/heatpump/advanced/AP40", json={"flag": False, "magnitude": 46}).status_code == 400
+            assert _put("/api/heatpump/advanced/AP40", json={"flag": "yes", "magnitude": 3}).status_code == 400
+            assert _put("/api/heatpump/advanced/AP29", json={"flag": True, "magnitude": 3}).status_code == 400
+        finally:
+            _put("/api/heatpump/advanced/AP40", data=str(original))
