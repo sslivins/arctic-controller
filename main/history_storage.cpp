@@ -1,4 +1,5 @@
 #include "history_storage.h"
+#include "task_report.h"
 
 #include <atomic>
 #include <esp_crc.h>
@@ -244,6 +245,7 @@ esp_err_t history_storage_init(void) {
             ESP_LOGE(TAG, "Failed to create telemetry storage mutex");
             return ESP_ERR_NO_MEM;
         }
+        task_report_register_lock("telemetry storage", s_telemetry_mutex);
     }
 
     s_partition = esp_partition_find_first(

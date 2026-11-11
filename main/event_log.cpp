@@ -7,6 +7,7 @@
 #include "event_log.h"
 #include "boot_stats.h"
 #include "history_storage.h"
+#include "task_report.h"
 #include <esp_log.h>
 #include <esp_random.h>
 #include <esp_timer.h>
@@ -107,6 +108,7 @@ static_assert(sizeof(s_category_names) / sizeof(s_category_names[0]) == EVENT_CA
 void event_log_init(void) {
     if (s_mutex == nullptr) {
         s_mutex = xSemaphoreCreateMutex();
+        task_report_register_lock("event log", s_mutex);
     }
     if (s_mutex == nullptr) {
         ESP_LOGE(TAG, "Failed to create event-log mutex");

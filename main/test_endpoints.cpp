@@ -3226,6 +3226,45 @@ static esp_err_t httpd_stall_post_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+static void ui_stall_task(void* arg)
+{
+    const int ms = (int)(intptr_t)arg;
+    bsp_display_lock(0);
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    bsp_display_unlock();
+    ESP_LOGW(TAG, "test: released the display lock after %d ms", ms);
+    vTaskDelete(NULL);
+}
+
+// POST /api/test/ui-stall?ms=N - hold the display (LVGL) lock for N ms
+// (default 5000, max 15000) from a short-lived task named "ui_stall", so tests
+// can check the UI thread stall detector (ui_watch.cpp) reports it and names
+// the lock holder. Answers 202 at once.
+static esp_err_t ui_stall_post_handler(httpd_req_t* req)
+{
+    int ms = 5000;
+    char query[24] = {0};
+    char val[8] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "ms", val, sizeof(val)) == ESP_OK) {
+        ms = atoi(val);
+    }
+    if (ms < 0) ms = 0;
+    if (ms > 15000) ms = 15000;
+    ESP_LOGW(TAG, "test: holding the display lock for %d ms", ms);
+    httpd_resp_set_type(req, "application/json");
+    if (xTaskCreate(ui_stall_task, "ui_stall", 3072, (void*)(intptr_t)ms, 4, NULL) != pdPASS) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_sendstr(req, "{\"error\":\"cannot start the stall task\"}");
+        return ESP_OK;
+    }
+    httpd_resp_set_status(req, "202 Accepted");
+    char body[32];
+    snprintf(body, sizeof(body), "{\"hold_ms\":%d}", ms);
+    httpd_resp_sendstr(req, body);
+    return ESP_OK;
+}
+
 static esp_err_t wifi_bounce_post_handler(httpd_req_t* req)
 {
     if (!wifi_mgr_has_saved_credentials()) {
@@ -3625,6 +3664,14 @@ void test_endpoints_register(httpd_handle_t server)
         .user_ctx = NULL
     };
     reg_test_uri(server, &httpd_stall_uri);
+
+    httpd_uri_t ui_stall_uri = {
+        .uri = "/api/test/ui-stall",
+        .method = HTTP_POST,
+        .handler = ui_stall_post_handler,
+        .user_ctx = NULL
+    };
+    reg_test_uri(server, &ui_stall_uri);
 
     httpd_uri_t type_text_uri = {
         .uri = "/api/test/type-text",

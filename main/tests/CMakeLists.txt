@@ -86,6 +86,7 @@ add_library(arctic_main_host STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/event_group_fake.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/sntp_fake.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/bus_fake.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/host_stubs/task_report_fake.cpp
 )
 
 # host_stubs must come first so its esp_log.h/nvs.h shadow nothing real; there

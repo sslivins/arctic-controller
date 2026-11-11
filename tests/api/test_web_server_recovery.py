@@ -17,7 +17,7 @@ These tests drive the real recovery paths through test-firmware hooks:
     touching the working web UI.
   - A screenshot streams off the server thread, and POST
     /api/test/httpd-stall holds the thread so the stall detector's report
-    can be checked.
+    can be checked; POST /api/test/ui-stall does the same for the UI thread.
 
 They are destructive (the device is offline for up to a few minutes); the
 reboot case is last in this module.
@@ -249,6 +249,27 @@ def test_stall_detector_reports_a_stuck_server():
     stuck = [m for m in msgs if m.startswith("Web server thread stuck for")]
     assert stuck, msgs
     assert any("<- web server" in m for m in msgs), msgs
+
+
+def test_stall_detector_reports_a_stuck_ui_thread():
+    """main/ui_watch.cpp logs what was running when the LVGL thread stops,
+    who holds the shared locks and where the UI thread is waiting, and when
+    it runs again."""
+    since = max((e["seq"] for e in _log_entries_after(0)), default=0)
+
+    r = _post("/api/test/ui-stall?ms=5000")
+    assert r.status_code == 202, r.text
+
+    def reported():
+        msgs = [e["message"] for e in _log_entries_after(since)
+                if e["tag"] == "ui_watch"]
+        return msgs if any("running again" in m for m in msgs) else None
+
+    msgs = _wait_for(reported, "the UI stall detector's report", 20)
+    assert any(m.startswith("UI thread stuck for") for m in msgs), msgs
+    assert any("<- UI thread" in m for m in msgs), msgs
+    assert any("'LVGL' by ui_stall" in m for m in msgs), msgs
+    assert any("taskLVGL pc 0x" in m for m in msgs), msgs
 
 
 def test_killed_servers_are_restarted_in_place():

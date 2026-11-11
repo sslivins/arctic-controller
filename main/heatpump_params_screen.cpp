@@ -87,6 +87,8 @@ static struct {
     // Shown only when the unit is in a mode with no button (2/3/4).
     lv_obj_t* mode_other_label = nullptr;
     int active_mode_idx = -1;
+    int shown_working_mode = -1;   // mode mode_other_label was last set for
+    int power_update_ticks = 0;
     
 
     // Advanced ("AP") parameter rows (arctic-macon table, verified regs only).
@@ -186,6 +188,10 @@ static void power_btn_event_cb(lv_event_t* e);
 static void power_hold_timer_cb(lv_timer_t* timer);
 static void power_hold_cancel(void);
 static void power_update_timer_cb(lv_timer_t* timer);
+// The mode buttons are checked every tick; power button, banner and AP rows
+// every kPowerUpdateSlowTicks (2 s).
+static constexpr uint32_t kPowerUpdatePeriodMs = 250;
+static constexpr int kPowerUpdateSlowTicks = 8;
 static void update_power_btn_appearance(bool power_on);
 static void mode_btn_event_cb(lv_event_t* e);
 static void update_mode_btn_styles(int selected_idx);
@@ -428,6 +434,21 @@ static void refresh_ap_rows() {
 static void power_update_timer_cb(lv_timer_t* timer) {
     if (!state.power_btn || state.power_holding) return;  // Don't overwrite hold animation
     arctic::HeatPumpState hp = arctic::getState();
+
+    // Mode buttons follow a mode change (from the web UI, API or the unit)
+    // within a tick; everything else only needs the slower cadence.
+    const int mode_idx = mode_button_index(hp.working_mode);
+    if (mode_idx != state.active_mode_idx) {
+        state.active_mode_idx = mode_idx;
+        update_mode_btn_styles(mode_idx);
+    }
+    if ((int)hp.working_mode != state.shown_working_mode) {
+        state.shown_working_mode = (int)hp.working_mode;
+        update_mode_other_label(hp.working_mode);
+    }
+    if (++state.power_update_ticks < kPowerUpdateSlowTicks) return;
+    state.power_update_ticks = 0;
+
     update_power_btn_appearance(hp.connected ? hp.unit_on : false);
 
     // Show the single disconnected banner whenever the pump is offline (demo
@@ -440,14 +461,6 @@ static void power_update_timer_cb(lv_timer_t* timer) {
         // communication-error modal.
         set_mode_controls_enabled(!disconnected);
     }
-    
-    // Also keep mode buttons in sync
-    const int mode_idx = mode_button_index(hp.working_mode);
-    if (mode_idx != state.active_mode_idx) {
-        state.active_mode_idx = mode_idx;
-        update_mode_btn_styles(mode_idx);
-    }
-    update_mode_other_label(hp.working_mode);
 
     // A parameter changed from the web UI or API: refresh the rows. Skipped
     // while the initial staggered load or an edit dialog is in progress.
@@ -1808,8 +1821,9 @@ void heatpump_control_create_in(lv_obj_t* parent) {
         }
     }
     
-    // Timer to keep power button in sync (2s interval)
-    state.power_update_timer = lv_timer_create(power_update_timer_cb, 2000, nullptr);
+    // Keeps the power button, banner, mode buttons and AP rows in sync
+    state.power_update_ticks = 0;
+    state.power_update_timer = lv_timer_create(power_update_timer_cb, kPowerUpdatePeriodMs, nullptr);
     
     // =========================================================================
     // MODE SELECTOR (below power button)
@@ -1868,6 +1882,7 @@ void heatpump_control_create_in(lv_obj_t* parent) {
     {
         arctic::HeatPumpState hp_mode = arctic::getState();
         update_mode_other_label(hp_mode.working_mode);
+        state.shown_working_mode = (int)hp_mode.working_mode;
     }
     
     update_mode_btn_styles(state.active_mode_idx);
@@ -2040,6 +2055,7 @@ void heatpump_control_hide(void) {
     memset(state.mode_labels, 0, sizeof(state.mode_labels));
     state.mode_other_label = nullptr;
     state.active_mode_idx = -1;
+    state.shown_working_mode = -1;
     state.cooling_value_label = nullptr;
     state.heating_value_label = nullptr;
     state.hotwater_value_label = nullptr;
