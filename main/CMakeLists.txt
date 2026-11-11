@@ -56,6 +56,8 @@ idf_component_register(
         "api_server.cpp"
         "slow_request.cpp"
         "httpd_watch.cpp"
+        "task_report.cpp"
+        "ui_watch.cpp"
         "ota_manager.cpp"
         "ota_commit.cpp"
         "auth_manager.cpp"

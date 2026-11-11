@@ -1542,6 +1542,22 @@ jobs:
             grep -nE 'Web server thread answering again' controller-serial.log | head -20 || true
           fi
 
+      - name: Report UI thread stalls
+        if: always()
+        # main/ui_watch.cpp logs "UI thread stuck" when the LVGL thread stops
+        # for 2 s or more, with a task snapshot, the holders of the shared
+        # locks and the UI thread's code addresses (decode them with
+        # riscv32-esp-elf-addr2line against the firmware ELF artifact). Not a
+        # failure on its own; it explains UI tests that timed out.
+        run: |
+          [ -f controller-serial.log ] || exit 0
+          COUNT=$(grep -c 'UI thread stuck' controller-serial.log || true)
+          if [ "${COUNT:-0}" -gt 0 ]; then
+            echo "::warning title=UI thread stalled (${COUNT}x)::The controller's LVGL thread stopped ${COUNT} time(s). The reports are in controller-serial.log (ui_watch)."
+            grep -nE -A 13 'UI thread stuck' controller-serial.log | head -150
+            grep -nE 'UI thread running again' controller-serial.log | head -20 || true
+          fi
+
       - name: Detect firmware crashes on device
         if: always()
         # Distinguish a *crash* reboot from an *intentional* reboot (OTA /

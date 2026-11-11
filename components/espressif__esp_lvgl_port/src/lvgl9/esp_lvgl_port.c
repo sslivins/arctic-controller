@@ -171,6 +171,11 @@ void lvgl_port_unlock(void)
     xSemaphoreGiveRecursive(lvgl_port_ctx.lvgl_mux);
 }
 
+SemaphoreHandle_t lvgl_port_get_lock(void)
+{
+    return lvgl_port_ctx.lvgl_mux;
+}
+
 esp_err_t lvgl_port_task_wake(lvgl_port_event_type_t event, void *param)
 {
     EventBits_t bits = 0;

@@ -12,6 +12,8 @@
 #pragma once
 
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "lvgl.h"
 #include "esp_lvgl_port_disp.h"
 #include "esp_lvgl_port_touch.h"
@@ -104,6 +106,12 @@ bool lvgl_port_lock(uint32_t timeout_ms);
  *
  */
 void lvgl_port_unlock(void);
+
+/**
+ * @brief LVGL mutex, so a stall detector can name the task holding it
+ *        (arctic-controller addition; lvgl9 port only).
+ */
+SemaphoreHandle_t lvgl_port_get_lock(void);
 
 /**
  * @brief Notify LVGL, that data was flushed to LCD display

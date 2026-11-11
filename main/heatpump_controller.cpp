@@ -20,6 +20,7 @@
 #include "energy_store.h"
 #include "run_store.h"
 #include "time_manager.h"
+#include "task_report.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -133,11 +134,17 @@ static MaconImage s_image;
 static SemaphoreHandle_t s_image_mutex = nullptr;
 
 static void ensureImageMutex() {
+    if (s_state_mutex == nullptr) {
+        s_state_mutex = xSemaphoreCreateMutex();
+        task_report_register_lock("heat pump state", s_state_mutex);
+    }
     if (s_image_mutex == nullptr) {
         s_image_mutex = xSemaphoreCreateMutex();
+        task_report_register_lock("Macon image", s_image_mutex);
     }
     if (s_persist_mutex == nullptr) {
         s_persist_mutex = xSemaphoreCreateMutex();
+        task_report_register_lock("heat pump persist", s_persist_mutex);
     }
 }
 
@@ -356,9 +363,6 @@ static void demoSyncTask(void*) {
 }
 
 void initDemoState() {
-    if (s_state_mutex == nullptr) {
-        s_state_mutex = xSemaphoreCreateMutex();
-    }
     ensureImageMutex();
 
     s_demo_mode = true;
@@ -446,9 +450,6 @@ bool isDemoMode() {
 // ============================================================================
 
 void initExternalFeed() {
-    if (s_state_mutex == nullptr) {
-        s_state_mutex = xSemaphoreCreateMutex();
-    }
     ensureImageMutex();
     s_feed_mode = true;
 

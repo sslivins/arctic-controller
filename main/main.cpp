@@ -62,6 +62,7 @@
 #include "log_persist.h"
 #include "ext_temp_sensors.h"
 #include "crash_dump.h"
+#include "ui_watch.h"
 #include "esp_task_wdt.h"
 #include <cJSON.h>
 
@@ -711,6 +712,8 @@ void create_ui(void)
         sync_fault_notice_bell();
         sync_ext_sensor_notice_bell();
     }, 1000, NULL);
+
+    ui_watch_start();
 }
 
 // ============================================================================
