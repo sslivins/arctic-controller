@@ -51,6 +51,10 @@ void net_diag_log_snapshot(void);
 //   - rpc: how long the host took to get the AP record from the C6 radio over
 //     ESP-Hosted. A slow or failed call ("ap-info FAILED") points at the
 //     host-to-radio link rather than the network.
+//   - thr=<ON|off> <held>ms/<count>/<drops>: ESP-Hosted host->C6 data
+//     throttle. While ON the host silently drops every STA frame (pings and
+//     TCP stall but RPC still works). held = how long the current throttle
+//     has lasted, count = throttle episodes since boot, drops = frames dropped.
 // Never contains "tw=", which scan_heap_floor.sh reads from netdiag lines.
 void net_diag_format_wifi(char* buf, size_t len);
 

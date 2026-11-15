@@ -23,6 +23,7 @@
 #include "serial_drv.h"
 #include "stats.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_hosted_log.h"
 #include "hci_drv.h"
 #include "endian.h"
@@ -841,11 +842,24 @@ static void sdio_read_task(void const* pvParameters)
 		ESP_LOGV(TAG, "Intr: %08"PRIX32, interrupts);
 
 		/* Check all supported interrupts */
-		if (BIT(SDIO_INT_START_THROTTLE) & interrupts)
+		if (BIT(SDIO_INT_START_THROTTLE) & interrupts) {
+			if (!wifi_tx_throttling) {
+				wifi_tx_throttle_since_us = esp_timer_get_time();
+				wifi_tx_throttle_on_count++;
+			}
 			wifi_tx_throttling = 1;
+		}
 
-		if (BIT(SDIO_INT_STOP_THROTTLE) & interrupts)
+		if (BIT(SDIO_INT_STOP_THROTTLE) & interrupts) {
+			if (wifi_tx_throttling) {
+				int64_t held_ms = (esp_timer_get_time() - wifi_tx_throttle_since_us) / 1000;
+				if (held_ms >= 100)
+					ESP_LOGW(TAG, "wifi tx throttle released after %lld ms (on#%"PRIu32" drops=%"PRIu32" both=%d)",
+							held_ms, wifi_tx_throttle_on_count, wifi_tx_throttle_drops,
+							!!(BIT(SDIO_INT_START_THROTTLE) & interrupts));
+			}
 			wifi_tx_throttling = 0;
+		}
 
 		if (!(BIT(SDIO_INT_NEW_PACKET) & interrupts)) {
 

@@ -22,6 +22,10 @@
 
 static const char* TAG = "netdiag";
 
+// Defined in the vendored esp_hosted transport_drv.c (Arctic diagnostic hook).
+extern "C" void esp_hosted_get_tx_throttle_stats(bool* active, uint32_t* on_count,
+                                                 uint32_t* drops, uint32_t* held_ms);
+
 // ---------------------------------------------------------------------------
 // PCB counting (runs on the tcpip thread)
 // ---------------------------------------------------------------------------
@@ -103,18 +107,24 @@ void net_diag_format_wifi(char* buf, size_t len)
         return;
     }
 
+    bool thr = false;
+    uint32_t thr_on = 0, thr_drops = 0, thr_ms = 0;
+    esp_hosted_get_tx_throttle_stats(&thr, &thr_on, &thr_drops, &thr_ms);
+
     wifi_ap_record_t ap;
     const int64_t t0 = esp_timer_get_time();
     const esp_err_t err = esp_wifi_sta_get_ap_info(&ap);
     const int rpc_ms = (int)((esp_timer_get_time() - t0) / 1000);
     if (err != ESP_OK) {
-        snprintf(buf, len, "wifi ap-info FAILED (%s) disc=%u reason=%u rpc=%dms",
-                 esp_err_to_name(err), disc, reason, rpc_ms);
+        snprintf(buf, len, "wifi ap-info FAILED (%s) disc=%u reason=%u rpc=%dms thr=%s%lums/%lu/%lu",
+                 esp_err_to_name(err), disc, reason, rpc_ms, thr ? "ON " : "off ",
+                 (unsigned long)thr_ms, (unsigned long)thr_on, (unsigned long)thr_drops);
         return;
     }
-    snprintf(buf, len, "wifi rssi=%d ch=%u ap=..%02x:%02x disc=%u reason=%u rpc=%dms",
+    snprintf(buf, len, "wifi rssi=%d ch=%u ap=..%02x:%02x disc=%u reason=%u rpc=%dms thr=%s%lums/%lu/%lu",
              (int)ap.rssi, (unsigned)ap.primary, ap.bssid[4], ap.bssid[5],
-             disc, reason, rpc_ms);
+             disc, reason, rpc_ms, thr ? "ON " : "off ",
+             (unsigned long)thr_ms, (unsigned long)thr_on, (unsigned long)thr_drops);
 }
 
 void net_diag_log_snapshot(void)

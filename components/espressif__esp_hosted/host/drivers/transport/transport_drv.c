@@ -23,6 +23,7 @@
 #include "esp_hosted_transport_config.h"
 #include "stats.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_hosted_log.h"
 #include "serial_drv.h"
 #include "serial_ll_if.h"
@@ -44,6 +45,24 @@ static char chip_type = ESP_PRIV_FIRMWARE_CHIP_UNRECOGNIZED;
 void(*transport_esp_hosted_up_cb)(void) = NULL;
 transport_channel_t *chan_arr[ESP_MAX_IF];
 volatile uint8_t wifi_tx_throttling;
+/* Arctic diagnostics: how often the slave throttles STA TX and what it drops. */
+volatile uint32_t wifi_tx_throttle_on_count;
+volatile uint32_t wifi_tx_throttle_drops;
+volatile int64_t wifi_tx_throttle_since_us;
+
+void esp_hosted_get_tx_throttle_stats(bool *active, uint32_t *on_count,
+		uint32_t *drops, uint32_t *held_ms)
+{
+	uint8_t on = wifi_tx_throttling;
+	if (active)
+		*active = on;
+	if (on_count)
+		*on_count = wifi_tx_throttle_on_count;
+	if (drops)
+		*drops = wifi_tx_throttle_drops;
+	if (held_ms)
+		*held_ms = on ? (uint32_t)((esp_timer_get_time() - wifi_tx_throttle_since_us) / 1000) : 0;
+}
 
 
 static uint8_t transport_state = TRANSPORT_INACTIVE;
@@ -220,6 +239,7 @@ static esp_err_t transport_drv_sta_tx(void *h, void *buffer, size_t len)
 		return ESP_OK;
 
 	if (unlikely(wifi_tx_throttling)) {
+		wifi_tx_throttle_drops++;
 	#if ESP_PKT_STATS
 		pkt_stats.sta_tx_in_drop++;
 	#endif
