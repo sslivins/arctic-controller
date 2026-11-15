@@ -1486,8 +1486,12 @@ int rpc_wifi_scan_get_ap_records(uint16_t *number, wifi_ap_record_t *ap_records)
 	if (resp && resp->resp_event_status == SUCCESS) {
 		ESP_LOGV(TAG, "num: %u",resp->u.wifi_scan_ap_list.number);
 
-		g_h.funcs->_h_memcpy(ap_records, resp->u.wifi_scan_ap_list.out_list,
-				resp->u.wifi_scan_ap_list.number * sizeof(wifi_ap_record_t));
+		/* arctic-controller patch: see rpc_wifi_sta_get_ap_info() */
+		if (!resp->u.wifi_scan_ap_list.out_list)
+			resp->u.wifi_scan_ap_list.number = 0;
+		else
+			g_h.funcs->_h_memcpy(ap_records, resp->u.wifi_scan_ap_list.out_list,
+					resp->u.wifi_scan_ap_list.number * sizeof(wifi_ap_record_t));
 	}
 	return rpc_rsp_callback(resp);
 }
@@ -1546,8 +1550,14 @@ int rpc_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info)
 	resp = wifi_sta_get_ap_info(req);
 
 	if (resp && resp->resp_event_status == SUCCESS) {
-		g_h.funcs->_h_memcpy(ap_info, resp->u.wifi_scan_ap_list.out_list,
-				sizeof(wifi_ap_record_t));
+		/* arctic-controller patch: rpc_parse_rsp() bails out without an
+		 * error status when the slave omits ap_record (e.g. mid-reconnect),
+		 * leaving out_list NULL; copying it asserted in hosted_memcpy. */
+		if (!resp->u.wifi_scan_ap_list.out_list)
+			resp->resp_event_status = ESP_ERR_WIFI_NOT_CONNECT;
+		else
+			g_h.funcs->_h_memcpy(ap_info, resp->u.wifi_scan_ap_list.out_list,
+					sizeof(wifi_ap_record_t));
 	}
 	return rpc_rsp_callback(resp);
 }
