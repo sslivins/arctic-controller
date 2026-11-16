@@ -15,6 +15,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,6 +74,9 @@ typedef struct {
     // Gateway ARP entry (stable entries only)
     bool gw_arp;
     unsigned char gw_mac[6];
+    // Another LAN host from the ARP table (IPv4, network byte order, 0 = none),
+    // pinged during an outage to tell "gateway not answering" from "LAN down".
+    uint32_t peer_ip;
 } net_diag_counters_t;
 
 void net_diag_sample_counters(net_diag_counters_t* out);

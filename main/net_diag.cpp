@@ -183,11 +183,12 @@ static void sample_counters_on_tcpip(void* arg)
             ip4_addr_t* ip = NULL;
             struct netif* nif = NULL;
             struct eth_addr* eth = NULL;
-            if (etharp_get_entry(i, &ip, &nif, &eth) && nif == w->netif &&
-                ip4_addr_get_u32(ip) == ip4_addr_get_u32(&w->gw)) {
+            if (!etharp_get_entry(i, &ip, &nif, &eth) || nif != w->netif) continue;
+            if (ip4_addr_get_u32(ip) == ip4_addr_get_u32(&w->gw)) {
                 c->gw_arp = true;
                 memcpy(c->gw_mac, eth->addr, sizeof(c->gw_mac));
-                break;
+            } else if (c->peer_ip == 0) {
+                c->peer_ip = ip4_addr_get_u32(ip);
             }
         }
     }

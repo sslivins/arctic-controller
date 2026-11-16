@@ -352,29 +352,18 @@ static void ping_on_end(esp_ping_handle_t hdl, void* args) {
     if (sem != nullptr) xSemaphoreGive(sem);
 }
 
-// Active reachability probe: ICMP-ping the default gateway. A reply proves the
-// full radio + TCP/IP external path is alive. During the network-stack wedge
-// the ping gets NO reply (recv=0) even though association is up, which is the
-// signal we act on. If we can't determine a gateway, or can't create/run a ping
-// session, we deliberately report reachable so the supervisor never triggers a
-// recovery on ambiguous evidence.
-static bool probe_gateway_reachable(void) {
-    esp_netif_t* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (sta == nullptr) return true;
-
-    esp_netif_ip_info_t ipinfo;
-    if (esp_netif_get_ip_info(sta, &ipinfo) != ESP_OK) return true;
-    if (ipinfo.gw.addr == 0) return true;   // no gateway known yet
-
+// Pings ipv4 (network byte order) 3 times. Returns 1 on any reply, 0 on none,
+// -1 if the ping session could not be created or run.
+static int ping_host(uint32_t ipv4) {
     if (s_ping_done == nullptr) {
         s_ping_done = xSemaphoreCreateBinary();
-        if (s_ping_done == nullptr) return true;
+        if (s_ping_done == nullptr) return -1;
     }
 
     ip_addr_t target;
     memset(&target, 0, sizeof(target));
     target.type = IPADDR_TYPE_V4;
-    target.u_addr.ip4.addr = ipinfo.gw.addr;
+    target.u_addr.ip4.addr = ipv4;
 
     esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
     cfg.target_addr     = target;
@@ -391,30 +380,62 @@ static bool probe_gateway_reachable(void) {
 
     esp_ping_handle_t hdl = nullptr;
     if (esp_ping_new_session(&cfg, &cbs, &hdl) != ESP_OK || hdl == nullptr) {
-        return true;
+        return -1;
     }
 
     // Drain any stale completion signal, then run the session to completion.
     xSemaphoreTake(s_ping_done, 0);
-    bool reachable = true;
+    int result = 1;
     if (esp_ping_start(hdl) != ESP_OK) {
         esp_ping_delete_session(hdl);
-        return true;
+        return -1;
     }
 
     // Worst case ~3*250ms + one 1000ms timeout; wait generously.
     if (xSemaphoreTake(s_ping_done, pdMS_TO_TICKS(5000)) == pdTRUE) {
         uint32_t received = 0;
         esp_ping_get_profile(hdl, ESP_PING_PROF_REPLY, &received, sizeof(received));
-        reachable = (received > 0);
+        result = (received > 0) ? 1 : 0;
     } else {
         // The ping task itself never finished within the window - treat the
         // stack as unreachable.
         esp_ping_stop(hdl);
-        reachable = false;
+        result = 0;
     }
     esp_ping_delete_session(hdl);
-    return reachable;
+    return result;
+}
+
+// Active reachability probe: ICMP-ping the default gateway. A reply proves the
+// full radio + TCP/IP external path is alive. During the network-stack wedge
+// the ping gets NO reply (recv=0) even though association is up, which is the
+// signal we act on. If we can't determine a gateway, or can't create/run a ping
+// session, we deliberately report reachable so the supervisor never triggers a
+// recovery on ambiguous evidence.
+static bool probe_gateway_reachable(void) {
+    esp_netif_t* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta == nullptr) return true;
+
+    esp_netif_ip_info_t ipinfo;
+    if (esp_netif_get_ip_info(sta, &ipinfo) != ESP_OK) return true;
+    if (ipinfo.gw.addr == 0) return true;   // no gateway known yet
+
+    return ping_host(ipinfo.gw.addr) != 0;
+}
+
+// During an outage, ping another LAN host seen while healthy. A reply means the
+// radio and LAN path work and only the gateway is not answering.
+static void log_peer_probe(uint32_t peer_ip) {
+    if (peer_ip == 0) {
+        ESP_LOGW(TAG, "outage peer probe: no LAN peer in ARP table");
+        return;
+    }
+    char ipstr[16];
+    esp_ip4_addr_t a = { .addr = peer_ip };
+    snprintf(ipstr, sizeof(ipstr), IPSTR, IP2STR(&a));
+    const int r = ping_host(peer_ip);
+    ESP_LOGW(TAG, "outage peer probe %s: %s", ipstr,
+             r > 0 ? "reply" : (r == 0 ? "NO reply" : "ping failed to run"));
 }
 
 static void wifi_supervisor_task(void* param) {
@@ -601,6 +622,7 @@ static void wifi_supervisor_task(void* param) {
         ESP_LOGW(TAG, "associated (ip=%s) but gateway unreachable for %ds "
                  "(bounces so far %d) | %s", ip, down_ms / 1000, bounces, wifi);
         log_outage_counters(&last_ok_counters);
+        log_peer_probe(last_ok_counters.peer_ip);
 
         // Record the outage once it is clearly not a transient blip, even if it
         // self-heals before we bounce (that itself confirms keepalive working).
