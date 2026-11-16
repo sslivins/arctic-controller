@@ -61,6 +61,7 @@
 #include <esp_timer.h>
 #include <esp_netif.h>
 #include <string.h>
+#include <time.h>
 #include <atomic>
 #include "ping/ping_sock.h"
 #include "lwip/ip_addr.h"
@@ -309,6 +310,20 @@ static void supervise_api_server(ApiWatch& w) {
 static TaskHandle_t s_task = nullptr;
 
 // Sleeps until the next check, or until the link drops.
+// Includes wall-clock UTC so outages can be matched against the AP's event
+// log (the serial log only carries uptime).
+static void log_outage_counters(const net_diag_counters_t* base) {
+    char ctr[200];
+    net_diag_format_counters(ctr, sizeof(ctr), base);
+    char utc[24] = "unsynced";
+    time_t t = time(nullptr);
+    struct tm tm;
+    if (t > 1700000000 && gmtime_r(&t, &tm)) {
+        strftime(utc, sizeof(utc), "%Y-%m-%dT%H:%M:%SZ", &tm);
+    }
+    ESP_LOGW(TAG, "outage counters utc=%s: %s", utc, ctr);
+}
+
 static void wait_for_next_check(int ms) {
     ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(ms > 0 ? ms : 1));
 }
@@ -539,8 +554,6 @@ static void wifi_supervisor_task(void* param) {
             if (unreachable_since_us != 0) {
                 const int down_ms =
                     (int)((esp_timer_get_time() - unreachable_since_us) / 1000);
-                char ctr[200];
-                net_diag_format_counters(ctr, sizeof(ctr), &last_ok_counters);
                 if (unreachable_logged) {
                     const uint32_t method = (bounces > 0) ? RECOVER_BOUNCE
                                                           : RECOVER_SELF;
@@ -558,7 +571,7 @@ static void wifi_supervisor_task(void* param) {
                              "(brief outage, not recorded) | %s",
                              down_ms / 1000, wifi);
                 }
-                ESP_LOGW(TAG, "outage counters: %s", ctr);
+                log_outage_counters(&last_ok_counters);
             }
             net_diag_sample_counters(&last_ok_counters);
             unreachable_since_us = 0;
@@ -587,11 +600,7 @@ static void wifi_supervisor_task(void* param) {
         net_diag_format_wifi(wifi, sizeof(wifi));
         ESP_LOGW(TAG, "associated (ip=%s) but gateway unreachable for %ds "
                  "(bounces so far %d) | %s", ip, down_ms / 1000, bounces, wifi);
-        {
-            char ctr[200];
-            net_diag_format_counters(ctr, sizeof(ctr), &last_ok_counters);
-            ESP_LOGW(TAG, "outage counters: %s", ctr);
-        }
+        log_outage_counters(&last_ok_counters);
 
         // Record the outage once it is clearly not a transient blip, even if it
         // self-heals before we bounce (that itself confirms keepalive working).
