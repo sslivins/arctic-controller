@@ -82,8 +82,17 @@ def _https_open() -> bool:
 
 
 def _mode() -> str:
-    """'https' when port 443 answers, otherwise 'http'."""
-    return "https" if _https_open() else "http"
+    """'https' or 'http', read from port 80.
+
+    Port 80 serves /api/tls/status only in HTTP mode (including the fallback
+    when 443 failed to start) and answers 404 in HTTPS mode. Asking over plain
+    HTTP avoids misreading a single failed TLS handshake as HTTP mode, which
+    then sent HTTPS-mode requests to port 80 and got 404s.
+    """
+    def probe():
+        r = _get(HTTP_URL, "/api/tls/status", timeout=5)
+        return {200: "http", 404: "https"}.get(r.status_code)
+    return _poll(probe, 30) or ("https" if _https_open() else "http")
 
 
 def _base() -> str:

@@ -70,6 +70,9 @@ struct hosted_transport_context_t {
 };
 
 extern volatile uint8_t wifi_tx_throttling;
+extern volatile uint32_t wifi_tx_throttle_on_count;
+extern volatile uint32_t wifi_tx_throttle_drops;
+extern volatile int64_t wifi_tx_throttle_since_us;
 
 typedef int (*hosted_rxcb_t)(void *buffer, uint16_t len, void *free_buff_hdl);
 
