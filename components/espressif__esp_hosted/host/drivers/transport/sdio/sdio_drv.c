@@ -501,6 +501,9 @@ static void sdio_write_task(void const* pvParameters)
 		sdio_tx_buf_count += buf_needed;
 		sdio_tx_buf_count = sdio_tx_buf_count % ESP_TX_BUFFER_MAX;
 
+		if (buf_handle.if_type == ESP_STA_IF)
+			arctic_sta_tx_sent++;
+
 #if ESP_PKT_STATS
 			if (buf_handle.if_type == ESP_STA_IF)
 				pkt_stats.sta_tx_out++;
@@ -558,6 +561,8 @@ static int is_valid_sdio_rx_packet(uint8_t *rxbuff_a, uint16_t *len_a, uint16_t 
 	}
 #endif
 
+	if (h->if_type == ESP_STA_IF)
+		arctic_sta_rx++;
 #if ESP_PKT_STATS
 	if (h->if_type == ESP_STA_IF)
 		pkt_stats.sta_rx_in++;
@@ -1157,6 +1162,8 @@ int esp_hosted_tx(uint8_t iface_type, uint8_t iface_num,
 	g_h.funcs->_h_queue_item(to_slave_queue[pkt_prio], &buf_handle, HOSTED_BLOCK_MAX);
 	g_h.funcs->_h_post_semaphore(sem_to_slave_queue);
 
+	if (buf_handle.if_type == ESP_STA_IF)
+		arctic_sta_tx_queued++;
 #if ESP_PKT_STATS
 	if (buf_handle.if_type == ESP_STA_IF)
 		pkt_stats.sta_tx_in_pass++;

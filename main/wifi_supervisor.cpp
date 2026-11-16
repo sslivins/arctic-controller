@@ -414,6 +414,9 @@ static void wifi_supervisor_task(void* param) {
     bool    unreachable_logged   = false;  // recorded EVENT_NETWORK_UNREACHABLE yet
     int     bounces              = 0;      // WiFi bounces performed this outage
     bool    ever_reachable       = false;  // gate: only supervise once first seen up
+    // Packet counters at the last successful probe; outage lines print deltas
+    // from here so the failed probe's own traffic is included.
+    net_diag_counters_t last_ok_counters = {};
     ApiWatch api_watch;
 
     // The reboot cap lives in RTC no-init RAM: garbage after power loss, and
@@ -536,6 +539,8 @@ static void wifi_supervisor_task(void* param) {
             if (unreachable_since_us != 0) {
                 const int down_ms =
                     (int)((esp_timer_get_time() - unreachable_since_us) / 1000);
+                char ctr[200];
+                net_diag_format_counters(ctr, sizeof(ctr), &last_ok_counters);
                 if (unreachable_logged) {
                     const uint32_t method = (bounces > 0) ? RECOVER_BOUNCE
                                                           : RECOVER_SELF;
@@ -553,7 +558,9 @@ static void wifi_supervisor_task(void* param) {
                              "(brief outage, not recorded) | %s",
                              down_ms / 1000, wifi);
                 }
+                ESP_LOGW(TAG, "outage counters: %s", ctr);
             }
+            net_diag_sample_counters(&last_ok_counters);
             unreachable_since_us = 0;
             unreachable_logged = false;
             bounces = 0;
@@ -580,6 +587,11 @@ static void wifi_supervisor_task(void* param) {
         net_diag_format_wifi(wifi, sizeof(wifi));
         ESP_LOGW(TAG, "associated (ip=%s) but gateway unreachable for %ds "
                  "(bounces so far %d) | %s", ip, down_ms / 1000, bounces, wifi);
+        {
+            char ctr[200];
+            net_diag_format_counters(ctr, sizeof(ctr), &last_ok_counters);
+            ESP_LOGW(TAG, "outage counters: %s", ctr);
+        }
 
         // Record the outage once it is clearly not a transient blip, even if it
         // self-heals before we bounce (that itself confirms keepalive working).

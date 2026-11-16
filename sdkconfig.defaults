@@ -35,6 +35,9 @@ CONFIG_LWIP_MAX_ACTIVE_TCP=24
 # SNTP_MAX_SERVERS (default 1). With one, an unanswered request just backs off
 # (15/30/60 s...) and a boot sync took 150 s; with three it moves on after 15 s.
 CONFIG_LWIP_SNTP_MAX_SERVERS=3
+# lwIP packet counters (link/etharp/ip/icmp), read by net_diag at the start and
+# end of a gateway outage to show where frames stop (no TX, no RX, ARP stuck).
+CONFIG_LWIP_STATS=y
 
 # TCP window / send buffer. IDF's stock 5760 is 4x MSS, which caps throughput
 # at window/RTT regardless of link speed: measured against the CI controller at

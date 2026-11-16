@@ -49,6 +49,19 @@ volatile uint8_t wifi_tx_throttling;
 volatile uint32_t wifi_tx_throttle_on_count;
 volatile uint32_t wifi_tx_throttle_drops;
 volatile int64_t wifi_tx_throttle_since_us;
+volatile uint32_t arctic_sta_tx_queued;
+volatile uint32_t arctic_sta_tx_sent;
+volatile uint32_t arctic_sta_rx;
+
+void esp_hosted_get_sta_pkt_counts(uint32_t *tx_queued, uint32_t *tx_sent, uint32_t *rx)
+{
+	if (tx_queued)
+		*tx_queued = arctic_sta_tx_queued;
+	if (tx_sent)
+		*tx_sent = arctic_sta_tx_sent;
+	if (rx)
+		*rx = arctic_sta_rx;
+}
 
 void esp_hosted_get_tx_throttle_stats(bool *active, uint32_t *on_count,
 		uint32_t *drops, uint32_t *held_ms)

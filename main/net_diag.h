@@ -58,6 +58,34 @@ void net_diag_log_snapshot(void);
 // Never contains "tw=", which scan_heap_floor.sh reads from netdiag lines.
 void net_diag_format_wifi(char* buf, size_t len);
 
+// Packet counters for pinning down where frames stop during a gateway outage.
+// Sampled on the tcpip thread together with the gateway's ARP entry.
+typedef struct {
+    bool valid;                   // false if the tcpip callback timed out
+    // lwIP (zero unless CONFIG_LWIP_STATS)
+    unsigned link_tx, link_rx, link_drop, link_err;
+    unsigned arp_tx, arp_rx;
+    unsigned ip_tx, ip_rx, ip_drop, ip_rterr;
+    unsigned icmp_tx, icmp_rx;
+    // ESP-Hosted STA frames: queued to the SDIO driver, written to the C6,
+    // and read from the C6.
+    unsigned hosted_q, hosted_sent, hosted_rx;
+    // Gateway ARP entry (stable entries only)
+    bool gw_arp;
+    unsigned char gw_mac[6];
+} net_diag_counters_t;
+
+void net_diag_sample_counters(net_diag_counters_t* out);
+
+// Format the counter deltas since `base` plus the current gateway ARP entry:
+//   "link tx+3 rx+0 drop+0 err+0 | arp tx+3 rx+0 | ip tx+3 rx+0 drop+0 rterr+0 |
+//    icmp tx+3 rx+0 | hosted q+3 sent+3 rx+0 | gw_arp=..:3a:1f"
+// Reading the chain left to right shows where traffic stops: ICMP/IP TX
+// climbing with hosted sent and no RX means frames reach the radio but nothing
+// comes back; hosted q climbing without sent means the SDIO path is stuck;
+// gw_arp=none means the gateway's MAC was lost. Never contains "tw=".
+void net_diag_format_counters(char* buf, size_t len, const net_diag_counters_t* base);
+
 // Threshold for treating internal heap as critically low. Healthy runs sit at
 // 30-40 KB free internal; observed excursions collapse to double digits. 12 KB
 // is low enough not to fire in normal operation but high enough to catch the
