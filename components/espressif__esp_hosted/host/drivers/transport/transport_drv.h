@@ -73,6 +73,10 @@ extern volatile uint8_t wifi_tx_throttling;
 extern volatile uint32_t wifi_tx_throttle_on_count;
 extern volatile uint32_t wifi_tx_throttle_drops;
 extern volatile int64_t wifi_tx_throttle_since_us;
+/* Arctic diagnostics: STA frames queued for, written to, and read from the slave. */
+extern volatile uint32_t arctic_sta_tx_queued;
+extern volatile uint32_t arctic_sta_tx_sent;
+extern volatile uint32_t arctic_sta_rx;
 
 typedef int (*hosted_rxcb_t)(void *buffer, uint16_t len, void *free_buff_hdl);
 
