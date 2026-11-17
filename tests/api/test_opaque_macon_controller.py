@@ -7,9 +7,12 @@ the arctic-macon library's typed/opaque APIs — including the passive listener,
 the active bus-master engine, and the observed-window catalog (#123).
 
 Scope of the gate is the controller sources under ``main/`` only, excluding:
-  * ``advanced_params.{cpp,h}`` — the advanced-parameters *quarantine wrapper*.
-    It is the sole controller file allowed to touch raw AP registers/wire codes,
-    translating the library's opaque option ids into wire writes (#118).
+  * ``tests/test_advanced_params.cpp`` — host-test code that asserts the
+    library's id<->wire mapping and so has to name the raw metadata.
+
+Advanced (AP) parameters are read and written by AP number through the
+library's address-free APIs (readAdvancedParam / writeAdvancedParam with an
+opaque AdvWritePlan); the controller never names a register address for them.
 
 Note: ``main/tuya/`` (the RS485 transport + master/listener shims) is now IN
 scope — after #123 relocated all frame/register/window decoding into the
@@ -32,13 +35,10 @@ SOURCE_SUFFIXES = {".cpp", ".h", ".hpp", ".c", ".cc"}
 # Directories (relative to main/) that are out of scope for the gate.
 EXCLUDED_DIR_PARTS = set()
 # Individual files (relative to main/) that are out of scope for the gate.
-# advanced_params.{cpp,h} is the quarantine wrapper that owns the id<->wire
-# mapping. tests/test_advanced_params.cpp is that wrapper's own unit test: it
-# asserts the mapping is correct, which it cannot do without naming the raw
-# metadata the wrapper translates. It is host-test code and is never shipped.
+# tests/test_advanced_params.cpp asserts the library's id<->wire mapping, which
+# it cannot do without naming the raw metadata. It is host-test code and is
+# never shipped.
 EXCLUDED_FILES = {
-    "advanced_params.cpp",
-    "advanced_params.h",
     "test_advanced_params.cpp",
 }
 # Generated font / image blobs — huge and never contain protocol knowledge.
@@ -70,8 +70,7 @@ INCLUDE_RE = re.compile(r'#\s*include\s*[<"]\s*([A-Za-z0-9_./]+)\s*[>"]')
 # heatpump_params_screen.cpp, web/index.html handling) must consume stable option
 # ids + semantic accessors, never the raw AdvancedParam.reg register address, the
 # AdvEnumOption.wire RS485 code, the enum_vals/enum_count arrays, or the
-# ADV_REG_UNKNOWN sentinel. The advanced_params.{cpp,h} quarantine wrapper is the
-# sole excluded consumer (see EXCLUDED_FILES) — it owns the id<->wire mapping.
+# ADV_REG_UNKNOWN sentinel.
 FORBIDDEN_ADV_WIRE_META = re.compile(
     r"\benum_vals\b|\benum_count\b|(?:->|\.)wire\b|(?:->|\.)reg\b|\bADV_REG_UNKNOWN\b"
 )
@@ -82,6 +81,12 @@ FORBIDDEN_ADV_WIRE_META = re.compile(
 # feed, or the observed-window recorder — those all imply wire knowledge.
 FORBIDDEN_RAW_REGISTER_PLUMBING = re.compile(
     r"\bfeedRegisterWindow\b|\brecordObservedWindow\b|\breg_base\b"
+)
+
+# Register-addressed bus IO. Advanced parameters go through the address-free
+# readAdvancedParam / writeAdvancedParam(AdvWritePlan) APIs instead.
+FORBIDDEN_REGISTER_IO = re.compile(
+    r"\breadRegister\b|\bwriteRegister\b|\bwrite_register\b"
 )
 
 # The arctic-macon library's public headers.
@@ -152,9 +157,18 @@ def test_controller_has_no_advanced_param_wire_metadata():
         "(AdvancedParam.reg, AdvEnumOption.wire, enum_vals/enum_count, "
         "ADV_REG_UNKNOWN). Consume the opaque option-id API "
         "(advanced_enum_option_index_for_wire / advanced_param_write_option) and "
-        "semantic accessors (advanced_param_reg_known, advanced_register_address) "
-        "instead (#118). The advanced_params.{cpp,h} quarantine wrapper is the "
-        "only file allowed to touch these:\n" + "\n".join(violations)
+        "semantic accessors (advanced_param_reg_known) instead (#118):\n"
+        + "\n".join(violations)
+    )
+
+
+def test_controller_has_no_register_addressed_io():
+    violations = _scan(FORBIDDEN_REGISTER_IO)
+    assert not violations, (
+        "main/ must not read or write the bus by register address "
+        "(readRegister / writeRegister / write_register). Use "
+        "readAdvancedParam / writeAdvancedParam with an AdvWritePlan:\n"
+        + "\n".join(violations)
     )
 
 

@@ -67,7 +67,7 @@ bool advanced_param_read(uint8_t ap, int16_t* value_out) {
         ESP_LOGW(TAG, "read AP%u: unknown parameter", (unsigned)ap);
         return false;
     }
-    if (p->reg == arctic::ADV_REG_UNKNOWN) {
+    if (!arctic::advanced_param_reg_known(ap)) {
         // Register not change-and-capture verified: refuse rather than read a
         // guessed register and show a bogus value.
         ESP_LOGD(TAG, "read AP%u (%s): register unverified", (unsigned)ap, p->name);
@@ -88,8 +88,8 @@ bool advanced_param_read(uint8_t ap, int16_t* value_out) {
     }
 
     uint16_t raw = 0;
-    if (!arctic::readRegister(p->reg, &raw)) {
-        ESP_LOGW(TAG, "read AP%u: bus read of reg%u failed", (unsigned)ap, (unsigned)p->reg);
+    if (!arctic::readAdvancedParam(ap, &raw)) {
+        ESP_LOGW(TAG, "read AP%u: value not available", (unsigned)ap);
         return false;
     }
     // Signed params are 8-bit two's-complement in the low byte; the library
@@ -103,7 +103,7 @@ arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus
     if (bus_ok) *bus_ok = false;
 
     // Build a validated write plan (range/enum + register-known + unlocked).
-    AdvWritePlan plan{};
+    AdvWritePlan plan;
     AdvWriteResult r = arctic::advanced_prepare_display_write(ap, value, &plan);
     if (r != AdvWriteResult::OK) {
         ESP_LOGW(TAG, "write AP%u = %d refused: %s",
@@ -115,9 +115,9 @@ arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus
 
     // Demo mode - accept the (valid) write without touching the bus.
     if (app_prefs_is_demo_mode()) {
-        ESP_LOGI(TAG, "[DEMO] AP%u = %d (reg%u=%u, not sent)",
-                 (unsigned)ap, value, (unsigned)plan.reg, (unsigned)plan.raw);
-        demo_store(ap, plan.raw);
+        ESP_LOGI(TAG, "[DEMO] AP%u = %d (raw %u, not sent)",
+                 (unsigned)ap, value, (unsigned)plan.raw());
+        demo_store(ap, plan.raw());
         log_change(ap, from, value);
         if (bus_ok) *bus_ok = true;
         return AdvWriteResult::OK;
@@ -128,15 +128,15 @@ arctic::AdvWriteResult advanced_param_write(uint8_t ap, int16_t value, bool* bus
         return AdvWriteResult::OK;  // guardrail passed; caller checks *bus_ok
     }
 
-    bool ok = arctic::writeRegister(plan.reg, plan.raw);
+    bool ok = arctic::writeAdvancedParam(plan);
     if (bus_ok) *bus_ok = ok;
     if (ok) {
-        ESP_LOGI(TAG, "Wrote AP%u = %d (reg%u = %u)",
-                 (unsigned)ap, value, (unsigned)plan.reg, (unsigned)plan.raw);
+        ESP_LOGI(TAG, "Wrote AP%u = %d (raw %u)",
+                 (unsigned)ap, value, (unsigned)plan.raw());
         log_change(ap, from, value);
     } else {
-        ESP_LOGE(TAG, "AP%u guardrail OK but bus write of reg%u failed",
-                 (unsigned)ap, (unsigned)plan.reg);
+        ESP_LOGE(TAG, "AP%u guardrail OK but bus write failed",
+                 (unsigned)ap);
     }
     return AdvWriteResult::OK;
 }
@@ -148,7 +148,7 @@ arctic::AdvWriteResult advanced_param_write_option(uint8_t ap, size_t option_ind
     // Build a validated write plan by opaque option id: arctic-macon maps the
     // id to its wire code and runs the range/enum + register-known + unlocked
     // guardrail. The raw wire code stays inside the library/this module.
-    AdvWritePlan plan{};
+    AdvWritePlan plan;
     AdvWriteResult r = arctic::advanced_prepare_write_option(ap, option_index, &plan);
     if (r != AdvWriteResult::OK) {
         ESP_LOGW(TAG, "write AP%u option %u refused: %s",
@@ -160,9 +160,9 @@ arctic::AdvWriteResult advanced_param_write_option(uint8_t ap, size_t option_ind
 
     // Demo mode - accept the (valid) write without touching the bus.
     if (app_prefs_is_demo_mode()) {
-        ESP_LOGI(TAG, "[DEMO] AP%u option %u (reg%u=%u, not sent)",
-                 (unsigned)ap, (unsigned)option_index, (unsigned)plan.reg, (unsigned)plan.raw);
-        demo_store(ap, plan.raw);
+        ESP_LOGI(TAG, "[DEMO] AP%u option %u (raw %u, not sent)",
+                 (unsigned)ap, (unsigned)option_index, (unsigned)plan.raw());
+        demo_store(ap, plan.raw());
         log_change(ap, from, (int)option_index);
         if (bus_ok) *bus_ok = true;
         return AdvWriteResult::OK;
@@ -173,15 +173,15 @@ arctic::AdvWriteResult advanced_param_write_option(uint8_t ap, size_t option_ind
         return AdvWriteResult::OK;  // guardrail passed; caller checks *bus_ok
     }
 
-    bool ok = arctic::writeRegister(plan.reg, plan.raw);
+    bool ok = arctic::writeAdvancedParam(plan);
     if (bus_ok) *bus_ok = ok;
     if (ok) {
-        ESP_LOGI(TAG, "Wrote AP%u option %u (reg%u = %u)",
-                 (unsigned)ap, (unsigned)option_index, (unsigned)plan.reg, (unsigned)plan.raw);
+        ESP_LOGI(TAG, "Wrote AP%u option %u (raw %u)",
+                 (unsigned)ap, (unsigned)option_index, (unsigned)plan.raw());
         log_change(ap, from, (int)option_index);
     } else {
-        ESP_LOGE(TAG, "AP%u option guardrail OK but bus write of reg%u failed",
-                 (unsigned)ap, (unsigned)plan.reg);
+        ESP_LOGE(TAG, "AP%u option guardrail OK but bus write failed",
+                 (unsigned)ap);
     }
     return AdvWriteResult::OK;
 }

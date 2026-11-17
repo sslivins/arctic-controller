@@ -11,7 +11,7 @@
 // What is real and what is faked, and why. The parameter table, the range and
 // enum guardrail, and the wire encoding are the actual arctic-macon code,
 // linked as-is and already covered by that component's own suite. The only
-// thing faked is the bus itself -- isConnected / readRegister / writeRegister --
+// thing faked is the bus itself -- isConnected / readAdvancedParam / writeAdvancedParam --
 // because that is an RS485 transaction with physical hardware. Faking the
 // guardrail instead would mean asserting that a stand-in for the logic under
 // test agrees with itself.
@@ -92,7 +92,7 @@ const AdvancedParam* find_writable() {
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
         if (!p) continue;
-        if (p->reg == arctic::ADV_REG_UNKNOWN) continue;
+        if (!arctic::advanced_param_reg_known(p->ap)) continue;
         if (p->needs_sim_confirm || p->read_only || p->is_trigger) continue;
         if (p->enum_vals != nullptr) continue;
         if (p->min_val >= p->max_val) continue;
@@ -107,7 +107,7 @@ const AdvancedParam* find_writable() {
 const AdvancedParam* find_signed_readable() {
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
-        if (p && p->is_signed && p->reg != arctic::ADV_REG_UNKNOWN) return p;
+        if (p && p->is_signed && arctic::advanced_param_reg_known(p->ap)) return p;
     }
     return nullptr;
 }
@@ -117,7 +117,7 @@ const AdvancedParam* find_enum_writable() {
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
         if (!p) continue;
-        if (p->reg == arctic::ADV_REG_UNKNOWN) continue;
+        if (!arctic::advanced_param_reg_known(p->ap)) continue;
         if (p->needs_sim_confirm || p->read_only) continue;
         if (p->enum_vals == nullptr || p->enum_count < 2) continue;
         return p;
@@ -133,7 +133,7 @@ const AdvancedParam* find_scaled_writable() {
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
         if (!p) continue;
-        if (p->reg == arctic::ADV_REG_UNKNOWN) continue;
+        if (!arctic::advanced_param_reg_known(p->ap)) continue;
         if (p->needs_sim_confirm || p->read_only || p->is_trigger) continue;
         if (p->enum_vals != nullptr) continue;
         if (p->display_multiplier <= 1) continue;
@@ -150,7 +150,7 @@ const AdvancedParam* find_nonidentity_enum() {
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
         if (!p) continue;
-        if (p->reg == arctic::ADV_REG_UNKNOWN) continue;
+        if (!arctic::advanced_param_reg_known(p->ap)) continue;
         if (p->needs_sim_confirm || p->read_only) continue;
         if (p->enum_vals == nullptr || p->enum_count < 2) continue;
         for (uint8_t i = 0; i < p->enum_count; ++i) {
@@ -226,7 +226,7 @@ void every_parameter_has_a_verified_register() {
     live_device();
 
     // The current table has no unverified registers at all, which makes the
-    // ADV_REG_UNKNOWN refusal in advanced_param_read() unreachable today. That
+    // unverified-register refusal in advanced_param_read() unreachable today. That
     // is worth stating rather than quietly leaving three scenarios that pass
     // by testing nothing.
     //
@@ -234,14 +234,14 @@ void every_parameter_has_a_verified_register() {
     // by correlation would otherwise be read and its value shown to a
     // technician as though it were authoritative. So this scenario asserts the
     // property that keeps the branch dead. The day someone adds an AP with
-    // reg = 0, this fails, and whoever is looking at it is pointed straight at
+    // an unverified register, this fails, and whoever is looking at it is pointed straight at
     // the path that now needs covering.
     int checked = 0;
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
         if (!p) continue;
         ++checked;
-        if (p->reg == arctic::ADV_REG_UNKNOWN) {
+        if (!arctic::advanced_param_reg_known(p->ap)) {
             std::fprintf(stderr,
                          "  FAIL %s:%d: AP%u (%s) has an unverified register. "
                          "The refusal paths in advanced_param_read/write are "
@@ -287,9 +287,8 @@ void a_successful_read_uses_the_verified_register() {
     int16_t value = 0;
     CHECK(advanced_param_read(p->ap, &value) == true);
     CHECK_EQ_INT(bus_fake::reads().size(), 1);
-    // The confirmed register from the table, not the AP number and not a
-    // computed 2000 + ap guess.
-    CHECK_EQ_INT(bus_fake::reads()[0], p->reg);
+    // The parameter asked for -- the library owns where it lives on the wire.
+    CHECK_EQ_INT(bus_fake::reads()[0], p->ap);
     CHECK_EQ_INT(value, p->min_val);
 }
 
@@ -367,7 +366,7 @@ void a_scaled_write_encodes_back_to_wire_units() {
     CHECK(bus_ok == true);
     CHECK_EQ_INT(bus_fake::writes().size(), 1);
     if (bus_fake::writes().size() == 1) {
-        CHECK_EQ_INT(bus_fake::writes()[0].reg, p->reg);
+        CHECK_EQ_INT(bus_fake::writes()[0].ap, p->ap);
         CHECK_EQ_INT(bus_fake::writes()[0].raw, wire);
         CHECK(bus_fake::writes()[0].raw != (uint16_t)display);
     }
@@ -396,7 +395,7 @@ void an_option_write_sends_the_wire_code_not_the_index() {
     CHECK(bus_ok == true);
     CHECK_EQ_INT(bus_fake::writes().size(), 1);
     if (bus_fake::writes().size() == 1) {
-        CHECK_EQ_INT(bus_fake::writes()[0].reg, p->reg);
+        CHECK_EQ_INT(bus_fake::writes()[0].ap, p->ap);
         CHECK_EQ_INT(bus_fake::writes()[0].raw, code);
         CHECK(bus_fake::writes()[0].raw != (uint16_t)idx);
     }
@@ -472,8 +471,8 @@ void a_valid_write_reaches_the_wire() {
     CHECK(advanced_param_write(p->ap, p->max_val, &bus_ok) == AdvWriteResult::OK);
     CHECK(bus_ok == true);
     CHECK_EQ_INT(bus_fake::writes().size(), 1);
-    CHECK_EQ_INT(bus_fake::writes()[0].reg, expected.reg);
-    CHECK_EQ_INT(bus_fake::writes()[0].raw, expected.raw);
+    CHECK_EQ_INT(bus_fake::writes()[0].ap, expected.ap());
+    CHECK_EQ_INT(bus_fake::writes()[0].raw, expected.raw());
 }
 
 void a_disconnected_write_reports_ok_but_not_sent() {
@@ -531,7 +530,7 @@ void demo_mode_reads_back_what_was_written() {
     const AdvancedParam* s = nullptr;
     for (uint8_t ap = 0; ap < AP_MAX && !s; ++ap) {
         const AdvancedParam* c = arctic::advanced_param_lookup(ap);
-        if (c && c->is_signed && c->min_val < 0 && c->reg != arctic::ADV_REG_UNKNOWN &&
+        if (c && c->is_signed && c->min_val < 0 && arctic::advanced_param_reg_known(c->ap) &&
             !c->needs_sim_confirm && !c->read_only && !c->enum_vals &&
             c->display_multiplier == 1 && c->min_val != c->default_val) s = c;
     }
@@ -589,10 +588,10 @@ void an_option_write_puts_the_wire_code_on_the_bus() {
     CHECK(advanced_param_write_option(p->ap, 1, &bus_ok) == AdvWriteResult::OK);
     CHECK(bus_ok == true);
     CHECK_EQ_INT(bus_fake::writes().size(), 1);
-    CHECK_EQ_INT(bus_fake::writes()[0].reg, expected.reg);
+    CHECK_EQ_INT(bus_fake::writes()[0].ap, expected.ap());
     // The option index is a UI concern; what reaches the mainboard is the
     // vendor's wire code, which is not generally equal to the index.
-    CHECK_EQ_INT(bus_fake::writes()[0].raw, expected.raw);
+    CHECK_EQ_INT(bus_fake::writes()[0].raw, expected.raw());
 }
 
 void a_disconnected_option_write_reports_ok_but_not_sent() {
@@ -658,7 +657,7 @@ void a_read_only_parameter_can_be_read_but_not_written() {
     const AdvancedParam* found = nullptr;
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
-        if (p && p->read_only && p->reg != arctic::ADV_REG_UNKNOWN) {
+        if (p && p->read_only && arctic::advanced_param_reg_known(p->ap)) {
             found = p;
             break;
         }
@@ -680,7 +679,7 @@ void a_locked_parameter_can_be_read_but_not_written() {
     const AdvancedParam* found = nullptr;
     for (uint8_t ap = 0; ap < AP_MAX; ++ap) {
         const AdvancedParam* p = arctic::advanced_param_lookup(ap);
-        if (p && p->needs_sim_confirm && p->reg != arctic::ADV_REG_UNKNOWN &&
+        if (p && p->needs_sim_confirm && arctic::advanced_param_reg_known(p->ap) &&
             !p->read_only) {
             found = p;
             break;

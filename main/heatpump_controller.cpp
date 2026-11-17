@@ -10,6 +10,7 @@
 #include "macon_state.h"
 #include "macon_fields.h"
 #include "macon_image.h"
+#include "macon_advanced_params.h"
 #include "macon_listener.h"
 #include "macon_master.h"
 #include "macon_faults.h"
@@ -1442,38 +1443,34 @@ bool setHotWaterSetpoint(int16_t temp) {
     return true;
 }
 
-bool writeRegister(uint16_t address, uint16_t value) {
-    // The image owns the window bounds, so the controller keeps no window
-    // constants of its own.
-    if (!s_image.in_window(address)) {
-        ESP_LOGE(TAG, "Register %u is outside known Macon windows",
-                 (unsigned)address);
-        return false;
-    }
-    if (value > UINT8_MAX) {
-        ESP_LOGE(TAG, "Invalid register value %u (Macon registers are one byte)",
-                 (unsigned)value);
+bool writeAdvancedParam(const AdvWritePlan& plan) {
+    if (!plan.valid()) {
+        ESP_LOGE(TAG, "Refusing invalid AP write plan");
         return false;
     }
     if (macon_master::is_active()) {
-        return macon_master::write_register(address, static_cast<uint8_t>(value));
+        return macon_master::write_advanced(plan);
     }
     imageLock();
-    s_image.set_register(address, value);
+    bool ok = s_image.apply_advanced(plan);
     imageUnlock();
+    if (!ok) {
+        ESP_LOGE(TAG, "AP%u write rejected by image", (unsigned)plan.ap());
+        return false;
+    }
     applyMaconMapping();
-    ESP_LOGI(TAG, "Register %d set to %d", address, value);
+    ESP_LOGI(TAG, "AP%u set to %u", (unsigned)plan.ap(), (unsigned)plan.raw());
     return true;
 }
 
-bool readRegister(uint16_t address, uint16_t* value_out) {
-    if (value_out == nullptr) {
+bool readAdvancedParam(uint8_t ap, uint16_t* raw_out) {
+    if (raw_out == nullptr) {
         return false;
     }
     // Demo, passive-listen, and active-master polling all populate this image.
     if (s_demo_mode || s_feed_mode) {
         imageLock();
-        bool ok = s_image.get_register(address, value_out);
+        bool ok = s_image.read_advanced(ap, raw_out);
         imageUnlock();
         return ok;
     }

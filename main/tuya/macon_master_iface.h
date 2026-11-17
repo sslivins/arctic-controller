@@ -70,8 +70,9 @@ bool set_hot_water_setpoint(int celsius);
 // (no-op) unless the master is active.
 bool set_working_mode(arctic::MaconWorkingMode mode);
 
-// Write a one-byte value to a register covered by a known Macon wire window.
-bool write_register(uint16_t address, uint8_t value);
+// Execute a validated advanced-parameter (AP) write plan. Returns false
+// (no-op) unless the master is active; true only when ACKed.
+bool write_advanced(const arctic::AdvWritePlan& plan);
 
 // Reject every subsequent setpoint/mode/register write (they return false).
 // Called as soon as a reboot is committed (e.g. a successful OTA) so a

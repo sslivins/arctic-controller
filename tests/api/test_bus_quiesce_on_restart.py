@@ -40,7 +40,7 @@ def test_ota_paths_reject_writes_once_reboot_committed():
 
 def test_control_writes_honour_shutdown():
     src = _read("tuya/macon_master.cpp")
-    for fn in ("guarded_setpoint", "set_working_mode", "write_register"):
+    for fn in ("guarded_setpoint", "set_working_mode", "write_advanced"):
         body = src[src.index(fn + "("):]
         body = body[:body.index("\n}\n") if "\n}\n" in body else len(body)]
         assert "acquire_for_write(" in body, fn

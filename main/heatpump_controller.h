@@ -16,6 +16,8 @@
 
 namespace arctic {
 
+class AdvWritePlan;
+
 class MaconWindowSink;   // fwd (defined in macon_master.h); used by liveIngestSink()
 
 // ============================================================================
@@ -290,13 +292,14 @@ bool setCoolingSetpoint(int16_t temp);
 bool setHeatingSetpoint(int16_t temp);
 bool setHotWaterSetpoint(int16_t temp);
 
-// Generic register write (for technician parameters)
-// Returns true on success
-bool writeRegister(uint16_t address, uint16_t value);
+// Execute a validated advanced-parameter (AP) write plan from
+// arctic::advanced_prepare_*write*. Returns true on success (ACKed when the
+// bus master is active). Invalid plans are refused.
+bool writeAdvancedParam(const AdvWritePlan& plan);
 
-// Read a single register (for technician parameters)
-// Returns true on success, value is stored in *value_out
-bool readRegister(uint16_t address, uint16_t* value_out);
+// Read an AP's raw wire value from the register image. False when the AP's
+// register is unknown or has not been ingested from the bus yet.
+bool readAdvancedParam(uint8_t ap, uint16_t* raw_out);
 
 // ============================================================================
 // Debug/Diagnostic Functions
