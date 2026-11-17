@@ -27,6 +27,7 @@
 #include "macon_uart_transport.h"   // tuya::MaconUartTransport
 #include "macon_master.h"           // arctic::MaconMaster / MaconClock
 #include "macon_link.h"             // arctic::MaconResult / macon_result_name
+#include "macon_advanced_params.h"  // arctic::AdvWritePlan
 #include "heatpump_controller.h"    // arctic::liveIngestSink / liveIngestBeginCycle / liveIngestEndCycle
 
 static const char *TAG = "macon_master";
@@ -269,19 +270,19 @@ bool set_working_mode(arctic::MaconWorkingMode mode)
     return false;
 }
 
-bool write_register(uint16_t address, uint8_t value)
+bool write_advanced(const arctic::AdvWritePlan& plan)
 {
-    if (!acquire_for_write("register")) return false;
-    const arctic::MaconResult r = s_master->write_register(address, value);
+    if (!acquire_for_write("advanced param")) return false;
+    const arctic::MaconResult r = s_master->write_advanced(plan);
     xSemaphoreGive(s_bus_mutex);
     note_write(r == arctic::MaconResult::Ok);
 
     if (r == arctic::MaconResult::Ok) {
-        ESP_LOGI(TAG, "register %u -> %u (ACKed)", (unsigned)address, (unsigned)value);
+        ESP_LOGI(TAG, "AP%u -> %u (ACKed)", (unsigned)plan.ap(), (unsigned)plan.raw());
         return true;
     }
-    ESP_LOGW(TAG, "register %u write failed: %s",
-             (unsigned)address, arctic::macon_result_name(r));
+    ESP_LOGW(TAG, "AP%u write failed: %s",
+             (unsigned)plan.ap(), arctic::macon_result_name(r));
     return false;
 }
 
