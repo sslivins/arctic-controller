@@ -308,7 +308,7 @@ class TestDemoModeInjection:
 
     def test_inject_compressor_readings(self):
         """Inject compressor freq and fan speed and verify in readings."""
-        # fan_speed is the fan RPM (reg2003 raw ×10). 450 RPM falls in the
+        # fan_speed is the fan RPM (raw ×10). 450 RPM falls in the
         # "medium" bucket (300..599 => 2 bars).
         _inject_demo({"compressor_freq": 75, "fan_speed": 450})
         data = _wait_json("/api/heatpump/status",
@@ -327,8 +327,8 @@ class TestDemoModeInjection:
                           "electrical readings to reflect")
         assert data["readings"]["ac_voltage"] == 230
         assert data["readings"]["ac_current"] == 50
-        # power_consumption is sourced from the unit's real-time power register
-        # (reg2114), not derived from V*I, so it is reported independently.
+        # power_consumption is sourced from the unit's real-time power reading,
+        # not derived from V*I, so it is reported independently.
         assert isinstance(data["readings"]["power_consumption"], (int, float))
 
     def test_inject_setpoints(self):
@@ -481,13 +481,13 @@ class TestDemoFaultControlViaDemoEndpoint:
 # The unit's run-state is decoded natively by arctic-macon from the real Tuya
 # registers — there is no fictional "status1" bitfield any more. Component
 # flags map to:
-#   compressor -> compressor_freq (reg2141) > 0
-#   fans       -> fan_on icon bit (reg2129 bit4); fan_speed (reg2003) sets level
-#   pump       -> pump_on status bit (reg2130 bit3)
+#   compressor -> compressor_freq > 0
+#   fans       -> fan_on icon bit; fan_speed sets level
+#   pump       -> pump_on status bit
 #   aux_heater -> not currently mapped from any Tuya register (always false)
 # We drive each via the named demo fields so tests never touch raw bit layout.
 
-# fan_speed is the fan RPM (reg2003 raw ×10). getFanSpeedLevel buckets it as a
+# fan_speed is the fan RPM (raw ×10). getFanSpeedLevel buckets it as a
 # percentage of the library-provided max (fan_speed_max = 1000 RPM):
 #   0 -> 0, <33% -> 1, 33..65% -> 2, >=66% -> 3. Demo values below are RPM.
 _FAN_OFF, _FAN_LOW, _FAN_MED, _FAN_HIGH = 0, 200, 450, 700

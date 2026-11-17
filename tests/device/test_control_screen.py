@@ -16,7 +16,7 @@ The control screen shows:
 import pytest
 from device_client import DeviceClient
 
-# Working modes (reg2096 values, see heatpump_types.h)
+# Working modes (values, see heatpump_types.h)
 MODE_COOLING = 0
 MODE_HEATING = 1
 MODE_FREEZE_PROTECTION = 2
