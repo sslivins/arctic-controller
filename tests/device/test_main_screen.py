@@ -8,7 +8,7 @@ Component/run state is decoded natively by arctic-macon from the real Tuya
 registers, so there is no fictional "status1" bitfield. Tests drive named
 demo fields instead of raw register bits:
   compressor -> compressor_freq (>0 = running)
-  fan bars   -> fan_speed RPM (reg2003 raw ×10; getFanSpeedLevel buckets)
+  fan bars   -> fan_speed RPM (raw ×10; getFanSpeedLevel buckets)
   fan pill   -> fan_on
   pump       -> pump_on
 Faults are injected by their Macon code via inject_fault()/clear_all_faults().
@@ -20,7 +20,7 @@ import pytest
 from device_client import DeviceClient
 
 # ---------------------------------------------------------------------------
-# fan_speed is the fan RPM (reg2003 raw ×10). getFanSpeedLevel buckets it as a
+# fan_speed is the fan RPM (raw ×10). getFanSpeedLevel buckets it as a
 # percentage of the library-provided max (fan_speed_max = 1000 RPM):
 #   0 -> 0 bars, <33% -> 1 bar, 33..65% -> 2 bars, >=66% -> 3 bars
 # ---------------------------------------------------------------------------
@@ -156,8 +156,8 @@ class TestHeroState:
     def test_hero_shows_cooling(self, device: DeviceClient):
         """Switching to cooling mode with compressor on should show Cooling."""
         device.clear_all_faults()
-        # Cooling operation is decoded from the reversing-valve bit (reg2129
-        # bit2 = cooling_on), not the selected working_mode, so set both.
+        # Cooling operation is decoded from the reversing-valve bit
+        # (cooling_on), not the selected working_mode, so set both.
         _running(device, working_mode=MODE_COOLING, cooling_on=1)
         _wait(device, lambda: _hero_text(device, "Cooling"),
               "hero_state == Cooling")

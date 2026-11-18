@@ -363,7 +363,7 @@ MaconListenerStats getListenerStats();
 
 // Debug/calibration: copy the raw fed register cache into `out` (up to
 // `max_count` entries). Returns the number of registers copied. `base_out`
-// receives the register number of index 0 (DEMO_REG_BASE).
+// receives the wire byte offset of index 0.
 uint16_t getRawRegisters(uint16_t* out, uint16_t max_count, uint16_t* base_out);
 
 // Copy the library-owned observed-window diagnostic catalog into `out` (up to

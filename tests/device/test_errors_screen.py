@@ -277,7 +277,7 @@ class TestActiveErrors:
             "P06 error not found"
 
     def test_error_from_register1(self, device: DeviceClient):
-        """A sensor fault (reg2125) should also show error cards."""
+        """A sensor fault should also show error cards."""
         device.clear_all_faults()
         device.inject_fault("E19", True)
 

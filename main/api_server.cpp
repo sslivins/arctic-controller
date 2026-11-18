@@ -4884,7 +4884,7 @@ static esp_err_t heatpump_catalog_handler(httpd_req_t* req)
 
 #ifdef CONFIG_TEST_ENDPOINTS
 // GET /api/heatpump/raw - Debug: dump the raw fed Tuya register cache as a
-// flat JSON array (index 0 == register `base`). Used for calibrating the
+// flat JSON array (index 0 == wire byte offset `base`). Used for calibrating the
 // ECO-600 Tuya byte->field mapping against live idle/running snapshots.
 // Compiled into debug/test builds only (exposes raw register addresses).
 static esp_err_t heatpump_raw_handler(httpd_req_t* req)

@@ -2401,6 +2401,7 @@ paths:
                   base:
                     type: integer
                     minimum: 0
+                    description: Wire byte offset of `regs[0]`.
                   count:
                     type: integer
                     minimum: 0

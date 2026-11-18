@@ -51,7 +51,7 @@ writes over an RS485 half-duplex transport). Follow-ups:
 - [ ] Capture OEM traffic across cold-boot / steady-state / setpoint change /
       fault / defrost to confirm periodic fc=0x03 polling fully replaces the OEM
       controller (no missed handshake / keepalive / unsolicited frames).
-- [ ] Verify `reg2094` before adding `set_heating_setpoint` (currently
+- [ ] Verify the heating-setpoint byte (`@1`, formerly `reg2094`) before adding `set_heating_setpoint` (currently
       unsupported in master mode).
 
 ## Screen Render Performance
